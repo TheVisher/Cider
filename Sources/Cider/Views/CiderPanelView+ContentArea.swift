@@ -285,7 +285,24 @@ extension CiderPanelView {
                 )
             }
         } else {
-            noTabsEmptyState
+            if let domain = selectedNavigationDomain {
+                WorkspaceDomainDashboardView(
+                    model: WorkspaceDomainDashboardProvider.model(
+                        for: domain,
+                        savedViews: savedViewStorage.savedViews,
+                        allTabs: allTabs
+                    ),
+                    onOpenTab: { tab in
+                        selectedTab = tab
+                    },
+                    onBrowseAll: {
+                        selectedNavigationDomain = .browse
+                        selectedTab = nil
+                    }
+                )
+            } else {
+                noTabsEmptyState
+            }
         }
     }
 

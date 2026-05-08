@@ -88,7 +88,11 @@ extension CiderPanelView {
             return
         }
 
-        normalizeSelectedTabForCurrentDomain()
+        if domain == .mainDashboard {
+            normalizeSelectedTabForCurrentDomain()
+        } else {
+            selectedTab = nil
+        }
     }
 
     func normalizeSelectedTabForCurrentDomain() {

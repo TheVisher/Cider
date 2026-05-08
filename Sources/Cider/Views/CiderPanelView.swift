@@ -168,8 +168,10 @@ struct CiderPanelView: View {
                 }
             }
         }
-        .onChange(of: selectedNavigationDomain) { _, _ in
-            normalizeSelectedTabForCurrentDomain()
+        .onChange(of: selectedNavigationDomain) { _, newDomain in
+            if newDomain == .mainDashboard || newDomain == .aiAssistant {
+                normalizeSelectedTabForCurrentDomain()
+            }
             updateLivePerformanceContext()
         }
         .onChange(of: selectedTab) { _, _ in
