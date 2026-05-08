@@ -127,6 +127,8 @@ struct CiderCLI {
             handleClipboard(subcommand: subcommand, args: remaining)
         case "dashboard", "dash":
             handleDashboard(subcommand: subcommand, args: remaining)
+        case "agenda", "brief":
+            handleAgenda(args: Array(args.dropFirst()))
         case "embeddings":
             if subcommand == "backfill" {
                 let store = EmbeddingStore.shared
@@ -145,6 +147,39 @@ struct CiderCLI {
             printUsage()
         default:
             print("Unknown command: \(command). Run 'cider-cli help' for usage.")
+        }
+    }
+
+    // MARK: - Agenda Commands
+
+    static func handleAgenda(args: [String]) {
+        let includeLater = args.contains("--all") || args.contains("--include-later")
+        let includeSuppressed = args.contains("--all") || args.contains("--include-suppressed")
+        let now = Date()
+        let brief = AgendaBriefingService.build(
+            todos: TodoCardStorage.shared.todoCards,
+            dateCards: DateCardStorage.shared.dateCards,
+            now: now
+        )
+
+        let visibleItems = brief.items.filter { item in
+            if item.surfaceToday { return true }
+            if includeLater && item.bucket == .later { return true }
+            if includeSuppressed && item.bucket == .suppressed { return true }
+            return false
+        }
+        let visibleBrief = AgendaBriefing(generatedAt: brief.generatedAt, items: visibleItems)
+
+        if jsonOutput {
+            outputJSON(agendaBriefingToDict(visibleBrief))
+        } else {
+            if visibleItems.isEmpty {
+                print("No agenda items due to surface today.")
+                return
+            }
+            for item in visibleItems {
+                print("[\(item.itemType.rawValue)] \(item.title) — \(item.reason)")
+            }
         }
     }
 

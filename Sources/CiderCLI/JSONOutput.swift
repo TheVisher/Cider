@@ -69,6 +69,7 @@ func outputJSON(_ value: Any) {
     ]
     if let due = todo.dueDate { d["dueDate"] = ISO8601DateFormatter().string(from: due) }
     if let priority = todo.priority { d["priority"] = priority.rawValue }
+    if let actionURLString = todo.actionURLString { d["actionURL"] = actionURLString }
     if let completedAt = todo.completedAt { d["completedAt"] = ISO8601DateFormatter().string(from: completedAt) }
     d["checklist"] = todo.checklist.map { item -> [String: Any] in
         var cd: [String: Any] = [
@@ -102,7 +103,33 @@ func outputJSON(_ value: Any) {
     if let endAt = card.endAt { d["endAt"] = ISO8601DateFormatter().string(from: endAt) }
     if !card.location.isEmpty { d["location"] = card.location }
     if let amount = card.amount { d["amount"] = amount }
+    if let actionURLString = card.actionURLString { d["actionURL"] = actionURLString }
     return d
+}
+
+func agendaBriefingToDict(_ brief: AgendaBriefing) -> [String: Any] {
+    let formatter = ISO8601DateFormatter()
+    return [
+        "generatedAt": formatter.string(from: brief.generatedAt),
+        "items": brief.items.map { agendaBriefingItemToDict($0, formatter: formatter) }
+    ]
+}
+
+func agendaBriefingItemToDict(_ item: AgendaBriefingItem, formatter: ISO8601DateFormatter) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": item.id.uuidString,
+        "type": item.itemType.rawValue,
+        "title": item.title,
+        "status": item.status.rawValue,
+        "bucket": item.bucket.rawValue,
+        "surfaceToday": item.surfaceToday,
+        "reason": item.reason
+    ]
+    if let dueAt = item.dueAt { dict["dueAt"] = formatter.string(from: dueAt) }
+    if let nextSurfaceDate = item.nextSurfaceDate { dict["nextSurfaceDate"] = formatter.string(from: nextSurfaceDate) }
+    if let priority = item.priority { dict["priority"] = priority }
+    if let actionURLString = item.actionURLString { dict["actionURL"] = actionURLString }
+    return dict
 }
 
 @MainActor func contactToDict(_ contact: ContactCard) -> [String: Any] {

@@ -51,8 +51,14 @@ enum HomeOverviewDataProvider {
         now: Date = Date()
     ) -> HomeOverviewSnapshot {
         let unfiledCount = items.filter { $0.folderID == nil }.count
-        let urgentCount = urgentCount(in: items, surfacingDays: surfacingDays, now: now)
-        let dueTodayCount = dueTodayCount(in: items, now: now)
+        let agendaBriefing = AgendaBriefingService.build(
+            todos: items.compactMap { if case .todo(let todo) = $0 { return todo }; return nil },
+            dateCards: items.compactMap { if case .dateCard(let dateCard) = $0 { return dateCard }; return nil },
+            now: now
+        )
+        let agendaSurfaceItems = agendaBriefing.items.filter(\.surfaceToday)
+        let urgentCount = agendaSurfaceItems.count
+        let dueTodayCount = agendaSurfaceItems.filter { $0.status == .today }.count
         let untitledNotesCount = untitledNotesCount(in: items)
 
         let telemetry = [
@@ -176,7 +182,8 @@ enum HomeOverviewDataProvider {
                     resurfaceTarget: resurfaceTarget
                 ),
                 focusItems: dailyBriefFocusItems(
-                    upcomingItems: Array(upcomingItems.prefix(3)),
+                    agendaItems: Array(agendaSurfaceItems.prefix(3)),
+                    libraryItems: items,
                     unfiledCount: unfiledCount,
                     urgentCount: urgentCount,
                     dueTodayCount: dueTodayCount,
@@ -316,7 +323,8 @@ enum HomeOverviewDataProvider {
     }
 
     private static func dailyBriefFocusItems(
-        upcomingItems: [LibraryItemV2],
+        agendaItems: [AgendaBriefingItem],
+        libraryItems: [LibraryItemV2],
         unfiledCount: Int,
         urgentCount: Int,
         dueTodayCount: Int,
@@ -326,17 +334,17 @@ enum HomeOverviewDataProvider {
         upcomingTarget: HomeOverviewActionTarget,
         resurfaceTarget: HomeOverviewActionTarget
     ) -> [HomeDailyBriefItem] {
-        var briefItems = upcomingItems.prefix(2).map { item in
+        var briefItems = agendaItems.prefix(2).map { agendaItem in
             HomeDailyBriefItem(
-                id: "item-\(item.id)",
-                title: item.title,
-                subtitle: item.dashboardSubtitle,
-                systemImage: item.dashboardSymbol,
-                target: .item(item)
+                id: "agenda-\(agendaItem.id)",
+                title: agendaItem.title,
+                subtitle: agendaItem.reason,
+                systemImage: agendaItem.itemType == .todo ? "checkmark.circle" : "calendar.badge.clock",
+                target: libraryItems.first(where: { $0.id == "\(agendaItem.itemType.rawValue)-\(agendaItem.id.uuidString)" }).map { .item($0) } ?? .action(upcomingTarget)
             )
         }
 
-        if dueTodayCount > 0 {
+        if dueTodayCount > 0, briefItems.contains(where: { $0.id == "due-today" }) == false {
             briefItems.append(
                 HomeDailyBriefItem(
                     id: "due-today",
