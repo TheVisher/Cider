@@ -30,6 +30,14 @@ struct TodoDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if let url = todo.actionURL {
+                    Link(destination: url) {
+                        Label("Open Link", systemImage: "link")
+                            .font(CiderFont.bodyMedium)
+                    }
+                    .help(todo.actionURLString ?? "Open action link")
+                }
+
                 HStack(spacing: Spacing.sm) {
                     if let priority = todo.priority {
                         HStack(spacing: Spacing.xxs) {

@@ -43,6 +43,7 @@ struct DateCard: Identifiable, Codable, Hashable {
     var completedAt: Date?
     var labelIDs: [UUID]
     var linkedEntities: [LibraryEntityRef]
+    var actionURLString: String?
     var folderID: UUID?
     var rules: [SurfacingRule]
     var createdAt: Date
@@ -62,6 +63,7 @@ struct DateCard: Identifiable, Codable, Hashable {
         completedAt: Date? = nil,
         labelIDs: [UUID] = [],
         linkedEntities: [LibraryEntityRef] = [],
+        actionURLString: String? = nil,
         folderID: UUID? = nil,
         rules: [SurfacingRule] = [],
         createdAt: Date = Date(),
@@ -80,6 +82,7 @@ struct DateCard: Identifiable, Codable, Hashable {
         self.completedAt = completedAt
         self.labelIDs = labelIDs
         self.linkedEntities = linkedEntities
+        self.actionURLString = DateCard.normalizedActionURLString(actionURLString)
         self.folderID = folderID
         self.rules = rules
         self.createdAt = createdAt
@@ -101,10 +104,22 @@ struct DateCard: Identifiable, Codable, Hashable {
         completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
         labelIDs = (try c.decodeIfPresent([UUID].self, forKey: .labelIDs)) ?? []
         linkedEntities = (try c.decodeIfPresent([LibraryEntityRef].self, forKey: .linkedEntities)) ?? []
+        actionURLString = DateCard.normalizedActionURLString(try c.decodeIfPresent(String.self, forKey: .actionURLString))
         folderID = try c.decodeIfPresent(UUID.self, forKey: .folderID)
         rules = (try c.decodeIfPresent([SurfacingRule].self, forKey: .rules)) ?? []
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+    }
+
+    static func normalizedActionURLString(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    var actionURL: URL? {
+        guard let actionURLString else { return nil }
+        if let url = URL(string: actionURLString), url.scheme != nil { return url }
+        return URL(string: "https://\(actionURLString)")
     }
 
     /// For recurring events, computes the next occurrence after `date`.

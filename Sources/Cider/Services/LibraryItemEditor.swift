@@ -40,6 +40,7 @@ enum LibraryItemEditor {
         allDay: Bool,
         location: String,
         amount: Double?,
+        actionURLString: String? = nil,
         labelIDs: [UUID],
         recurrenceRule: DateCardRecurrenceRule? = nil,
         rules: [SurfacingRule] = []
@@ -52,6 +53,7 @@ enum LibraryItemEditor {
             existingCard.allDay = allDay
             existingCard.location = location
             existingCard.amount = amount
+            existingCard.actionURLString = DateCard.normalizedActionURLString(actionURLString)
             existingCard.labelIDs = labelIDs
             existingCard.recurrenceRule = recurrenceRule
             existingCard.rules = rules
@@ -69,6 +71,7 @@ enum LibraryItemEditor {
         created.details = details
         created.location = location
         created.amount = amount
+        created.actionURLString = DateCard.normalizedActionURLString(actionURLString)
         created.labelIDs = labelIDs
         created.recurrenceRule = recurrenceRule
         created.rules = rules

@@ -117,6 +117,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
     var labelIDs: [UUID]
     var notes: String
     var linkedEntities: [LibraryEntityRef]
+    var actionURLString: String?
     var folderID: UUID?
     var rules: [SurfacingRule]
     var createdAt: Date
@@ -134,6 +135,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
         labelIDs: [UUID] = [],
         notes: String = "",
         linkedEntities: [LibraryEntityRef] = [],
+        actionURLString: String? = nil,
         folderID: UUID? = nil,
         rules: [SurfacingRule] = [],
         createdAt: Date = Date(),
@@ -150,6 +152,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
         self.labelIDs = labelIDs
         self.notes = notes
         self.linkedEntities = linkedEntities
+        self.actionURLString = TodoCard.normalizedActionURLString(actionURLString)
         self.folderID = folderID
         self.rules = rules
         self.createdAt = createdAt
@@ -169,10 +172,22 @@ struct TodoCard: Identifiable, Codable, Hashable {
         labelIDs = (try c.decodeIfPresent([UUID].self, forKey: .labelIDs)) ?? []
         notes = (try c.decodeIfPresent(String.self, forKey: .notes)) ?? ""
         linkedEntities = (try c.decodeIfPresent([LibraryEntityRef].self, forKey: .linkedEntities)) ?? []
+        actionURLString = TodoCard.normalizedActionURLString(try c.decodeIfPresent(String.self, forKey: .actionURLString))
         folderID = try c.decodeIfPresent(UUID.self, forKey: .folderID)
         rules = (try c.decodeIfPresent([SurfacingRule].self, forKey: .rules)) ?? []
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+    }
+
+    static func normalizedActionURLString(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    var actionURL: URL? {
+        guard let actionURLString else { return nil }
+        if let url = URL(string: actionURLString), url.scheme != nil { return url }
+        return URL(string: "https://\(actionURLString)")
     }
 
     /// Number of completed checklist items.

@@ -3,7 +3,7 @@ import SwiftUI
 struct DateCardEditorSheet: View {
     let existingCard: DateCard?
     let defaultDate: Date
-    let onSave: (String, String, Date, Date?, Bool, String, Double?, [UUID], DateCardRecurrenceRule?, [SurfacingRule]) -> Void
+    let onSave: (String, String, Date, Date?, Bool, String, Double?, String?, [UUID], DateCardRecurrenceRule?, [SurfacingRule]) -> Void
     let onDelete: ((DateCard) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
@@ -17,6 +17,7 @@ struct DateCardEditorSheet: View {
     @State private var hasEndDate: Bool
     @State private var location: String
     @State private var amountText: String
+    @State private var actionURLString: String
     @State private var selectedLabelIDs: Set<UUID>
     @State private var hasRecurrence: Bool
     @State private var recurrenceFrequency: DateCardRecurrenceFrequency
@@ -30,7 +31,7 @@ struct DateCardEditorSheet: View {
     init(
         existingCard: DateCard?,
         defaultDate: Date,
-        onSave: @escaping (String, String, Date, Date?, Bool, String, Double?, [UUID], DateCardRecurrenceRule?, [SurfacingRule]) -> Void,
+        onSave: @escaping (String, String, Date, Date?, Bool, String, Double?, String?, [UUID], DateCardRecurrenceRule?, [SurfacingRule]) -> Void,
         onDelete: ((DateCard) -> Void)? = nil
     ) {
         self.existingCard = existingCard
@@ -49,6 +50,7 @@ struct DateCardEditorSheet: View {
         _hasEndDate = State(initialValue: existingCard?.endAt != nil)
         _location = State(initialValue: existingCard?.location ?? "")
         _amountText = State(initialValue: existingCard?.amount.map { Self.currencyFormatter.string(from: NSNumber(value: $0)) ?? "\($0)" } ?? "")
+        _actionURLString = State(initialValue: existingCard?.actionURLString ?? "")
         _selectedLabelIDs = State(initialValue: Set(existingCard?.labelIDs ?? []))
         _hasRecurrence = State(initialValue: existingCard?.recurrenceRule != nil)
         _recurrenceFrequency = State(initialValue: existingCard?.recurrenceRule?.frequency ?? .weekly)
@@ -102,6 +104,10 @@ struct DateCardEditorSheet: View {
 
                 TextField("Amount (optional)", text: $amountText)
                     .textFieldStyle(.roundedBorder)
+
+                TextField("Action URL (optional)", text: $actionURLString)
+                    .textFieldStyle(.roundedBorder)
+                    .help("Open this event's action site without creating a bookmark")
 
                 Toggle("Repeat", isOn: $hasRecurrence)
                     .toggleStyle(.switch)
@@ -229,6 +235,7 @@ struct DateCardEditorSheet: View {
                         allDay,
                         location.trimmingCharacters(in: .whitespacesAndNewlines),
                         parsedAmount,
+                        DateCard.normalizedActionURLString(actionURLString),
                         Array(selectedLabelIDs),
                         rule,
                         surfacingRules

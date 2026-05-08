@@ -75,6 +75,14 @@ struct DateCardDetailView: View {
                             .foregroundColor(CiderColors.tertiary)
                     }
 
+                    if let url = dateCard.actionURL {
+                        Link(destination: url) {
+                            Label("Open Link", systemImage: "link")
+                                .font(CiderFont.bodyMedium)
+                        }
+                        .help(dateCard.actionURLString ?? "Open action link")
+                    }
+
                     if !dateCard.location.isEmpty {
                         HStack(spacing: Spacing.xs) {
                             Image(systemName: "mappin.and.ellipse")
@@ -101,6 +109,7 @@ struct DateCardDetailView: View {
 
             // Expandable metadata
             let hasMetadata = dateCard.amount != nil
+                || dateCard.actionURLString != nil
                 || recurrenceString != nil
                 || !dateCard.labelIDs.isEmpty
                 || dateCard.linkedEntities.contains(where: { $0.type == .contact })
@@ -123,6 +132,10 @@ struct DateCardDetailView: View {
 
                 if isMetadataExpanded {
                     VStack(alignment: .leading, spacing: Spacing.xs) {
+                        if let actionURLString = dateCard.actionURLString {
+                            detailRow(icon: "link", text: actionURLString)
+                        }
+
                         if let amount = dateCard.amount {
                             let amountStr = Self.currencyFormatter.string(from: NSNumber(value: amount))
                                 ?? String(format: "%.2f", amount)

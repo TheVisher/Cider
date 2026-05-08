@@ -820,7 +820,7 @@ final class TodoCardStorage: ObservableObject {
         let stmt = try db.prepare("""
                 SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
                        t.details, t.due_date, t.priority, t.is_completed, t.completed_at,
-                       t.notes, t.checklist, t.surfacing_rules
+                       t.notes, t.checklist, t.surfacing_rules, t.action_url
                 FROM items i
                 JOIN todos t ON t.item_id = i.id
                 WHERE i.type = 'todo';
@@ -842,6 +842,7 @@ final class TodoCardStorage: ObservableObject {
                 let notes = stmt.string(at: 11)
                 let checklistJSON = stmt.optionalString(at: 12)
                 let rulesJSON = stmt.optionalString(at: 13)
+                let actionURLString = TodoCard.normalizedActionURLString(stmt.optionalString(at: 14))
                 let checklist: [TodoChecklistItem] =
                     DatabaseHelpers.decodeJSON([TodoChecklistItem].self, from: checklistJSON) ?? []
                 let rules: [SurfacingRule] =
@@ -862,6 +863,7 @@ final class TodoCardStorage: ObservableObject {
                     labelIDs: labelIDs,
                     notes: notes,
                     linkedEntities: linkedEntities,
+                    actionURLString: actionURLString,
                     folderID: folderID,
                     rules: rules,
                     createdAt: createdAt,
@@ -1010,8 +1012,8 @@ final class TodoCardStorage: ObservableObject {
 
         // 2. UPSERT into todos
         let todoStmt = try db.prepare("""
-            INSERT INTO todos (item_id, details, due_date, priority, is_completed, completed_at, notes, checklist, surfacing_rules)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO todos (item_id, details, due_date, priority, is_completed, completed_at, notes, checklist, surfacing_rules, action_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(item_id) DO UPDATE SET
                 details = excluded.details,
                 due_date = excluded.due_date,
@@ -1020,7 +1022,8 @@ final class TodoCardStorage: ObservableObject {
                 completed_at = excluded.completed_at,
                 notes = excluded.notes,
                 checklist = excluded.checklist,
-                surfacing_rules = excluded.surfacing_rules;
+                surfacing_rules = excluded.surfacing_rules,
+                action_url = excluded.action_url;
             """)
         let checklistJSON: String? = todo.checklist.isEmpty
             ? nil
@@ -1037,6 +1040,7 @@ final class TodoCardStorage: ObservableObject {
             .bind(todo.notes, at: 7)
             .bind(checklistJSON, at: 8)
             .bind(rulesJSON, at: 9)
+            .bind(todo.actionURLString, at: 10)
         try todoStmt.step()
 
         // 3. Sync item_labels: delete all, re-insert current.

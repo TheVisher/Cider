@@ -94,7 +94,8 @@ enum CiderSchema {
             completed_at REAL,
             notes        TEXT NOT NULL DEFAULT '',
             checklist    TEXT,
-            surfacing_rules TEXT
+            surfacing_rules TEXT,
+            action_url   TEXT
         );
         """
 
@@ -110,7 +111,8 @@ enum CiderSchema {
             recurrence_rule TEXT,
             is_completed    INTEGER NOT NULL DEFAULT 0,
             completed_at    REAL,
-            surfacing_rules TEXT
+            surfacing_rules TEXT,
+            action_url   TEXT
         );
         """
 

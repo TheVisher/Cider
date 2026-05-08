@@ -307,7 +307,7 @@ struct CiderPanelView: View {
         AnyView(DateCardEditorSheet(
             existingCard: context.existingCard,
             defaultDate: context.defaultDate,
-            onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs, recurrenceRule, rules in
+            onSave: { title, details, startAt, endAt, allDay, location, amount, actionURLString, labelIDs, recurrenceRule, rules in
                 LibraryItemEditor.saveDateCard(
                     existingCard: context.existingCard,
                     title: title,
@@ -316,8 +316,9 @@ struct CiderPanelView: View {
                     endAt: endAt,
                     allDay: allDay,
                     location: location,
-                    amount: amount,
-                    labelIDs: labelIDs,
+                        amount: amount,
+                        actionURLString: actionURLString,
+                        labelIDs: labelIDs,
                     recurrenceRule: recurrenceRule,
                     rules: rules
                 )

@@ -15,6 +15,7 @@ struct TodoEditorSheet: View {
     @State private var hasDueTime: Bool
     @State private var priority: TodoPriority?
     @State private var checklist: [TodoChecklistItem]
+    @State private var actionURLString: String
     @State private var selectedLabelIDs: Set<UUID>
     @State private var draftLabelName = ""
     @State private var draftItemTitle = ""
@@ -37,6 +38,7 @@ struct TodoEditorSheet: View {
         _hasDueTime = State(initialValue: existingCard?.hasExplicitDueTime ?? false)
         _priority = State(initialValue: existingCard?.priority)
         _checklist = State(initialValue: existingCard?.checklist ?? [])
+        _actionURLString = State(initialValue: existingCard?.actionURLString ?? "")
         _selectedLabelIDs = State(initialValue: Set(existingCard?.labelIDs ?? []))
         let existingNotificationRule = existingCard?.rules.first(where: { $0.type == .remindBeforeMinutes && $0.isEnabled })
         _notificationEnabled = State(initialValue: existingNotificationRule != nil)
@@ -75,6 +77,10 @@ struct TodoEditorSheet: View {
                         .labelsHidden()
                         .frame(width: 120)
                     }
+
+                    TextField("Action URL (optional)", text: $actionURLString)
+                        .textFieldStyle(.roundedBorder)
+                        .help("Open this todo's action site without creating a bookmark")
 
                     // Due Date
                     Toggle("Due Date", isOn: $hasDueDate)
@@ -413,6 +419,7 @@ struct TodoEditorSheet: View {
         card.details = details.trimmingCharacters(in: .whitespacesAndNewlines)
         card.dueDate = hasDueDate ? normalizedDueDate : nil
         card.priority = priority
+        card.actionURLString = TodoCard.normalizedActionURLString(actionURLString)
         card.rules = todoReminderRules
         // Update sortOrder to match current array position
         for i in checklist.indices {
