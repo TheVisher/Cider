@@ -6,117 +6,165 @@ struct WorkspaceDomainDashboardView: View {
     let onBrowseAll: () -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                header
+        GeometryReader { proxy in
+            let contentWidth = min(max(0, proxy.size.width - (Spacing.md * 2)), HomeOverviewDesign.maxContentWidth)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: HomeOverviewDesign.rowSpacing) {
+                    overviewPanel
+
+                    if model.sections.isEmpty {
+                        emptyStatePanel
+                    } else {
+                        ForEach(model.sections) { section in
+                            sectionPanel(section)
+                        }
+                    }
+                }
+                .frame(maxWidth: contentWidth, alignment: .leading)
+                .padding(.horizontal, Spacing.md)
+                .padding(.top, HomeOverviewDesign.telemetryTopPadding)
+                .padding(.bottom, Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    private var overviewPanel: some View {
+        HomeOverviewPanel(title: "\(model.title) Dashboard") {
+            Text(model.title)
+                .font(CiderFont.displayBold)
+                .foregroundColor(CiderColors.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(model.subtitle)
+                .font(CiderFont.body)
+                .foregroundColor(CiderColors.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+                .background(CiderColors.separator)
+                .padding(.top, Spacing.xs)
+
+            Text("FOCUS")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.tertiary)
+                .tracking(1.4)
+
+            HStack(alignment: .center, spacing: Spacing.sm) {
+                Image(systemName: model.systemImage)
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.controlAccent)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(model.sections.isEmpty ? model.emptyStateTitle : "Open a domain view")
+                        .font(CiderFont.labelSemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Text(model.sections.isEmpty ? model.emptyStateSubtitle : "Use a card below to jump into the matching saved view or tab.")
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: Spacing.sm)
 
                 if let primaryAction = model.primaryAction {
                     Button {
                         open(primaryAction.target)
                     } label: {
                         Label(primaryAction.title, systemImage: primaryAction.systemImage)
+                            .font(CiderFont.captionSemibold)
                     }
-                    .buttonStyle(CiderAccentButtonStyle())
-                }
-
-                if model.sections.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(model.sections) { section in
-                        sectionView(section)
-                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(CiderColors.controlAccent)
                 }
             }
-            .padding(Spacing.xl)
-            .frame(maxWidth: 980, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .background(CiderColors.opaqueBackground)
-    }
-
-    private var header: some View {
-        HStack(alignment: .center, spacing: Spacing.md) {
-            Image(systemName: model.systemImage)
-                .font(CiderFont.emptyStateIcon)
-                .foregroundColor(CiderColors.controlAccent)
-                .frame(width: 54, height: 54)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                        .fill(CiderColors.controlAccent.opacity(0.12))
-                )
-
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(model.title)
-                    .font(CiderFont.displayBold)
-                    .foregroundColor(CiderColors.primary)
-                Text(model.subtitle)
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.secondary)
-            }
+            .padding(Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                            .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                    )
+            )
         }
     }
 
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Label(model.emptyStateTitle, systemImage: "tray")
+    private var emptyStatePanel: some View {
+        HomeOverviewPanel(title: "Domain Items") {
+            Text(model.emptyStateTitle)
                 .font(CiderFont.headingSemibold)
-                .foregroundColor(CiderColors.secondary)
+                .foregroundColor(CiderColors.primary)
             Text(model.emptyStateSubtitle)
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(Spacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(CiderColors.surfaceElevated)
-        )
     }
 
-    private func sectionView(_ section: WorkspaceDomainDashboardSection) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text(section.title)
-                .font(CiderFont.headingSemibold)
-                .foregroundColor(CiderColors.primary)
-
+    private func sectionPanel(_ section: WorkspaceDomainDashboardSection) -> some View {
+        HomeOverviewPanel(title: section.title) {
             if let subtitle = section.subtitle {
                 Text(subtitle)
-                    .font(CiderFont.caption)
+                    .font(CiderFont.body)
                     .foregroundColor(CiderColors.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: Spacing.sm)], spacing: Spacing.sm) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Spacing.sm)], spacing: Spacing.sm) {
                 ForEach(section.items) { item in
                     Button {
                         open(item.target)
                     } label: {
-                        VStack(alignment: .leading, spacing: Spacing.xs) {
-                            Image(systemName: item.systemImage)
-                                .font(CiderFont.bodySemibold)
-                                .foregroundColor(CiderColors.controlAccent)
-                            Text(item.title)
-                                .font(CiderFont.labelSemibold)
-                                .foregroundColor(CiderColors.primary)
-                                .lineLimit(2)
-                            if let subtitle = item.subtitle {
-                                Text(subtitle)
-                                    .font(CiderFont.caption)
-                                    .foregroundColor(CiderColors.tertiary)
-                                    .lineLimit(2)
-                            }
-                        }
-                        .padding(Spacing.md)
-                        .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
-                        .background(
-                            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                                .fill(CiderColors.surfaceElevated)
-                        )
+                        dashboardItemCard(item)
                     }
                     .buttonStyle(.plain)
                     .disabled(item.target == nil)
                 }
             }
         }
+    }
+
+    private func dashboardItemCard(_ item: WorkspaceDomainDashboardItem) -> some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: item.systemImage)
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.controlAccent)
+                .frame(width: 20)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text(item.title)
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+                if let subtitle = item.subtitle {
+                    Text(subtitle)
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, minHeight: 68, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(CiderColors.surfaceInput)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                )
+        )
     }
 
     private func open(_ target: CiderTab?) {
