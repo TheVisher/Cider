@@ -82,6 +82,7 @@ struct CiderPanelView: View {
     var contextualTabs: [CiderTab] {
         WorkspaceContextualTabPolicy.tabs(
             for: selectedNavigationDomain,
+            selectedTab: selectedTab,
             allTabs: allTabs,
             savedViews: savedViewStorage.savedViews
         )

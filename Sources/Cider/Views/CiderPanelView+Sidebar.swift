@@ -80,7 +80,6 @@ extension CiderPanelView {
 
     func normalizeSelectedTabForCurrentDomain() {
         let tabs = contextualTabs
-        guard !tabs.isEmpty else { return }
         if let selectedTab, tabs.contains(selectedTab) { return }
         selectedTab = tabs.first
     }

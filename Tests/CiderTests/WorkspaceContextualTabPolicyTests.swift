@@ -46,7 +46,7 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["saved-\(boardID.uuidString)"])
     }
 
-    func testBookmarkDomainFiltersBookmarkSavedViewsButFallsBackToAllTabsWhenEmpty() {
+    func testBookmarkDomainFiltersBookmarkSavedViewsAndDoesNotFallBackToAllTabsWhenEmpty() {
         let bookmarksID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
         let notesID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C2")!
         let tabs: [CiderTab] = [
@@ -78,6 +78,53 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(bookmarkTabs.map(\.id), ["saved-\(bookmarksID.uuidString)"])
-        XCTAssertEqual(mediaTabs.map(\.id), tabs.filter { $0 != .aiAssistant }.map(\.id))
+        XCTAssertEqual(mediaTabs.map(\.id), [])
+    }
+
+    func testBrowseDomainShowsAllNonAssistantTabsAsCatchAll() {
+        let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
+        let boardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let libraryID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
+        let tabs: [CiderTab] = [
+            .savedView(id: dashboardID, name: "Dashboard"),
+            .savedView(id: libraryID, name: "Library"),
+            .savedView(id: boardID, name: "Cider"),
+            .aiAssistant
+        ]
+        let savedViews = [
+            SavedView(id: dashboardID, name: "Dashboard", kind: .dashboard),
+            SavedView(id: libraryID, name: "Library", kind: .library),
+            SavedView(id: boardID, name: "Cider", kind: .kanban(boardID: "2afee0"))
+        ]
+
+        let result = WorkspaceContextualTabPolicy.tabs(
+            for: .browse,
+            allTabs: tabs,
+            savedViews: savedViews
+        )
+
+        XCTAssertEqual(result.map(\.id), [
+            "saved-\(dashboardID.uuidString)",
+            "saved-\(libraryID.uuidString)",
+            "saved-\(boardID.uuidString)"
+        ])
+    }
+
+    func testAssistantSelectionShowsOnlyAssistantTab() {
+        let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
+        let tabs: [CiderTab] = [
+            .savedView(id: dashboardID, name: "Dashboard"),
+            .aiAssistant
+        ]
+        let savedViews = [SavedView(id: dashboardID, name: "Dashboard", kind: .dashboard)]
+
+        let result = WorkspaceContextualTabPolicy.tabs(
+            for: nil,
+            selectedTab: .aiAssistant,
+            allTabs: tabs,
+            savedViews: savedViews
+        )
+
+        XCTAssertEqual(result, [.aiAssistant])
     }
 }

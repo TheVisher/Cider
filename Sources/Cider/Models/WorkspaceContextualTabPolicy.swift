@@ -3,21 +3,23 @@ import Foundation
 enum WorkspaceContextualTabPolicy {
     static func tabs(
         for domain: WorkspaceNavigationDomain?,
+        selectedTab: CiderTab? = nil,
         allTabs: [CiderTab],
         savedViews: [SavedView]
     ) -> [CiderTab] {
+        if selectedTab == .aiAssistant && domain == nil { return [.aiAssistant] }
+
         let domainTabs = allTabs.filter { tab in
             tab != .aiAssistant
         }
 
         guard let domain else { return domainTabs }
+        if domain == .browse { return domainTabs }
 
         let savedViewByID = Dictionary(uniqueKeysWithValues: savedViews.map { ($0.id, $0) })
-        let compatibleTabs = domainTabs.filter { tab in
+        return domainTabs.filter { tab in
             isCompatibilityTab(tab) || matches(tab, domain: domain, savedViewByID: savedViewByID)
         }
-
-        return compatibleTabs.isEmpty ? domainTabs : compatibleTabs
     }
 
     private static func isCompatibilityTab(_ tab: CiderTab) -> Bool {
