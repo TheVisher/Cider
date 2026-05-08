@@ -502,13 +502,48 @@ struct HomeOverviewDashboardView: View {
             minHeight: layoutMetrics.requiredHeight(for: .recentActivity),
             fixedHeight: fixedHeight
         ) {
-            if snapshot.recentItems.isEmpty {
+            if snapshot.recentCaptureItems.isEmpty {
                 Text("No recent activity yet.")
                     .font(CiderFont.body)
                     .foregroundColor(CiderColors.tertiary)
             } else {
-                HomeOverviewCaptureTimeline(items: snapshot.recentItems) { item in
-                    onOpenItem(item)
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(snapshot.recentCaptureItems) { capture in
+                        Button {
+                            onOpenItem(capture.item)
+                        } label: {
+                            HStack(alignment: .top, spacing: Spacing.sm) {
+                                Image(systemName: capture.item.dashboardSymbol)
+                                    .font(CiderFont.captionSemibold)
+                                    .foregroundColor(capture.item.dashboardAccentColor)
+                                    .frame(width: 18)
+
+                                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                    Text(capture.title)
+                                        .font(CiderFont.labelMedium)
+                                        .foregroundColor(CiderColors.primary)
+                                        .lineLimit(1)
+
+                                    Text("\(capture.typeLabel) • \(capture.locationLabel)")
+                                        .font(CiderFont.caption)
+                                        .foregroundColor(CiderColors.tertiary)
+                                        .lineLimit(1)
+
+                                    Text(capture.suggestedAction)
+                                        .font(CiderFont.captionSemibold)
+                                        .foregroundColor(CiderColors.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+
+                        if capture.id != snapshot.recentCaptureItems.last?.id {
+                            Divider()
+                                .background(CiderColors.separator)
+                        }
+                    }
                 }
             }
         }

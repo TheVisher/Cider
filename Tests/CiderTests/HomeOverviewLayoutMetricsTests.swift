@@ -77,6 +77,7 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
                 HomeAttentionMetric(id: "untitledNotes", title: "Untitled Notes", value: 1, target: .inbox)
             ],
             recentItems: Array(repeating: makeItem(title: "Recent"), count: recentCount),
+            recentCaptureItems: Array(repeating: makeRecentCapture(title: "Recent"), count: recentCount),
             upcomingItems: Array(repeating: makeItem(title: "Upcoming"), count: upcomingCount),
             todoItems: [],
             completedTodoItems: [],
@@ -96,6 +97,18 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
                 createdAt: now,
                 modifiedAt: now
             )
+        )
+    }
+
+    private func makeRecentCapture(title: String) -> HomeRecentCaptureItem {
+        let item = makeItem(title: title)
+        return HomeRecentCaptureItem(
+            id: UUID().uuidString,
+            item: item,
+            title: title,
+            typeLabel: "Note",
+            locationLabel: "Inbox / Unfiled",
+            suggestedAction: "Open"
         )
     }
 

@@ -247,6 +247,7 @@ enum HomeOverviewDataProvider {
                 )
             ],
             recentItems: Array(recentItems.prefix(4)),
+            recentCaptureItems: recentCaptureItems(from: recentItems, folders: folders),
             upcomingItems: Array(upcomingItems.prefix(4)),
             todoItems: Array(todoQueueItems(from: items, now: now).prefix(6)),
             completedTodoItems: Array(completedTodoItems(from: items).prefix(4)),
@@ -324,6 +325,62 @@ enum HomeOverviewDataProvider {
             default:
                 break
             }
+        }
+    }
+
+    private static func recentCaptureItems(from recentItems: [LibraryItemV2], folders: [Folder]) -> [HomeRecentCaptureItem] {
+        let folderNames = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0.name) })
+        return recentItems.prefix(6).map { item in
+            HomeRecentCaptureItem(
+                id: "recent-capture-\(item.id)",
+                item: item,
+                title: item.title,
+                typeLabel: typeLabel(for: item),
+                locationLabel: locationLabel(for: item, folderNames: folderNames),
+                suggestedAction: recentCaptureSuggestedAction(for: item)
+            )
+        }
+    }
+
+    private static func locationLabel(for item: LibraryItemV2, folderNames: [UUID: String]) -> String {
+        guard let folderID = item.folderID, let name = folderNames[folderID] else {
+            return "Inbox / Unfiled"
+        }
+        return name
+    }
+
+    private static func typeLabel(for item: LibraryItemV2) -> String {
+        switch item {
+        case .bookmark: return "Bookmark"
+        case .note: return "Note"
+        case .dateCard: return "Date"
+        case .contact: return "Contact"
+        case .todo: return "Todo"
+        case .vaultFile: return "File"
+        }
+    }
+
+    private static func recentCaptureSuggestedAction(for item: LibraryItemV2) -> String {
+        switch item {
+        case .bookmark(let bookmark):
+            if bookmarkGenericTitleReason(bookmark) != nil { return "Clean up title" }
+            if bookmarkNeedsEnrichment(bookmark) { return "Enrich and route" }
+            if bookmark.folderID == nil { return "Route to folder" }
+            return "Open"
+        case .note(let note):
+            if isUntitled(note.title) { return "Ask Erik" }
+            if note.folderID == nil || isInboxPath(note.relativePath) { return "Route to folder" }
+            return "Open"
+        case .vaultFile(let file):
+            if file.folderID == nil || isInboxPath(file.relativePath) { return "Route to folder" }
+            return "Open"
+        case .todo(let todo):
+            if todo.isCompleted { return "Review" }
+            return todo.earliestApproachingDate == nil ? "Add reminder" : "Do next"
+        case .dateCard(let dateCard):
+            return dateCard.actionURL == nil ? "Add action URL" : "Review"
+        case .contact:
+            return "Open"
         }
     }
 

@@ -161,6 +161,47 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         }
     }
 
+    func testRecentCaptureSummariesIncludeVerifiedPathTypeAndNextAction() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let folderID = UUID()
+        let folder = Folder(id: folderID, name: "Research")
+        let bookmark = Bookmark(
+            id: UUID(),
+            title: "https://example.com/article",
+            urlString: "https://example.com/article",
+            createdAt: now.addingTimeInterval(-120),
+            updatedAt: now.addingTimeInterval(-60),
+            notes: "",
+            tags: [],
+            labelIDs: [],
+            dismissedLabelIDs: [],
+            folderID: folderID,
+            enrichmentStatus: "complete",
+            lastEnrichedAt: now
+        )
+        let note = Note(
+            id: UUID(),
+            title: "Untitled capture",
+            createdAt: now.addingTimeInterval(-240),
+            modifiedAt: now.addingTimeInterval(-180)
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.bookmark(bookmark), .note(note)],
+            recentItems: [.bookmark(bookmark), .note(note)],
+            folders: [folder],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.recentCaptureItems.map(\.title), ["https://example.com/article", "Untitled capture"])
+        XCTAssertEqual(snapshot.recentCaptureItems[0].typeLabel, "Bookmark")
+        XCTAssertEqual(snapshot.recentCaptureItems[0].locationLabel, "Research")
+        XCTAssertEqual(snapshot.recentCaptureItems[0].suggestedAction, "Clean up title")
+        XCTAssertEqual(snapshot.recentCaptureItems[1].locationLabel, "Inbox / Unfiled")
+        XCTAssertEqual(snapshot.recentCaptureItems[1].suggestedAction, "Ask Erik")
+    }
+
     func testDashboardBuildsKanbanPulseFromCiderBoardState() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let parent = KanbanCard(

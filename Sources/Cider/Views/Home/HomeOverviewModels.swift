@@ -102,6 +102,15 @@ struct HomeTriageItem: Equatable, Identifiable {
     let confidenceLabel: String
 }
 
+struct HomeRecentCaptureItem: Equatable, Identifiable {
+    let id: String
+    let item: LibraryItemV2
+    let title: String
+    let typeLabel: String
+    let locationLabel: String
+    let suggestedAction: String
+}
+
 struct HomeKanbanPulseItem: Equatable, Identifiable {
     let id: String
     let boardID: String
@@ -122,6 +131,7 @@ struct HomeOverviewSnapshot: Equatable {
     let overviewChips: [HomeOverviewChip]
     let attentionMetrics: [HomeAttentionMetric]
     let recentItems: [LibraryItemV2]
+    let recentCaptureItems: [HomeRecentCaptureItem]
     let upcomingItems: [LibraryItemV2]
     let todoItems: [TodoCard]
     let completedTodoItems: [TodoCard]
@@ -161,7 +171,7 @@ struct HomeOverviewLayoutMetrics {
         case .recentActivity:
             return max(
                 HomeOverviewDesign.recentActivityBaseHeight,
-                88 + (CGFloat(max(snapshot.recentItems.count, 1)) * HomeOverviewDesign.recentActivityRowHeightEstimate)
+                88 + (CGFloat(max(snapshot.recentCaptureItems.count, 1)) * HomeOverviewDesign.recentActivityRowHeightEstimate)
             )
         case .upcoming:
             return HomeOverviewDesign.upcomingPanelFixedHeight
