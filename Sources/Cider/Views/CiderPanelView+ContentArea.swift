@@ -125,22 +125,88 @@ extension CiderPanelView {
         } else if let tab = selectedTab {
             switch tab {
             case .domainDashboard(let domain):
-                WorkspaceDomainDashboardView(
-                    model: WorkspaceDomainDashboardProvider.model(
-                        for: domain,
-                        savedViews: savedViewStorage.savedViews,
-                        allTabs: allTabs,
-                        bookmarks: bookmarksViewModel.bookmarks,
-                        bookmarkFolders: bookmarksViewModel.folders
-                    ),
-                    onOpenTab: { tab in
-                        openDomainDashboardTab(tab)
-                    },
-                    onBrowseAll: {
-                        selectedNavigationDomain = .browse
-                        selectedTab = .domainDashboard(.browse)
-                    }
-                )
+                if domain == .projects {
+                    ProjectWorkspaceOverviewView(
+                        model: ProjectWorkspaceOverviewProvider.model(
+                            for: projectWorkspaceCatalog.home,
+                            catalog: projectWorkspaceCatalog,
+                            boards: kanbanStorage.boards
+                        ),
+                        onOpenProject: { row in
+                            if let project = projectWorkspaceCatalog.workspace(id: row.projectID) {
+                                selectProjectWorkspace(project)
+                            }
+                        },
+                        onOpenBoard: { boardID in
+                            openProjectBoard(boardID)
+                        }
+                    )
+                } else {
+                    WorkspaceDomainDashboardView(
+                        model: WorkspaceDomainDashboardProvider.model(
+                            for: domain,
+                            savedViews: savedViewStorage.savedViews,
+                            allTabs: allTabs,
+                            bookmarks: bookmarksViewModel.bookmarks,
+                            bookmarkFolders: bookmarksViewModel.folders
+                        ),
+                        onOpenTab: { tab in
+                            openDomainDashboardTab(tab)
+                        },
+                        onBrowseAll: {
+                            selectedNavigationDomain = .browse
+                            selectedTab = .domainDashboard(.browse)
+                        }
+                    )
+                }
+            case .projectOverview(let projectID, _):
+                if let project = projectWorkspaceCatalog.workspace(id: projectID) {
+                    ProjectWorkspaceOverviewView(
+                        model: ProjectWorkspaceOverviewProvider.model(
+                            for: project,
+                            catalog: projectWorkspaceCatalog,
+                            boards: kanbanStorage.boards
+                        ),
+                        onOpenProject: { _ in },
+                        onOpenBoard: { boardID in
+                            openProjectBoard(boardID)
+                        }
+                    )
+                } else {
+                    EmptyStateView(
+                        icon: "rectangle.3.group",
+                        title: "Project not found"
+                    )
+                }
+            case .projectReferences(let projectID, _):
+                if let project = projectWorkspaceCatalog.workspace(id: projectID) {
+                    ProjectReferencesView(
+                        project: project,
+                        references: ProjectReferenceProvider.references(
+                            for: project,
+                            items: libraryViewModel.items,
+                            boards: kanbanStorage.boards
+                        ),
+                        boards: kanbanStorage.boards,
+                        onOpenItem: { item in
+                            openDashboardItem(item)
+                        },
+                        onOpenCard: { boardID, cardID in
+                            openKanbanCardDetail(boardID: boardID, cardID: cardID)
+                        },
+                        onLinkReferenceToCard: { ref, boardID, cardID in
+                            linkProjectReference(ref, toCardID: cardID, boardID: boardID)
+                        },
+                        onPromoteReference: { reference in
+                            promoteProjectReference(reference, in: project)
+                        }
+                    )
+                } else {
+                    EmptyStateView(
+                        icon: "photo.on.rectangle",
+                        title: "Project references not found"
+                    )
+                }
             case .aiAssistant:
                 AIAssistantPanelView(
                     viewModel: AIAssistantViewModel.shared,
@@ -518,6 +584,63 @@ extension CiderPanelView {
         case .savedView(let name, let filterSpec, let sortMode):
             openDashboardLibraryView(named: name, filterSpec: filterSpec, sortMode: sortMode)
         }
+    }
+
+    func openProjectBoard(_ boardID: String) {
+        guard let savedView = savedViewStorage.savedViews.first(where: { savedView in
+            if case .kanban(let candidateBoardID) = savedView.kind {
+                return candidateBoardID == boardID
+            }
+            return false
+        }) else { return }
+        selectedFolderID = nil
+        selectedTab = .savedView(id: savedView.id, name: savedView.name)
+    }
+
+    func linkProjectReference(_ ref: LibraryEntityRef, toCardID cardID: String, boardID: String) {
+        guard let found = KanbanStorage.shared.findCard(id: cardID),
+              found.board.id == boardID,
+              !found.card.linkedEntities.contains(ref) else {
+            return
+        }
+        var updated = found.card
+        updated.linkedEntities.append(ref)
+        KanbanStorage.shared.updateCard(boardID: boardID, card: updated)
+    }
+
+    func promoteProjectReference(_ reference: ProjectReferenceItem, in project: ProjectWorkspace) {
+        guard let board = project.boardIDs.compactMap({ boardID in
+            kanbanStorage.boards.first { $0.id == boardID }
+        }).first,
+              let columnID = preferredProjectWorkColumnID(in: board) else {
+            return
+        }
+        let title = "Follow up: \(reference.item.title)"
+        let notes = """
+        Created from \(project.title) References.
+
+        Linked reference: \(reference.ref.type.rawValue) \(reference.ref.entityID.uuidString)
+        """
+        guard var card = KanbanStorage.shared.addCard(
+            boardID: board.id,
+            columnID: columnID,
+            title: title,
+            notes: notes,
+            tags: [project.id, "references"]
+        ) else { return }
+        card.linkedEntities = [reference.ref]
+        KanbanStorage.shared.updateCard(boardID: board.id, card: card)
+        openKanbanCardDetail(boardID: board.id, cardID: card.id)
+    }
+
+    private func preferredProjectWorkColumnID(in board: KanbanBoard) -> String? {
+        if let queued = board.columns.first(where: { $0.name.localizedCaseInsensitiveContains("queued") }) {
+            return queued.id
+        }
+        if let backlog = board.columns.first(where: { $0.name.localizedCaseInsensitiveContains("backlog") }) {
+            return backlog.id
+        }
+        return board.columns.first?.id
     }
 
     private func openDashboardLibraryView(

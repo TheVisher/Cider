@@ -126,7 +126,7 @@ struct CiderTabBar: View {
                 Button("Delete Tab", role: .destructive) {
                     onDeleteTab?(tab)
                 }
-            } else if tab != .aiAssistant && !isDomainDashboard(tab) {
+            } else if tab != .aiAssistant && !isPersistentContextTab(tab) {
                 Button("Close Tab") {
                     onCloseTab?(tab)
                 }
@@ -300,8 +300,10 @@ struct CiderTabBar: View {
         return tab.systemImage
     }
 
-    private func isDomainDashboard(_ tab: CiderTab) -> Bool {
+    private func isPersistentContextTab(_ tab: CiderTab) -> Bool {
         if case .domainDashboard = tab { return true }
+        if case .projectOverview = tab { return true }
+        if case .projectReferences = tab { return true }
         return false
     }
 
@@ -314,6 +316,8 @@ struct CiderTabBar: View {
         case .search: return 0
         case .tag: return 0
         case .domainDashboard: return 0
+        case .projectOverview: return 0
+        case .projectReferences: return 0
         case .aiAssistant: return 0
         }
     }

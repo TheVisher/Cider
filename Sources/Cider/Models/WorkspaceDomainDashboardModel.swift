@@ -236,6 +236,22 @@ enum WorkspaceDomainDashboardProvider {
         switch tab {
         case .domainDashboard:
             return nil
+        case .projectOverview(let projectID, let name):
+            return WorkspaceDomainDashboardItem(
+                id: tab.id,
+                title: name,
+                subtitle: "\(projectID) project overview",
+                systemImage: tab.systemImage,
+                target: tab
+            )
+        case .projectReferences(let projectID, let name):
+            return WorkspaceDomainDashboardItem(
+                id: tab.id,
+                title: name,
+                subtitle: "\(projectID) references and inspiration",
+                systemImage: tab.systemImage,
+                target: tab
+            )
         case .aiAssistant:
             return WorkspaceDomainDashboardItem(
                 id: tab.id,

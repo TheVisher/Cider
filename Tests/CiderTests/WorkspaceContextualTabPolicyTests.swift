@@ -49,6 +49,135 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         ])
     }
 
+    func testProjectsDomainWithSelectedProjectGeneratesProjectScopedTabs() {
+        let ciderID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+        let webID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C2")!
+        let iosID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C3")!
+        let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
+        let savedViews = [
+            SavedView(id: dashboardID, name: "Dashboard", kind: .dashboard),
+            SavedView(id: ciderID, name: "Cider", kind: .kanban(boardID: "2afee0")),
+            SavedView(id: webID, name: "Cider Web", kind: .kanban(boardID: "08c899")),
+            SavedView(id: iosID, name: "Cider iOS", kind: .kanban(boardID: "2d3f69"))
+        ]
+        let selectedProject = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider project",
+            boardIDs: ["2afee0", "08c899", "2d3f69"],
+            referenceSearchTerms: ["cider"]
+        )
+
+        let result = WorkspaceContextualTabPolicy.tabs(
+            for: .projects,
+            selectedProject: selectedProject,
+            allTabs: [.savedView(id: dashboardID, name: "Dashboard")],
+            savedViews: savedViews
+        )
+
+        XCTAssertEqual(result.map(\.id), [
+            "project-overview-cider",
+            "saved-\(ciderID.uuidString)",
+            "saved-\(webID.uuidString)",
+            "saved-\(iosID.uuidString)",
+            "project-references-cider"
+        ])
+        XCTAssertEqual(result.first?.displayName, "Overview")
+        XCTAssertEqual(result.last?.displayName, "References")
+    }
+
+    func testProjectsHomeUsesProjectsDashboardWhenNoProjectIsSelected() {
+        let boardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let result = WorkspaceContextualTabPolicy.tabs(
+            for: .projects,
+            selectedProject: nil,
+            allTabs: [.savedView(id: boardID, name: "Cider")],
+            savedViews: [SavedView(id: boardID, name: "Cider", kind: .kanban(boardID: "2afee0"))]
+        )
+
+        XCTAssertEqual(result.map(\.id), [
+            CiderTab.domainDashboard(.projects).id,
+            "saved-\(boardID.uuidString)"
+        ])
+    }
+
+    func testProjectsBrowseAllBoardsShowsOnlyAllBoardsContextTabByDefault() {
+        let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
+        let libraryID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
+        let ciderID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+        let urgentID = UUID(uuidString: "00000000-0000-0000-0000-0000000000E1")!
+        let savedViews = [
+            SavedView(id: dashboardID, name: "Dashboard", kind: .dashboard),
+            SavedView(id: libraryID, name: "Library", kind: .library),
+            SavedView(id: ciderID, name: "Cider", kind: .kanban(boardID: "2afee0")),
+            SavedView(id: urgentID, name: "Urgent", kind: .library)
+        ]
+        let workspace = ProjectWorkspace(
+            id: "browse-all-boards",
+            kind: .browseAllBoards,
+            title: "Browse All Boards",
+            subtitle: "Every Kanban board and project artifact",
+            boardIDs: ["2afee0"],
+            referenceSearchTerms: []
+        )
+
+        let result = WorkspaceContextualTabPolicy.tabs(
+            for: .projects,
+            selectedProject: workspace,
+            selectedTab: .projectOverview(projectID: "browse-all-boards", name: "All Boards"),
+            allTabs: [
+                .savedView(id: dashboardID, name: "Dashboard"),
+                .savedView(id: libraryID, name: "Library"),
+                .savedView(id: ciderID, name: "Cider"),
+                .savedView(id: urgentID, name: "Urgent")
+            ],
+            savedViews: savedViews
+        )
+
+        XCTAssertEqual(result.map(\.id), ["project-overview-browse-all-boards"])
+        XCTAssertEqual(result.first?.displayName, "All Boards")
+    }
+
+    func testProjectsBrowseAllBoardsAllowsCurrentBoardDrillInWithoutGlobalTabs() {
+        let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
+        let ciderID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+        let bugsID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B6")!
+        let urgentID = UUID(uuidString: "00000000-0000-0000-0000-0000000000E1")!
+        let savedViews = [
+            SavedView(id: dashboardID, name: "Dashboard", kind: .dashboard),
+            SavedView(id: ciderID, name: "Cider", kind: .kanban(boardID: "2afee0")),
+            SavedView(id: bugsID, name: "Cider Bugs", kind: .kanban(boardID: "d4e5f6")),
+            SavedView(id: urgentID, name: "Urgent", kind: .library)
+        ]
+        let workspace = ProjectWorkspace(
+            id: "browse-all-boards",
+            kind: .browseAllBoards,
+            title: "Browse All Boards",
+            subtitle: "Every Kanban board and project artifact",
+            boardIDs: ["2afee0", "d4e5f6"],
+            referenceSearchTerms: []
+        )
+
+        let result = WorkspaceContextualTabPolicy.tabs(
+            for: .projects,
+            selectedProject: workspace,
+            selectedTab: .savedView(id: bugsID, name: "Cider Bugs"),
+            allTabs: [
+                .savedView(id: dashboardID, name: "Dashboard"),
+                .savedView(id: ciderID, name: "Cider"),
+                .savedView(id: bugsID, name: "Cider Bugs"),
+                .savedView(id: urgentID, name: "Urgent")
+            ],
+            savedViews: savedViews
+        )
+
+        XCTAssertEqual(result.map(\.id), [
+            "project-overview-browse-all-boards",
+            "saved-\(bugsID.uuidString)"
+        ])
+    }
+
     func testBookmarkDomainPrependsDashboardTabAndFiltersBookmarkSavedViews() {
         let bookmarksID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
         let notesID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C2")!

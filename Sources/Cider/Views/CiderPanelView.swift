@@ -64,6 +64,7 @@ struct CiderPanelView: View {
     @State var contentAreaWidth: CGFloat = 800
     @State var isURLDropTargeted = false
     @State var selectedNavigationDomain: WorkspaceNavigationDomain?
+    @State var selectedProjectWorkspaceID: String?
 
     @State var selectedTagIDs: Set<UUID> = []
     @State var tagsCollapsed: Bool = CiderConfig.load().tagsCollapsed
@@ -82,10 +83,20 @@ struct CiderPanelView: View {
     var contextualTabs: [CiderTab] {
         WorkspaceContextualTabPolicy.tabs(
             for: selectedNavigationDomain,
+            selectedProject: selectedProjectWorkspace,
             selectedTab: selectedTab,
             allTabs: allTabs,
             savedViews: savedViewStorage.savedViews
         )
+    }
+
+    var projectWorkspaceCatalog: ProjectWorkspaceCatalog {
+        ProjectWorkspaceCatalog.defaultCatalog(boards: kanbanStorage.boards)
+    }
+
+    var selectedProjectWorkspace: ProjectWorkspace? {
+        guard selectedNavigationDomain == .projects else { return nil }
+        return projectWorkspaceCatalog.workspace(id: selectedProjectWorkspaceID)
     }
 
     private var savedViewTabs: [CiderTab] {

@@ -3,6 +3,7 @@ import Foundation
 enum WorkspaceContextualTabPolicy {
     static func tabs(
         for domain: WorkspaceNavigationDomain?,
+        selectedProject: ProjectWorkspace? = nil,
         selectedTab: CiderTab? = nil,
         allTabs: [CiderTab],
         savedViews: [SavedView]
@@ -16,6 +17,16 @@ enum WorkspaceContextualTabPolicy {
         guard let domain else { return domainTabs }
         if domain == .aiAssistant { return allTabs.contains(.aiAssistant) ? [.aiAssistant] : [] }
         if domain == .browse { return [CiderTab.domainDashboard(.browse)] + domainTabs }
+        if domain == .projects, let selectedProject {
+            switch selectedProject.kind {
+            case .project:
+                return projectTabs(for: selectedProject, savedViews: savedViews, allTabs: domainTabs)
+            case .browseAllBoards:
+                return browseAllBoardTabs(for: selectedProject, selectedTab: selectedTab, savedViews: savedViews)
+            case .home:
+                break
+            }
+        }
 
         let savedViewByID = Dictionary(uniqueKeysWithValues: savedViews.map { ($0.id, $0) })
         let matchingTabs = domainTabs.filter { tab in
@@ -23,6 +34,53 @@ enum WorkspaceContextualTabPolicy {
         }
         if domain == .mainDashboard { return matchingTabs }
         return [CiderTab.domainDashboard(domain)] + matchingTabs
+    }
+
+    private static func projectTabs(
+        for project: ProjectWorkspace,
+        savedViews: [SavedView],
+        allTabs: [CiderTab]
+    ) -> [CiderTab] {
+        let boardTabs = project.boardIDs.compactMap { boardID -> CiderTab? in
+            guard let savedView = savedViews.first(where: { savedView in
+                if case .kanban(let savedBoardID) = savedView.kind {
+                    return savedBoardID == boardID
+                }
+                return false
+            }) else { return nil }
+            return .savedView(id: savedView.id, name: savedView.name)
+        }
+
+        var result: [CiderTab] = [
+            .projectOverview(projectID: project.id, name: "Overview")
+        ] + boardTabs + [
+            .projectReferences(projectID: project.id, name: "References")
+        ]
+
+        for tab in allTabs where isCompatibilityTab(tab) && !result.contains(tab) {
+            result.append(tab)
+        }
+        return result
+    }
+
+    private static func browseAllBoardTabs(
+        for workspace: ProjectWorkspace,
+        selectedTab: CiderTab?,
+        savedViews: [SavedView]
+    ) -> [CiderTab] {
+        var result: [CiderTab] = [
+            .projectOverview(projectID: workspace.id, name: "All Boards")
+        ]
+
+        guard case .savedView(let selectedID, let selectedName) = selectedTab,
+              let savedView = savedViews.first(where: { $0.id == selectedID }),
+              case .kanban(let boardID) = savedView.kind,
+              workspace.boardIDs.contains(boardID) else {
+            return result
+        }
+
+        result.append(.savedView(id: selectedID, name: selectedName))
+        return result
     }
 
     private static func isCompatibilityTab(_ tab: CiderTab) -> Bool {

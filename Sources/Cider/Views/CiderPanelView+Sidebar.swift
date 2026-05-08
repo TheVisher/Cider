@@ -26,6 +26,12 @@ extension CiderPanelView {
     var domainSidebarContent: some View {
         if selectedNavigationDomain == .aiAssistant {
             AIAssistantDomainSidebarView(onOpenAssistant: openOrSelectAIAssistantTab)
+        } else if selectedNavigationDomain == .projects {
+            ProjectsDomainSidebarView(
+                catalog: projectWorkspaceCatalog,
+                selectedWorkspaceID: $selectedProjectWorkspaceID,
+                onSelectWorkspace: selectProjectWorkspace
+            )
         } else {
             folderSidebar(folders: contextualFolders)
         }
@@ -83,6 +89,10 @@ extension CiderPanelView {
             selectedNavigationDomain = domain
         }
 
+        if domain != .projects {
+            selectedProjectWorkspaceID = nil
+        }
+
         if domain == .aiAssistant {
             openOrSelectAIAssistantTab()
             return
@@ -92,6 +102,30 @@ extension CiderPanelView {
             normalizeSelectedTabForCurrentDomain()
         } else {
             selectedTab = .domainDashboard(domain)
+        }
+    }
+
+    func selectProjectWorkspace(_ workspace: ProjectWorkspace) {
+        selectedFolderID = nil
+        selectedTagIDs.removeAll()
+        selectedItemIDs.removeAll()
+        focusedItemID = nil
+        selectionAnchorID = nil
+        closeAllDetails()
+
+        switch workspace.kind {
+        case .home:
+            selectedProjectWorkspaceID = nil
+            selectedNavigationDomain = .projects
+            selectedTab = .domainDashboard(.projects)
+        case .project:
+            selectedProjectWorkspaceID = workspace.id
+            selectedNavigationDomain = .projects
+            selectedTab = .projectOverview(projectID: workspace.id, name: "Overview")
+        case .browseAllBoards:
+            selectedProjectWorkspaceID = workspace.id
+            selectedNavigationDomain = .projects
+            selectedTab = .projectOverview(projectID: workspace.id, name: "All Boards")
         }
     }
 
