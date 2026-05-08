@@ -45,6 +45,34 @@ final class AgendaBriefingServiceTests: XCTestCase {
         XCTAssertEqual(brief.items[0].reason, "outside reminder window")
     }
 
+    func testOldCompletedTodoDoesNotSuppressDifferentUpcomingDateCycle() {
+        let now = date(2026, 5, 15)
+        let oldRent = TodoCard(
+            title: "Rent",
+            dueDate: date(2026, 5, 1),
+            isCompleted: true,
+            completedAt: date(2026, 5, 2)
+        )
+        let upcomingRent = DateCard(
+            title: "Rent",
+            startAt: date(2026, 5, 20),
+            recurrenceRule: DateCardRecurrenceRule(frequency: .monthly)
+        )
+
+        let brief = AgendaBriefingService.build(
+            todos: [oldRent],
+            dateCards: [upcomingRent],
+            now: now,
+            calendar: calendar,
+            options: AgendaBriefingOptions(monthlyBillLeadDays: 5)
+        )
+
+        XCTAssertEqual(brief.items.count, 1)
+        XCTAssertEqual(brief.items[0].status, .upcoming)
+        XCTAssertTrue(brief.items[0].surfaceToday)
+        XCTAssertEqual(brief.items[0].reason, "upcoming in 5 days")
+    }
+
     func testBirthdayOutsideLeadWindowIsNotSurfaced() {
         let now = date(2026, 5, 7)
         let birthday = DateCard(

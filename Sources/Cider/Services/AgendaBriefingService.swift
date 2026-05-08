@@ -54,6 +54,12 @@ struct AgendaBriefingOptions: Equatable {
 }
 
 enum AgendaBriefingService {
+    private struct CompletedTodoReference {
+        let normalizedTitle: String
+        let dueAt: Date?
+        let completedAt: Date?
+    }
+
     static func build(
         todos: [TodoCard],
         dateCards: [DateCard],
@@ -61,15 +67,19 @@ enum AgendaBriefingService {
         calendar: Calendar = .current,
         options: AgendaBriefingOptions = .default
     ) -> AgendaBriefing {
-        let completedTodoTitles = Set(
-            todos
-                .filter { $0.isCompleted }
-                .map { normalizedTitle($0.title) }
-        )
+        let completedTodos = todos
+            .filter { $0.isCompleted }
+            .map {
+                CompletedTodoReference(
+                    normalizedTitle: normalizedTitle($0.title),
+                    dueAt: $0.earliestApproachingDate,
+                    completedAt: $0.completedAt
+                )
+            }
 
         var items: [AgendaBriefingItem] = []
         items += todos.compactMap { todoItem(for: $0, now: now, calendar: calendar, options: options) }
-        items += dateCards.compactMap { dateCardItem(for: $0, completedTodoTitles: completedTodoTitles, now: now, calendar: calendar, options: options) }
+        items += dateCards.compactMap { dateCardItem(for: $0, completedTodos: completedTodos, now: now, calendar: calendar, options: options) }
 
         return AgendaBriefing(
             generatedAt: now,
@@ -140,7 +150,7 @@ enum AgendaBriefingService {
 
     private static func dateCardItem(
         for card: DateCard,
-        completedTodoTitles: Set<String>,
+        completedTodos: [CompletedTodoReference],
         now: Date,
         calendar: Calendar,
         options: AgendaBriefingOptions
@@ -149,7 +159,12 @@ enum AgendaBriefingService {
 
         let effectiveDate = card.effectiveDate(now: now)
         let normalized = normalizedTitle(card.title)
-        if completedTodoTitles.contains(normalized), calendar.isDate(effectiveDate, equalTo: now, toGranularity: .month) {
+        if hasCompletedMatchingTodo(
+            normalizedTitle: normalized,
+            occurrenceDate: effectiveDate,
+            completedTodos: completedTodos,
+            calendar: calendar
+        ) {
             return AgendaBriefingItem(
                 id: card.id,
                 itemType: .dateCard,
@@ -245,6 +260,20 @@ enum AgendaBriefingService {
             return "monthly bill lead window: \(leadDays) day\(leadDays == 1 ? "" : "s")"
         }
         return "date card lead window: \(leadDays) day\(leadDays == 1 ? "" : "s")"
+    }
+
+    private static func hasCompletedMatchingTodo(
+        normalizedTitle: String,
+        occurrenceDate: Date,
+        completedTodos: [CompletedTodoReference],
+        calendar: Calendar
+    ) -> Bool {
+        completedTodos.contains { todo in
+            guard todo.normalizedTitle == normalizedTitle, let dueAt = todo.dueAt else { return false }
+            guard calendar.isDate(dueAt, inSameDayAs: occurrenceDate) else { return false }
+            guard let completedAt = todo.completedAt else { return true }
+            return completedAt >= calendar.startOfDay(for: dueAt)
+        }
     }
 
     private static func daysBetween(_ start: Date, _ end: Date, calendar: Calendar) -> Int {
