@@ -240,6 +240,14 @@ struct KanbanBoard: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
+    func cards(linking ref: LibraryEntityRef) -> [KanbanCard] {
+        var seen: Set<String> = []
+        return allCards.compactMap { card in
+            guard card.linkedEntities.contains(ref), seen.insert(card.id).inserted else { return nil }
+            return card
+        }
+    }
+
     func relatedCardCandidates(
         for cardID: String,
         matching query: String,

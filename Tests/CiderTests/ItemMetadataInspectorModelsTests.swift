@@ -72,6 +72,35 @@ struct ItemMetadataInspectorModelsTests {
         #expect(visible.first?.candidates.map(\.ref) == [addableBookmark])
     }
 
+    @Test("kanban reference backlinks expose card title board column and id")
+    func kanbanReferenceBacklinksExposeCardContext() {
+        let ref = LibraryEntityRef(
+            type: .bookmark,
+            entityID: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        )
+        let board = KanbanBoard(
+            id: "board-cider",
+            name: "Cider",
+            columns: [
+                KanbanColumn(
+                    id: "active",
+                    name: "In Progress",
+                    cards: [
+                        KanbanCard(id: "a18f97", title: "Project references MVP", linkedEntities: [ref]),
+                        KanbanCard(id: "other", title: "Unlinked")
+                    ]
+                )
+            ]
+        )
+
+        let rows = KanbanReferenceBacklinkRows.rows(for: ref, boards: [board])
+
+        #expect(rows.map(\.id) == ["kanban-backlink-board-cider-active-a18f97"])
+        #expect(rows.first?.symbol == "square.split.2x1")
+        #expect(rows.first?.title == "Project references MVP")
+        #expect(rows.first?.value == "Cider · In Progress · a18f97")
+    }
+
     @Test("info rows use stable created updated type order")
     func infoRowsUseStableOrder() {
         let created = Date(timeIntervalSince1970: 100)

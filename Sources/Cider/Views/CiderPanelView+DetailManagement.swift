@@ -636,10 +636,12 @@ extension CiderPanelView {
 
     func exportKanbanCardMarkdown(board: KanbanBoard, column: KanbanColumn, card: KanbanCard) {
         let card = kanbanCardDraft?.updatedCard(from: card) ?? card
+        let linkedReferenceSummaries = ItemLinkService.shared.summaries(for: card.linkedEntities)
         let markdown = KanbanCardMarkdownExporter.markdown(
             for: card,
             boardName: board.name,
-            columnName: column.name
+            columnName: column.name,
+            linkedReferenceSummaries: linkedReferenceSummaries
         )
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

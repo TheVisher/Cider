@@ -318,6 +318,7 @@ struct ItemMetadataLinkedSection: View {
     @ObservedObject private var contacts = ContactStorage.shared
     @ObservedObject private var todos = TodoCardStorage.shared
     @ObservedObject private var files = VaultFileService.shared
+    @ObservedObject private var kanbanStorage = KanbanStorage.shared
 
     @State private var refreshID = UUID()
     @State private var errorMessage: String?
@@ -340,6 +341,23 @@ struct ItemMetadataLinkedSection: View {
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
                         ForEach(linkedRows) { row in
                             linkedRow(row)
+                        }
+                    }
+                }
+
+                if !kanbanBacklinkRows.isEmpty {
+                    Divider()
+                        .opacity(0.35)
+
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("Kanban Cards")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            ForEach(kanbanBacklinkRows) { row in
+                                metadataRow(row)
+                            }
                         }
                     }
                 }
@@ -438,6 +456,12 @@ struct ItemMetadataLinkedSection: View {
         guard let sourceRef else { return rows }
         let refs = (try? ItemLinkService.shared.relatedRefs(for: sourceRef)) ?? []
         return ItemLinkService.shared.summaries(for: refs).map(ItemMetadataRow.related)
+    }
+
+    private var kanbanBacklinkRows: [ItemMetadataRow] {
+        _ = refreshID
+        guard let sourceRef else { return [] }
+        return KanbanReferenceBacklinkRows.rows(for: sourceRef, boards: kanbanStorage.boards)
     }
 
     private var relatedRefs: [LibraryEntityRef] {

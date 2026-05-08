@@ -104,6 +104,41 @@ struct KanbanCardHierarchyTests {
         #expect(board.childCards(of: "parent").map(\.id) == ["active"])
     }
 
+    @Test("board finds cards that backlink a linked reference item")
+    func boardFindsCardsThatBacklinkLinkedReferenceItem() {
+        let ref = LibraryEntityRef(
+            type: .bookmark,
+            entityID: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        )
+        let otherRef = LibraryEntityRef(
+            type: .note,
+            entityID: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        )
+        let board = KanbanBoard(
+            name: "References",
+            columns: [
+                KanbanColumn(
+                    id: "active",
+                    name: "Active",
+                    cards: [
+                        KanbanCard(id: "a", title: "Uses bookmark", linkedEntities: [ref]),
+                        KanbanCard(id: "b", title: "Uses note", linkedEntities: [otherRef]),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "testing",
+                    name: "Testing",
+                    cards: [
+                        KanbanCard(id: "c", title: "Also uses bookmark", linkedEntities: [ref]),
+                    ]
+                ),
+            ]
+        )
+
+        #expect(board.cards(linking: ref).map(\.id) == ["a", "c"])
+        #expect(board.cards(linking: otherRef).map(\.id) == ["b"])
+    }
+
     @Test("related card candidates search by id and title and omit current references")
     func relatedCardCandidatesSearchByIDAndTitle() {
         let board = KanbanBoard(

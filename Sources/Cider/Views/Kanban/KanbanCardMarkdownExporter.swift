@@ -5,16 +5,23 @@ enum KanbanCardMarkdownExporter {
         for draft: KanbanCardDraft,
         baseCard: KanbanCard,
         boardName: String,
-        columnName: String
+        columnName: String,
+        linkedReferenceSummaries: [ItemLinkSummary] = []
     ) -> String {
         markdown(
             for: draft.updatedCard(from: baseCard),
             boardName: boardName,
-            columnName: columnName
+            columnName: columnName,
+            linkedReferenceSummaries: linkedReferenceSummaries
         )
     }
 
-    static func markdown(for card: KanbanCard, boardName: String, columnName: String) -> String {
+    static func markdown(
+        for card: KanbanCard,
+        boardName: String,
+        columnName: String,
+        linkedReferenceSummaries: [ItemLinkSummary] = []
+    ) -> String {
         var lines: [String] = []
         lines.append("# \(card.title)")
         lines.append("")
@@ -45,6 +52,11 @@ enum KanbanCardMarkdownExporter {
             lines.append("_No notes yet._")
         }
         lines.append("")
+        appendLinkedReferences(
+            to: &lines,
+            card: card,
+            linkedReferenceSummaries: linkedReferenceSummaries
+        )
         return lines.joined(separator: "\n")
     }
 
@@ -55,6 +67,39 @@ enum KanbanCardMarkdownExporter {
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return "\((cleaned.isEmpty ? "Kanban Card" : cleaned)).md"
+    }
+
+    private static func appendLinkedReferences(
+        to lines: inout [String],
+        card: KanbanCard,
+        linkedReferenceSummaries: [ItemLinkSummary]
+    ) {
+        guard !card.linkedEntities.isEmpty else { return }
+
+        let summariesByID = Dictionary(uniqueKeysWithValues: linkedReferenceSummaries.map { ($0.ref.id, $0) })
+        lines.append("## Linked References")
+        lines.append("")
+        for ref in card.linkedEntities {
+            if let summary = summariesByID[ref.id] {
+                lines.append("- \(displayName(for: ref.type)): \(summary.title) — \(summary.subtitle) [\(ref.entityID.uuidString)]")
+            } else {
+                lines.append("- \(displayName(for: ref.type)): \(ref.entityID.uuidString)")
+            }
+        }
+        lines.append("")
+    }
+
+    private static func displayName(for type: LibraryEntityType) -> String {
+        switch type {
+        case .bookmark: return "Bookmark"
+        case .note: return "Note"
+        case .dateCard: return "Date card"
+        case .contact: return "Contact"
+        case .todo: return "Todo"
+        case .vaultFile: return "File"
+        case .externalFile: return "External file"
+        case .session: return "Session"
+        }
     }
 
     private static func formattedDate(_ date: Date) -> String {

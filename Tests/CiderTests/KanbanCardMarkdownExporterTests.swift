@@ -77,4 +77,32 @@ struct KanbanCardMarkdownExporterTests {
         #expect(markdown.contains("- Priority: high"))
         #expect(!markdown.contains("Stored notes"))
     }
+
+    @Test("markdown export includes linked reference context for agent handoff")
+    func markdownExportIncludesLinkedReferenceContextForAgentHandoff() {
+        let refID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let ref = LibraryEntityRef(type: .bookmark, entityID: refID)
+        let card = KanbanCard(
+            id: "ref-card",
+            title: "Build references",
+            notes: "Use the inspiration.",
+            linkedEntities: [ref]
+        )
+        let summary = ItemLinkSummary(
+            ref: ref,
+            title: "Linear inspiration",
+            subtitle: "https://linear.app",
+            symbol: "bookmark"
+        )
+
+        let markdown = KanbanCardMarkdownExporter.markdown(
+            for: card,
+            boardName: "Cider",
+            columnName: "In Progress",
+            linkedReferenceSummaries: [summary]
+        )
+
+        #expect(markdown.contains("## Linked References"))
+        #expect(markdown.contains("- Bookmark: Linear inspiration — https://linear.app [11111111-1111-1111-1111-111111111111]"))
+    }
 }

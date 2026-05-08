@@ -53,6 +53,24 @@ struct ItemMetadataLinkCandidateGroup: Identifiable, Equatable {
     var id: String { title }
 }
 
+enum KanbanReferenceBacklinkRows {
+    static func rows(for source: LibraryEntityRef, boards: [KanbanBoard]) -> [ItemMetadataRow] {
+        boards.flatMap { board in
+            board.columns.flatMap { column in
+                column.cards.compactMap { card -> ItemMetadataRow? in
+                    guard card.linkedEntities.contains(source) else { return nil }
+                    return ItemMetadataRow(
+                        id: "kanban-backlink-\(board.id)-\(column.id)-\(card.id)",
+                        symbol: "square.split.2x1",
+                        title: card.title,
+                        value: "\(board.name) · \(column.name) · \(card.id)"
+                    )
+                }
+            }
+        }
+    }
+}
+
 enum ItemMetadataLinkingActions {
     static func visibleGroups(
         source: LibraryEntityRef,
