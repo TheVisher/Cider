@@ -23,6 +23,7 @@ struct DetailSlideOutView: View {
     var onFloat: (() -> Void)? = nil
     var onCancel: () -> Void
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil
+    var onOpenKanbanCard: ((String, String) -> Void)? = nil
     var onModeChange: (DetailViewMode) -> Void
     var showDragHandle: Bool = true
 
@@ -158,7 +159,8 @@ struct DetailSlideOutView: View {
                             onCopyURL: onCopyURL,
                             onSave: onSave,
                             onCancel: onCancel,
-                            onOpenLinkedRef: onOpenLinkedRef
+                            onOpenLinkedRef: onOpenLinkedRef,
+                            onOpenKanbanCard: onOpenKanbanCard
                         )
                         .background(CiderColors.surfaceInput)
                         .overlay(alignment: .leading) {

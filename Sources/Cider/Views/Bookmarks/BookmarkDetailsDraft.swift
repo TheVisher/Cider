@@ -47,6 +47,7 @@ struct BookmarkMetadataSidebar: View {
     var onCancel: () -> Void
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil
     var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil
+    var onOpenKanbanCard: ((String, String) -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.textScale) private var textScale
@@ -210,6 +211,7 @@ struct BookmarkMetadataSidebar: View {
             sourceRef: bookmark.map { LibraryEntityRef(type: .bookmark, entityID: $0.id) },
             onOpenLinkedRef: onOpenLinkedRef,
             canOpenLinkedRef: canOpenLinkedRef,
+            onOpenKanbanCard: onOpenKanbanCard,
             onLinkedItemsChanged: refreshLinkedSummaries
         )
     }

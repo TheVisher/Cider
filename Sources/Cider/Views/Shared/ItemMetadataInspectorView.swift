@@ -310,6 +310,7 @@ struct ItemMetadataLinkedSection: View {
     var sourceRef: LibraryEntityRef?
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
     var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)?
+    var onOpenKanbanCard: ((String, String) -> Void)? = nil
     var onLinkedItemsChanged: (() -> Void)?
 
     @ObservedObject private var bookmarks = VaultBookmarkService.shared
@@ -356,7 +357,7 @@ struct ItemMetadataLinkedSection: View {
 
                         VStack(alignment: .leading, spacing: Spacing.xxs) {
                             ForEach(kanbanBacklinkRows) { row in
-                                metadataRow(row)
+                                kanbanBacklinkRow(row)
                             }
                         }
                     }
@@ -424,6 +425,22 @@ struct ItemMetadataLinkedSection: View {
                 .buttonStyle(.plain)
                 .help("Remove link")
             }
+        }
+    }
+
+    @ViewBuilder
+    private func kanbanBacklinkRow(_ row: ItemMetadataRow) -> some View {
+        if let boardID = row.boardID,
+           let cardID = row.cardID,
+           let onOpenKanbanCard {
+            Button {
+                onOpenKanbanCard(boardID, cardID)
+            } label: {
+                metadataRow(row)
+            }
+            .buttonStyle(.plain)
+        } else {
+            metadataRow(row)
         }
     }
 

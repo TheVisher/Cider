@@ -6,13 +6,25 @@ struct ItemMetadataRow: Identifiable, Equatable {
     let title: String
     let value: String
     let ref: LibraryEntityRef?
+    let boardID: String?
+    let cardID: String?
 
-    init(id: String, symbol: String, title: String, value: String = "", ref: LibraryEntityRef? = nil) {
+    init(
+        id: String,
+        symbol: String,
+        title: String,
+        value: String = "",
+        ref: LibraryEntityRef? = nil,
+        boardID: String? = nil,
+        cardID: String? = nil
+    ) {
         self.id = id
         self.symbol = symbol
         self.title = title
         self.value = value
         self.ref = ref
+        self.boardID = boardID
+        self.cardID = cardID
     }
 
     static func related(_ summary: ItemLinkSummary) -> ItemMetadataRow {
@@ -63,7 +75,9 @@ enum KanbanReferenceBacklinkRows {
                         id: "kanban-backlink-\(board.id)-\(column.id)-\(card.id)",
                         symbol: "square.split.2x1",
                         title: card.title,
-                        value: "\(board.name) · \(column.name) · \(card.id)"
+                        value: "\(board.name) · \(column.name) · \(card.id)",
+                        boardID: board.id,
+                        cardID: card.id
                     )
                 }
             }

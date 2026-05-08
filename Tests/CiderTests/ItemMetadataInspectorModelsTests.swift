@@ -99,6 +99,8 @@ struct ItemMetadataInspectorModelsTests {
         #expect(rows.first?.symbol == "square.split.2x1")
         #expect(rows.first?.title == "Project references MVP")
         #expect(rows.first?.value == "Cider · In Progress · a18f97")
+        #expect(rows.first?.boardID == "board-cider")
+        #expect(rows.first?.cardID == "a18f97")
     }
 
     @Test("info rows use stable created updated type order")

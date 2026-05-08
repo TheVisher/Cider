@@ -49,6 +49,7 @@ extension CiderPanelView {
             onFloat: floatBookmarkDetails,
             onCancel: closeBookmarkDetails,
             onOpenLinkedRef: openLinkedRef,
+            onOpenKanbanCard: openKanbanCardDetail,
             onModeChange: changeDetailViewMode
         )
         }
@@ -75,6 +76,7 @@ extension CiderPanelView {
                 onFloat: floatBookmarkDetails,
                 onCancel: closeBookmarkDetails,
                 onOpenLinkedRef: openLinkedRef,
+                onOpenKanbanCard: openKanbanCardDetail,
                 onModeChange: changeDetailViewMode,
                 showDragHandle: false
             )
@@ -479,6 +481,7 @@ extension CiderPanelView {
             onFloat: floatBookmarkDetails,
             onCancel: closeBookmarkDetails,
             onOpenLinkedRef: openLinkedRef,
+            onOpenKanbanCard: openKanbanCardDetail,
             onModeChange: changeDetailViewMode,
             showDragHandle: false
         )
