@@ -14,6 +14,7 @@ enum WorkspaceContextualTabPolicy {
         }
 
         guard let domain else { return domainTabs }
+        if domain == .aiAssistant { return allTabs.contains(.aiAssistant) ? [.aiAssistant] : [] }
         if domain == .browse { return domainTabs }
 
         let savedViewByID = Dictionary(uniqueKeysWithValues: savedViews.map { ($0.id, $0) })

@@ -99,12 +99,10 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
 
     private func domainButton(_ domain: WorkspaceNavigationDomain) -> some View {
         Button {
-            if domain == .aiAssistant {
-                onSelectDomain(domain)
-            } else {
+            if domain.opensDomainSidebar {
                 selectedDomain = domain
-                onSelectDomain(domain)
             }
+            onSelectDomain(domain)
         } label: {
             HStack(alignment: .top, spacing: Spacing.sm) {
                 Image(systemName: domain.systemImage)

@@ -12,6 +12,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertTrue(domains.contains(.aiAssistant))
         XCTAssertTrue(domains.contains(.browse))
         XCTAssertEqual(WorkspaceNavigationDomain.aiAssistant.title, "AI Assistant")
+        XCTAssertTrue(WorkspaceNavigationDomain.aiAssistant.opensDomainSidebar)
         XCTAssertEqual(WorkspaceNavigationDomain.projects.systemImage, "square.split.2x1")
     }
 

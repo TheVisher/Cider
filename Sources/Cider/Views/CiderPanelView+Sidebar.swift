@@ -18,6 +18,15 @@ extension CiderPanelView {
             domains: WorkspaceNavigationDomain.allCases,
             onSelectDomain: openNavigationDomain
         ) {
+            domainSidebarContent
+        }
+    }
+
+    @ViewBuilder
+    var domainSidebarContent: some View {
+        if selectedNavigationDomain == .aiAssistant {
+            AIAssistantDomainSidebarView(onOpenAssistant: openOrSelectAIAssistantTab)
+        } else {
             folderSidebar(folders: contextualFolders)
         }
     }
@@ -69,6 +78,10 @@ extension CiderPanelView {
         focusedItemID = nil
         selectionAnchorID = nil
         closeAllDetails()
+
+        if selectedNavigationDomain != domain {
+            selectedNavigationDomain = domain
+        }
 
         if domain == .aiAssistant {
             openOrSelectAIAssistantTab()

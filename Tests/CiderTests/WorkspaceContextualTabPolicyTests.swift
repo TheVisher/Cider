@@ -119,7 +119,7 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         let savedViews = [SavedView(id: dashboardID, name: "Dashboard", kind: .dashboard)]
 
         let result = WorkspaceContextualTabPolicy.tabs(
-            for: nil,
+            for: .aiAssistant,
             selectedTab: .aiAssistant,
             allTabs: tabs,
             savedViews: savedViews

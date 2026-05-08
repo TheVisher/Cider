@@ -62,6 +62,10 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
     var breadcrumbPath: [String] {
         ["Cider", title]
     }
+
+    var opensDomainSidebar: Bool {
+        true
+    }
 }
 
 struct WorkspaceNavigationState: Equatable {
