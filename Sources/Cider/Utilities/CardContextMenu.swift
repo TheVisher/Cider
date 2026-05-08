@@ -1,10 +1,13 @@
 import AppKit
 import SwiftUI
+import os
 
 // MARK: - File Export
 
 @MainActor
 enum CiderFileExporter {
+    private static let logger = Logger(subsystem: "com.cider.app", category: "FileExport")
+
     static func exportFile(sourceURL: URL, suggestedFileName: String, helpText: String? = nil) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggestedFileName
@@ -23,7 +26,7 @@ enum CiderFileExporter {
             try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
         } catch {
             NSSound.beep()
-            print("Export failed: \(error.localizedDescription)")
+            logger.error("Export failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

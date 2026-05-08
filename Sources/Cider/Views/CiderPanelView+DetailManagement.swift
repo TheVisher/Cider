@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 enum CiderDetailSurfaceKind: CaseIterable, Hashable {
     case bookmark
@@ -28,6 +29,8 @@ enum CiderReanchorSurfaceResolver {
 }
 
 extension CiderPanelView {
+    private static let detailLogger = Logger(subsystem: "com.cider.app", category: "DetailManagement")
+
 
     // MARK: - Bookmark Details (Centralized)
 
@@ -650,7 +653,7 @@ extension CiderPanelView {
                 helpText: "Export this Kanban card as a Markdown file."
             )
         } catch {
-            print("Kanban Markdown export failed: \(error.localizedDescription)")
+            Self.detailLogger.error("Kanban Markdown export failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

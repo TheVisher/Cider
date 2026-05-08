@@ -40,4 +40,41 @@ struct LazyMasonryPerformanceTests {
         print("MASONRY_RESIZE_PLAN widths=401 items=1000 recompute_count=\(recomputeCount) elapsed=\(elapsed)")
         #expect(recomputeCount <= 60)
     }
+
+    @Test("masonry render width avoids per-pixel relayout during live resize")
+    func masonryRenderWidthAvoidsPerPixelRelayoutDuringLiveResize() {
+        var distinctRenderWidths = Set<CGFloat>()
+
+        for width in stride(from: CGFloat(720), through: CGFloat(1_120), by: CGFloat(1)) {
+            let layout = LazyMasonryColumnPlanner.layout(
+                containerWidth: width,
+                minimumColumnWidth: 220,
+                itemSpacing: 16
+            )
+            distinctRenderWidths.insert(LazyMasonryColumnPlanner.renderingColumnWidth(for: layout))
+        }
+
+        print("MASONRY_RENDER_WIDTH widths=401 distinct_render_widths=\(distinctRenderWidths.count)")
+        #expect(distinctRenderWidths.count <= 60)
+    }
+
+    @Test("masonry container width publishing avoids per-pixel body invalidation")
+    func masonryContainerWidthPublishingAvoidsPerPixelBodyInvalidation() {
+        var publishedWidth: CGFloat = 0
+        var publishCount = 0
+
+        for width in stride(from: CGFloat(720), through: CGFloat(1_120), by: CGFloat(1)) {
+            guard LazyMasonryColumnPlanner.shouldPublishContainerWidth(
+                currentWidth: publishedWidth,
+                candidateWidth: width,
+                minimumColumnWidth: 220,
+                itemSpacing: 16
+            ) else { continue }
+            publishedWidth = width
+            publishCount += 1
+        }
+
+        print("MASONRY_CONTAINER_WIDTH widths=401 publish_count=\(publishCount)")
+        #expect(publishCount <= 60)
+    }
 }

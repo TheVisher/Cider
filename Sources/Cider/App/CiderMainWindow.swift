@@ -12,9 +12,14 @@ final class CiderMainWindow: NSWindow {
     private var dragStartMouse: NSPoint?
     private var isDragging = false
     private var dragExclusionRects: [String: NSRect] = [:]
+    private let framePersistenceDebouncer: CiderMainWindowFramePersistenceDebouncer
 
-    init(frameStore: CiderMainWindowFrameStore = .shared) {
+    init(
+        frameStore: CiderMainWindowFrameStore = .shared,
+        framePersistenceDebouncer: CiderMainWindowFramePersistenceDebouncer = CiderMainWindowFramePersistenceDebouncer()
+    ) {
         self.frameStore = frameStore
+        self.framePersistenceDebouncer = framePersistenceDebouncer
         let initialFrame = NSRect(x: 0, y: 0, width: 1180, height: 760)
 
         super.init(
@@ -34,13 +39,13 @@ final class CiderMainWindow: NSWindow {
 
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleFrameDidChange),
+            selector: #selector(handleFrameDidMove),
             name: NSWindow.didMoveNotification,
             object: self
         )
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleFrameDidChange),
+            selector: #selector(handleFrameDidResize),
             name: NSWindow.didResizeNotification,
             object: self
         )
@@ -109,9 +114,13 @@ final class CiderMainWindow: NSWindow {
             super.sendEvent(event)
 
         case .leftMouseUp:
+            let shouldFlushDragFrame = isDragging
             dragStartOrigin = nil
             dragStartMouse = nil
             isDragging = false
+            if shouldFlushDragFrame {
+                flushDeferredFramePersistence()
+            }
             super.sendEvent(event)
 
         default:
@@ -250,8 +259,26 @@ final class CiderMainWindow: NSWindow {
         return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
     }
 
-    @objc private func handleFrameDidChange() {
-        persistCurrentFrame()
+    @objc private func handleFrameDidMove() {
+        scheduleDeferredFramePersistence()
+        CiderLivePerformanceRecorder.shared.recordFrame(event: .move, windowSize: frame.size)
+    }
+
+    @objc private func handleFrameDidResize() {
+        scheduleDeferredFramePersistence()
+        CiderLivePerformanceRecorder.shared.recordFrame(event: .resize, windowSize: frame.size)
+    }
+
+    private func scheduleDeferredFramePersistence() {
+        framePersistenceDebouncer.schedule { [weak self] in
+            self?.persistCurrentFrame()
+        }
+    }
+
+    private func flushDeferredFramePersistence() {
+        framePersistenceDebouncer.flush { [weak self] in
+            self?.persistCurrentFrame()
+        }
     }
 }
 

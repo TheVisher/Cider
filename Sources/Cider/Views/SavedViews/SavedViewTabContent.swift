@@ -1,6 +1,9 @@
 import SwiftUI
+import os
 
 struct SavedViewTabContent: View {
+    private static let logger = Logger(subsystem: "com.cider.app", category: "SavedViewTabContent")
+
     let savedView: SavedView
     @ObservedObject var libraryViewModel: LibraryViewModel
     var folders: [Folder] = []
@@ -639,7 +642,7 @@ struct SavedViewTabContent: View {
         case .dateCard(let dateCard):
             DateCardCardView(
                 dateCard: dateCard,
-                urgency: dateCard.urgency(windowDays: CiderConfig.load().dateCardSurfacingDays),
+                urgency: dateCard.urgency(windowDays: savedViewConfig.dateCardSurfacingDays),
                 onOpen: {
                     if let cb = onOpenDateCard { cb(dateCard) }
                     else { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) }
@@ -868,7 +871,7 @@ struct SavedViewTabContent: View {
             updateInMemoryLinkedEntities(source: source, target: target, shouldAdd: true)
             updateInMemoryLinkedEntities(source: target, target: source, shouldAdd: true)
         } catch {
-            print("Failed to link \(source.id) to \(target.id): \(error.localizedDescription)")
+            Self.logger.error("Failed to link \(source.id, privacy: .public) to \(target.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 

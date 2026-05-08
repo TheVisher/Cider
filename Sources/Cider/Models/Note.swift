@@ -53,8 +53,21 @@ struct Note: Identifiable, Hashable {
     }
 
     // Pre-compiled regexes for image extraction
-    private static let mdImageRegex = try! NSRegularExpression(pattern: #"!\[[^\]]*\]\(([^\)]+)\)"#)
-    private static let htmlImageRegex = try! NSRegularExpression(pattern: #"<img\s[^>]*src=[\"']([^\"']+)[\"']"#, options: .caseInsensitive)
+    private static let mdImageRegex = makeImageRegex(pattern: #"!\[[^\]]*\]\(([^\)]+)\)"#)
+    private static let htmlImageRegex = makeImageRegex(
+        pattern: #"<img\s[^>]*src=[\"']([^\"']+)[\"']"#,
+        options: .caseInsensitive
+    )
+
+    private static func makeImageRegex(
+        pattern: String,
+        options: NSRegularExpression.Options = []
+    ) -> NSRegularExpression {
+        if let regex = try? NSRegularExpression(pattern: pattern, options: options) {
+            return regex
+        }
+        preconditionFailure("Invalid built-in note image regex pattern: \(pattern)")
+    }
 
     /// Extract image URLs from markdown/HTML content, resolved to absolute file URLs.
     var imageURLs: [URL] {
