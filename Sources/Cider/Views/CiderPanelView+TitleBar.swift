@@ -19,7 +19,7 @@ extension CiderPanelView {
     private var normalTitleBar: some View {
         CiderTabBar(
             selectedTab: $selectedTab,
-            tabs: allTabs,
+            tabs: contextualTabs,
             selectedFolderID: $selectedFolderID,
             onCloseTab: closeTab,
             onDeleteTab: deleteTab,

@@ -65,20 +65,13 @@ extension CiderPanelView {
         focusedItemID = nil
         selectionAnchorID = nil
         closeAllDetails()
+        normalizeSelectedTabForCurrentDomain()
+    }
 
-        switch domain {
-        case .mainDashboard:
-            if let dashboard = savedViewStorage.savedViews.first(where: { $0.kind == .dashboard }) {
-                selectedTab = .savedView(id: dashboard.id, name: dashboard.name)
-            }
-        case .projects:
-            if selectedTab == nil {
-                selectedTab = allTabs.first
-            }
-        case .browse, .media, .bookmarks, .notes, .tasksEvents, .files, .people:
-            if selectedTab == nil {
-                selectedTab = allTabs.first
-            }
-        }
+    func normalizeSelectedTabForCurrentDomain() {
+        let tabs = contextualTabs
+        guard !tabs.isEmpty else { return }
+        if let selectedTab, tabs.contains(selectedTab) { return }
+        selectedTab = tabs.first
     }
 }

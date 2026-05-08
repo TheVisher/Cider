@@ -79,6 +79,14 @@ struct CiderPanelView: View {
         savedViewTabs + dynamicTabs
     }
 
+    var contextualTabs: [CiderTab] {
+        WorkspaceContextualTabPolicy.tabs(
+            for: selectedNavigationDomain,
+            allTabs: allTabs,
+            savedViews: savedViewStorage.savedViews
+        )
+    }
+
     private var savedViewTabs: [CiderTab] {
         savedViewStorage.tabOrderedViews().map { savedView in
             .savedView(id: savedView.id, name: savedView.name)
@@ -158,6 +166,10 @@ struct CiderPanelView: View {
                     debouncedSearchText = newValue
                 }
             }
+        }
+        .onChange(of: selectedNavigationDomain) { _, _ in
+            normalizeSelectedTabForCurrentDomain()
+            updateLivePerformanceContext()
         }
         .onChange(of: selectedTab) { _, _ in
             selectedFolderID = nil
