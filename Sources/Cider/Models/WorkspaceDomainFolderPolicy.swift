@@ -31,7 +31,7 @@ enum WorkspaceDomainFolderPolicy {
 
     private static func rootFolderNames(for domain: WorkspaceNavigationDomain) -> [String]? {
         switch domain {
-        case .mainDashboard, .browse:
+        case .mainDashboard, .browse, .aiAssistant:
             nil
         case .media:
             ["Media", "Movies", "TV Shows", "Games", "Books", "Music"]

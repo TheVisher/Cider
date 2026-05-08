@@ -69,6 +69,12 @@ extension CiderPanelView {
         focusedItemID = nil
         selectionAnchorID = nil
         closeAllDetails()
+
+        if domain == .aiAssistant {
+            openOrSelectAIAssistantTab()
+            return
+        }
+
         normalizeSelectedTabForCurrentDomain()
     }
 

@@ -9,7 +9,9 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertTrue(domains.contains(.media))
         XCTAssertTrue(domains.contains(.bookmarks))
         XCTAssertTrue(domains.contains(.projects))
+        XCTAssertTrue(domains.contains(.aiAssistant))
         XCTAssertTrue(domains.contains(.browse))
+        XCTAssertEqual(WorkspaceNavigationDomain.aiAssistant.title, "AI Assistant")
         XCTAssertEqual(WorkspaceNavigationDomain.projects.systemImage, "square.split.2x1")
     }
 

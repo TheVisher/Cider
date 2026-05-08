@@ -6,14 +6,18 @@ enum WorkspaceContextualTabPolicy {
         allTabs: [CiderTab],
         savedViews: [SavedView]
     ) -> [CiderTab] {
-        guard let domain else { return allTabs }
+        let domainTabs = allTabs.filter { tab in
+            tab != .aiAssistant
+        }
+
+        guard let domain else { return domainTabs }
 
         let savedViewByID = Dictionary(uniqueKeysWithValues: savedViews.map { ($0.id, $0) })
-        let compatibleTabs = allTabs.filter { tab in
+        let compatibleTabs = domainTabs.filter { tab in
             isCompatibilityTab(tab) || matches(tab, domain: domain, savedViewByID: savedViewByID)
         }
 
-        return compatibleTabs.isEmpty ? allTabs : compatibleTabs
+        return compatibleTabs.isEmpty ? domainTabs : compatibleTabs
     }
 
     private static func isCompatibilityTab(_ tab: CiderTab) -> Bool {
@@ -51,7 +55,7 @@ enum WorkspaceContextualTabPolicy {
             return isLibraryView(savedView, scopedTo: [.contact])
         case .browse:
             return savedView.kind == .library
-        case .media:
+        case .media, .aiAssistant:
             return false
         }
     }

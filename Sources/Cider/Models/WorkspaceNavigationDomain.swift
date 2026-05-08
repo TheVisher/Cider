@@ -9,6 +9,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
     case tasksEvents
     case files
     case people
+    case aiAssistant
     case browse
 
     var id: String { rawValue }
@@ -23,6 +24,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         case .tasksEvents: "Tasks & Events"
         case .files: "Files"
         case .people: "People"
+        case .aiAssistant: "AI Assistant"
         case .browse: "Browse"
         }
     }
@@ -37,6 +39,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         case .tasksEvents: "Todos, reminders, and calendar cards"
         case .files: "Vault files and attachments"
         case .people: "Contacts and relationships"
+        case .aiAssistant: "Ask questions and run agent workflows"
         case .browse: "All folders, tags, and saved views"
         }
     }
@@ -51,6 +54,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         case .tasksEvents: "checklist"
         case .files: "doc.text"
         case .people: "person.2"
+        case .aiAssistant: "sparkles"
         case .browse: "folder"
         }
     }

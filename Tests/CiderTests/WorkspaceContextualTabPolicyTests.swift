@@ -2,7 +2,7 @@ import XCTest
 @testable import Cider
 
 final class WorkspaceContextualTabPolicyTests: XCTestCase {
-    func testDashboardDomainShowsDashboardTabsAndKeepsAIAssistantCompatibility() {
+    func testDashboardDomainShowsDashboardTabsAndKeepsAssistantOutOfTopTabs() {
         let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
         let libraryID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
         let tabs: [CiderTab] = [
@@ -21,10 +21,10 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
             savedViews: savedViews
         )
 
-        XCTAssertEqual(result.map(\.id), ["saved-\(dashboardID.uuidString)", "aiAssistant"])
+        XCTAssertEqual(result.map(\.id), ["saved-\(dashboardID.uuidString)"])
     }
 
-    func testProjectsDomainShowsKanbanTabsAndKeepsAIAssistantCompatibility() {
+    func testProjectsDomainShowsKanbanTabsAndKeepsAssistantOutOfTopTabs() {
         let boardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
         let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
         let tabs: [CiderTab] = [
@@ -43,7 +43,7 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
             savedViews: savedViews
         )
 
-        XCTAssertEqual(result.map(\.id), ["saved-\(boardID.uuidString)", "aiAssistant"])
+        XCTAssertEqual(result.map(\.id), ["saved-\(boardID.uuidString)"])
     }
 
     func testBookmarkDomainFiltersBookmarkSavedViewsButFallsBackToAllTabsWhenEmpty() {
@@ -78,6 +78,6 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(bookmarkTabs.map(\.id), ["saved-\(bookmarksID.uuidString)"])
-        XCTAssertEqual(mediaTabs.map(\.id), tabs.map(\.id))
+        XCTAssertEqual(mediaTabs.map(\.id), tabs.filter { $0 != .aiAssistant }.map(\.id))
     }
 }
