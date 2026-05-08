@@ -96,3 +96,38 @@ On light backgrounds:
 - Mac window floating on dark gradient
 - Icon in corner
 - Minimal
+
+---
+
+## Social Voice
+
+Cider social posts should sound like a useful Mac app made by a real person.
+
+Use:
+- Clear examples of what Cider does: bookmarks, notes, dates, contacts, ideas, files, screenshots, tags, folders, saved views, and quick capture.
+- Light humor or mild snark when it fits.
+- Short, specific copy with a plain CTA.
+- `https://cider.so` as the default CTA.
+
+Avoid:
+- Corporate launch-speak.
+- Vague productivity claims.
+- Over-polished AI phrasing.
+- Feature overpromises.
+- Em dashes.
+
+## Social Workflow
+
+Active social drafts, approvals, published URLs, blockers, and handoffs belong on the Cider Social Kanban board:
+
+```text
+~/CiderVault/.cider/boards/c0ffee.yaml
+```
+
+Do not recreate `SOCIAL.md` for social queues or post history.
+
+Bluesky automation should publish only approved cards from the Cider Social board. If no approved card exists, it should create a candidate in `Needs Approval` and stop.
+
+For Bluesky automation runs, use the Codex in-app Browser plugin with the `iab` backend when available. Verify the account is `@ciderapp.bsky.social` before publishing.
+
+Hermes, Main Brain, and AI angles must be checked against current core docs before posting. If a feature is still in testing, phrase it as testing, experimental, being wired up, or being worked on.

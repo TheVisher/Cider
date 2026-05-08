@@ -50,6 +50,7 @@ Active board files:
 - `~/CiderVault/.cider/boards/2d3f69.yaml` — Cider iOS
 - `~/CiderVault/.cider/boards/a1b2c3.yaml` — Cider Roadmap (legacy/general roadmap; audit old cards and move relevant work into dedicated project boards)
 - `~/CiderVault/.cider/boards/d4e5f6.yaml` — Cider Bugs
+- `~/CiderVault/.cider/boards/c0ffee.yaml` — Cider Social (social drafts, approvals, published URLs, blockers, and posting handoffs; do not recreate `SOCIAL.md`)
 - `~/CiderVault/.cider/boards/p1l2m3.yaml` — Implementation Plans
 - `~/CiderVault/.cider/boards/e7f8a9.yaml` — Kanban Implementation
 - `~/CiderVault/.cider/boards/f0d730.yaml` — Vault Agent Work
