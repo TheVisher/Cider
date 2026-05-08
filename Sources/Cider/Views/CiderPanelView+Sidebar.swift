@@ -16,15 +16,19 @@ extension CiderPanelView {
         WorkspaceDomainSidebarView(
             selectedDomain: $selectedNavigationDomain,
             domains: WorkspaceNavigationDomain.allCases,
-            onSelectDomain: openNavigationDomain(_:)
+            onSelectDomain: openNavigationDomain
         ) {
-            folderSidebar
+            folderSidebar(folders: contextualFolders)
         }
     }
 
-    var folderSidebar: some View {
+    var contextualFolders: [Folder] {
+        WorkspaceDomainFolderPolicy.folders(bookmarksViewModel.folders, for: selectedNavigationDomain)
+    }
+
+    func folderSidebar(folders visibleFolders: [Folder]) -> some View {
         FolderSidebarView(
-            folders: bookmarksViewModel.folders,
+            folders: visibleFolders,
             bookmarks: bookmarksViewModel.bookmarks,
             notes: notesViewModel.notes,
             selectedFolderID: $selectedFolderID,
