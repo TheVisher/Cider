@@ -130,6 +130,37 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.overviewChips.map(\.id), ["recent", "unfiled", "dueToday", "resurfaced"])
     }
 
+    func testDailyBriefFocusUsesAgendaReasonsFromRealItems() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let todo = TodoCard(
+            id: UUID(),
+            title: "Pay rent",
+            dueDate: now,
+            actionURLString: "https://rent.example.com",
+            createdAt: now.addingTimeInterval(-3600),
+            updatedAt: now.addingTimeInterval(-3600)
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.todo(todo)],
+            recentItems: [],
+            folders: [],
+            savedViews: [],
+            tabOrder: [],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.dailyBrief.focusItems.first?.title, "Pay rent")
+        XCTAssertEqual(snapshot.dailyBrief.focusItems.first?.subtitle, "due today")
+        XCTAssertEqual(snapshot.dailyBrief.focusItems.first?.systemImage, "checkmark.circle")
+        if case .item(.todo(let focusedTodo)) = snapshot.dailyBrief.focusItems.first?.target {
+            XCTAssertEqual(focusedTodo.id, todo.id)
+        } else {
+            XCTFail("Expected the Today brief focus item to open the real todo")
+        }
+    }
+
     func testClosedTabsPreferRecentlyUpdatedViewsThatAreNotOpen() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let openView = SavedView(
