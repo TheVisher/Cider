@@ -5,6 +5,7 @@ struct HomeOverviewDashboardView: View {
     let onOpenItem: (LibraryItemV2) -> Void
     let onOpenTarget: (HomeOverviewActionTarget) -> Void
     let onOpenTab: (HomeOverviewClosedTabSummary) -> Void
+    let onOpenKanbanCard: (String, String) -> Void
     let onOpenSettings: () -> Void
     let onSyncNow: () -> Void
     let onCreateNew: () -> Void
@@ -86,6 +87,8 @@ struct HomeOverviewDashboardView: View {
             HStack(alignment: .top, spacing: HomeOverviewDesign.columnSpacing) {
                 recentActivityPanel(fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight)
                     .frame(width: tracks.recentWidth)
+                kanbanPulsePanel(fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight)
+                    .frame(width: tracks.third)
                 triagePanel(fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight)
                     .frame(width: tracks.third)
                 closedTabsPanel(
@@ -106,6 +109,7 @@ struct HomeOverviewDashboardView: View {
                 todoPanel()
                 recentActivityPanel()
             }
+            kanbanPulsePanel()
             triagePanel()
             closedTabsPanel(columnCount: HomeOverviewDesign.closedTabsCompactColumnCount)
         }
@@ -117,6 +121,7 @@ struct HomeOverviewDashboardView: View {
             upcomingPanel()
             todoPanel()
             recentActivityPanel()
+            kanbanPulsePanel()
             triagePanel()
             closedTabsPanel(columnCount: HomeOverviewDesign.closedTabsSingleColumnCount)
         }
@@ -365,6 +370,68 @@ struct HomeOverviewDashboardView: View {
                     systemImage: "plus",
                     action: onCreateNew
                 )
+            }
+        }
+    }
+
+    private func kanbanPulsePanel(fixedHeight: CGFloat? = nil) -> some View {
+        HomeOverviewPanel(
+            title: "Active Work",
+            minHeight: layoutMetrics.requiredHeight(for: .kanbanPulse),
+            fixedHeight: fixedHeight
+        ) {
+            if snapshot.kanbanPulseItems.isEmpty {
+                HomeOverviewEmptyStateCard(
+                    title: "No active work queued.",
+                    subtitle: "Kanban is calm; nothing needs a dashboard pulse."
+                )
+            } else {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(snapshot.kanbanPulseItems) { pulseItem in
+                        Button {
+                            onOpenKanbanCard(pulseItem.boardID, pulseItem.cardID)
+                        } label: {
+                            HStack(alignment: .top, spacing: Spacing.sm) {
+                                Image(systemName: pulseItem.priority <= 1 ? "bolt.circle" : "rectangle.stack.badge.person.crop")
+                                    .font(CiderFont.captionSemibold)
+                                    .foregroundColor(pulseItem.priority <= 1 ? CiderColors.controlAccent : CiderColors.secondary)
+                                    .frame(width: 18)
+
+                                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                    Text(pulseItem.title)
+                                        .font(CiderFont.labelMedium)
+                                        .foregroundColor(CiderColors.primary)
+                                        .lineLimit(1)
+
+                                    if let parentTitle = pulseItem.parentTitle {
+                                        Text(parentTitle)
+                                            .font(CiderFont.caption)
+                                            .foregroundColor(CiderColors.tertiary)
+                                            .lineLimit(1)
+                                    }
+
+                                    HStack(spacing: Spacing.xs) {
+                                        Text(pulseItem.statusLabel)
+                                            .font(CiderFont.captionSemibold)
+                                            .foregroundColor(CiderColors.secondary)
+                                            .lineLimit(1)
+                                        Text(pulseItem.suggestedAction)
+                                            .font(CiderFont.caption)
+                                            .foregroundColor(CiderColors.quaternary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+
+                        if pulseItem.id != snapshot.kanbanPulseItems.last?.id {
+                            Divider()
+                                .background(CiderColors.separator)
+                        }
+                    }
+                }
             }
         }
     }

@@ -161,6 +161,59 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         }
     }
 
+    func testDashboardBuildsKanbanPulseFromCiderBoardState() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let parent = KanbanCard(
+            id: "parent",
+            title: "Second-brain Dashboard command center MVP",
+            created: now.addingTimeInterval(-86_400 * 7)
+        )
+        let queued = KanbanCard(
+            id: "queued-child",
+            title: "Dashboard recent captures with next action",
+            parentCardID: "parent",
+            created: now.addingTimeInterval(-86_400 * 2)
+        )
+        let active = KanbanCard(
+            id: "active-child",
+            title: "Dashboard active work and Kanban pulse lane",
+            parentCardID: "parent",
+            created: now.addingTimeInterval(-86_400)
+        )
+        let testing = KanbanCard(
+            id: "testing-child",
+            title: "Dashboard Inbox and triage health lane",
+            parentCardID: "parent",
+            created: now.addingTimeInterval(-86_400 * 3)
+        )
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            created: now.addingTimeInterval(-86_400 * 30),
+            columns: [
+                KanbanColumn(id: "queued", name: "Queued", cards: [parent, queued]),
+                KanbanColumn(id: "in_progress", name: "In Progress", cards: [active]),
+                KanbanColumn(id: "testing", name: "Testing", cards: [testing])
+            ]
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [],
+            recentItems: [],
+            folders: [],
+            kanbanBoards: [board],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.kanbanPulseItems.map(\.cardID), ["active-child", "testing-child", "parent", "queued-child"])
+        XCTAssertEqual(snapshot.kanbanPulseItems.first?.statusLabel, "In Progress")
+        XCTAssertEqual(snapshot.kanbanPulseItems.first?.parentTitle, "Second-brain Dashboard command center MVP")
+        XCTAssertEqual(snapshot.kanbanPulseItems.first?.suggestedAction, "Keep moving")
+        XCTAssertEqual(snapshot.kanbanPulseItems[1].suggestedAction, "Needs Erik QA")
+        XCTAssertEqual(snapshot.kanbanPulseItems[2].statusLabel, "Queued plan")
+    }
+
     func testDashboardBuildsTriageItemsWithReasonsAndActions() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let genericBookmark = Bookmark(

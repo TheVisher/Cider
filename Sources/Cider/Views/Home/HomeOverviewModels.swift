@@ -102,6 +102,18 @@ struct HomeTriageItem: Equatable, Identifiable {
     let confidenceLabel: String
 }
 
+struct HomeKanbanPulseItem: Equatable, Identifiable {
+    let id: String
+    let boardID: String
+    let boardName: String
+    let cardID: String
+    let title: String
+    let statusLabel: String
+    let parentTitle: String?
+    let suggestedAction: String
+    let priority: Int
+}
+
 struct HomeOverviewSnapshot: Equatable {
     let telemetry: [HomeTelemetryMetric]
     let dailyBrief: HomeDailyBrief
@@ -115,6 +127,7 @@ struct HomeOverviewSnapshot: Equatable {
     let completedTodoItems: [TodoCard]
     let resurfacedItems: [LibraryItemV2]
     let triageItems: [HomeTriageItem]
+    let kanbanPulseItems: [HomeKanbanPulseItem]
     let closedTabs: [HomeOverviewClosedTabSummary]
 }
 
@@ -125,6 +138,7 @@ enum HomeOverviewPanelID {
     case profile
     case recentActivity
     case upcoming
+    case kanbanPulse
     case todos
     case triage
     case resurface
@@ -151,6 +165,8 @@ struct HomeOverviewLayoutMetrics {
             )
         case .upcoming:
             return HomeOverviewDesign.upcomingPanelFixedHeight
+        case .kanbanPulse:
+            return HomeOverviewDesign.resurfacePanelMinHeight
         case .todos:
             return HomeOverviewDesign.resurfacePanelMinHeight
         case .triage:

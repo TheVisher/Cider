@@ -150,11 +150,16 @@ extension CiderPanelView {
                                     folders: bookmarksViewModel.folders,
                                     savedViews: savedViewStorage.savedViews,
                                     tabOrder: savedViewStorage.tabOrder,
+                                    kanbanBoards: kanbanStorage.boards,
                                     surfacingDays: CiderConfig.load().dateCardSurfacingDays
                                 ),
                                 onOpenItem: { item in openDashboardItem(item) },
                                 onOpenTarget: { target in openDashboardTarget(target) },
                                 onOpenTab: { tab in openDashboardTab(tab) },
+                                onOpenKanbanCard: { boardID, cardID in
+                                    selectedKanbanBoardID = boardID
+                                    selectedKanbanCardID = cardID
+                                },
                                 onOpenSettings: {
                                     NotificationCenter.default.post(name: .openCiderSettings, object: nil)
                                 },

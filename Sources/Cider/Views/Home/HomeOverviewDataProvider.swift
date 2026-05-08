@@ -47,6 +47,7 @@ enum HomeOverviewDataProvider {
         folders: [Folder],
         savedViews: [SavedView] = [],
         tabOrder: [UUID] = [],
+        kanbanBoards: [KanbanBoard] = [],
         surfacingDays: Int,
         now: Date = Date()
     ) -> HomeOverviewSnapshot {
@@ -117,6 +118,7 @@ enum HomeOverviewDataProvider {
             .prefix(4)
             .map { $0 }
         let triageItems = triageItems(from: items)
+        let kanbanPulseItems = kanbanPulseItems(from: kanbanBoards)
 
         let openTabIDs = Set(tabOrder)
         let closedTabs = savedViews
@@ -250,6 +252,7 @@ enum HomeOverviewDataProvider {
             completedTodoItems: Array(completedTodoItems(from: items).prefix(4)),
             resurfacedItems: resurfacedItems,
             triageItems: triageItems,
+            kanbanPulseItems: kanbanPulseItems,
             closedTabs: closedTabs
         )
     }
@@ -322,6 +325,79 @@ enum HomeOverviewDataProvider {
                 break
             }
         }
+    }
+
+    private static func kanbanPulseItems(from boards: [KanbanBoard]) -> [HomeKanbanPulseItem] {
+        let preferredBoards = boards.sorted { lhs, rhs in
+            let lhsPreferred = lhs.id == "2afee0" || lhs.name.localizedCaseInsensitiveContains("Cider")
+            let rhsPreferred = rhs.id == "2afee0" || rhs.name.localizedCaseInsensitiveContains("Cider")
+            if lhsPreferred != rhsPreferred { return lhsPreferred }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+
+        return preferredBoards.flatMap { board -> [HomeKanbanPulseItem] in
+            board.columns.flatMap { column -> [HomeKanbanPulseItem] in
+                column.cards.compactMap { card in
+                    kanbanPulseItem(board: board, column: column, card: card)
+                }
+            }
+        }
+        .sorted { lhs, rhs in
+            if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+        .prefix(6)
+        .map { $0 }
+    }
+
+    private static func kanbanPulseItem(board: KanbanBoard, column: KanbanColumn, card: KanbanCard) -> HomeKanbanPulseItem? {
+        let columnID = column.id.lowercased()
+        let columnName = column.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isTesting = columnID.contains("test") || columnName.localizedCaseInsensitiveContains("ready to test")
+        let isActive = columnID == "in_progress" || columnName.localizedCaseInsensitiveContains("progress")
+        let isQueued = columnID == "queued" || columnName.localizedCaseInsensitiveContains("queued")
+        let isBlocked = columnID.contains("block") || columnName.localizedCaseInsensitiveContains("blocked") || (card.notes ?? "").localizedCaseInsensitiveContains("blocked")
+        guard isActive || isTesting || isQueued || isBlocked else { return nil }
+
+        let children = board.childCards(of: card.id)
+        let isParentPlan = !children.isEmpty
+        let parentTitle = card.parentCardID.flatMap { board.card(id: $0)?.title }
+        let statusLabel: String
+        let suggestedAction: String
+        let priority: Int
+        if isBlocked {
+            statusLabel = "Blocked"
+            suggestedAction = "Unblock"
+            priority = 0
+        } else if isActive {
+            statusLabel = columnName.isEmpty ? "In Progress" : columnName
+            suggestedAction = "Keep moving"
+            priority = 1
+        } else if isTesting {
+            statusLabel = columnName.isEmpty ? "Testing" : columnName
+            suggestedAction = "Needs Erik QA"
+            priority = 2
+        } else if isParentPlan {
+            statusLabel = "Queued plan"
+            suggestedAction = "Review scope"
+            priority = 3
+        } else {
+            statusLabel = columnName.isEmpty ? "Queued" : columnName
+            suggestedAction = "Next up"
+            priority = 4
+        }
+
+        return HomeKanbanPulseItem(
+            id: "kanban-\(board.id)-\(card.id)",
+            boardID: board.id,
+            boardName: board.name,
+            cardID: card.id,
+            title: card.title,
+            statusLabel: statusLabel,
+            parentTitle: parentTitle,
+            suggestedAction: suggestedAction,
+            priority: priority
+        )
     }
 
     private static func triageItems(from items: [LibraryItemV2]) -> [HomeTriageItem] {

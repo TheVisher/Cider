@@ -7,6 +7,7 @@ struct CiderPanelView: View {
     @ObservedObject var notesViewModel: NotesViewModel
     var surface: CiderWorkspaceSurface = .mainWindow
     @ObservedObject var savedViewStorage = SavedViewStorage.shared
+    @ObservedObject var kanbanStorage = KanbanStorage.shared
     @StateObject var libraryViewModel = LibraryViewModel()
     @State var selectedTab: CiderTab?
     @State var isCollapsed = false
