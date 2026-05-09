@@ -83,6 +83,9 @@ extension CiderPanelView {
         if !selectedTagIDs.isEmpty {
             return selectedTagIDs.count == 1 ? "Tag" : "Tags"
         }
+        if let route = currentDomainRoute, selectedNavigationDomain == .browse {
+            return route.title
+        }
         if selectedNavigationDomain == nil {
             return "Home"
         }
@@ -100,6 +103,9 @@ extension CiderPanelView {
         if selectedDomainRouteKind == .folders, let domain = selectedNavigationDomain {
             return "\(domain.title) / Folder browser"
         }
+        if let route = currentDomainRoute, selectedNavigationDomain == .browse {
+            return "Library / \(route.title)"
+        }
         if selectedNavigationDomain == .projects,
            selectedTab != .domainDashboard(.projects),
            let selectedTab {
@@ -115,12 +121,20 @@ extension CiderPanelView {
         if selectedFolderID != nil { return "folder" }
         if selectedDomainRouteKind == .folders, selectedNavigationDomain != nil { return "folder" }
         if !selectedTagIDs.isEmpty { return "tag" }
+        if let route = currentDomainRoute, selectedNavigationDomain == .browse {
+            return route.systemImage
+        }
         if selectedNavigationDomain == .projects,
            selectedTab != .domainDashboard(.projects),
            let selectedTab {
             return selectedTab.systemImage
         }
         return selectedNavigationDomain?.systemImage ?? WorkspaceNavigationDomain.mainDashboard.systemImage
+    }
+
+    private var currentDomainRoute: WorkspaceDomainRoute? {
+        guard let domain = selectedNavigationDomain else { return nil }
+        return WorkspaceDomainRoutePolicy.routes(for: domain).first { $0.kind == selectedDomainRouteKind }
     }
 
     @ViewBuilder

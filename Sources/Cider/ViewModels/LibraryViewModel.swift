@@ -78,8 +78,9 @@ final class LibraryViewModel: ObservableObject {
                 return false
             }
 
-            // Skip onlyUnassigned when scope explicitly targets folders
-            if scope?.hasFolderScope != true, filterSpec.onlyUnassigned, item.folderID != nil {
+            // Inbox/Unassigned views should show real Inbox captures and pathless unfiled cards,
+            // not every legacy path-backed item whose folder row is missing.
+            if scope?.hasFolderScope != true, filterSpec.onlyUnassigned, !item.isInboxItem {
                 return false
             }
 

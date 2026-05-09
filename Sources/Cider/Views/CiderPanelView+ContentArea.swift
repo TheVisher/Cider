@@ -305,6 +305,7 @@ extension CiderPanelView {
             
                             onlyUnassigned: savedView.filterSpec.onlyUnassigned,
                             activeLabelIDs: savedView.filterSpec.labelIDs,
+                            maxVisibleItems: libraryFeedMaxVisibleItems(for: savedView),
                             onToggleLabelBulk: { toggleTagOnSelected($0) },
                             showComingUp: savedView.layoutSpec.showComingUpSection,
                             scrollToItemID: $scrollToItemID,
@@ -572,6 +573,15 @@ extension CiderPanelView {
         case .vaultFile(let file):
             openVaultFileDetail(file)
         }
+    }
+
+    func libraryFeedMaxVisibleItems(for savedView: SavedView) -> Int? {
+        guard selectedNavigationDomain == .browse,
+              selectedDomainRouteKind == .inbox,
+              savedView.kind == .library,
+              savedView.filterSpec.onlyUnassigned
+        else { return nil }
+        return LibraryInboxPresentationPolicy.maxVisibleItems
     }
 
     func openDashboardTab(_ tab: HomeOverviewClosedTabSummary) {

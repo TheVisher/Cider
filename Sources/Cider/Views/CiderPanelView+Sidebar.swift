@@ -120,9 +120,14 @@ extension CiderPanelView {
         }
 
         selectedProjectWorkspaceID = nil
-        selectedDomainRouteKind = .overview
+        selectedDomainRouteKind = defaultRouteKind(for: domain)
 
         folderContentScope = WorkspaceDomainContentScope.defaultScope(for: domain)
+
+        if domain == .browse {
+            openLibraryView(onlyUnassigned: true)
+            return
+        }
 
         if domain == .aiAssistant {
             if allTabs.contains(.aiAssistant) == false {
@@ -152,15 +157,56 @@ extension CiderPanelView {
         switch route.kind {
         case .overview:
             selectedTab = .domainDashboard(domain)
+        case .all:
+            if domain == .browse {
+                openLibraryView(onlyUnassigned: false)
+            } else {
+                selectedTab = .domainDashboard(domain)
+            }
         case .folders:
             selectedTab = .domainDashboard(domain)
         case .tags:
             openOrSelectTagTab()
         case .chats:
             openOrSelectAIAssistantTab()
-        case .inbox, .recent, .savedViews:
+        case .inbox:
+            if domain == .browse {
+                openLibraryView(onlyUnassigned: true)
+            } else {
+                selectedTab = .domainDashboard(domain)
+            }
+        case .recent, .savedViews:
             selectedTab = .domainDashboard(domain)
         }
+    }
+
+    private func defaultRouteKind(for domain: WorkspaceNavigationDomain) -> WorkspaceDomainRouteKind {
+        WorkspaceDomainRoutePolicy.routes(for: domain).first?.kind ?? .overview
+    }
+
+    private func openLibraryView(onlyUnassigned: Bool) {
+        let name = onlyUnassigned ? "Inbox" : "Library"
+
+        if let savedView = savedViewStorage.savedViews.first(where: {
+            $0.kind == .library && $0.filterSpec.onlyUnassigned == onlyUnassigned
+        }) {
+            selectedTab = .savedView(id: savedView.id, name: savedView.name)
+            return
+        }
+
+        if onlyUnassigned {
+            homeDisplayMode = LibraryInboxPresentationPolicy.preferredDisplayMode
+        }
+
+        let savedView = savedViewStorage.createSavedView(
+            name: name,
+            filterSpec: SavedViewFilterSpec(onlyUnassigned: onlyUnassigned),
+            layoutSpec: SavedViewLayoutSpec(
+                displayMode: onlyUnassigned ? LibraryInboxPresentationPolicy.preferredDisplayMode : .list
+            )
+        )
+        savedViewStorage.addToTabOrder(savedView.id)
+        selectedTab = .savedView(id: savedView.id, name: savedView.name)
     }
 
     var dashboardTab: CiderTab? {

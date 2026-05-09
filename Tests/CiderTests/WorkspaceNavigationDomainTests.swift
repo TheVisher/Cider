@@ -66,7 +66,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .browse).map(\.kind),
-            [.overview, .folders, .tags, .recent, .savedViews]
+            [.inbox, .all, .tags]
         )
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .aiAssistant).map(\.kind),

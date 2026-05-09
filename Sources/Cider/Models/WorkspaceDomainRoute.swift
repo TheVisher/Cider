@@ -3,6 +3,7 @@ import Foundation
 enum WorkspaceDomainRouteKind: String, CaseIterable, Hashable {
     case overview
     case inbox
+    case all
     case folders
     case tags
     case recent
@@ -28,7 +29,7 @@ enum WorkspaceDomainRoutePolicy {
         case .mainDashboard:
             return []
         case .browse:
-            return [.overview, .folders, .tags, .recent, .savedViews]
+            return [.inbox, .all, .tags]
         case .projects:
             return [.overview]
         case .aiAssistant:
@@ -48,6 +49,8 @@ enum WorkspaceDomainRoutePolicy {
             return WorkspaceDomainRoute(kind: kind, title: "Overview", systemImage: "rectangle.3.group")
         case .inbox:
             return WorkspaceDomainRoute(kind: kind, title: "Inbox", systemImage: "tray")
+        case .all:
+            return WorkspaceDomainRoute(kind: kind, title: "All", systemImage: "square.grid.2x2")
         case .folders:
             return WorkspaceDomainRoute(kind: kind, title: "Folders", systemImage: "folder")
         case .tags:
