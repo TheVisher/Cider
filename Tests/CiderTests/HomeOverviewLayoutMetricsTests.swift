@@ -28,6 +28,12 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
         XCTAssertEqual(metrics.activityRowHeight, metrics.requiredHeight(for: .recentActivity))
     }
 
+    func testActivityTimelineUsesStableTimelinePanelHeight() {
+        let metrics = HomeOverviewLayoutMetrics(snapshot: makeSnapshot(recentCount: 6))
+
+        XCTAssertEqual(metrics.requiredHeight(for: .activityTimeline), HomeOverviewDesign.activityTimelinePanelHeight)
+    }
+
     func testBottomRowHeightUsesStableClosedTabsBaselineForScrollableGrid() {
         let metrics = HomeOverviewLayoutMetrics(snapshot: makeSnapshot(closedTabCount: 9))
 

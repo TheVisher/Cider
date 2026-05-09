@@ -2,23 +2,25 @@ import SwiftUI
 
 struct WorkspaceDomainSidebarView<DomainContent: View>: View {
     @Binding var selectedDomain: WorkspaceNavigationDomain?
+    @Binding var expandedDomains: Set<WorkspaceNavigationDomain>
     @Binding var searchText: String
     let domains: [WorkspaceNavigationDomain]
     let onTriggerSearch: () -> Void
     let onSelectDomain: (WorkspaceNavigationDomain) -> Void
-    @ViewBuilder let domainContent: () -> DomainContent
+    @ViewBuilder let domainContent: (WorkspaceNavigationDomain) -> DomainContent
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         persistentDomainList
         .animation(reduceMotion ? .none : CiderAnimation.snappy, value: selectedDomain)
+        .animation(reduceMotion ? .none : CiderAnimation.snappy, value: expandedDomains)
     }
 
     private var persistentDomainList: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             sidebarSearchField
-                .padding(.horizontal, Spacing.sm)
+            .padding(.horizontal, Spacing.sm)
 
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -26,8 +28,8 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
                         VStack(alignment: .leading, spacing: Spacing.xxs) {
                             domainButton(domain)
 
-                            if selectedDomain == domain, domain != .mainDashboard {
-                                domainContent()
+                            if isExpanded(domain) {
+                                domainContent(domain)
                                     .padding(.leading, Spacing.lg)
                             }
                         }
@@ -71,6 +73,17 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
                     .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.quaternary)
             }
+
+            Button {
+                toggleAllDomains()
+            } label: {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(allExpandableDomainsExpanded ? CiderColors.controlAccent : CiderColors.tertiary)
+                    .frame(width: Spacing.lg, height: Spacing.lg)
+            }
+            .buttonStyle(.plain)
+            .help(allExpandableDomainsExpanded ? "Collapse all domains" : "Expand all domains")
         }
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, Spacing.xs)
@@ -84,39 +97,85 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
         let isSelected = selectedDomain == domain
             || (domain == .mainDashboard && selectedDomain == nil)
         let showsChildren = domain != .mainDashboard
+        let isExpanded = isExpanded(domain)
 
-        return Button {
-            onSelectDomain(domain)
-        } label: {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: domain.systemImage)
-                    .font(CiderFont.bodyMedium)
-                    .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
-                    .frame(width: Spacing.xl, height: Spacing.xl)
+        return HStack(spacing: Spacing.xs) {
+            Button {
+                onSelectDomain(domain)
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: domain.systemImage)
+                        .font(CiderFont.bodyMedium)
+                        .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
+                        .frame(width: Spacing.xl, height: Spacing.xl)
 
-                Text(domain.title)
-                    .font(CiderFont.labelSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(1)
+                    Text(domain.title)
+                        .font(CiderFont.labelSemibold)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
-                if showsChildren {
+            if showsChildren {
+                Button {
+                    toggleDomainExpansion(domain)
+                } label: {
                     Image(systemName: "chevron.right")
                         .font(CiderFont.captionMedium)
                         .foregroundColor(CiderColors.quaternary)
-                        .rotationEffect(.degrees(isSelected ? 90 : 0))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: Spacing.xl, height: Spacing.xl)
                 }
+                .buttonStyle(.plain)
+                .help(isExpanded ? "Collapse \(domain.title)" : "Expand \(domain.title)")
             }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs + 1)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isSelected ? CiderColors.accentSubtle : CiderColors.separatorLight.opacity(0.65))
-            )
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xs + 1)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(isSelected ? CiderColors.accentSubtle : CiderColors.separatorLight.opacity(0.65))
+        )
         .help(domain.subtitle)
+    }
+
+    private func isExpanded(_ domain: WorkspaceNavigationDomain) -> Bool {
+        WorkspaceDomainSidebarExpansionState(expandedDomains: expandedDomains).isExpanded(domain)
+    }
+
+    private var allExpandableDomainsExpanded: Bool {
+        let expandableDomains = contextualDomains.filter { $0 != .mainDashboard }
+        guard !expandableDomains.isEmpty else { return false }
+        return expandableDomains.allSatisfy(isExpanded)
+    }
+
+    private func toggleDomainExpansion(_ domain: WorkspaceNavigationDomain) {
+        var state = WorkspaceDomainSidebarExpansionState(expandedDomains: expandedDomains)
+        state.toggle(domain)
+        expandedDomains = state.expandedDomains
+    }
+
+    private func expandAllDomains() {
+        var state = WorkspaceDomainSidebarExpansionState(expandedDomains: expandedDomains)
+        state.expandAll(in: contextualDomains)
+        expandedDomains = state.expandedDomains
+    }
+
+    private func collapseAllDomains() {
+        var state = WorkspaceDomainSidebarExpansionState(expandedDomains: expandedDomains)
+        state.collapseAll()
+        expandedDomains = state.expandedDomains
+    }
+
+    private func toggleAllDomains() {
+        if allExpandableDomainsExpanded {
+            collapseAllDomains()
+        } else {
+            expandAllDomains()
+        }
     }
 }

@@ -28,7 +28,7 @@ enum VCardSerializer {
             lines.append("ADR:;;\(escapeVCard(contact.address));;;;")
         }
         if let birthday = contact.birthday {
-            lines.append("BDAY:\(birthdayFormatter.string(from: birthday))")
+            lines.append("BDAY:\(CiderLocalDate.formatCompact(birthday))")
         }
         if !contact.notes.isEmpty {
             lines.append("NOTE:\(escapeVCard(contact.notes))")
@@ -107,7 +107,7 @@ enum VCardSerializer {
                     address = unescapeVCard(value)
                 }
             case "BDAY":
-                birthday = birthdayFormatter.date(from: value)
+                birthday = CiderLocalDate.parseCompact(value)
             case "NOTE":
                 notes = unescapeVCard(value)
             case "X-CIDER-RELATIONSHIP":
@@ -204,16 +204,6 @@ enum VCardSerializer {
             return LibraryEntityRef(type: type, entityID: uuid)
         }
     }
-
-    /// Birthday formatter uses the current timezone because BDAY is a calendar date,
-    /// not a point in time. Using UTC would shift the date by -1 day in western timezones.
-    private static let birthdayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
-        return f
-    }()
 
     nonisolated(unsafe) private static let iso8601Formatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()

@@ -316,23 +316,15 @@ struct KanbanBoard: Codable, Identifiable, Equatable, Sendable {
 private struct KanbanDate: Codable, Sendable {
     let date: Date
 
-    private static let formatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC")
-        return f
-    }()
-
     init(date: Date) { self.date = date }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         // Yams parses unquoted dates (2026-03-20) as Date, quoted ones ('2026-03-20') as String
         if let directDate = try? container.decode(Date.self) {
-            date = directDate
+            date = CiderLocalDate.localDate(fromUTCDateOnlyInstant: directDate)
         } else if let string = try? container.decode(String.self) {
-            if let parsed = Self.formatter.date(from: string) {
+            if let parsed = CiderLocalDate.parseDashed(string) {
                 date = parsed
             } else if let parsed = ISO8601DateFormatter().date(from: string) {
                 date = parsed
@@ -352,7 +344,7 @@ private struct KanbanDate: Codable, Sendable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
-        try container.encode(Self.formatter.string(from: date))
+        try container.encode(CiderLocalDate.formatDashed(date))
     }
 }
 

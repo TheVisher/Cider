@@ -119,4 +119,29 @@ struct KanbanCardCodableTests {
 
         #expect(decoded.aiSummary == nil)
     }
+
+    @Test("date-only created values preserve local Pacific calendar day")
+    func dateOnlyCreatedValuesPreserveLocalPacificCalendarDay() throws {
+        let originalTimeZone = NSTimeZone.default
+        let pacific = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        NSTimeZone.default = pacific
+        defer { NSTimeZone.default = originalTimeZone }
+
+        let json = """
+        {
+          "id": "date-only-card",
+          "title": "Date-only card",
+          "created": "2026-05-09"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: Data(json.utf8))
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = pacific
+        let components = calendar.dateComponents([.year, .month, .day], from: decoded.created)
+
+        #expect(components.year == 2026)
+        #expect(components.month == 5)
+        #expect(components.day == 9)
+    }
 }

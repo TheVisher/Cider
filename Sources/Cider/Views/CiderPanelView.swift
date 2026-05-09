@@ -66,6 +66,7 @@ struct CiderPanelView: View {
     @State var contentAreaWidth: CGFloat = 800
     @State var isURLDropTargeted = false
     @State var selectedNavigationDomain: WorkspaceNavigationDomain?
+    @State var expandedNavigationDomains: Set<WorkspaceNavigationDomain> = []
     @State var selectedProjectWorkspaceID: String?
     @State var selectedDomainRouteKind: WorkspaceDomainRouteKind = .overview
 

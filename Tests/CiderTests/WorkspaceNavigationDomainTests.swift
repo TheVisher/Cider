@@ -7,7 +7,6 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
 
         XCTAssertTrue(domains.contains(.mainDashboard))
         XCTAssertTrue(domains.contains(.media))
-        XCTAssertTrue(domains.contains(.bookmarks))
         XCTAssertTrue(domains.contains(.projects))
         XCTAssertTrue(domains.contains(.aiAssistant))
         XCTAssertTrue(domains.contains(.browse))
@@ -42,35 +41,74 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(state.breadcrumbPath, ["Cider"])
     }
 
-    func testPersistentSidebarKeepsEveryTopLevelDestinationVisibleWhenDomainIsSelected() {
-        let domains = WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: .bookmarks)
+    func testPersistentSidebarShowsWorkflowDomainsNotContentTypes() {
+        let domains = WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: .browse)
 
         XCTAssertEqual(domains, [
             .mainDashboard,
             .browse,
             .media,
-            .bookmarks,
-            .notes,
             .projects,
             .tasksEvents,
-            .files,
             .people,
             .aiAssistant
         ])
+        XCTAssertFalse(domains.contains(.bookmarks))
+        XCTAssertFalse(domains.contains(.notes))
+        XCTAssertFalse(domains.contains(.files))
     }
 
-    func testDomainRoutesUseHighLevelDestinationsInsteadOfFolderTrees() {
-        XCTAssertEqual(
-            WorkspaceDomainRoutePolicy.routes(for: .bookmarks).map(\.kind),
-            [.overview, .inbox, .folders, .tags, .recent, .savedViews]
-        )
+    func testLibraryRoutesExposeContentTypesForFastFiltering() {
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .browse).map(\.kind),
-            [.inbox, .all, .tags]
+            [.inbox, .all, .bookmarks, .notes, .files, .tags]
+        )
+        XCTAssertEqual(WorkspaceDomainRouteKind.bookmarks.libraryEntityTypes, [.bookmark])
+        XCTAssertEqual(WorkspaceDomainRouteKind.notes.libraryEntityTypes, [.note])
+        XCTAssertEqual(WorkspaceDomainRouteKind.files.libraryEntityTypes, [.vaultFile])
+    }
+
+    func testDomainRoutesUseWorkflowDestinationsInsteadOfContentTypeDomains() {
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.routes(for: .tasksEvents).map(\.kind),
+            [.overview, .inbox, .folders, .tags, .recent]
         )
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .aiAssistant).map(\.kind),
             [.overview, .chats]
         )
+    }
+
+    func testDomainExpansionStateCanOpenMultipleDomainsWithoutNavigationSelection() {
+        var state = WorkspaceDomainSidebarExpansionState()
+
+        state.toggle(.browse)
+        state.toggle(.projects)
+
+        XCTAssertTrue(state.isExpanded(.browse))
+        XCTAssertTrue(state.isExpanded(.projects))
+        XCTAssertFalse(state.isExpanded(.media))
+
+        state.toggle(.browse)
+
+        XCTAssertFalse(state.isExpanded(.browse))
+        XCTAssertTrue(state.isExpanded(.projects))
+    }
+
+    func testDomainExpansionStateExpandsAllExpandableDomainsAndKeepsHomeCollapsed() {
+        var state = WorkspaceDomainSidebarExpansionState()
+        let domains = WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: .projects)
+
+        state.expandAll(in: domains)
+
+        XCTAssertEqual(
+            state.expandedDomains,
+            Set(domains.filter { $0 != .mainDashboard })
+        )
+        XCTAssertFalse(state.isExpanded(.mainDashboard))
+
+        state.collapseAll()
+
+        XCTAssertTrue(state.expandedDomains.isEmpty)
     }
 }

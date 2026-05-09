@@ -146,6 +146,7 @@ enum HomeOverviewPanelID {
     case pulse
     case overview
     case profile
+    case activityTimeline
     case recentActivity
     case upcoming
     case kanbanPulse
@@ -168,6 +169,8 @@ struct HomeOverviewLayoutMetrics {
             return HomeOverviewDesign.overviewPanelFixedHeight
         case .profile:
             return HomeOverviewDesign.profilePanelFixedHeight
+        case .activityTimeline:
+            return HomeOverviewDesign.activityTimelinePanelHeight
         case .recentActivity:
             return max(
                 HomeOverviewDesign.recentActivityBaseHeight,

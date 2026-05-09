@@ -202,6 +202,35 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.recentCaptureItems[1].suggestedAction, "Ask Erik")
     }
 
+    func testRecentTimelineKeepsSixRecentItemsForDashboardRail() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let recentItems: [LibraryItemV2] = (0..<8).map { index in
+            .note(Note(
+                id: UUID(),
+                title: "Recent \(index)",
+                createdAt: now.addingTimeInterval(TimeInterval(-index)),
+                modifiedAt: now.addingTimeInterval(TimeInterval(-index))
+            ))
+        }
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: recentItems,
+            recentItems: recentItems,
+            folders: [],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.recentItems.map(\.title), [
+            "Recent 0",
+            "Recent 1",
+            "Recent 2",
+            "Recent 3",
+            "Recent 4",
+            "Recent 5"
+        ])
+    }
+
     func testDashboardBuildsKanbanPulseFromCiderBoardState() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let parent = KanbanCard(

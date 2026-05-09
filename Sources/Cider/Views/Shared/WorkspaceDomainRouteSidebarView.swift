@@ -2,7 +2,7 @@ import SwiftUI
 
 struct WorkspaceDomainRouteSidebarView: View {
     let domain: WorkspaceNavigationDomain
-    let selectedRouteKind: WorkspaceDomainRouteKind
+    let selectedRouteKind: WorkspaceDomainRouteKind?
     var onSelectRoute: (WorkspaceDomainRoute, WorkspaceNavigationDomain) -> Void
 
     @Environment(\.textScale) private var textScale

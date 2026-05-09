@@ -76,6 +76,7 @@ struct HomeOverviewDashboardView: View {
 
         return VStack(alignment: .leading, spacing: HomeOverviewDesign.rowSpacing) {
             dailyBriefPanel(fixedHeight: HomeOverviewDesign.fullLayoutTopRowHeight)
+            activityTimelinePanel(fixedHeight: HomeOverviewDesign.activityTimelinePanelHeight)
 
             HStack(alignment: .top, spacing: HomeOverviewDesign.columnSpacing) {
                 todoPanel(fixedHeight: HomeOverviewDesign.fullLayoutMiddleRowHeight)
@@ -104,6 +105,7 @@ struct HomeOverviewDashboardView: View {
     private var compactLayout: some View {
         VStack(alignment: .leading, spacing: HomeOverviewDesign.rowSpacing) {
             dailyBriefPanel()
+            activityTimelinePanel()
             upcomingPanel()
             HStack(alignment: .top, spacing: HomeOverviewDesign.columnSpacing) {
                 todoPanel()
@@ -118,12 +120,31 @@ struct HomeOverviewDashboardView: View {
     private var singleColumnLayout: some View {
         VStack(alignment: .leading, spacing: HomeOverviewDesign.rowSpacing) {
             dailyBriefPanel()
+            activityTimelinePanel()
             upcomingPanel()
             todoPanel()
             recentActivityPanel()
             kanbanPulsePanel()
             triagePanel()
             closedTabsPanel(columnCount: HomeOverviewDesign.closedTabsSingleColumnCount)
+        }
+    }
+
+    private func activityTimelinePanel(fixedHeight: CGFloat? = nil) -> some View {
+        HomeOverviewPanel(
+            title: "Activity Timeline",
+            minHeight: layoutMetrics.requiredHeight(for: .activityTimeline),
+            fixedHeight: fixedHeight
+        ) {
+            if snapshot.recentItems.isEmpty {
+                Text("No timeline activity yet.")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.tertiary)
+            } else {
+                HomeOverviewCaptureTimeline(items: snapshot.recentItems) { item in
+                    onOpenItem(item)
+                }
+            }
         }
     }
 

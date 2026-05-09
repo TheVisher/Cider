@@ -15,23 +15,24 @@ extension CiderPanelView {
     var workspaceSidebar: some View {
         WorkspaceDomainSidebarView(
             selectedDomain: $selectedNavigationDomain,
+            expandedDomains: $expandedNavigationDomains,
             searchText: $sidebarSearchText,
             domains: WorkspaceNavigationDomain.allCases,
             onTriggerSearch: { isSearchPaletteVisible = true },
             onSelectDomain: openNavigationDomain
-        ) {
-            domainSidebarContent
+        ) { domain in
+            domainSidebarContent(for: domain)
         }
     }
 
     @ViewBuilder
-    var domainSidebarContent: some View {
-        if selectedNavigationDomain == .aiAssistant {
+    func domainSidebarContent(for domain: WorkspaceNavigationDomain) -> some View {
+        if domain == .aiAssistant {
             AIAssistantDomainSidebarView(
-                isChatListActive: selectedTab == .aiAssistant,
+                isChatListActive: selectedNavigationDomain == .aiAssistant && selectedTab == .aiAssistant,
                 onOpenAssistant: openOrSelectAIAssistantTab
             )
-        } else if selectedNavigationDomain == .projects {
+        } else if domain == .projects {
             ProjectsDomainSidebarView(
                 catalog: projectWorkspaceCatalog,
                 boards: kanbanStorage.boards,
@@ -40,14 +41,12 @@ extension CiderPanelView {
                 onSelectWorkspace: selectProjectWorkspace,
                 onSelectDestination: selectProjectWorkspaceDestination
             )
-        } else if let selectedNavigationDomain {
+        } else {
             WorkspaceDomainRouteSidebarView(
-                domain: selectedNavigationDomain,
-                selectedRouteKind: selectedDomainRouteKind,
+                domain: domain,
+                selectedRouteKind: selectedNavigationDomain == domain ? selectedDomainRouteKind : nil,
                 onSelectRoute: selectWorkspaceDomainRoute
             )
-        } else {
-            EmptyView()
         }
     }
 
@@ -98,6 +97,9 @@ extension CiderPanelView {
         if previousDomain != domain {
             expandedFolderIDs.removeAll()
         }
+        if domain != .mainDashboard {
+            expandedNavigationDomains.insert(domain)
+        }
 
         selectedFolderID = nil
         selectedTagIDs.removeAll()
@@ -146,6 +148,13 @@ extension CiderPanelView {
     }
 
     func selectWorkspaceDomainRoute(_ route: WorkspaceDomainRoute, in domain: WorkspaceNavigationDomain) {
+        if selectedNavigationDomain != domain {
+            selectedNavigationDomain = domain
+            selectedProjectWorkspaceID = nil
+            folderContentScope = WorkspaceDomainContentScope.defaultScope(for: domain)
+            expandedNavigationDomains.insert(domain)
+        }
+
         selectedDomainRouteKind = route.kind
         selectedFolderID = nil
         selectedTagIDs.removeAll()
@@ -160,6 +169,16 @@ extension CiderPanelView {
         case .all:
             if domain == .browse {
                 openLibraryView(onlyUnassigned: false)
+            } else {
+                selectedTab = .domainDashboard(domain)
+            }
+        case .bookmarks, .notes, .files:
+            if domain == .browse, let entityTypes = route.kind.libraryEntityTypes {
+                openLibraryView(
+                    named: route.title,
+                    onlyUnassigned: false,
+                    entityTypes: entityTypes
+                )
             } else {
                 selectedTab = .domainDashboard(domain)
             }
@@ -184,11 +203,17 @@ extension CiderPanelView {
         WorkspaceDomainRoutePolicy.routes(for: domain).first?.kind ?? .overview
     }
 
-    private func openLibraryView(onlyUnassigned: Bool) {
-        let name = onlyUnassigned ? "Inbox" : "Library"
+    private func openLibraryView(
+        named explicitName: String? = nil,
+        onlyUnassigned: Bool,
+        entityTypes: Set<LibraryEntityType> = LibraryEntityType.activeCases
+    ) {
+        let name = explicitName ?? (onlyUnassigned ? "Inbox" : "Library")
 
         if let savedView = savedViewStorage.savedViews.first(where: {
-            $0.kind == .library && $0.filterSpec.onlyUnassigned == onlyUnassigned
+            $0.kind == .library
+                && $0.filterSpec.onlyUnassigned == onlyUnassigned
+                && $0.filterSpec.entityTypes == entityTypes
         }) {
             selectedTab = .savedView(id: savedView.id, name: savedView.name)
             return
@@ -200,7 +225,10 @@ extension CiderPanelView {
 
         let savedView = savedViewStorage.createSavedView(
             name: name,
-            filterSpec: SavedViewFilterSpec(onlyUnassigned: onlyUnassigned),
+            filterSpec: SavedViewFilterSpec(
+                entityTypes: entityTypes,
+                onlyUnassigned: onlyUnassigned
+            ),
             layoutSpec: SavedViewLayoutSpec(
                 displayMode: onlyUnassigned ? LibraryInboxPresentationPolicy.preferredDisplayMode : .list
             )

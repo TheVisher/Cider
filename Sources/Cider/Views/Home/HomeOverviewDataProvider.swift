@@ -246,7 +246,7 @@ enum HomeOverviewDataProvider {
                     target: notesTarget
                 )
             ],
-            recentItems: Array(recentItems.prefix(4)),
+            recentItems: Array(recentItems.prefix(6)),
             recentCaptureItems: recentCaptureItems(from: recentItems, folders: folders),
             upcomingItems: Array(upcomingItems.prefix(4)),
             todoItems: Array(todoQueueItems(from: items, now: now).prefix(6)),

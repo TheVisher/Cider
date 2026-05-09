@@ -69,6 +69,10 @@ Daily agent reports should reduce noise, not turn every dated item into an alarm
 - The same reminder should not spam every daily report across its lead window unless explicitly configured as a repeating reminder.
 - CLI/date handling should make local-date semantics obvious. Agents observed `event update <id> --date 2026-06-01` producing a `startAt` of `2026-06-02T00:00:00Z`; this needs a regression test or clearer timezone/date normalization.
 
+## Known Agent/CLI Hardening Findings
+
+- 2026-05-09: Running the Cider app while Hermes uses `cider-cli` to capture/route bookmarks can create duplicate bookmarks. Repro observed with Steam/TikTok captures: CLI created and moved the bookmark, then the already-running app adopted the moved `.webloc` as an orphan because its in-memory bookmark list had not reloaded the CLI-created URL/ID. Result: same URL appears twice, often with `(... 2).webloc`, and later UI enrichment/labels apply to the duplicate. Fix direction: cross-process storage invalidation/reload or a URL/relative-path duplicate guard in app-side orphan adoption/sync before minting a new bookmark ID. Agent workaround until fixed: after CLI bookmark capture while Cider.app is running, run duplicate-check/search/get and report/cleanup duplicates rather than assuming one row.
+
 ## CLI Quality Bar
 
 When fixing or adding CLI behavior:

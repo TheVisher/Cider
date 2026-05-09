@@ -68,6 +68,11 @@ struct ContactProfilePatchTests {
 
     @Test("profile patch parses birthday and related entity refs")
     func patchParsesBirthdayAndRelatedRefs() throws {
+        let originalTimeZone = NSTimeZone.default
+        let pacific = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        NSTimeZone.default = pacific
+        defer { NSTimeZone.default = originalTimeZone }
+
         let bookmarkID = UUID()
         let noteID = UUID()
         let patch = try ContactProfileJSON.decodePatch(from: """
@@ -81,14 +86,20 @@ struct ContactProfilePatchTests {
         """)
 
         let updated = try patch.apply(to: ContactCard(displayName: "Baine"))
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = pacific
         let birthdayComponents = Calendar(identifier: .gregorian).dateComponents(
-            in: TimeZone(secondsFromGMT: 0)!,
+            in: pacific,
             from: try #require(updated.birthday)
         )
 
         #expect(birthdayComponents.year == 2016)
         #expect(birthdayComponents.month == 6)
         #expect(birthdayComponents.day == 15)
+        #expect(calendar.component(.day, from: LibraryItemEditor.nextBirthdayOccurrence(
+            from: try #require(updated.birthday),
+            now: try #require(calendar.date(from: DateComponents(year: 2026, month: 5, day: 9)))
+        )) == 15)
         #expect(updated.linkedEntities == [
             LibraryEntityRef(type: .bookmark, entityID: bookmarkID),
             LibraryEntityRef(type: .note, entityID: noteID)

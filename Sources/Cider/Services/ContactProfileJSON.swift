@@ -192,11 +192,11 @@ enum ContactProfileJSON {
     }
 
     static func parseBirthday(_ value: String) -> Date? {
-        birthdayFormatter.date(from: value)
+        CiderLocalDate.parseDashed(value)
     }
 
     static func formatBirthday(_ date: Date) -> String {
-        birthdayFormatter.string(from: date)
+        CiderLocalDate.formatDashed(date)
     }
 
     static func profileDictionary(for contact: ContactCard) -> [String: Any] {
@@ -236,13 +236,6 @@ enum ContactProfileJSON {
         return dict
     }
 
-    private static let birthdayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter
-    }()
 }
 
 private extension KeyedDecodingContainer {

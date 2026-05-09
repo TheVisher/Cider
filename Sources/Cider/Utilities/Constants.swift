@@ -734,6 +734,7 @@ enum HomeOverviewDesign {
     static let columnSpacing: CGFloat = Spacing.md
     static let fullLayoutTrackWeights: [CGFloat] = [1.2, 2.55, 1.9, 1.35]
     static let fullLayoutTopRowHeight: CGFloat = 270
+    static let activityTimelinePanelHeight: CGFloat = 252
     static let fullLayoutMiddleRowHeight: CGFloat = 460
     static let fullLayoutBottomRowHeight: CGFloat = 292
     static let topRowMinHeight: CGFloat = 160

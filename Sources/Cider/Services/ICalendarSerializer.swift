@@ -189,9 +189,9 @@ enum ICalendarSerializer {
 
         if dc.allDay {
             // All-day events use DATE (not DATE-TIME)
-            lines.append("DTSTART;VALUE=DATE:\(dateOnlyFormatter.string(from: dc.startAt))")
+            lines.append("DTSTART;VALUE=DATE:\(CiderLocalDate.formatCompact(dc.startAt))")
             if let endAt = dc.endAt {
-                lines.append("DTEND;VALUE=DATE:\(dateOnlyFormatter.string(from: endAt))")
+                lines.append("DTEND;VALUE=DATE:\(CiderLocalDate.formatCompact(endAt))")
             }
         } else {
             lines.append("DTSTART:\(dateTimeFormatter.string(from: dc.startAt))")
@@ -292,14 +292,14 @@ enum ICalendarSerializer {
                 details = unescapeICalText(value)
             case "DTSTART":
                 if key.contains("VALUE=DATE") {
-                    startAt = dateOnlyFormatter.date(from: value)
+                    startAt = CiderLocalDate.parseCompact(value)
                     allDay = true
                 } else {
                     startAt = parseDateTime(value)
                 }
             case "DTEND":
                 if key.contains("VALUE=DATE") {
-                    endAt = dateOnlyFormatter.date(from: value)
+                    endAt = CiderLocalDate.parseCompact(value)
                 } else {
                     endAt = parseDateTime(value)
                 }
@@ -446,7 +446,7 @@ enum ICalendarSerializer {
     /// Parses iCalendar date-time: 20260401T090000Z or 20260401T090000
     static func parseDateTime(_ value: String) -> Date? {
         dateTimeFormatter.date(from: value)
-            ?? dateOnlyFormatter.date(from: value)
+            ?? CiderLocalDate.parseCompact(value)
     }
 
     // iCalendar uses yyyyMMdd'T'HHmmss'Z' (UTC)
@@ -454,16 +454,6 @@ enum ICalendarSerializer {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
         f.timeZone = TimeZone(identifier: "UTC")
-        return f
-    }()
-
-    private static let dateOnlyFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd"
-        // DATE values in iCalendar are calendar days, not instants in UTC.
-        // Parsing them as UTC shifts all-day events backward in western timezones.
-        f.timeZone = .autoupdatingCurrent
-        f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
 

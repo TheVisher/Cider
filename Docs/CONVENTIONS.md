@@ -30,6 +30,7 @@ Status: canonical core doc.
 - Bookmark dedup/adoption should preserve stable identity and avoid folder-order flip-flops.
 - Trash/restore must handle sidecars and duplicate-delete cases without direct file removal.
 - URL rewrites and folder moves must persist, not only update in memory.
+- Date-only values are calendar days, not UTC instants. Birthdays, all-day events, due dates without explicit times, and Kanban `created` dates should parse and render with local calendar semantics via `CiderLocalDate`; real appointments, logs, and timestamps remain instants displayed in the Mac's current timezone.
 
 ## Docs
 
