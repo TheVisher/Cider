@@ -31,7 +31,9 @@ struct FolderSidebarView: View {
     var onSelectSubFolder: ((UUID) -> Void)?
     var searchText: Binding<String> = .constant("")
     var onTriggerSearch: (() -> Void)?
+    var showsSearchField: Bool = true
     var showBackground: Bool = true
+    var contentEntityTypes: Set<LibraryEntityType> = LibraryEntityType.activeCases
     // Tags
     var labels: [CardLabel] = []
     var selectedTagIDs: Binding<Set<UUID>> = .constant([])
@@ -90,7 +92,8 @@ struct FolderSidebarView: View {
         let contacts = contactStorage.contacts.map { LibraryItemV2.contact($0) }
         let todos = todoCardStorage.todoCards.map { LibraryItemV2.todo($0) }
         let vaultFiles = vaultFileService.files.map { LibraryItemV2.vaultFile($0) }
-        return bookmarks + notes + dateCards + contacts + todos + vaultFiles
+        return (bookmarks + notes + dateCards + contacts + todos + vaultFiles)
+            .filter { contentEntityTypes.contains($0.entityType) }
     }
 
     private var folderDropTypeIdentifiers: [String] {
@@ -111,38 +114,9 @@ struct FolderSidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            // Live search field
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "magnifyingglass")
-                    .font(CiderFont.captionMedium)
-                    .foregroundColor(CiderColors.tertiary)
-
-                TextField("Search", text: searchText)
-                    .textFieldStyle(.plain)
-                    .font(CiderFont.label)
-                    .foregroundColor(CiderColors.primary)
-
-                if !searchText.wrappedValue.isEmpty {
-                    Button {
-                        searchText.wrappedValue = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(CiderFont.captionMedium)
-                            .foregroundColor(CiderColors.tertiary)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Text("\u{2318}K")
-                        .font(CiderFont.captionMedium)
-                        .foregroundColor(CiderColors.quaternary)
-                }
+            if showsSearchField {
+                sidebarSearchField
             }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(CiderColors.separatorLight)
-            )
 
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -258,6 +232,40 @@ struct FolderSidebarView: View {
         }
     }
 
+    private var sidebarSearchField: some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.tertiary)
+
+            TextField("Search", text: searchText)
+                .textFieldStyle(.plain)
+                .font(CiderFont.label)
+                .foregroundColor(CiderColors.primary)
+
+            if !searchText.wrappedValue.isEmpty {
+                Button {
+                    searchText.wrappedValue = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("\u{2318}K")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.quaternary)
+            }
+        }
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.separatorLight)
+        )
+    }
+
     // MARK: - Tags Section
 
     private var tagsShowMoreThreshold: Int { 8 }
@@ -272,33 +280,37 @@ struct FolderSidebarView: View {
         let hasMore = baseLabels.count > tagsShowMoreThreshold
 
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            Divider()
-                .background(CiderColors.separator)
-                .padding(.vertical, Spacing.xxs)
-
             HStack(spacing: Spacing.xs) {
-                ZStack {
-                    Image(systemName: "tag")
-                        .font(CiderFont.bodySemibold)
-                        .foregroundColor(CiderColors.secondary)
-                        .opacity(tagsHeaderHovered ? 0 : 1)
-
-                    Image(systemName: "chevron.down")
-                        .font(CiderFont.captionBold)
-                        .foregroundColor(CiderColors.secondary)
-                        .rotationEffect(.degrees(isCollapsed ? -90 : 0))
-                        .opacity(tagsHeaderHovered ? 1 : 0)
-                }
-                .animation(reduceMotion ? .none : .smooth, value: tagsHeaderHovered)
-
                 Button {
-                    onOpenTagManager?()
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        tagsCollapsed.wrappedValue.toggle()
+                    }
                 } label: {
-                    Text("Tags")
-                        .font(CiderFont.bodySemibold)
-                        .foregroundColor(CiderColors.secondary)
+                    HStack(spacing: Spacing.xs) {
+                        ZStack {
+                            Image(systemName: "tag")
+                                .font(CiderFont.bodySemibold)
+                                .foregroundColor(CiderColors.secondary)
+                                .opacity(tagsHeaderHovered ? 0 : 1)
+
+                            Image(systemName: "chevron.down")
+                                .font(CiderFont.captionBold)
+                                .foregroundColor(CiderColors.secondary)
+                                .rotationEffect(.degrees(isCollapsed ? -90 : 0))
+                                .opacity(tagsHeaderHovered ? 1 : 0)
+                        }
+                        .animation(reduceMotion ? .none : .smooth, value: tagsHeaderHovered)
+
+                        Text("Tags")
+                            .font(CiderFont.bodySemibold)
+                            .foregroundColor(CiderColors.secondary)
+
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .hoverState($tagsHeaderHovered)
 
                 if hasActiveFilters {
                     Button {
@@ -311,19 +323,24 @@ struct FolderSidebarView: View {
                     .buttonStyle(.plain)
                 }
 
-                Spacer(minLength: 0)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(reduceMotion ? .none : .snappy) {
-                    tagsCollapsed.wrappedValue.toggle()
+                if let onOpenTagManager {
+                    Button(action: onOpenTagManager) {
+                        Image(systemName: "ellipsis")
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.tertiary)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Manage tags")
+                    .accessibilityLabel("Manage tags")
                 }
             }
-            .hoverState($tagsHeaderHovered)
+            .padding(.top, Spacing.xs)
 
             if !isCollapsed {
-                if labels.isEmpty {
-                    Text("No tags yet")
+                if baseLabels.isEmpty {
+                    Text(labels.isEmpty ? "No tags yet" : "No matching tags")
                         .font(CiderFont.body)
                         .foregroundColor(CiderColors.tertiary)
                         .padding(.horizontal, Spacing.xs)

@@ -63,7 +63,7 @@ enum WorkspaceDomainDashboardProvider {
             primaryAction: primaryAction,
             sections: sections,
             emptyStateTitle: "No \(domain.title) dashboard items yet",
-            emptyStateSubtitle: "Use Browse to see every tab, folder, saved view, and board while this domain gets richer."
+            emptyStateSubtitle: "Use Library to see every tab, folder, saved view, and board while this domain gets richer."
         )
     }
 
@@ -223,7 +223,7 @@ enum WorkspaceDomainDashboardProvider {
         }
         guard domain != .browse else { return nil }
         return WorkspaceDomainDashboardAction(
-            title: "Browse all Cider",
+            title: "Open Library",
             systemImage: WorkspaceNavigationDomain.browse.systemImage,
             target: nil
         )

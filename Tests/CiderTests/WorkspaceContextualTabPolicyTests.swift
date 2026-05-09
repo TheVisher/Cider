@@ -255,7 +255,7 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         ])
     }
 
-    func testAssistantSelectionShowsOnlyAssistantTab() {
+    func testAssistantDomainShowsDashboardBeforeChatSurface() {
         let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
         let tabs: [CiderTab] = [
             .savedView(id: dashboardID, name: "Dashboard"),
@@ -270,6 +270,6 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
             savedViews: savedViews
         )
 
-        XCTAssertEqual(result, [.aiAssistant])
+        XCTAssertEqual(result, [.domainDashboard(.aiAssistant), .aiAssistant])
     }
 }

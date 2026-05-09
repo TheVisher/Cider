@@ -62,12 +62,12 @@ final class WorkspaceDomainDashboardModelTests: XCTestCase {
         )
 
         XCTAssertEqual(model.domain, .people)
-        XCTAssertEqual(model.primaryAction?.title, "Browse all Cider")
+        XCTAssertEqual(model.primaryAction?.title, "Open Library")
         XCTAssertEqual(model.emptyStateTitle, "No People dashboard items yet")
         XCTAssertTrue(model.sections.isEmpty)
     }
 
-    func testBrowseDashboardIsCatchAll() {
+    func testLibraryDashboardIsCatchAll() {
         let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-00000000D001")!
         let boardID = UUID(uuidString: "00000000-0000-0000-0000-00000000B001")!
         let savedViews = [
@@ -81,7 +81,7 @@ final class WorkspaceDomainDashboardModelTests: XCTestCase {
             allTabs: [.savedView(id: dashboardID, name: "Main Dashboard"), .savedView(id: boardID, name: "Cider Board")]
         )
 
-        XCTAssertEqual(model.title, "Browse")
+        XCTAssertEqual(model.title, "Library")
         XCTAssertEqual(model.sections.first?.items.map(\.title), ["Main Dashboard", "Cider Board"])
     }
 

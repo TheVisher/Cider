@@ -2,7 +2,11 @@ import SwiftUI
 
 struct WorkspaceDomainSidebarView<DomainContent: View>: View {
     @Binding var selectedDomain: WorkspaceNavigationDomain?
+    @Binding var searchText: String
     let domains: [WorkspaceNavigationDomain]
+    let selectedAnchor: WorkspaceSidebarAnchor?
+    let selectedDomainRowIsCurrent: Bool
+    let onTriggerSearch: () -> Void
     let onSelectDomain: (WorkspaceNavigationDomain) -> Void
     @ViewBuilder let domainContent: () -> DomainContent
 
@@ -21,20 +25,21 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
 
     private var globalDomainList: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text("Cider")
-                    .font(CiderFont.headingSemibold)
-                    .foregroundColor(CiderColors.primary)
-                Text("Choose a workspace")
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.tertiary)
-            }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.bottom, Spacing.xs)
+            sidebarSearchField
+                .padding(.horizontal, Spacing.sm)
+
+            persistentAnchors
+                .padding(.horizontal, Spacing.xs)
 
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    ForEach(domains) { domain in
+                    Text("Domains")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.tertiary)
+                        .padding(.horizontal, Spacing.sm)
+                        .padding(.top, Spacing.sm)
+
+                    ForEach(contextualDomains) { domain in
                         domainButton(domain)
                     }
                 }
@@ -48,53 +53,110 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
 
     private func domainSidebar(for domain: WorkspaceNavigationDomain) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            domainHeader(domain)
+            sidebarSearchField
+                .padding(.horizontal, Spacing.sm)
+
+            persistentAnchors
+                .padding(.horizontal, Spacing.xs)
+
+            if showsCurrentDomainRow(for: domain) {
+                currentDomainButton(domain)
+                    .padding(.horizontal, Spacing.xs)
+            }
+
             domainContent()
         }
         .frame(width: BookmarksDesign.folderSidebarWidth)
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    private func domainHeader(_ domain: WorkspaceNavigationDomain) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Button {
-                selectedDomain = nil
-            } label: {
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "chevron.left")
-                        .font(CiderFont.captionBold)
-                    Text("All Cider")
-                        .font(CiderFont.captionSemibold)
-                }
-                .foregroundColor(CiderColors.controlAccent)
-                .contentShape(Rectangle())
+    private func showsCurrentDomainRow(for domain: WorkspaceNavigationDomain) -> Bool {
+        switch domain {
+        case .media, .bookmarks, .notes, .projects, .tasksEvents, .files, .people, .aiAssistant:
+            true
+        case .mainDashboard, .browse:
+            false
+        }
+    }
+
+    private var contextualDomains: [WorkspaceNavigationDomain] {
+        domains.filter { domain in
+            domain != .mainDashboard && domain != .browse
+        }
+    }
+
+    private var persistentAnchors: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            ForEach(WorkspaceSidebarAnchor.allCases) { anchor in
+                anchorButton(anchor)
             }
-            .buttonStyle(.plain)
-            .help("Back to all Cider domains")
+        }
+    }
 
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: domain.systemImage)
-                    .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.controlAccent)
-                    .frame(width: Spacing.xl, height: Spacing.xl)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.controlAccent.opacity(0.12))
-                    )
+    private var sidebarSearchField: some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.tertiary)
 
-                VStack(alignment: .leading, spacing: Spacing.hairline) {
-                    Text(domain.title)
-                        .font(CiderFont.bodySemibold)
-                        .foregroundColor(CiderColors.primary)
-                    Text(domain.breadcrumbPath.joined(separator: " / "))
-                        .font(CiderFont.micro)
+            TextField("Search", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(CiderFont.label)
+                .foregroundColor(CiderColors.primary)
+                .onSubmit(onTriggerSearch)
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(CiderFont.captionMedium)
                         .foregroundColor(CiderColors.tertiary)
-                        .lineLimit(1)
                 }
+                .buttonStyle(.plain)
+            } else {
+                Text("\u{2318}K")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.quaternary)
             }
         }
         .padding(.horizontal, Spacing.sm)
-        .padding(.bottom, Spacing.xs)
+        .padding(.vertical, Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.separatorLight)
+        )
+    }
+
+    private func anchorButton(_ anchor: WorkspaceSidebarAnchor) -> some View {
+        let isSelected = selectedAnchor == anchor
+
+        return Button {
+            onSelectDomain(anchor.domain)
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: anchor.systemImage)
+                    .font(CiderFont.bodyMedium)
+                    .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
+                    .frame(width: Spacing.xl, height: Spacing.xl)
+
+                Text(anchor.title)
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs + 1)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isSelected ? CiderColors.accentSubtle : CiderColors.separatorLight.opacity(0.65))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(anchor.subtitle)
     }
 
     private func domainButton(_ domain: WorkspaceNavigationDomain) -> some View {
@@ -104,21 +166,16 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
             }
             onSelectDomain(domain)
         } label: {
-            HStack(alignment: .top, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.sm) {
                 Image(systemName: domain.systemImage)
                     .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.secondary)
                     .frame(width: Spacing.xl, height: Spacing.xl)
 
-                VStack(alignment: .leading, spacing: Spacing.hairline) {
-                    Text(domain.title)
-                        .font(CiderFont.labelSemibold)
-                        .foregroundColor(CiderColors.primary)
-                    Text(domain.subtitle)
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
-                        .lineLimit(2)
-                }
+                Text(domain.title)
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
 
                 Spacer(minLength: 0)
 
@@ -127,10 +184,39 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
                     .foregroundColor(CiderColors.quaternary)
             }
             .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
+            .padding(.vertical, Spacing.xs + 1)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(CiderColors.separatorLight.opacity(0.65))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(domain.subtitle)
+    }
+
+    private func currentDomainButton(_ domain: WorkspaceNavigationDomain) -> some View {
+        Button {
+            onSelectDomain(domain)
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: domain.systemImage)
+                    .font(CiderFont.bodyMedium)
+                    .foregroundColor(selectedDomainRowIsCurrent ? CiderColors.controlAccent : CiderColors.secondary)
+                    .frame(width: Spacing.xl, height: Spacing.xl)
+
+                Text(domain.title)
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs + 1)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(selectedDomainRowIsCurrent ? CiderColors.accentSubtle : CiderColors.separatorLight.opacity(0.65))
             )
             .contentShape(Rectangle())
         }

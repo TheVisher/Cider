@@ -149,4 +149,23 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(sections[1].entries.map(\.id), ["cider", "cider-web"])
         XCTAssertEqual(sections[2].entries.map(\.id), ["browse-all-boards"])
     }
+
+    func testSidebarTreeBuildsProjectViewDestinations() {
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [
+            KanbanBoard(id: "2afee0", name: "Cider"),
+            KanbanBoard(id: "08c899", name: "Cider Web")
+        ])
+        let cider = catalog.workspace(id: "cider")!
+
+        let destinations = ProjectWorkspaceSidebarTree.destinations(
+            for: cider,
+            boards: [
+                KanbanBoard(id: "2afee0", name: "Cider"),
+                KanbanBoard(id: "08c899", name: "Cider Web")
+            ]
+        )
+
+        XCTAssertEqual(destinations.map(\.title), ["Overview", "Boards", "Cider", "References"])
+        XCTAssertEqual(destinations.map(\.kind), [.overview, .boardsGroup, .board("2afee0"), .references])
+    }
 }

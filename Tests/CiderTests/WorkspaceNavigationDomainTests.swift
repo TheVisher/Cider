@@ -16,6 +16,15 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(WorkspaceNavigationDomain.projects.systemImage, "square.split.2x1")
     }
 
+    func testPersistentSidebarAnchorsNameHomeAndLibrary() {
+        let anchors = WorkspaceSidebarAnchor.allCases
+
+        XCTAssertEqual(anchors.map(\.title), ["Home", "Library"])
+        XCTAssertEqual(anchors.map(\.domain), [.mainDashboard, .browse])
+        XCTAssertEqual(WorkspaceNavigationDomain.mainDashboard.title, "Home")
+        XCTAssertEqual(WorkspaceNavigationDomain.browse.title, "Library")
+    }
+
     func testNavigationStateBuildsBreadcrumbAndCanReturnToGlobalDomains() {
         var state = WorkspaceNavigationState()
 

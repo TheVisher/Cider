@@ -15,7 +15,11 @@ extension CiderPanelView {
     var workspaceSidebar: some View {
         WorkspaceDomainSidebarView(
             selectedDomain: $selectedNavigationDomain,
+            searchText: $sidebarSearchText,
             domains: WorkspaceNavigationDomain.allCases,
+            selectedAnchor: selectedSidebarAnchor,
+            selectedDomainRowIsCurrent: selectedDomainRowIsCurrent,
+            onTriggerSearch: { isSearchPaletteVisible = true },
             onSelectDomain: openNavigationDomain
         ) {
             domainSidebarContent
@@ -25,15 +29,54 @@ extension CiderPanelView {
     @ViewBuilder
     var domainSidebarContent: some View {
         if selectedNavigationDomain == .aiAssistant {
-            AIAssistantDomainSidebarView(onOpenAssistant: openOrSelectAIAssistantTab)
+            AIAssistantDomainSidebarView(
+                isChatListActive: selectedTab == .aiAssistant,
+                onOpenAssistant: openOrSelectAIAssistantTab
+            )
         } else if selectedNavigationDomain == .projects {
             ProjectsDomainSidebarView(
                 catalog: projectWorkspaceCatalog,
+                boards: kanbanStorage.boards,
                 selectedWorkspaceID: $selectedProjectWorkspaceID,
-                onSelectWorkspace: selectProjectWorkspace
+                selectedTab: selectedTab,
+                onSelectWorkspace: selectProjectWorkspace,
+                onSelectDestination: selectProjectWorkspaceDestination
             )
         } else {
             folderSidebar(folders: contextualFolders)
+        }
+    }
+
+    var selectedSidebarAnchor: WorkspaceSidebarAnchor? {
+        guard selectedFolderID == nil, selectedTagIDs.isEmpty else {
+            return nil
+        }
+
+        if selectedNavigationDomain == nil || selectedNavigationDomain == .mainDashboard {
+            return .home
+        }
+        if selectedNavigationDomain == .browse {
+            return .library
+        }
+        return nil
+    }
+
+    var selectedDomainRowIsCurrent: Bool {
+        guard let selectedNavigationDomain,
+              selectedNavigationDomain != .browse,
+              selectedFolderID == nil,
+              selectedTagIDs.isEmpty
+        else {
+            return false
+        }
+
+        switch selectedNavigationDomain {
+        case .projects:
+            return selectedProjectWorkspaceID == nil && selectedTab == .domainDashboard(.projects)
+        case .aiAssistant:
+            return selectedTab == .domainDashboard(.aiAssistant)
+        case .mainDashboard, .browse, .media, .bookmarks, .notes, .tasksEvents, .files, .people:
+            return true
         }
     }
 
@@ -56,7 +99,9 @@ extension CiderPanelView {
             onDeleteFolder: deleteFolder,
             searchText: $sidebarSearchText,
             onTriggerSearch: { isSearchPaletteVisible = true },
+            showsSearchField: false,
             showBackground: false,
+            contentEntityTypes: folderContentScope.entityTypes(for: selectedNavigationDomain),
             labels: labelStorage.labels,
             selectedTagIDs: $selectedTagIDs,
             tagsCollapsed: $tagsCollapsed,
@@ -78,6 +123,11 @@ extension CiderPanelView {
     }
 
     func openNavigationDomain(_ domain: WorkspaceNavigationDomain) {
+        let previousDomain = selectedNavigationDomain
+        if previousDomain != domain {
+            expandedFolderIDs.removeAll()
+        }
+
         selectedFolderID = nil
         selectedTagIDs.removeAll()
         selectedItemIDs.removeAll()
@@ -85,16 +135,28 @@ extension CiderPanelView {
         selectionAnchorID = nil
         closeAllDetails()
 
+        if domain == .mainDashboard {
+            selectedNavigationDomain = nil
+            selectedProjectWorkspaceID = nil
+            folderContentScope = .allItems
+            selectedTab = dashboardTab ?? allTabs.first
+            return
+        }
+
         if selectedNavigationDomain != domain {
             selectedNavigationDomain = domain
         }
 
-        if domain != .projects {
-            selectedProjectWorkspaceID = nil
-        }
+        selectedProjectWorkspaceID = nil
+
+        folderContentScope = WorkspaceDomainContentScope.defaultScope(for: domain)
 
         if domain == .aiAssistant {
-            openOrSelectAIAssistantTab()
+            if allTabs.contains(.aiAssistant) == false {
+                dynamicTabs.append(.aiAssistant)
+                CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(true)
+            }
+            selectedTab = .domainDashboard(.aiAssistant)
             return
         }
 
@@ -103,6 +165,13 @@ extension CiderPanelView {
         } else {
             selectedTab = .domainDashboard(domain)
         }
+    }
+
+    var dashboardTab: CiderTab? {
+        guard let savedView = savedViewStorage.savedViews.first(where: { $0.kind == .dashboard }) else {
+            return nil
+        }
+        return .savedView(id: savedView.id, name: savedView.name)
     }
 
     func selectProjectWorkspace(_ workspace: ProjectWorkspace) {
@@ -126,6 +195,28 @@ extension CiderPanelView {
             selectedProjectWorkspaceID = workspace.id
             selectedNavigationDomain = .projects
             selectedTab = .projectOverview(projectID: workspace.id, name: "All Boards")
+        }
+    }
+
+    func selectProjectWorkspaceDestination(_ destination: ProjectWorkspaceSidebarDestination, in workspace: ProjectWorkspace) {
+        selectedFolderID = nil
+        selectedTagIDs.removeAll()
+        selectedItemIDs.removeAll()
+        focusedItemID = nil
+        selectionAnchorID = nil
+        closeAllDetails()
+        selectedProjectWorkspaceID = workspace.id
+        selectedNavigationDomain = .projects
+
+        switch destination.kind {
+        case .overview:
+            selectedTab = .projectOverview(projectID: workspace.id, name: "Overview")
+        case .boardsGroup:
+            break
+        case .board(let boardID):
+            openProjectBoard(boardID)
+        case .references:
+            selectedTab = .projectReferences(projectID: workspace.id, name: "References")
         }
     }
 

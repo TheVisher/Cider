@@ -92,11 +92,13 @@ extension CiderPanelView {
                 focusedItemID: focusedItemID
             )
         } else if let folderID = selectedFolderID {
-            FolderDetailView(
-                bookmarksViewModel: bookmarksViewModel,
-                notesViewModel: notesViewModel,
-                folderID: folderID,
-                displayMode: $homeDisplayMode,
+                FolderDetailView(
+                    bookmarksViewModel: bookmarksViewModel,
+                    notesViewModel: notesViewModel,
+                    folderID: folderID,
+                    navigationDomain: selectedNavigationDomain,
+                    contentScope: $folderContentScope,
+                    displayMode: $homeDisplayMode,
                 cardSizeScale: $homeCardSizeScale,
                 selectedItemIDs: $selectedItemIDs,
                 subFoldersCollapsed: $subFoldersCollapsed,
@@ -154,8 +156,7 @@ extension CiderPanelView {
                             openDomainDashboardTab(tab)
                         },
                         onBrowseAll: {
-                            selectedNavigationDomain = .browse
-                            selectedTab = .domainDashboard(.browse)
+                            openNavigationDomain(.browse)
                         }
                     )
                 }
@@ -223,7 +224,7 @@ extension CiderPanelView {
                     if case .kanban(let boardID) = savedView.kind {
                         KanbanBoardView(boardID: boardID, onOpenCard: openKanbanCardDetail)
                     } else if case .dashboard = savedView.kind {
-                        DashboardHubView(onOpenSourceURL: { url in
+                        DashboardHubView(showsTopicSwitcher: false, onOpenSourceURL: { url in
                             openURLSafely(url)
                         }) {
                             HomeOverviewDashboardView(
@@ -381,8 +382,7 @@ extension CiderPanelView {
                         openDomainDashboardTab(tab)
                     },
                     onBrowseAll: {
-                        selectedNavigationDomain = .browse
-                        selectedTab = .domainDashboard(.browse)
+                        openNavigationDomain(.browse)
                     }
                 )
             } else {
