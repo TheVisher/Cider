@@ -68,41 +68,6 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
     }
 }
 
-enum WorkspaceSidebarAnchor: String, CaseIterable, Identifiable {
-    case home
-    case library
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .home: "Home"
-        case .library: "Library"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .home: "Command center and active work"
-        case .library: "Everything, folders, and tags"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .home: "house"
-        case .library: "books.vertical"
-        }
-    }
-
-    var domain: WorkspaceNavigationDomain {
-        switch self {
-        case .home: .mainDashboard
-        case .library: .browse
-        }
-    }
-}
-
 struct WorkspaceNavigationState: Equatable {
     private(set) var selectedDomain: WorkspaceNavigationDomain?
 

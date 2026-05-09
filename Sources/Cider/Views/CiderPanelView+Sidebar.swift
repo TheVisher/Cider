@@ -17,8 +17,6 @@ extension CiderPanelView {
             selectedDomain: $selectedNavigationDomain,
             searchText: $sidebarSearchText,
             domains: WorkspaceNavigationDomain.allCases,
-            selectedAnchor: selectedSidebarAnchor,
-            selectedDomainRowIsCurrent: selectedDomainRowIsCurrent,
             onTriggerSearch: { isSearchPaletteVisible = true },
             onSelectDomain: openNavigationDomain
         ) {
@@ -42,41 +40,14 @@ extension CiderPanelView {
                 onSelectWorkspace: selectProjectWorkspace,
                 onSelectDestination: selectProjectWorkspaceDestination
             )
+        } else if let selectedNavigationDomain {
+            WorkspaceDomainRouteSidebarView(
+                domain: selectedNavigationDomain,
+                selectedRouteKind: selectedDomainRouteKind,
+                onSelectRoute: selectWorkspaceDomainRoute
+            )
         } else {
-            folderSidebar(folders: contextualFolders)
-        }
-    }
-
-    var selectedSidebarAnchor: WorkspaceSidebarAnchor? {
-        guard selectedFolderID == nil, selectedTagIDs.isEmpty else {
-            return nil
-        }
-
-        if selectedNavigationDomain == nil || selectedNavigationDomain == .mainDashboard {
-            return .home
-        }
-        if selectedNavigationDomain == .browse {
-            return .library
-        }
-        return nil
-    }
-
-    var selectedDomainRowIsCurrent: Bool {
-        guard let selectedNavigationDomain,
-              selectedNavigationDomain != .browse,
-              selectedFolderID == nil,
-              selectedTagIDs.isEmpty
-        else {
-            return false
-        }
-
-        switch selectedNavigationDomain {
-        case .projects:
-            return selectedProjectWorkspaceID == nil && selectedTab == .domainDashboard(.projects)
-        case .aiAssistant:
-            return selectedTab == .domainDashboard(.aiAssistant)
-        case .mainDashboard, .browse, .media, .bookmarks, .notes, .tasksEvents, .files, .people:
-            return true
+            EmptyView()
         }
     }
 
@@ -138,6 +109,7 @@ extension CiderPanelView {
         if domain == .mainDashboard {
             selectedNavigationDomain = nil
             selectedProjectWorkspaceID = nil
+            selectedDomainRouteKind = .overview
             folderContentScope = .allItems
             selectedTab = dashboardTab ?? allTabs.first
             return
@@ -148,6 +120,7 @@ extension CiderPanelView {
         }
 
         selectedProjectWorkspaceID = nil
+        selectedDomainRouteKind = .overview
 
         folderContentScope = WorkspaceDomainContentScope.defaultScope(for: domain)
 
@@ -167,6 +140,29 @@ extension CiderPanelView {
         }
     }
 
+    func selectWorkspaceDomainRoute(_ route: WorkspaceDomainRoute, in domain: WorkspaceNavigationDomain) {
+        selectedDomainRouteKind = route.kind
+        selectedFolderID = nil
+        selectedTagIDs.removeAll()
+        selectedItemIDs.removeAll()
+        focusedItemID = nil
+        selectionAnchorID = nil
+        closeAllDetails()
+
+        switch route.kind {
+        case .overview:
+            selectedTab = .domainDashboard(domain)
+        case .folders:
+            selectedTab = .domainDashboard(domain)
+        case .tags:
+            openOrSelectTagTab()
+        case .chats:
+            openOrSelectAIAssistantTab()
+        case .inbox, .recent, .savedViews:
+            selectedTab = .domainDashboard(domain)
+        }
+    }
+
     var dashboardTab: CiderTab? {
         guard let savedView = savedViewStorage.savedViews.first(where: { $0.kind == .dashboard }) else {
             return nil
@@ -181,6 +177,7 @@ extension CiderPanelView {
         focusedItemID = nil
         selectionAnchorID = nil
         closeAllDetails()
+        selectedDomainRouteKind = .overview
 
         switch workspace.kind {
         case .home:
@@ -207,6 +204,7 @@ extension CiderPanelView {
         closeAllDetails()
         selectedProjectWorkspaceID = workspace.id
         selectedNavigationDomain = .projects
+        selectedDomainRouteKind = .overview
 
         switch destination.kind {
         case .overview:

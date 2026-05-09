@@ -67,6 +67,7 @@ struct CiderPanelView: View {
     @State var isURLDropTargeted = false
     @State var selectedNavigationDomain: WorkspaceNavigationDomain?
     @State var selectedProjectWorkspaceID: String?
+    @State var selectedDomainRouteKind: WorkspaceDomainRouteKind = .overview
 
     @State var selectedTagIDs: Set<UUID> = []
     @State var tagsCollapsed: Bool = CiderConfig.load().tagsCollapsed

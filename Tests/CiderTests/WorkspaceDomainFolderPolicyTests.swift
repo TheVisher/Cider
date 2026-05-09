@@ -34,6 +34,40 @@ final class WorkspaceDomainFolderPolicyTests: XCTestCase {
         XCTAssertEqual(result.map(\.name), ["Random"])
     }
 
+    func testDomainFolderBrowserShowsOnlyFoldersWithDomainItemsAndAncestors() {
+        let rootID = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
+        let childID = UUID(uuidString: "00000000-0000-0000-0000-000000000102")!
+        let emptyID = UUID(uuidString: "00000000-0000-0000-0000-000000000103")!
+        let folders = [
+            Folder(id: rootID, name: "Projects"),
+            Folder(id: childID, name: "Cider", parentID: rootID),
+            Folder(id: emptyID, name: "Receipts")
+        ]
+
+        let result = FolderBrowserModel.visibleFolders(
+            folders: folders,
+            directItemCounts: [childID: 2, emptyID: 0],
+            navigationDomain: .notes
+        )
+
+        XCTAssertEqual(result.map(\.name), ["Projects", "Cider"])
+    }
+
+    func testLibraryFolderBrowserKeepsAllFoldersEvenWithoutDirectItems() {
+        let folders = [
+            Folder(name: "Applications"),
+            Folder(name: "Receipts")
+        ]
+
+        let result = FolderBrowserModel.visibleFolders(
+            folders: folders,
+            directItemCounts: [:],
+            navigationDomain: .browse
+        )
+
+        XCTAssertEqual(result.map(\.name), ["Applications", "Receipts"])
+    }
+
     private func makeFolders() -> [Folder] {
         let mediaID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
         let projectsID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!

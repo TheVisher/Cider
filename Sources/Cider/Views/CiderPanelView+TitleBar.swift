@@ -77,6 +77,9 @@ extension CiderPanelView {
            let folder = bookmarksViewModel.folders.first(where: { $0.id == folderID }) {
             return folder.name
         }
+        if selectedDomainRouteKind == .folders, selectedNavigationDomain != nil {
+            return "Folders"
+        }
         if !selectedTagIDs.isEmpty {
             return selectedTagIDs.count == 1 ? "Tag" : "Tags"
         }
@@ -94,6 +97,9 @@ extension CiderPanelView {
             let domainTitle = selectedNavigationDomain?.title ?? "Library"
             return "\(domainTitle) / \(bookmarksViewModel.folderPath(to: folderID).map(\.name).joined(separator: " / "))"
         }
+        if selectedDomainRouteKind == .folders, let domain = selectedNavigationDomain {
+            return "\(domain.title) / Folder browser"
+        }
         if selectedNavigationDomain == .projects,
            selectedTab != .domainDashboard(.projects),
            let selectedTab {
@@ -107,13 +113,14 @@ extension CiderPanelView {
 
     private var currentLocationSystemImage: String {
         if selectedFolderID != nil { return "folder" }
+        if selectedDomainRouteKind == .folders, selectedNavigationDomain != nil { return "folder" }
         if !selectedTagIDs.isEmpty { return "tag" }
         if selectedNavigationDomain == .projects,
            selectedTab != .domainDashboard(.projects),
            let selectedTab {
             return selectedTab.systemImage
         }
-        return selectedNavigationDomain?.systemImage ?? WorkspaceSidebarAnchor.home.systemImage
+        return selectedNavigationDomain?.systemImage ?? WorkspaceNavigationDomain.mainDashboard.systemImage
     }
 
     @ViewBuilder

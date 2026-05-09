@@ -16,11 +16,10 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(WorkspaceNavigationDomain.projects.systemImage, "square.split.2x1")
     }
 
-    func testPersistentSidebarAnchorsNameHomeAndLibrary() {
-        let anchors = WorkspaceSidebarAnchor.allCases
+    func testHomeAndLibraryAreFirstClassTopLevelDestinations() {
+        let domains = WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: .projects)
 
-        XCTAssertEqual(anchors.map(\.title), ["Home", "Library"])
-        XCTAssertEqual(anchors.map(\.domain), [.mainDashboard, .browse])
+        XCTAssertEqual(domains.prefix(2), [.mainDashboard, .browse])
         XCTAssertEqual(WorkspaceNavigationDomain.mainDashboard.title, "Home")
         XCTAssertEqual(WorkspaceNavigationDomain.browse.title, "Library")
     }
@@ -41,5 +40,37 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
 
         XCTAssertNil(state.selectedDomain)
         XCTAssertEqual(state.breadcrumbPath, ["Cider"])
+    }
+
+    func testPersistentSidebarKeepsEveryTopLevelDestinationVisibleWhenDomainIsSelected() {
+        let domains = WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: .bookmarks)
+
+        XCTAssertEqual(domains, [
+            .mainDashboard,
+            .browse,
+            .media,
+            .bookmarks,
+            .notes,
+            .projects,
+            .tasksEvents,
+            .files,
+            .people,
+            .aiAssistant
+        ])
+    }
+
+    func testDomainRoutesUseHighLevelDestinationsInsteadOfFolderTrees() {
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.routes(for: .bookmarks).map(\.kind),
+            [.overview, .inbox, .folders, .tags, .recent, .savedViews]
+        )
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.routes(for: .browse).map(\.kind),
+            [.overview, .folders, .tags, .recent, .savedViews]
+        )
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.routes(for: .aiAssistant).map(\.kind),
+            [.overview, .chats]
+        )
     }
 }

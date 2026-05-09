@@ -4,8 +4,6 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
     @Binding var selectedDomain: WorkspaceNavigationDomain?
     @Binding var searchText: String
     let domains: [WorkspaceNavigationDomain]
-    let selectedAnchor: WorkspaceSidebarAnchor?
-    let selectedDomainRowIsCurrent: Bool
     let onTriggerSearch: () -> Void
     let onSelectDomain: (WorkspaceNavigationDomain) -> Void
     @ViewBuilder let domainContent: () -> DomainContent
@@ -13,34 +11,26 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Group {
-            if let selectedDomain {
-                domainSidebar(for: selectedDomain)
-            } else {
-                globalDomainList
-            }
-        }
+        persistentDomainList
         .animation(reduceMotion ? .none : CiderAnimation.snappy, value: selectedDomain)
     }
 
-    private var globalDomainList: some View {
+    private var persistentDomainList: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             sidebarSearchField
                 .padding(.horizontal, Spacing.sm)
 
-            persistentAnchors
-                .padding(.horizontal, Spacing.xs)
-
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("Domains")
-                        .font(CiderFont.captionSemibold)
-                        .foregroundColor(CiderColors.tertiary)
-                        .padding(.horizontal, Spacing.sm)
-                        .padding(.top, Spacing.sm)
-
+                VStack(alignment: .leading, spacing: Spacing.sm) {
                     ForEach(contextualDomains) { domain in
-                        domainButton(domain)
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            domainButton(domain)
+
+                            if selectedDomain == domain, domain != .mainDashboard {
+                                domainContent()
+                                    .padding(.leading, Spacing.lg)
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, Spacing.xs)
@@ -51,46 +41,8 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    private func domainSidebar(for domain: WorkspaceNavigationDomain) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            sidebarSearchField
-                .padding(.horizontal, Spacing.sm)
-
-            persistentAnchors
-                .padding(.horizontal, Spacing.xs)
-
-            if showsCurrentDomainRow(for: domain) {
-                currentDomainButton(domain)
-                    .padding(.horizontal, Spacing.xs)
-            }
-
-            domainContent()
-        }
-        .frame(width: BookmarksDesign.folderSidebarWidth)
-        .frame(maxHeight: .infinity, alignment: .top)
-    }
-
-    private func showsCurrentDomainRow(for domain: WorkspaceNavigationDomain) -> Bool {
-        switch domain {
-        case .media, .bookmarks, .notes, .projects, .tasksEvents, .files, .people, .aiAssistant:
-            true
-        case .mainDashboard, .browse:
-            false
-        }
-    }
-
     private var contextualDomains: [WorkspaceNavigationDomain] {
-        domains.filter { domain in
-            domain != .mainDashboard && domain != .browse
-        }
-    }
-
-    private var persistentAnchors: some View {
-        VStack(alignment: .leading, spacing: Spacing.xxs) {
-            ForEach(WorkspaceSidebarAnchor.allCases) { anchor in
-                anchorButton(anchor)
-            }
-        }
+        WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: selectedDomain)
     }
 
     private var sidebarSearchField: some View {
@@ -128,95 +80,39 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
         )
     }
 
-    private func anchorButton(_ anchor: WorkspaceSidebarAnchor) -> some View {
-        let isSelected = selectedAnchor == anchor
+    private func domainButton(_ domain: WorkspaceNavigationDomain) -> some View {
+        let isSelected = selectedDomain == domain
+            || (domain == .mainDashboard && selectedDomain == nil)
+        let showsChildren = domain != .mainDashboard
 
         return Button {
-            onSelectDomain(anchor.domain)
+            onSelectDomain(domain)
         } label: {
             HStack(spacing: Spacing.sm) {
-                Image(systemName: anchor.systemImage)
+                Image(systemName: domain.systemImage)
                     .font(CiderFont.bodyMedium)
                     .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
                     .frame(width: Spacing.xl, height: Spacing.xl)
 
-                Text(anchor.title)
+                Text(domain.title)
                     .font(CiderFont.labelSemibold)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(1)
 
                 Spacer(minLength: 0)
+
+                if showsChildren {
+                    Image(systemName: "chevron.right")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.quaternary)
+                        .rotationEffect(.degrees(isSelected ? 90 : 0))
+                }
             }
             .padding(.horizontal, Spacing.sm)
             .padding(.vertical, Spacing.xs + 1)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(isSelected ? CiderColors.accentSubtle : CiderColors.separatorLight.opacity(0.65))
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(anchor.subtitle)
-    }
-
-    private func domainButton(_ domain: WorkspaceNavigationDomain) -> some View {
-        Button {
-            if domain.opensDomainSidebar {
-                selectedDomain = domain
-            }
-            onSelectDomain(domain)
-        } label: {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: domain.systemImage)
-                    .font(CiderFont.bodyMedium)
-                    .foregroundColor(CiderColors.secondary)
-                    .frame(width: Spacing.xl, height: Spacing.xl)
-
-                Text(domain.title)
-                    .font(CiderFont.labelSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(CiderFont.captionMedium)
-                    .foregroundColor(CiderColors.quaternary)
-            }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs + 1)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(CiderColors.separatorLight.opacity(0.65))
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(domain.subtitle)
-    }
-
-    private func currentDomainButton(_ domain: WorkspaceNavigationDomain) -> some View {
-        Button {
-            onSelectDomain(domain)
-        } label: {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: domain.systemImage)
-                    .font(CiderFont.bodyMedium)
-                    .foregroundColor(selectedDomainRowIsCurrent ? CiderColors.controlAccent : CiderColors.secondary)
-                    .frame(width: Spacing.xl, height: Spacing.xl)
-
-                Text(domain.title)
-                    .font(CiderFont.labelSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs + 1)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(selectedDomainRowIsCurrent ? CiderColors.accentSubtle : CiderColors.separatorLight.opacity(0.65))
             )
             .contentShape(Rectangle())
         }

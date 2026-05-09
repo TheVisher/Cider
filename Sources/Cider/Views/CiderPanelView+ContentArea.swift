@@ -124,6 +124,19 @@ extension CiderPanelView {
                 scrollToItemID: $scrollToItemID,
                 focusedItemID: focusedItemID
             )
+        } else if selectedDomainRouteKind == .folders,
+                  let selectedNavigationDomain {
+            FolderBrowserView(
+                folders: contextualFolders,
+                bookmarks: bookmarksViewModel.bookmarks,
+                notes: notesViewModel.notes,
+                navigationDomain: selectedNavigationDomain,
+                searchText: debouncedSearchText,
+                onSelectFolder: { folderID in
+                    selectedFolderID = folderID
+                    expandPathToFolder(folderID)
+                }
+            )
         } else if let tab = selectedTab {
             switch tab {
             case .domainDashboard(let domain):
