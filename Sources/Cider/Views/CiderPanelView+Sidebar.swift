@@ -15,7 +15,9 @@ extension CiderPanelView {
     var workspaceSidebar: some View {
         WorkspaceDomainSidebarView(
             selectedDomain: $selectedNavigationDomain,
+            searchText: $sidebarSearchText,
             domains: WorkspaceNavigationDomain.allCases,
+            onTriggerSearch: { isSearchPaletteVisible = true },
             onSelectDomain: openNavigationDomain
         ) {
             domainSidebarContent
@@ -25,15 +27,27 @@ extension CiderPanelView {
     @ViewBuilder
     var domainSidebarContent: some View {
         if selectedNavigationDomain == .aiAssistant {
-            AIAssistantDomainSidebarView(onOpenAssistant: openOrSelectAIAssistantTab)
+            AIAssistantDomainSidebarView(
+                isChatListActive: selectedTab == .aiAssistant,
+                onOpenAssistant: openOrSelectAIAssistantTab
+            )
         } else if selectedNavigationDomain == .projects {
             ProjectsDomainSidebarView(
                 catalog: projectWorkspaceCatalog,
+                boards: kanbanStorage.boards,
                 selectedWorkspaceID: $selectedProjectWorkspaceID,
-                onSelectWorkspace: selectProjectWorkspace
+                selectedTab: selectedTab,
+                onSelectWorkspace: selectProjectWorkspace,
+                onSelectDestination: selectProjectWorkspaceDestination
+            )
+        } else if let selectedNavigationDomain {
+            WorkspaceDomainRouteSidebarView(
+                domain: selectedNavigationDomain,
+                selectedRouteKind: selectedDomainRouteKind,
+                onSelectRoute: selectWorkspaceDomainRoute
             )
         } else {
-            folderSidebar(folders: contextualFolders)
+            EmptyView()
         }
     }
 
@@ -56,7 +70,9 @@ extension CiderPanelView {
             onDeleteFolder: deleteFolder,
             searchText: $sidebarSearchText,
             onTriggerSearch: { isSearchPaletteVisible = true },
+            showsSearchField: false,
             showBackground: false,
+            contentEntityTypes: folderContentScope.entityTypes(for: selectedNavigationDomain),
             labels: labelStorage.labels,
             selectedTagIDs: $selectedTagIDs,
             tagsCollapsed: $tagsCollapsed,
@@ -78,6 +94,11 @@ extension CiderPanelView {
     }
 
     func openNavigationDomain(_ domain: WorkspaceNavigationDomain) {
+        let previousDomain = selectedNavigationDomain
+        if previousDomain != domain {
+            expandedFolderIDs.removeAll()
+        }
+
         selectedFolderID = nil
         selectedTagIDs.removeAll()
         selectedItemIDs.removeAll()
@@ -85,16 +106,35 @@ extension CiderPanelView {
         selectionAnchorID = nil
         closeAllDetails()
 
+        if domain == .mainDashboard {
+            selectedNavigationDomain = nil
+            selectedProjectWorkspaceID = nil
+            selectedDomainRouteKind = .overview
+            folderContentScope = .allItems
+            selectedTab = dashboardTab ?? allTabs.first
+            return
+        }
+
         if selectedNavigationDomain != domain {
             selectedNavigationDomain = domain
         }
 
-        if domain != .projects {
-            selectedProjectWorkspaceID = nil
+        selectedProjectWorkspaceID = nil
+        selectedDomainRouteKind = defaultRouteKind(for: domain)
+
+        folderContentScope = WorkspaceDomainContentScope.defaultScope(for: domain)
+
+        if domain == .browse {
+            openLibraryView(onlyUnassigned: true)
+            return
         }
 
         if domain == .aiAssistant {
-            openOrSelectAIAssistantTab()
+            if allTabs.contains(.aiAssistant) == false {
+                dynamicTabs.append(.aiAssistant)
+                CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(true)
+            }
+            selectedTab = .domainDashboard(.aiAssistant)
             return
         }
 
@@ -105,6 +145,77 @@ extension CiderPanelView {
         }
     }
 
+    func selectWorkspaceDomainRoute(_ route: WorkspaceDomainRoute, in domain: WorkspaceNavigationDomain) {
+        selectedDomainRouteKind = route.kind
+        selectedFolderID = nil
+        selectedTagIDs.removeAll()
+        selectedItemIDs.removeAll()
+        focusedItemID = nil
+        selectionAnchorID = nil
+        closeAllDetails()
+
+        switch route.kind {
+        case .overview:
+            selectedTab = .domainDashboard(domain)
+        case .all:
+            if domain == .browse {
+                openLibraryView(onlyUnassigned: false)
+            } else {
+                selectedTab = .domainDashboard(domain)
+            }
+        case .folders:
+            selectedTab = .domainDashboard(domain)
+        case .tags:
+            openOrSelectTagTab()
+        case .chats:
+            openOrSelectAIAssistantTab()
+        case .inbox:
+            if domain == .browse {
+                openLibraryView(onlyUnassigned: true)
+            } else {
+                selectedTab = .domainDashboard(domain)
+            }
+        case .recent, .savedViews:
+            selectedTab = .domainDashboard(domain)
+        }
+    }
+
+    private func defaultRouteKind(for domain: WorkspaceNavigationDomain) -> WorkspaceDomainRouteKind {
+        WorkspaceDomainRoutePolicy.routes(for: domain).first?.kind ?? .overview
+    }
+
+    private func openLibraryView(onlyUnassigned: Bool) {
+        let name = onlyUnassigned ? "Inbox" : "Library"
+
+        if let savedView = savedViewStorage.savedViews.first(where: {
+            $0.kind == .library && $0.filterSpec.onlyUnassigned == onlyUnassigned
+        }) {
+            selectedTab = .savedView(id: savedView.id, name: savedView.name)
+            return
+        }
+
+        if onlyUnassigned {
+            homeDisplayMode = LibraryInboxPresentationPolicy.preferredDisplayMode
+        }
+
+        let savedView = savedViewStorage.createSavedView(
+            name: name,
+            filterSpec: SavedViewFilterSpec(onlyUnassigned: onlyUnassigned),
+            layoutSpec: SavedViewLayoutSpec(
+                displayMode: onlyUnassigned ? LibraryInboxPresentationPolicy.preferredDisplayMode : .list
+            )
+        )
+        savedViewStorage.addToTabOrder(savedView.id)
+        selectedTab = .savedView(id: savedView.id, name: savedView.name)
+    }
+
+    var dashboardTab: CiderTab? {
+        guard let savedView = savedViewStorage.savedViews.first(where: { $0.kind == .dashboard }) else {
+            return nil
+        }
+        return .savedView(id: savedView.id, name: savedView.name)
+    }
+
     func selectProjectWorkspace(_ workspace: ProjectWorkspace) {
         selectedFolderID = nil
         selectedTagIDs.removeAll()
@@ -112,6 +223,7 @@ extension CiderPanelView {
         focusedItemID = nil
         selectionAnchorID = nil
         closeAllDetails()
+        selectedDomainRouteKind = .overview
 
         switch workspace.kind {
         case .home:
@@ -126,6 +238,29 @@ extension CiderPanelView {
             selectedProjectWorkspaceID = workspace.id
             selectedNavigationDomain = .projects
             selectedTab = .projectOverview(projectID: workspace.id, name: "All Boards")
+        }
+    }
+
+    func selectProjectWorkspaceDestination(_ destination: ProjectWorkspaceSidebarDestination, in workspace: ProjectWorkspace) {
+        selectedFolderID = nil
+        selectedTagIDs.removeAll()
+        selectedItemIDs.removeAll()
+        focusedItemID = nil
+        selectionAnchorID = nil
+        closeAllDetails()
+        selectedProjectWorkspaceID = workspace.id
+        selectedNavigationDomain = .projects
+        selectedDomainRouteKind = .overview
+
+        switch destination.kind {
+        case .overview:
+            selectedTab = .projectOverview(projectID: workspace.id, name: "Overview")
+        case .boardsGroup:
+            break
+        case .board(let boardID):
+            openProjectBoard(boardID)
+        case .references:
+            selectedTab = .projectReferences(projectID: workspace.id, name: "References")
         }
     }
 

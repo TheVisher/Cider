@@ -10,15 +10,18 @@ struct DashboardHubView<MainContent: View>: View {
     @ObservedObject private var storage: DashboardStorage
     @State private var selection: DashboardHubSelection = .main
 
+    private let showsTopicSwitcher: Bool
     private let onOpenSourceURL: (URL) -> Void
     private let mainContent: () -> MainContent
 
     init(
         storage: DashboardStorage = .shared,
+        showsTopicSwitcher: Bool = true,
         onOpenSourceURL: @escaping (URL) -> Void,
         @ViewBuilder mainContent: @escaping () -> MainContent
     ) {
         self.storage = storage
+        self.showsTopicSwitcher = showsTopicSwitcher
         self.onOpenSourceURL = onOpenSourceURL
         self.mainContent = mainContent
     }
@@ -27,28 +30,34 @@ struct DashboardHubView<MainContent: View>: View {
         let topics = activeTopics
 
         VStack(spacing: 0) {
-            DashboardTopicTabsView(
-                topics: topics,
-                selection: $selection,
-                cardCounts: cardCounts
-            )
+            if showsTopicSwitcher {
+                DashboardTopicTabsView(
+                    topics: topics,
+                    selection: $selection,
+                    cardCounts: cardCounts
+                )
 
-            Divider()
-                .background(CiderColors.separator)
+                Divider()
+                    .background(CiderColors.separator)
+            }
 
             Group {
-                switch selection {
-                case .main:
+                if showsTopicSwitcher == false {
                     mainContent()
-                case .topic(let topicSyncId):
-                    if let topic = topics.first(where: { $0.ciderSyncId == topicSyncId }) {
-                        DashboardBoardView(
-                            topic: topic,
-                            storage: storage,
-                            onOpenSourceURL: onOpenSourceURL
-                        )
-                    } else {
+                } else {
+                    switch selection {
+                    case .main:
                         mainContent()
+                    case .topic(let topicSyncId):
+                        if let topic = topics.first(where: { $0.ciderSyncId == topicSyncId }) {
+                            DashboardBoardView(
+                                topic: topic,
+                                storage: storage,
+                                onOpenSourceURL: onOpenSourceURL
+                            )
+                        } else {
+                            mainContent()
+                        }
                     }
                 }
             }

@@ -53,6 +53,7 @@ struct CiderPanelView: View {
     @State var selectedKanbanCardID: String?
     @State var kanbanCardDraft: KanbanCardDraft?
     @State var kanbanMetadataVisible: Bool = true
+    @State var folderContentScope: WorkspaceDomainContentScope = .allItems
     @State var cardScaleSaveTask: Task<Void, Never>?
     @State var sidebarSearchText: String = ""
     @State var debouncedSearchText: String = ""
@@ -66,6 +67,7 @@ struct CiderPanelView: View {
     @State var isURLDropTargeted = false
     @State var selectedNavigationDomain: WorkspaceNavigationDomain?
     @State var selectedProjectWorkspaceID: String?
+    @State var selectedDomainRouteKind: WorkspaceDomainRouteKind = .overview
 
     @State var selectedTagIDs: Set<UUID> = []
     @State var tagsCollapsed: Bool = CiderConfig.load().tagsCollapsed
@@ -184,6 +186,7 @@ struct CiderPanelView: View {
             }
         }
         .onChange(of: selectedNavigationDomain) { _, newDomain in
+            folderContentScope = WorkspaceDomainContentScope.defaultScope(for: newDomain)
             if newDomain == .mainDashboard || newDomain == .aiAssistant {
                 normalizeSelectedTabForCurrentDomain()
             }

@@ -92,11 +92,13 @@ extension CiderPanelView {
                 focusedItemID: focusedItemID
             )
         } else if let folderID = selectedFolderID {
-            FolderDetailView(
-                bookmarksViewModel: bookmarksViewModel,
-                notesViewModel: notesViewModel,
-                folderID: folderID,
-                displayMode: $homeDisplayMode,
+                FolderDetailView(
+                    bookmarksViewModel: bookmarksViewModel,
+                    notesViewModel: notesViewModel,
+                    folderID: folderID,
+                    navigationDomain: selectedNavigationDomain,
+                    contentScope: $folderContentScope,
+                    displayMode: $homeDisplayMode,
                 cardSizeScale: $homeCardSizeScale,
                 selectedItemIDs: $selectedItemIDs,
                 subFoldersCollapsed: $subFoldersCollapsed,
@@ -121,6 +123,19 @@ extension CiderPanelView {
                 onToggleLabelBulk: { toggleTagOnSelected($0) },
                 scrollToItemID: $scrollToItemID,
                 focusedItemID: focusedItemID
+            )
+        } else if selectedDomainRouteKind == .folders,
+                  let selectedNavigationDomain {
+            FolderBrowserView(
+                folders: contextualFolders,
+                bookmarks: bookmarksViewModel.bookmarks,
+                notes: notesViewModel.notes,
+                navigationDomain: selectedNavigationDomain,
+                searchText: debouncedSearchText,
+                onSelectFolder: { folderID in
+                    selectedFolderID = folderID
+                    expandPathToFolder(folderID)
+                }
             )
         } else if let tab = selectedTab {
             switch tab {
@@ -154,8 +169,7 @@ extension CiderPanelView {
                             openDomainDashboardTab(tab)
                         },
                         onBrowseAll: {
-                            selectedNavigationDomain = .browse
-                            selectedTab = .domainDashboard(.browse)
+                            openNavigationDomain(.browse)
                         }
                     )
                 }
@@ -223,7 +237,7 @@ extension CiderPanelView {
                     if case .kanban(let boardID) = savedView.kind {
                         KanbanBoardView(boardID: boardID, onOpenCard: openKanbanCardDetail)
                     } else if case .dashboard = savedView.kind {
-                        DashboardHubView(onOpenSourceURL: { url in
+                        DashboardHubView(showsTopicSwitcher: false, onOpenSourceURL: { url in
                             openURLSafely(url)
                         }) {
                             HomeOverviewDashboardView(
@@ -291,6 +305,7 @@ extension CiderPanelView {
             
                             onlyUnassigned: savedView.filterSpec.onlyUnassigned,
                             activeLabelIDs: savedView.filterSpec.labelIDs,
+                            maxVisibleItems: libraryFeedMaxVisibleItems(for: savedView),
                             onToggleLabelBulk: { toggleTagOnSelected($0) },
                             showComingUp: savedView.layoutSpec.showComingUpSection,
                             scrollToItemID: $scrollToItemID,
@@ -381,8 +396,7 @@ extension CiderPanelView {
                         openDomainDashboardTab(tab)
                     },
                     onBrowseAll: {
-                        selectedNavigationDomain = .browse
-                        selectedTab = .domainDashboard(.browse)
+                        openNavigationDomain(.browse)
                     }
                 )
             } else {
@@ -559,6 +573,15 @@ extension CiderPanelView {
         case .vaultFile(let file):
             openVaultFileDetail(file)
         }
+    }
+
+    func libraryFeedMaxVisibleItems(for savedView: SavedView) -> Int? {
+        guard selectedNavigationDomain == .browse,
+              selectedDomainRouteKind == .inbox,
+              savedView.kind == .library,
+              savedView.filterSpec.onlyUnassigned
+        else { return nil }
+        return LibraryInboxPresentationPolicy.maxVisibleItems
     }
 
     func openDashboardTab(_ tab: HomeOverviewClosedTabSummary) {

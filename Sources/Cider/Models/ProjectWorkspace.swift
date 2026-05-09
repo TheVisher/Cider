@@ -141,7 +141,7 @@ struct ProjectWorkspaceCatalog: Equatable {
             home: ProjectWorkspace(
                 id: "projects-home",
                 kind: .home,
-                title: "Projects Home",
+                title: "Projects",
                 subtitle: "Cross-project active work, testing, blockers, and next-up cards",
                 boardIDs: boards.map(\.id),
                 referenceSearchTerms: []
@@ -217,5 +217,66 @@ enum ProjectWorkspaceSidebarModel {
                 entries: [catalog.browseAllBoards]
             )
         ].filter { !$0.entries.isEmpty }
+    }
+}
+
+enum ProjectWorkspaceSidebarDestinationKind: Hashable {
+    case overview
+    case boardsGroup
+    case board(String)
+    case references
+}
+
+struct ProjectWorkspaceSidebarDestination: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let systemImage: String
+    let kind: ProjectWorkspaceSidebarDestinationKind
+    let isSelectable: Bool
+}
+
+enum ProjectWorkspaceSidebarTree {
+    static func destinations(
+        for workspace: ProjectWorkspace,
+        boards: [KanbanBoard]
+    ) -> [ProjectWorkspaceSidebarDestination] {
+        guard workspace.kind == .project else { return [] }
+
+        let boardsByID = Dictionary(uniqueKeysWithValues: boards.map { ($0.id, $0) })
+        let boardDestinations = workspace.boardIDs.compactMap { boardID -> ProjectWorkspaceSidebarDestination? in
+            guard let board = boardsByID[boardID] else { return nil }
+            return ProjectWorkspaceSidebarDestination(
+                id: "board-\(board.id)",
+                title: board.name,
+                systemImage: "square.split.2x1",
+                kind: .board(board.id),
+                isSelectable: true
+            )
+        }
+
+        return [
+            ProjectWorkspaceSidebarDestination(
+                id: "overview",
+                title: "Overview",
+                systemImage: "rectangle.3.group",
+                kind: .overview,
+                isSelectable: true
+            ),
+            ProjectWorkspaceSidebarDestination(
+                id: "boards",
+                title: "Boards",
+                systemImage: "rectangle.split.3x1",
+                kind: .boardsGroup,
+                isSelectable: false
+            )
+        ] + boardDestinations + [
+            ProjectWorkspaceSidebarDestination(
+                id: "references",
+                title: "References",
+                systemImage: "photo.on.rectangle",
+                kind: .references,
+                isSelectable: true
+            )
+        ]
     }
 }

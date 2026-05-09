@@ -5,6 +5,8 @@ struct FolderDetailView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
     let folderID: UUID
+    var navigationDomain: WorkspaceNavigationDomain? = nil
+    @Binding var contentScope: WorkspaceDomainContentScope
     @Binding var displayMode: LibraryDisplayMode
     @Binding var cardSizeScale: Double
     @Binding var selectedItemIDs: Set<String>
@@ -96,15 +98,20 @@ struct FolderDetailView: View {
         return all
     }
 
+    private var domainScopedItems: [LibraryItemV2] {
+        let entityTypes = contentScope.entityTypes(for: navigationDomain)
+        return allScopedItems.filter { entityTypes.contains($0.entityType) }
+    }
+
     private var folderItems: [LibraryItemV2] {
-        allScopedItems.filter { $0.folderID == folderID }
+        domainScopedItems.filter { $0.folderID == folderID }
     }
 
     private var childOverviewSections: [FolderOverviewSection] {
         FolderOverviewSection.buildSections(
             parentFolderID: folderID,
             folders: bookmarksViewModel.folders,
-            items: allScopedItems
+            items: domainScopedItems
         )
     }
 
@@ -319,6 +326,18 @@ struct FolderDetailView: View {
                         .foregroundColor(CiderColors.quaternary)
                 }
             }
+
+            if showsContentScopeToggle {
+                Picker("Folder contents", selection: $contentScope) {
+                    Text(contentScope.focusedTitle(for: navigationDomain)).tag(WorkspaceDomainContentScope.domainOnly)
+                    Text("All Items").tag(WorkspaceDomainContentScope.allItems)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 260, alignment: .leading)
+                .padding(.top, Spacing.xs)
+                .help("Switch between this domain's items and everything in the folder")
+            }
         }
         .padding(.horizontal, Spacing.md + Spacing.xxs)
         .padding(.top, Spacing.md)
@@ -331,6 +350,10 @@ struct FolderDetailView: View {
                 Button("Set Cover Image...") { pickCoverImage() }
             }
         }
+    }
+
+    private var showsContentScopeToggle: Bool {
+        WorkspaceDomainContentScope.defaultScope(for: navigationDomain) == .domainOnly
     }
 
     // MARK: - Cover Banner

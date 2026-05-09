@@ -23,6 +23,7 @@ struct HomeDashboardView: View {
     var onOpenVaultFile: (VaultFile) -> Void = { _ in }
     var onlyUnassigned: Bool = false
     var activeLabelIDs: Set<UUID> = []
+    var maxVisibleItems: Int?
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
     var showComingUp: Bool = true
     @Binding var scrollToItemID: String?
@@ -62,7 +63,9 @@ struct HomeDashboardView: View {
 
     /// Library feed applies current filter + sort
     private var libraryItems: [LibraryItemV2] {
-        libraryViewModel.filteredItems(using: filterSpec, sort: sortSpec)
+        let items = libraryViewModel.filteredItems(using: filterSpec, sort: sortSpec)
+        guard let maxVisibleItems else { return items }
+        return Array(items.prefix(maxVisibleItems))
     }
 
     /// Date cards and todos with approaching/today/overdue dates

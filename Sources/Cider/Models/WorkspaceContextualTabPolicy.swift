@@ -15,7 +15,13 @@ enum WorkspaceContextualTabPolicy {
         }
 
         guard let domain else { return domainTabs }
-        if domain == .aiAssistant { return allTabs.contains(.aiAssistant) ? [.aiAssistant] : [] }
+        if domain == .aiAssistant {
+            var result: [CiderTab] = [.domainDashboard(.aiAssistant)]
+            if allTabs.contains(.aiAssistant) {
+                result.append(.aiAssistant)
+            }
+            return result
+        }
         if domain == .browse { return [CiderTab.domainDashboard(.browse)] + domainTabs }
         if domain == .projects, let selectedProject {
             switch selectedProject.kind {

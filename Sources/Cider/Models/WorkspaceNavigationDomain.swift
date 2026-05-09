@@ -16,7 +16,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
 
     var title: String {
         switch self {
-        case .mainDashboard: "Dashboard"
+        case .mainDashboard: "Home"
         case .media: "Media"
         case .bookmarks: "Bookmarks"
         case .notes: "Notes"
@@ -25,13 +25,13 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         case .files: "Files"
         case .people: "People"
         case .aiAssistant: "AI Assistant"
-        case .browse: "Browse"
+        case .browse: "Library"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .mainDashboard: "Daily brief, inbox, and active work"
+        case .mainDashboard: "Command center, inbox, and active work"
         case .media: "Movies, TV, games, and references"
         case .bookmarks: "Saved links and web captures"
         case .notes: "Notes and writing"
@@ -40,13 +40,13 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         case .files: "Vault files and attachments"
         case .people: "Contacts and relationships"
         case .aiAssistant: "Ask questions and run agent workflows"
-        case .browse: "All folders, tags, and saved views"
+        case .browse: "All items, folders, tags, and saved views"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .mainDashboard: "gauge.medium"
+        case .mainDashboard: "house"
         case .media: "play.rectangle"
         case .bookmarks: "bookmark"
         case .notes: "note.text"
@@ -55,7 +55,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         case .files: "doc.text"
         case .people: "person.2"
         case .aiAssistant: "sparkles"
-        case .browse: "folder"
+        case .browse: "books.vertical"
         }
     }
 

@@ -17,30 +17,27 @@ extension CiderPanelView {
 
     @ViewBuilder
     private var normalTitleBar: some View {
-        CiderTabBar(
-            selectedTab: $selectedTab,
-            tabs: contextualTabs,
-            selectedFolderID: $selectedFolderID,
-            onCloseTab: closeTab,
-            onDeleteTab: deleteTab,
-            onReorderTab: reorderVisibleTabs,
-            onRenameTab: { id, name in savedViewStorage.renameSavedView(id, to: name) },
-            projectBoardActionTitle: projectBoardRemovalTitle,
-            onRemoveBoardFromProject: { tab in
-                _ = removeBoardFromSelectedProject(tab)
-            },
-            onAddTab: { createSavedViewFromCurrentState() },
-            onReopenTab: reopenTab,
-            onOpenBoard: { board in
-                let savedView = savedViewStorage.createKanbanView(name: board.name, boardID: board.id)
-                savedViewStorage.addToTabOrder(savedView.id)
-                selectedFolderID = nil
-                selectedTab = .savedView(id: savedView.id, name: savedView.name)
-            },
-            projectAddableBoards: projectAddableBoards,
-            onAddBoardToProject: addBoardToSelectedProject,
-            onOpenAIAssistantTab: openOrSelectAIAssistantTab
-        )
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: currentLocationSystemImage)
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+                .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
+                Text(currentLocationTitle)
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+                if let subtitle = currentLocationSubtitle {
+                    Text(subtitle)
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: Spacing.md)
+        }
         .frame(maxWidth: .infinity)
 
         Image(systemName: "safari")
@@ -73,6 +70,71 @@ extension CiderPanelView {
             }
             .help("Clipboard history (\u{2325}V)")
 
+    }
+
+    private var currentLocationTitle: String {
+        if let folderID = selectedFolderID,
+           let folder = bookmarksViewModel.folders.first(where: { $0.id == folderID }) {
+            return folder.name
+        }
+        if selectedDomainRouteKind == .folders, selectedNavigationDomain != nil {
+            return "Folders"
+        }
+        if !selectedTagIDs.isEmpty {
+            return selectedTagIDs.count == 1 ? "Tag" : "Tags"
+        }
+        if let route = currentDomainRoute, selectedNavigationDomain == .browse {
+            return route.title
+        }
+        if selectedNavigationDomain == nil {
+            return "Home"
+        }
+        if selectedNavigationDomain == .projects, let workspace = selectedProjectWorkspace {
+            return workspace.title
+        }
+        return selectedNavigationDomain?.title ?? selectedTab?.displayName ?? "Cider"
+    }
+
+    private var currentLocationSubtitle: String? {
+        if let folderID = selectedFolderID {
+            let domainTitle = selectedNavigationDomain?.title ?? "Library"
+            return "\(domainTitle) / \(bookmarksViewModel.folderPath(to: folderID).map(\.name).joined(separator: " / "))"
+        }
+        if selectedDomainRouteKind == .folders, let domain = selectedNavigationDomain {
+            return "\(domain.title) / Folder browser"
+        }
+        if let route = currentDomainRoute, selectedNavigationDomain == .browse {
+            return "Library / \(route.title)"
+        }
+        if selectedNavigationDomain == .projects,
+           selectedTab != .domainDashboard(.projects),
+           let selectedTab {
+            return "Projects / \(selectedTab.displayName)"
+        }
+        if let domain = selectedNavigationDomain {
+            return domain.subtitle
+        }
+        return "Command center and active work"
+    }
+
+    private var currentLocationSystemImage: String {
+        if selectedFolderID != nil { return "folder" }
+        if selectedDomainRouteKind == .folders, selectedNavigationDomain != nil { return "folder" }
+        if !selectedTagIDs.isEmpty { return "tag" }
+        if let route = currentDomainRoute, selectedNavigationDomain == .browse {
+            return route.systemImage
+        }
+        if selectedNavigationDomain == .projects,
+           selectedTab != .domainDashboard(.projects),
+           let selectedTab {
+            return selectedTab.systemImage
+        }
+        return selectedNavigationDomain?.systemImage ?? WorkspaceNavigationDomain.mainDashboard.systemImage
+    }
+
+    private var currentDomainRoute: WorkspaceDomainRoute? {
+        guard let domain = selectedNavigationDomain else { return nil }
+        return WorkspaceDomainRoutePolicy.routes(for: domain).first { $0.kind == selectedDomainRouteKind }
     }
 
     @ViewBuilder

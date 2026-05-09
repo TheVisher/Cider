@@ -110,6 +110,23 @@ enum LibraryItemV2: Identifiable, Hashable {
         }
     }
 
+    var isInboxItem: Bool {
+        switch self {
+        case .bookmark(let bookmark):
+            return isInboxPath(bookmark.relativePath) || (bookmark.relativePath?.isEmpty != false && bookmark.folderID == nil)
+        case .note(let note):
+            return isInboxPath(note.relativePath) || (note.relativePath.isEmpty && note.folderID == nil)
+        case .vaultFile(let file):
+            return isInboxPath(file.relativePath)
+        case .dateCard(let dateCard):
+            return dateCard.folderID == nil
+        case .contact(let contact):
+            return contact.folderID == nil
+        case .todo(let todoCard):
+            return todoCard.folderID == nil
+        }
+    }
+
     var labelIDs: Set<UUID> {
         switch self {
         case .bookmark(let bookmark):
@@ -125,6 +142,11 @@ enum LibraryItemV2: Identifiable, Hashable {
         case .vaultFile(let file):
             return Set(file.labelIDs)
         }
+    }
+
+    private func isInboxPath(_ path: String?) -> Bool {
+        guard let path else { return false }
+        return path.lowercased().hasPrefix("inbox/")
     }
 
     var dateAnchor: Date? {
