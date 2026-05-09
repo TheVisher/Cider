@@ -25,6 +25,10 @@ extension CiderPanelView {
             onDeleteTab: deleteTab,
             onReorderTab: reorderVisibleTabs,
             onRenameTab: { id, name in savedViewStorage.renameSavedView(id, to: name) },
+            projectBoardActionTitle: projectBoardRemovalTitle,
+            onRemoveBoardFromProject: { tab in
+                _ = removeBoardFromSelectedProject(tab)
+            },
             onAddTab: { createSavedViewFromCurrentState() },
             onReopenTab: reopenTab,
             onOpenBoard: { board in
@@ -33,6 +37,8 @@ extension CiderPanelView {
                 selectedFolderID = nil
                 selectedTab = .savedView(id: savedView.id, name: savedView.name)
             },
+            projectAddableBoards: projectAddableBoards,
+            onAddBoardToProject: addBoardToSelectedProject,
             onOpenAIAssistantTab: openOrSelectAIAssistantTab
         )
         .frame(maxWidth: .infinity)

@@ -66,6 +66,10 @@ extension CiderPanelView {
     }
 
     func closeTab(_ tab: CiderTab) {
+        if removeBoardFromSelectedProject(tab) {
+            return
+        }
+
         let wasSelected = selectedTab == tab
 
         if case .savedView(let id, _) = tab {
@@ -81,6 +85,71 @@ extension CiderPanelView {
             // Select adjacent tab, excluding the one just closed
             selectedTab = allTabs.first { $0 != tab }
         }
+    }
+
+    func projectBoardRemovalTitle(for tab: CiderTab) -> String? {
+        guard let association = selectedProjectBoardAssociation(for: tab) else { return nil }
+        return "Remove \(association.boardName) from \(association.project.title)"
+    }
+
+    @discardableResult
+    func removeBoardFromSelectedProject(_ tab: CiderTab) -> Bool {
+        guard let association = selectedProjectBoardAssociation(for: tab) else { return false }
+        projectAssociationStore.exclude(
+            boardID: association.boardID,
+            fromProjectID: association.project.id
+        )
+        if selectedTab == tab {
+            selectedTab = .projectOverview(projectID: association.project.id, name: "Overview")
+        }
+        return true
+    }
+
+    private func selectedProjectBoardAssociation(for tab: CiderTab) -> (
+        project: ProjectWorkspace,
+        boardID: String,
+        boardName: String
+    )? {
+        guard selectedNavigationDomain == .projects,
+              let project = selectedProjectWorkspace,
+              project.kind == .project,
+              case .savedView(let savedViewID, let tabName) = tab,
+              let savedView = savedViewStorage.savedView(for: savedViewID),
+              case .kanban(let boardID) = savedView.kind,
+              project.boardIDs.contains(boardID) else {
+            return nil
+        }
+
+        let boardName = kanbanStorage.boards.first(where: { $0.id == boardID })?.name ?? tabName
+        return (project, boardID, boardName)
+    }
+
+    var projectAddableBoards: [KanbanBoard]? {
+        guard selectedNavigationDomain == .projects,
+              let project = selectedProjectWorkspace,
+              project.kind == .project else {
+            return nil
+        }
+        return kanbanStorage.boards.filter { !project.boardIDs.contains($0.id) }
+    }
+
+    func addBoardToSelectedProject(_ board: KanbanBoard) {
+        guard selectedNavigationDomain == .projects,
+              let project = selectedProjectWorkspace,
+              project.kind == .project else {
+            return
+        }
+
+        projectAssociationStore.include(boardID: board.id, inProjectID: project.id)
+        let savedView = savedViewStorage.savedViews.first { savedView in
+            if case .kanban(let boardID) = savedView.kind {
+                return boardID == board.id
+            }
+            return false
+        } ?? savedViewStorage.createKanbanView(name: board.name, boardID: board.id)
+
+        selectedFolderID = nil
+        selectedTab = .savedView(id: savedView.id, name: savedView.name)
     }
 
     func deleteTab(_ tab: CiderTab) {

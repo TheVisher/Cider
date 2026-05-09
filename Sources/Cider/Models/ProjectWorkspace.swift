@@ -23,6 +23,51 @@ struct ProjectWorkspace: Identifiable, Codable, Hashable {
     }
 }
 
+struct ProjectWorkspaceBoardAssociations: Codable, Equatable {
+    var includedBoardIDsByProjectID: [String: Set<String>] = [:]
+    var excludedBoardIDsByProjectID: [String: Set<String>] = [:]
+
+    static let empty = ProjectWorkspaceBoardAssociations()
+
+    init(
+        includedBoardIDsByProjectID: [String: Set<String>] = [:],
+        excludedBoardIDsByProjectID: [String: Set<String>] = [:]
+    ) {
+        self.includedBoardIDsByProjectID = includedBoardIDsByProjectID
+        self.excludedBoardIDsByProjectID = excludedBoardIDsByProjectID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        includedBoardIDsByProjectID = try container.decodeIfPresent(
+            [String: Set<String>].self,
+            forKey: .includedBoardIDsByProjectID
+        ) ?? [:]
+        excludedBoardIDsByProjectID = try container.decodeIfPresent(
+            [String: Set<String>].self,
+            forKey: .excludedBoardIDsByProjectID
+        ) ?? [:]
+    }
+
+    func includes(boardID: String, inProjectID projectID: String) -> Bool {
+        includedBoardIDsByProjectID[projectID, default: []].contains(boardID)
+    }
+
+    func excludes(boardID: String, fromProjectID projectID: String) -> Bool {
+        excludedBoardIDsByProjectID[projectID, default: []].contains(boardID)
+    }
+
+    mutating func include(boardID: String, inProjectID projectID: String) {
+        includedBoardIDsByProjectID[projectID, default: []].insert(boardID)
+        excludedBoardIDsByProjectID[projectID, default: []].remove(boardID)
+    }
+
+    mutating func exclude(boardID: String, fromProjectID projectID: String) {
+        excludedBoardIDsByProjectID[projectID, default: []].insert(boardID)
+        includedBoardIDsByProjectID[projectID, default: []].remove(boardID)
+    }
+}
+
 struct ProjectWorkspaceCatalog: Equatable {
     let home: ProjectWorkspace
     let activeProjects: [ProjectWorkspace]
@@ -37,12 +82,21 @@ struct ProjectWorkspaceCatalog: Equatable {
         return allEntries.first { $0.id == id }
     }
 
-    static func defaultCatalog(boards: [KanbanBoard]) -> ProjectWorkspaceCatalog {
+    static func defaultCatalog(
+        boards: [KanbanBoard],
+        boardAssociations: ProjectWorkspaceBoardAssociations = .empty
+    ) -> ProjectWorkspaceCatalog {
         let boardIDByName = Dictionary(uniqueKeysWithValues: boards.map { (normalize($0.name), $0.id) })
-        let ciderBoardIDs = ["cider", "cider web", "cider ios"].compactMap { boardIDByName[$0] }
+        let availableBoardIDs = boards.map(\.id)
+        let ciderBoardIDs = associatedBoardIDs(
+            projectID: "cider",
+            defaultBoardIDs: ["cider"].compactMap { boardIDByName[$0] },
+            availableBoardIDs: availableBoardIDs,
+            boardAssociations: boardAssociations
+        )
 
         var activeProjects: [ProjectWorkspace] = []
-        if !ciderBoardIDs.isEmpty {
+        if boardIDByName["cider"] != nil {
             activeProjects.append(ProjectWorkspace(
                 id: "cider",
                 kind: .project,
@@ -58,7 +112,12 @@ struct ProjectWorkspaceCatalog: Equatable {
                 kind: .project,
                 title: "Cider Web",
                 subtitle: "Cider web surface and related work",
-                boardIDs: [webBoardID],
+                boardIDs: associatedBoardIDs(
+                    projectID: "cider-web",
+                    defaultBoardIDs: [webBoardID],
+                    availableBoardIDs: availableBoardIDs,
+                    boardAssociations: boardAssociations
+                ),
                 referenceSearchTerms: ["cider web"]
             ))
         }
@@ -68,7 +127,12 @@ struct ProjectWorkspaceCatalog: Equatable {
                 kind: .project,
                 title: "Cider iOS",
                 subtitle: "Cider iOS app and mobile work",
-                boardIDs: [iosBoardID],
+                boardIDs: associatedBoardIDs(
+                    projectID: "cider-ios",
+                    defaultBoardIDs: [iosBoardID],
+                    availableBoardIDs: availableBoardIDs,
+                    boardAssociations: boardAssociations
+                ),
                 referenceSearchTerms: ["cider ios", "cider mobile"]
             ))
         }
@@ -100,6 +164,31 @@ struct ProjectWorkspaceCatalog: Equatable {
             .replacingOccurrences(of: "-", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .localizedLowercase
+    }
+
+    private static func associatedBoardIDs(
+        projectID: String,
+        defaultBoardIDs: [String],
+        availableBoardIDs: [String],
+        boardAssociations: ProjectWorkspaceBoardAssociations
+    ) -> [String] {
+        var result: [String] = []
+        for boardID in defaultBoardIDs where availableBoardIDs.contains(boardID) {
+            guard !boardAssociations.excludes(boardID: boardID, fromProjectID: projectID) else { continue }
+            if !result.contains(boardID) {
+                result.append(boardID)
+            }
+        }
+
+        for boardID in availableBoardIDs {
+            guard boardAssociations.includes(boardID: boardID, inProjectID: projectID),
+                  !boardAssociations.excludes(boardID: boardID, fromProjectID: projectID),
+                  !result.contains(boardID) else {
+                continue
+            }
+            result.append(boardID)
+        }
+        return result
     }
 }
 

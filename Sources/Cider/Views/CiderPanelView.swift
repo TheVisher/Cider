@@ -8,6 +8,7 @@ struct CiderPanelView: View {
     var surface: CiderWorkspaceSurface = .mainWindow
     @ObservedObject var savedViewStorage = SavedViewStorage.shared
     @ObservedObject var kanbanStorage = KanbanStorage.shared
+    @ObservedObject var projectAssociationStore = ProjectWorkspaceAssociationStore.shared
     @StateObject var libraryViewModel = LibraryViewModel()
     @State var selectedTab: CiderTab?
     @State var isCollapsed = false
@@ -91,7 +92,10 @@ struct CiderPanelView: View {
     }
 
     var projectWorkspaceCatalog: ProjectWorkspaceCatalog {
-        ProjectWorkspaceCatalog.defaultCatalog(boards: kanbanStorage.boards)
+        ProjectWorkspaceCatalog.defaultCatalog(
+            boards: kanbanStorage.boards,
+            boardAssociations: projectAssociationStore.associations
+        )
     }
 
     var selectedProjectWorkspace: ProjectWorkspace? {

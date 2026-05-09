@@ -112,7 +112,7 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         let projectModel = ProjectWorkspaceOverviewProvider.model(for: ciderWorkspace, catalog: catalog, boards: [cider, web])
         let homeModel = ProjectWorkspaceOverviewProvider.model(for: catalog.home, catalog: catalog, boards: [cider, web])
 
-        XCTAssertEqual(projectModel.boardSummaries.map(\.boardID), ["2afee0", "08c899"])
+        XCTAssertEqual(projectModel.boardSummaries.map(\.boardID), ["2afee0"])
         XCTAssertEqual(projectModel.totals.inProgress, 1)
         XCTAssertEqual(projectModel.totals.testing, 2)
         XCTAssertEqual(projectModel.totals.blocked, 1)
