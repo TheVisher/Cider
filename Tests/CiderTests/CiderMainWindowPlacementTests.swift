@@ -42,4 +42,32 @@ struct CiderMainWindowPlacementTests {
         #expect(restored.width >= 420)
         #expect(restored.height >= 300)
     }
+
+    @Test("QA visible frame centers and clamps within the target display")
+    func qaVisibleFrameCentersAndClampsWithinTargetDisplay() {
+        let targetVisibleFrame = NSRect(x: 80, y: 40, width: 1440, height: 900)
+
+        let frame = CiderMainWindowPlacement.qaVisibleFrame(
+            in: targetVisibleFrame,
+            preferredSize: NSSize(width: 1180, height: 760),
+            minimumSize: NSSize(width: 920, height: 560)
+        )
+
+        #expect(frame.minX >= targetVisibleFrame.minX + CiderMainWindowPlacement.screenPadding)
+        #expect(frame.minY >= targetVisibleFrame.minY + CiderMainWindowPlacement.screenPadding)
+        #expect(frame.maxX <= targetVisibleFrame.maxX - CiderMainWindowPlacement.screenPadding)
+        #expect(frame.maxY <= targetVisibleFrame.maxY - CiderMainWindowPlacement.screenPadding)
+        #expect(abs(frame.midX - targetVisibleFrame.midX) < 0.001)
+        #expect(abs(frame.midY - targetVisibleFrame.midY) < 0.001)
+    }
+
+    @Test("QA visible window chrome is opt-in through environment")
+    func qaVisibleWindowChromeIsEnvironmentGated() {
+        #expect(CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: [:]) == false)
+        #expect(CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: [
+            CiderMainWindowChromePolicy.qaVisibleEnvironmentKey: "1"
+        ]))
+        #expect(CiderMainWindowChromePolicy.styleMask(qaVisible: false).contains(.borderless))
+        #expect(CiderMainWindowChromePolicy.styleMask(qaVisible: true).contains(.titled))
+    }
 }

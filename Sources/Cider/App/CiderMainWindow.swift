@@ -22,9 +22,13 @@ final class CiderMainWindow: NSWindow {
         self.framePersistenceDebouncer = framePersistenceDebouncer
         let initialFrame = NSRect(x: 0, y: 0, width: 1180, height: 760)
 
+        let usesQAVisibleWindow = CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(
+            environment: ProcessInfo.processInfo.environment
+        )
+
         super.init(
             contentRect: initialFrame,
-            styleMask: [.borderless, .resizable],
+            styleMask: CiderMainWindowChromePolicy.styleMask(qaVisible: usesQAVisibleWindow),
             backing: .buffered,
             defer: false
         )
@@ -36,6 +40,10 @@ final class CiderMainWindow: NSWindow {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
+        if usesQAVisibleWindow {
+            titleVisibility = .visible
+            titlebarAppearsTransparent = false
+        }
 
         NotificationCenter.default.addObserver(
             self,
@@ -59,7 +67,11 @@ final class CiderMainWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 
     func showCentered() {
-        if !restoreSavedFrameIfAvailable() {
+        if CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(
+            environment: ProcessInfo.processInfo.environment
+        ) {
+            showInQAVisibleFrame()
+        } else if !restoreSavedFrameIfAvailable() {
             let targetScreen = screenContainingMouse() ?? NSScreen.main
 
             if frame.origin == .zero || !isVisible(frame, on: targetScreen) {
@@ -74,6 +86,12 @@ final class CiderMainWindow: NSWindow {
         shouldPersistFrame = true
         persistCurrentFrame()
         makeKeyAndOrderFront(nil)
+        if CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(
+            environment: ProcessInfo.processInfo.environment
+        ) {
+            orderFrontRegardless()
+            logQAVisibleFrame()
+        }
     }
 
     func persistCurrentFrame() {
@@ -227,6 +245,37 @@ final class CiderMainWindow: NSWindow {
         setFrame(centeredFrame, display: true)
     }
 
+    private func showInQAVisibleFrame() {
+        let targetScreen = qaVisibleScreen()
+            ?? NSScreen.main
+            ?? screenContainingMouse()
+            ?? NSScreen.screens.first
+        guard let visibleFrame = targetScreen?.visibleFrame else {
+            center()
+            return
+        }
+
+        setFrame(
+            CiderMainWindowPlacement.qaVisibleFrame(
+                in: visibleFrame,
+                preferredSize: frame.size,
+                minimumSize: minSize
+            ),
+            display: true
+        )
+    }
+
+    private func qaVisibleScreen() -> NSScreen? {
+        NSScreen.screens.first {
+            $0.frame.origin == .zero || $0.visibleFrame.origin == .zero
+        }
+    }
+
+    private func logQAVisibleFrame() {
+        let frameDescription = "x=\(Int(frame.minX)) y=\(Int(frame.minY)) width=\(Int(frame.width)) height=\(Int(frame.height))"
+        print("CIDER_QA_WINDOW visible \(frameDescription)")
+    }
+
     private func restoreSavedFrameIfAvailable() -> Bool {
         guard CiderConfig.load().rememberPanelPosition,
               let snapshot = frameStore.snapshot() else {
@@ -279,6 +328,24 @@ final class CiderMainWindow: NSWindow {
         framePersistenceDebouncer.flush { [weak self] in
             self?.persistCurrentFrame()
         }
+    }
+}
+
+enum CiderMainWindowChromePolicy {
+    static let qaVisibleEnvironmentKey = "CIDER_QA_VISIBLE_WINDOW"
+
+    static func usesQAVisibleWindowChrome(environment: [String: String]) -> Bool {
+        guard let value = environment[qaVisibleEnvironmentKey]?.lowercased() else {
+            return false
+        }
+        return ["1", "true", "yes", "on"].contains(value)
+    }
+
+    static func styleMask(qaVisible: Bool) -> NSWindow.StyleMask {
+        if qaVisible {
+            return [.titled, .closable, .miniaturizable, .resizable]
+        }
+        return [.borderless, .resizable]
     }
 }
 

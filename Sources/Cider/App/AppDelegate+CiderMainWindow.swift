@@ -7,14 +7,19 @@ extension AppDelegate {
     func configureCiderMainWindow() {
         guard bookmarksViewModel != nil, notesViewModel != nil else { return }
 
-        let window = CiderMainWindow()
-        ciderMainWindow = window
+        if CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(
+            environment: ProcessInfo.processInfo.environment
+        ) {
+            qaCiderMainWindow = makeQACiderMainWindow()
+        } else {
+            let window = CiderMainWindow()
+            ciderMainWindow = window
+        }
         updateCiderMainWindowView()
     }
 
     func updateCiderMainWindowView() {
-        guard let window = ciderMainWindow,
-              let bookmarksViewModel,
+        guard let bookmarksViewModel,
               let notesViewModel else { return }
 
         let windowView = CiderPanelView(
@@ -24,7 +29,11 @@ extension AppDelegate {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-        window.contentView = CiderMainWindowHostingView(rootView: windowView)
+        if let qaCiderMainWindow {
+            qaCiderMainWindow.contentView = NSHostingView(rootView: windowView)
+        } else {
+            ciderMainWindow?.contentView = CiderMainWindowHostingView(rootView: windowView)
+        }
     }
 
     func observeCiderMainWindowNotifications() {
@@ -86,22 +95,31 @@ extension AppDelegate {
     }
 
     func showCiderMainWindow() {
-        guard let window = ciderMainWindow else { return }
-        window.showCentered()
+        if let qaCiderMainWindow {
+            showQACiderMainWindow(qaCiderMainWindow)
+        } else {
+            guard let window = ciderMainWindow else { return }
+            window.showCentered()
+        }
     }
 
     func hideCiderMainWindow() {
+        qaCiderMainWindow?.orderOut(nil)
         ciderMainWindow?.persistCurrentFrame()
         ciderMainWindow?.orderOut(nil)
     }
 
     func minimizeCiderMainWindow() {
+        if let qaCiderMainWindow {
+            qaCiderMainWindow.miniaturize(nil)
+            return
+        }
         ciderMainWindow?.persistCurrentFrame()
         ciderMainWindow?.miniaturize(nil)
     }
 
     func maximizeCiderMainWindow() {
-        ciderMainWindow?.zoom(nil)
+        (qaCiderMainWindow ?? ciderMainWindow)?.zoom(nil)
     }
 
     private func apply(_ transition: CiderSurfaceTransition) {
@@ -118,5 +136,46 @@ extension AppDelegate {
         if transition.shouldActivateApp {
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    private func makeQACiderMainWindow() -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Cider"
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 920, height: 560)
+        return window
+    }
+
+    private func showQACiderMainWindow(_ window: NSWindow) {
+        let targetScreen = NSScreen.screens.first {
+            $0.frame.origin == .zero || $0.visibleFrame.origin == .zero
+        } ?? NSScreen.main ?? NSScreen.screens.first
+
+        if let visibleFrame = targetScreen?.visibleFrame {
+            window.setFrame(
+                CiderMainWindowPlacement.qaVisibleFrame(
+                    in: visibleFrame,
+                    preferredSize: window.frame.size,
+                    minimumSize: window.minSize
+                ),
+                display: true
+            )
+        } else {
+            window.center()
+        }
+
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+
+        let frame = window.frame
+        print("CIDER_QA_WINDOW visible x=\(Int(frame.minX)) y=\(Int(frame.minY)) width=\(Int(frame.width)) height=\(Int(frame.height))")
     }
 }

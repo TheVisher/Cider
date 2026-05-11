@@ -10,23 +10,49 @@ final class CiderLivePerformanceRecorder {
     private let isEnabled: Bool
     private let jankThresholdSeconds: TimeInterval
     private let logSink: CiderLivePerformanceLogSink
+    private let hangMonitor: CiderMainThreadHangMonitor?
     private var lastTimestamp: TimeInterval?
+    private var sessionStarted = false
 
     init(
         isEnabled: Bool,
         jankThresholdSeconds: TimeInterval = 1.0 / 30.0,
-        logSink: CiderLivePerformanceLogSink = .default
+        logSink: CiderLivePerformanceLogSink = .default,
+        hangMonitor: CiderMainThreadHangMonitor? = nil
     ) {
         self.isEnabled = isEnabled
         self.jankThresholdSeconds = jankThresholdSeconds
         self.logSink = logSink
+        self.hangMonitor = hangMonitor
         self.currentSummary = CiderLivePerformanceSummary(context: .unknown)
+    }
+
+    func startSession(surface: String) {
+        guard isEnabled, !sessionStarted else { return }
+        sessionStarted = true
+        logSink.write("CIDER_PERF session_start surface=\"\(Self.escape(surface))\" \(currentSummary.context.logFields)")
+        hangMonitor?.start(initialContext: currentSummary.context)
     }
 
     func updateContext(_ context: CiderLivePerformanceContext) {
         guard isEnabled else { return }
         currentSummary.context = context
+        hangMonitor?.updateContext(context)
         logSink.write("CIDER_PERF context \(context.logFields)")
+    }
+
+    func recordNavigation(
+        action: String,
+        from previous: CiderLivePerformanceNavigationSnapshot,
+        to next: CiderLivePerformanceNavigationSnapshot
+    ) {
+        guard isEnabled else { return }
+        logSink.write(
+            "CIDER_NAV action=\"\(Self.escape(action))\" " +
+            "\(previous.logFields(prefix: "from")) " +
+            "\(next.logFields(prefix: "to")) " +
+            currentSummary.context.logFields
+        )
     }
 
     func recordFrame(
@@ -59,6 +85,7 @@ final class CiderLivePerformanceRecorder {
     func flushSession(reason: String) {
         guard isEnabled else { return }
         logSink.write(currentSummary.summaryLine(reason: reason))
+        hangMonitor?.stop()
     }
 
     private static func fromEnvironment() -> CiderLivePerformanceRecorder {
@@ -72,7 +99,13 @@ final class CiderLivePerformanceRecorder {
             logSink: CiderLivePerformanceLogSink(
                 logURL: logURL ?? CiderLivePerformanceLogSink.defaultLogURL,
                 mirrorsToConsole: true
-            )
+            ),
+            hangMonitor: isEnabled ? CiderMainThreadHangMonitor(
+                logSink: CiderLivePerformanceLogSink(
+                    logURL: logURL ?? CiderLivePerformanceLogSink.defaultLogURL,
+                    mirrorsToConsole: true
+                )
+            ) : nil
         )
     }
 
@@ -83,6 +116,11 @@ final class CiderLivePerformanceRecorder {
 
     private static func format(_ value: CGFloat) -> String {
         String(format: "%.1f", Double(value))
+    }
+
+    private static func escape(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
 
@@ -111,6 +149,46 @@ struct CiderLivePerformanceContext: Codable, Equatable, Sendable {
             fields += " visible_items=unknown"
         }
         return fields
+    }
+
+    private static func escape(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+}
+
+struct CiderLivePerformanceNavigationSnapshot: Codable, Equatable, Sendable {
+    let domain: String?
+    let route: String?
+    let tab: String?
+    let hasFolder: Bool
+    let tagCount: Int
+
+    init(
+        domain: String?,
+        route: String?,
+        tab: String?,
+        hasFolder: Bool = false,
+        tagCount: Int = 0
+    ) {
+        self.domain = domain
+        self.route = route
+        self.tab = tab
+        self.hasFolder = hasFolder
+        self.tagCount = tagCount
+    }
+
+    var logFields: String {
+        logFields(prefix: nil)
+    }
+
+    func logFields(prefix: String?) -> String {
+        let fieldPrefix = prefix.map { "\($0)_" } ?? ""
+        return "\(fieldPrefix)domain=\"\(Self.escape(domain ?? "none"))\" " +
+            "\(fieldPrefix)route=\"\(Self.escape(route ?? "none"))\" " +
+            "\(fieldPrefix)tab=\"\(Self.escape(tab ?? "none"))\" " +
+            "\(fieldPrefix)folder=\(hasFolder) " +
+            "\(fieldPrefix)tag_count=\(tagCount)"
     }
 
     private static func escape(_ value: String) -> String {

@@ -31,6 +31,24 @@ Choose the narrowest meaningful verification:
 - floating/detail pop-out surfaces, focus return, resizing, and pointer interactions
 - screen capture and drag/drop routing when touched
 
+## Hang and Crash Capture
+
+When chasing intermittent rainbow-spinner hangs or unexplained app freezes, launch Cider from the repo with:
+
+```bash
+./script/build_and_run.sh --telemetry
+```
+
+Keep that terminal running while using the app. It writes a timestamped session under `~/Library/Logs/Cider/` with:
+
+- `unified.log`: macOS unified logs for the Cider process and `com.cider.app` subsystem.
+- `performance.log`: `CIDER_PERF` context/frame samples, `CIDER_NAV` route changes, and `CIDER_HANG` suspected main-thread stalls.
+- `stdout.log` and `stderr.log`: app process output.
+- `process-stats.tsv`: periodic CPU, memory, process state, and elapsed-time samples.
+- `samples/`: periodic `sample` stack captures for post-hang inspection.
+
+If Cider hangs, leave the telemetry command running long enough for at least one more sample, then stop it with `Ctrl-C`. Put the log directory path, reproduction steps, visible UI state, nearest `CIDER_NAV` line, any `CIDER_HANG` line, and the nearest sample file on the relevant bug card.
+
 ## Release Gate
 
 Before a user-facing build:

@@ -44,6 +44,24 @@ enum CiderMainWindowPlacement {
         return clamped
     }
 
+    static func qaVisibleFrame(
+        in visibleFrame: NSRect,
+        preferredSize: NSSize,
+        minimumSize: NSSize
+    ) -> NSRect {
+        let size = clampedSize(preferredSize, in: visibleFrame, minimumSize: minimumSize)
+        return clampedFrame(
+            NSRect(
+                x: visibleFrame.midX - size.width / 2,
+                y: visibleFrame.midY - size.height / 2,
+                width: size.width,
+                height: size.height
+            ),
+            in: visibleFrame,
+            minimumSize: minimumSize
+        )
+    }
+
     private static func clampedSize(
         _ size: NSSize,
         in visibleFrame: NSRect,

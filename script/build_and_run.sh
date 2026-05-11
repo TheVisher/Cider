@@ -11,14 +11,21 @@ APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/$APP_NAME.app"
 
 VERIFY=0
 STREAM_LOGS=0
+TELEMETRY=0
+LOG_DIR=""
+WATCHDOG_PID=""
 
 for arg in "$@"; do
   case "$arg" in
     --verify)
       VERIFY=1
       ;;
-    --logs|--telemetry)
+    --logs)
       STREAM_LOGS=1
+      ;;
+    --telemetry)
+      STREAM_LOGS=1
+      TELEMETRY=1
       ;;
     *)
       echo "Unknown option: $arg" >&2
@@ -44,6 +51,40 @@ stop_app() {
   fi
 }
 
+start_watchdog() {
+  local pid="$1"
+  local log_dir="$2"
+  local stats_path="$log_dir/process-stats.tsv"
+  local samples_dir="$log_dir/samples"
+
+  mkdir -p "$samples_dir"
+  printf "timestamp\tpid\tstat\tcpu\tmem\trss_kb\tetime\tcommand\n" > "$stats_path"
+
+  (
+    local tick=0
+    while kill -0 "$pid" >/dev/null 2>&1; do
+      local timestamp
+      timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+      ps -p "$pid" -o pid=,stat=,%cpu=,%mem=,rss=,etime=,command= \
+        | awk -v ts="$timestamp" '{$1=$1; print ts "\t" $0}' >> "$stats_path" || true
+
+      if (( tick % 6 == 0 )); then
+        sample "$pid" 2 -file "$samples_dir/sample-$(date -u +"%Y%m%dT%H%M%SZ").txt" >/dev/null 2>&1 || true
+      fi
+
+      tick=$((tick + 1))
+      sleep 5
+    done
+  ) &
+  WATCHDOG_PID="$!"
+}
+
+cleanup() {
+  if [[ -n "$WATCHDOG_PID" ]]; then
+    kill "$WATCHDOG_PID" >/dev/null 2>&1 || true
+  fi
+}
+
 stop_app
 
 xcodebuild \
@@ -59,7 +100,24 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
-/usr/bin/open -n "$APP_PATH"
+if [[ "$STREAM_LOGS" -eq 1 ]]; then
+  LOG_DIR="${CIDER_DIAGNOSTICS_DIR:-$HOME/Library/Logs/Cider/dev-session-$(date -u +"%Y%m%dT%H%M%SZ")}"
+  mkdir -p "$LOG_DIR"
+  echo "Cider diagnostics: $LOG_DIR"
+fi
+
+if [[ "$TELEMETRY" -eq 1 ]]; then
+  /usr/bin/open \
+    -n \
+    --stdout "$LOG_DIR/stdout.log" \
+    --stderr "$LOG_DIR/stderr.log" \
+    --env "CIDER_PERF_MONITOR=1" \
+    --env "CIDER_PERF_LOG_PATH=$LOG_DIR/performance.log" \
+    --env "CIDER_QA_VISIBLE_WINDOW=1" \
+    "$APP_PATH"
+else
+  /usr/bin/open -n "$APP_PATH"
+fi
 
 if [[ "$VERIFY" -eq 1 || "$STREAM_LOGS" -eq 1 ]]; then
   for _ in {1..20}; do
@@ -77,5 +135,23 @@ if [[ "$VERIFY" -eq 1 || "$STREAM_LOGS" -eq 1 ]]; then
 fi
 
 if [[ "$STREAM_LOGS" -eq 1 ]]; then
-  /usr/bin/log stream --style compact --predicate "process == \"$APP_NAME\""
+  trap cleanup EXIT INT TERM
+  APP_PID="$(pgrep -x "$APP_NAME" | tail -1)"
+  echo "$APP_NAME pid: $APP_PID"
+
+  if [[ "$TELEMETRY" -eq 1 ]]; then
+    start_watchdog "$APP_PID" "$LOG_DIR"
+    echo "Telemetry enabled:"
+    echo "  performance: $LOG_DIR/performance.log"
+    echo "  stdout:      $LOG_DIR/stdout.log"
+    echo "  stderr:      $LOG_DIR/stderr.log"
+    echo "  stats:       $LOG_DIR/process-stats.tsv"
+    echo "  samples:     $LOG_DIR/samples"
+  fi
+
+  /usr/bin/log stream \
+    --style compact \
+    --info \
+    --predicate "process == \"$APP_NAME\" OR subsystem == \"com.cider.app\"" \
+    | tee "$LOG_DIR/unified.log"
 fi

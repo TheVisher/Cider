@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Main Cider window
     var ciderMainWindow: CiderMainWindow?
+    var qaCiderMainWindow: NSWindow?
     var floatingPanelManager: CiderFloatingPanelManager?
 
     // Undo toast
