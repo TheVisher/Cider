@@ -51,6 +51,32 @@ struct HermesSessionClientTests {
         #expect(continuation.source == "telegram")
     }
 
+    @Test("continuation resolver reads WAL-mode state database without sidecars")
+    func continuationResolverReadsWALModeStateDatabaseWithoutSidecars() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let dbURL = tempDir.appendingPathComponent("state.db")
+        try makeHermesStateDB(at: dbURL)
+        try insertSession(
+            id: "wal-session",
+            parent: nil,
+            source: "cider",
+            title: "WAL Session",
+            startedAt: 100,
+            dbURL: dbURL
+        )
+        try markDatabaseAsWALModeAndRemoveSidecars(dbURL)
+
+        let resolver = HermesSessionContinuationResolver(stateDatabaseURL: dbURL)
+        let continuation = try resolver.resolveContinuation(from: "wal-session")
+
+        #expect(continuation.activeSessionID == "wal-session")
+        #expect(continuation.lineage == ["wal-session"])
+        #expect(continuation.title == "WAL Session")
+    }
+
     @Test("service attaches explicitly chosen session")
     func serviceAttachesExplicitlyChosenSession() async throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -714,6 +740,26 @@ struct HermesSessionClientTests {
         """
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw TestSQLiteError.exec
+        }
+    }
+
+    private func markDatabaseAsWALModeAndRemoveSidecars(_ dbURL: URL) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(dbURL.path, &db) == SQLITE_OK else {
+            throw TestSQLiteError.open
+        }
+        defer { sqlite3_close(db) }
+
+        guard sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, nil) == SQLITE_OK else {
+            throw TestSQLiteError.exec
+        }
+
+        let sidecarPaths = [
+            dbURL.path + "-wal",
+            dbURL.path + "-shm"
+        ]
+        for path in sidecarPaths {
+            try? FileManager.default.removeItem(atPath: path)
         }
     }
 

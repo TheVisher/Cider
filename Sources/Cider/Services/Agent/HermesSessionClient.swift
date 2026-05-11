@@ -100,108 +100,140 @@ struct HermesSessionContinuationResolver {
     }
 
     func resolveContinuation(from sessionID: String) throws -> HermesSessionContinuation {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(stateDatabaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            throw HermesSessionClientError.stateDatabaseUnavailable(stateDatabaseURL.path)
+        try withReadOnlyDatabase { db in
+            guard let startingRecord = try sessionRecord(id: sessionID, db: db) else {
+                throw HermesSessionClientError.sessionNotFound(sessionID)
+            }
+
+            var active = startingRecord
+            var lineage = [startingRecord.id]
+            var seen = Set(lineage)
+
+            while let child = try newestChild(of: active.id, db: db), !seen.contains(child.id) {
+                active = child
+                lineage.append(child.id)
+                seen.insert(child.id)
+            }
+
+            return HermesSessionContinuation(
+                activeSessionID: active.id,
+                lineage: lineage,
+                title: active.title,
+                source: active.source,
+                startedAt: active.startedAt
+            )
         }
-        defer { sqlite3_close(db) }
-
-        guard let startingRecord = try sessionRecord(id: sessionID, db: db) else {
-            throw HermesSessionClientError.sessionNotFound(sessionID)
-        }
-
-        var active = startingRecord
-        var lineage = [startingRecord.id]
-        var seen = Set(lineage)
-
-        while let child = try newestChild(of: active.id, db: db), !seen.contains(child.id) {
-            active = child
-            lineage.append(child.id)
-            seen.insert(child.id)
-        }
-
-        return HermesSessionContinuation(
-            activeSessionID: active.id,
-            lineage: lineage,
-            title: active.title,
-            source: active.source,
-            startedAt: active.startedAt
-        )
     }
 
     func latestSession(source preferredSource: String, newerThan sessionID: String) throws -> HermesSessionContinuation? {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(stateDatabaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            throw HermesSessionClientError.stateDatabaseUnavailable(stateDatabaseURL.path)
+        try withReadOnlyDatabase { db in
+            guard let current = try sessionRecord(id: sessionID, db: db),
+                  let latest = try latestSessionRecord(source: preferredSource, db: db),
+                  latest.startedAt > current.startedAt
+            else { return nil }
+
+            return try resolveContinuation(from: latest.id)
         }
-        defer { sqlite3_close(db) }
-
-        guard let current = try sessionRecord(id: sessionID, db: db),
-              let latest = try latestSessionRecord(source: preferredSource, db: db),
-              latest.startedAt > current.startedAt
-        else { return nil }
-
-        return try resolveContinuation(from: latest.id)
     }
 
     func latestSession(source preferredSource: String? = "telegram") throws -> HermesSessionContinuation? {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(stateDatabaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            throw HermesSessionClientError.stateDatabaseUnavailable(stateDatabaseURL.path)
-        }
-        defer { sqlite3_close(db) }
+        try withReadOnlyDatabase { db in
+            if let preferredSource,
+               let preferred = try latestSessionRecord(source: preferredSource, db: db) {
+                return try resolveContinuation(from: preferred.id)
+            }
 
-        if let preferredSource,
-           let preferred = try latestSessionRecord(source: preferredSource, db: db) {
-            return try resolveContinuation(from: preferred.id)
+            guard let any = try latestSessionRecord(source: nil, db: db) else { return nil }
+            return try resolveContinuation(from: any.id)
         }
-
-        guard let any = try latestSessionRecord(source: nil, db: db) else { return nil }
-        return try resolveContinuation(from: any.id)
     }
 
     func latestSession(title: String) throws -> HermesSessionContinuation? {
         let trimmedTitle = CiderAgentChatRegistry.sanitizedHermesTitle(title)
         guard !trimmedTitle.isEmpty else { return nil }
 
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(stateDatabaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            throw HermesSessionClientError.stateDatabaseUnavailable(stateDatabaseURL.path)
-        }
-        defer { sqlite3_close(db) }
+        return try withReadOnlyDatabase { db in
+            guard let latest = try latestSessionRecord(title: trimmedTitle, db: db) else {
+                return nil
+            }
 
-        guard let latest = try latestSessionRecord(title: trimmedTitle, db: db) else {
-            return nil
+            let lineage = try lineageEnding(at: latest.id, db: db)
+            return HermesSessionContinuation(
+                activeSessionID: latest.id,
+                lineage: lineage.isEmpty ? [latest.id] : lineage,
+                title: latest.title,
+                source: latest.source,
+                startedAt: latest.startedAt
+            )
         }
-
-        let lineage = try lineageEnding(at: latest.id, db: db)
-        return HermesSessionContinuation(
-            activeSessionID: latest.id,
-            lineage: lineage.isEmpty ? [latest.id] : lineage,
-            title: latest.title,
-            source: latest.source,
-            startedAt: latest.startedAt
-        )
     }
 
     func sessionIDs(source preferredSource: String, in sessionIDs: [String]) throws -> [String] {
         guard !sessionIDs.isEmpty else { return [] }
 
+        return try withReadOnlyDatabase { db in
+            var matching = Set<String>()
+            for sessionID in sessionIDs {
+                guard let record = try sessionRecord(id: sessionID, db: db),
+                      record.source == preferredSource
+                else { continue }
+                matching.insert(record.id)
+            }
+
+            return sessionIDs.filter { matching.contains($0) }
+        }
+    }
+
+    private func withReadOnlyDatabase<T>(_ operation: (OpaquePointer?) throws -> T) throws -> T {
+        if shouldOpenImmutableReadOnlyDatabaseFirst {
+            return try withDatabase(
+                path: immutableReadOnlyDatabaseURI(),
+                flags: SQLITE_OPEN_READONLY | SQLITE_OPEN_URI,
+                operation
+            )
+        }
+
+        do {
+            return try withDatabase(
+                path: stateDatabaseURL.path,
+                flags: SQLITE_OPEN_READONLY,
+                operation
+            )
+        } catch let error as HermesSessionClientError
+            where error.shouldRetryWithImmutableReadOnlyDatabase {
+            return try withDatabase(
+                path: immutableReadOnlyDatabaseURI(),
+                flags: SQLITE_OPEN_READONLY | SQLITE_OPEN_URI,
+                operation
+            )
+        }
+    }
+
+    private func withDatabase<T>(
+        path: String,
+        flags: Int32,
+        _ operation: (OpaquePointer?) throws -> T
+    ) throws -> T {
         var db: OpaquePointer?
-        guard sqlite3_open_v2(stateDatabaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK else {
+            sqlite3_close(db)
             throw HermesSessionClientError.stateDatabaseUnavailable(stateDatabaseURL.path)
         }
         defer { sqlite3_close(db) }
 
-        var matching = Set<String>()
-        for sessionID in sessionIDs {
-            guard let record = try sessionRecord(id: sessionID, db: db),
-                  record.source == preferredSource
-            else { continue }
-            matching.insert(record.id)
-        }
+        return try operation(db)
+    }
 
-        return sessionIDs.filter { matching.contains($0) }
+    private var shouldOpenImmutableReadOnlyDatabaseFirst: Bool {
+        FileManager.default.fileExists(atPath: stateDatabaseURL.path)
+            && !FileManager.default.fileExists(atPath: stateDatabaseURL.path + "-wal")
+    }
+
+    private func immutableReadOnlyDatabaseURI() -> String {
+        let allowedCharacters = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "?"))
+        let encodedPath = stateDatabaseURL.path.addingPercentEncoding(withAllowedCharacters: allowedCharacters)
+            ?? stateDatabaseURL.path
+        return "file:\(encodedPath)?mode=ro&immutable=1"
     }
 
     private func sessionRecord(id: String, db: OpaquePointer?) throws -> HermesSessionRecord? {
@@ -345,6 +377,20 @@ struct HermesSessionContinuationResolver {
 
     private func errorMessage(_ db: OpaquePointer?) -> String {
         db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown SQLite error"
+    }
+}
+
+private extension HermesSessionClientError {
+    var shouldRetryWithImmutableReadOnlyDatabase: Bool {
+        switch self {
+        case .stateDatabaseUnavailable:
+            return true
+        case .sqlitePrepare(let detail), .sqliteStep(let detail):
+            return detail.localizedCaseInsensitiveContains("unable to open database")
+                || detail.localizedCaseInsensitiveContains("cannot open file")
+        default:
+            return false
+        }
     }
 }
 
