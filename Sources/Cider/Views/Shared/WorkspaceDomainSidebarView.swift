@@ -86,7 +86,10 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
     }
 
     private var contextualDomains: [WorkspaceNavigationDomain] {
-        WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: selectedDomain)
+        WorkspaceDomainSidebarModel.primaryDomains(
+            selectedDomain: selectedDomain,
+            pinnedSpaces: pinnedSpaces
+        )
     }
 
     private var sidebarSearchField: some View {

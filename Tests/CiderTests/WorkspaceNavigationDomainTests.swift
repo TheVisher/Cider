@@ -58,6 +58,36 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertFalse(domains.contains(.files))
     }
 
+    func testPinnedMediaSpaceReplacesGenericMediaDomainInPersistentSidebar() {
+        let mediaSpace = CiderSpace(
+            id: "media-space",
+            name: "Media",
+            systemImage: "play.rectangle",
+            purpose: "Movies, shows, games, books, and entertainment tracking.",
+            preset: .media,
+            isPinned: true,
+            aiInstructions: "Route media here.",
+            routingHints: [],
+            defaultViews: [.overview],
+            rootRelativePath: "Spaces/Media"
+        )
+
+        let domains = WorkspaceDomainSidebarModel.primaryDomains(
+            selectedDomain: .browse,
+            pinnedSpaces: [mediaSpace]
+        )
+
+        XCTAssertFalse(domains.contains(.media))
+        XCTAssertEqual(domains, [
+            .mainDashboard,
+            .browse,
+            .projects,
+            .tasksEvents,
+            .people,
+            .aiAssistant
+        ])
+    }
+
     func testLibraryRoutesExposeContentTypesForFastFiltering() {
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .browse).map(\.kind),

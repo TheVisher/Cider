@@ -91,7 +91,14 @@ enum WorkspaceDomainRoutePolicy {
 
 enum WorkspaceDomainSidebarModel {
     static func primaryDomains(selectedDomain: WorkspaceNavigationDomain?) -> [WorkspaceNavigationDomain] {
-        [
+        primaryDomains(selectedDomain: selectedDomain, pinnedSpaces: [])
+    }
+
+    static func primaryDomains(
+        selectedDomain: WorkspaceNavigationDomain?,
+        pinnedSpaces: [CiderSpace]
+    ) -> [WorkspaceNavigationDomain] {
+        var domains: [WorkspaceNavigationDomain] = [
             .mainDashboard,
             .browse,
             .media,
@@ -100,6 +107,12 @@ enum WorkspaceDomainSidebarModel {
             .people,
             .aiAssistant
         ]
+
+        if pinnedSpaces.contains(where: { $0.preset == .media }) {
+            domains.removeAll { $0 == .media }
+        }
+
+        return domains
     }
 
     static func isDomainSelected(
