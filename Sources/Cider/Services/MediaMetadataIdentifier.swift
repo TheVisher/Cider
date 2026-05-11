@@ -199,6 +199,35 @@ struct MediaMetadataIdentifier {
             )
         }
 
+        if host.hasSuffix("tv.apple.com"), let mediaKindIndex = components.firstIndex(where: { $0 == "movie" || $0 == "show" }) {
+            let idIndex = mediaKindIndex + 2
+            guard idIndex < components.count else { return nil }
+            let mediaKind = components[mediaKindIndex]
+            let appleID = components[idIndex]
+            return candidate(
+                providerKey: "appleTV",
+                providerValue: "\(mediaKind):\(appleID)",
+                id: "apple-tv-\(mediaKind)-\(appleID)",
+                type: mediaKind == "show" ? .show : .movie,
+                title: title(from: [components[mediaKindIndex + 1]], fallback: bookmark.title),
+                confidence: 0.9,
+                reason: "Apple TV URL contained stable \(mediaKind) id \(appleID)."
+            )
+        }
+
+        if host.hasSuffix("boardgamegeek.com"), components.count >= 2, components[0] == "boardgame", components[1].allSatisfy(\.isNumber) {
+            let gameID = components[1]
+            return candidate(
+                providerKey: "boardGameGeek",
+                providerValue: gameID,
+                id: "boardgamegeek-\(gameID)",
+                type: .game,
+                title: title(from: components.dropFirst(2), fallback: bookmark.title),
+                confidence: 0.9,
+                reason: "BoardGameGeek board game URL contained stable game id \(gameID)."
+            )
+        }
+
         return nil
     }
 

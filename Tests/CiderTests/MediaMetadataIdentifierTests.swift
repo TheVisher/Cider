@@ -35,6 +35,14 @@ final class MediaMetadataIdentifierTests: XCTestCase {
             try candidate("https://app.thestorygraph.com/books/9780593321201").externalIDs["storygraph"],
             "9780593321201"
         )
+        XCTAssertEqual(
+            try candidate("https://tv.apple.com/us/movie/dune-part-two/umc.cmc.363aycnv6vy9qgekvew6fveb7").externalIDs["appleTV"],
+            "movie:umc.cmc.363aycnv6vy9qgekvew6fveb7"
+        )
+        XCTAssertEqual(
+            try candidate("https://boardgamegeek.com/boardgame/174430/gloomhaven").externalIDs["boardGameGeek"],
+            "174430"
+        )
     }
 
     func testProviderURLParsersAssignExpectedMediaTypes() throws {
