@@ -43,6 +43,8 @@ struct MediaSpaceDashboardView: View {
                         sectionDetail(for: activeSection)
                     } else {
                         collectionMapPanel
+                        mediaHealthPanel
+                        recommendedActionsPanel
                         featuredShelfPanel
                         tasteProfilePanel
                     }
@@ -222,6 +224,120 @@ struct MediaSpaceDashboardView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var mediaHealthPanel: some View {
+        HomeOverviewPanel(title: "Media Library Health") {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 138), spacing: Spacing.xs)], spacing: Spacing.xs) {
+                    mediaFact("Structured", value: "\(model.structuredItemCount)")
+                    mediaFact("Source-only", value: "\(model.sourceOnlyItemCount)")
+                    mediaFact("Needs sorting", value: "\(model.needsSortingCount)")
+                    mediaFact("Sources", value: "\(model.sourceSummaries.count)")
+                }
+
+                if !model.statusBreakdown.isEmpty {
+                    TagFlowLayout(spacing: Spacing.xs) {
+                        ForEach(model.statusBreakdown) { status in
+                            Label("\(status.displayName) \(status.count)", systemImage: "circle.fill")
+                                .font(CiderFont.captionSemibold)
+                                .foregroundColor(CiderColors.secondary)
+                                .lineLimit(1)
+                                .padding(.horizontal, Spacing.xs)
+                                .padding(.vertical, Spacing.hairline)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(CiderColors.surfaceInput)
+                                )
+                        }
+                    }
+                }
+
+                if !model.sourceSummaries.isEmpty {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("Top sources")
+                            .font(CiderFont.labelSemibold)
+                            .foregroundColor(CiderColors.primary)
+
+                        ForEach(model.sourceSummaries.prefix(4)) { source in
+                            HStack(spacing: Spacing.xs) {
+                                Image(systemName: "link")
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(CiderColors.tertiary)
+                                    .frame(width: Spacing.lg)
+
+                                Text(source.host)
+                                    .font(CiderFont.captionSemibold)
+                                    .foregroundColor(CiderColors.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+
+                                Spacer(minLength: 0)
+
+                                Text("\(source.count)")
+                                    .font(CiderFont.captionSemibold)
+                                    .foregroundColor(CiderColors.tertiary)
+                            }
+                        }
+                    }
+                } else {
+                    mediaEmptyState(
+                        title: "No sources summarized yet",
+                        message: "As MediaItems and media bookmarks arrive, this panel will show whether Media is structured or still source-only."
+                    )
+                }
+            }
+        }
+    }
+
+    private var recommendedActionsPanel: some View {
+        HomeOverviewPanel(title: "Next Best Actions") {
+            if model.recommendedActions.isEmpty {
+                mediaEmptyState(
+                    title: "Media Space is calm",
+                    message: "No review queue or obvious empty shelves need attention right now."
+                )
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: Spacing.sm)], spacing: Spacing.sm) {
+                    ForEach(model.recommendedActions) { action in
+                        Button {
+                            selectSection(action.section)
+                        } label: {
+                            VStack(alignment: .leading, spacing: Spacing.xs) {
+                                Image(systemName: action.systemImage)
+                                    .font(CiderFont.bodySemibold)
+                                    .foregroundColor(CiderColors.controlAccent)
+
+                                Text(action.title)
+                                    .font(CiderFont.labelSemibold)
+                                    .foregroundColor(CiderColors.primary)
+                                    .lineLimit(2)
+
+                                Text(action.message)
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(CiderColors.tertiary)
+                                    .lineLimit(2)
+
+                                Text(action.actionLabel)
+                                    .font(CiderFont.captionSemibold)
+                                    .foregroundColor(CiderColors.controlAccent)
+                            }
+                            .padding(Spacing.sm)
+                            .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
+                            .background(
+                                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                                    .fill(CiderColors.surfaceInput)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                                            .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }

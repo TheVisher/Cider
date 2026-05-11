@@ -154,6 +154,42 @@ struct MediaSpaceSectionSummary: Identifiable, Hashable {
     var previewItems: [MediaSpaceItem] { Array(items.prefix(8)) }
 }
 
+struct MediaSpaceSourceSummary: Identifiable, Hashable {
+    let host: String
+    let count: Int
+
+    var id: String { host }
+}
+
+struct MediaSpaceStatusSummary: Identifiable, Hashable {
+    let status: MediaItemStatus
+    let count: Int
+
+    var id: MediaItemStatus { status }
+
+    var displayName: String {
+        switch status {
+        case .unknown: "Unknown"
+        case .want: "Want"
+        case .consuming: "In Progress"
+        case .completed: "Completed"
+        case .paused: "Paused"
+        case .abandoned: "Abandoned"
+        case .favorite: "Favorite"
+        }
+    }
+}
+
+struct MediaSpaceRecommendedAction: Identifiable, Hashable {
+    let section: MediaSpaceSectionKind
+    let title: String
+    let message: String
+    let actionLabel: String
+    let systemImage: String
+
+    var id: String { "\(section.rawValue)-\(title)" }
+}
+
 struct MediaSpaceDashboardModel: Equatable {
     let summaries: [MediaSpaceSectionSummary]
 
@@ -183,6 +219,90 @@ struct MediaSpaceDashboardModel: Equatable {
 
     var reviewItems: [MediaSpaceItem] {
         items(for: .inbox)
+    }
+
+    var allItems: [MediaSpaceItem] {
+        summaries.flatMap(\.items)
+    }
+
+    var structuredItemCount: Int {
+        allItems.filter { $0.detailMode == .structuredMediaItem }.count
+    }
+
+    var sourceOnlyItemCount: Int {
+        allItems.filter { $0.detailMode == .sourceBookmark }.count
+    }
+
+    var sourceSummaries: [MediaSpaceSourceSummary] {
+        var counts: [String: Int] = [:]
+        var orderedHosts: [String] = []
+
+        for item in allItems {
+            let host = item.sourceSubtitle.isEmpty ? "Unknown source" : item.sourceSubtitle
+            if counts[host] == nil {
+                orderedHosts.append(host)
+            }
+            counts[host, default: 0] += 1
+        }
+
+        return orderedHosts
+            .map { MediaSpaceSourceSummary(host: $0, count: counts[$0, default: 0]) }
+            .sorted { lhs, rhs in
+                if lhs.count != rhs.count { return lhs.count > rhs.count }
+                guard let lhsIndex = orderedHosts.firstIndex(of: lhs.host), let rhsIndex = orderedHosts.firstIndex(of: rhs.host) else {
+                    return lhs.host < rhs.host
+                }
+                return lhsIndex < rhsIndex
+            }
+    }
+
+    var statusBreakdown: [MediaSpaceStatusSummary] {
+        let statuses = allItems.compactMap(\.mediaItem?.status).filter { $0 != .unknown }
+        let counts = Dictionary(statuses.map { ($0, 1) }, uniquingKeysWith: +)
+        let preferredOrder: [MediaItemStatus] = [.want, .consuming, .favorite, .completed, .paused, .abandoned]
+
+        return preferredOrder.compactMap { status in
+            guard let count = counts[status], count > 0 else { return nil }
+            return MediaSpaceStatusSummary(status: status, count: count)
+        }
+    }
+
+    var recommendedActions: [MediaSpaceRecommendedAction] {
+        var actions: [MediaSpaceRecommendedAction] = []
+
+        if needsSortingCount > 0 {
+            actions.append(MediaSpaceRecommendedAction(
+                section: .inbox,
+                title: "Review \(needsSortingCount) ambiguous \(needsSortingCount == 1 ? "save" : "saves")",
+                message: "Keep conservative media guesses out of the wrong shelf.",
+                actionLabel: "Sort now",
+                systemImage: "tray.full"
+            ))
+        }
+
+        let tasteCount = tasteSignals().count
+        if tasteCount > 0 {
+            actions.append(MediaSpaceRecommendedAction(
+                section: .tasteProfile,
+                title: "Review \(tasteCount) taste \(tasteCount == 1 ? "signal" : "signals")",
+                message: "Turn favorites and Hermes context into reviewable media ideas later.",
+                actionLabel: "Open signals",
+                systemImage: "sparkles"
+            ))
+        }
+
+        let seedSections: [MediaSpaceSectionKind] = [.movies, .shows, .games, .books, .references]
+        for section in seedSections where items(for: section).isEmpty {
+            actions.append(MediaSpaceRecommendedAction(
+                section: section,
+                title: "Seed \(section.displayName)",
+                message: "Capture or identify saved \(section.displayName.lowercased()) so this shelf stops being empty.",
+                actionLabel: "View shelf",
+                systemImage: section.systemImage
+            ))
+        }
+
+        return Array(actions.prefix(4))
     }
 
     func summary(for section: MediaSpaceSectionKind) -> MediaSpaceSectionSummary {

@@ -171,6 +171,74 @@ final class MediaSpaceDashboardModelTests: XCTestCase {
         XCTAssertEqual(model.featuredItems.map(\.bookmark.title), ["Old Movie", "Recent Game"])
     }
 
+    func testDashboardHealthSummarizesStructuredItemsSourcesAndStatuses() {
+        let steamBookmark = bookmark(
+            title: "Hades II on Steam",
+            url: "https://store.steampowered.com/app/1145350/Hades_II/"
+        )
+        let letterboxdBookmark = bookmark(
+            title: "Dune: Part Two",
+            url: "https://letterboxd.com/film/dune-part-two/"
+        )
+        let reviewBookmark = bookmark(
+            title: "Interesting media thing",
+            url: "https://example.com/save"
+        )
+        let game = MediaItem(
+            id: "steam-1145350",
+            type: .game,
+            title: "Hades II",
+            status: .want,
+            sourceBookmarkIDs: [steamBookmark.id],
+            sourceURLs: [steamBookmark.urlString],
+            confidence: 0.98
+        )
+        let movie = MediaItem(
+            id: "letterboxd-dune",
+            type: .movie,
+            title: "Dune: Part Two",
+            status: .completed,
+            sourceBookmarkIDs: [letterboxdBookmark.id],
+            sourceURLs: [letterboxdBookmark.urlString],
+            confidence: 0.95
+        )
+
+        let model = MediaSpaceDashboardModel.make(
+            bookmarks: [steamBookmark, letterboxdBookmark, reviewBookmark],
+            mediaItems: [game, movie]
+        )
+
+        XCTAssertEqual(model.structuredItemCount, 2)
+        XCTAssertEqual(model.sourceOnlyItemCount, 1)
+        XCTAssertEqual(model.statusBreakdown.map(\.status), [.want, .completed])
+        XCTAssertEqual(model.statusBreakdown.map(\.count), [1, 1])
+        XCTAssertEqual(model.sourceSummaries.map(\.host), ["letterboxd.com", "store.steampowered.com", "example.com"])
+        XCTAssertEqual(model.sourceSummaries.map(\.count), [1, 1, 1])
+    }
+
+    func testRecommendedActionsPrioritizeNeedsSortingThenTasteSignalsThenEmptySections() {
+        let note = Note(
+            title: "Favorite games",
+            content: "I loved Outer Wilds.",
+            modifiedAt: Date(timeIntervalSince1970: 5),
+            relativePath: "Notes/Favorites.md"
+        )
+        let model = MediaSpaceDashboardModel.make(
+            bookmarks: [bookmark(title: "Interesting media thing", url: "https://example.com/save")],
+            mediaItems: [],
+            notes: [note]
+        )
+
+        XCTAssertEqual(model.recommendedActions.map(\.section), [.inbox, .tasteProfile, .movies, .shows])
+        XCTAssertEqual(model.recommendedActions.map(\.title), [
+            "Review 1 ambiguous save",
+            "Review 1 taste signal",
+            "Seed Movies",
+            "Seed Shows"
+        ])
+        XCTAssertEqual(model.recommendedActions.first?.actionLabel, "Sort now")
+    }
+
     private func bookmark(
         title: String,
         url: String,
