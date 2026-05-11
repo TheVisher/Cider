@@ -9,9 +9,13 @@ enum WorkspaceContextualTabPolicy {
         savedViews: [SavedView]
     ) -> [CiderTab] {
         if selectedTab == .aiAssistant && domain == nil { return [.aiAssistant] }
+        if let selectedTab, case .spaceOverview = selectedTab, domain == nil {
+            return [selectedTab]
+        }
+        if selectedTab == .spacesManager && domain == nil { return [.spacesManager] }
 
         let domainTabs = allTabs.filter { tab in
-            tab != .aiAssistant
+            tab != .aiAssistant && tab != .spacesManager
         }
 
         guard let domain else { return domainTabs }
@@ -93,6 +97,7 @@ enum WorkspaceContextualTabPolicy {
         if tab == .aiAssistant { return true }
         if case .search = tab { return true }
         if case .tag = tab { return true }
+        if case .spaceOverview = tab { return true }
         return false
     }
 

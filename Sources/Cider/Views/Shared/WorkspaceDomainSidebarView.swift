@@ -5,8 +5,13 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
     @Binding var expandedDomains: Set<WorkspaceNavigationDomain>
     @Binding var searchText: String
     let domains: [WorkspaceNavigationDomain]
+    let pinnedSpaces: [CiderSpace]
+    let selectedSpaceID: String?
+    let isSpacesManagerSelected: Bool
     let onTriggerSearch: () -> Void
     let onSelectDomain: (WorkspaceNavigationDomain) -> Void
+    let onSelectSpace: (CiderSpace) -> Void
+    let onOpenSpacesManager: () -> Void
     @ViewBuilder let domainContent: (WorkspaceNavigationDomain) -> DomainContent
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -30,8 +35,12 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
 
                             if isExpanded(domain) {
                                 domainContent(domain)
-                                    .padding(.leading, Spacing.lg)
+                                    .padding(.leading, WorkspaceSidebarNestedRowMetrics.childIndent)
                             }
+                        }
+
+                        if domain == .browse {
+                            spacesSection
                         }
                     }
                 }
@@ -41,6 +50,39 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
         }
         .frame(width: BookmarksDesign.folderSidebarWidth)
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var spacesSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            WorkspaceSidebarNestedSectionHeader(title: "Spaces", count: pinnedSpaces.isEmpty ? nil : pinnedSpaces.count)
+
+            ForEach(pinnedSpaces) { space in
+                Button {
+                    onSelectSpace(space)
+                } label: {
+                    WorkspaceSidebarNestedRowLabel(
+                        title: space.name,
+                        systemImage: space.systemImage,
+                        isSelected: selectedSpaceID == space.id
+                    )
+                }
+                .buttonStyle(.plain)
+                .help(space.purpose)
+            }
+
+            Button {
+                onOpenSpacesManager()
+            } label: {
+                WorkspaceSidebarNestedRowLabel(
+                    title: "All Spaces",
+                    systemImage: "square.grid.2x2",
+                    isSelected: isSpacesManagerSelected
+                )
+            }
+            .buttonStyle(.plain)
+            .help("Manage Spaces")
+        }
+        .padding(.leading, WorkspaceSidebarNestedRowMetrics.childIndent)
     }
 
     private var contextualDomains: [WorkspaceNavigationDomain] {
@@ -94,8 +136,12 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
     }
 
     private func domainButton(_ domain: WorkspaceNavigationDomain) -> some View {
-        let isSelected = selectedDomain == domain
-            || (domain == .mainDashboard && selectedDomain == nil)
+        let isSelected = WorkspaceDomainSidebarModel.isDomainSelected(
+            domain,
+            selectedDomain: selectedDomain,
+            selectedSpaceID: selectedSpaceID,
+            isSpacesManagerSelected: isSpacesManagerSelected
+        )
         let showsChildren = domain != .mainDashboard
         let isExpanded = isExpanded(domain)
 

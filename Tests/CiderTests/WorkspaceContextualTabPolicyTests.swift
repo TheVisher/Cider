@@ -272,4 +272,38 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
 
         XCTAssertEqual(result, [.domainDashboard(.aiAssistant), .aiAssistant])
     }
+
+    func testPinnedSpaceAndSpacesManagerTabsOwnContextWhenNoDomainIsSelected() {
+        let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
+        let libraryID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
+        let allTabs: [CiderTab] = [
+            .savedView(id: dashboardID, name: "Dashboard"),
+            .savedView(id: libraryID, name: "Library"),
+            .aiAssistant
+        ]
+        let savedViews = [
+            SavedView(id: dashboardID, name: "Dashboard", kind: .dashboard),
+            SavedView(id: libraryID, name: "Library", kind: .library)
+        ]
+        let mediaSpace = CiderTab.spaceOverview(id: "media-space", name: "Media")
+
+        XCTAssertEqual(
+            WorkspaceContextualTabPolicy.tabs(
+                for: nil,
+                selectedTab: mediaSpace,
+                allTabs: allTabs,
+                savedViews: savedViews
+            ),
+            [mediaSpace]
+        )
+        XCTAssertEqual(
+            WorkspaceContextualTabPolicy.tabs(
+                for: nil,
+                selectedTab: .spacesManager,
+                allTabs: allTabs,
+                savedViews: savedViews
+            ),
+            [.spacesManager]
+        )
+    }
 }

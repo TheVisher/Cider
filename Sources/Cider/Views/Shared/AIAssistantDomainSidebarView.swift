@@ -11,7 +11,7 @@ struct AIAssistantDomainSidebarView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                sectionHeader("Chats", count: chatCount)
+                WorkspaceSidebarNestedSectionHeader(title: "Chats", count: chatCount)
 
                 if chatCount == 0 {
                     emptyChatsRow
@@ -36,43 +36,13 @@ struct AIAssistantDomainSidebarView: View {
             : conversationStorage.conversations.count
     }
 
-    private func sectionHeader(_ title: String, count: Int) -> some View {
-        HStack(spacing: Spacing.xs) {
-            Text(title)
-                .font(CiderFont.captionSemibold)
-                .foregroundColor(CiderColors.tertiary)
-
-            Spacer(minLength: 0)
-
-            Text("\(count)")
-                .font(CiderFont.microMonospaced)
-                .foregroundColor(CiderColors.tertiary)
-        }
-        .padding(.horizontal, Spacing.sm)
-    }
-
     private var emptyChatsRow: some View {
         Button(action: onOpenAssistant) {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(CiderFont.bodyMedium)
-                    .foregroundColor(CiderColors.secondary)
-                    .frame(width: Spacing.xl, height: Spacing.xl)
-
-                Text("New Chat")
-                    .font(CiderFont.labelSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs + 1)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(CiderColors.separatorLight.opacity(0.65))
+            WorkspaceSidebarNestedRowLabel(
+                title: "New Chat",
+                systemImage: "bubble.left.and.bubble.right",
+                isSelected: false
             )
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("Open AI Assistant")
@@ -136,40 +106,12 @@ struct AIAssistantDomainSidebarView: View {
         isActive: Bool,
         badge: String?
     ) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: systemImage)
-                .font(CiderFont.bodyMedium)
-                .foregroundColor(isActive ? CiderColors.controlAccent : CiderColors.secondary)
-                .frame(width: Spacing.xl, height: Spacing.xl)
-
-            VStack(alignment: .leading, spacing: Spacing.hairline) {
-                HStack(spacing: Spacing.xs) {
-                    Text(title)
-                        .font(CiderFont.labelSemibold)
-                        .foregroundColor(CiderColors.primary)
-                        .lineLimit(1)
-
-                    if let badge {
-                        Text(badge)
-                            .font(CiderFont.micro)
-                            .foregroundColor(CiderColors.tertiary)
-                    }
-                }
-
-                Text(subtitle)
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.tertiary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, Spacing.sm)
-        .padding(.vertical, Spacing.xs)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(isActive ? CiderColors.accentSubtle : Color.clear)
+        WorkspaceSidebarNestedRowLabel(
+            title: title,
+            subtitle: subtitle,
+            systemImage: systemImage,
+            isSelected: isActive,
+            badge: badge
         )
-        .contentShape(Rectangle())
     }
 }

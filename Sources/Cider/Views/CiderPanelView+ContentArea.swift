@@ -221,6 +221,37 @@ extension CiderPanelView {
                         title: "Project references not found"
                     )
                 }
+            case .spaceOverview(let spaceID, _):
+                if let space = spaceStorage.space(id: spaceID) {
+                    CiderSpaceOverviewView(
+                        space: space,
+                        rootURL: spaceStorage.rootURL(for: space),
+                        bookmarks: bookmarksViewModel.bookmarks,
+                        mediaItems: mediaItemStorage.items,
+                        notes: notesViewModel.notes,
+                        onTogglePinned: {
+                            togglePinnedSpace(space)
+                        },
+                        onOpenBookmark: { bookmark in
+                            openBookmarkDetails(bookmark)
+                        },
+                        onOpenNote: { note in
+                            openNoteDetail(note)
+                        }
+                    )
+                } else {
+                    EmptyStateView(
+                        icon: "square.grid.2x2",
+                        title: "Space not found"
+                    )
+                }
+            case .spacesManager:
+                CiderSpacesManagerView(
+                    spaces: spaceStorage.spaces,
+                    loadIssues: spaceStorage.loadIssues,
+                    onCreateSpace: createSpace,
+                    onOpenSpace: openSpace
+                )
             case .aiAssistant:
                 AIAssistantPanelView(
                     viewModel: AIAssistantViewModel.shared,

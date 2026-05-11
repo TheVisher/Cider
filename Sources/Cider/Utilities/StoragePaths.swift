@@ -63,6 +63,9 @@ enum StoragePaths {
     /// Visible directory for unfiled content files (bookmarks, notes, etc.).
     static let inboxDir = "Inbox"
 
+    /// Visible directory for user-owned rich Spaces.
+    static let spacesDir = "Spaces"
+
     /// Lock protecting the mutable cache dictionary from concurrent access.
     /// `cachedDirectoryURL(for:)` is called from background threads (e.g., NoteCardData.load),
     /// so the dictionary needs synchronization. Simple `URL?` optionals are practically atomic
@@ -188,6 +191,8 @@ enum StoragePaths {
                 ensureDirectory(inboxSubdirectoryURL(for: type, config: config))
             }
         }
+        // Create Spaces/ so user-owned contexts are Finder-visible even before the first Space is created.
+        ensureDirectory(vaultRoot.appendingPathComponent(spacesDir))
         // Create agent memory directories
         let memoryDir = vaultRoot.appendingPathComponent(ciderInternalDir).appendingPathComponent("memory")
         ensureDirectory(memoryDir)

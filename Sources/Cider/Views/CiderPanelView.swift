@@ -9,6 +9,8 @@ struct CiderPanelView: View {
     @ObservedObject var savedViewStorage = SavedViewStorage.shared
     @ObservedObject var kanbanStorage = KanbanStorage.shared
     @ObservedObject var projectAssociationStore = ProjectWorkspaceAssociationStore.shared
+    @ObservedObject var spaceStorage = CiderSpaceStorage.shared
+    @ObservedObject var mediaItemStorage = MediaItemStorage()
     @StateObject var libraryViewModel = LibraryViewModel()
     @State var selectedTab: CiderTab?
     @State var isCollapsed = false
@@ -168,6 +170,7 @@ struct CiderPanelView: View {
         .task { ensureDefaultTabs() }
         .onAppear {
             installKeyboardMonitor()
+            CiderLivePerformanceRecorder.shared.startSession(surface: String(describing: surface))
             updateLivePerformanceContext()
         }
         .onDisappear {

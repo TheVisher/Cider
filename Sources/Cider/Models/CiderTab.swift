@@ -7,6 +7,8 @@ enum CiderTab: Identifiable, Hashable {
     case domainDashboard(WorkspaceNavigationDomain)
     case projectOverview(projectID: String, name: String)
     case projectReferences(projectID: String, name: String)
+    case spaceOverview(id: String, name: String)
+    case spacesManager
     case aiAssistant
 
     static func == (lhs: CiderTab, rhs: CiderTab) -> Bool {
@@ -25,6 +27,8 @@ enum CiderTab: Identifiable, Hashable {
         case .domainDashboard(let domain): "domain-dashboard-\(domain.rawValue)"
         case .projectOverview(let projectID, _): "project-overview-\(projectID)"
         case .projectReferences(let projectID, _): "project-references-\(projectID)"
+        case .spaceOverview(let id, _): "space-overview-\(id)"
+        case .spacesManager: "spaces-manager"
         case .aiAssistant: "aiAssistant"
         }
     }
@@ -37,6 +41,8 @@ enum CiderTab: Identifiable, Hashable {
         case .domainDashboard(let domain): "\(domain.title) Dashboard"
         case .projectOverview(_, let name): name
         case .projectReferences(_, let name): name
+        case .spaceOverview(_, let name): name
+        case .spacesManager: "All Spaces"
         case .aiAssistant: "AI Assistant"
         }
     }
@@ -49,6 +55,8 @@ enum CiderTab: Identifiable, Hashable {
         case .domainDashboard(let domain): domain.systemImage
         case .projectOverview: "rectangle.3.group"
         case .projectReferences: "photo.on.rectangle"
+        case .spaceOverview: "square.grid.2x2"
+        case .spacesManager: "square.grid.2x2"
         case .aiAssistant: "sparkles"
         }
     }

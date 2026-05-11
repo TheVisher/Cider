@@ -370,6 +370,8 @@ struct CiderTabBar: View {
         case .domainDashboard: return 0
         case .projectOverview: return 0
         case .projectReferences: return 0
+        case .spaceOverview: return 0
+        case .spacesManager: return 0
         case .aiAssistant: return 0
         }
     }

@@ -71,12 +71,27 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
     func testDomainRoutesUseWorkflowDestinationsInsteadOfContentTypeDomains() {
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .tasksEvents).map(\.kind),
-            [.overview, .inbox, .folders, .tags, .recent]
+            [.overview, .inbox]
+        )
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.routes(for: .media).map(\.kind),
+            [.overview]
+        )
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.routes(for: .people).map(\.kind),
+            [.overview]
         )
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .aiAssistant).map(\.kind),
             [.overview, .chats]
         )
+    }
+
+    func testNestedSidebarRowsUseSharedCompactMetrics() {
+        XCTAssertEqual(WorkspaceSidebarNestedRowMetrics.iconFrame, Spacing.lg)
+        XCTAssertEqual(WorkspaceSidebarNestedRowMetrics.horizontalPadding, Spacing.sm)
+        XCTAssertEqual(WorkspaceSidebarNestedRowMetrics.verticalPadding, Spacing.xxs)
+        XCTAssertEqual(WorkspaceSidebarNestedRowMetrics.childIndent, Spacing.lg)
     }
 
     func testDomainExpansionStateCanOpenMultipleDomainsWithoutNavigationSelection() {
@@ -110,5 +125,48 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         state.collapseAll()
 
         XCTAssertTrue(state.expandedDomains.isEmpty)
+    }
+
+    func testSpaceTabsHaveStableIdentityAndReadableLabels() {
+        let tab = CiderTab.spaceOverview(id: "media-space", name: "Media")
+
+        XCTAssertEqual(tab.id, "space-overview-media-space")
+        XCTAssertEqual(tab.displayName, "Media")
+        XCTAssertEqual(tab.systemImage, "square.grid.2x2")
+    }
+
+    func testSpacesManagerTabIsSeparateFromLibraryAndDomains() {
+        let tab = CiderTab.spacesManager
+
+        XCTAssertEqual(tab.id, "spaces-manager")
+        XCTAssertEqual(tab.displayName, "All Spaces")
+        XCTAssertEqual(tab.systemImage, "square.grid.2x2")
+    }
+
+    func testHomeSidebarSelectionDoesNotCompeteWithSpaces() {
+        XCTAssertTrue(WorkspaceDomainSidebarModel.isDomainSelected(
+            .mainDashboard,
+            selectedDomain: nil,
+            selectedSpaceID: nil,
+            isSpacesManagerSelected: false
+        ))
+        XCTAssertFalse(WorkspaceDomainSidebarModel.isDomainSelected(
+            .mainDashboard,
+            selectedDomain: nil,
+            selectedSpaceID: "media-space",
+            isSpacesManagerSelected: false
+        ))
+        XCTAssertFalse(WorkspaceDomainSidebarModel.isDomainSelected(
+            .mainDashboard,
+            selectedDomain: nil,
+            selectedSpaceID: nil,
+            isSpacesManagerSelected: true
+        ))
+        XCTAssertTrue(WorkspaceDomainSidebarModel.isDomainSelected(
+            .projects,
+            selectedDomain: .projects,
+            selectedSpaceID: "media-space",
+            isSpacesManagerSelected: false
+        ))
     }
 }

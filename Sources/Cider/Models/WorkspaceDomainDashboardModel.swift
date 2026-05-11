@@ -234,8 +234,16 @@ enum WorkspaceDomainDashboardProvider {
         savedViews: [SavedView]
     ) -> WorkspaceDomainDashboardItem? {
         switch tab {
-        case .domainDashboard:
+        case .domainDashboard, .spacesManager:
             return nil
+        case .spaceOverview(_, let name):
+            return WorkspaceDomainDashboardItem(
+                id: tab.id,
+                title: name,
+                subtitle: "Space overview",
+                systemImage: tab.systemImage,
+                target: tab
+            )
         case .projectOverview(let projectID, let name):
             return WorkspaceDomainDashboardItem(
                 id: tab.id,

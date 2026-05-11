@@ -8,8 +8,6 @@ struct ProjectsDomainSidebarView: View {
     var onSelectWorkspace: (ProjectWorkspace) -> Void
     var onSelectDestination: (ProjectWorkspaceSidebarDestination, ProjectWorkspace) -> Void
 
-    @Environment(\.textScale) private var textScale
-
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: Spacing.md) {
@@ -28,25 +26,22 @@ struct ProjectsDomainSidebarView: View {
         if entries.isEmpty {
             EmptyView()
         } else {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text(section.title)
-                .font(CiderFont.captionSemibold(scale: textScale))
-                .foregroundColor(CiderColors.tertiary)
-                .padding(.horizontal, Spacing.sm)
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                WorkspaceSidebarNestedSectionHeader(title: section.title)
 
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                ForEach(entries) { workspace in
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        workspaceButton(workspace)
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    ForEach(entries) { workspace in
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            workspaceButton(workspace)
 
-                        if workspace.kind == .project && selectedWorkspaceID == workspace.id {
-                            projectDestinationTree(for: workspace)
-                                .padding(.leading, Spacing.lg)
+                            if workspace.kind == .project && selectedWorkspaceID == workspace.id {
+                                projectDestinationTree(for: workspace)
+                                    .padding(.leading, WorkspaceSidebarNestedRowMetrics.childIndent)
+                            }
                         }
                     }
                 }
             }
-        }
         }
     }
 
@@ -57,26 +52,11 @@ struct ProjectsDomainSidebarView: View {
             selectedWorkspaceID = workspace.kind == .home ? nil : workspace.id
             onSelectWorkspace(workspace)
         } label: {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: workspace.systemImage)
-                    .font(CiderFont.bodyMedium(scale: textScale))
-                    .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
-                    .frame(width: Spacing.xl, height: Spacing.xl)
-
-                Text(workspace.title)
-                    .font(CiderFont.labelSemibold(scale: textScale))
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs + 1)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isSelected ? CiderColors.accentSubtle : Color.clear)
+            WorkspaceSidebarNestedRowLabel(
+                title: workspace.title,
+                systemImage: workspace.systemImage,
+                isSelected: isSelected
             )
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(workspace.subtitle)
@@ -100,26 +80,11 @@ struct ProjectsDomainSidebarView: View {
             guard destination.isSelectable else { return }
             onSelectDestination(destination, workspace)
         } label: {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: destination.systemImage)
-                    .font(CiderFont.captionMedium(scale: textScale))
-                    .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.tertiary)
-                    .frame(width: Spacing.lg, height: Spacing.lg)
-
-                Text(destination.title)
-                    .font(destination.isSelectable ? CiderFont.captionMedium(scale: textScale) : CiderFont.captionSemibold(scale: textScale))
-                    .foregroundColor(destination.isSelectable ? CiderColors.secondary : CiderColors.tertiary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xxs)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isSelected ? CiderColors.accentSubtle : Color.clear)
+            WorkspaceSidebarNestedRowLabel(
+                title: destination.title,
+                systemImage: destination.systemImage,
+                isSelected: isSelected
             )
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!destination.isSelectable)
@@ -134,7 +99,7 @@ struct ProjectsDomainSidebarView: View {
             return .references
         case .savedView:
             return selectedBoardID.map { .board($0) }
-        case .search, .tag, .domainDashboard, .aiAssistant:
+        case .search, .tag, .domainDashboard, .spaceOverview, .spacesManager, .aiAssistant:
             return nil
         }
     }

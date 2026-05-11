@@ -18,11 +18,21 @@ extension CiderPanelView {
             expandedDomains: $expandedNavigationDomains,
             searchText: $sidebarSearchText,
             domains: WorkspaceNavigationDomain.allCases,
+            pinnedSpaces: spaceStorage.pinnedSpaces,
+            selectedSpaceID: selectedSpaceID,
+            isSpacesManagerSelected: selectedTab == .spacesManager,
             onTriggerSearch: { isSearchPaletteVisible = true },
-            onSelectDomain: openNavigationDomain
+            onSelectDomain: openNavigationDomain,
+            onSelectSpace: openSpace,
+            onOpenSpacesManager: openSpacesManager
         ) { domain in
             domainSidebarContent(for: domain)
         }
+    }
+
+    var selectedSpaceID: String? {
+        guard case .spaceOverview(let id, _) = selectedTab else { return nil }
+        return id
     }
 
     @ViewBuilder
@@ -93,6 +103,14 @@ extension CiderPanelView {
     }
 
     func openNavigationDomain(_ domain: WorkspaceNavigationDomain) {
+        let navigationSnapshot = livePerformanceNavigationSnapshot
+        defer {
+            recordLivePerformanceNavigation(
+                action: "open_navigation_domain:\(domain.title)",
+                from: navigationSnapshot
+            )
+        }
+
         let previousDomain = selectedNavigationDomain
         if previousDomain != domain {
             expandedFolderIDs.removeAll()
@@ -147,7 +165,79 @@ extension CiderPanelView {
         }
     }
 
+    func openSpace(_ space: CiderSpace) {
+        let navigationSnapshot = livePerformanceNavigationSnapshot
+        defer {
+            recordLivePerformanceNavigation(
+                action: "open_space:\(space.name)",
+                from: navigationSnapshot
+            )
+        }
+
+        selectedNavigationDomain = nil
+        selectedProjectWorkspaceID = nil
+        selectedDomainRouteKind = .overview
+        selectedFolderID = nil
+        selectedTagIDs.removeAll()
+        selectedItemIDs.removeAll()
+        focusedItemID = nil
+        selectionAnchorID = nil
+        closeAllDetails()
+        selectedTab = .spaceOverview(id: space.id, name: space.name)
+    }
+
+    func openSpacesManager() {
+        let navigationSnapshot = livePerformanceNavigationSnapshot
+        defer {
+            recordLivePerformanceNavigation(
+                action: "open_spaces_manager",
+                from: navigationSnapshot
+            )
+        }
+
+        selectedNavigationDomain = nil
+        selectedProjectWorkspaceID = nil
+        selectedDomainRouteKind = .overview
+        selectedFolderID = nil
+        selectedTagIDs.removeAll()
+        selectedItemIDs.removeAll()
+        focusedItemID = nil
+        selectionAnchorID = nil
+        closeAllDetails()
+        selectedTab = .spacesManager
+    }
+
+    func createSpace(_ preset: CiderSpacePresetKind) {
+        let defaults = CiderSpacePreset.defaults(for: preset)
+        do {
+            let space = try spaceStorage.createSpace(
+                name: defaults.title,
+                preset: preset,
+                isPinned: true
+            )
+            openSpace(space)
+        } catch {
+            print("Failed to create Space: \(error.localizedDescription)")
+        }
+    }
+
+    func togglePinnedSpace(_ space: CiderSpace) {
+        do {
+            try spaceStorage.setPinned(!space.isPinned, for: space.id)
+        } catch {
+            print("Failed to update Space pin state: \(error.localizedDescription)")
+        }
+    }
+
     func selectWorkspaceDomainRoute(_ route: WorkspaceDomainRoute, in domain: WorkspaceNavigationDomain) {
+        let navigationSnapshot = livePerformanceNavigationSnapshot
+        defer {
+            recordLivePerformanceNavigation(
+                action: "select_domain_route:\(domain.title)/\(route.title)",
+                from: navigationSnapshot
+            )
+        }
+
         if selectedNavigationDomain != domain {
             selectedNavigationDomain = domain
             selectedProjectWorkspaceID = nil

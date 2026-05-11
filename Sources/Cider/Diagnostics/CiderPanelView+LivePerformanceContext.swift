@@ -7,6 +7,30 @@ extension CiderPanelView {
     }
 
     @MainActor
+    func recordLivePerformanceNavigation(
+        action: String,
+        from previous: CiderLivePerformanceNavigationSnapshot
+    ) {
+        CiderLivePerformanceRecorder.shared.recordNavigation(
+            action: action,
+            from: previous,
+            to: livePerformanceNavigationSnapshot
+        )
+        updateLivePerformanceContext()
+    }
+
+    @MainActor
+    var livePerformanceNavigationSnapshot: CiderLivePerformanceNavigationSnapshot {
+        CiderLivePerformanceNavigationSnapshot(
+            domain: selectedNavigationDomain?.title,
+            route: selectedDomainRouteKind.rawValue,
+            tab: selectedTab?.displayName,
+            hasFolder: selectedFolderID != nil,
+            tagCount: selectedTagIDs.count
+        )
+    }
+
+    @MainActor
     var livePerformanceContext: CiderLivePerformanceContext {
         if !selectedTagIDs.isEmpty {
             return CiderLivePerformanceContext(
@@ -27,7 +51,7 @@ extension CiderPanelView {
         }
 
         switch selectedTab {
-        case .aiAssistant, .domainDashboard, .projectOverview, .projectReferences:
+        case .aiAssistant, .domainDashboard, .projectOverview, .projectReferences, .spaceOverview, .spacesManager:
             return CiderLivePerformanceContext(view: selectedTab.displayName, visibleItemCount: nil)
         case .search(_, let query):
             return CiderLivePerformanceContext(

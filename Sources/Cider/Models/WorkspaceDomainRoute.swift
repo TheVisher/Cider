@@ -53,8 +53,10 @@ enum WorkspaceDomainRoutePolicy {
         case .bookmarks:
             return [.overview, .inbox, .folders, .tags, .recent, .savedViews]
         case .tasksEvents:
-            return [.overview, .inbox, .folders, .tags, .recent]
-        case .media, .notes, .files, .people:
+            return [.overview, .inbox]
+        case .media, .people:
+            return [.overview]
+        case .notes, .files:
             return [.overview, .folders, .tags, .recent, .savedViews]
         }
     }
@@ -98,6 +100,20 @@ enum WorkspaceDomainSidebarModel {
             .people,
             .aiAssistant
         ]
+    }
+
+    static func isDomainSelected(
+        _ domain: WorkspaceNavigationDomain,
+        selectedDomain: WorkspaceNavigationDomain?,
+        selectedSpaceID: String?,
+        isSpacesManagerSelected: Bool
+    ) -> Bool {
+        if domain == .mainDashboard {
+            return selectedDomain == nil
+                && selectedSpaceID == nil
+                && !isSpacesManagerSelected
+        }
+        return selectedDomain == domain
     }
 }
 
