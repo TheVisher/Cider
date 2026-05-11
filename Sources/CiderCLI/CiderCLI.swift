@@ -127,6 +127,8 @@ struct CiderCLI {
             handleClipboard(subcommand: subcommand, args: remaining)
         case "dashboard", "dash":
             handleDashboard(subcommand: subcommand, args: remaining)
+        case "media":
+            handleMedia(subcommand: subcommand, args: remaining, bookmarks: bookmarkService.bookmarks)
         case "agenda", "brief":
             handleAgenda(args: Array(args.dropFirst()))
         case "embeddings":
@@ -5659,6 +5661,10 @@ struct CiderCLI {
           cider-cli dashboard card archive <card-id>
           cider-cli dashboard card delete <card-id>
           cider-cli dashboard card feedback <card-id> [--more-like-this|--less-like-this|--clear-preference] [--rating 1-5]
+
+        MEDIA
+          cider-cli media identify --dry-run [--json]
+          cider-cli media identify --apply [--json]
 
         LABELS (alias: tag)
           cider-cli label list
