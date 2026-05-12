@@ -65,6 +65,11 @@ final class VaultDoctor {
             case duplicateFolderPath   // multiple folders rows with same relative_path (schema invariant violation)
             case orphanBreadcrumb      // old .cider/folders/.trash/*-breadcrumbs.json > 30 days old
             case reservedPathInFolders // folders row for a reserved top dir (legacy drift)
+            case suspiciousFlattenedFolderDuplicate // root folder duplicates an existing nested folder name, often with numeric suffix
+            case duplicateNoteContent // notes with same normalized title and exact content
+            case duplicateBookmarkURL // bookmarks with same canonical URL
+            case duplicateContactEmail // contacts with same normalized email
+            case duplicateContactPhone // contacts with same normalized phone
         }
 
         /// Fix-action payload. Decoded opaquely — NOT user-facing.
@@ -110,6 +115,8 @@ final class VaultDoctor {
         findings.append(contentsOf: scanDuplicateFolderPaths())
         findings.append(contentsOf: scanOrphanBreadcrumbs())
         findings.append(contentsOf: scanReservedPathsInFolders())
+        findings.append(contentsOf: scanSuspiciousFlattenedFolderDuplicates())
+        findings.append(contentsOf: scanDuplicateVaultEntities())
 
         return Report(
             startedAt: started,
@@ -364,7 +371,126 @@ final class VaultDoctor {
         return out
     }
 
+    /// Check 8: root folder looks like a flattened duplicate of a nested folder.
+    /// This is intentionally conservative and read-only. It catches sync/adoption
+    /// drift where a child folder was created at the vault root after its remote
+    /// parent could not be resolved. Cleanup needs human judgement because both
+    /// folders may now contain distinct files.
+    private func scanSuspiciousFlattenedFolderDuplicates() -> [Finding] {
+        let folders = VaultFolderService.shared.folders
+        let nestedByNormalizedName = Dictionary(grouping: folders.filter { $0.parentRelativePath != nil }) { folder in
+            Self.normalizedFolderDuplicateKey(folder.name)
+        }
+        let rootFolders = folders.filter { $0.parentRelativePath == nil }
+        var out: [Finding] = []
+
+        for folder in rootFolders {
+            let key = Self.normalizedFolderDuplicateKey(folder.name)
+            guard let nestedMatches = nestedByNormalizedName[key], !nestedMatches.isEmpty else { continue }
+            let nestedPaths = nestedMatches.map(\.relativePath).sorted()
+            guard !Self.isAllowedRootNestedFolderNameCollision(
+                rootRelativePath: folder.relativePath,
+                nestedRelativePaths: nestedPaths
+            ) else { continue }
+            let matchPaths = nestedPaths.joined(separator: ", ")
+            out.append(Finding(
+                id: "flattened-folder-\(folder.id.uuidString)",
+                kind: .suspiciousFlattenedFolderDuplicate,
+                severity: .warning,
+                summary: "Possible flattened folder duplicate: \(folder.relativePath)",
+                detail: "Root folder '\(folder.relativePath)' has the same normalized name as nested folder path(s): \(matchPaths). This can happen when sync receives a child folder before its parent and must be reviewed before merging or deleting files.",
+                isFixable: false,
+                fixLabel: nil,
+                payload: Finding.Payload(folderID: folder.id, relativePath: folder.relativePath)
+            ))
+        }
+
+        let siblingGroups = Dictionary(grouping: folders) { folder in
+            "\(folder.parentRelativePath ?? "")|\(Self.normalizedFolderDuplicateKey(folder.name))"
+        }
+        for (_, siblings) in siblingGroups where siblings.count > 1 {
+            let canonicalNames = Set(siblings.map { $0.name }.filter { !Self.hasNumericSuffix($0) })
+            guard !canonicalNames.isEmpty else { continue }
+            let canonicalPaths = siblings
+                .filter { !Self.hasNumericSuffix($0.name) }
+                .map(\.relativePath)
+                .sorted()
+                .joined(separator: ", ")
+            for folder in siblings where Self.hasNumericSuffix(folder.name) {
+                out.append(Finding(
+                    id: "numeric-suffix-folder-\(folder.id.uuidString)",
+                    kind: .suspiciousFlattenedFolderDuplicate,
+                    severity: .warning,
+                    summary: "Possible numeric-suffix folder duplicate: \(folder.relativePath)",
+                    detail: "Folder '\(folder.relativePath)' has a numeric-suffix name and a same-parent canonical folder exists: \(canonicalPaths). Review before merging or deleting files.",
+                    isFixable: false,
+                    fixLabel: nil,
+                    payload: Finding.Payload(folderID: folder.id, relativePath: folder.relativePath)
+                ))
+            }
+        }
+
+        return out
+    }
+
+    /// Check 9: cross-entity duplicate candidates (notes/bookmarks/contacts).
+    /// Read-only by design; merge/trash is entity-specific and must be reviewed.
+    private func scanDuplicateVaultEntities() -> [Finding] {
+        VaultDuplicateAuditor.scan().map { duplicate in
+            Finding(
+                id: duplicate.id,
+                kind: doctorKind(for: duplicate),
+                severity: duplicate.confidence == .exact ? .warning : .info,
+                summary: duplicate.summary,
+                detail: duplicate.detail,
+                isFixable: false,
+                fixLabel: nil,
+                payload: Finding.Payload(relativePath: duplicate.items.compactMap(\.path).first)
+            )
+        }
+    }
+
+    private func doctorKind(for duplicate: VaultDuplicateAuditor.Finding) -> Finding.Kind {
+        switch (duplicate.entityType, duplicate.kind) {
+        case (.note, .exactContent):
+            return .duplicateNoteContent
+        case (.bookmark, .canonicalURL):
+            return .duplicateBookmarkURL
+        case (.contact, .email):
+            return .duplicateContactEmail
+        case (.contact, .phone):
+            return .duplicateContactPhone
+        default:
+            return .duplicateNoteContent
+        }
+    }
+
     // MARK: - Helpers
+
+    nonisolated static func isAllowedRootNestedFolderNameCollision(
+        rootRelativePath: String,
+        nestedRelativePaths: [String]
+    ) -> Bool {
+        // `Media` is a canonical Cider top-level library container. Users can also
+        // have a domain/topic folder named `Media` nested elsewhere (for example
+        // `Spaces/Media`), so this name collision is not evidence that sync
+        // flattened a child folder to the vault root.
+        rootRelativePath == "Media" && nestedRelativePaths.contains { $0 != "Media" }
+    }
+
+    nonisolated static func hasNumericSuffix(_ name: String) -> Bool {
+        name.range(of: #"\s+\d+$"#, options: .regularExpression) != nil
+    }
+
+    private static func normalizedFolderDuplicateKey(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let strippedNumericSuffix = trimmed.replacingOccurrences(
+            of: #"(?:\s+\d+)+$"#,
+            with: "",
+            options: .regularExpression
+        )
+        return strippedNumericSuffix.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
 
     private func countItemsReferencingFolder(_ folderID: UUID) -> Int {
         guard let db = database else { return 0 }
@@ -404,7 +530,13 @@ final class VaultDoctor {
             return fixOrphanBreadcrumb(finding)
         case .reservedPathInFolders:
             return fixReservedPathInFolders(finding)
-        case .untrackedNonEmptyDir, .duplicateFolderPath:
+        case .untrackedNonEmptyDir,
+             .duplicateFolderPath,
+             .suspiciousFlattenedFolderDuplicate,
+             .duplicateNoteContent,
+             .duplicateBookmarkURL,
+             .duplicateContactEmail,
+             .duplicateContactPhone:
             return false
         }
     }
