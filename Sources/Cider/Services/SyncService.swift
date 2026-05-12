@@ -143,6 +143,34 @@ final class SyncService: ObservableObject {
         pendingNoteDeletions = UserDefaults.standard.stringArray(forKey: pendingNoteDeletionsKey) ?? []
     }
 
+    struct FolderDependencyPartition {
+        let ready: [SyncPulledFolder]
+        let unresolved: [SyncPulledFolder]
+    }
+
+    /// Split pulled folders into folders safe to apply now and folders that
+    /// still need a parent folder row. Children must never be applied as roots
+    /// simply because their parent is missing from the current local snapshot.
+    nonisolated static func partitionPulledFoldersByResolvedParent(
+        _ folders: [SyncPulledFolder],
+        availableFolderIDs: Set<String>
+    ) -> FolderDependencyPartition {
+        var ready: [SyncPulledFolder] = []
+        var unresolved: [SyncPulledFolder] = []
+        for folder in folders {
+            guard folder.ciderSyncId != nil else { continue }
+            let isDeletion = (folder.deleted ?? false) || folder.purged == true
+            if let parentSyncId = folder.parentSyncId?.lowercased(),
+               !isDeletion,
+               !availableFolderIDs.contains(parentSyncId) {
+                unresolved.append(folder)
+            } else {
+                ready.append(folder)
+            }
+        }
+        return FolderDependencyPartition(ready: ready, unresolved: unresolved)
+    }
+
     // MARK: - Lifecycle
 
     func startIfEnabled() {
@@ -561,43 +589,81 @@ final class SyncService: ObservableObject {
         let storage = VaultBookmarkService.shared
 
         // --- Folders first (bookmarks/notes may reference them) ---
+        // Apply folders in dependency passes. A previous implementation captured
+        // `localFolders` once before the loop and treated any unresolved
+        // `parentSyncId` as `nil`; if a child folder arrived before its parent,
+        // or if the parent was missing from the local snapshot, the child was
+        // flattened into a new root folder (`Games`, `Cider`, etc.) and later
+        // sync/adoption created suffixed duplicate notes beneath it. Never
+        // promote a remote child to root just because its parent is not resolved
+        // yet — defer within this pull, then skip until a later pull can resolve.
         let folderService = VaultFolderService.shared
-        let localFolders = folderService.legacyFolders
-        for folder in result.folders {
-            guard let syncId = folder.ciderSyncId else { continue }
+        var pendingFolders = result.folders.filter { $0.ciderSyncId != nil }
+        while !pendingFolders.isEmpty {
+            let availableFolderIDs = Set(folderService.legacyFolders.map { $0.id.uuidString.lowercased() })
+            let partition = Self.partitionPulledFoldersByResolvedParent(
+                pendingFolders,
+                availableFolderIDs: availableFolderIDs
+            )
+            var nextPass = partition.unresolved
+            var madeProgress = false
 
-            let syncIdLower = syncId.lowercased()
-            let remoteUpdatedAt = Date(timeIntervalSince1970: folder.updatedAt / 1000)
-            let isDeleted = folder.deleted ?? false
-            let parentSyncId = folder.parentSyncId?.lowercased()
+            for folder in partition.ready {
+                guard let syncId = folder.ciderSyncId else { continue }
 
-            let parentID: UUID? = if let parentSyncId {
-                localFolders.first(where: { $0.id.uuidString.lowercased() == parentSyncId })?.id
-            } else {
-                nil
-            }
+                let syncIdLower = syncId.lowercased()
+                let remoteUpdatedAt = Date(timeIntervalSince1970: folder.updatedAt / 1000)
+                let isDeleted = folder.deleted ?? false
+                let isTombstone = isDeleted || folder.purged == true
+                let parentSyncId = folder.parentSyncId?.lowercased()
+                let currentFolders = folderService.legacyFolders
 
-            if let local = localFolders.first(where: { $0.id.uuidString.lowercased() == syncIdLower }) {
-                if folder.purged == true {
-                    folderService.deleteFolderFromSync(local.id)
-                } else if isDeleted {
-                    folderService.deleteFolderFromSync(local.id)
-                } else if remoteUpdatedAt > local.updatedAt {
-                    folderService.updateFolderFromSync(
-                        folderID: local.id, name: folder.name, icon: folder.icon,
-                        parentID: parentID, remoteUpdatedAt: remoteUpdatedAt
-                    )
+                let parentID: UUID?
+                if isTombstone {
+                    parentID = nil
+                } else if let parentSyncId {
+                    if let resolved = currentFolders.first(where: { $0.id.uuidString.lowercased() == parentSyncId })?.id {
+                        parentID = resolved
+                    } else {
+                        nextPass.append(folder)
+                        continue
+                    }
+                } else {
+                    parentID = nil
                 }
-            } else if !isDeleted {
-                if let uuid = UUID(uuidString: syncId) {
+
+                if let local = currentFolders.first(where: { $0.id.uuidString.lowercased() == syncIdLower }) {
+                    if folder.purged == true {
+                        folderService.deleteFolderFromSync(local.id)
+                    } else if isDeleted {
+                        folderService.deleteFolderFromSync(local.id)
+                    } else if remoteUpdatedAt > local.updatedAt {
+                        folderService.updateFolderFromSync(
+                            folderID: local.id, name: folder.name, icon: folder.icon,
+                            parentID: parentID, remoteUpdatedAt: remoteUpdatedAt
+                        )
+                    }
+                    madeProgress = true
+                } else if !isDeleted, let uuid = UUID(uuidString: syncId) {
                     folderService.addFolderFromSync(
                         id: uuid, name: folder.name, icon: folder.icon,
                         parentID: parentID,
                         createdAt: Date(timeIntervalSince1970: folder.createdAt / 1000),
                         updatedAt: remoteUpdatedAt
                     )
+                    madeProgress = true
+                } else {
+                    madeProgress = true
                 }
             }
+
+            if !madeProgress {
+                for folder in nextPass {
+                    self.logger.warning("Sync: skipping folder \(folder.ciderSyncId ?? "<nil>") named '\(folder.name)' because parent \(folder.parentSyncId ?? "<nil>") is unresolved; not flattening to root")
+                }
+                break
+            }
+            pendingFolders = nextPass
         }
 
         // --- Bookmarks ---

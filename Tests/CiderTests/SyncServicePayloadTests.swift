@@ -4,6 +4,97 @@ import Testing
 
 @Suite("SyncService Payload Tests")
 struct SyncServicePayloadTests {
+    private func pulledFolder(
+        id: String,
+        name: String,
+        parentID: String? = nil,
+        updatedAt: Double = 1_700_000_000_000,
+        deleted: Bool = false,
+        purged: Bool = false
+    ) -> SyncPulledFolder {
+        SyncPulledFolder(
+            ciderSyncId: id,
+            name: name,
+            icon: nil,
+            parentSyncId: parentID,
+            createdAt: updatedAt,
+            updatedAt: updatedAt,
+            deleted: deleted,
+            deletedAt: deleted ? updatedAt : nil,
+            purged: purged,
+            purgedAt: purged ? updatedAt : nil
+        )
+    }
+
+    @Test("pulled folder children wait for resolved parent instead of flattening to root")
+    func pulledFolderChildrenRequireResolvedParent() {
+        let parentID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        let child = pulledFolder(
+            id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            name: "Games",
+            parentID: parentID.uppercased()
+        )
+        let root = pulledFolder(
+            id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            name: "Media"
+        )
+
+        let initial = SyncService.partitionPulledFoldersByResolvedParent(
+            [child, root],
+            availableFolderIDs: []
+        )
+        #expect(initial.ready.map(\.name) == ["Media"])
+        #expect(initial.unresolved.map(\.name) == ["Games"])
+
+        let afterParentExists = SyncService.partitionPulledFoldersByResolvedParent(
+            [child],
+            availableFolderIDs: [parentID]
+        )
+        #expect(afterParentExists.ready.map(\.name) == ["Games"])
+        #expect(afterParentExists.unresolved.isEmpty)
+    }
+
+    @Test("pulled folders with missing parents remain unresolved")
+    func pulledFolderMissingParentIsNotRootReady() {
+        let child = pulledFolder(
+            id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+            name: "Cider",
+            parentID: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+        )
+
+        let partition = SyncService.partitionPulledFoldersByResolvedParent(
+            [child],
+            availableFolderIDs: []
+        )
+
+        #expect(partition.ready.isEmpty)
+        #expect(partition.unresolved.map(\.name) == ["Cider"])
+    }
+
+    @Test("folder tombstones do not wait for unresolved parents")
+    func pulledFolderTombstonesBypassMissingParent() {
+        let deletedChild = pulledFolder(
+            id: "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            name: "Games",
+            parentID: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+            deleted: true
+        )
+        let purgedChild = pulledFolder(
+            id: "99999999-9999-9999-9999-999999999999",
+            name: "Movies",
+            parentID: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+            purged: true
+        )
+
+        let partition = SyncService.partitionPulledFoldersByResolvedParent(
+            [deletedChild, purgedChild],
+            availableFolderIDs: []
+        )
+
+        #expect(partition.ready.map(\.name) == ["Games", "Movies"])
+        #expect(partition.unresolved.isEmpty)
+    }
+
     @Test("note payload includes tags for web sync")
     @MainActor
     func notePayloadIncludesTags() {
