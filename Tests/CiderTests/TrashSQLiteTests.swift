@@ -74,6 +74,34 @@ struct TrashSQLiteTests {
 
     // MARK: - 1. Basic round-trip
 
+    @Test("trashing note with existing trash filename moves source to unique trash filename")
+    func noteTrashAvoidsFilenameCollision() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+        let notesDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-note-trash-collision-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: notesDir) }
+        try FileManager.default.createDirectory(at: notesDir.appendingPathComponent(".trash"), withIntermediateDirectories: true)
+
+        let note = Note(title: "Duplicate", content: "same", relativePath: "Inbox/Notes/Duplicate.md")
+        let sourceURL = notesDir.appendingPathComponent("Duplicate.md")
+        let existingTrashURL = notesDir.appendingPathComponent(".trash/Duplicate.md")
+        try "source copy".write(to: sourceURL, atomically: true, encoding: .utf8)
+        try "older trash copy".write(to: existingTrashURL, atomically: true, encoding: .utf8)
+
+        let trashItem = service.trashNote(note, notesDir: notesDir)
+
+        #expect(!FileManager.default.fileExists(atPath: sourceURL.path))
+        #expect(FileManager.default.fileExists(atPath: existingTrashURL.path))
+        #expect(trashItem.notePayload?.noteFilename != "Duplicate.md")
+        let movedFilename = try #require(trashItem.notePayload?.noteFilename)
+        let movedURL = notesDir.appendingPathComponent(".trash").appendingPathComponent(movedFilename)
+        #expect(FileManager.default.fileExists(atPath: movedURL.path))
+        #expect((try String(contentsOf: movedURL, encoding: .utf8)) == "source copy")
+    }
+
     @Test("Trash item round-trips all top-level fields")
     func basicRoundTrip() throws {
         let (db, url) = try makeTestDB()

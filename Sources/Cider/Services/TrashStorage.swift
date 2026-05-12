@@ -235,13 +235,16 @@ final class TrashStorage {
 
         let filename = (note.relativePath as NSString).lastPathComponent
         let srcURL = notesDir.appendingPathComponent(filename)
-        let destURL = trashDir.appendingPathComponent(filename)
+        var trashFilename = filename
+        var destURL = trashDir.appendingPathComponent(trashFilename)
         if fm.fileExists(atPath: srcURL.path) {
+            trashFilename = uniqueTrashFilename(for: filename, in: trashDir)
+            destURL = trashDir.appendingPathComponent(trashFilename)
             try? fm.moveItem(at: srcURL, to: destURL)
         }
 
         let payload = NoteTrashPayload(
-            noteFilename: filename,
+            noteFilename: trashFilename,
             folderID: note.folderID,
             createdAt: note.createdAt
         )
@@ -1160,6 +1163,19 @@ final class TrashStorage {
         } catch {
             Self.logger.error("Failed to delete trash item \(trashItemID) from database: \(error.localizedDescription)")
         }
+    }
+
+    private func uniqueTrashFilename(for filename: String, in trashDir: URL) -> String {
+        let fm = FileManager.default
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        var candidate = filename
+        var index = 2
+        while fm.fileExists(atPath: trashDir.appendingPathComponent(candidate).path) {
+            candidate = ext.isEmpty ? "\(base) \(index)" : "\(base) \(index).\(ext)"
+            index += 1
+        }
+        return candidate
     }
 
     /// DELETE every row from the trash table. Used by `emptyTrash()`.
