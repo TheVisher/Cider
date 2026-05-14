@@ -226,6 +226,39 @@ extension CiderPanelView {
                 set: { kanbanCardDraft = $0 }
             )
             let draftCard = currentKanbanDraftCard(from: detail)
+            let currentWidth = min(detailSlideOutWidth, maxSlideOutWidth)
+            let metadataBinding = Binding<Bool>(
+                get: { kanbanMetadataVisible },
+                set: { isVisible in
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        kanbanMetadataVisible = isVisible
+                        if isVisible {
+                            detailSlideOutWidth = KanbanDetailSlideOutLayoutPolicy.expandedWidth(
+                                currentWidth: currentWidth,
+                                maxWidth: maxSlideOutWidth,
+                                sourceNotesVisible: kanbanSourceNotesVisible,
+                                metadataVisible: true
+                            )
+                        }
+                    }
+                }
+            )
+            let sourceNotesBinding = Binding<Bool>(
+                get: { kanbanSourceNotesVisible },
+                set: { isVisible in
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        kanbanSourceNotesVisible = isVisible
+                        if isVisible {
+                            detailSlideOutWidth = KanbanDetailSlideOutLayoutPolicy.expandedWidth(
+                                currentWidth: currentWidth,
+                                maxWidth: maxSlideOutWidth,
+                                sourceNotesVisible: true,
+                                metadataVisible: kanbanMetadataVisible
+                            )
+                        }
+                    }
+                }
+            )
 
             GenericItemDetailPanel(
                 title: draftCard.title,
@@ -234,15 +267,22 @@ extension CiderPanelView {
                 maxWidth: maxSlideOutWidth,
                 showTitle: false,
                 scrollsContent: false,
-                metadataVisible: $kanbanMetadataVisible,
+                metadataVisible: metadataBinding,
                 onResize: { newWidth in
                     let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
-                    detailSlideOutWidth = clamped
+                    let fittingState = KanbanDetailSlideOutLayoutPolicy.fittingState(
+                        for: clamped,
+                        sourceNotesVisible: kanbanSourceNotesVisible,
+                        metadataVisible: kanbanMetadataVisible
+                    )
+                    kanbanSourceNotesVisible = fittingState.sourceNotesVisible
+                    kanbanMetadataVisible = fittingState.metadataVisible
+                    detailSlideOutWidth = min(fittingState.width, maxSlideOutWidth)
                 },
                 onClose: closeKanbanDetail,
                 onModeChange: { _ in },
                 trailingExtra: {
-                    KanbanSourceNotesToggleButton(isVisible: $kanbanSourceNotesVisible)
+                    KanbanSourceNotesToggleButton(isVisible: sourceNotesBinding)
                 },
                 metadata: {
                     KanbanCardMetadataInspectorView(
@@ -272,7 +312,7 @@ extension CiderPanelView {
                     boardName: detail.board.name,
                     cardID: detail.card.id,
                     draft: draftBinding,
-                    sourceNotesVisible: $kanbanSourceNotesVisible,
+                    sourceNotesVisible: sourceNotesBinding,
                     onSave: saveKanbanCardDraft
                 )
             }

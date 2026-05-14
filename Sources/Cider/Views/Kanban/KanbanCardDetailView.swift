@@ -28,7 +28,11 @@ struct KanbanCardDetailView: View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
             HStack(alignment: .top, spacing: Spacing.xl) {
                 KanbanCardDashboardView(boardName: boardName, cardID: cardID, title: draft.title, notes: draft.notes)
-                    .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(
+                        minWidth: KanbanDetailSlideOutLayoutPolicy.dashboardMinimumWidth,
+                        maxWidth: .infinity,
+                        maxHeight: .infinity
+                    )
 
                 if sourceNotesVisible {
                     VStack(alignment: .leading, spacing: Spacing.md) {
@@ -45,7 +49,12 @@ struct KanbanCardDetailView: View {
                             .focused($notesFocused)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .frame(minWidth: 360, idealWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(
+                        minWidth: KanbanDetailSlideOutLayoutPolicy.sourceNotesMinimumWidth,
+                        idealWidth: 520,
+                        maxWidth: .infinity,
+                        maxHeight: .infinity
+                    )
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
                 }
             }
