@@ -159,4 +159,24 @@ struct KanbanBoardLayoutTests {
         #expect(KanbanDesign.kanbanBlueAccentHueDegrees < KanbanDesign.kanbanPurpleAccentHueDegrees)
         #expect(KanbanDesign.kanbanPurpleAccentHueDegrees - KanbanDesign.kanbanBlueAccentHueDegrees >= 45)
     }
+
+    @Test("testing owner badge is derived from card tags")
+    func testingOwnerBadgeIsDerivedFromCardTags() {
+        let erikCard = KanbanCard(
+            title: "Manual QA",
+            tags: ["kanban", "needs-erik", "ui"]
+        )
+        let agentCard = KanbanCard(
+            title: "Automated QA",
+            tags: ["qa", "agent-can-verify"]
+        )
+        let untaggedCard = KanbanCard(
+            title: "No owner yet",
+            tags: ["qa"]
+        )
+
+        #expect(KanbanBoardLayout.testingOwnerBadge(for: erikCard)?.text == "Needs Erik")
+        #expect(KanbanBoardLayout.testingOwnerBadge(for: agentCard)?.text == "Agent can verify")
+        #expect(KanbanBoardLayout.testingOwnerBadge(for: untaggedCard) == nil)
+    }
 }

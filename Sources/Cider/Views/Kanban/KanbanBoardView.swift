@@ -914,7 +914,10 @@ struct KanbanBoardView: View {
     }
 
     private func hasCardFooter(_ card: KanbanCard) -> Bool {
-        card.priority != nil || card.agent != nil || !card.tags.isEmpty
+        KanbanBoardLayout.testingOwnerBadge(for: card) != nil
+            || card.priority != nil
+            || card.agent != nil
+            || !card.tags.isEmpty
     }
 
     private func hasCardContext(parentBadge: KanbanParentBadge?, planIndicator: KanbanPlanIndicator?) -> Bool {
@@ -939,6 +942,9 @@ struct KanbanBoardView: View {
 
     private func cardFooterView(_ card: KanbanCard) -> some View {
         HStack(spacing: Spacing.xs) {
+            if let badge = KanbanBoardLayout.testingOwnerBadge(for: card) {
+                testingOwnerBadgeView(badge)
+            }
             if let priority = card.priority {
                 priorityBadge(priority)
             }
@@ -963,6 +969,30 @@ struct KanbanBoardView: View {
                 }
             }
             Spacer()
+        }
+    }
+
+    private func testingOwnerBadgeView(_ badge: KanbanTestingOwnerBadge) -> some View {
+        let color = testingOwnerBadgeColor(for: badge.kind)
+        return Text(badge.text)
+            .font(CiderFont.micro)
+            .foregroundColor(color)
+            .padding(.horizontal, Spacing.xxs)
+            .padding(.vertical, 2)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(color.opacity(0.14))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(color.opacity(0.3), lineWidth: CiderBorder.hairlineStrokeWidth)
+            )
+    }
+
+    private func testingOwnerBadgeColor(for kind: KanbanTestingOwnerBadge.Kind) -> Color {
+        switch kind {
+        case .needsErik: CiderColors.warning
+        case .agentCanVerify: CiderColors.success
         }
     }
 
