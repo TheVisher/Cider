@@ -25,6 +25,18 @@ Schema v9 adds additive foundation tables:
 
 Vectors and embeddings may augment retrieval later, but they are not the source of truth. Hybrid retrieval should layer structured filters, FTS5, links/graph expansion, optional embeddings, and reranking.
 
+## Kanban Projection Lifecycle
+
+Kanban YAML remains canonical for boards and card notes in this bridge phase. SQLite projections are rebuildable agent/read-model data.
+
+- Card projection is created or refreshed when Cider writes card notes through `board add-card`, `board update-card`, `board section update`, or `board evidence add`.
+- `item backfill-kanban [--board <name-or-id>]` rebuilds projections from canonical board YAML. Use it after branch changes, restores, manual YAML repair, or when an agent needs current search results before the app has naturally refreshed the board.
+- Card or board deletion removes matching `item_sections` and `content_chunks` projections so old card text does not remain searchable.
+- Board reload/restore should re-project cards when loaded by Cider services; agents can force the same result with `item backfill-kanban`.
+- `item doctor` currently verifies schema/table health and SQLite integrity. Stale projection drift is not yet a first-class doctor finding; until that follow-up lands, repair suspected drift with backfill and verify with `item get card <id>` and `item search`.
+
+The target future model is native structured sections rendered into dashboard/source/export views. The current Markdown-derived projection is an intentional migration bridge, not the final authority model.
+
 ## Safety Rules
 
 - Never delete user data directly from feature code. Use trash/undo flows.

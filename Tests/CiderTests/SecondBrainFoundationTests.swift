@@ -16,6 +16,54 @@ struct SecondBrainFoundationTests {
         try? FileManager.default.removeItem(atPath: url.path + "-shm")
     }
 
+    private var packageRootURL: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private var ciderCLIURL: URL {
+        let candidates = [
+            packageRootURL.appendingPathComponent(".build/arm64-apple-macosx/debug/cider-cli"),
+            packageRootURL.appendingPathComponent(".build/debug/cider-cli"),
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) } ?? candidates[0]
+    }
+
+    private func runCLI(_ args: [String], vaultURL: URL) throws -> String {
+        let process = Process()
+        process.executableURL = ciderCLIURL
+        process.currentDirectoryURL = packageRootURL
+        process.arguments = ["--vault", vaultURL.path] + args
+
+        let output = Pipe()
+        let error = Pipe()
+        process.standardOutput = output
+        process.standardError = error
+
+        try process.run()
+        process.waitUntilExit()
+
+        let stdout = String(
+            data: output.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        ) ?? ""
+        let stderr = String(
+            data: error.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        ) ?? ""
+
+        #expect(process.terminationStatus == 0, "CLI failed: \(args.joined(separator: " "))\nstdout:\n\(stdout)\nstderr:\n\(stderr)")
+        return stdout
+    }
+
+    private func jsonObject(from output: String) throws -> [String: Any] {
+        let data = Data(output.utf8)
+        let object = try JSONSerialization.jsonObject(with: data)
+        return (object as? [String: Any]) ?? [:]
+    }
+
     private func makeTestDB() throws -> (CiderDatabase, URL) {
         let url = makeTempDBURL()
         let db = CiderDatabase()
@@ -670,5 +718,79 @@ struct SecondBrainFoundationTests {
             try stmt.step()
             #expect(stmt.int(at: 0) == 1, "Expected migrated database to include \(table)")
         }
+    }
+
+    @Test("process CLI supports normal agent card workflow")
+    func processCLISupportsNormalAgentCardWorkflow() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-agent-workflow-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Agent Workflow Smoke"], vaultURL: vaultURL)
+        let addOutput = try runCLI([
+            "board", "add-card", "Agent Workflow Smoke",
+            "--column", "Backlog",
+            "--title", "Agent contract smoke",
+            "--notes", """
+            ## Problem
+            Agents need structured Cider card context.
+
+            ## Current State
+            Created through process-level CLI smoke.
+
+            ## Next Step
+            Update state and add evidence through the CLI.
+            """,
+        ], vaultURL: vaultURL)
+
+        let cardID = try #require(addOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1)
+        let cardRef = String(cardID)
+
+        let inspected = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Agent Workflow Smoke",
+            "--card", cardRef,
+            "--json",
+        ], vaultURL: vaultURL))
+        let dashboard = try #require(inspected["dashboard"] as? [String: Any])
+        #expect(dashboard["currentState"] as? String == "Created through process-level CLI smoke.")
+
+        let updated = try jsonObject(from: runCLI([
+            "board", "section", "update", "Agent Workflow Smoke",
+            "--card", cardRef,
+            "--section", "Current State",
+            "--value", "Updated through board section update.",
+            "--json",
+        ], vaultURL: vaultURL))
+        let updatedDashboard = try #require(updated["dashboard"] as? [String: Any])
+        #expect(updatedDashboard["currentState"] as? String == "Updated through board section update.")
+
+        let evidence = try jsonObject(from: runCLI([
+            "board", "evidence", "add", "Agent Workflow Smoke",
+            "--card", cardRef,
+            "--text", "Process-level CLI evidence smoke passed.",
+            "--source", "swift test process",
+            "--json",
+        ], vaultURL: vaultURL))
+        let evidenceDashboard = try #require(evidence["dashboard"] as? [String: Any])
+        let evidenceEntries = try #require(evidenceDashboard["evidenceEntries"] as? [[String: Any]])
+        #expect(evidenceEntries.contains {
+            ($0["body"] as? String)?.contains("Process-level CLI evidence smoke passed.") == true
+        })
+
+        _ = try runCLI([
+            "item", "backfill-kanban",
+            "--board", "Agent Workflow Smoke",
+            "--json",
+        ], vaultURL: vaultURL)
+
+        let item = try jsonObject(from: runCLI([
+            "item", "get", "card", cardRef,
+            "--json",
+        ], vaultURL: vaultURL))
+        let sections = try #require(item["sections"] as? [[String: Any]])
+        #expect(sections.contains { $0["sectionKey"] as? String == "current_state" })
+        #expect(sections.contains {
+            ($0["body"] as? String)?.contains("Process-level CLI evidence smoke passed.") == true
+        })
     }
 }

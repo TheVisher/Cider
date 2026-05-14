@@ -100,6 +100,20 @@ Board files live in `~/CiderVault/.cider/boards/`.
 - Move implementation work through `Queued`, `In Progress`, `Testing`, and `Done` as reality changes.
 - Preserve YAML structure and quote dates with single quotes.
 
+## Second-Brain Card Workflow
+
+For Cider development work with a Kanban card, agents should use the structured card contract before reading raw board YAML:
+
+1. Inspect the active card with `cider-cli board card inspect <board> --card <id> --json`.
+2. Read `dashboard.currentState`, `dashboard.nextStep`, `dashboard.openLoops`, `dashboard.evidenceEntries`, and `dashboard.agentContext`.
+3. Move or create cards through `cider-cli board ...` commands, not direct YAML edits.
+4. Update active status with `cider-cli board section update <board> --card <id> --section "Current State" --value "..." --json`.
+5. Add verification through `cider-cli board evidence add <board> --card <id> --text "..." --source "..." --json`.
+6. Record durable product, architecture, storage, CLI, QA, or agent-behavior choices in a `Decisions` section before promoting them into core docs.
+7. Before stopping, refresh `Agent Handoff` with the current status, exact commands the next agent should run, known gaps, and merge/push constraints.
+
+Use `cider-cli item get card <id> --json` when an agent only needs projected sections/provenance, and `cider-cli item search <query> --json` when it needs retrieval across projected chunks. Raw Markdown or YAML inspection is for parser/storage debugging, not normal handoff.
+
 ## Development Rules
 
 - Use existing Cider patterns before adding abstractions.

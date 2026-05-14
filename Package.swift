@@ -44,7 +44,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CiderTests",
-            dependencies: ["Cider"],
+            dependencies: ["Cider", "CiderCLI"],
             path: "Tests/CiderTests"
         )
     ]
