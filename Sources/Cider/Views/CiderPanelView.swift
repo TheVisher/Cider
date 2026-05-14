@@ -55,6 +55,7 @@ struct CiderPanelView: View {
     @State var selectedKanbanCardID: String?
     @State var kanbanCardDraft: KanbanCardDraft?
     @State var kanbanMetadataVisible: Bool = true
+    @State var kanbanSourceNotesVisible: Bool = false
     @State var folderContentScope: WorkspaceDomainContentScope = .allItems
     @State var cardScaleSaveTask: Task<Void, Never>?
     @State var sidebarSearchText: String = ""

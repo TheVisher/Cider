@@ -5,14 +5,22 @@ struct KanbanCardDetailView: View {
     let boardName: String
     let cardID: String
     @Binding var draft: KanbanCardDraft
+    @Binding var sourceNotesVisible: Bool
     var onSave: () -> Void
 
     @FocusState private var notesFocused: Bool
 
-    init(boardName: String, cardID: String, draft: Binding<KanbanCardDraft>, onSave: @escaping () -> Void) {
+    init(
+        boardName: String,
+        cardID: String,
+        draft: Binding<KanbanCardDraft>,
+        sourceNotesVisible: Binding<Bool>,
+        onSave: @escaping () -> Void
+    ) {
         self.boardName = boardName
         self.cardID = cardID
         _draft = draft
+        _sourceNotesVisible = sourceNotesVisible
         self.onSave = onSave
     }
 
@@ -20,23 +28,26 @@ struct KanbanCardDetailView: View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
             HStack(alignment: .top, spacing: Spacing.xl) {
                 KanbanCardDashboardView(boardName: boardName, cardID: cardID, title: draft.title, notes: draft.notes)
-                    .frame(minWidth: 340, idealWidth: 430, maxWidth: 520, maxHeight: .infinity)
+                    .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
 
-                VStack(alignment: .leading, spacing: Spacing.md) {
-                    Text("Source Notes")
-                        .font(CiderFont.captionSemibold)
-                        .foregroundColor(CiderColors.tertiary)
+                if sourceNotesVisible {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        Text("Source Notes")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.tertiary)
 
-                    TextEditor(text: $draft.notes)
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.primary)
-                        .lineSpacing(4)
-                        .scrollContentBackground(.hidden)
-                        .background(Color.clear)
-                        .focused($notesFocused)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        TextEditor(text: $draft.notes)
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.primary)
+                            .lineSpacing(4)
+                            .scrollContentBackground(.hidden)
+                            .background(Color.clear)
+                            .focused($notesFocused)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .frame(minWidth: 360, idealWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -51,6 +62,36 @@ struct KanbanCardDetailView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.lg)
+        .onChange(of: sourceNotesVisible) { _, isVisible in
+            if !isVisible {
+                notesFocused = false
+            }
+        }
+    }
+}
+
+struct KanbanSourceNotesToggleButton: View {
+    @Binding var isVisible: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .snappy) {
+                isVisible.toggle()
+            }
+        } label: {
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(isVisible ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
+                .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
+                .overlay {
+                    Image(systemName: isVisible ? "doc.text.fill" : "doc.text")
+                        .font(CiderFont.toolbarIcon)
+                        .foregroundColor(isVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                }
+        }
+        .buttonStyle(.plain)
+        .help(isVisible ? "Hide Source Notes" : "Show Source Notes")
     }
 }
 

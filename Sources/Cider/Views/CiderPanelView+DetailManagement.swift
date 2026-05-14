@@ -392,6 +392,7 @@ extension CiderPanelView {
         let wasExpanded = isAnyDetailOpen
         clearDetailSelectionState(except: .kanban)
         kanbanMetadataVisible = true
+        kanbanSourceNotesVisible = false
         selectedKanbanBoardID = boardID
         selectedKanbanCardID = cardID
         kanbanCardDraft = KanbanCardDraft(card: found.card)

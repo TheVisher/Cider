@@ -241,7 +241,9 @@ extension CiderPanelView {
                 },
                 onClose: closeKanbanDetail,
                 onModeChange: { _ in },
-                trailingExtra: { EmptyView() },
+                trailingExtra: {
+                    KanbanSourceNotesToggleButton(isVisible: $kanbanSourceNotesVisible)
+                },
                 metadata: {
                     KanbanCardMetadataInspectorView(
                         board: detail.board,
@@ -270,6 +272,7 @@ extension CiderPanelView {
                     boardName: detail.board.name,
                     cardID: detail.card.id,
                     draft: draftBinding,
+                    sourceNotesVisible: $kanbanSourceNotesVisible,
                     onSave: saveKanbanCardDraft
                 )
             }
