@@ -36,6 +36,8 @@ Agent and AI services should route through narrow seams so runtime providers can
 
 `ItemLinkService` owns explicit related-item/backlink behavior. `DashboardStorage` owns local dashboard snapshot persistence. A shared agenda/briefing policy service should own relevance decisions for today's dashboard, reminders, and agent reports. Feature views, `cider-cli` JSON, and agent integrations should consume that service instead of reconstructing reminder/date relevance independently.
 
+The second-brain foundation lives in SQLite services, not in Markdown conventions or LLM memory. `SecondBrainStore` owns item sections, content chunks, FTS search, routing decisions, and agent action provenance. Feature-specific projectors, such as Kanban card projection, translate canonical feature storage into that shared graph without rewriting the feature's storage all at once.
+
 ## Agent Boundary
 
 Cider owns the native UI, vault data, stable logical chat identity, local state, commands, mirrored display history, and user-facing approval surfaces. Hermes or another runtime owns long-running agent execution, tool semantics, runtime session truth, and external session continuity.
@@ -49,6 +51,8 @@ Future Agent Host work should coordinate multi-client rooms, ordering, approvals
 `cider-cli` is an agent-facing and user-facing interface to Cider data. It should prefer strict JSON when `--json` is passed and human-readable output otherwise.
 
 Agents should use CLI/services for vault facts and mutations. They should not read raw caches or count filesystem files when a CLI command can answer.
+
+Hermes and other agents should query Cider through stable commands such as `item get`, `item search`, `item route`, `item backfill-kanban`, `item doctor`, `space explain`, `board card inspect`, `board section update`, and `board evidence add`. Agents should not infer Cider state by scanning random Markdown files, folder names, sidecars, or UI-only summaries when a structured command exists.
 
 ## Testing Boundary
 

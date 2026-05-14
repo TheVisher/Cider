@@ -9,7 +9,21 @@ Cider is local-first. The user's vault and local SQLite database are the durable
 - SQLite is the canonical metadata/query layer for Cider-managed entities.
 - Vault files are durable user artifacts where the file itself matters: notes, `.webloc` bookmarks, `.ics` todos/events, `.vcf` contacts, and saved files.
 - JSON indexes and sidecars are transitional, compatibility, cache, or export surfaces unless explicitly documented otherwise.
-- Kanban board YAML files are a separate project/workflow store, not part of the library graph.
+- Kanban board YAML files remain the canonical project/workflow store, but selected card detail is projected into SQLite for structured sections and search.
+
+## Second Brain Item Graph
+
+Cider's durable second-brain foundation is SQLite-led. LLMs and Hermes reason over Cider; SQLite owns memory identity, structured state, retrieval hooks, routing records, and provenance.
+
+Schema v9 adds additive foundation tables:
+
+- `item_sections`: typed visual/detail sections for an item or external owner such as a Kanban card.
+- `content_chunks`: searchable chunks derived from sections, notes, captures, or imported content.
+- `content_chunks_fts`: FTS5 exact-search index over chunk title/body.
+- `routing_decisions`: durable record of where an item was routed, why, by whom, and with what confidence.
+- `agent_actions`: durable record of agent/CLI/tool actions against an item or projected owner.
+
+Vectors and embeddings may augment retrieval later, but they are not the source of truth. Hybrid retrieval should layer structured filters, FTS5, links/graph expansion, optional embeddings, and reranking.
 
 ## Safety Rules
 
@@ -51,6 +65,8 @@ Contacts use `.vcf` files and SQLite-backed metadata. Relationship context shoul
 ## Backups And Migration
 
 SQLite backup and restore are required safety rails. Migrations should be idempotent where possible and should not depend on debug-only state. Restore paths should be tested against isolated databases before real-vault use.
+
+Second-brain migrations must be additive until backfill and export safety are proven. Kanban, Markdown, `.webloc`, `.ics`, `.vcf`, and saved files must remain usable during migration; projected SQLite rows can be rebuilt from canonical artifacts when applicable.
 
 ## Sync
 

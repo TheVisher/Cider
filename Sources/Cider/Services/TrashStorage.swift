@@ -490,6 +490,7 @@ final class TrashStorage {
 
         // Reload and re-create the tab
         KanbanStorage.shared.reload()
+        KanbanStorage.shared.refreshSecondBrainProjectionIfAvailable(boardID: payload.boardID)
         let savedView = SavedViewStorage.shared.createKanbanView(name: trashItem.title, boardID: payload.boardID)
         SavedViewStorage.shared.addToTabOrder(savedView.id)
 

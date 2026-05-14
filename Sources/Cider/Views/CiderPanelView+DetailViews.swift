@@ -267,6 +267,8 @@ extension CiderPanelView {
                 }
             ) {
                 KanbanCardDetailView(
+                    boardName: detail.board.name,
+                    cardID: detail.card.id,
                     draft: draftBinding,
                     onSave: saveKanbanCardDraft
                 )

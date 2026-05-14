@@ -53,8 +53,25 @@ Keep command details in CLI help and tests, not sprawling docs. The core command
 - todos/events/contacts/files: create, list, update where supported
 - links: related/backlink operations where available
 - dashboard: topic/card list and upsert with JSON
-- boards: show, add-card, update-card, move-card, children
+- item graph: inspect/search/routing/provenance, Kanban projection backfill, and doctor checks
+- spaces: explain routing context and agent instructions
+- boards: show, card inspect, add-card, update-card, move-card, children, section update, evidence add
 - database: backup list and isolated restore verification
+
+## Item Graph And Spaces
+
+Agents should prefer `cider-cli item ...` and `cider-cli space ...` for second-brain memory work.
+
+Core commands:
+
+- `item search <query> --json`: FTS-backed search over projected chunks.
+- `item get <type> <id-or-ref> --json`: structured sections, routing decisions, agent actions, and owner resolution metadata for an owner.
+- `item route <type> <id-or-ref> --target-type <space|folder|board> --reason <text> --json`: records a routing decision without silently moving files.
+- `item backfill-kanban [--board <name-or-id>] --json`: rebuilds Kanban card projections from YAML into SQLite sections/chunks.
+- `item doctor --json`: checks second-brain tables and SQLite integrity.
+- `space explain <name-or-id> --json`: returns purpose, routing hints, default views, and agent instructions for a Space.
+
+Kanban card details can be inspected through `board card inspect <board> --card <id> --json`, which returns parsed dashboard lanes, sections, card metadata, hierarchy, links, routing decisions, and agent actions. Card details can be edited through `board section update <board> --card <id> --section <name> --value <text>` and `board evidence add <board> --card <id> --text <text>`. These update the YAML card and refresh its SQLite projection.
 
 ## Scheduled Briefing / Life-Assistant Reporting
 

@@ -38,13 +38,17 @@ Key code: `Sources/Cider/Services/VaultFolderService.swift`, `Sources/Cider/View
 
 Search lets the user find saved items across vault types. Recall quality should favor precise local data over vague AI summaries. Related-items/backlink surfaces should use explicit links when they exist instead of asking agents to infer relationships every time.
 
-Key code: `Sources/Cider/Services/SearchService.swift`, `Sources/Cider/Services/ItemLinkService.swift`, `Sources/Cider/Views/Search/SearchPaletteView.swift`, `Sources/Cider/Views/Bookmarks/RelatedItemsView.swift`.
+Second-brain recall adds structured sections, content chunks, FTS5 search, routing decisions, and agent-action provenance. Exact search stays first-class; embeddings may supplement recall later, but vector search should not become the memory authority.
+
+Key code: `Sources/Cider/Services/SearchService.swift`, `Sources/Cider/Services/SecondBrainStore.swift`, `Sources/Cider/Services/ItemLinkService.swift`, `Sources/Cider/Views/Search/SearchPaletteView.swift`, `Sources/Cider/Views/Bookmarks/RelatedItemsView.swift`.
 
 ## Kanban
 
 Kanban is both a user feature and Cider's development workflow. It owns roadmap, active work, QA evidence, bugs, implementation notes, review findings, failed attempts, completed plan history, and handoff context. Markdown export is explicit and one-way; cards remain the source of truth.
 
-Key code: `Sources/Cider/Views/Kanban/`, `Sources/Cider/Models/KanbanBoard.swift`, `Sources/Cider/Services/KanbanStorage.swift`.
+Card notes can be parsed into native dashboard sections and projected into the second-brain item graph for search and agent inspection. YAML still owns the card; SQLite projection is rebuildable.
+
+Key code: `Sources/Cider/Views/Kanban/`, `Sources/Cider/Models/KanbanBoard.swift`, `Sources/Cider/Services/KanbanStorage.swift`, `Sources/Cider/Services/KanbanCardSectionParser.swift`, `Sources/Cider/Services/SecondBrainKanbanProjectionService.swift`.
 
 ## Todos, Dates, And Reminders
 
