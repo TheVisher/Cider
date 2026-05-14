@@ -84,6 +84,10 @@ private struct KanbanCardDashboardView: View {
                 LazyVStack(alignment: .leading, spacing: Spacing.md) {
                     KanbanDashboardCurrentStateView(model: model)
 
+                    if !model.testingGuidanceEntries.isEmpty {
+                        KanbanDashboardTestingGuidanceView(entries: model.testingGuidanceEntries)
+                    }
+
                     KanbanDashboardTripleSection(model: model)
 
                     KanbanDashboardEntryGroup(
@@ -124,6 +128,41 @@ private struct KanbanCardDashboardView: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+}
+
+private struct KanbanDashboardTestingGuidanceView: View {
+    let entries: [KanbanCardDashboardEntry]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "checkmark.seal")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.warning)
+                Text("What To Test")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+                Spacer(minLength: Spacing.sm)
+                KanbanDashboardBadge(text: "\(entries.count)")
+            }
+
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                ForEach(entries.prefix(6)) { entry in
+                    KanbanDashboardEntryRow(entry: entry)
+                }
+            }
+        }
+        .padding(Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.warning.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .stroke(CiderColors.warning.opacity(0.35), lineWidth: 1)
+        )
     }
 }
 

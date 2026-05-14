@@ -33,6 +33,7 @@ struct KanbanCardDashboardModel: Equatable {
     var goal: String?
     var scope: String?
     var nextStep: String?
+    var testingGuidanceEntries: [KanbanCardDashboardEntry]
     var openLoops: [KanbanCardDashboardEntry]
     var decisions: [KanbanCardDashboardEntry]
     var historyEntries: [KanbanCardDashboardEntry]
@@ -53,6 +54,14 @@ struct KanbanCardDashboardModel: Equatable {
         goal = Self.firstBody(in: parsedSections, matching: ["goal"])
         scope = Self.firstBody(in: parsedSections, matching: Self.scopeKeys)
         nextStep = Self.firstActionLine(in: parsedSections, matching: Self.nextStepKeys)
+        let explicitTestingGuidanceEntries = Self.entries(
+            from: parsedSections,
+            matching: Self.testingGuidanceKeys,
+            fallbackTitle: "What to test"
+        )
+        testingGuidanceEntries = explicitTestingGuidanceEntries.isEmpty
+            ? Self.entries(from: parsedSections, matching: ["acceptance_criteria"], fallbackTitle: "Acceptance criteria")
+            : explicitTestingGuidanceEntries
         decisions = Self.entries(from: parsedSections, matching: Self.decisionKeys, fallbackTitle: "Decision")
         historyEntries = Self.evidenceEntries(from: parsedSections.filter { Self.historyKeys.contains($0.key) })
         evidenceEntries = Self.evidenceEntries(from: parsedSections)
@@ -268,6 +277,14 @@ struct KanbanCardDashboardModel: Equatable {
         "next_steps",
         "next_action",
         "next_actions",
+    ]
+    private static let testingGuidanceKeys: Set<String> = [
+        "manual_qa",
+        "manual_qa_guidance",
+        "qa_guidance",
+        "testing_guidance",
+        "what_to_test",
+        "test_plan",
     ]
     private static let decisionKeys: Set<String> = [
         "decision",

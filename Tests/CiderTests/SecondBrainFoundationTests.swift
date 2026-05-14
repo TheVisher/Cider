@@ -561,6 +561,48 @@ struct SecondBrainFoundationTests {
         #expect(model.nextStep == "User review.")
     }
 
+    @Test("Kanban dashboard model promotes manual QA guidance")
+    func kanbanDashboardModelPromotesManualQAGuidance() {
+        let model = KanbanCardDashboardModel(
+            title: "Readable long card sections",
+            notes: """
+            ## Problem
+            Details are hard to scan.
+
+            ## Manual QA Guidance
+            - Open a Kanban card whose notes have headings.
+            - Confirm a readable sections preview appears above the raw editor.
+            - Edit raw notes and confirm the preview updates.
+            """
+        )
+
+        #expect(model.testingGuidanceEntries.map(\.body) == [
+            "Open a Kanban card whose notes have headings.",
+            "Confirm a readable sections preview appears above the raw editor.",
+            "Edit raw notes and confirm the preview updates.",
+        ])
+    }
+
+    @Test("Kanban dashboard model falls back to acceptance criteria for testing guidance")
+    func kanbanDashboardModelFallsBackToAcceptanceCriteriaForTestingGuidance() {
+        let model = KanbanCardDashboardModel(
+            title: "History section",
+            notes: """
+            ## Problem
+            History is invisible.
+
+            ## Acceptance criteria
+            - Existing history entries are visible in card detail.
+            - Users can add a typed history entry.
+            """
+        )
+
+        #expect(model.testingGuidanceEntries.map(\.body) == [
+            "Existing history entries are visible in card detail.",
+            "Users can add a typed history entry.",
+        ])
+    }
+
     @Test("Kanban projection prunes stale sections")
     func kanbanProjectionPrunesStaleSections() throws {
         let (db, url) = try makeTestDB()
