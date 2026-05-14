@@ -926,4 +926,49 @@ struct SecondBrainFoundationTests {
         #expect(parent["id"] as? String == parentID)
         #expect(parent["title"] as? String == "Parent roadmap")
     }
+
+    @Test("process CLI ranks edited cards first in recent Kanban activity")
+    func processCLIRanksEditedCardsFirstInRecentKanbanActivity() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-board-activity-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Activity Smoke"], vaultURL: vaultURL)
+        let olderOutput = try runCLI([
+            "board", "add-card", "Activity Smoke",
+            "--column", "Backlog",
+            "--title", "Older but edited",
+            "--notes", """
+            ## Current State
+            Waiting.
+            """,
+        ], vaultURL: vaultURL)
+        let olderID = String(try #require(olderOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        _ = try runCLI([
+            "board", "add-card", "Activity Smoke",
+            "--column", "Backlog",
+            "--title", "Newer untouched",
+        ], vaultURL: vaultURL)
+
+        _ = try runCLI([
+            "board", "section", "update", "Activity Smoke",
+            "--card", olderID,
+            "--section", "Current State",
+            "--value", "Edited after the newer card was created.",
+            "--json",
+        ], vaultURL: vaultURL)
+
+        let recent = try jsonObject(from: runCLI([
+            "board", "recent", "Activity Smoke",
+            "--limit", "1",
+            "--json",
+        ], vaultURL: vaultURL))
+        let cards = try #require(recent["cards"] as? [[String: Any]])
+        let first = try #require(cards.first)
+        #expect(first["id"] as? String == olderID)
+        #expect(first["title"] as? String == "Older but edited")
+        #expect(first["activityKind"] as? String == "updated")
+        #expect(first["updatedAt"] as? String != nil)
+    }
 }

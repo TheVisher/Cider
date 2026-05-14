@@ -98,6 +98,8 @@ Board files live in `~/CiderVault/.cider/boards/`.
 - Put test evidence and implementation notes on the card.
 - Move fixed bugs to the bugs board `Fixed` column.
 - Move implementation work through `Queued`, `In Progress`, `Testing`, and `Done` as reality changes.
+- Do not leave cards in Testing when an agent can verify the result with CLI/tests/builds that produce the same evidence Erik would read. Run the verification, record evidence, and move the card forward.
+- Testing handoffs to Erik must be ID-readable from chat: group cards by `Needs Erik` vs `Agent can verify`, include the card title/status, and use IDs only as secondary references.
 - Preserve YAML structure and quote dates with single quotes.
 
 ## Second-Brain Card Workflow

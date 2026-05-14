@@ -3409,18 +3409,25 @@ struct CiderCLI {
                         return
                     }
                     if let card = storage.addCard(boardID: board.id, columnID: col.id, title: title, parentCardID: parentCardID) {
-                        // Apply optional notes and priority via updateCard
+                        // Apply optional notes and priority via updateCard while preserving creation activity.
                         var updated = card
-                        if let notes = parseFlag("--notes", from: args) { updated.notes = notes }
+                        var changed = false
+                        if let notes = parseFlag("--notes", from: args) {
+                            updated.notes = notes
+                            changed = true
+                        }
                         if let priorityStr = parseFlag("--priority", from: args) {
                             switch priorityStr.lowercased() {
-                            case "high": updated.priority = .high
-                            case "medium": updated.priority = .medium
-                            case "low": updated.priority = .low
+                            case "high": updated.priority = .high; changed = true
+                            case "medium": updated.priority = .medium; changed = true
+                            case "low": updated.priority = .low; changed = true
                             default: break
                             }
                         }
-                        storage.updateCard(boardID: board.id, card: updated)
+                        if changed {
+                            updated.markActivity("created", at: card.created)
+                            storage.updateCard(boardID: board.id, card: updated)
+                        }
                         refreshSecondBrainProjection(boardID: board.id, card: updated)
                         print("Added card: \(updated.title) [\(updated.id)] to \(col.name)")
                     } else {
@@ -5442,8 +5449,8 @@ struct CiderCLI {
         for column in board.columns {
             for card in column.cards {
                 traversalOrder += 1
-                let activityAt = card.completed ?? card.created
-                let activityKind = card.completed == nil ? "created" : "completed"
+                let activityAt = card.updatedAt ?? card.completed ?? card.created
+                let activityKind = card.lastActivityKind ?? (card.completed == nil ? "created" : "completed")
                 entries.append(BoardRecentCard(
                     board: board,
                     column: column,
@@ -5479,6 +5486,9 @@ struct CiderCLI {
         ]
         if let completed = entry.card.completed {
             dict["completed"] = ISO8601DateFormatter().string(from: completed)
+        }
+        if let updatedAt = entry.card.updatedAt {
+            dict["updatedAt"] = ISO8601DateFormatter().string(from: updatedAt)
         }
         if let priority = entry.card.priority {
             dict["priority"] = priority.rawValue
@@ -5526,6 +5536,8 @@ struct CiderCLI {
         if let color = card.color { cardDict["color"] = color.rawValue }
         if let parentCardID = card.parentCardID { cardDict["parentCardID"] = parentCardID }
         if let completed = card.completed { cardDict["completed"] = ISO8601DateFormatter().string(from: completed) }
+        if let updatedAt = card.updatedAt { cardDict["updatedAt"] = ISO8601DateFormatter().string(from: updatedAt) }
+        if let lastActivityKind = card.lastActivityKind { cardDict["lastActivityKind"] = lastActivityKind }
 
         let parent = board.parentCard(for: card.id)
         var dict: [String: Any] = [

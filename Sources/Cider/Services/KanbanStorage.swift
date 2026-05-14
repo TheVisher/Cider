@@ -288,6 +288,9 @@ final class KanbanStorage: ObservableObject {
                         merged.aiSummary = nil
                     }
                     guard board.canAssignParent(cardID: merged.id, parentCardID: merged.parentCardID) else { return }
+                    if merged.updatedAt == current.updatedAt {
+                        merged.markActivity("updated")
+                    }
                     board.columns[colIdx].cards[cardIdx] = merged
                     didUpdate = true
                     return
@@ -317,6 +320,8 @@ final class KanbanStorage: ObservableObject {
         if incoming.relatedCardIDs != baseline.relatedCardIDs { merged.relatedCardIDs = incoming.relatedCardIDs }
         if incoming.parentCardID != baseline.parentCardID { merged.parentCardID = incoming.parentCardID }
         if incoming.completed != baseline.completed { merged.completed = incoming.completed }
+        if incoming.updatedAt != baseline.updatedAt { merged.updatedAt = incoming.updatedAt }
+        if incoming.lastActivityKind != baseline.lastActivityKind { merged.lastActivityKind = incoming.lastActivityKind }
         return merged
     }
 
@@ -450,8 +455,12 @@ final class KanbanStorage: ObservableObject {
                 // Auto-set completed date when moving to a done column
                 if board.columns[destIdx].isDoneColumn && movedCard.completed == nil {
                     movedCard.completed = Date()
+                    movedCard.markActivity("completed")
                 } else if !board.columns[destIdx].isDoneColumn {
                     movedCard.completed = nil
+                    movedCard.markActivity("moved")
+                } else {
+                    movedCard.markActivity("moved")
                 }
                 return movedCard
             }
