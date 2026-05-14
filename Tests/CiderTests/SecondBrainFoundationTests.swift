@@ -971,4 +971,63 @@ struct SecondBrainFoundationTests {
         #expect(first["activityKind"] as? String == "updated")
         #expect(first["updatedAt"] as? String != nil)
     }
+
+    @Test("process CLI summarizes testing queue by owner")
+    func processCLISummarizesTestingQueueByOwner() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-testing-summary-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Testing Summary Smoke"], vaultURL: vaultURL)
+        _ = try runCLI([
+            "board", "add-column", "Testing Summary Smoke",
+            "--name", "Testing",
+        ], vaultURL: vaultURL)
+
+        let manualOutput = try runCLI([
+            "board", "add-card", "Testing Summary Smoke",
+            "--column", "Testing",
+            "--title", "Manual card detail QA",
+            "--notes", """
+            ## Current State
+            Manual QA needed: open the card detail UI and confirm history is readable.
+
+            ## Next Step
+            Erik should inspect the visible card detail flow.
+            """,
+        ], vaultURL: vaultURL)
+        let manualID = String(try #require(manualOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let agentOutput = try runCLI([
+            "board", "add-card", "Testing Summary Smoke",
+            "--column", "Testing",
+            "--title", "CLI JSON contract QA",
+            "--notes", """
+            ## Current State
+            Agent can verify through CLI JSON smoke coverage.
+
+            ## Next Step
+            Run board recent --json and inspect the response.
+            """,
+        ], vaultURL: vaultURL)
+        let agentID = String(try #require(agentOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let summary = try jsonObject(from: runCLI([
+            "board", "testing-summary", "Testing Summary Smoke",
+            "--json",
+        ], vaultURL: vaultURL))
+
+        let counts = try #require(summary["counts"] as? [String: Any])
+        #expect(counts["total"] as? Int == 2)
+        #expect(counts["needsErik"] as? Int == 1)
+        #expect(counts["agentCanVerify"] as? Int == 1)
+
+        let needsErik = try #require(summary["needsErik"] as? [[String: Any]])
+        #expect(needsErik.first?["id"] as? String == manualID)
+        #expect(needsErik.first?["reason"] as? String == "manual")
+
+        let agentCanVerify = try #require(summary["agentCanVerify"] as? [[String: Any]])
+        #expect(agentCanVerify.first?["id"] as? String == agentID)
+        #expect(agentCanVerify.first?["reason"] as? String == "agent")
+    }
 }

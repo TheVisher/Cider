@@ -3322,6 +3322,27 @@ struct CiderCLI {
                 }
             }
 
+        case "testing-summary":
+            guard let boardRef = args.first else {
+                printCLIError("Usage: cider-cli board testing-summary <board> [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            let summary = testingQueueSummary(in: board)
+            if jsonOutput {
+                outputJSON(boardTestingSummaryToDict(board: board, summary: summary))
+            } else {
+                print("Testing summary for \(board.name):")
+                print("  Needs Erik: \(summary.needsErik.count)")
+                for entry in summary.needsErik {
+                    print("    [\(entry.card.id)] \(entry.card.title) — \(entry.column.name)")
+                }
+                print("  Agent can verify: \(summary.agentCanVerify.count)")
+                for entry in summary.agentCanVerify {
+                    print("    [\(entry.card.id)] \(entry.card.title) — \(entry.column.name)")
+                }
+            }
+
         case "card":
             guard args.first == "inspect" else {
                 printCLIError("Usage: cider-cli board card inspect <board> --card <id> [--json]")
@@ -3746,7 +3767,7 @@ struct CiderCLI {
 
         default:
             print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, recent, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
+            print("Commands: list, show, recent, testing-summary, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -5443,6 +5464,21 @@ struct CiderCLI {
         let traversalOrder: Int
     }
 
+    struct BoardTestingSummaryEntry {
+        let board: KanbanBoard
+        let column: KanbanColumn
+        let card: KanbanCard
+        let parent: KanbanCard?
+        let reason: String
+        let activityAt: Date
+        let traversalOrder: Int
+    }
+
+    struct BoardTestingSummary {
+        let needsErik: [BoardTestingSummaryEntry]
+        let agentCanVerify: [BoardTestingSummaryEntry]
+    }
+
     static func recentKanbanCards(in board: KanbanBoard, limit: Int) -> [BoardRecentCard] {
         var entries: [BoardRecentCard] = []
         var traversalOrder = 0
@@ -5469,6 +5505,80 @@ struct CiderCLI {
             }
             return lhs.traversalOrder > rhs.traversalOrder
         }.prefix(limit))
+    }
+
+    static func testingQueueSummary(in board: KanbanBoard) -> BoardTestingSummary {
+        var needsErik: [BoardTestingSummaryEntry] = []
+        var agentCanVerify: [BoardTestingSummaryEntry] = []
+        var traversalOrder = 0
+
+        for column in board.columns where isTestingQueueColumn(column) {
+            for card in column.cards where card.completed == nil {
+                traversalOrder += 1
+                let entry = BoardTestingSummaryEntry(
+                    board: board,
+                    column: column,
+                    card: card,
+                    parent: board.parentCard(for: card.id),
+                    reason: testingQueueOwnerReason(for: card),
+                    activityAt: card.updatedAt ?? card.created,
+                    traversalOrder: traversalOrder
+                )
+                if entry.reason == "manual" {
+                    needsErik.append(entry)
+                } else {
+                    agentCanVerify.append(entry)
+                }
+            }
+        }
+
+        return BoardTestingSummary(
+            needsErik: sortTestingQueueEntries(needsErik),
+            agentCanVerify: sortTestingQueueEntries(agentCanVerify)
+        )
+    }
+
+    static func isTestingQueueColumn(_ column: KanbanColumn) -> Bool {
+        let normalized = column.name.lowercased()
+        return normalized == "testing"
+            || normalized == "ready to test"
+            || normalized.contains("testing")
+            || normalized.contains("ready to test")
+    }
+
+    static func testingQueueOwnerReason(for card: KanbanCard) -> String {
+        let model = KanbanCardDashboardModel(title: card.title, notes: card.notes)
+        let haystack = [
+            card.title,
+            card.notes ?? "",
+            model.currentState ?? "",
+            model.nextStep ?? "",
+            model.fallbackSummary,
+        ].joined(separator: "\n").lowercased()
+        let manualSignals = [
+            "manual qa",
+            "manual test",
+            "manual testing",
+            "needs erik",
+            "erik should",
+            "user test",
+            "user should",
+            "visual",
+            "ui",
+            "open the app",
+            "approval",
+            "approve",
+        ]
+        return manualSignals.contains { haystack.contains($0) } ? "manual" : "agent"
+    }
+
+    static func sortTestingQueueEntries(_ entries: [BoardTestingSummaryEntry]) -> [BoardTestingSummaryEntry] {
+        entries.sorted { lhs, rhs in
+            if lhs.activityAt != rhs.activityAt {
+                return lhs.activityAt > rhs.activityAt
+            }
+            return lhs.traversalOrder > rhs.traversalOrder
+        }
     }
 
     static func boardRecentCardToDict(_ entry: BoardRecentCard) -> [String: Any] {
@@ -5498,6 +5608,53 @@ struct CiderCLI {
         }
         if let color = entry.card.color {
             dict["color"] = color.rawValue
+        }
+        if let parentCardID = entry.card.parentCardID {
+            dict["parentCardID"] = parentCardID
+        }
+        if let currentState = model.currentState {
+            dict["currentState"] = currentState
+        }
+        if let nextStep = model.nextStep {
+            dict["nextStep"] = nextStep
+        }
+        if let parent = entry.parent {
+            dict["parent"] = minimalCardToDict(parent)
+        }
+        return dict
+    }
+
+    static func boardTestingSummaryToDict(board: KanbanBoard, summary: BoardTestingSummary) -> [String: Any] {
+        [
+            "ok": true,
+            "board": ["id": board.id, "name": board.name],
+            "counts": [
+                "total": summary.needsErik.count + summary.agentCanVerify.count,
+                "needsErik": summary.needsErik.count,
+                "agentCanVerify": summary.agentCanVerify.count,
+            ],
+            "needsErik": summary.needsErik.map(boardTestingSummaryEntryToDict),
+            "agentCanVerify": summary.agentCanVerify.map(boardTestingSummaryEntryToDict),
+        ]
+    }
+
+    static func boardTestingSummaryEntryToDict(_ entry: BoardTestingSummaryEntry) -> [String: Any] {
+        let model = KanbanCardDashboardModel(title: entry.card.title, notes: entry.card.notes)
+        var dict: [String: Any] = [
+            "id": entry.card.id,
+            "title": entry.card.title,
+            "board": ["id": entry.board.id, "name": entry.board.name],
+            "column": ["id": entry.column.id, "name": entry.column.name, "isDoneColumn": entry.column.isDoneColumn],
+            "created": ISO8601DateFormatter().string(from: entry.card.created),
+            "activityAt": ISO8601DateFormatter().string(from: entry.activityAt),
+            "reason": entry.reason,
+            "summary": model.currentState ?? model.nextStep ?? model.fallbackSummary,
+        ]
+        if let priority = entry.card.priority {
+            dict["priority"] = priority.rawValue
+        }
+        if let agent = entry.card.agent {
+            dict["agent"] = agent
         }
         if let parentCardID = entry.card.parentCardID {
             dict["parentCardID"] = parentCardID
@@ -6556,6 +6713,7 @@ struct CiderCLI {
           cider-cli board list
           cider-cli board show <board-name-or-id> [--json]
           cider-cli board recent <board> [--limit <count>] [--json]
+          cider-cli board testing-summary <board> [--json]
           cider-cli board card inspect <board> --card <id> [--json]
           cider-cli board create <name>
           cider-cli board rename <name|id> --to <new-name>
