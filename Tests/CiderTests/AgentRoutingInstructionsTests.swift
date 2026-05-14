@@ -13,7 +13,7 @@ struct AgentRoutingInstructionsTests {
         #expect(text.contains("Inbox"))
         #expect(text.contains("For bookmarks, notes, and contacts, route before creating when the destination is reasonably clear."))
         #expect(text.contains("prefer saving the raw URL"))
-        #expect(text.contains("native title and thumbnail enrichment"))
+        #expect(text.contains("native title and thumbnail capture"))
         #expect(text.contains("If the destination is unclear, save to Inbox and explain why."))
     }
 

@@ -63,9 +63,13 @@ struct VaultDuplicateAuditor {
     static func findDuplicateNotes(_ notes: [Note]) -> [Finding] {
         let candidates = notes.compactMap { note -> (key: String, item: Item)? in
             let content = note.resolvedContent.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !content.isEmpty else { return nil }
             let nameKey = normalizedDuplicateName(note.title.isEmpty ? note.relativePath : note.title)
             guard !nameKey.isEmpty else { return nil }
+            // Empty Markdown notes can still be active duplicate rows/files after
+            // sync/adoption drift (for example `CodexNote.md`, `CodexNote 2.md`).
+            // Keep them in the read-only duplicate audit so doctor/list/hash scans
+            // reconcile; cleanup remains human/CLI-reviewed because findings are
+            // not auto-fixable.
             return (
                 key: "\(nameKey)|\(content)",
                 item: Item(

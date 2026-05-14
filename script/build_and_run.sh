@@ -108,7 +108,6 @@ fi
 
 if [[ "$TELEMETRY" -eq 1 ]]; then
   /usr/bin/open \
-    -n \
     --stdout "$LOG_DIR/stdout.log" \
     --stderr "$LOG_DIR/stderr.log" \
     --env "CIDER_PERF_MONITOR=1" \
@@ -116,7 +115,7 @@ if [[ "$TELEMETRY" -eq 1 ]]; then
     --env "CIDER_QA_VISIBLE_WINDOW=1" \
     "$APP_PATH"
 else
-  /usr/bin/open -n "$APP_PATH"
+  /usr/bin/open "$APP_PATH"
 fi
 
 if [[ "$VERIFY" -eq 1 || "$STREAM_LOGS" -eq 1 ]]; then

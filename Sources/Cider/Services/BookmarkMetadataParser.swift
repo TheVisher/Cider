@@ -4,7 +4,22 @@ struct BookmarkEnrichmentPayload {
     let title: String?
     let thumbnailURL: URL?
     let screenshotData: Data?
+    let recipeExtractionText: String?
     var carouselImageURLs: [URL]?  // Additional images (e.g. Reddit gallery)
+
+    init(
+        title: String?,
+        thumbnailURL: URL?,
+        screenshotData: Data?,
+        recipeExtractionText: String? = nil,
+        carouselImageURLs: [URL]? = nil
+    ) {
+        self.title = title
+        self.thumbnailURL = thumbnailURL
+        self.screenshotData = screenshotData
+        self.recipeExtractionText = recipeExtractionText
+        self.carouselImageURLs = carouselImageURLs
+    }
 }
 
 enum EnrichmentRetryThresholds {
@@ -93,8 +108,14 @@ enum BookmarkMetadataParser {
             .compactMap { $0 }
             .first(where: { isThumbnailCandidateAcceptable($0, for: pageURL) })
 
-        guard title != nil || thumbnailURL != nil else { return nil }
-        return BookmarkEnrichmentPayload(title: title, thumbnailURL: thumbnailURL, screenshotData: nil)
+        let recipeExtractionText = recipeJSONLDExtractionText(html: html)
+        guard title != nil || thumbnailURL != nil || recipeExtractionText != nil else { return nil }
+        return BookmarkEnrichmentPayload(
+            title: title,
+            thumbnailURL: thumbnailURL,
+            screenshotData: nil,
+            recipeExtractionText: recipeExtractionText
+        )
     }
 
     private static func titleTagContent(html: String) -> String? {
@@ -186,6 +207,54 @@ enum BookmarkMetadataParser {
         }
 
         return results
+    }
+
+    private static func recipeJSONLDExtractionText(html: String) -> String? {
+        guard let scriptRegex else { return nil }
+        let cappedHTML = html.count > 200_000 ? String(html.prefix(200_000)) : html
+        let nsRange = NSRange(cappedHTML.startIndex..<cappedHTML.endIndex, in: cappedHTML)
+        let matches = scriptRegex.matches(in: cappedHTML, options: [], range: nsRange)
+
+        for match in matches {
+            guard let attrsRange = Range(match.range(at: 1), in: cappedHTML),
+                  let bodyRange = Range(match.range(at: 2), in: cappedHTML) else { continue }
+
+            let attributes = parseAttributes(String(cappedHTML[attrsRange]))
+            guard let scriptType = attributes["type"]?.lowercased(),
+                  scriptType.contains("application/ld+json") else { continue }
+
+            let scriptBody = String(cappedHTML[bodyRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let object = parseJSONLDObject(from: scriptBody), jsonLDContainsRecipe(object) else { continue }
+
+            return """
+            Cider native recipe extraction source:
+            <script type=\"application/ld+json\">
+            \(scriptBody)
+            </script>
+            """
+        }
+
+        return nil
+    }
+
+    private static func jsonLDContainsRecipe(_ object: Any) -> Bool {
+        if let dict = object as? [String: Any] {
+            if jsonLDTypeContainsRecipe(dict["@type"]) { return true }
+            if let graph = dict["@graph"] as? [Any], graph.contains(where: jsonLDContainsRecipe) { return true }
+            if let mainEntity = dict["mainEntity"], jsonLDContainsRecipe(mainEntity) { return true }
+            if let itemListElement = dict["itemListElement"], jsonLDContainsRecipe(itemListElement) { return true }
+        }
+        if let array = object as? [Any] {
+            return array.contains(where: jsonLDContainsRecipe)
+        }
+        return false
+    }
+
+    private static func jsonLDTypeContainsRecipe(_ value: Any?) -> Bool {
+        if let string = value as? String { return string.localizedCaseInsensitiveContains("Recipe") }
+        if let strings = value as? [String] { return strings.contains { $0.localizedCaseInsensitiveContains("Recipe") } }
+        if let values = value as? [Any] { return values.contains { jsonLDTypeContainsRecipe($0) } }
+        return false
     }
 
     private static func parseJSONLDObject(from raw: String) -> Any? {

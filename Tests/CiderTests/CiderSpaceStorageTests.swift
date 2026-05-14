@@ -126,6 +126,23 @@ final class CiderSpaceStorageTests: XCTestCase {
     }
 
     @MainActor
+    func testDefaultPinnedPresetsAreCreatedAndShownInSidebar() throws {
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let storage = CiderSpaceStorage(vaultRoot: tempRoot, defaultPinnedPresets: [.recipes])
+
+        XCTAssertEqual(storage.spaces.map(\.preset), [.recipes])
+        XCTAssertEqual(storage.pinnedSpaces.map(\.name), ["Recipes"])
+        XCTAssertEqual(storage.spaces.first?.rootRelativePath, "Spaces/Recipes")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("Spaces/Recipes/.cider-space.yaml").path))
+
+        let reloaded = CiderSpaceStorage(vaultRoot: tempRoot, defaultPinnedPresets: [.recipes])
+        XCTAssertEqual(reloaded.spaces.count, 1)
+        XCTAssertEqual(reloaded.pinnedSpaces.map(\.name), ["Recipes"])
+    }
+
+    @MainActor
     func testInvalidMetadataIsSkippedWithoutCrashing() throws {
         let tempRoot = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -144,10 +161,10 @@ final class CiderSpaceStorageTests: XCTestCase {
         XCTAssertEqual(storage.loadIssues.count, 1)
     }
 
-    func testLibraryRoutesRemainUnchangedWhenSpacesAreIntroduced() {
+    func testLibraryRoutesKeepFoldersVisibleWhenSpacesAreIntroduced() {
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .browse).map(\.kind),
-            [.inbox, .all, .bookmarks, .notes, .files, .tags]
+            [.inbox, .all, .bookmarks, .notes, .files, .folders, .tags]
         )
         XCTAssertEqual(
             WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: nil).prefix(2),

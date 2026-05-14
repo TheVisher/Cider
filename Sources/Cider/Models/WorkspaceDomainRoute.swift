@@ -45,7 +45,7 @@ enum WorkspaceDomainRoutePolicy {
         case .mainDashboard:
             return []
         case .browse:
-            return [.inbox, .all, .bookmarks, .notes, .files, .tags]
+            return [.inbox, .all, .bookmarks, .notes, .files, .folders, .tags]
         case .projects:
             return [.overview]
         case .aiAssistant:

@@ -37,6 +37,9 @@ func outputJSON(_ value: Any) {
     if let status = bm.enrichmentStatus { d["enrichmentStatus"] = status }
     if let enrichedAt = bm.lastEnrichedAt { d["lastEnrichedAt"] = ISO8601DateFormatter().string(from: enrichedAt) }
     if let thumb = bm.thumbnailRelativePath { d["thumbnailPath"] = thumb }
+    if let remoteThumb = bm.thumbnailRemoteURLString { d["thumbnailRemoteURL"] = remoteThumb }
+    if let metadataUpdatedAt = bm.metadataUpdatedAt { d["metadataUpdatedAt"] = ISO8601DateFormatter().string(from: metadataUpdatedAt) }
+    d["isEnriching"] = bm.isEnriching
     if let media = bm.mediaType { d["mediaType"] = media.rawValue }
     return d
 }

@@ -78,19 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Lifecycle
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.regular)
-        AccessibilityHelpers.promptIfNeeded()
-        VaultStructureMigration.migrateIfNeeded()
-        VaultStructureMigration.migrateContentToInboxIfNeeded()
-        VaultStructureMigration.migrateContactsToPerFileIfNeeded()
-        VaultStructureMigration.migrateTodosToPerFileIfNeeded()
-        VaultStructureMigration.migrateDateCardsToPerFileIfNeeded()
-        StoragePaths.ensureVaultStructure()
-
-        // Open SQLite database before any storage service is touched. All services
-        // check CiderDatabase.shared.isOpen on first access and use it as the primary
-        // store when available, falling back to JSON otherwise.
+    private func openSQLiteForStartupOrTerminate() -> Bool {
         do {
             let vaultRoot = StoragePaths.cachedVaultDirectoryURL
             let dbPath = vaultRoot.appendingPathComponent(".cider/cider.db")
@@ -101,10 +89,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DatabaseSafetyService.shared.capturePreOpenSnapshotIfNeeded(databaseURL: dbPath)
             try CiderDatabase.shared.open(at: dbPath)
             DatabaseSafetyService.shared.performStartupSafetyPass(database: CiderDatabase.shared)
+            return true
         } catch {
+            let message = "Cider cannot safely open the vault database: \(error.localizedDescription)"
             Logger(subsystem: Bundle.main.bundleIdentifier ?? "Cider", category: "Startup")
-                .error("Failed to open SQLite database: \(error.localizedDescription). Falling back to JSON.")
+                .fault("\(message, privacy: .public). Refusing JSON fallback to protect vault integrity.")
+            NSAlert(error: NSError(
+                domain: "CiderStartup",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey: message,
+                    NSLocalizedRecoverySuggestionErrorKey: "Build and launch the newest Cider app before using this vault. This launch was stopped so an older build cannot recreate duplicate folders, notes, or bookmarks."
+                ]
+            )).runModal()
+            NSApp.terminate(nil)
+            return false
         }
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.regular)
+        AccessibilityHelpers.promptIfNeeded()
+        StoragePaths.ensureVaultStructure()
+
+        // Open SQLite before any migration/reconcile/storage singleton can mutate
+        // the vault. A stale build that cannot read the current schema must stop
+        // here; falling back to JSON can re-adopt the same filesystem as fresh
+        // folders/items and recreate duplicate suffix trees.
+        guard openSQLiteForStartupOrTerminate() else { return }
+
+        VaultStructureMigration.migrateIfNeeded()
+        VaultStructureMigration.migrateContentToInboxIfNeeded()
+        VaultStructureMigration.migrateContactsToPerFileIfNeeded()
+        VaultStructureMigration.migrateTodosToPerFileIfNeeded()
+        VaultStructureMigration.migrateDateCardsToPerFileIfNeeded()
 
         // Force-initialize foundational services in FK dependency order BEFORE any
         // ViewModel touches VaultBookmarkService / NotesStorage / etc. Item-type

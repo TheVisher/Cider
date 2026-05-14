@@ -86,7 +86,7 @@ struct ProjectWorkspaceCatalog: Equatable {
         boards: [KanbanBoard],
         boardAssociations: ProjectWorkspaceBoardAssociations = .empty
     ) -> ProjectWorkspaceCatalog {
-        let boardIDByName = Dictionary(uniqueKeysWithValues: boards.map { (normalize($0.name), $0.id) })
+        let boardIDByName = boardIDByNormalizedName(boards)
         let availableBoardIDs = boards.map(\.id)
         let ciderBoardIDs = associatedBoardIDs(
             projectID: "cider",
@@ -156,6 +156,14 @@ struct ProjectWorkspaceCatalog: Equatable {
                 referenceSearchTerms: []
             )
         )
+    }
+
+    private static func boardIDByNormalizedName(_ boards: [KanbanBoard]) -> [String: String] {
+        boards.reduce(into: [:]) { result, board in
+            let name = normalize(board.name)
+            guard !name.isEmpty, result[name] == nil else { return }
+            result[name] = board.id
+        }
     }
 
     private static func normalize(_ value: String) -> String {

@@ -775,6 +775,71 @@ struct BookmarkSQLiteTests {
         #expect(optedInRead.tags == ["legacy"])
     }
 
+    // MARK: - Sync Duplicate Prevention
+
+    @Test("Synced bookmark with canonical duplicate URL merges instead of creating a second active bookmark")
+    func addFromSyncMergesCanonicalDuplicateURL() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-sync-duplicate-bookmark-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(at: vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true), withIntermediateDirectories: true)
+
+        let existingID = UUID()
+        let existing = Bookmark(
+            id: existingID,
+            title: "Stonewards on Steam",
+            urlString: "https://store.steampowered.com/app/4502710/Stonewards/",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            tags: ["gaming"],
+            thumbnailRemoteURLString: nil,
+            thumbnailRelativePath: ".thumbnails/existing.png",
+            relativePath: "Media/Games/Stonewards on Steam.webloc"
+        )
+
+        let service = makeService(db)
+        service.persistBookmarkToDatabase(db, bookmark: existing)
+        service.loadBookmarksFromDatabase(db)
+
+        service.addFromSync(
+            id: UUID(),
+            title: "Store.Steampowered.Com (2)",
+            urlString: "https://www.store.steampowered.com/app/4502710/Stonewards/?utm_source=cider#screenshots",
+            notes: "",
+            tags: ["shopping", "gaming"],
+            thumbnailRemoteURLString: "https://cdn.example.test/stonewards.jpg",
+            aiSummary: "Remote duplicate metadata",
+            dominantColors: ["#AAFFFF"],
+            createdAt: Date(timeIntervalSince1970: 3_000),
+            updatedAt: Date(timeIntervalSince1970: 4_000),
+            folderID: nil
+        )
+
+        #expect(service.bookmarks.count == 1)
+        let merged = try #require(service.bookmarks.first)
+        #expect(merged.id == existingID)
+        #expect(merged.title == "Stonewards on Steam")
+        #expect(merged.urlString == "https://store.steampowered.com/app/4502710/Stonewards/")
+        #expect(Set(merged.tags) == Set(["gaming", "shopping"]))
+        #expect(merged.thumbnailRemoteURLString == "https://cdn.example.test/stonewards.jpg")
+        #expect(merged.aiSummary == "Remote duplicate metadata")
+        #expect(merged.updatedAt == Date(timeIntervalSince1970: 4_000))
+
+        let service2 = makeService(db)
+        service2.loadBookmarksFromDatabase(db)
+        #expect(service2.bookmarks.count == 1)
+        #expect(service2.bookmarks.first?.id == existingID)
+    }
+
     // MARK: - Empty Database
 
     @Test("Empty database loads empty bookmarks array")

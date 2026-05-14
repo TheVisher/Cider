@@ -533,9 +533,14 @@ final class VaultBookmarkService: ObservableObject {
         guard let normalizedURL = normalizedURL(from: urlString) else { return nil }
         let canonical = normalizedURL.absoluteString
 
-        // Check for existing bookmark with same URL
+        let canonicalDedupKey = bookmarkURLDedupKey(canonical)
+
+        // Check for existing bookmark with the same canonical URL. This must use
+        // the same canonicalization as Vault Doctor so tracking params / `www.`
+        // variants don't create a second live bookmark that the auditor will
+        // immediately flag as a duplicate.
         if let existingIndex = bookmarks.firstIndex(where: {
-            $0.urlString.caseInsensitiveCompare(canonical) == .orderedSame
+            bookmarkURLDedupKey($0.urlString) == canonicalDedupKey
         }) {
             var existing = bookmarks.remove(at: existingIndex)
             if let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -638,7 +643,7 @@ final class VaultBookmarkService: ObservableObject {
         SyncService.shared.trackDeletion(of: bookmark.id)
         // Track deleted URL so adoption doesn't re-adopt duplicate files
         if !bookmark.urlString.isEmpty {
-            recentlyDeletedURLs[bookmark.urlString.lowercased()] = Date()
+            recentlyDeletedURLs[bookmarkURLDedupKey(bookmark.urlString)] = Date()
         }
         let (bookmarkDir, _) = resolveBookmarkDirectory(bookmark.folderID)
         let trashItem = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir, bookmarksMetaDir: bookmarksMetaDir)
@@ -664,7 +669,7 @@ final class VaultBookmarkService: ObservableObject {
             cancelEnrichment(for: bookmark.id)
             SyncService.shared.trackDeletion(of: bookmark.id)
             if !bookmark.urlString.isEmpty {
-                recentlyDeletedURLs[bookmark.urlString.lowercased()] = Date()
+                recentlyDeletedURLs[bookmarkURLDedupKey(bookmark.urlString)] = Date()
             }
             let (bookmarkDir, _) = resolveBookmarkDirectory(bookmark.folderID)
             let item = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir, bookmarksMetaDir: bookmarksMetaDir)
@@ -967,6 +972,33 @@ final class VaultBookmarkService: ObservableObject {
     ) {
         guard !bookmarks.contains(where: { $0.id == id }) else { return }
 
+        let incomingDedupKey = bookmarkURLDedupKey(urlString)
+        if !incomingDedupKey.isEmpty,
+           let existingIndex = bookmarks.firstIndex(where: { bookmarkURLDedupKey($0.urlString) == incomingDedupKey }) {
+            var existing = bookmarks.remove(at: existingIndex)
+            let merged = mergeSyncedDuplicateBookmark(
+                existing: existing,
+                incomingTitle: title,
+                incomingURLString: urlString,
+                incomingNotes: notes,
+                incomingTags: tags,
+                incomingThumbnailRemoteURLString: thumbnailRemoteURLString,
+                incomingAISummary: aiSummary,
+                incomingDominantColors: dominantColors,
+                incomingUpdatedAt: updatedAt,
+                incomingFolderID: folderID
+            )
+            existing = merged
+            bookmarks.insert(existing, at: 0)
+            bookmarks.sort { $0.createdAt > $1.createdAt }
+            persist()
+            if existing.thumbnailRelativePath == nil {
+                startEnrichmentIfNeeded(for: existing.id)
+            }
+            logger.warning("Skipped synced duplicate bookmark URL \(urlString, privacy: .public); merged metadata into existing bookmark \(existing.id.uuidString, privacy: .public)")
+            return
+        }
+
         var bookmark = Bookmark(
             id: id,
             title: title,
@@ -1160,7 +1192,7 @@ final class VaultBookmarkService: ObservableObject {
         var existingIDByRelativePath: [String: UUID] = [:]
         var existingIDs = Set<UUID>()
         for bm in bookmarks {
-            let url = bm.urlString.lowercased()
+            let url = bookmarkURLDedupKey(bm.urlString)
             if !url.isEmpty { existingIDByURL[url] = bm.id }
             if let relativePath = bm.relativePath {
                 existingIDByRelativePath[relativePath] = bm.id
@@ -1185,7 +1217,7 @@ final class VaultBookmarkService: ObservableObject {
                 includeLegacySidecarMetadata: false
             )
             for var bookmark in found {
-                let url = bookmark.urlString.lowercased()
+                let url = bookmarkURLDedupKey(bookmark.urlString)
 
                 // Image-only bookmarks (no URL): match by sidecar UUID
                 if url.isEmpty {
@@ -1216,7 +1248,7 @@ final class VaultBookmarkService: ObservableObject {
                 if let relativePath = bookmark.relativePath,
                    let existingID = existingIDByRelativePath[relativePath],
                    let idx = bookmarks.firstIndex(where: { $0.id == existingID }) {
-                    let oldURL = bookmarks[idx].urlString.lowercased()
+                    let oldURL = bookmarkURLDedupKey(bookmarks[idx].urlString)
                     if oldURL != url {
                         bookmarks[idx].urlString = bookmark.urlString
                         bookmarks[idx].updatedAt = Date()
@@ -1687,27 +1719,17 @@ final class VaultBookmarkService: ObservableObject {
                 imageAssets = await self.cacheImageAssets(from: thumbnailURL, for: bookmarkID, pageURL: url)
             }
 
-            // Screenshot fallback
-            if imageAssets == nil, let screenshotData = payload?.screenshotData {
+            // Screenshot fallback only when native metadata did not find a provider
+            // thumbnail. If a provider thumbnail URL exists but downloading it fails,
+            // keep the remote URL for retry instead of locking in a generic page shell.
+            if imageAssets == nil,
+               BookmarkNativeCapturePolicy.allowsScreenshotFallback(thumbnailURL: payload?.thumbnailURL),
+               let screenshotData = payload?.screenshotData {
                 imageAssets = self.cacheImageAssets(
                     from: screenshotData,
                     for: bookmarkID,
                     preferredFileExtension: "jpg"
                 )
-            }
-
-            // WebView screenshot fallback
-            if imageAssets == nil, payload?.thumbnailURL != nil {
-                let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
-                enrichLog.info("Thumbnail download failed, trying WebView screenshot for \(url.host ?? "?", privacy: .public)")
-                let extracted = await WebViewMetadataExtractor.extract(from: url)
-                if let screenshotData = extracted.screenshotData {
-                    imageAssets = self.cacheImageAssets(
-                        from: screenshotData,
-                        for: bookmarkID,
-                        preferredFileExtension: "jpg"
-                    )
-                }
             }
 
             await self.completeEnrichment(
@@ -1740,6 +1762,17 @@ final class VaultBookmarkService: ObservableObject {
             changed = true
         }
 
+        if let recipeExtractionText = payload?.recipeExtractionText,
+           !recipeExtractionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           shouldApplyRecipeExtractionText(recipeExtractionText, to: bookmark) {
+            bookmark.aiSummary = mergedRecipeExtractionSummary(
+                existing: bookmark.aiSummary,
+                recipeExtractionText: recipeExtractionText
+            )
+            bookmark.enrichmentStatus = "partial"
+            changed = true
+        }
+
         if let imageAssets {
             if bookmark.thumbnailRelativePath != imageAssets.thumbnailRelativePath {
                 removeImageIfPresent(relativePath: bookmark.thumbnailRelativePath)
@@ -1755,6 +1788,24 @@ final class VaultBookmarkService: ObservableObject {
                bookmark.thumbnailRemoteURLString != remoteURL {
                 bookmark.thumbnailRemoteURLString = remoteURL
                 changed = true
+            }
+        } else if let remoteURL = payload?.thumbnailURL?.absoluteString {
+            if bookmark.thumbnailRemoteURLString != remoteURL {
+                bookmark.thumbnailRemoteURLString = remoteURL
+                changed = true
+            }
+
+            if !localThumbnailExists(relativePath: bookmark.thumbnailRelativePath) {
+                if let path = bookmark.thumbnailRelativePath, !path.isEmpty {
+                    removeImageIfPresent(relativePath: path)
+                    bookmark.thumbnailRelativePath = nil
+                    changed = true
+                }
+                if let path = bookmark.originalImageRelativePath, !path.isEmpty {
+                    removeImageIfPresent(relativePath: path)
+                    bookmark.originalImageRelativePath = nil
+                    changed = true
+                }
             }
         } else {
             // New URL has no thumbnail — clear stale references and files
@@ -1810,6 +1861,29 @@ final class VaultBookmarkService: ObservableObject {
         if let current = bookmarks.first(where: { $0.id == bookmarkID }) {
             BookmarkAIEnrichment.shared.schedule(for: current)
         }
+    }
+
+    private static let recipeExtractionMarker = "Cider native recipe extraction source:"
+
+    private func shouldApplyRecipeExtractionText(_ recipeExtractionText: String, to bookmark: Bookmark) -> Bool {
+        let trimmed = recipeExtractionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard let aiSummary = bookmark.aiSummary?.trimmingCharacters(in: .whitespacesAndNewlines), !aiSummary.isEmpty else {
+            return true
+        }
+        return !aiSummary.contains(Self.recipeExtractionMarker)
+    }
+
+    private func mergedRecipeExtractionSummary(existing: String?, recipeExtractionText: String) -> String {
+        let trimmedRecipeText = recipeExtractionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let existing = existing?.trimmingCharacters(in: .whitespacesAndNewlines), !existing.isEmpty else {
+            return trimmedRecipeText
+        }
+        return """
+        \(existing)
+
+        \(trimmedRecipeText)
+        """
     }
 
     private func shouldEnrich(_ bookmark: Bookmark, for url: URL) -> Bool {
@@ -2086,7 +2160,8 @@ final class VaultBookmarkService: ObservableObject {
                 return BookmarkEnrichmentPayload(
                     title: htmlResult?.title,
                     thumbnailURL: thumbURL ?? htmlResult?.thumbnailURL,
-                    screenshotData: nil
+                    screenshotData: nil,
+                    recipeExtractionText: htmlResult?.recipeExtractionText
                 )
             }
         }
@@ -2104,7 +2179,8 @@ final class VaultBookmarkService: ObservableObject {
             return BookmarkEnrichmentPayload(
                 title: htmlResult?.title ?? oembedResult.title,
                 thumbnailURL: oembedResult.thumbnailURL,
-                screenshotData: nil
+                screenshotData: nil,
+                recipeExtractionText: htmlResult?.recipeExtractionText
             )
         }
 
@@ -2118,7 +2194,8 @@ final class VaultBookmarkService: ObservableObject {
                 return BookmarkEnrichmentPayload(
                     title: extracted.title ?? htmlResult?.title,
                     thumbnailURL: extracted.imageURL ?? htmlResult?.thumbnailURL,
-                    screenshotData: extracted.screenshotData
+                    screenshotData: extracted.screenshotData,
+                    recipeExtractionText: htmlResult?.recipeExtractionText
                 )
             }
         }
@@ -2367,6 +2444,60 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     // MARK: - URL Helpers
+
+    private func bookmarkURLDedupKey(_ rawValue: String) -> String {
+        if let canonical = VaultDuplicateAuditor.canonicalBookmarkURL(rawValue) {
+            return canonical
+        }
+        return rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func mergeSyncedDuplicateBookmark(
+        existing: Bookmark,
+        incomingTitle: String,
+        incomingURLString: String,
+        incomingNotes: String,
+        incomingTags: [String],
+        incomingThumbnailRemoteURLString: String?,
+        incomingAISummary: String?,
+        incomingDominantColors: [String]?,
+        incomingUpdatedAt: Date,
+        incomingFolderID: UUID?
+    ) -> Bookmark {
+        var merged = existing
+        if incomingUpdatedAt > merged.updatedAt {
+            merged.updatedAt = incomingUpdatedAt
+        }
+
+        if !merged.titleManuallySet,
+           let incomingURL = URL(string: incomingURLString),
+           shouldApplyEnrichedTitle(incomingTitle, to: merged, sourceURL: incomingURL) {
+            merged.title = incomingTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if merged.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !incomingNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !merged.notesManuallySet {
+            merged.notes = incomingNotes
+        }
+
+        if merged.thumbnailRemoteURLString == nil {
+            merged.thumbnailRemoteURLString = incomingThumbnailRemoteURLString
+        }
+        if merged.aiSummary == nil {
+            merged.aiSummary = incomingAISummary
+        }
+        if merged.dominantColors == nil {
+            merged.dominantColors = incomingDominantColors
+        }
+        if !incomingTags.isEmpty {
+            merged.tags = deduplicatedTags(from: merged.tags + incomingTags)
+        }
+        if merged.folderID == nil {
+            merged.folderID = incomingFolderID
+        }
+        return merged
+    }
 
     private func normalizedURL(from rawValue: String) -> URL? {
         guard let candidate = extractedURLCandidate(from: rawValue) else { return nil }

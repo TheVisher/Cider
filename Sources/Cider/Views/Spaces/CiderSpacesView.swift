@@ -11,7 +11,8 @@ struct CiderSpaceOverviewView: View {
     let onOpenNote: (Note) -> Void
 
     var body: some View {
-        if space.preset == .media {
+        switch space.preset {
+        case .media:
             MediaSpaceDashboardView(
                 space: space,
                 rootURL: rootURL,
@@ -22,7 +23,17 @@ struct CiderSpaceOverviewView: View {
                 onOpenBookmark: onOpenBookmark,
                 onOpenNote: onOpenNote
             )
-        } else {
+        case .recipes:
+            RecipeSpaceDashboardView(
+                space: space,
+                rootURL: rootURL,
+                bookmarks: bookmarks,
+                notes: notes,
+                onTogglePinned: onTogglePinned,
+                onOpenBookmark: onOpenBookmark,
+                onOpenNote: onOpenNote
+            )
+        default:
             genericOverview
         }
     }

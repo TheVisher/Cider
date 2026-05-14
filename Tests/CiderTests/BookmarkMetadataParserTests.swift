@@ -133,6 +133,95 @@ struct BookmarkMetadataParserTests {
         #expect(result?.thumbnailURL?.absoluteString == "https://cdn.example.com/ld-image.jpg")
     }
 
+    @Test("Preserves recipe JSON-LD as recipe extraction text")
+    func recipeJSONLDPreservedForRecipeExtraction() throws {
+        let html = """
+        <html><head>
+        <meta property="og:title" content="Crispy Rice Salmon">
+        <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "Recipe",
+          "name": "Crispy Rice Salmon Bites",
+          "recipeYield": "4 servings",
+          "totalTime": "PT35M",
+          "recipeIngredient": ["2 cups sushi rice", "8 oz salmon", "spicy mayo"],
+          "recipeInstructions": [
+            {"@type":"HowToStep", "text":"Bake the salmon."},
+            {"@type":"HowToStep", "text":"Crisp the rice and top with salmon."}
+          ]
+        }
+        </script>
+        </head></html>
+        """
+
+        let result = try #require(BookmarkMetadataParser.parse(html: html, pageURL: exampleURL))
+
+        #expect(result.recipeExtractionText?.contains("\"@type\": \"Recipe\"") == true)
+        #expect(result.recipeExtractionText?.contains("Crispy Rice Salmon Bites") == true)
+        #expect(result.recipeExtractionText?.contains("spicy mayo") == true)
+    }
+
+    @Test("Recipe extraction text feeds Recipes Space through AI-owned enrichment text")
+    func recipeExtractionTextFeedsRecipesSpaceThroughAISummary() throws {
+        let html = """
+        <html><head>
+        <script type="application/ld+json">
+        {
+          "@type": "Recipe",
+          "name": "Miso Butter Pasta",
+          "recipeIngredient": ["spaghetti", "white miso", "butter"],
+          "recipeInstructions": [{"@type":"HowToStep", "text":"Toss pasta with miso butter."}]
+        }
+        </script>
+        </head></html>
+        """
+        let payload = try #require(BookmarkMetadataParser.parse(html: html, pageURL: exampleURL))
+        let bookmark = Bookmark(
+            title: payload.title ?? "Miso Butter Pasta",
+            urlString: "https://example.com/miso-butter-pasta",
+            aiSummary: payload.recipeExtractionText,
+            relativePath: "Food/Recipes/Miso Butter Pasta.webloc"
+        )
+
+        let item = try #require(RecipeSpaceDashboardModel.make(bookmarks: [bookmark]).items.first)
+
+        #expect(item.title == "Miso Butter Pasta")
+        #expect(item.ingredients == ["spaghetti", "white miso", "butter"])
+        #expect(item.instructions == ["Toss pasta with miso butter."])
+        #expect(item.extractionStatus == RecipeExtractionStatus.parsed)
+        #expect(item.metadataChips.contains("Recipe pulled"))
+    }
+
+    @Test("Recipe extraction text alone makes an inbox bookmark a Recipes Space item")
+    func recipeExtractionTextMakesInboxBookmarkRecipeCandidate() throws {
+        let html = """
+        <html><head>
+        <script type="application/ld+json">
+        {
+          "@type": "Recipe",
+          "name": "Sesame Cucumber Salad",
+          "recipeIngredient": ["cucumbers", "sesame oil"],
+          "recipeInstructions": ["Slice cucumbers and dress with sesame oil."]
+        }
+        </script>
+        </head></html>
+        """
+        let payload = try #require(BookmarkMetadataParser.parse(html: html, pageURL: exampleURL))
+        let bookmark = Bookmark(
+            title: "A thing I found",
+            urlString: "https://example.com/post/12345",
+            aiSummary: payload.recipeExtractionText,
+            relativePath: "Inbox/Bookmarks/A thing I found.webloc"
+        )
+
+        let item = try #require(RecipeSpaceDashboardModel.make(bookmarks: [bookmark]).items.first)
+
+        #expect(item.title == "Sesame Cucumber Salad")
+        #expect(item.ingredients == ["cucumbers", "sesame oil"])
+        #expect(item.extractionStatus == RecipeExtractionStatus.parsed)
+    }
+
     @Test("Falls back to favicon when no og:image")
     func faviconFallback() {
         let html = """

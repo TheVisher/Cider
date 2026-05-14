@@ -666,11 +666,11 @@ actor AgentOrchestrator {
             route = "bookmark-capture"
             detail = "url capture"
             hints.append("- This looks like a bookmark capture. Duplicate-check the URL first with `cider-cli duplicate-check \"<url>\" --json`.")
-            hints.append("- Keep this turn on the fast path: `duplicate-check -> bookmark add -> bookmark get`. If the duplicate check finds an existing bookmark, report that result and stop.")
+            hints.append("- Keep this turn on the native capture path: `duplicate-check -> bookmark add -> bookmark get`. `bookmark add` waits briefly for Cider's native title/thumbnail capture before returning. If the duplicate check finds an existing bookmark, report that result and stop.")
             hints.append("- Decide the destination path before saving when confidence is high enough. Use folder-aware CLI lookups if needed, then save directly with `cider-cli bookmark add \"<url>\" --path \"<vault-path>\"`.")
             hints.append("- Let Cider own the native bookmark title and thumbnail scraping. Do not pass `--title` unless the user explicitly gave the final title or Cider already exposed a trustworthy title that should be preserved verbatim.")
             hints.append("- Do not save to Inbox first and move it later unless routing is genuinely unclear.")
-            hints.append("- Let Cider do the native scraping/enrichment pass after save. Save first, then re-read the bookmark with `cider-cli bookmark get <id-prefix> --json` and report the stored result.")
+            hints.append("- Let Cider do the native scraping/enrichment pass during and after save. Save first, then re-read the bookmark with `cider-cli bookmark get <id-prefix> --json` and report the stored result.")
             hints.append("- Do not fetch raw page HTML, do not manually call oEmbed or WebView, do not read `.cider` indexes or `_cider_bookmarks.json`, and do not scan random vault files before saving unless the direct CLI path failed.")
             hints.append("- Only add extra AI enrichment after the bookmark already exists and only by writing AI-owned fields such as `--ai-summary` when that extra context is genuinely useful, for example store location, hours, product context, or movie notes.")
         }

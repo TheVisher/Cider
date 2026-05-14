@@ -184,6 +184,56 @@ struct VaultFolderServiceSQLiteTests {
         #expect(loaded!.createdAt.timeIntervalSince(after) <= 0.01)
     }
 
+    @Test("Sync add for existing folder path reuses folder instead of creating numeric suffix")
+    func addFolderFromSyncReusesExistingRelativePath() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-sync-duplicate-folder-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(at: vault, withIntermediateDirectories: true)
+
+        let existingID = UUID()
+        let existing = VaultFolder(
+            id: existingID,
+            relativePath: "Media",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            icon: nil
+        )
+        let service = VaultFolderService(database: db)
+        service.persistToDatabase(db, folder: existing)
+        let loadedService = VaultFolderService(database: db)
+
+        let returned = try #require(loadedService.addFolderFromSync(
+            id: UUID(),
+            name: "Media",
+            icon: "🎬",
+            parentID: nil,
+            createdAt: Date(timeIntervalSince1970: 3_000),
+            updatedAt: Date(timeIntervalSince1970: 4_000)
+        ))
+
+        #expect(returned.id == existingID)
+        #expect(returned.relativePath == "Media")
+        #expect(loadedService.folders.count == 1)
+        #expect(loadedService.folders.first?.relativePath == "Media")
+        #expect(loadedService.folders.first?.icon == "🎬")
+        #expect(!fm.fileExists(atPath: vault.appendingPathComponent("Media 2").path))
+
+        let service2 = VaultFolderService(database: db)
+        #expect(service2.folders.count == 1)
+        #expect(service2.folders.first?.id == existingID)
+        #expect(service2.folders.first?.relativePath == "Media")
+    }
+
     @Test("Empty database loads empty folders array")
     func emptyDatabaseLoadsEmpty() throws {
         let (db, url) = try makeTestDB()

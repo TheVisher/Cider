@@ -1417,6 +1417,17 @@ final class BookmarksStorage: ObservableObject {
             changed = true
         }
 
+        if let recipeExtractionText = payload?.recipeExtractionText,
+           !recipeExtractionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           shouldApplyRecipeExtractionText(recipeExtractionText, to: bookmark) {
+            bookmark.aiSummary = mergedRecipeExtractionSummary(
+                existing: bookmark.aiSummary,
+                recipeExtractionText: recipeExtractionText
+            )
+            bookmark.enrichmentStatus = "partial"
+            changed = true
+        }
+
         if let imageAssets {
             if bookmark.thumbnailRelativePath != imageAssets.thumbnailRelativePath {
                 removeImageIfPresent(relativePath: bookmark.thumbnailRelativePath)
@@ -1453,6 +1464,29 @@ final class BookmarksStorage: ObservableObject {
 
         // Schedule AI enrichment after metadata + thumbnail are ready
         BookmarkAIEnrichment.shared.schedule(for: bookmarks[index])
+    }
+
+    private static let recipeExtractionMarker = "Cider native recipe extraction source:"
+
+    private func shouldApplyRecipeExtractionText(_ recipeExtractionText: String, to bookmark: Bookmark) -> Bool {
+        let trimmed = recipeExtractionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard let aiSummary = bookmark.aiSummary?.trimmingCharacters(in: .whitespacesAndNewlines), !aiSummary.isEmpty else {
+            return true
+        }
+        return !aiSummary.contains(Self.recipeExtractionMarker)
+    }
+
+    private func mergedRecipeExtractionSummary(existing: String?, recipeExtractionText: String) -> String {
+        let trimmedRecipeText = recipeExtractionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let existing = existing?.trimmingCharacters(in: .whitespacesAndNewlines), !existing.isEmpty else {
+            return trimmedRecipeText
+        }
+        return """
+        \(existing)
+
+        \(trimmedRecipeText)
+        """
     }
 
     private func shouldEnrich(_ bookmark: Bookmark, for url: URL) -> Bool {
@@ -1973,7 +2007,8 @@ final class BookmarksStorage: ObservableObject {
                 return BookmarkEnrichmentPayload(
                     title: htmlResult?.title,
                     thumbnailURL: thumbURL ?? htmlResult?.thumbnailURL,
-                    screenshotData: nil
+                    screenshotData: nil,
+                    recipeExtractionText: htmlResult?.recipeExtractionText
                 )
             }
         }
@@ -1992,7 +2027,8 @@ final class BookmarksStorage: ObservableObject {
             return BookmarkEnrichmentPayload(
                 title: htmlResult?.title ?? oembedResult.title,
                 thumbnailURL: oembedResult.thumbnailURL,
-                screenshotData: nil
+                screenshotData: nil,
+                recipeExtractionText: htmlResult?.recipeExtractionText
             )
         }
 
@@ -2007,7 +2043,8 @@ final class BookmarksStorage: ObservableObject {
                 return BookmarkEnrichmentPayload(
                     title: extracted.title ?? htmlResult?.title,
                     thumbnailURL: extracted.imageURL ?? htmlResult?.thumbnailURL,
-                    screenshotData: extracted.screenshotData
+                    screenshotData: extracted.screenshotData,
+                    recipeExtractionText: htmlResult?.recipeExtractionText
                 )
             }
         }

@@ -77,7 +77,7 @@ enum CiderSpaceMetadataCodec {
 
 @MainActor
 final class CiderSpaceStorage: ObservableObject {
-    static let shared = CiderSpaceStorage()
+    static let shared = CiderSpaceStorage(defaultPinnedPresets: [.recipes])
 
     static let spacesRootName = StoragePaths.spacesDir
     static let metadataFileName = ".cider-space.yaml"
@@ -87,6 +87,7 @@ final class CiderSpaceStorage: ObservableObject {
 
     private let vaultRoot: URL
     private let fileManager: FileManager
+    private let defaultPinnedPresets: [CiderSpacePresetKind]
 
     var spacesRootURL: URL {
         vaultRoot.appendingPathComponent(Self.spacesRootName, isDirectory: true)
@@ -98,10 +99,12 @@ final class CiderSpaceStorage: ObservableObject {
 
     init(
         vaultRoot: URL = StoragePaths.cachedVaultDirectoryURL,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        defaultPinnedPresets: [CiderSpacePresetKind] = []
     ) {
         self.vaultRoot = vaultRoot
         self.fileManager = fileManager
+        self.defaultPinnedPresets = defaultPinnedPresets
         load()
     }
 
@@ -185,8 +188,17 @@ final class CiderSpaceStorage: ObservableObject {
         var issues: [String] = []
 
         guard fileManager.fileExists(atPath: spacesRootURL.path) else {
-            spaces = []
-            loadIssues = []
+            for preset in defaultPinnedPresets {
+                do {
+                    loaded.append(try makeDefaultPinnedSpace(for: preset))
+                } catch {
+                    issues.append("Failed to create default \(CiderSpacePreset.defaults(for: preset).title) Space: \(error.localizedDescription)")
+                }
+            }
+            spaces = loaded.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            loadIssues = issues
             return
         }
 
@@ -212,10 +224,44 @@ final class CiderSpaceStorage: ObservableObject {
             }
         }
 
+        for preset in defaultPinnedPresets where loaded.contains(where: { $0.preset == preset }) == false {
+            do {
+                loaded.append(try makeDefaultPinnedSpace(for: preset))
+            } catch {
+                issues.append("Failed to create default \(CiderSpacePreset.defaults(for: preset).title) Space: \(error.localizedDescription)")
+            }
+        }
+
         spaces = loaded.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
         loadIssues = issues
+    }
+
+    private func makeDefaultPinnedSpace(for preset: CiderSpacePresetKind) throws -> CiderSpace {
+        try ensureSpacesRoot()
+        let defaults = CiderSpacePreset.defaults(for: preset)
+        let folderName = uniqueFolderName(for: defaults.title)
+        let now = Date()
+        let space = CiderSpace(
+            name: defaults.title,
+            systemImage: defaults.systemImage,
+            purpose: defaults.purpose,
+            preset: preset,
+            isPinned: true,
+            aiInstructions: defaults.aiInstructions,
+            routingHints: defaults.routingHints,
+            defaultViews: defaults.defaultViews,
+            rootRelativePath: "\(Self.spacesRootName)/\(folderName)",
+            createdAt: now,
+            updatedAt: now
+        )
+        try fileManager.createDirectory(
+            at: rootURL(for: space),
+            withIntermediateDirectories: true
+        )
+        try write(space)
+        return space
     }
 
     private func write(_ space: CiderSpace) throws {

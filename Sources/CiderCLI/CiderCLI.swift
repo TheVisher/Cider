@@ -400,7 +400,7 @@ struct CiderCLI {
 
         case "add", "create":
             guard let url = args.first else {
-                print("Error: URL required. Usage: cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--path <vault-path>]")
+                print("Error: URL required. Usage: cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--path <vault-path>] [--timeout <seconds>|--no-wait]")
                 return
             }
             // Resolve the destination folder BEFORE creating, so that a bad
@@ -417,7 +417,30 @@ struct CiderCLI {
                 if let targetFolder {
                     _ = service.assignBookmark(bookmark.id, toFolder: targetFolder.id)
                 }
-                print("Created bookmark: \(bookmark.title) (\(bookmark.id.uuidString.prefix(8)))")
+                let waitResult: BookmarkNativeCaptureWaitResult?
+                if let timeout = bookmarkNativeCaptureWaitTimeout(from: args) {
+                    waitResult = await waitForNativeBookmarkCapture(
+                        bookmark.id,
+                        in: service,
+                        timeout: timeout
+                    )
+                } else {
+                    waitResult = nil
+                }
+                let finalBookmark = waitResult?.bookmark ?? service.bookmarks.first(where: { $0.id == bookmark.id }) ?? bookmark
+                if jsonOutput {
+                    var dict = bookmarkToDict(finalBookmark)
+                    if let waitResult {
+                        dict["nativeCaptureStatus"] = waitResult.timedOut ? "timedOut" : "settled"
+                        dict["nativeCaptureElapsedSeconds"] = waitResult.elapsedSeconds
+                    }
+                    outputJSON(dict)
+                } else {
+                    print("Created bookmark: \(finalBookmark.title) (\(finalBookmark.id.uuidString.prefix(8)))")
+                    if let waitResult, waitResult.timedOut {
+                        print("  Native capture: still running after \(Int(waitResult.elapsedSeconds.rounded()))s")
+                    }
+                }
             } else {
                 print("Error: Could not create bookmark for URL: \(url)")
             }
@@ -556,18 +579,31 @@ struct CiderCLI {
                 return
             }
             guard let idPrefix = args.first else {
-                print("Error: ID prefix or --all required. Usage: cider-cli bookmark enrich <id> | --all")
+                print("Error: ID prefix or --all required. Usage: cider-cli bookmark enrich <id> [--timeout <seconds>|--no-wait] | --all")
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
                 print("Scheduling enrichment for '\(bm.title)'...")
                 service.refetchMetadata(for: bm.id)
-                try? await Task.sleep(for: .seconds(5))
-                if let updated = service.bookmarks.first(where: { $0.id == bm.id }) {
+                let waitResult: BookmarkNativeCaptureWaitResult?
+                if let timeout = bookmarkNativeCaptureWaitTimeout(from: args) {
+                    waitResult = await waitForNativeBookmarkCapture(
+                        bm.id,
+                        in: service,
+                        timeout: timeout
+                    )
+                } else {
+                    waitResult = nil
+                }
+                if let updated = waitResult?.bookmark ?? service.bookmarks.first(where: { $0.id == bm.id }) {
                     print("  Title: \(updated.title)")
                     print("  Thumbnail: \(updated.thumbnailRelativePath ?? "none")")
+                    print("  Remote thumbnail: \(updated.thumbnailRemoteURLString ?? "none")")
                     print("  OCR: \(updated.ocrText?.prefix(80) ?? "none")")
                     print("  Colors: \(updated.dominantColors?.joined(separator: ", ") ?? "none")")
+                    if let waitResult {
+                        print("  Native capture: \(waitResult.timedOut ? "timed out" : "settled") after \(String(format: "%.1f", waitResult.elapsedSeconds))s")
+                    }
                 }
             }
 
@@ -4495,6 +4531,14 @@ struct CiderCLI {
     // MARK: - Helpers
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+    struct BookmarkNativeCaptureWaitResult {
+        let bookmark: Bookmark?
+        let elapsedSeconds: TimeInterval
+        let timedOut: Bool
+    }
+
+    static let defaultBookmarkNativeCaptureWaitSeconds: TimeInterval = 20
+
     static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
@@ -4535,6 +4579,58 @@ struct CiderCLI {
         guard let flagIndex = args.firstIndex(of: flag),
               flagIndex + 1 < args.count else { return nil }
         return args[flagIndex + 1]
+    }
+
+    static func bookmarkNativeCaptureWaitTimeout(from args: [String]) -> TimeInterval? {
+        if args.contains("--no-wait") { return nil }
+
+        let rawValue = parseFlag("--timeout", from: args)
+            ?? parseFlag("--wait-timeout", from: args)
+            ?? parseFlag("--capture-timeout", from: args)
+        guard let rawValue else { return defaultBookmarkNativeCaptureWaitSeconds }
+        guard let seconds = TimeInterval(rawValue), seconds >= 0 else {
+            return defaultBookmarkNativeCaptureWaitSeconds
+        }
+        return seconds
+    }
+
+    static func waitForNativeBookmarkCapture(
+        _ bookmarkID: UUID,
+        in service: VaultBookmarkService,
+        timeout: TimeInterval
+    ) async -> BookmarkNativeCaptureWaitResult {
+        let startedAt = Date()
+        let deadline = startedAt.addingTimeInterval(timeout)
+        var sawEnrichmentRunning = false
+        var polls = 0
+
+        while Date() <= deadline {
+            if let bookmark = service.bookmarks.first(where: { $0.id == bookmarkID }) {
+                if bookmark.isEnriching {
+                    sawEnrichmentRunning = true
+                } else if sawEnrichmentRunning
+                    || bookmark.metadataUpdatedAt != nil
+                    || bookmark.thumbnailRelativePath != nil
+                    || bookmark.thumbnailRemoteURLString != nil
+                    || polls >= 2 {
+                    return BookmarkNativeCaptureWaitResult(
+                        bookmark: bookmark,
+                        elapsedSeconds: Date().timeIntervalSince(startedAt),
+                        timedOut: false
+                    )
+                }
+            }
+
+            if timeout == 0 { break }
+            polls += 1
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+
+        return BookmarkNativeCaptureWaitResult(
+            bookmark: service.bookmarks.first(where: { $0.id == bookmarkID }),
+            elapsedSeconds: Date().timeIntervalSince(startedAt),
+            timedOut: true
+        )
     }
 
     static func dashboardNowMilliseconds() -> Int64 {
@@ -5530,14 +5626,14 @@ struct CiderCLI {
 
         BOOKMARKS (alias: bm)
           cider-cli bookmark list [--folder <name|path>] [--limit <n>]
-          cider-cli bookmark add <url> [--title <title>] [--folder <name|path>]
+          cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--timeout <seconds>|--no-wait]
           cider-cli bookmark get <id-prefix>
           cider-cli bookmark search <query>
           cider-cli bookmark move <id-prefix> --folder <name|path>
           cider-cli bookmark tag <id-prefix> <label-name>
           cider-cli bookmark untag <id-prefix> <label-name>
           cider-cli bookmark delete <id-prefix>
-          cider-cli bookmark enrich <id-prefix> | --all
+          cider-cli bookmark enrich <id-prefix> [--timeout <seconds>|--no-wait] | --all
           cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
                     [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]
           cider-cli bookmark similar <id-prefix> [--limit <n>]

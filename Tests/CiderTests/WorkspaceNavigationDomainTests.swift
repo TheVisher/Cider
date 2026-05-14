@@ -88,10 +88,10 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         ])
     }
 
-    func testLibraryRoutesExposeContentTypesForFastFiltering() {
+    func testLibraryRoutesExposeContentTypesAndFoldersForFastFiltering() {
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .browse).map(\.kind),
-            [.inbox, .all, .bookmarks, .notes, .files, .tags]
+            [.inbox, .all, .bookmarks, .notes, .files, .folders, .tags]
         )
         XCTAssertEqual(WorkspaceDomainRouteKind.bookmarks.libraryEntityTypes, [.bookmark])
         XCTAssertEqual(WorkspaceDomainRouteKind.notes.libraryEntityTypes, [.note])

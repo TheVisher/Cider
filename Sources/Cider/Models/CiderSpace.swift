@@ -4,6 +4,7 @@ enum CiderSpacePresetKind: String, Codable, CaseIterable, Hashable {
     case blank
     case project
     case media
+    case recipes
     case people
     case tasksEvents
     case custom
@@ -62,6 +63,16 @@ struct CiderSpacePreset: Equatable {
                 aiInstructions: "Route movies, shows, games, books, trailers, reviews, watchlists, Steam pages, and entertainment notes here.",
                 routingHints: ["Prefer Games for Steam and game pages.", "Prefer Movies or Shows for trailers and reviews.", "Use References for essays and criticism."],
                 defaultViews: [.overview, .inbox, .recent, .notes, .files]
+            )
+        case .recipes:
+            return CiderSpacePreset(
+                kind: kind,
+                title: "Recipes",
+                systemImage: "fork.knife",
+                purpose: "A recipe collection space for saved dishes, social recipe ideas, source backlinks, and taste signals.",
+                aiInstructions: "Route recipe saves, cooking links, food videos, recipe screenshots, and recipe notes here. Preserve the original source link as backlink metadata and keep uncertain extractions reviewable.",
+                routingHints: ["Preserve original source backlinks such as TikTok, YouTube, blogs, or bookmarks.", "Prefer reviewable recipe candidates over confident AI guesses when ingredients or steps are unclear.", "Use liked/disliked taste signals when the user or family reacts to a recipe."],
+                defaultViews: [.overview, .inbox, .recent, .notes, .references]
             )
         case .people:
             return CiderSpacePreset(

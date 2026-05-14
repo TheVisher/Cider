@@ -911,6 +911,19 @@ final class VaultFolderService: ObservableObject {
             parentPath = nil
         }
 
+        let targetRelativePath = parentPath.map { "\($0)/\(sanitized)" } ?? sanitized
+        if let existing = index.values.first(where: { $0.relativePath == targetRelativePath }) {
+            var merged = existing
+            if merged.icon == nil { merged.icon = icon }
+            if updatedAt > merged.updatedAt { merged.updatedAt = updatedAt }
+            index[merged.id] = merged
+            persistFolderToDatabase(merged)
+            saveIndex()
+            rebuildFolders()
+            logger.warning("Sync: skipped duplicate folder '\(targetRelativePath, privacy: .public)' for remote id \(id.uuidString, privacy: .public); using existing local folder \(merged.id.uuidString, privacy: .public)")
+            return merged
+        }
+
         let resolvedName = uniqueName(baseName: sanitized, parentPath: parentPath)
         let relativePath = parentPath.map { "\($0)/\(resolvedName)" } ?? resolvedName
         let directoryURL = vaultRoot.appendingPathComponent(relativePath)

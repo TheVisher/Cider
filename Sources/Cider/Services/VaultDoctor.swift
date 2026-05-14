@@ -408,21 +408,28 @@ final class VaultDoctor {
         let siblingGroups = Dictionary(grouping: folders) { folder in
             "\(folder.parentRelativePath ?? "")|\(Self.normalizedFolderDuplicateKey(folder.name))"
         }
-        for (_, siblings) in siblingGroups where siblings.count > 1 {
-            let canonicalNames = Set(siblings.map { $0.name }.filter { !Self.hasNumericSuffix($0) })
-            guard !canonicalNames.isEmpty else { continue }
+        for (_, siblings) in siblingGroups where Self.shouldFlagNumericSuffixFolderGroup(siblings.map(\.name)) {
             let canonicalPaths = siblings
                 .filter { !Self.hasNumericSuffix($0.name) }
                 .map(\.relativePath)
                 .sorted()
-                .joined(separator: ", ")
+            let numericSuffixPaths = siblings
+                .filter { Self.hasNumericSuffix($0.name) }
+                .map(\.relativePath)
+                .sorted()
+            let peerDescription: String
+            if canonicalPaths.isEmpty {
+                peerDescription = "multiple same-parent numeric-suffix siblings exist: \(numericSuffixPaths.joined(separator: ", "))"
+            } else {
+                peerDescription = "a same-parent canonical folder exists: \(canonicalPaths.joined(separator: ", "))"
+            }
             for folder in siblings where Self.hasNumericSuffix(folder.name) {
                 out.append(Finding(
                     id: "numeric-suffix-folder-\(folder.id.uuidString)",
                     kind: .suspiciousFlattenedFolderDuplicate,
                     severity: .warning,
                     summary: "Possible numeric-suffix folder duplicate: \(folder.relativePath)",
-                    detail: "Folder '\(folder.relativePath)' has a numeric-suffix name and a same-parent canonical folder exists: \(canonicalPaths). Review before merging or deleting files.",
+                    detail: "Folder '\(folder.relativePath)' has a numeric-suffix name and \(peerDescription). Review before merging or deleting files.",
                     isFixable: false,
                     fixLabel: nil,
                     payload: Finding.Payload(folderID: folder.id, relativePath: folder.relativePath)
@@ -480,6 +487,13 @@ final class VaultDoctor {
 
     nonisolated static func hasNumericSuffix(_ name: String) -> Bool {
         name.range(of: #"\s+\d+$"#, options: .regularExpression) != nil
+    }
+
+    nonisolated static func shouldFlagNumericSuffixFolderGroup(_ names: [String]) -> Bool {
+        let numericSuffixCount = names.filter { hasNumericSuffix($0) }.count
+        guard numericSuffixCount > 0, names.count > 1 else { return false }
+        let hasCanonicalSibling = names.contains { !hasNumericSuffix($0) }
+        return hasCanonicalSibling || numericSuffixCount > 1
     }
 
     private static func normalizedFolderDuplicateKey(_ name: String) -> String {

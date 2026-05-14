@@ -110,6 +110,39 @@ struct VaultDuplicateAuditorTests {
         #expect(!VaultDoctor.hasNumericSuffix("Applications"))
     }
 
+    @Test("VaultDoctor detects repeated numeric suffix folder groups without a canonical sibling")
+    func repeatedNumericSuffixFolderGroupsWithoutCanonicalAreDuplicateCandidates() {
+        #expect(VaultDoctor.shouldFlagNumericSuffixFolderGroup(["Applications 2", "Applications 2 2"]))
+        #expect(VaultDoctor.shouldFlagNumericSuffixFolderGroup(["Media 2", "Media 3"]))
+        #expect(VaultDoctor.shouldFlagNumericSuffixFolderGroup(["Media", "Media 2"]))
+        #expect(!VaultDoctor.shouldFlagNumericSuffixFolderGroup(["Applications 2"]))
+        #expect(!VaultDoctor.shouldFlagNumericSuffixFolderGroup(["Applications", "Utilities"]))
+    }
+
+    @Test("empty notes with numeric suffix titles are duplicate candidates")
+    func emptyNotesWithSuffixTitlesAreDuplicates() {
+        let notes = [
+            Note(
+                id: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
+                title: "CodexNote-1775948805",
+                content: "",
+                relativePath: "Inbox/Notes/CodexNote-1775948805.md"
+            ),
+            Note(
+                id: UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!,
+                title: "CodexNote-1775948805 2",
+                content: "",
+                relativePath: "Inbox/Notes/CodexNote-1775948805 2.md"
+            ),
+        ]
+
+        let findings = VaultDuplicateAuditor.findDuplicateNotes(notes)
+
+        #expect(findings.count == 1)
+        #expect(findings.first?.entityType == .note)
+        #expect(findings.first?.kind == .exactContent)
+    }
+
     @Test("normalized titles strip numeric suffixes")
     func normalizedTitlesStripNumericSuffixes() {
         #expect(VaultDuplicateAuditor.normalizedDuplicateName("Games Library 3.md") == "games library")

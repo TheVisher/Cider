@@ -34,6 +34,20 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(catalog.workspace(id: "cider-ios")?.boardIDs, ["2d3f69"])
     }
 
+    func testDefaultCatalogToleratesDuplicateNormalizedBoardNames() {
+        let boards = [
+            KanbanBoard(id: "2afee0", name: "Cider"),
+            KanbanBoard(id: "smoke-one", name: "Merge Smoke"),
+            KanbanBoard(id: "smoke-two", name: "Merge-Smoke")
+        ]
+
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: boards)
+
+        XCTAssertEqual(catalog.workspace(id: "cider")?.boardIDs, ["2afee0"])
+        XCTAssertEqual(catalog.home.boardIDs, ["2afee0", "smoke-one", "smoke-two"])
+        XCTAssertEqual(catalog.browseAllBoards.boardIDs, ["2afee0", "smoke-one", "smoke-two"])
+    }
+
     func testDefaultCatalogAppliesPersistedProjectBoardExclusions() {
         let boards = [
             KanbanBoard(id: "2afee0", name: "Cider"),
