@@ -122,6 +122,48 @@ enum KanbanCardSectionParser {
         return updatingSection(in: notes, title: "Test Evidence", body: line)
     }
 
+    static func appendingHistory(
+        to notes: String?,
+        type: String,
+        text: String,
+        source: String?,
+        at date: Date = Date()
+    ) -> String? {
+        guard let section = historySection(for: type) else { return nil }
+        if section.key == "test_evidence" {
+            return appendingEvidence(to: notes, text: text, source: source, at: date)
+        }
+
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else {
+            return notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+
+        let timestamp = evidenceDateFormatter.string(from: date)
+        let sourceSuffix = source.flatMap { value -> String? in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : " (source: \(trimmed))"
+        } ?? ""
+        let line = "- \(timestamp) - \(trimmedText)\(sourceSuffix)"
+        let current = sections(from: notes).first { $0.key == section.key }
+
+        if let current {
+            let existingBody = current.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            let nextBody = [existingBody, line].filter { !$0.isEmpty }.joined(separator: "\n")
+            return updatingSection(in: notes, title: current.title, body: nextBody)
+        }
+
+        return updatingSection(in: notes, title: section.title, body: line)
+    }
+
+    static let supportedHistoryTypes = [
+        "implementation",
+        "failed-attempt",
+        "test",
+        "decision",
+        "handoff",
+    ]
+
     static func normalizedKey(for title: String) -> String {
         let scalars = title.unicodeScalars.map { scalar -> Character in
             CharacterSet.alphanumerics.contains(scalar)
@@ -215,6 +257,36 @@ enum KanbanCardSectionParser {
         }
     }
 
+    private static func historySection(for rawType: String) -> (key: String, title: String)? {
+        switch normalizedKey(for: rawType) {
+        case "implementation",
+             "implementation_summary",
+             "implementation_history",
+             "summary",
+             "fix",
+             "fix_summary":
+            return ("implementation_history", "Implementation History")
+        case "failed_attempt",
+             "failed_attempts",
+             "failure",
+             "attempt":
+            return ("failed_attempts", "Failed Attempts")
+        case "test",
+             "test_evidence",
+             "evidence",
+             "verification":
+            return ("test_evidence", "Test Evidence")
+        case "decision",
+             "decisions":
+            return ("decisions", "Decisions")
+        case "handoff",
+             "agent_handoff":
+            return ("agent_handoff", "Agent Handoff")
+        default:
+            return nil
+        }
+    }
+
     private static let knownLabelKeys: Set<String> = [
         "acceptance_criteria",
         "agent_context",
@@ -237,6 +309,7 @@ enum KanbanCardSectionParser {
         "handoff",
         "implementation_evidence",
         "implementation_handoff",
+        "implementation_history",
         "implementation_plan",
         "latest_verification_snapshot",
         "links",

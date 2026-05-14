@@ -108,9 +108,11 @@ For Cider development work with a Kanban card, agents should use the structured 
 2. Read `dashboard.currentState`, `dashboard.nextStep`, `dashboard.openLoops`, `dashboard.evidenceEntries`, and `dashboard.agentContext`.
 3. Move or create cards through `cider-cli board ...` commands, not direct YAML edits.
 4. Update active status with `cider-cli board section update <board> --card <id> --section "Current State" --value "..." --json`.
-5. Add verification through `cider-cli board evidence add <board> --card <id> --text "..." --source "..." --json`.
-6. Record durable product, architecture, storage, CLI, QA, or agent-behavior choices in a `Decisions` section before promoting them into core docs.
-7. Before stopping, refresh `Agent Handoff` with the current status, exact commands the next agent should run, known gaps, and merge/push constraints.
+5. Add implementation summaries with `cider-cli board history add <board> --card <id> --type implementation --text "..." --source "..." --json`.
+6. Add failed-attempt notes with `cider-cli board history add <board> --card <id> --type failed-attempt --text "..." --source "..." --json` when they would save a future agent time.
+7. Add verification through `cider-cli board evidence add <board> --card <id> --text "..." --source "..." --json`.
+8. Record durable product, architecture, storage, CLI, QA, or agent-behavior choices with `cider-cli board history add <board> --card <id> --type decision --text "..." --source "..." --json` before promoting them into core docs.
+9. Before stopping, refresh `Agent Handoff` with the current status, exact commands the next agent should run, known gaps, and merge/push constraints.
 
 Use `cider-cli item get card <id> --json` when an agent only needs projected sections/provenance, and `cider-cli item search <query> --json` when it needs retrieval across projected chunks. Raw Markdown or YAML inspection is for parser/storage debugging, not normal handoff.
 

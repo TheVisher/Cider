@@ -3579,6 +3579,38 @@ struct CiderCLI {
             refreshSecondBrainProjection(boardID: board.id, card: card)
             printBoardCardSectionResult(board: board, card: card)
 
+        case "history":
+            guard args.first == "add" else {
+                printCLIError("Usage: cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text> [--source <source>] [--json]")
+                return
+            }
+            let historyArgs = Array(args.dropFirst())
+            guard let boardRef = historyArgs.first,
+                  let cardID = parseFlag("--card", from: historyArgs),
+                  let type = parseFlag("--type", from: historyArgs),
+                  let text = parseFlag("--text", from: historyArgs) else {
+                printCLIError("Usage: cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text> [--source <source>] [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard var card = board.card(id: cardID) else {
+                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+            guard let nextNotes = KanbanCardSectionParser.appendingHistory(
+                to: card.notes,
+                type: type,
+                text: text,
+                source: parseFlag("--source", from: historyArgs)
+            ) else {
+                printCLIError("Invalid history type '\(type)'. Use \(KanbanCardSectionParser.supportedHistoryTypes.joined(separator: ", ")).")
+                return
+            }
+            card.notes = nextNotes
+            storage.updateCard(boardID: board.id, card: card)
+            refreshSecondBrainProjection(boardID: board.id, card: card)
+            printBoardCardSectionResult(board: board, card: card)
+
         case "move-card":
             guard let boardName = args.first,
                   let cardID = parseFlag("--card", from: args),
@@ -3677,7 +3709,7 @@ struct CiderCLI {
 
         default:
             print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, move-card, delete-card, children, add-column, rename-column, delete-column")
+            print("Commands: list, show, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -5496,6 +5528,7 @@ struct CiderCLI {
             "nextStep": model.nextStep ?? "",
             "openLoops": model.openLoops.map(dashboardEntryToDict),
             "decisions": model.decisions.map(dashboardEntryToDict),
+            "historyEntries": model.historyEntries.map(dashboardEntryToDict),
             "evidenceEntries": model.evidenceEntries.map(dashboardEntryToDict),
             "relatedItems": model.relatedItems.map(dashboardEntryToDict),
             "missingCoreSections": model.missingCoreSections,
@@ -6413,6 +6446,7 @@ struct CiderCLI {
                                          [--parent <card-id>] [--clear-parent]
           cider-cli board section update <board> --card <id> --section <name> --value <text> [--json]
           cider-cli board evidence add <board> --card <id> --text <text> [--source <source>] [--json]
+          cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text> [--source <source>] [--json]
           cider-cli board move-card <board> --card <id> --to <column>
           cider-cli board delete-card <board> --card <id>
           cider-cli board children <board> --card <id> [--json]

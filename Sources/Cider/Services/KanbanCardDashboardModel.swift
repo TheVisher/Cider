@@ -17,6 +17,7 @@ struct KanbanCardAgentContext: Equatable {
             "cider-cli board card inspect \(board) --card \(cardID) --json",
             "cider-cli item get card \(cardID) --json",
             "cider-cli board section update \(board) --card \(cardID) --section \"Current State\" --value \"...\" --json",
+            "cider-cli board history add \(board) --card \(cardID) --type implementation --text \"...\" --source \"...\" --json",
             "cider-cli board evidence add \(board) --card \(cardID) --text \"...\" --source \"...\" --json",
         ]
     }
@@ -33,6 +34,7 @@ struct KanbanCardDashboardModel: Equatable {
     var nextStep: String?
     var openLoops: [KanbanCardDashboardEntry]
     var decisions: [KanbanCardDashboardEntry]
+    var historyEntries: [KanbanCardDashboardEntry]
     var evidenceEntries: [KanbanCardDashboardEntry]
     var relatedItems: [KanbanCardDashboardEntry]
     var agentContext: KanbanCardAgentContext
@@ -51,6 +53,7 @@ struct KanbanCardDashboardModel: Equatable {
         scope = Self.firstBody(in: parsedSections, matching: Self.scopeKeys)
         nextStep = Self.firstActionLine(in: parsedSections, matching: Self.nextStepKeys)
         decisions = Self.entries(from: parsedSections, matching: Self.decisionKeys, fallbackTitle: "Decision")
+        historyEntries = Self.evidenceEntries(from: parsedSections.filter { Self.historyKeys.contains($0.key) })
         evidenceEntries = Self.evidenceEntries(from: parsedSections)
         relatedItems = Self.entries(from: parsedSections, matching: Self.relatedKeys, fallbackTitle: "Related")
         openLoops = Self.openLoopEntries(from: parsedSections)
@@ -230,10 +233,10 @@ struct KanbanCardDashboardModel: Equatable {
 
     private static func agentContext(from sections: [KanbanCardSection]) -> KanbanCardAgentContext {
         let notes = firstBody(in: sections, matching: agentContextKeys)
-            ?? "Future agents should update this card through Cider CLI commands. Put verification in Test Evidence, implementation notes in Implementation Evidence, durable decisions in Decisions, and current status in Current State."
+            ?? "Future agents should update this card through Cider CLI commands. Put implementation summaries in Implementation History, failed attempts in Failed Attempts, verification in Test Evidence, durable decisions in Decisions, and current status in Current State."
         return KanbanCardAgentContext(
             notes: notes,
-            updateTargets: ["Current State", "Decisions", "Implementation Evidence", "Test Evidence", "Agent Handoff"]
+            updateTargets: ["Current State", "Implementation History", "Failed Attempts", "Decisions", "Test Evidence", "Agent Handoff"]
         )
     }
 
@@ -275,8 +278,13 @@ struct KanbanCardDashboardModel: Equatable {
         "evidence",
         "test_evidence",
         "implementation_evidence",
+        "implementation_history",
         "verification",
         "latest_verification_snapshot",
+        "failed_attempts",
+    ]
+    private static let historyKeys: Set<String> = [
+        "implementation_history",
         "failed_attempts",
     ]
     private static let openLoopKeys: Set<String> = [

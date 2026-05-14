@@ -64,6 +64,12 @@ struct SecondBrainFoundationTests {
         return (object as? [String: Any]) ?? [:]
     }
 
+    private func jsonObjectArray(from output: String) throws -> [[String: Any]] {
+        let data = Data(output.utf8)
+        let object = try JSONSerialization.jsonObject(with: data)
+        return (object as? [[String: Any]]) ?? []
+    }
+
     private func makeTestDB() throws -> (CiderDatabase, URL) {
         let url = makeTempDBURL()
         let db = CiderDatabase()
@@ -423,6 +429,22 @@ struct SecondBrainFoundationTests {
         #expect(updated.contains("- 2026-05-13 19:20 - Second-brain tests passed. (source: swift test)"))
     }
 
+    @Test("Kanban history appends typed timeline entries")
+    func kanbanHistoryAppendsTypedTimelineEntries() {
+        let date = Date(timeIntervalSince1970: 1_778_700_000)
+
+        let updated = KanbanCardSectionParser.appendingHistory(
+            to: "## Problem\nNeeds history.",
+            type: "implementation",
+            text: "Added the agent-readable history command.",
+            source: "swift test",
+            at: date
+        )
+
+        #expect(updated?.contains("## Implementation History") == true)
+        #expect(updated?.contains("- 2026-05-13 19:20 - Added the agent-readable history command. (source: swift test)") == true)
+    }
+
     @Test("Kanban card projection populates sections and searchable chunks")
     func kanbanCardProjectionPopulatesSectionsAndSearchableChunks() throws {
         let (db, url) = try makeTestDB()
@@ -501,15 +523,23 @@ struct SecondBrainFoundationTests {
 
             Agent handoff:
             Future agents should append verification to Test Evidence and implementation notes to Implementation Evidence.
+
+            ## Implementation History
+            - 2026-05-14 03:00 - Added history support. (source: codex)
             """
         )
 
         #expect(model.goal == "Make dashboard resurfacing explainable.")
         #expect(model.relatedItems.count == 2)
         #expect(model.relatedItems[0].body.contains("eb3626"))
+        #expect(model.historyEntries.first?.body == "Added history support.")
+        #expect(model.historyEntries.first?.source == "codex")
         #expect(model.agentContext.notes.contains("Future agents should append verification"))
         #expect(model.agentContext.commands(board: "Cider", cardID: "abc123").contains {
             $0.contains("board evidence add Cider --card abc123")
+        })
+        #expect(model.agentContext.commands(board: "Cider", cardID: "abc123").contains {
+            $0.contains("board history add Cider --card abc123")
         })
     }
 
@@ -777,6 +807,34 @@ struct SecondBrainFoundationTests {
             ($0["body"] as? String)?.contains("Process-level CLI evidence smoke passed.") == true
         })
 
+        let implementation = try jsonObject(from: runCLI([
+            "board", "history", "add", "Agent Workflow Smoke",
+            "--card", cardRef,
+            "--type", "implementation",
+            "--text", "Implemented agent-readable card history smoke.",
+            "--source", "swift test process",
+            "--json",
+        ], vaultURL: vaultURL))
+        let implementationSections = try #require(implementation["sections"] as? [[String: Any]])
+        #expect(implementationSections.contains {
+            $0["key"] as? String == "implementation_history"
+                && ($0["body"] as? String)?.contains("Implemented agent-readable card history smoke.") == true
+        })
+
+        let failedAttempt = try jsonObject(from: runCLI([
+            "board", "history", "add", "Agent Workflow Smoke",
+            "--card", cardRef,
+            "--type", "failed-attempt",
+            "--text", "Tried raw YAML scraping and rejected it.",
+            "--source", "swift test process",
+            "--json",
+        ], vaultURL: vaultURL))
+        let failedAttemptSections = try #require(failedAttempt["sections"] as? [[String: Any]])
+        #expect(failedAttemptSections.contains {
+            $0["key"] as? String == "failed_attempts"
+                && ($0["body"] as? String)?.contains("Tried raw YAML scraping and rejected it.") == true
+        })
+
         _ = try runCLI([
             "item", "backfill-kanban",
             "--board", "Agent Workflow Smoke",
@@ -791,6 +849,21 @@ struct SecondBrainFoundationTests {
         #expect(sections.contains { $0["sectionKey"] as? String == "current_state" })
         #expect(sections.contains {
             ($0["body"] as? String)?.contains("Process-level CLI evidence smoke passed.") == true
+        })
+        #expect(sections.contains { $0["sectionKey"] as? String == "implementation_history" })
+        #expect(sections.contains { $0["sectionKey"] as? String == "failed_attempts" })
+
+        let searchResults = try jsonObjectArray(from: runCLI([
+            "item", "search", "raw YAML scraping rejected",
+            "--json",
+        ], vaultURL: vaultURL))
+        #expect(searchResults.contains {
+            guard let owner = $0["owner"] as? [String: Any],
+                  owner["ownerType"] as? String == "kanban_card",
+                  let ownerID = owner["ownerID"] as? String else {
+                return false
+            }
+            return ownerID.hasSuffix("/\(cardRef)")
         })
     }
 }

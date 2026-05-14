@@ -55,7 +55,7 @@ Keep command details in CLI help and tests, not sprawling docs. The core command
 - dashboard: topic/card list and upsert with JSON
 - item graph: inspect/search/routing/provenance, Kanban projection backfill, and doctor checks
 - spaces: explain routing context and agent instructions
-- boards: show, card inspect, add-card, update-card, move-card, children, section update, evidence add
+- boards: show, card inspect, add-card, update-card, move-card, children, section update, evidence add, history add
 - database: backup list and isolated restore verification
 
 ## Item Graph And Spaces
@@ -71,19 +71,21 @@ Core commands:
 - `item doctor --json`: checks second-brain tables and SQLite integrity.
 - `space explain <name-or-id> --json`: returns purpose, routing hints, default views, and agent instructions for a Space.
 
-Kanban card details can be inspected through `board card inspect <board> --card <id> --json`, which returns parsed dashboard lanes, sections, card metadata, hierarchy, links, routing decisions, and agent actions. Card details can be edited through `board section update <board> --card <id> --section <name> --value <text>` and `board evidence add <board> --card <id> --text <text>`. These update the YAML card and refresh its SQLite projection.
+Kanban card details can be inspected through `board card inspect <board> --card <id> --json`, which returns parsed dashboard lanes, sections, card metadata, hierarchy, links, routing decisions, and agent actions. Card details can be edited through `board section update <board> --card <id> --section <name> --value <text>`, `board evidence add <board> --card <id> --text <text>`, and `board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text>`. These update the YAML card and refresh its SQLite projection.
 
 Normal agent workflow for a Cider card:
 
 1. `board card inspect <board> --card <id> --json` to understand state without scraping YAML.
 2. `board section update ... --section "Current State" --value "..." --json` before and after implementation when state changes.
-3. `board evidence add ... --text "..." --source "..." --json` after verification.
-4. `board section update ... --section "Decisions" --value "..." --json` when a durable product, architecture, storage, CLI, QA, or agent-behavior choice is made.
-5. `board section update ... --section "Agent Handoff" --value "..." --json` before stopping.
+3. `board history add ... --type implementation --text "..." --source "..." --json` for concise implementation or fix summaries.
+4. `board history add ... --type failed-attempt --text "..." --source "..." --json` when an attempted path matters for future agents.
+5. `board evidence add ... --text "..." --source "..." --json` after verification. `board history add ... --type test` writes the same durable test-evidence lane.
+6. `board history add ... --type decision --text "..." --source "..." --json` when a durable product, architecture, storage, CLI, QA, or agent-behavior choice is made.
+7. `board history add ... --type handoff --text "..." --source "..." --json` before stopping, or use `board section update ... --section "Agent Handoff" --value "..." --json` for a full replacement handoff.
 
 Kanban projection lifecycle:
 
-- Creation: `board add-card`, `board update-card`, `board section update`, and `board evidence add` refresh that card's SQLite projection after writing YAML.
+- Creation: `board add-card`, `board update-card`, `board section update`, `board evidence add`, and `board history add` refresh that card's SQLite projection after writing YAML.
 - Refresh: `item backfill-kanban --board <board> --json` rebuilds all card projections for a board from canonical YAML; omit `--board` to refresh every board.
 - Deletion: deleting a Kanban card or board removes its projected sections/chunks so `item search` stops finding stale card content.
 - Restore/reload: restored or reloaded boards should be followed by `item backfill-kanban --board <board> --json` when an agent needs fresh search immediately.
