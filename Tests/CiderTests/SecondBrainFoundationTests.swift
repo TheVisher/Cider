@@ -866,4 +866,64 @@ struct SecondBrainFoundationTests {
             return ownerID.hasSuffix("/\(cardRef)")
         })
     }
+
+    @Test("process CLI lists recent Kanban cards with agent context")
+    func processCLIListsRecentKanbanCardsWithAgentContext() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-board-recent-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Recent Smoke"], vaultURL: vaultURL)
+        let parentOutput = try runCLI([
+            "board", "add-card", "Recent Smoke",
+            "--column", "Backlog",
+            "--title", "Parent roadmap",
+        ], vaultURL: vaultURL)
+        let parentID = String(try #require(parentOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        _ = try runCLI([
+            "board", "add-card", "Recent Smoke",
+            "--column", "Backlog",
+            "--title", "Older child",
+            "--parent", parentID,
+        ], vaultURL: vaultURL)
+        let latestOutput = try runCLI([
+            "board", "add-card", "Recent Smoke",
+            "--column", "Backlog",
+            "--title", "Latest child",
+            "--notes", """
+            ## Current State
+            Ready for recent-card discovery.
+
+            ## Next Step
+            Pick this card without knowing its ID.
+            """,
+            "--priority", "high",
+            "--parent", parentID,
+        ], vaultURL: vaultURL)
+        let latestID = String(try #require(latestOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let recent = try jsonObject(from: runCLI([
+            "board", "recent", "Recent Smoke",
+            "--limit", "1",
+            "--json",
+        ], vaultURL: vaultURL))
+
+        let cards = try #require(recent["cards"] as? [[String: Any]])
+        #expect(cards.count == 1)
+        let first = try #require(cards.first)
+        #expect(first["id"] as? String == latestID)
+        #expect(first["title"] as? String == "Latest child")
+        #expect(first["priority"] as? String == "high")
+        #expect(first["parentCardID"] as? String == parentID)
+        #expect(first["activityKind"] as? String == "created")
+        #expect(first["summary"] as? String == "Ready for recent-card discovery.")
+
+        let column = try #require(first["column"] as? [String: Any])
+        #expect(column["name"] as? String == "Backlog")
+
+        let parent = try #require(first["parent"] as? [String: Any])
+        #expect(parent["id"] as? String == parentID)
+        #expect(parent["title"] as? String == "Parent roadmap")
+    }
 }

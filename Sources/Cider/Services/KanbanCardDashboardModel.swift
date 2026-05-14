@@ -14,6 +14,7 @@ struct KanbanCardAgentContext: Equatable {
 
     func commands(board: String = "<board>", cardID: String = "<card-id>") -> [String] {
         [
+            "cider-cli board recent \(board) --limit 20 --json",
             "cider-cli board card inspect \(board) --card \(cardID) --json",
             "cider-cli item get card \(cardID) --json",
             "cider-cli board section update \(board) --card \(cardID) --section \"Current State\" --value \"...\" --json",

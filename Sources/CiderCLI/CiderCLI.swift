@@ -3292,6 +3292,36 @@ struct CiderCLI {
                 print("Error: Board '\(name)' not found")
             }
 
+        case "recent":
+            guard let boardRef = args.first else {
+                printCLIError("Usage: cider-cli board recent <board> [--limit <count>] [--json]")
+                return
+            }
+            let limitValue = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+            guard limitValue > 0 else {
+                printCLIError("Invalid --limit '\(parseFlag("--limit", from: args) ?? "")'. Use a positive number.")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            let recentCards = recentKanbanCards(in: board, limit: limitValue)
+            if jsonOutput {
+                outputJSON([
+                    "ok": true,
+                    "board": ["id": board.id, "name": board.name],
+                    "limit": limitValue,
+                    "cards": recentCards.map(boardRecentCardToDict),
+                ])
+            } else if recentCards.isEmpty {
+                print("No cards found for board: \(board.name)")
+            } else {
+                print("Recent cards for \(board.name):")
+                for entry in recentCards {
+                    let parent = entry.parent.map { " parent:\($0.id)" } ?? ""
+                    let priority = entry.card.priority.map { " [\($0.rawValue)]" } ?? ""
+                    print("  [\(entry.card.id)] \(entry.card.title)\(priority) — \(entry.column.name) \(entry.activityKind):\(dateFormatter.string(from: entry.activityAt))\(parent)")
+                }
+            }
+
         case "card":
             guard args.first == "inspect" else {
                 printCLIError("Usage: cider-cli board card inspect <board> --card <id> [--json]")
@@ -3709,7 +3739,7 @@ struct CiderCLI {
 
         default:
             print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
+            print("Commands: list, show, recent, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -5396,6 +5426,84 @@ struct CiderCLI {
         }
     }
 
+    struct BoardRecentCard {
+        let board: KanbanBoard
+        let column: KanbanColumn
+        let card: KanbanCard
+        let parent: KanbanCard?
+        let activityAt: Date
+        let activityKind: String
+        let traversalOrder: Int
+    }
+
+    static func recentKanbanCards(in board: KanbanBoard, limit: Int) -> [BoardRecentCard] {
+        var entries: [BoardRecentCard] = []
+        var traversalOrder = 0
+        for column in board.columns {
+            for card in column.cards {
+                traversalOrder += 1
+                let activityAt = card.completed ?? card.created
+                let activityKind = card.completed == nil ? "created" : "completed"
+                entries.append(BoardRecentCard(
+                    board: board,
+                    column: column,
+                    card: card,
+                    parent: board.parentCard(for: card.id),
+                    activityAt: activityAt,
+                    activityKind: activityKind,
+                    traversalOrder: traversalOrder
+                ))
+            }
+        }
+
+        return Array(entries.sorted { lhs, rhs in
+            if lhs.activityAt != rhs.activityAt {
+                return lhs.activityAt > rhs.activityAt
+            }
+            return lhs.traversalOrder > rhs.traversalOrder
+        }.prefix(limit))
+    }
+
+    static func boardRecentCardToDict(_ entry: BoardRecentCard) -> [String: Any] {
+        let model = KanbanCardDashboardModel(title: entry.card.title, notes: entry.card.notes)
+        var dict: [String: Any] = [
+            "id": entry.card.id,
+            "title": entry.card.title,
+            "board": ["id": entry.board.id, "name": entry.board.name],
+            "column": ["id": entry.column.id, "name": entry.column.name, "isDoneColumn": entry.column.isDoneColumn],
+            "created": ISO8601DateFormatter().string(from: entry.card.created),
+            "activityAt": ISO8601DateFormatter().string(from: entry.activityAt),
+            "activityKind": entry.activityKind,
+            "tags": entry.card.tags,
+            "summary": model.currentState ?? model.nextStep ?? model.fallbackSummary,
+        ]
+        if let completed = entry.card.completed {
+            dict["completed"] = ISO8601DateFormatter().string(from: completed)
+        }
+        if let priority = entry.card.priority {
+            dict["priority"] = priority.rawValue
+        }
+        if let agent = entry.card.agent {
+            dict["agent"] = agent
+        }
+        if let color = entry.card.color {
+            dict["color"] = color.rawValue
+        }
+        if let parentCardID = entry.card.parentCardID {
+            dict["parentCardID"] = parentCardID
+        }
+        if let currentState = model.currentState {
+            dict["currentState"] = currentState
+        }
+        if let nextStep = model.nextStep {
+            dict["nextStep"] = nextStep
+        }
+        if let parent = entry.parent {
+            dict["parent"] = minimalCardToDict(parent)
+        }
+        return dict
+    }
+
     static func boardCardInspectToDict(board: KanbanBoard, column: KanbanColumn?, card: KanbanCard) -> [String: Any] {
         let owner = SecondBrainKanbanProjectionService.owner(boardID: board.id, cardID: card.id)
         let model = KanbanCardDashboardModel(title: card.title, notes: card.notes)
@@ -6435,6 +6543,7 @@ struct CiderCLI {
         BOARDS (Kanban)
           cider-cli board list
           cider-cli board show <board-name-or-id> [--json]
+          cider-cli board recent <board> [--limit <count>] [--json]
           cider-cli board card inspect <board> --card <id> [--json]
           cider-cli board create <name>
           cider-cli board rename <name|id> --to <new-name>

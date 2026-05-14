@@ -104,15 +104,16 @@ Board files live in `~/CiderVault/.cider/boards/`.
 
 For Cider development work with a Kanban card, agents should use the structured card contract before reading raw board YAML:
 
-1. Inspect the active card with `cider-cli board card inspect <board> --card <id> --json`.
-2. Read `dashboard.currentState`, `dashboard.nextStep`, `dashboard.openLoops`, `dashboard.evidenceEntries`, and `dashboard.agentContext`.
-3. Move or create cards through `cider-cli board ...` commands, not direct YAML edits.
-4. Update active status with `cider-cli board section update <board> --card <id> --section "Current State" --value "..." --json`.
-5. Add implementation summaries with `cider-cli board history add <board> --card <id> --type implementation --text "..." --source "..." --json`.
-6. Add failed-attempt notes with `cider-cli board history add <board> --card <id> --type failed-attempt --text "..." --source "..." --json` when they would save a future agent time.
-7. Add verification through `cider-cli board evidence add <board> --card <id> --text "..." --source "..." --json`.
-8. Record durable product, architecture, storage, CLI, QA, or agent-behavior choices with `cider-cli board history add <board> --card <id> --type decision --text "..." --source "..." --json` before promoting them into core docs.
-9. Before stopping, refresh `Agent Handoff` with the current status, exact commands the next agent should run, known gaps, and merge/push constraints.
+1. If the active card ID is unknown, run `cider-cli board recent <board> --limit 20 --json`.
+2. Inspect the active card with `cider-cli board card inspect <board> --card <id> --json`.
+3. Read `dashboard.currentState`, `dashboard.nextStep`, `dashboard.openLoops`, `dashboard.evidenceEntries`, and `dashboard.agentContext`.
+4. Move or create cards through `cider-cli board ...` commands, not direct YAML edits.
+5. Update active status with `cider-cli board section update <board> --card <id> --section "Current State" --value "..." --json`.
+6. Add implementation summaries with `cider-cli board history add <board> --card <id> --type implementation --text "..." --source "..." --json`.
+7. Add failed-attempt notes with `cider-cli board history add <board> --card <id> --type failed-attempt --text "..." --source "..." --json` when they would save a future agent time.
+8. Add verification through `cider-cli board evidence add <board> --card <id> --text "..." --source "..." --json`.
+9. Record durable product, architecture, storage, CLI, QA, or agent-behavior choices with `cider-cli board history add <board> --card <id> --type decision --text "..." --source "..." --json` before promoting them into core docs.
+10. Before stopping, refresh `Agent Handoff` with the current status, exact commands the next agent should run, known gaps, and merge/push constraints.
 
 Use `cider-cli item get card <id> --json` when an agent only needs projected sections/provenance, and `cider-cli item search <query> --json` when it needs retrieval across projected chunks. Raw Markdown or YAML inspection is for parser/storage debugging, not normal handoff.
 
