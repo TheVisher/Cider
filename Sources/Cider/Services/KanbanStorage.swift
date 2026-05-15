@@ -309,6 +309,7 @@ final class KanbanStorage: ObservableObject {
         if incoming.linkedEntities != baseline.linkedEntities { merged.linkedEntities = incoming.linkedEntities }
         if incoming.relatedCardIDs != baseline.relatedCardIDs { merged.relatedCardIDs = incoming.relatedCardIDs }
         if incoming.parentCardID != baseline.parentCardID { merged.parentCardID = incoming.parentCardID }
+        if incoming.historyEntries != baseline.historyEntries { merged.historyEntries = incoming.historyEntries }
         if incoming.completed != baseline.completed { merged.completed = incoming.completed }
         return merged
     }

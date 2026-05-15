@@ -46,6 +46,7 @@ When the user sends a bare URL, do not stop after creating the bookmark. Use the
 Active board files:
 
 - `~/CiderVault/.cider/boards/2afee0.yaml` — Cider (default dedicated Cider product/project board; move newly audited Cider work here instead of deleting old cards)
+- `~/CiderVault/.cider/boards/3d45ca.yaml` — Second-Brain Roadmap v1 (clean active execution board for current second-brain roadmap work; use this instead of old Cider board cards when the task is specifically Roadmap v1)
 - `~/CiderVault/.cider/boards/08c899.yaml` — Cider Web
 - `~/CiderVault/.cider/boards/2d3f69.yaml` — Cider iOS
 - `~/CiderVault/.cider/boards/a1b2c3.yaml` — Cider Roadmap (legacy/general roadmap; audit old cards and move relevant work into dedicated project boards)

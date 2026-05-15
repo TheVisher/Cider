@@ -11,6 +11,7 @@ struct KanbanCardDraft: Equatable {
     var linkedEntities: [LibraryEntityRef]
     var relatedCardIDs: [String]
     var parentCardID: String?
+    var historyEntries: [KanbanCardHistoryEntry]
 
     init(card: KanbanCard) {
         title = card.title
@@ -23,6 +24,7 @@ struct KanbanCardDraft: Equatable {
         linkedEntities = card.linkedEntities
         relatedCardIDs = card.relatedCardIDs
         parentCardID = card.parentCardID
+        historyEntries = card.historyEntries
     }
 
     func updatedCard(from original: KanbanCard) -> KanbanCard {
@@ -47,6 +49,7 @@ struct KanbanCardDraft: Equatable {
         updated.linkedEntities = linkedEntities
         updated.relatedCardIDs = relatedCardIDs
         updated.parentCardID = parentCardID
+        updated.historyEntries = historyEntries
 
         return updated
     }

@@ -120,6 +120,48 @@ struct KanbanCardCodableTests {
         #expect(decoded.aiSummary == nil)
     }
 
+    @Test("card history entries round trip through codable storage")
+    func cardHistoryEntriesRoundTripThroughCodableStorage() throws {
+        let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let card = KanbanCard(
+            id: "card-with-history",
+            title: "Fix regression",
+            historyEntries: [
+                KanbanCardHistoryEntry(
+                    id: "history-1",
+                    type: .failedAttempt,
+                    body: "Tried invalidating every layout pass; it made resize janky.",
+                    author: "Codex",
+                    createdAt: createdAt
+                ),
+            ]
+        )
+
+        let data = try JSONEncoder().encode(card)
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: data)
+
+        #expect(decoded.historyEntries.count == 1)
+        #expect(decoded.historyEntries.first?.type == .failedAttempt)
+        #expect(decoded.historyEntries.first?.body == "Tried invalidating every layout pass; it made resize janky.")
+        #expect(decoded.historyEntries.first?.author == "Codex")
+        #expect(decoded.historyEntries.first?.createdAt == createdAt)
+    }
+
+    @Test("legacy cards without history entries decode with empty history")
+    func legacyCardsWithoutHistoryEntriesDecodeWithEmptyHistory() throws {
+        let json = """
+        {
+          "id": "legacy-card",
+          "title": "Legacy Kanban Card",
+          "created": "2026-05-02"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: Data(json.utf8))
+
+        #expect(decoded.historyEntries.isEmpty)
+    }
+
     @Test("date-only created values preserve local Pacific calendar day")
     func dateOnlyCreatedValuesPreserveLocalPacificCalendarDay() throws {
         let originalTimeZone = NSTimeZone.default

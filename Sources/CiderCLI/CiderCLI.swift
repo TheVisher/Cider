@@ -85,6 +85,8 @@ struct CiderCLI {
         }
 
         switch command {
+        case "capture":
+            handleCapture(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
         case "bookmark", "bm":
             await handleBookmark(subcommand: subcommand, args: remaining, service: bookmarkService)
         case "note":
@@ -374,6 +376,52 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // MARK: - Bookmark Commands
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleCapture(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) {
+        switch subcommand {
+        case "add":
+            guard let source = args.first else {
+                print("Error: Source required. Usage: cider-cli capture add <url> [--title <title>] [--folder <name|path>] [--json]")
+                return
+            }
+
+            let targetFolder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: targetFolder = nil
+            case .resolved(let folder): targetFolder = folder
+            case .failed: return
+            }
+
+            do {
+                let result = try CiderCaptureService(bookmarkService: bookmarkService).add(
+                    source,
+                    title: parseFlag("--title", from: args),
+                    folderID: targetFolder?.id
+                )
+                if jsonOutput {
+                    outputJSON(result.toDictionary())
+                } else {
+                    print("Captured: \(result.item.title) (\(result.item.id.uuidString.prefix(8)))")
+                    if let relativePath = result.item.relativePath {
+                        print("  Path: \(relativePath)")
+                    }
+                    print("  Duplicate: \(result.duplicate.status)")
+                    print("  Enrichment: \(result.enrichment.status)")
+                    print("  Review needed: \(result.routing.reviewNeeded)")
+                    print("  Next safe action: \(result.nextSafeAction)")
+                }
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case nil, "help", "--help", "-h":
+            print("Usage: cider-cli capture add <url> [--title <title>] [--folder <name|path>] [--json]")
+
+        default:
+            print("Unknown capture command: \(subcommand ?? "nil")")
+            print("Commands: add")
+        }
+    }
 
     static func handleBookmark(subcommand: String?, args: [String], service: VaultBookmarkService) async {
         switch subcommand {
@@ -2995,11 +3043,16 @@ struct CiderCLI {
                 return
             }
             if let board = storage.boards.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame || $0.id == name }) {
+                guard let tagFilters = parseBoardTagFilters(from: args) else { return }
+                let visibleBoard = board.filteredByTags(tagFilters)
                 if jsonOutput {
-                    outputJSON(boardToDict(board))
+                    outputJSON(boardToDict(visibleBoard))
                 } else {
-                    print("Board: \(board.name) (\(board.id))")
-                    for col in board.columns {
+                    print("Board: \(visibleBoard.name) (\(visibleBoard.id))")
+                    if !tagFilters.isEmpty {
+                        print("Filtered by tags: \(tagFilters.joined(separator: ", "))")
+                    }
+                    for col in visibleBoard.columns {
                         let done = col.isDoneColumn ? " ✅" : ""
                         print("\n  ── \(col.name)\(done) (\(col.cards.count)) ──")
                         for card in col.cards {
@@ -3014,6 +3067,62 @@ struct CiderCLI {
                 }
             } else {
                 print("Error: Board '\(name)' not found")
+            }
+
+        case "tags":
+            if jsonOutput {
+                outputJSON([
+                    "coreTags": KanbanCardTagTaxonomy.coreTags,
+                    "usage": "Use cider-cli board show <board> --tag <tag> [--tag <tag>] [--tags <csv>] [--json] to filter cards by all requested tags.",
+                ])
+            } else {
+                print("Core Kanban tags:")
+                for tag in KanbanCardTagTaxonomy.coreTags {
+                    print("  - \(tag)")
+                }
+                print("\nFilter cards: cider-cli board show <board> --tag bug --tag kanban [--tags qa,agent-handoff] [--json]")
+            }
+
+        case "workflow":
+            guard let boardRef = args.first else {
+                print("Error: Usage: cider-cli board workflow <board> [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            let summary = KanbanAgentWorkflowSummary(board: board)
+            if jsonOutput {
+                outputJSON(kanbanAgentWorkflowSummaryToDict(summary))
+            } else {
+                print("Agent workflow for: \(summary.boardName) [\(summary.boardID)]")
+                if summary.laneSummaries.isEmpty {
+                    print("  No standard workflow lanes found. Expected columns like Queued, In Progress, Testing, Needs Fix, Done.")
+                } else {
+                    for lane in summary.laneSummaries {
+                        print("\n  ── \(lane.columnName) / \(lane.role.rawValue) (\(lane.count)) ──")
+                        for card in lane.cards {
+                            let agent = card.agent.map { " @\($0)" } ?? ""
+                            let priority = card.priority.map { " [\($0.rawValue)]" } ?? ""
+                            print("    [\(card.id)] \(card.title)\(agent)\(priority)")
+                        }
+                    }
+                }
+            }
+
+        case "testing-summary":
+            guard let boardRef = args.first else {
+                print("Error: Usage: cider-cli board testing-summary <board> [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            let summary = KanbanTestingTriageSummary(board: board)
+            if jsonOutput {
+                outputJSON(kanbanTestingTriageSummaryToDict(summary))
+            } else {
+                print("Testing summary for: \(summary.boardName) [\(summary.boardID)]")
+                print("  Needs Erik: \(summary.needsErik.count)  Agent can verify: \(summary.agentCanVerify.count)  Mixed: \(summary.mixed.count)")
+                printTestingTriageSection("Needs Erik", items: summary.needsErik)
+                printTestingTriageSection("Agent can verify", items: summary.agentCanVerify)
+                printTestingTriageSection("Mixed / needs triage", items: summary.mixed)
             }
 
         case "children":
@@ -3318,7 +3427,7 @@ struct CiderCLI {
 
         default:
             print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, create, rename, delete, add-card, update-card, move-card, delete-card, children, add-column, rename-column, delete-column")
+            print("Commands: list, show, create, rename, delete, add-card, update-card, move-card, delete-card, tags, workflow, testing-summary, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -4978,6 +5087,43 @@ struct CiderCLI {
         return nil
     }
 
+    static func printTestingTriageSection(_ title: String, items: [KanbanTestingTriageSummary.Item]) {
+        print("\n  ── \(title) (\(items.count)) ──")
+        if items.isEmpty {
+            print("    None")
+            return
+        }
+        for item in items {
+            let priority = item.card.priority.map { " [\($0.rawValue)]" } ?? ""
+            let parent = item.parentTitle.map { " — parent: \($0)" } ?? ""
+            print("    [\(item.card.id)] \(item.card.title)\(priority) — \(item.reason)\(parent)")
+            if !item.whatChanged.isEmpty {
+                print("      What changed:")
+                for change in item.whatChanged.prefix(2) {
+                    print("        • \(change)")
+                }
+            }
+            if !item.testEvidence.isEmpty {
+                print("      Test evidence:")
+                for evidence in item.testEvidence.prefix(2) {
+                    print("        • \(evidence)")
+                }
+            }
+            if !item.agentVerificationSteps.isEmpty {
+                print("      Agent can verify:")
+                for step in item.agentVerificationSteps.prefix(2) {
+                    print("        • \(step)")
+                }
+            }
+            if !item.manualQASteps.isEmpty {
+                print("      Manual QA:")
+                for step in item.manualQASteps.prefix(3) {
+                    print("        • \(step)")
+                }
+            }
+        }
+    }
+
     static func findColumn(_ nameOrID: String, in board: KanbanBoard) -> KanbanColumn? {
         if let col = board.columns.first(where: {
             $0.name.localizedCaseInsensitiveCompare(nameOrID) == .orderedSame || $0.id == nameOrID
@@ -4995,6 +5141,26 @@ struct CiderCLI {
         arg.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+
+    static func parseBoardTagFilters(from args: [String]) -> [String]? {
+        var values: [String] = []
+        var i = 0
+        while i < args.count {
+            let token = args[i]
+            guard token == "--tag" || token == "--tags" else {
+                i += 1
+                continue
+            }
+            guard i + 1 < args.count, !args[i + 1].hasPrefix("--") else {
+                print("Error: \(token) requires a tag value.")
+                print("Usage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]")
+                return nil
+            }
+            values.append(args[i + 1])
+            i += 2
+        }
+        return KanbanCardTagTaxonomy.normalizedTags(from: values)
     }
 
     /// Parse every occurrence of `--flag <value>` in `args`. Used for
@@ -5624,6 +5790,9 @@ struct CiderCLI {
         print("""
         CiderCLI — Full command-line interface to Cider's vault
 
+        CAPTURE
+          cider-cli capture add <url> [--title <title>] [--folder <name|path>] [--json]
+
         BOOKMARKS (alias: bm)
           cider-cli bookmark list [--folder <name|path>] [--limit <n>]
           cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--timeout <seconds>|--no-wait]
@@ -5727,7 +5896,8 @@ struct CiderCLI {
 
         BOARDS (Kanban)
           cider-cli board list
-          cider-cli board show <board-name-or-id>
+          cider-cli board show <board-name-or-id> [--tag <tag>] [--tags <csv>] [--json]
+          cider-cli board tags [--json]
           cider-cli board create <name>
           cider-cli board rename <name|id> --to <new-name>
           cider-cli board delete <name|id>
@@ -5738,6 +5908,8 @@ struct CiderCLI {
                                          [--parent <card-id>] [--clear-parent]
           cider-cli board move-card <board> --card <id> --to <column>
           cider-cli board delete-card <board> --card <id>
+          cider-cli board workflow <board> [--json]
+          cider-cli board testing-summary <board> [--json]
           cider-cli board children <board> --card <id> [--json]
           cider-cli board add-column <board> --name <col-name> [--done]
           cider-cli board rename-column <board> --column <col> --to <new-name>

@@ -119,4 +119,37 @@ struct KanbanCardDraftTests {
         #expect(updated.parentCardID == "current-plan")
         #expect(updated.relatedCardIDs == ["old-card", "historical-bug"])
     }
+
+    @Test("draft preserves and edits structured history entries")
+    func draftPreservesAndEditsStructuredHistoryEntries() {
+        let existing = KanbanCardHistoryEntry(
+            id: "entry-1",
+            type: .testEvidence,
+            body: "Initial test evidence",
+            author: "Hermes",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let card = KanbanCard(
+            id: "history-card",
+            title: "History Card",
+            historyEntries: [existing]
+        )
+
+        var draft = KanbanCardDraft(card: card)
+        draft.historyEntries.append(
+            KanbanCardHistoryEntry(
+                id: "entry-2",
+                type: .finalSummary,
+                body: "Final implementation summary",
+                author: "Codex",
+                createdAt: Date(timeIntervalSince1970: 1_700_100_000)
+            )
+        )
+
+        let updated = draft.updatedCard(from: card)
+
+        #expect(updated.historyEntries.map(\.id) == ["entry-1", "entry-2"])
+        #expect(updated.historyEntries.last?.type == .finalSummary)
+        #expect(updated.historyEntries.last?.body == "Final implementation summary")
+    }
 }

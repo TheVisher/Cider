@@ -82,20 +82,23 @@ final class VaultBookmarkService: ObservableObject {
     /// Explicit database reference for testing. Production uses `CiderDatabase.shared`.
     private var database: CiderDatabase?
     private let writesVaultCaches: Bool
+    private let schedulesEnrichment: Bool
 
     // MARK: - Init
 
     private init() {
         writesVaultCaches = true
+        schedulesEnrichment = true
         ensureDirectories()
         loadBookmarks()
     }
 
     /// Testing-only initializer with an explicit database.
     /// Does NOT call loadBookmarks() — tests call loadBookmarksFromDatabase() directly.
-    init(database: CiderDatabase) {
+    init(database: CiderDatabase, schedulesEnrichment: Bool = true) {
         self.database = database
         writesVaultCaches = false
+        self.schedulesEnrichment = schedulesEnrichment
     }
 
     // MARK: - Load
@@ -1687,6 +1690,7 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     private func startEnrichmentIfNeeded(for bookmarkID: UUID, force: Bool = false) {
+        guard schedulesEnrichment else { return }
         guard enrichmentTasks[bookmarkID] == nil else { return }
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         guard let url = URL(string: bookmarks[index].urlString) else { return }
