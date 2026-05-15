@@ -48,6 +48,7 @@ enum HomeOverviewDataProvider {
         savedViews: [SavedView] = [],
         tabOrder: [UUID] = [],
         kanbanBoards: [KanbanBoard] = [],
+        reviewQueueItems: [CiderReviewQueueItem] = [],
         surfacingDays: Int,
         now: Date = Date()
     ) -> HomeOverviewSnapshot {
@@ -117,6 +118,7 @@ enum HomeOverviewDataProvider {
             }
             .prefix(4)
             .map { $0 }
+        let reviewCockpitItems = reviewCockpitItems(from: reviewQueueItems, libraryItems: items)
         let triageItems = triageItems(from: items)
         let kanbanPulseItems = kanbanPulseItems(from: kanbanBoards)
 
@@ -252,6 +254,7 @@ enum HomeOverviewDataProvider {
             todoItems: Array(todoQueueItems(from: items, now: now).prefix(6)),
             completedTodoItems: Array(completedTodoItems(from: items).prefix(4)),
             resurfacedItems: resurfacedItems,
+            reviewCockpitItems: reviewCockpitItems,
             triageItems: triageItems,
             kanbanPulseItems: kanbanPulseItems,
             closedTabs: closedTabs
@@ -455,6 +458,91 @@ enum HomeOverviewDataProvider {
             suggestedAction: suggestedAction,
             priority: priority
         )
+    }
+
+    private static func reviewCockpitItems(
+        from reviewItems: [CiderReviewQueueItem],
+        libraryItems: [LibraryItemV2]
+    ) -> [HomeReviewCockpitItem] {
+        let itemsByUUID = Dictionary(uniqueKeysWithValues: libraryItems.compactMap { item in
+            itemUUID(for: item).map { ($0, item) }
+        })
+
+        return reviewItems.prefix(6).map { reviewItem in
+            let linkedItem = itemsByUUID[reviewItem.itemID]
+            let safeActions = Set(reviewItem.safeActions.map { $0.lowercased() })
+            let hasRoutingDecision = reviewItem.routingDecisionID != nil
+
+            return HomeReviewCockpitItem(
+                id: "review-cockpit-\(reviewItem.id)",
+                sourceReviewID: reviewItem.id,
+                itemID: reviewItem.itemID,
+                itemType: reviewItem.itemType,
+                item: linkedItem,
+                title: reviewItem.title,
+                kindLabel: reviewKindLabel(reviewItem.kind),
+                reason: reviewItem.reason,
+                suggestedAction: reviewItem.suggestedAction,
+                reviewStateLabel: reviewStateLabel(reviewItem.reviewState),
+                confidenceLabel: reviewItem.confidence.map(confidenceLabel),
+                targetLabel: reviewTargetLabel(for: reviewItem),
+                sourceLabel: reviewSourceLabel(reviewItem.source),
+                canApprove: hasRoutingDecision && safeActions.contains("approve"),
+                canCorrect: linkedItem != nil && safeActions.contains("correct"),
+                canDefer: hasRoutingDecision && safeActions.contains("defer"),
+                safeActions: reviewItem.safeActions
+            )
+        }
+    }
+
+    private static func itemUUID(for item: LibraryItemV2) -> UUID? {
+        switch item {
+        case .bookmark(let bookmark):
+            return bookmark.id
+        case .note(let note):
+            return note.id
+        case .dateCard(let dateCard):
+            return dateCard.id
+        case .contact(let contact):
+            return contact.id
+        case .todo(let todo):
+            return todo.id
+        case .vaultFile(let file):
+            return file.id
+        }
+    }
+
+    private static func reviewKindLabel(_ kind: String) -> String {
+        let normalized = kind.lowercased()
+        if normalized.contains("routing") { return "Routing" }
+        if normalized.contains("enrichment") { return "Enrichment" }
+        if normalized.contains("inbox") { return "Inbox" }
+        return "Review"
+    }
+
+    private static func reviewStateLabel(_ state: String) -> String {
+        state
+            .split(separator: "_")
+            .map { word in word.prefix(1).uppercased() + word.dropFirst() }
+            .joined(separator: " ")
+    }
+
+    private static func reviewSourceLabel(_ source: String) -> String {
+        source
+            .split(separator: "_")
+            .map { word in word.prefix(1).uppercased() + word.dropFirst() }
+            .joined(separator: " ")
+    }
+
+    private static func confidenceLabel(_ confidence: Double) -> String {
+        "\(Int((confidence * 100).rounded()))% confidence"
+    }
+
+    private static func reviewTargetLabel(for item: CiderReviewQueueItem) -> String? {
+        if let target = item.target {
+            return target.relativePath.isEmpty ? target.name : target.relativePath
+        }
+        return item.relativePath
     }
 
     private static func triageItems(from items: [LibraryItemV2]) -> [HomeTriageItem] {
