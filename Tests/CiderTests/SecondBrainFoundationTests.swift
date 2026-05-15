@@ -909,6 +909,58 @@ struct SecondBrainFoundationTests {
         })
     }
 
+    @Test("process CLI exposes parent child rollup on card inspect")
+    func processCLIExposesParentChildRollupOnCardInspect() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-child-rollup-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Rollup Smoke"], vaultURL: vaultURL)
+        _ = try runCLI(["board", "add-column", "Rollup Smoke", "--name", "Queued"], vaultURL: vaultURL)
+        _ = try runCLI(["board", "add-column", "Rollup Smoke", "--name", "Testing"], vaultURL: vaultURL)
+
+        let parentOutput = try runCLI([
+            "board", "add-card", "Rollup Smoke",
+            "--column", "Backlog",
+            "--title", "Parent roadmap",
+        ], vaultURL: vaultURL)
+        let parentID = String(try #require(parentOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        _ = try runCLI([
+            "board", "add-card", "Rollup Smoke",
+            "--column", "Queued",
+            "--title", "Queued child",
+            "--parent", parentID,
+        ], vaultURL: vaultURL)
+        _ = try runCLI([
+            "board", "add-card", "Rollup Smoke",
+            "--column", "Testing",
+            "--title", "Failed QA child",
+            "--notes", """
+            ## QA Results
+            - Step 1 failed: Expected status copy was missing.
+            """,
+            "--parent", parentID,
+        ], vaultURL: vaultURL)
+
+        let inspected = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Rollup Smoke",
+            "--card", parentID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let rollup = try #require(inspected["childRollup"] as? [String: Any])
+        let counts = try #require(rollup["counts"] as? [String: Any])
+        let failedQAChild = try #require(rollup["failedQAChild"] as? [String: Any])
+        let nextActionableChild = try #require(rollup["nextActionableChild"] as? [String: Any])
+
+        #expect(rollup["totalChildCount"] as? Int == 2)
+        #expect(counts["queued"] as? Int == 1)
+        #expect(counts["testing"] as? Int == 1)
+        #expect(failedQAChild["title"] as? String == "Failed QA child")
+        #expect(nextActionableChild["title"] as? String == "Failed QA child")
+        #expect(rollup["nextActionLine"] as? String == "Fix failed QA on Failed QA child.")
+    }
+
     @Test("process CLI lists recent Kanban cards with agent context")
     func processCLIListsRecentKanbanCardsWithAgentContext() throws {
         let vaultURL = FileManager.default.temporaryDirectory

@@ -131,8 +131,7 @@ struct KanbanTestingTriageSummary: Equatable, Sendable {
         let testEvidence = extractListEntries(from: notes, headings: ["test evidence", "tests", "verification", "automated evidence", "build/qa evidence"])
         let agentVerificationSteps = extractListEntries(from: notes, headings: ["agent verification", "agent can verify", "automated verification", "agent qa"])
         let manualSteps = extractListEntries(from: notes, headings: ["manual qa guidance", "manual qa", "manual testing", "what to test"])
-        let failedQASteps = extractListEntries(from: notes, headings: ["qa results", "testing results", "manual qa results"])
-            .filter(isFailedQAResultLine)
+        let failedQASteps = failedQASteps(in: notes)
 
         let manualSignals = [
             "manual qa", "manual testing", "needs erik", "erik should", "visual", "visually",
@@ -188,6 +187,11 @@ struct KanbanTestingTriageSummary: Equatable, Sendable {
         return Array(steps.prefix(5))
     }
 
+    static func failedQASteps(in notes: String) -> [String] {
+        extractListEntries(from: notes, headings: ["qa results", "testing results", "manual qa results"])
+            .filter(isFailedQAResultLine)
+    }
+
     private static func isFailedQAResultLine(_ line: String) -> Bool {
         let normalized = line
             .trimmingCharacters(in: CharacterSet(charactersIn: "-•* "))
@@ -203,6 +207,177 @@ struct KanbanTestingTriageSummary: Equatable, Sendable {
             .trimmingCharacters(in: CharacterSet(charactersIn: "#:-–— "))
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+    }
+}
+
+struct KanbanParentChildRollup: Equatable, Sendable {
+    struct Counts: Equatable, Sendable {
+        var backlog = 0
+        var queued = 0
+        var inProgress = 0
+        var testing = 0
+        var needsFix = 0
+        var done = 0
+        var other = 0
+    }
+
+    struct Child: Equatable, Identifiable, Sendable {
+        var id: String
+        var title: String
+        var columnID: String
+        var columnName: String
+        var role: KanbanParentChildRole
+        var failedQASteps: [String]
+
+        var hasFailedQA: Bool { !failedQASteps.isEmpty }
+    }
+
+    var parentID: String
+    var children: [Child]
+    var counts: Counts
+
+    init?(board: KanbanBoard, parentID: String) {
+        let childCards = board.childCards(of: parentID)
+        guard !childCards.isEmpty else { return nil }
+
+        self.parentID = parentID
+        children = board.columns.flatMap { column in
+            column.cards.compactMap { card -> Child? in
+                guard card.parentCardID == parentID else { return nil }
+                return Child(
+                    id: card.id,
+                    title: card.title,
+                    columnID: column.id,
+                    columnName: column.name,
+                    role: KanbanParentChildRole(column: column),
+                    failedQASteps: KanbanTestingTriageSummary.failedQASteps(in: card.notes ?? "")
+                )
+            }
+        }
+
+        counts = children.reduce(into: Counts()) { partial, child in
+            switch child.role {
+            case .backlog: partial.backlog += 1
+            case .queued: partial.queued += 1
+            case .inProgress: partial.inProgress += 1
+            case .testing: partial.testing += 1
+            case .needsFix: partial.needsFix += 1
+            case .done: partial.done += 1
+            case .other: partial.other += 1
+            }
+        }
+    }
+
+    var totalChildCount: Int { children.count }
+    var isComplete: Bool { totalChildCount > 0 && counts.done == totalChildCount }
+
+    var failedQAChild: Child? {
+        children.first { $0.hasFailedQA }
+    }
+
+    var blockedChild: Child? {
+        children.first { $0.role == .needsFix }
+    }
+
+    var testingChild: Child? {
+        children.first { $0.role == .testing }
+    }
+
+    var activeChild: Child? {
+        children.first { $0.role == .inProgress }
+    }
+
+    var nextQueuedChild: Child? {
+        children.first { $0.role == .queued }
+    }
+
+    var backlogChild: Child? {
+        children.first { $0.role == .backlog }
+    }
+
+    var currentGate: Child? {
+        failedQAChild ?? blockedChild ?? testingChild ?? activeChild ?? nextQueuedChild ?? backlogChild
+    }
+
+    var nextActionableChild: Child? {
+        currentGate
+    }
+
+    var statusLine: String {
+        let parts: [String] = [
+            formattedCount(counts.backlog, singular: "backlog"),
+            formattedCount(counts.queued, singular: "queued"),
+            formattedCount(counts.inProgress, singular: "in progress"),
+            formattedCount(counts.testing, singular: "testing"),
+            formattedCount(counts.needsFix, singular: "needs fix"),
+            formattedCount(counts.done, singular: "done"),
+            formattedCount(counts.other, singular: "other"),
+        ].compactMap { $0 }
+        let childLabel = totalChildCount == 1 ? "child" : "children"
+        return "\(totalChildCount) \(childLabel): \(parts.joined(separator: ", "))."
+    }
+
+    var nextActionLine: String {
+        if let failedQAChild {
+            return "Fix failed QA on \(failedQAChild.title)."
+        }
+        if let blockedChild {
+            return "Resolve \(blockedChild.title)."
+        }
+        if let testingChild {
+            return "Finish testing \(testingChild.title)."
+        }
+        if let activeChild {
+            return "Continue \(activeChild.title)."
+        }
+        if let nextQueuedChild {
+            return "Start \(nextQueuedChild.title)."
+        }
+        if let backlogChild {
+            return "Queue \(backlogChild.title)."
+        }
+        return "All child cards are done."
+    }
+
+    private func formattedCount(_ count: Int, singular: String) -> String? {
+        count > 0 ? "\(count) \(singular)" : nil
+    }
+}
+
+enum KanbanParentChildRole: String, Codable, CaseIterable, Sendable {
+    case backlog
+    case queued
+    case inProgress = "in_progress"
+    case testing
+    case needsFix = "needs_fix"
+    case done
+    case other
+
+    init(column: KanbanColumn) {
+        if column.isDoneColumn {
+            self = .done
+            return
+        }
+
+        let normalized = column.name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+
+        if normalized == "backlog" {
+            self = .backlog
+        } else if normalized == "queued" || normalized == "queue" {
+            self = .queued
+        } else if normalized == "in progress" || normalized == "doing" || normalized == "active" {
+            self = .inProgress
+        } else if normalized == "testing" || normalized == "ready to test" || normalized.contains("testing") {
+            self = .testing
+        } else if normalized == "needs fix" || normalized == "blocked" || normalized.contains("needs fix") {
+            self = .needsFix
+        } else {
+            self = .other
+        }
     }
 }
 

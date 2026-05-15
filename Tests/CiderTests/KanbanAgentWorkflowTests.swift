@@ -3,6 +3,137 @@ import Testing
 @testable import Cider
 
 struct KanbanAgentWorkflowTests {
+    @Test("parent rollup derives child status and next action from board state")
+    func parentRollupDerivesChildStatusAndNextActionFromBoardState() throws {
+        let board = KanbanBoard(
+            id: "rollup-board",
+            name: "Rollup Board",
+            columns: [
+                KanbanColumn(
+                    id: "queued",
+                    name: "Queued",
+                    cards: [
+                        KanbanCard(id: "queued-child", title: "Queued child", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "in_progress",
+                    name: "In Progress",
+                    cards: [
+                        KanbanCard(id: "parent", title: "Parent card"),
+                        KanbanCard(id: "active-child", title: "Active child", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "testing",
+                    name: "Testing",
+                    cards: [
+                        KanbanCard(
+                            id: "failed-qa",
+                            title: "Failed QA child",
+                            notes: """
+                            ## QA Results
+                            - Step 1 failed: Button did not persist the note.
+                            """,
+                            parentCardID: "parent"
+                        ),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "done",
+                    name: "Done",
+                    isDoneColumn: true,
+                    cards: [
+                        KanbanCard(
+                            id: "done-child",
+                            title: "Done child",
+                            parentCardID: "parent",
+                            completed: Date(timeIntervalSince1970: 0)
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        let rollup = try #require(KanbanParentChildRollup(board: board, parentID: "parent"))
+
+        #expect(rollup.totalChildCount == 4)
+        #expect(rollup.counts.queued == 1)
+        #expect(rollup.counts.inProgress == 1)
+        #expect(rollup.counts.testing == 1)
+        #expect(rollup.counts.done == 1)
+        #expect(rollup.failedQAChild?.id == "failed-qa")
+        #expect(rollup.currentGate?.id == "failed-qa")
+        #expect(rollup.nextActionableChild?.id == "failed-qa")
+        #expect(rollup.nextQueuedChild?.id == "queued-child")
+        #expect(rollup.statusLine == "4 children: 1 queued, 1 in progress, 1 testing, 1 done.")
+        #expect(rollup.nextActionLine == "Fix failed QA on Failed QA child.")
+    }
+
+    @Test("parent rollup falls through to active queued and completed children")
+    func parentRollupFallsThroughToActiveQueuedAndCompletedChildren() throws {
+        let board = KanbanBoard(
+            id: "rollup-board",
+            name: "Rollup Board",
+            columns: [
+                KanbanColumn(
+                    id: "backlog",
+                    name: "Backlog",
+                    cards: [
+                        KanbanCard(id: "backlog-child", title: "Backlog child", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "queued",
+                    name: "Queued",
+                    cards: [
+                        KanbanCard(id: "queued-child", title: "Queued child", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "done",
+                    name: "Done",
+                    isDoneColumn: true,
+                    cards: [
+                        KanbanCard(id: "done-child", title: "Done child", parentCardID: "parent", completed: Date()),
+                    ]
+                ),
+            ]
+        )
+
+        let rollup = try #require(KanbanParentChildRollup(board: board, parentID: "parent"))
+
+        #expect(rollup.currentGate?.id == "queued-child")
+        #expect(rollup.nextActionableChild?.id == "queued-child")
+        #expect(rollup.nextActionLine == "Start Queued child.")
+        #expect(rollup.isComplete == false)
+    }
+
+    @Test("parent rollup marks parent complete when every child is done")
+    func parentRollupMarksParentCompleteWhenEveryChildIsDone() throws {
+        let board = KanbanBoard(
+            id: "rollup-board",
+            name: "Rollup Board",
+            columns: [
+                KanbanColumn(
+                    id: "done",
+                    name: "Done",
+                    isDoneColumn: true,
+                    cards: [
+                        KanbanCard(id: "done-a", title: "Done A", parentCardID: "parent", completed: Date()),
+                        KanbanCard(id: "done-b", title: "Done B", parentCardID: "parent", completed: Date()),
+                    ]
+                ),
+            ]
+        )
+
+        let rollup = try #require(KanbanParentChildRollup(board: board, parentID: "parent"))
+
+        #expect(rollup.isComplete)
+        #expect(rollup.currentGate == nil)
+        #expect(rollup.nextActionLine == "All child cards are done.")
+    }
+
     @Test("agent workflow summary groups implementation testing and fix loops")
     func agentWorkflowSummaryGroupsImplementationTestingAndFixLoops() {
         let board = KanbanBoard(

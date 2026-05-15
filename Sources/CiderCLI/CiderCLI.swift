@@ -6298,6 +6298,9 @@ struct CiderCLI {
         if let parent {
             dict["parent"] = minimalCardToDict(parent)
         }
+        if let rollup = KanbanParentChildRollup(board: board, parentID: card.id) {
+            dict["childRollup"] = parentChildRollupToDict(rollup)
+        }
         return dict
     }
 
@@ -6413,6 +6416,57 @@ struct CiderCLI {
         ]
         if let dateLabel = entry.dateLabel { dict["dateLabel"] = dateLabel }
         if let source = entry.source { dict["source"] = source }
+        return dict
+    }
+
+    static func parentChildRollupToDict(_ rollup: KanbanParentChildRollup) -> [String: Any] {
+        var dict: [String: Any] = [
+            "parentID": rollup.parentID,
+            "totalChildCount": rollup.totalChildCount,
+            "isComplete": rollup.isComplete,
+            "statusLine": rollup.statusLine,
+            "nextActionLine": rollup.nextActionLine,
+            "counts": [
+                "backlog": rollup.counts.backlog,
+                "queued": rollup.counts.queued,
+                "inProgress": rollup.counts.inProgress,
+                "testing": rollup.counts.testing,
+                "needsFix": rollup.counts.needsFix,
+                "done": rollup.counts.done,
+                "other": rollup.counts.other,
+            ],
+            "children": rollup.children.map(parentChildRollupChildToDict),
+        ]
+
+        if let currentGate = rollup.currentGate {
+            dict["currentGate"] = parentChildRollupChildToDict(currentGate)
+        }
+        if let nextActionableChild = rollup.nextActionableChild {
+            dict["nextActionableChild"] = parentChildRollupChildToDict(nextActionableChild)
+        }
+        if let failedQAChild = rollup.failedQAChild {
+            dict["failedQAChild"] = parentChildRollupChildToDict(failedQAChild)
+        }
+        if let nextQueuedChild = rollup.nextQueuedChild {
+            dict["nextQueuedChild"] = parentChildRollupChildToDict(nextQueuedChild)
+        }
+
+        return dict
+    }
+
+    static func parentChildRollupChildToDict(_ child: KanbanParentChildRollup.Child) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": child.id,
+            "title": child.title,
+            "columnID": child.columnID,
+            "columnName": child.columnName,
+            "role": child.role.rawValue,
+            "hasFailedQA": child.hasFailedQA,
+            "failedQASteps": child.failedQASteps,
+        ]
+        if child.failedQASteps.isEmpty {
+            dict.removeValue(forKey: "failedQASteps")
+        }
         return dict
     }
 

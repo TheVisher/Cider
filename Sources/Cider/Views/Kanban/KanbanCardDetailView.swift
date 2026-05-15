@@ -208,8 +208,17 @@ private struct KanbanCardDashboardView: View {
     let title: String
     let notes: String
 
+    @ObservedObject private var storage = KanbanStorage.shared
+
     private var model: KanbanCardDashboardModel {
         KanbanCardDashboardModel(title: title, notes: notes)
+    }
+
+    private var childRollup: KanbanParentChildRollup? {
+        guard let board = storage.boards.first(where: { $0.id == boardID || $0.name == boardName }) else {
+            return nil
+        }
+        return KanbanParentChildRollup(board: board, parentID: cardID)
     }
 
     var body: some View {
@@ -231,6 +240,10 @@ private struct KanbanCardDashboardView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.md) {
                     KanbanDashboardCurrentStateView(model: model)
+
+                    if let childRollup {
+                        KanbanDashboardChildRollupView(rollup: childRollup)
+                    }
 
                     if !model.testingGuidanceEntries.isEmpty {
                         KanbanDashboardTestingGuidanceView(
@@ -282,6 +295,141 @@ private struct KanbanCardDashboardView: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+}
+
+private struct KanbanDashboardChildRollupView: View {
+    let rollup: KanbanParentChildRollup
+
+    private var visibleChildren: ArraySlice<KanbanParentChildRollup.Child> {
+        rollup.children.prefix(5)
+    }
+
+    private var countBadges: [String] {
+        [
+            rollup.counts.backlog > 0 ? "\(rollup.counts.backlog) backlog" : nil,
+            rollup.counts.queued > 0 ? "\(rollup.counts.queued) queued" : nil,
+            rollup.counts.inProgress > 0 ? "\(rollup.counts.inProgress) active" : nil,
+            rollup.counts.testing > 0 ? "\(rollup.counts.testing) testing" : nil,
+            rollup.counts.needsFix > 0 ? "\(rollup.counts.needsFix) needs fix" : nil,
+            rollup.counts.done > 0 ? "\(rollup.counts.done) done" : nil,
+            rollup.counts.other > 0 ? "\(rollup.counts.other) other" : nil,
+        ].compactMap { $0 }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "list.bullet.indent")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.controlAccent)
+                Text("Child Rollup")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+                Spacer(minLength: Spacing.sm)
+                KanbanDashboardBadge(text: "\(rollup.totalChildCount) children")
+                if rollup.isComplete {
+                    KanbanDashboardBadge(text: "complete")
+                }
+            }
+
+            Text(rollup.statusLine)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(rollup.nextActionLine)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(rollup.failedQAChild == nil ? CiderColors.primary : CiderColors.warning)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !countBadges.isEmpty {
+                TagFlowLayout(spacing: Spacing.xs) {
+                    ForEach(countBadges, id: \.self) { badge in
+                        KanbanDashboardBadge(text: badge)
+                    }
+                }
+            }
+
+            if let currentGate = rollup.currentGate {
+                KanbanDashboardChildRollupRow(label: "Current Gate", child: currentGate)
+            }
+
+            if !visibleChildren.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(Array(visibleChildren)) { child in
+                        KanbanDashboardChildRollupRow(label: nil, child: child)
+                    }
+                }
+            }
+        }
+        .padding(Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.surfaceInput.opacity(0.72))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .stroke(CiderColors.controlAccent.opacity(0.28), lineWidth: 1)
+        )
+    }
+}
+
+private struct KanbanDashboardChildRollupRow: View {
+    let label: String?
+    let child: KanbanParentChildRollup.Child
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+            Image(systemName: iconName)
+                .font(CiderFont.microMedium)
+                .foregroundColor(child.hasFailedQA ? CiderColors.warning : CiderColors.tertiary)
+                .frame(width: 14)
+
+            if let label {
+                Text(label)
+                    .font(CiderFont.microMedium)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+
+            Text(child.title)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: Spacing.xs)
+
+            Text(child.columnName)
+                .font(CiderFont.microMedium)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    private var iconName: String {
+        if child.hasFailedQA {
+            return "exclamationmark.triangle.fill"
+        }
+
+        switch child.role {
+        case .backlog:
+            return "tray"
+        case .queued:
+            return "line.3.horizontal.decrease.circle"
+        case .inProgress:
+            return "play.circle"
+        case .testing:
+            return "checkmark.seal"
+        case .needsFix:
+            return "wrench.adjustable"
+        case .done:
+            return "checkmark.circle"
+        case .other:
+            return "circle"
+        }
     }
 }
 
