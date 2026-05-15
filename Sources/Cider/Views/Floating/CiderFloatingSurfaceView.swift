@@ -21,6 +21,13 @@ struct CiderFloatingSurfaceView: View {
                 presentationStyle: .floatingSurface
             )
             .frame(minWidth: AIAssistantPanelDesign.minWidth, minHeight: AIAssistantPanelDesign.minHeight)
+        } else if case .kanbanTestingGuide(let payload) = surface {
+            KanbanTestingGuideFloatingView(
+                payload: payload,
+                onDock: onDock,
+                onReanchor: onReanchor
+            )
+            .frame(minWidth: 360, minHeight: 420)
         } else {
             fallbackView
         }
@@ -88,6 +95,8 @@ struct CiderFloatingSurfaceView: View {
             "sparkles"
         case .dropZone:
             "tray.and.arrow.down"
+        case .kanbanTestingGuide:
+            "checkmark.seal"
         }
     }
 
@@ -110,7 +119,7 @@ private extension CiderFloatableSurface {
         switch self {
         case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .vaultFile:
             true
-        case .clipboard, .aiAssistant, .dropZone:
+        case .clipboard, .aiAssistant, .dropZone, .kanbanTestingGuide:
             false
         }
     }

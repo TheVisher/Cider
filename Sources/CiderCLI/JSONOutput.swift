@@ -322,27 +322,34 @@ func agendaBriefingItemToDict(_ item: AgendaBriefingItem, formatter: ISO8601Date
             "agentCanVerify": summary.agentCanVerify.count,
             "mixed": summary.mixed.count,
         ],
+        "needsErik": summary.needsErik.map(kanbanTestingTriageItemToDict),
+        "agentCanVerify": summary.agentCanVerify.map(kanbanTestingTriageItemToDict),
+        "mixed": summary.mixed.map(kanbanTestingTriageItemToDict),
         "items": summary.items.map { item in
-            var dict: [String: Any] = [
-                "id": item.card.id,
-                "title": item.card.title,
-                "columnID": item.columnID,
-                "columnName": item.columnName,
-                "owner": item.owner.rawValue,
-                "ownerLabel": item.owner.displayName,
-                "reason": item.reason,
-                "whatChanged": item.whatChanged,
-                "testEvidence": item.testEvidence,
-                "agentVerificationSteps": item.agentVerificationSteps,
-                "manualQASteps": item.manualQASteps,
-            ]
-            if let priority = item.card.priority { dict["priority"] = priority.rawValue }
-            if let parentCardID = item.card.parentCardID { dict["parentCardID"] = parentCardID }
-            if let parentTitle = item.parentTitle { dict["parentTitle"] = parentTitle }
-            if !item.card.tags.isEmpty { dict["tags"] = item.card.tags }
-            return dict
+            kanbanTestingTriageItemToDict(item)
         },
     ]
+}
+
+@MainActor private func kanbanTestingTriageItemToDict(_ item: KanbanTestingTriageSummary.Item) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": item.card.id,
+        "title": item.card.title,
+        "columnID": item.columnID,
+        "columnName": item.columnName,
+        "owner": item.owner.rawValue,
+        "ownerLabel": item.owner.displayName,
+        "reason": item.reason,
+        "whatChanged": item.whatChanged,
+        "testEvidence": item.testEvidence,
+        "agentVerificationSteps": item.agentVerificationSteps,
+        "manualQASteps": item.manualQASteps,
+    ]
+    if let priority = item.card.priority { dict["priority"] = priority.rawValue }
+    if let parentCardID = item.card.parentCardID { dict["parentCardID"] = parentCardID }
+    if let parentTitle = item.parentTitle { dict["parentTitle"] = parentTitle }
+    if !item.card.tags.isEmpty { dict["tags"] = item.card.tags }
+    return dict
 }
 
 @MainActor func dashboardTopicToDict(_ topic: DashboardTopic) -> [String: Any] {

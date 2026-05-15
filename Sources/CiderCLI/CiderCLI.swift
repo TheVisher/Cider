@@ -105,6 +105,8 @@ struct CiderCLI {
             handleContact(subcommand: subcommand, args: remaining)
         case "link":
             handleLink(subcommand: subcommand, args: remaining)
+        case "item":
+            handleItem(subcommand: subcommand, args: remaining)
         case "file":
             handleFile(subcommand: subcommand, args: remaining, service: vaultFileService)
         case "folder":
@@ -574,16 +576,42 @@ struct CiderCLI {
                 }
             }
 
+        case "explain":
+            guard let ref = args.first else {
+                printCLIError("Usage: cider-cli space explain <name-or-id> [--json]")
+                return
+            }
+            guard let space = resolveSpace(ref, storage: storage) else { return }
+            var dict = spaceToDict(space)
+            dict["loadIssues"] = storage.loadIssues
+            if jsonOutput {
+                outputJSON(dict)
+            } else {
+                print("\(space.name) (\(space.id))")
+                print("Path: \(space.rootRelativePath)")
+                print("Purpose: \(space.purpose)")
+                if !space.routingHints.isEmpty {
+                    print("Routing hints:")
+                    for hint in space.routingHints {
+                        print("  - \(hint)")
+                    }
+                }
+                if !space.aiInstructions.isEmpty {
+                    print("Agent instructions: \(space.aiInstructions)")
+                }
+            }
+
         case nil, "help", "--help", "-h":
             print("""
             Usage:
               cider-cli space list [--json]
+              cider-cli space explain <name-or-id> [--json]
               cider-cli space captures <space-id|name> [--limit <n>] [--json]
             """)
 
         default:
             print("Unknown space command: \(subcommand ?? "nil")")
-            print("Commands: list, captures")
+            print("Commands: list, explain, captures")
         }
     }
 
@@ -2426,6 +2454,223 @@ struct CiderCLI {
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: - Item Graph / Agent Commands
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleItem(subcommand: String?, args: [String]) {
+        let store = SecondBrainStore(database: .shared)
+        switch subcommand {
+        case nil, "help", "--help", "-h":
+            print("""
+            Item graph commands:
+              cider-cli item search <query> [--limit <n>] [--json]
+              cider-cli item get <type> <id-or-ref> [--json]
+              cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
+              cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
+              cider-cli item backfill-kanban [--board <name-or-id>] [--json]
+              cider-cli item doctor [--json]
+            """)
+
+        case "search":
+            let query = leadingPositionalArgs(from: args).joined(separator: " ")
+            guard !query.isEmpty else {
+                printCLIError("Usage: cider-cli item search <query> [--limit <n>] [--json]")
+                return
+            }
+            let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 20
+            do {
+                let results = try store.searchChunks(query: query, limit: limit)
+                if jsonOutput {
+                    outputJSON(results.map(secondBrainSearchResultToDict))
+                } else if results.isEmpty {
+                    print("No item graph results for '\(query)'.")
+                } else {
+                    print("Item graph search '\(query)' (\(results.count) results):")
+                    for result in results {
+                        print("  [\(result.owner.ownerType):\(result.owner.ownerID)] \(result.title) — \(result.snippet)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "get", "inspect":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item get <type> <id-or-ref> [--json]")
+                return
+            }
+            let owner = normalizedOwner(type: positional[0], ref: positional[1])
+            let ownerResolved = ownerExists(type: positional[0], ref: positional[1], owner: owner)
+            do {
+                let sections = try store.sections(for: owner)
+                let routes = try store.routingDecisions(for: owner)
+                let actions = try store.agentActions(for: owner)
+                let dict: [String: Any] = [
+                    "ok": true,
+                    "exists": ownerResolved,
+                    "ownerResolved": ownerResolved,
+                    "sourceRef": [
+                        "type": positional[0],
+                        "ref": positional[1],
+                    ],
+                    "owner": ownerToDict(owner),
+                    "sections": sections.map(secondBrainSectionToDict),
+                    "routingDecisions": routes.map(routingDecisionToDict),
+                    "agentActions": actions.map(agentActionToDict),
+                ]
+                if jsonOutput {
+                    outputJSON(dict)
+                } else {
+                    print("\(owner.ownerType):\(owner.ownerID)")
+                    if sections.isEmpty {
+                        print("  No structured sections.")
+                    } else {
+                        for section in sections {
+                            print("  ## \(section.title)")
+                            print("  \(section.body.replacingOccurrences(of: "\n", with: "\n  "))")
+                        }
+                    }
+                    if !routes.isEmpty {
+                        print("  Routing decisions: \(routes.count)")
+                    }
+                    if !actions.isEmpty {
+                        print("  Agent actions: \(actions.count)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "backfill-kanban":
+            let storage = KanbanStorage.shared
+            let boards: [KanbanBoard]
+            if let boardRef = parseFlag("--board", from: args) {
+                guard let board = findBoard(boardRef, in: storage) else {
+                    if jsonOutput { outputJSON(["ok": false, "error": "Board '\(boardRef)' not found"]) }
+                    return
+                }
+                boards = [board]
+            } else {
+                boards = storage.boards
+            }
+
+            let projector = SecondBrainKanbanProjectionService(store: store)
+            var refreshedCards = 0
+            var failures: [[String: Any]] = []
+            for board in boards {
+                for card in board.allCards {
+                    do {
+                        try projector.refreshCard(boardID: board.id, card: card)
+                        refreshedCards += 1
+                    } catch {
+                        failures.append([
+                            "boardID": board.id,
+                            "cardID": card.id,
+                            "error": error.localizedDescription,
+                        ])
+                    }
+                }
+            }
+
+            if jsonOutput {
+                outputJSON([
+                    "boards": boards.count,
+                    "cards": refreshedCards,
+                    "failures": failures,
+                ])
+            } else {
+                print("Backfilled \(refreshedCards) Kanban card projection(s) across \(boards.count) board(s).")
+                if !failures.isEmpty {
+                    print("Failures: \(failures.count)")
+                }
+            }
+
+        case "doctor":
+            do {
+                let status = try secondBrainDoctorStatus()
+                if jsonOutput {
+                    outputJSON(status)
+                } else {
+                    let ok = status["ok"] as? Bool == true
+                    print("Second-brain foundation: \(ok ? "ok" : "needs attention")")
+                    if let tables = status["tables"] as? [[String: Any]] {
+                        for table in tables {
+                            let name = table["name"] as? String ?? "table"
+                            let exists = table["exists"] as? Bool == true
+                            let count = table["count"] as? Int
+                            print("  \(exists ? "✓" : "x") \(name)\(count.map { " (\($0))" } ?? "")")
+                        }
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "link":
+            handleLink(subcommand: "add", args: args)
+
+        case "route":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2,
+                  let targetType = parseFlag("--target-type", from: args),
+                  let reason = parseFlag("--reason", from: args) else {
+                printCLIError("Usage: cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text>")
+                return
+            }
+            let normalizedTargetType = targetType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard ["space", "folder", "board"].contains(normalizedTargetType) else {
+                printCLIError("--target-type must be one of: space, folder, board")
+                return
+            }
+            let status = parseFlag("--status", from: args) ?? "accepted"
+            guard ["accepted", "needs_review", "rejected"].contains(status) else {
+                printCLIError("--status must be one of: accepted, needs_review, rejected")
+                return
+            }
+            let confidence = Double(parseFlag("--confidence", from: args) ?? "") ?? 1.0
+            guard confidence >= 0, confidence <= 1 else {
+                printCLIError("--confidence must be between 0 and 1")
+                return
+            }
+            let owner = normalizedOwner(type: positional[0], ref: positional[1])
+            let decision = SecondBrainRoutingDecision(
+                owner: owner,
+                targetType: normalizedTargetType,
+                targetID: parseFlag("--target-id", from: args),
+                targetPath: parseFlag("--target-path", from: args),
+                confidence: confidence,
+                reason: reason,
+                status: status,
+                actor: parseFlag("--actor", from: args) ?? "cider-cli",
+                source: parseFlag("--source", from: args) ?? "cli"
+            )
+            do {
+                try store.recordRoutingDecision(decision)
+                let action = SecondBrainAgentAction(
+                    owner: owner,
+                    toolName: "item.route",
+                    actionType: "route",
+                    source: decision.source,
+                    status: "succeeded",
+                    summary: reason
+                )
+                try store.recordAgentAction(action)
+                if jsonOutput {
+                    outputJSON(routingDecisionToDict(decision))
+                } else {
+                    print("Recorded route for \(owner.ownerType):\(owner.ownerID) -> \(targetType)")
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        default:
+            printCLIError("Unknown item command: \(subcommand ?? "nil"). Run 'cider-cli item help' for usage.")
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // MARK: - File Commands
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -3377,9 +3622,39 @@ struct CiderCLI {
                 }
             }
 
+        case "recent":
+            guard let boardRef = args.first else {
+                printCLIError("Usage: cider-cli board recent <board> [--limit <count>] [--json]")
+                return
+            }
+            let limitValue = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+            guard limitValue > 0 else {
+                printCLIError("Invalid --limit '\(parseFlag("--limit", from: args) ?? "")'. Use a positive number.")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            let recentCards = recentKanbanCards(in: board, limit: limitValue)
+            if jsonOutput {
+                outputJSON([
+                    "ok": true,
+                    "board": ["id": board.id, "name": board.name],
+                    "limit": limitValue,
+                    "cards": recentCards.map(boardRecentCardToDict),
+                ])
+            } else if recentCards.isEmpty {
+                print("No cards found for board: \(board.name)")
+            } else {
+                print("Recent cards for \(board.name):")
+                for entry in recentCards {
+                    let parent = entry.parent.map { " parent:\($0.id)" } ?? ""
+                    let priority = entry.card.priority.map { " [\($0.rawValue)]" } ?? ""
+                    print("  [\(entry.card.id)] \(entry.card.title)\(priority) — \(entry.column.name) \(entry.activityKind):\(dateFormatter.string(from: entry.activityAt))\(parent)")
+                }
+            }
+
         case "testing-summary":
             guard let boardRef = args.first else {
-                print("Error: Usage: cider-cli board testing-summary <board> [--json]")
+                printCLIError("Usage: cider-cli board testing-summary <board> [--json]")
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
@@ -3392,6 +3667,38 @@ struct CiderCLI {
                 printTestingTriageSection("Needs Erik", items: summary.needsErik)
                 printTestingTriageSection("Agent can verify", items: summary.agentCanVerify)
                 printTestingTriageSection("Mixed / needs triage", items: summary.mixed)
+            }
+
+        case "card":
+            guard args.first == "inspect" else {
+                printCLIError("Usage: cider-cli board card inspect <board> --card <id> [--json]")
+                return
+            }
+            let inspectArgs = Array(args.dropFirst())
+            guard let boardRef = inspectArgs.first,
+                  let cardID = parseFlag("--card", from: inspectArgs) else {
+                printCLIError("Usage: cider-cli board card inspect <board> --card <id> [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let card = board.card(id: cardID) else {
+                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+            let column = board.columns.first { column in
+                column.cards.contains { $0.id == card.id }
+            }
+            if jsonOutput {
+                outputJSON(boardCardInspectToDict(board: board, column: column, card: card))
+            } else {
+                print("Card: \(card.title) [\(card.id)]")
+                if let column {
+                    print("Column: \(column.name)")
+                }
+                let model = KanbanCardDashboardModel(title: card.title, notes: card.notes)
+                print("Sections: \(model.sections.count)")
+                if let problem = model.problem { print("Problem: \(problem)") }
+                if let goal = model.goal { print("Goal: \(goal)") }
             }
 
         case "children":
@@ -3449,18 +3756,26 @@ struct CiderCLI {
                         return
                     }
                     if let card = storage.addCard(boardID: board.id, columnID: col.id, title: title, parentCardID: parentCardID) {
-                        // Apply optional notes and priority via updateCard
+                        // Apply optional notes and priority via updateCard while preserving creation activity.
                         var updated = card
-                        if let notes = parseFlag("--notes", from: args) { updated.notes = notes }
+                        var changed = false
+                        if let notes = parseFlag("--notes", from: args) {
+                            updated.notes = notes
+                            changed = true
+                        }
                         if let priorityStr = parseFlag("--priority", from: args) {
                             switch priorityStr.lowercased() {
-                            case "high": updated.priority = .high
-                            case "medium": updated.priority = .medium
-                            case "low": updated.priority = .low
+                            case "high": updated.priority = .high; changed = true
+                            case "medium": updated.priority = .medium; changed = true
+                            case "low": updated.priority = .low; changed = true
                             default: break
                             }
                         }
-                        storage.updateCard(boardID: board.id, card: updated)
+                        if changed {
+                            updated.markActivity("created", at: card.created)
+                            storage.updateCard(boardID: board.id, card: updated)
+                        }
+                        refreshSecondBrainProjection(boardID: board.id, card: updated)
                         print("Added card: \(updated.title) [\(updated.id)] to \(col.name)")
                     } else {
                         print("Error: Could not add card")
@@ -3596,7 +3911,89 @@ struct CiderCLI {
             }
 
             storage.updateCard(boardID: board.id, card: card)
+            refreshSecondBrainProjection(boardID: board.id, card: card)
             print("Updated card: \(card.title) [\(card.id)]")
+
+        case "section":
+            guard args.first == "update" else {
+                printCLIError("Usage: cider-cli board section update <board> --card <id> --section <name> --value <text> [--json]")
+                return
+            }
+            let sectionArgs = Array(args.dropFirst())
+            guard let boardRef = sectionArgs.first,
+                  let cardID = parseFlag("--card", from: sectionArgs),
+                  let section = parseFlag("--section", from: sectionArgs),
+                  let value = parseFlag("--value", from: sectionArgs) else {
+                printCLIError("Usage: cider-cli board section update <board> --card <id> --section <name> --value <text> [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard var card = board.card(id: cardID) else {
+                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+            card.notes = KanbanCardSectionParser.updatingSection(in: card.notes, title: section, body: value)
+            storage.updateCard(boardID: board.id, card: card)
+            refreshSecondBrainProjection(boardID: board.id, card: card)
+            printBoardCardSectionResult(board: board, card: card)
+
+        case "evidence":
+            guard args.first == "add" else {
+                printCLIError("Usage: cider-cli board evidence add <board> --card <id> --text <text> [--source <source>] [--json]")
+                return
+            }
+            let evidenceArgs = Array(args.dropFirst())
+            guard let boardRef = evidenceArgs.first,
+                  let cardID = parseFlag("--card", from: evidenceArgs),
+                  let text = parseFlag("--text", from: evidenceArgs) else {
+                printCLIError("Usage: cider-cli board evidence add <board> --card <id> --text <text> [--source <source>] [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard var card = board.card(id: cardID) else {
+                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+            card.notes = KanbanCardSectionParser.appendingEvidence(
+                to: card.notes,
+                text: text,
+                source: parseFlag("--source", from: evidenceArgs)
+            )
+            storage.updateCard(boardID: board.id, card: card)
+            refreshSecondBrainProjection(boardID: board.id, card: card)
+            printBoardCardSectionResult(board: board, card: card)
+
+        case "history":
+            guard args.first == "add" else {
+                printCLIError("Usage: cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text> [--source <source>] [--json]")
+                return
+            }
+            let historyArgs = Array(args.dropFirst())
+            guard let boardRef = historyArgs.first,
+                  let cardID = parseFlag("--card", from: historyArgs),
+                  let type = parseFlag("--type", from: historyArgs),
+                  let text = parseFlag("--text", from: historyArgs) else {
+                printCLIError("Usage: cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text> [--source <source>] [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard var card = board.card(id: cardID) else {
+                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+            guard let nextNotes = KanbanCardSectionParser.appendingHistory(
+                to: card.notes,
+                type: type,
+                text: text,
+                source: parseFlag("--source", from: historyArgs)
+            ) else {
+                printCLIError("Invalid history type '\(type)'. Use \(KanbanCardSectionParser.supportedHistoryTypes.joined(separator: ", ")).")
+                return
+            }
+            card.notes = nextNotes
+            storage.updateCard(boardID: board.id, card: card)
+            refreshSecondBrainProjection(boardID: board.id, card: card)
+            printBoardCardSectionResult(board: board, card: card)
 
         case "move-card":
             guard let boardName = args.first,
@@ -3696,7 +4093,7 @@ struct CiderCLI {
 
         default:
             print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, create, rename, delete, add-card, update-card, move-card, delete-card, tags, workflow, testing-summary, children, add-column, rename-column, delete-column")
+            print("Commands: list, show, tags, workflow, recent, testing-summary, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -5352,7 +5749,7 @@ struct CiderCLI {
         }) {
             return board
         }
-        print("Error: Board '\(nameOrID)' not found")
+        printCLIError("Board '\(nameOrID)' not found")
         return nil
     }
 
@@ -5513,6 +5910,498 @@ struct CiderCLI {
         return nil
     }
 
+    static func findColumn(_ nameOrID: String, in board: KanbanBoard) -> KanbanColumn? {
+        if let col = board.columns.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(nameOrID) == .orderedSame || $0.id == nameOrID
+        }) {
+            return col
+        }
+        printCLIError("Column '\(nameOrID)' not found in board '\(board.name)'. Available: \(board.columns.map(\.name).joined(separator: ", "))")
+        return nil
+    }
+
+    static func refreshSecondBrainProjection(boardID: String, card: KanbanCard) {
+        guard CiderDatabase.shared.isOpen else { return }
+        do {
+            try SecondBrainKanbanProjectionService().refreshCard(boardID: boardID, card: card)
+        } catch {
+            FileHandle.standardError.write(Data("Warning: failed to refresh item graph projection for card \(card.id): \(error.localizedDescription)\n".utf8))
+        }
+    }
+
+    static func printBoardCardSectionResult(board: KanbanBoard, card: KanbanCard) {
+        if jsonOutput {
+            outputJSON(boardCardInspectToDict(board: board, column: board.columns.first { $0.cards.contains { $0.id == card.id } }, card: card))
+        } else {
+            print("Updated card sections: \(card.title) [\(card.id)]")
+        }
+    }
+
+    struct BoardRecentCard {
+        let board: KanbanBoard
+        let column: KanbanColumn
+        let card: KanbanCard
+        let parent: KanbanCard?
+        let activityAt: Date
+        let activityKind: String
+        let traversalOrder: Int
+    }
+
+    struct BoardTestingSummaryEntry {
+        let board: KanbanBoard
+        let column: KanbanColumn
+        let card: KanbanCard
+        let parent: KanbanCard?
+        let reason: String
+        let activityAt: Date
+        let traversalOrder: Int
+    }
+
+    struct BoardTestingSummary {
+        let needsErik: [BoardTestingSummaryEntry]
+        let agentCanVerify: [BoardTestingSummaryEntry]
+    }
+
+    static func recentKanbanCards(in board: KanbanBoard, limit: Int) -> [BoardRecentCard] {
+        var entries: [BoardRecentCard] = []
+        var traversalOrder = 0
+        for column in board.columns {
+            for card in column.cards {
+                traversalOrder += 1
+                let activityAt = card.updatedAt ?? card.completed ?? card.created
+                let activityKind = card.lastActivityKind ?? (card.completed == nil ? "created" : "completed")
+                entries.append(BoardRecentCard(
+                    board: board,
+                    column: column,
+                    card: card,
+                    parent: board.parentCard(for: card.id),
+                    activityAt: activityAt,
+                    activityKind: activityKind,
+                    traversalOrder: traversalOrder
+                ))
+            }
+        }
+
+        return Array(entries.sorted { lhs, rhs in
+            if lhs.activityAt != rhs.activityAt {
+                return lhs.activityAt > rhs.activityAt
+            }
+            return lhs.traversalOrder > rhs.traversalOrder
+        }.prefix(limit))
+    }
+
+    static func testingQueueSummary(in board: KanbanBoard) -> BoardTestingSummary {
+        var needsErik: [BoardTestingSummaryEntry] = []
+        var agentCanVerify: [BoardTestingSummaryEntry] = []
+        var traversalOrder = 0
+
+        for column in board.columns where isTestingQueueColumn(column) {
+            for card in column.cards where card.completed == nil {
+                traversalOrder += 1
+                let entry = BoardTestingSummaryEntry(
+                    board: board,
+                    column: column,
+                    card: card,
+                    parent: board.parentCard(for: card.id),
+                    reason: testingQueueOwnerReason(for: card),
+                    activityAt: card.updatedAt ?? card.created,
+                    traversalOrder: traversalOrder
+                )
+                if entry.reason == "manual" {
+                    needsErik.append(entry)
+                } else {
+                    agentCanVerify.append(entry)
+                }
+            }
+        }
+
+        return BoardTestingSummary(
+            needsErik: sortTestingQueueEntries(needsErik),
+            agentCanVerify: sortTestingQueueEntries(agentCanVerify)
+        )
+    }
+
+    static func isTestingQueueColumn(_ column: KanbanColumn) -> Bool {
+        let normalized = column.name.lowercased()
+        return normalized == "testing"
+            || normalized == "ready to test"
+            || normalized.contains("testing")
+            || normalized.contains("ready to test")
+    }
+
+    static func testingQueueOwnerReason(for card: KanbanCard) -> String {
+        let model = KanbanCardDashboardModel(title: card.title, notes: card.notes)
+        let haystack = [
+            card.title,
+            card.notes ?? "",
+            model.currentState ?? "",
+            model.nextStep ?? "",
+            model.fallbackSummary,
+        ].joined(separator: "\n").lowercased()
+        let manualSignals = [
+            "manual qa",
+            "manual test",
+            "manual testing",
+            "needs erik",
+            "erik should",
+            "user test",
+            "user should",
+            "visual",
+            "ui",
+            "open the app",
+            "approval",
+            "approve",
+        ]
+        return manualSignals.contains { haystack.contains($0) } ? "manual" : "agent"
+    }
+
+    static func sortTestingQueueEntries(_ entries: [BoardTestingSummaryEntry]) -> [BoardTestingSummaryEntry] {
+        entries.sorted { lhs, rhs in
+            if lhs.activityAt != rhs.activityAt {
+                return lhs.activityAt > rhs.activityAt
+            }
+            return lhs.traversalOrder > rhs.traversalOrder
+        }
+    }
+
+    static func boardRecentCardToDict(_ entry: BoardRecentCard) -> [String: Any] {
+        let model = KanbanCardDashboardModel(title: entry.card.title, notes: entry.card.notes)
+        var dict: [String: Any] = [
+            "id": entry.card.id,
+            "title": entry.card.title,
+            "board": ["id": entry.board.id, "name": entry.board.name],
+            "column": ["id": entry.column.id, "name": entry.column.name, "isDoneColumn": entry.column.isDoneColumn],
+            "created": ISO8601DateFormatter().string(from: entry.card.created),
+            "activityAt": ISO8601DateFormatter().string(from: entry.activityAt),
+            "activityKind": entry.activityKind,
+            "tags": entry.card.tags,
+            "summary": model.currentState ?? model.nextStep ?? model.fallbackSummary,
+        ]
+        if let completed = entry.card.completed {
+            dict["completed"] = ISO8601DateFormatter().string(from: completed)
+        }
+        if let updatedAt = entry.card.updatedAt {
+            dict["updatedAt"] = ISO8601DateFormatter().string(from: updatedAt)
+        }
+        if let priority = entry.card.priority {
+            dict["priority"] = priority.rawValue
+        }
+        if let agent = entry.card.agent {
+            dict["agent"] = agent
+        }
+        if let color = entry.card.color {
+            dict["color"] = color.rawValue
+        }
+        if let parentCardID = entry.card.parentCardID {
+            dict["parentCardID"] = parentCardID
+        }
+        if let currentState = model.currentState {
+            dict["currentState"] = currentState
+        }
+        if let nextStep = model.nextStep {
+            dict["nextStep"] = nextStep
+        }
+        if let parent = entry.parent {
+            dict["parent"] = minimalCardToDict(parent)
+        }
+        return dict
+    }
+
+    static func boardTestingSummaryToDict(board: KanbanBoard, summary: BoardTestingSummary) -> [String: Any] {
+        [
+            "ok": true,
+            "board": ["id": board.id, "name": board.name],
+            "counts": [
+                "total": summary.needsErik.count + summary.agentCanVerify.count,
+                "needsErik": summary.needsErik.count,
+                "agentCanVerify": summary.agentCanVerify.count,
+            ],
+            "needsErik": summary.needsErik.map(boardTestingSummaryEntryToDict),
+            "agentCanVerify": summary.agentCanVerify.map(boardTestingSummaryEntryToDict),
+        ]
+    }
+
+    static func boardTestingSummaryEntryToDict(_ entry: BoardTestingSummaryEntry) -> [String: Any] {
+        let model = KanbanCardDashboardModel(title: entry.card.title, notes: entry.card.notes)
+        var dict: [String: Any] = [
+            "id": entry.card.id,
+            "title": entry.card.title,
+            "board": ["id": entry.board.id, "name": entry.board.name],
+            "column": ["id": entry.column.id, "name": entry.column.name, "isDoneColumn": entry.column.isDoneColumn],
+            "created": ISO8601DateFormatter().string(from: entry.card.created),
+            "activityAt": ISO8601DateFormatter().string(from: entry.activityAt),
+            "reason": entry.reason,
+            "summary": model.currentState ?? model.nextStep ?? model.fallbackSummary,
+        ]
+        if let priority = entry.card.priority {
+            dict["priority"] = priority.rawValue
+        }
+        if let agent = entry.card.agent {
+            dict["agent"] = agent
+        }
+        if let parentCardID = entry.card.parentCardID {
+            dict["parentCardID"] = parentCardID
+        }
+        if let currentState = model.currentState {
+            dict["currentState"] = currentState
+        }
+        if let nextStep = model.nextStep {
+            dict["nextStep"] = nextStep
+        }
+        if let parent = entry.parent {
+            dict["parent"] = minimalCardToDict(parent)
+        }
+        return dict
+    }
+
+    static func boardCardInspectToDict(board: KanbanBoard, column: KanbanColumn?, card: KanbanCard) -> [String: Any] {
+        let owner = SecondBrainKanbanProjectionService.owner(boardID: board.id, cardID: card.id)
+        let model = KanbanCardDashboardModel(title: card.title, notes: card.notes)
+        let store = SecondBrainStore(database: .shared)
+        let projectedSections = (try? store.sections(for: owner)) ?? []
+        let routes = (try? store.routingDecisions(for: owner)) ?? []
+        let actions = (try? store.agentActions(for: owner)) ?? []
+
+        var cardDict: [String: Any] = [
+            "id": card.id,
+            "title": card.title,
+            "notes": card.notes ?? "",
+            "created": ISO8601DateFormatter().string(from: card.created),
+            "tags": card.tags,
+            "linkedEntities": card.linkedEntities.map(libraryEntityRefToDict),
+            "relatedCardIDs": card.relatedCardIDs,
+        ]
+        if let priority = card.priority { cardDict["priority"] = priority.rawValue }
+        if let agent = card.agent { cardDict["agent"] = agent }
+        if let color = card.color { cardDict["color"] = color.rawValue }
+        if let parentCardID = card.parentCardID { cardDict["parentCardID"] = parentCardID }
+        if let completed = card.completed { cardDict["completed"] = ISO8601DateFormatter().string(from: completed) }
+        if let updatedAt = card.updatedAt { cardDict["updatedAt"] = ISO8601DateFormatter().string(from: updatedAt) }
+        if let lastActivityKind = card.lastActivityKind { cardDict["lastActivityKind"] = lastActivityKind }
+
+        let parent = board.parentCard(for: card.id)
+        var dict: [String: Any] = [
+            "ok": true,
+            "board": ["id": board.id, "name": board.name],
+            "card": cardDict,
+            "owner": ownerToDict(owner),
+            "dashboard": dashboardModelToDict(model, board: board.name, cardID: card.id),
+            "sections": model.sections.map(kanbanSectionToDict),
+            "projectedSections": projectedSections.map(secondBrainSectionToDict),
+            "children": board.childCards(of: card.id).map(minimalCardToDict),
+            "relatedCards": board.relatedCards(for: card.id).map(minimalCardToDict),
+            "linkedEntities": card.linkedEntities.map(libraryEntityRefToDict),
+            "routingDecisions": routes.map(routingDecisionToDict),
+            "agentActions": actions.map(agentActionToDict),
+        ]
+        if let column {
+            dict["column"] = ["id": column.id, "name": column.name, "isDoneColumn": column.isDoneColumn]
+        }
+        if let parent {
+            dict["parent"] = minimalCardToDict(parent)
+        }
+        return dict
+    }
+
+    static func printCLIError(_ message: String) {
+        if jsonOutput {
+            outputJSON(["ok": false, "error": message])
+        } else {
+            print("Error: \(message)")
+        }
+    }
+
+    static func normalizedOwner(type rawType: String, ref rawRef: String) -> SecondBrainOwnerRef {
+        let normalizedType = rawType
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+
+        if normalizedType == "kanban" || normalizedType == "kanban_card" || normalizedType == "card" {
+            if rawRef.contains("/") {
+                return SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: rawRef)
+            }
+            if let detail = KanbanStorage.shared.findCard(id: rawRef) {
+                return SecondBrainKanbanProjectionService.owner(boardID: detail.board.id, cardID: detail.card.id)
+            }
+            return SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: rawRef)
+        }
+
+        if let entityType = try? ItemLinkService.entityType(from: rawType),
+           let ref = try? ItemLinkService.shared.resolve(type: entityType, ref: rawRef) {
+            return SecondBrainOwnerRef(ownerType: ref.type.rawValue, ownerID: ref.entityID.uuidString)
+        }
+
+        return SecondBrainOwnerRef(ownerType: normalizedType, ownerID: rawRef)
+    }
+
+    static func ownerExists(type rawType: String, ref rawRef: String, owner: SecondBrainOwnerRef) -> Bool {
+        let normalizedType = rawType
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+        if normalizedType == "kanban" || normalizedType == "kanban_card" || normalizedType == "card" {
+            if rawRef.contains("/") {
+                let parts = rawRef.split(separator: "/", maxSplits: 1).map(String.init)
+                guard parts.count == 2,
+                      let board = KanbanStorage.shared.boards.first(where: { $0.id == parts[0] || $0.name == parts[0] }) else {
+                    return false
+                }
+                return board.card(id: parts[1]) != nil
+            }
+            return KanbanStorage.shared.findCard(id: rawRef) != nil
+                || KanbanStorage.shared.boards.contains { board in
+                    SecondBrainKanbanProjectionService.owner(boardID: board.id, cardID: rawRef) == owner
+                        && board.card(id: rawRef) != nil
+                }
+        }
+        if let entityType = try? ItemLinkService.entityType(from: rawType) {
+            return (try? ItemLinkService.shared.resolve(type: entityType, ref: rawRef)) != nil
+        }
+        return true
+    }
+
+    static func ownerToDict(_ owner: SecondBrainOwnerRef) -> [String: Any] {
+        [
+            "ownerType": owner.ownerType,
+            "ownerID": owner.ownerID,
+        ]
+    }
+
+    static func kanbanSectionToDict(_ section: KanbanCardSection) -> [String: Any] {
+        [
+            "key": section.key,
+            "title": section.title,
+            "body": section.body,
+            "sortOrder": section.sortOrder,
+        ]
+    }
+
+    static func dashboardModelToDict(_ model: KanbanCardDashboardModel, board: String, cardID: String) -> [String: Any] {
+        var dict: [String: Any] = [
+            "title": model.title,
+            "hasStructuredContent": model.hasStructuredContent,
+            "currentState": model.currentState ?? "",
+            "problem": model.problem ?? "",
+            "goal": model.goal ?? "",
+            "scope": model.scope ?? "",
+            "nextStep": model.nextStep ?? "",
+            "openLoops": model.openLoops.map(dashboardEntryToDict),
+            "decisions": model.decisions.map(dashboardEntryToDict),
+            "historyEntries": model.historyEntries.map(dashboardEntryToDict),
+            "evidenceEntries": model.evidenceEntries.map(dashboardEntryToDict),
+            "relatedItems": model.relatedItems.map(dashboardEntryToDict),
+            "missingCoreSections": model.missingCoreSections,
+            "fallbackSummary": model.fallbackSummary,
+            "agentContext": [
+                "notes": model.agentContext.notes,
+                "updateTargets": model.agentContext.updateTargets,
+                "commands": model.agentContext.commands(board: board, cardID: cardID),
+            ],
+        ]
+        if model.currentState == nil { dict.removeValue(forKey: "currentState") }
+        if model.problem == nil { dict.removeValue(forKey: "problem") }
+        if model.goal == nil { dict.removeValue(forKey: "goal") }
+        if model.scope == nil { dict.removeValue(forKey: "scope") }
+        if model.nextStep == nil { dict.removeValue(forKey: "nextStep") }
+        return dict
+    }
+
+    static func dashboardEntryToDict(_ entry: KanbanCardDashboardEntry) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": entry.id,
+            "title": entry.title,
+            "body": entry.body,
+        ]
+        if let dateLabel = entry.dateLabel { dict["dateLabel"] = dateLabel }
+        if let source = entry.source { dict["source"] = source }
+        return dict
+    }
+
+    static func minimalCardToDict(_ card: KanbanCard) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": card.id,
+            "title": card.title,
+            "created": ISO8601DateFormatter().string(from: card.created),
+        ]
+        if let priority = card.priority { dict["priority"] = priority.rawValue }
+        if let completed = card.completed { dict["completed"] = ISO8601DateFormatter().string(from: completed) }
+        return dict
+    }
+
+    static func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
+        [
+            "id": ref.id,
+            "type": ref.type.rawValue,
+            "entityID": ref.entityID.uuidString,
+        ]
+    }
+
+    static func secondBrainSectionToDict(_ section: SecondBrainSection) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": section.id,
+            "owner": ownerToDict(section.owner),
+            "sectionKey": section.sectionKey,
+            "title": section.title,
+            "body": section.body,
+            "source": section.source,
+            "metadata": section.metadata,
+            "sortOrder": section.sortOrder,
+            "createdAt": ISO8601DateFormatter().string(from: section.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: section.updatedAt),
+        ]
+        if let itemID = section.itemID { dict["itemID"] = itemID }
+        if let confidence = section.confidence { dict["confidence"] = confidence }
+        return dict
+    }
+
+    static func secondBrainSearchResultToDict(_ result: SecondBrainChunkSearchResult) -> [String: Any] {
+        [
+            "id": result.id,
+            "owner": ownerToDict(result.owner),
+            "title": result.title,
+            "snippet": result.snippet,
+            "rank": result.rank,
+        ]
+    }
+
+    static func routingDecisionToDict(_ decision: SecondBrainRoutingDecision) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": decision.id,
+            "owner": ownerToDict(decision.owner),
+            "targetType": decision.targetType,
+            "confidence": decision.confidence,
+            "reason": decision.reason,
+            "status": decision.status,
+            "actor": decision.actor,
+            "source": decision.source,
+            "createdAt": ISO8601DateFormatter().string(from: decision.createdAt),
+        ]
+        if let itemID = decision.itemID { dict["itemID"] = itemID }
+        if let targetID = decision.targetID { dict["targetID"] = targetID }
+        if let targetPath = decision.targetPath { dict["targetPath"] = targetPath }
+        if let candidatesJSON = decision.candidatesJSON { dict["candidatesJSON"] = candidatesJSON }
+        if let reviewedAt = decision.reviewedAt { dict["reviewedAt"] = ISO8601DateFormatter().string(from: reviewedAt) }
+        return dict
+    }
+
+    static func agentActionToDict(_ action: SecondBrainAgentAction) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": action.id,
+            "owner": ownerToDict(action.owner),
+            "toolName": action.toolName,
+            "actionType": action.actionType,
+            "source": action.source,
+            "status": action.status,
+            "summary": action.summary,
+            "createdAt": ISO8601DateFormatter().string(from: action.createdAt),
+        ]
+        if let itemID = action.itemID { dict["itemID"] = itemID }
+        if let argumentsJSON = action.argumentsJSON { dict["argumentsJSON"] = argumentsJSON }
+        if let resultJSON = action.resultJSON { dict["resultJSON"] = resultJSON }
+        return dict
+    }
+
     static func spaceToDict(_ space: CiderSpace) -> [String: Any] {
         [
             "id": space.id,
@@ -5521,20 +6410,49 @@ struct CiderCLI {
             "purpose": space.purpose,
             "preset": space.preset.rawValue,
             "isPinned": space.isPinned,
-            "rootRelativePath": space.rootRelativePath,
+            "aiInstructions": space.aiInstructions,
             "routingHints": space.routingHints,
             "defaultViews": space.defaultViews.map(\.rawValue),
+            "rootRelativePath": space.rootRelativePath,
+            "createdAt": ISO8601DateFormatter().string(from: space.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: space.updatedAt),
         ]
     }
 
-    static func findColumn(_ nameOrID: String, in board: KanbanBoard) -> KanbanColumn? {
-        if let col = board.columns.first(where: {
-            $0.name.localizedCaseInsensitiveCompare(nameOrID) == .orderedSame || $0.id == nameOrID
-        }) {
-            return col
+    static func secondBrainDoctorStatus() throws -> [String: Any] {
+        let expected = [
+            "item_sections",
+            "content_chunks",
+            "content_chunks_fts",
+            "routing_decisions",
+            "agent_actions",
+        ]
+        let tableRows = try expected.map { table -> [String: Any] in
+            let existsStmt = try CiderDatabase.shared.prepare(
+                "SELECT count(*) FROM sqlite_master WHERE name = ?;"
+            )
+            existsStmt.bind(table, at: 1)
+            try existsStmt.step()
+            let exists = existsStmt.int(at: 0) == 1
+
+            var row: [String: Any] = [
+                "name": table,
+                "exists": exists,
+            ]
+            if exists, table != "content_chunks_fts" {
+                let countStmt = try CiderDatabase.shared.prepare("SELECT count(*) FROM \(table);")
+                try countStmt.step()
+                row["count"] = countStmt.int(at: 0)
+            }
+            return row
         }
-        print("Error: Column '\(nameOrID)' not found in board '\(board.name)'. Available: \(board.columns.map(\.name).joined(separator: ", "))")
-        return nil
+        let integrity = try CiderDatabase.shared.integrityCheck()
+        return [
+            "ok": tableRows.allSatisfy { $0["exists"] as? Bool == true } && integrity.isHealthy,
+            "schemaVersion": DatabaseMigrations.latestVersion,
+            "integrity": integrity.messages,
+            "tables": tableRows,
+        ]
     }
 
     /// Split a CSV argument into individual ID prefixes, trimming whitespace
@@ -6317,6 +7235,9 @@ struct CiderCLI {
           cider-cli board list
           cider-cli board show <board-name-or-id> [--tag <tag>] [--tags <csv>] [--json]
           cider-cli board tags [--json]
+          cider-cli board recent <board> [--limit <count>] [--json]
+          cider-cli board testing-summary <board> [--json]
+          cider-cli board card inspect <board> --card <id> [--json]
           cider-cli board create <name>
           cider-cli board rename <name|id> --to <new-name>
           cider-cli board delete <name|id>
@@ -6325,6 +7246,9 @@ struct CiderCLI {
                                          [--priority low|medium|high|none] [--agent <name>] [--clear-agent]
                                          [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none]
                                          [--parent <card-id>] [--clear-parent]
+          cider-cli board section update <board> --card <id> --section <name> --value <text> [--json]
+          cider-cli board evidence add <board> --card <id> --text <text> [--source <source>] [--json]
+          cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text> [--source <source>] [--json]
           cider-cli board move-card <board> --card <id> --to <column>
           cider-cli board delete-card <board> --card <id>
           cider-cli board workflow <board> [--json]

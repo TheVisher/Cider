@@ -20,7 +20,7 @@ enum CiderDetailNavigationPolicy {
 enum CiderReanchorSurfaceResolver {
     static func canOpenInMainWindow(_ surface: CiderFloatableSurface) -> Bool {
         switch surface {
-        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .vaultFile, .aiAssistant:
+        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .vaultFile, .aiAssistant, .kanbanTestingGuide:
             true
         case .clipboard, .dropZone:
             false
@@ -165,6 +165,7 @@ extension CiderPanelView {
 
     func openSurfaceInMainWindow(_ surface: CiderFloatableSurface) {
         guard CiderReanchorSurfaceResolver.canOpenInMainWindow(surface) else { return }
+        let previousKanbanMetadataVisible = kanbanMetadataVisible
         closeAllDetails()
 
         switch surface {
@@ -194,6 +195,12 @@ extension CiderPanelView {
             }
         case .aiAssistant:
             openOrSelectAIAssistantTab()
+        case .kanbanTestingGuide(let payload):
+            openKanbanCardDetail(
+                boardID: payload.boardID,
+                cardID: payload.cardID,
+                metadataVisible: previousKanbanMetadataVisible
+            )
         case .clipboard, .dropZone:
             break
         }
@@ -381,6 +388,10 @@ extension CiderPanelView {
     }
 
     func openKanbanCardDetail(boardID: String, cardID: String) {
+        openKanbanCardDetail(boardID: boardID, cardID: cardID, metadataVisible: true)
+    }
+
+    func openKanbanCardDetail(boardID: String, cardID: String, metadataVisible: Bool) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
         if isNoteDetailOpen { notesViewModel.flushSave() }
         if isDetailOpen { saveBookmarkDetails() }
@@ -391,7 +402,8 @@ extension CiderPanelView {
 
         let wasExpanded = isAnyDetailOpen
         clearDetailSelectionState(except: .kanban)
-        kanbanMetadataVisible = true
+        kanbanMetadataVisible = metadataVisible
+        kanbanSourceNotesVisible = false
         selectedKanbanBoardID = boardID
         selectedKanbanCardID = cardID
         kanbanCardDraft = KanbanCardDraft(card: found.card)

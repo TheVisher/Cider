@@ -3,6 +3,19 @@ import Testing
 @testable import Cider
 
 struct CiderFloatableSurfaceTests {
+    private var testingGuidePayload: KanbanTestingGuidePanelPayload {
+        KanbanTestingGuidePanelPayload(
+            boardID: "2afee0",
+            boardName: "Cider",
+            cardID: "abc123",
+            cardTitle: "QA handoff",
+            steps: [
+                KanbanTestingGuideStep(id: "step-1", text: "Open Media."),
+                KanbanTestingGuideStep(id: "step-2", text: "Confirm counts render."),
+            ]
+        )
+    }
+
     @Test("floatable surfaces have stable keys and readable default titles")
     func surfacesProvideStableKeysAndTitles() {
         let noteID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
@@ -19,6 +32,8 @@ struct CiderFloatableSurfaceTests {
         #expect(CiderFloatableSurface.clipboard.stableKey == "clipboard")
         #expect(CiderFloatableSurface.aiAssistant.defaultTitle == "Chat")
         #expect(CiderFloatableSurface.dropZone.defaultTitle == "Drop Zone")
+        #expect(CiderFloatableSurface.kanbanTestingGuide(testingGuidePayload).stableKey == "kanbanTestingGuide:2afee0:abc123")
+        #expect(CiderFloatableSurface.kanbanTestingGuide(testingGuidePayload).defaultTitle == "QA Companion")
     }
 
     @Test("notification names use cider floatable surface namespace")
@@ -192,6 +207,14 @@ struct CiderFloatableSurfaceTests {
         #expect(size.height >= 560)
     }
 
+    @Test("floating QA companion panels default to checklist-friendly size")
+    func floatingQACompanionPanelDefaultSizeFitsChecklist() {
+        let size = CiderFloatingPanelLayout.defaultContentSize(for: .kanbanTestingGuide(testingGuidePayload))
+
+        #expect(size.width >= 400)
+        #expect(size.height >= 520)
+    }
+
     @Test("floating metadata panels default wide enough for side rail")
     func floatingMetadataPanelDefaultSizeFitsSideRail() {
         let id = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
@@ -232,6 +255,7 @@ struct CiderFloatableSurfaceTests {
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.todo(UUID())))
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.vaultFile(UUID())))
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.aiAssistant))
+        #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.kanbanTestingGuide(testingGuidePayload)))
     }
 
     @Test("reanchor resolver rejects utility surfaces")

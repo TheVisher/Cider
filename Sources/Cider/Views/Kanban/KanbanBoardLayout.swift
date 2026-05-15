@@ -87,6 +87,16 @@ struct KanbanPlanIndicator: Equatable {
     }
 }
 
+struct KanbanTestingOwnerBadge: Equatable {
+    enum Kind: Equatable {
+        case needsErik
+        case agentCanVerify
+    }
+
+    let text: String
+    let kind: Kind
+}
+
 enum KanbanBoardLayout {
     static let archiveDividerWidth: CGFloat = 28
 
@@ -264,6 +274,17 @@ enum KanbanBoardLayout {
             title: parent.title,
             accentColor: cardAccentColor(for: parent, in: board)
         )
+    }
+
+    static func testingOwnerBadge(for card: KanbanCard) -> KanbanTestingOwnerBadge? {
+        let normalizedTags = Set(card.tags.map(normalize))
+        if normalizedTags.contains("needs_erik") || normalizedTags.contains("manual_qa") {
+            return KanbanTestingOwnerBadge(text: "Needs Erik", kind: .needsErik)
+        }
+        if normalizedTags.contains("agent_can_verify") {
+            return KanbanTestingOwnerBadge(text: "Agent can verify", kind: .agentCanVerify)
+        }
+        return nil
     }
 
     static func planIndicator(for card: KanbanCard, in board: KanbanBoard) -> KanbanPlanIndicator? {

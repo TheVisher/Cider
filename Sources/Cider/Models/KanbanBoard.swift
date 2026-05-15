@@ -99,6 +99,8 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
     var historyEntries: [KanbanCardHistoryEntry]
     var created: Date
     var completed: Date?
+    var updatedAt: Date?
+    var lastActivityKind: String?
 
     init(
         id: String = KanbanID.generate(),
@@ -114,7 +116,9 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         parentCardID: String? = nil,
         historyEntries: [KanbanCardHistoryEntry] = [],
         created: Date = Date(),
-        completed: Date? = nil
+        completed: Date? = nil,
+        updatedAt: Date? = nil,
+        lastActivityKind: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -130,11 +134,18 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         self.historyEntries = historyEntries
         self.created = created
         self.completed = completed
+        self.updatedAt = updatedAt
+        self.lastActivityKind = lastActivityKind
+    }
+
+    mutating func markActivity(_ kind: String, at date: Date = Date()) {
+        updatedAt = date
+        lastActivityKind = kind
     }
 
     // Custom Codable for date format and backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, aiSummary, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, historyEntries, created, completed
+        case id, title, notes, aiSummary, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, historyEntries, created, completed, updatedAt, lastActivityKind
     }
 
     init(from decoder: Decoder) throws {
@@ -153,6 +164,8 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         historyEntries = (try c.decodeIfPresent([KanbanCardHistoryEntry].self, forKey: .historyEntries)) ?? []
         created = (try c.decodeIfPresent(KanbanDate.self, forKey: .created))?.date ?? Date()
         completed = try c.decodeIfPresent(KanbanDate.self, forKey: .completed)?.date
+        updatedAt = try c.decodeIfPresent(KanbanTimestamp.self, forKey: .updatedAt)?.date
+        lastActivityKind = try c.decodeIfPresent(String.self, forKey: .lastActivityKind)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -171,6 +184,8 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         if !historyEntries.isEmpty { try c.encode(historyEntries, forKey: .historyEntries) }
         try c.encode(KanbanDate(date: created), forKey: .created)
         try c.encodeIfPresent(completed.map { KanbanDate(date: $0) }, forKey: .completed)
+        try c.encodeIfPresent(updatedAt.map { KanbanTimestamp(date: $0) }, forKey: .updatedAt)
+        try c.encodeIfPresent(lastActivityKind, forKey: .lastActivityKind)
     }
 }
 
@@ -423,6 +438,32 @@ private struct KanbanHistoryDate: Codable, Sendable {
 }
 
 // MARK: - Date Wrapper (yyyy-MM-dd)
+
+private struct KanbanTimestamp: Codable, Sendable {
+    let date: Date
+
+    init(date: Date) { self.date = date }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let directDate = try? container.decode(Date.self) {
+            date = directDate
+        } else if let string = try? container.decode(String.self),
+                  let parsed = ISO8601DateFormatter().date(from: string) {
+            date = parsed
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid timestamp format. Expected ISO-8601."
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(ISO8601DateFormatter().string(from: date))
+    }
+}
 
 /// Wraps a Date for YAML encoding as a bare date string (2026-03-20).
 private struct KanbanDate: Codable, Sendable {

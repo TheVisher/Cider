@@ -9,7 +9,33 @@ Cider is local-first. The user's vault and local SQLite database are the durable
 - SQLite is the canonical metadata/query layer for Cider-managed entities.
 - Vault files are durable user artifacts where the file itself matters: notes, `.webloc` bookmarks, `.ics` todos/events, `.vcf` contacts, and saved files.
 - JSON indexes and sidecars are transitional, compatibility, cache, or export surfaces unless explicitly documented otherwise.
-- Kanban board YAML files are a separate project/workflow store, not part of the library graph.
+- Kanban board YAML files remain the canonical project/workflow store, but selected card detail is projected into SQLite for structured sections and search.
+
+## Second Brain Item Graph
+
+Cider's durable second-brain foundation is SQLite-led. LLMs and Hermes reason over Cider; SQLite owns memory identity, structured state, retrieval hooks, routing records, and provenance.
+
+Schema v9 adds additive foundation tables:
+
+- `item_sections`: typed visual/detail sections for an item or external owner such as a Kanban card.
+- `content_chunks`: searchable chunks derived from sections, notes, captures, or imported content.
+- `content_chunks_fts`: FTS5 exact-search index over chunk title/body.
+- `routing_decisions`: durable record of where an item was routed, why, by whom, and with what confidence.
+- `agent_actions`: durable record of agent/CLI/tool actions against an item or projected owner.
+
+Vectors and embeddings may augment retrieval later, but they are not the source of truth. Hybrid retrieval should layer structured filters, FTS5, links/graph expansion, optional embeddings, and reranking.
+
+## Kanban Projection Lifecycle
+
+Kanban YAML remains canonical for boards and card notes in this bridge phase. SQLite projections are rebuildable agent/read-model data.
+
+- Card projection is created or refreshed when Cider writes card notes through `board add-card`, `board update-card`, `board section update`, or `board evidence add`.
+- `item backfill-kanban [--board <name-or-id>]` rebuilds projections from canonical board YAML. Use it after branch changes, restores, manual YAML repair, or when an agent needs current search results before the app has naturally refreshed the board.
+- Card or board deletion removes matching `item_sections` and `content_chunks` projections so old card text does not remain searchable.
+- Board reload/restore should re-project cards when loaded by Cider services; agents can force the same result with `item backfill-kanban`.
+- `item doctor` currently verifies schema/table health and SQLite integrity. Stale projection drift is not yet a first-class doctor finding; until that follow-up lands, repair suspected drift with backfill and verify with `item get card <id>` and `item search`.
+
+The target future model is native structured sections rendered into dashboard/source/export views. The current Markdown-derived projection is an intentional migration bridge, not the final authority model.
 
 ## Safety Rules
 
@@ -51,6 +77,8 @@ Contacts use `.vcf` files and SQLite-backed metadata. Relationship context shoul
 ## Backups And Migration
 
 SQLite backup and restore are required safety rails. Migrations should be idempotent where possible and should not depend on debug-only state. Restore paths should be tested against isolated databases before real-vault use.
+
+Second-brain migrations must be additive until backfill and export safety are proven. Kanban, Markdown, `.webloc`, `.ics`, `.vcf`, and saved files must remain usable during migration; projected SQLite rows can be rebuilt from canonical artifacts when applicable.
 
 ## Sync
 

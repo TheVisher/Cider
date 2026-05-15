@@ -11,6 +11,7 @@ enum CiderFloatableSurface: Hashable, Identifiable, Sendable {
     case clipboard
     case aiAssistant
     case dropZone
+    case kanbanTestingGuide(KanbanTestingGuidePanelPayload)
 
     var id: String { stableKey }
 
@@ -36,6 +37,8 @@ enum CiderFloatableSurface: Hashable, Identifiable, Sendable {
             "aiAssistant"
         case .dropZone:
             "dropZone"
+        case .kanbanTestingGuide(let payload):
+            "kanbanTestingGuide:\(payload.boardID):\(payload.cardID)"
         }
     }
 
@@ -61,6 +64,8 @@ enum CiderFloatableSurface: Hashable, Identifiable, Sendable {
             "Chat"
         case .dropZone:
             "Drop Zone"
+        case .kanbanTestingGuide:
+            "QA Companion"
         }
     }
 
@@ -80,6 +85,8 @@ enum CiderFloatableSurface: Hashable, Identifiable, Sendable {
             "Floating AI assistant surface"
         case .dropZone:
             "Drop files, links, text, or images here"
+        case .kanbanTestingGuide(let payload):
+            "\(payload.cardTitle) (\(payload.cardID))"
         }
     }
 }

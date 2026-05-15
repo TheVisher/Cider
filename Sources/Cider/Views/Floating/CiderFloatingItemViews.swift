@@ -60,6 +60,8 @@ struct CiderFloatingItemView: View {
                 FloatingMissingItemView(title: "AI Assistant opens in its dedicated panel", surface: surface)
             case .dropZone:
                 FloatingMissingItemView(title: "Drop zone is handled by the drop surface", surface: surface)
+            case .kanbanTestingGuide:
+                FloatingMissingItemView(title: "QA companion opens in its dedicated panel", surface: surface)
             }
         }
         .environment(\.floatingCiderDockAction, onDock)

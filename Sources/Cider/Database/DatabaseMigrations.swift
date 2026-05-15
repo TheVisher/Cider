@@ -92,8 +92,11 @@ enum DatabaseMigrations {
 
         try withTransaction(db) {
             try repairRoutingDecisionsSchemaIfNeeded(db)
+            try runOnDB(db, CiderSchema.createSecondBrainRoutingDecisions)
             try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_routing_decisions_item ON routing_decisions(item_id, created_at);")
             try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_routing_decisions_review ON routing_decisions(review_state);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_owner ON second_brain_routing_decisions(owner_type, owner_id, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_status ON second_brain_routing_decisions(status, created_at);")
             try runOnDB(db, "DELETE FROM schema_version;")
             try runOnDB(db, "INSERT INTO schema_version (version) VALUES (10);")
         }
@@ -285,15 +288,26 @@ enum DatabaseMigrations {
         }
     }
 
-    // MARK: - V8 -> V9: Explainable routing decisions
+    // MARK: - V8 -> V9: Second brain sections, chunks, routing, and agent provenance
 
     private static func migrateToV9(_ db: OpaquePointer) throws {
         logger.info("Migrating to schema version 9...")
 
         try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createItemSections)
+            try runOnDB(db, CiderSchema.createContentChunks)
+            try runOnDB(db, CiderSchema.createContentChunksFTS)
+            try runOnDB(db, CiderSchema.createContentChunksFTSInsertTrigger)
+            try runOnDB(db, CiderSchema.createContentChunksFTSDeleteTrigger)
+            try runOnDB(db, CiderSchema.createContentChunksFTSUpdateTrigger)
             try runOnDB(db, CiderSchema.createRoutingDecisions)
-            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_routing_decisions_item ON routing_decisions(item_id, created_at);")
-            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_routing_decisions_review ON routing_decisions(review_state);")
+            try runOnDB(db, CiderSchema.createSecondBrainRoutingDecisions)
+            try runOnDB(db, CiderSchema.createAgentActions)
+
+            for sql in CiderSchema.createIndexes {
+                try runOnDB(db, sql)
+            }
+
             try runOnDB(db, "DELETE FROM schema_version;")
             try runOnDB(db, "INSERT INTO schema_version (version) VALUES (9);")
         }

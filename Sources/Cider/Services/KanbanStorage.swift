@@ -174,6 +174,7 @@ final class KanbanStorage: ObservableObject {
 
             boards.removeAll { $0.id == id }
             try? FileManager.default.removeItem(at: url)
+            deleteSecondBrainBoardProjectionIfAvailable(boardID: id)
             logger.info("Trashed board: \(id, privacy: .public)")
         }
 
@@ -267,6 +268,7 @@ final class KanbanStorage: ObservableObject {
         }
         if didAdd {
             schedulePreviewSummaryRefresh(boardID: boardID, cardID: card.id)
+            refreshSecondBrainProjectionIfAvailable(boardID: boardID, card: card)
         }
         return didAdd ? card : nil
     }
@@ -276,6 +278,7 @@ final class KanbanStorage: ObservableObject {
         let shouldRefreshSummary = baseline.map {
             $0.title != card.title || $0.notes != card.notes
         } ?? false
+        var didUpdate = false
         mutate(boardID: boardID) { board in
             for colIdx in board.columns.indices {
                 if let cardIdx = board.columns[colIdx].cards.firstIndex(where: { $0.id == card.id }) {
@@ -285,13 +288,20 @@ final class KanbanStorage: ObservableObject {
                         merged.aiSummary = nil
                     }
                     guard board.canAssignParent(cardID: merged.id, parentCardID: merged.parentCardID) else { return }
+                    if merged.updatedAt == current.updatedAt {
+                        merged.markActivity("updated")
+                    }
                     board.columns[colIdx].cards[cardIdx] = merged
+                    didUpdate = true
                     return
                 }
             }
         }
         if shouldRefreshSummary {
             schedulePreviewSummaryRefresh(boardID: boardID, cardID: card.id)
+        }
+        if didUpdate {
+            refreshSecondBrainProjectionIfAvailable(boardID: boardID, card: card)
         }
     }
 
@@ -311,6 +321,8 @@ final class KanbanStorage: ObservableObject {
         if incoming.parentCardID != baseline.parentCardID { merged.parentCardID = incoming.parentCardID }
         if incoming.historyEntries != baseline.historyEntries { merged.historyEntries = incoming.historyEntries }
         if incoming.completed != baseline.completed { merged.completed = incoming.completed }
+        if incoming.updatedAt != baseline.updatedAt { merged.updatedAt = incoming.updatedAt }
+        if incoming.lastActivityKind != baseline.lastActivityKind { merged.lastActivityKind = incoming.lastActivityKind }
         return merged
     }
 
@@ -338,12 +350,61 @@ final class KanbanStorage: ObservableObject {
         }
     }
 
+    private func refreshSecondBrainProjectionIfAvailable(boardID: String, card: KanbanCard) {
+        guard CiderDatabase.shared.isOpen else { return }
+        do {
+            try SecondBrainKanbanProjectionService().refreshCard(boardID: boardID, card: card)
+        } catch {
+            logger.error("Failed to refresh item graph projection for card \(card.id): \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    func refreshSecondBrainProjectionIfAvailable(boardID: String) {
+        guard CiderDatabase.shared.isOpen else { return }
+        guard let board = boards.first(where: { $0.id == boardID }) else { return }
+        let projector = SecondBrainKanbanProjectionService()
+        for card in board.allCards {
+            do {
+                try projector.refreshCard(boardID: boardID, card: card)
+            } catch {
+                logger.error("Failed to refresh item graph projection for restored card \(card.id): \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    private func deleteSecondBrainCardProjectionIfAvailable(boardID: String, cardID: String) {
+        guard CiderDatabase.shared.isOpen else { return }
+        do {
+            let owner = SecondBrainKanbanProjectionService.owner(boardID: boardID, cardID: cardID)
+            try SecondBrainStore().deleteProjection(for: owner)
+        } catch {
+            logger.error("Failed to delete item graph projection for card \(cardID): \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    private func deleteSecondBrainBoardProjectionIfAvailable(boardID: String) {
+        guard CiderDatabase.shared.isOpen else { return }
+        do {
+            try SecondBrainStore().deleteProjections(ownerType: "kanban_card", ownerIDPrefix: "\(boardID)/")
+        } catch {
+            logger.error("Failed to delete item graph projections for board \(boardID): \(String(describing: error), privacy: .public)")
+        }
+    }
+
     func deleteCard(boardID: String, cardID: String) {
+        var didDelete = false
         mutate(boardID: boardID) { board in
             for colIdx in board.columns.indices {
+                let before = board.columns[colIdx].cards.count
                 board.columns[colIdx].cards.removeAll { $0.id == cardID }
+                if board.columns[colIdx].cards.count != before {
+                    didDelete = true
+                }
             }
             board.clearParentReferences(to: cardID)
+        }
+        if didDelete {
+            deleteSecondBrainCardProjectionIfAvailable(boardID: boardID, cardID: cardID)
         }
     }
 
@@ -395,8 +456,12 @@ final class KanbanStorage: ObservableObject {
                 // Auto-set completed date when moving to a done column
                 if board.columns[destIdx].isDoneColumn && movedCard.completed == nil {
                     movedCard.completed = Date()
+                    movedCard.markActivity("completed")
                 } else if !board.columns[destIdx].isDoneColumn {
                     movedCard.completed = nil
+                    movedCard.markActivity("moved")
+                } else {
+                    movedCard.markActivity("moved")
                 }
                 return movedCard
             }

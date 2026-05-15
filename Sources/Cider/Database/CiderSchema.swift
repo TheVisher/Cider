@@ -211,6 +211,100 @@ enum CiderSchema {
         );
         """
 
+    // MARK: - Second Brain Foundation
+
+    static let createItemSections = """
+        CREATE TABLE IF NOT EXISTS item_sections (
+            id          TEXT PRIMARY KEY,
+            item_id     TEXT REFERENCES items(id) ON DELETE CASCADE,
+            owner_type  TEXT NOT NULL,
+            owner_id    TEXT NOT NULL,
+            section_key TEXT NOT NULL,
+            title       TEXT NOT NULL,
+            body        TEXT NOT NULL DEFAULT '',
+            source      TEXT NOT NULL,
+            confidence  REAL,
+            metadata    TEXT NOT NULL DEFAULT '{}',
+            sort_order  INTEGER NOT NULL DEFAULT 0,
+            created_at  REAL NOT NULL,
+            updated_at  REAL NOT NULL,
+            UNIQUE(owner_type, owner_id, section_key)
+        );
+        """
+
+    static let createContentChunks = """
+        CREATE TABLE IF NOT EXISTS content_chunks (
+            id           TEXT PRIMARY KEY,
+            section_id   TEXT REFERENCES item_sections(id) ON DELETE SET NULL,
+            item_id      TEXT REFERENCES items(id) ON DELETE CASCADE,
+            owner_type   TEXT NOT NULL,
+            owner_id     TEXT NOT NULL,
+            source       TEXT NOT NULL,
+            title        TEXT NOT NULL DEFAULT '',
+            body         TEXT NOT NULL,
+            chunk_index  INTEGER NOT NULL DEFAULT 0,
+            content_hash TEXT NOT NULL,
+            metadata     TEXT NOT NULL DEFAULT '{}',
+            created_at   REAL NOT NULL,
+            updated_at   REAL NOT NULL
+        );
+        """
+
+    static let createContentChunksFTS = """
+        CREATE VIRTUAL TABLE IF NOT EXISTS content_chunks_fts
+        USING fts5(
+            title,
+            body,
+            owner_type UNINDEXED,
+            owner_id UNINDEXED,
+            content='content_chunks',
+            content_rowid='rowid'
+        );
+        """
+
+    static let createContentChunksFTSInsertTrigger = """
+        CREATE TRIGGER IF NOT EXISTS content_chunks_ai
+        AFTER INSERT ON content_chunks BEGIN
+            INSERT INTO content_chunks_fts(rowid, title, body, owner_type, owner_id)
+            VALUES (new.rowid, new.title, new.body, new.owner_type, new.owner_id);
+        END;
+        """
+
+    static let createContentChunksFTSDeleteTrigger = """
+        CREATE TRIGGER IF NOT EXISTS content_chunks_ad
+        AFTER DELETE ON content_chunks BEGIN
+            INSERT INTO content_chunks_fts(content_chunks_fts, rowid, title, body, owner_type, owner_id)
+            VALUES ('delete', old.rowid, old.title, old.body, old.owner_type, old.owner_id);
+        END;
+        """
+
+    static let createContentChunksFTSUpdateTrigger = """
+        CREATE TRIGGER IF NOT EXISTS content_chunks_au
+        AFTER UPDATE ON content_chunks BEGIN
+            INSERT INTO content_chunks_fts(content_chunks_fts, rowid, title, body, owner_type, owner_id)
+            VALUES ('delete', old.rowid, old.title, old.body, old.owner_type, old.owner_id);
+            INSERT INTO content_chunks_fts(rowid, title, body, owner_type, owner_id)
+            VALUES (new.rowid, new.title, new.body, new.owner_type, new.owner_id);
+        END;
+        """
+
+    static let createAgentActions = """
+        CREATE TABLE IF NOT EXISTS agent_actions (
+            id             TEXT PRIMARY KEY,
+            item_id        TEXT REFERENCES items(id) ON DELETE SET NULL,
+            owner_type     TEXT NOT NULL,
+            owner_id       TEXT NOT NULL,
+            tool_name      TEXT NOT NULL,
+            action_type    TEXT NOT NULL,
+            source         TEXT NOT NULL,
+            status         TEXT NOT NULL,
+            summary        TEXT NOT NULL,
+            arguments_json TEXT,
+            result_json    TEXT,
+            created_at     REAL NOT NULL
+        );
+        """
+
     // MARK: - Trash
 
     static let createTrash = """
@@ -258,6 +352,26 @@ enum CiderSchema {
         );
         """
 
+    static let createSecondBrainRoutingDecisions = """
+        CREATE TABLE IF NOT EXISTS second_brain_routing_decisions (
+            id              TEXT PRIMARY KEY,
+            item_id         TEXT REFERENCES items(id) ON DELETE SET NULL,
+            owner_type      TEXT NOT NULL,
+            owner_id        TEXT NOT NULL,
+            target_type     TEXT NOT NULL,
+            target_id       TEXT,
+            target_path     TEXT,
+            confidence      REAL NOT NULL,
+            reason          TEXT NOT NULL,
+            status          TEXT NOT NULL,
+            actor           TEXT NOT NULL,
+            source          TEXT NOT NULL,
+            candidates_json TEXT,
+            created_at      REAL NOT NULL,
+            reviewed_at     REAL
+        );
+        """
+
     // MARK: - Indexes
 
     static let createIndexes: [String] = [
@@ -269,6 +383,14 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_item_labels_label ON item_labels(label_id);",
         "CREATE INDEX IF NOT EXISTS idx_item_tags_tag     ON item_tags(tag_id);",
         "CREATE INDEX IF NOT EXISTS idx_item_links_target ON item_links(target_id);",
+        "CREATE INDEX IF NOT EXISTS idx_item_sections_owner ON item_sections(owner_type, owner_id, sort_order);",
+        "CREATE INDEX IF NOT EXISTS idx_item_sections_item ON item_sections(item_id) WHERE item_id IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_content_chunks_owner ON content_chunks(owner_type, owner_id, chunk_index);",
+        "CREATE INDEX IF NOT EXISTS idx_content_chunks_section ON content_chunks(section_id) WHERE section_id IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_agent_actions_owner ON agent_actions(owner_type, owner_id, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_agent_actions_tool ON agent_actions(tool_name, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_owner ON second_brain_routing_decisions(owner_type, owner_id, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_status ON second_brain_routing_decisions(status, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_bookmarks_url     ON bookmarks(url);",
         "CREATE INDEX IF NOT EXISTS idx_bookmarks_enrich  ON bookmarks(enrichment_status);",
         "CREATE INDEX IF NOT EXISTS idx_todos_completed   ON todos(is_completed);",
@@ -298,9 +420,17 @@ enum CiderSchema {
         createTags,
         createItemTags,
         createItemLinks,
+        createItemSections,
+        createContentChunks,
+        createContentChunksFTS,
+        createContentChunksFTSInsertTrigger,
+        createContentChunksFTSDeleteTrigger,
+        createContentChunksFTSUpdateTrigger,
+        createRoutingDecisions,
+        createSecondBrainRoutingDecisions,
+        createAgentActions,
         createTrash,
         createMutationAudit,
-        createRoutingDecisions,
         createSchemaMigrations,
     ]
 }

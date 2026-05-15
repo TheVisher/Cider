@@ -53,8 +53,44 @@ Keep command details in CLI help and tests, not sprawling docs. The core command
 - todos/events/contacts/files: create, list, update where supported
 - links: related/backlink operations where available
 - dashboard: topic/card list and upsert with JSON
-- boards: show, add-card, update-card, move-card, children
+- item graph: inspect/search/routing/provenance, Kanban projection backfill, and doctor checks
+- spaces: explain routing context and agent instructions
+- boards: show, recent, testing-summary, card inspect, add-card, update-card, move-card, children, section update, evidence add, history add
 - database: backup list and isolated restore verification
+
+## Item Graph And Spaces
+
+Agents should prefer `cider-cli item ...` and `cider-cli space ...` for second-brain memory work.
+
+Core commands:
+
+- `item search <query> --json`: FTS-backed search over projected chunks.
+- `item get <type> <id-or-ref> --json`: structured sections, routing decisions, agent actions, and owner resolution metadata for an owner.
+- `item route <type> <id-or-ref> --target-type <space|folder|board> --reason <text> --json`: records a routing decision without silently moving files.
+- `item backfill-kanban [--board <name-or-id>] --json`: rebuilds Kanban card projections from YAML into SQLite sections/chunks.
+- `item doctor --json`: checks second-brain tables and SQLite integrity.
+- `space explain <name-or-id> --json`: returns purpose, routing hints, default views, and agent instructions for a Space.
+
+Kanban card details can be discovered with `board recent <board> --limit <count> --json`, which lists newest card activity with board, column, parent, priority, timestamps, recent edit/move/completion activity kind, and compact current-state/next-step context. Testing gates can be triaged with `board testing-summary <board> --json`, which groups cards in Testing/Ready to Test columns into `needsErik` and `agentCanVerify` queues. Exact cards can be inspected through `board card inspect <board> --card <id> --json`, which returns parsed dashboard lanes, sections, card metadata, hierarchy, links, routing decisions, and agent actions. Card details can be edited through `board section update <board> --card <id> --section <name> --value <text>`, `board evidence add <board> --card <id> --text <text>`, and `board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text>`. These update the YAML card and refresh its SQLite projection.
+
+Normal agent workflow for a Cider card:
+
+1. If the active card ID is unknown, run `board recent <board> --limit 20 --json` before broad search or raw YAML inspection.
+2. `board card inspect <board> --card <id> --json` to understand state without scraping YAML.
+3. `board section update ... --section "Current State" --value "..." --json` before and after implementation when state changes.
+4. `board history add ... --type implementation --text "..." --source "..." --json` for concise implementation or fix summaries.
+5. `board history add ... --type failed-attempt --text "..." --source "..." --json` when an attempted path matters for future agents.
+6. `board evidence add ... --text "..." --source "..." --json` after verification. `board history add ... --type test` writes the same durable test-evidence lane.
+7. `board history add ... --type decision --text "..." --source "..." --json` when a durable product, architecture, storage, CLI, QA, or agent-behavior choice is made.
+8. `board history add ... --type handoff --text "..." --source "..." --json` before stopping, or use `board section update ... --section "Agent Handoff" --value "..." --json` for a full replacement handoff.
+
+Kanban projection lifecycle:
+
+- Creation: `board add-card`, `board update-card`, `board section update`, `board evidence add`, and `board history add` refresh that card's SQLite projection after writing YAML.
+- Refresh: `item backfill-kanban --board <board> --json` rebuilds all card projections for a board from canonical YAML; omit `--board` to refresh every board.
+- Deletion: deleting a Kanban card or board removes its projected sections/chunks so `item search` stops finding stale card content.
+- Restore/reload: restored or reloaded boards should be followed by `item backfill-kanban --board <board> --json` when an agent needs fresh search immediately.
+- Doctor: `item doctor --json` checks schema and table health. Projection drift detection is a follow-up, so suspected stale card projections should currently be repaired with backfill and verified with `item get card <id> --json` plus `item search <query> --json`.
 
 ## Scheduled Briefing / Life-Assistant Reporting
 
