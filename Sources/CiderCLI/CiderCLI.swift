@@ -87,6 +87,8 @@ struct CiderCLI {
         switch command {
         case "capture":
             handleCapture(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
+        case "review":
+            handleReview(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
         case "routing", "route":
             handleRouting(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
         case "bookmark", "bm":
@@ -422,6 +424,115 @@ struct CiderCLI {
         default:
             print("Unknown capture command: \(subcommand ?? "nil")")
             print("Commands: add")
+        }
+    }
+
+    static func handleReview(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) {
+        let service = CiderReviewQueueService()
+
+        switch subcommand {
+        case "list", "ls":
+            let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 50
+            do {
+                let result = try service.list(
+                    limit: limit,
+                    includeDeferred: args.contains("--include-deferred")
+                )
+                printReviewQueueResult(result)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "approve":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli review approve <item-id> [--actor user|agent] [--json]")
+                return
+            }
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.approve(
+                    itemID: itemID,
+                    actor: parseFlag("--actor", from: args) ?? "user"
+                )
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "correct":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
+                return
+            }
+
+            let target: CiderRoutingDecisionTarget
+            if args.contains("--inbox") {
+                target = CiderRoutingDecisionTarget(
+                    kind: "inbox",
+                    name: "Inbox/Bookmarks",
+                    relativePath: "Inbox/Bookmarks",
+                    folderID: nil
+                )
+            } else {
+                switch resolveFolderArg(from: args) {
+                case .unspecified:
+                    print("Error: review correct requires --folder, --path, or --inbox.")
+                    return
+                case .failed:
+                    return
+                case .resolved(let folder):
+                    target = CiderRoutingDecisionTarget(
+                        kind: "folder",
+                        name: folder.name,
+                        relativePath: folder.relativePath,
+                        folderID: folder.id
+                    )
+                }
+            }
+
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.correctBookmark(
+                    itemID: itemID,
+                    target: target,
+                    reason: parseFlag("--reason", from: args) ?? "Corrected from review queue.",
+                    actor: parseFlag("--actor", from: args) ?? "user",
+                    bookmarkService: bookmarkService
+                )
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "defer":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]")
+                return
+            }
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.deferReview(
+                    itemID: itemID,
+                    reason: parseFlag("--reason", from: args) ?? "Deferred from review queue.",
+                    actor: parseFlag("--actor", from: args) ?? "user"
+                )
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case nil, "help", "--help", "-h":
+            print("""
+            Usage:
+              cider-cli review list [--include-deferred] [--limit <n>] [--json]
+              cider-cli review approve <item-id> [--actor user|agent] [--json]
+              cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+              cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
+            """)
+
+        default:
+            print("Unknown review command: \(subcommand ?? "nil")")
+            print("Commands: list, approve, correct, defer")
         }
     }
 
@@ -5259,6 +5370,38 @@ struct CiderCLI {
         print("  Next safe action: \(explanation.nextSafeAction)")
     }
 
+    static func printReviewQueueResult(_ result: CiderReviewQueueResult) {
+        if jsonOutput {
+            outputJSON(result.toDictionary())
+            return
+        }
+
+        guard !result.items.isEmpty else {
+            print("No review items.")
+            return
+        }
+
+        print("Review queue (\(result.items.count)):")
+        for item in result.items {
+            let id = item.itemID.uuidString.prefix(8)
+            print("  [\(id)] \(item.title)")
+            print("    Kind: \(item.kind)")
+            print("    State: \(item.reviewState)")
+            if let relativePath = item.relativePath {
+                print("    Path: \(relativePath)")
+            }
+            if let target = item.target {
+                print("    Candidate target: \(target.relativePath)")
+            }
+            if let confidence = item.confidence {
+                print("    Confidence: \(confidence)")
+            }
+            print("    Reason: \(item.reason)")
+            print("    Suggested action: \(item.suggestedAction)")
+            print("    Safe actions: \(item.safeActions.joined(separator: ", "))")
+        }
+    }
+
     static func findColumn(_ nameOrID: String, in board: KanbanBoard) -> KanbanColumn? {
         if let col = board.columns.first(where: {
             $0.name.localizedCaseInsensitiveCompare(nameOrID) == .orderedSame || $0.id == nameOrID
@@ -5933,6 +6076,12 @@ struct CiderCLI {
           cider-cli routing approve <item-id> [--actor user|agent] [--json]
           cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli routing rerun <item-id> [--actor user|agent] [--json]
+
+        REVIEW
+          cider-cli review list [--include-deferred] [--limit <n>] [--json]
+          cider-cli review approve <item-id> [--actor user|agent] [--json]
+          cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+          cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
 
         BOOKMARKS (alias: bm)
           cider-cli bookmark list [--folder <name|path>] [--limit <n>]
