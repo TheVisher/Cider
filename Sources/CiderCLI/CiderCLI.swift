@@ -87,6 +87,8 @@ struct CiderCLI {
         switch command {
         case "capture":
             handleCapture(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
+        case "routing", "route":
+            handleRouting(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
         case "bookmark", "bm":
             await handleBookmark(subcommand: subcommand, args: remaining, service: bookmarkService)
         case "note":
@@ -420,6 +422,111 @@ struct CiderCLI {
         default:
             print("Unknown capture command: \(subcommand ?? "nil")")
             print("Commands: add")
+        }
+    }
+
+    static func handleRouting(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) {
+        let service = CiderRoutingDecisionService()
+
+        switch subcommand {
+        case "explain":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli routing explain <item-id> [--json]")
+                return
+            }
+            do {
+                let explanation = try service.explain(itemRef: itemRef)
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "approve":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli routing approve <item-id> [--actor user|agent] [--json]")
+                return
+            }
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.approve(itemID: itemID, actor: parseFlag("--actor", from: args) ?? "user")
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "correct":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
+                return
+            }
+
+            let target: CiderRoutingDecisionTarget
+            if args.contains("--inbox") {
+                target = CiderRoutingDecisionTarget(
+                    kind: "inbox",
+                    name: "Inbox/Bookmarks",
+                    relativePath: "Inbox/Bookmarks",
+                    folderID: nil
+                )
+            } else {
+                switch resolveFolderArg(from: args) {
+                case .unspecified:
+                    print("Error: routing correct requires --folder, --path, or --inbox.")
+                    return
+                case .failed:
+                    return
+                case .resolved(let folder):
+                    target = CiderRoutingDecisionTarget(
+                        kind: "folder",
+                        name: folder.name,
+                        relativePath: folder.relativePath,
+                        folderID: folder.id
+                    )
+                }
+            }
+
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.correctBookmark(
+                    itemID: itemID,
+                    target: target,
+                    reason: parseFlag("--reason", from: args) ?? "Corrected route.",
+                    actor: parseFlag("--actor", from: args) ?? "user",
+                    bookmarkService: bookmarkService
+                )
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "rerun":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli routing rerun <item-id> [--actor user|agent] [--json]")
+                return
+            }
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.rerunDeterministic(
+                    itemID: itemID,
+                    actor: parseFlag("--actor", from: args) ?? "agent"
+                )
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case nil, "help", "--help", "-h":
+            print("""
+            Usage:
+              cider-cli routing explain <item-id> [--json]
+              cider-cli routing approve <item-id> [--actor user|agent] [--json]
+              cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+              cider-cli routing rerun <item-id> [--actor user|agent] [--json]
+            """)
+
+        default:
+            print("Unknown routing command: \(subcommand ?? "nil")")
+            print("Commands: explain, approve, correct, rerun")
         }
     }
 
@@ -5124,6 +5231,34 @@ struct CiderCLI {
         }
     }
 
+    static func printRoutingExplanation(_ explanation: CiderRoutingExplanation) {
+        if jsonOutput {
+            outputJSON(explanation.toDictionary())
+            return
+        }
+
+        print("Item: \(explanation.item.title) [\(explanation.item.type)] \(explanation.item.id.uuidString.prefix(8))")
+        guard let decision = explanation.latestDecision else {
+            print("  Routing: none recorded")
+            print("  Review needed: true")
+            print("  Next safe action: \(explanation.nextSafeAction)")
+            return
+        }
+
+        print("  Target: \(decision.target.relativePath)")
+        print("  Confidence: \(decision.confidence)")
+        print("  Review state: \(decision.reviewState)")
+        print("  Actor: \(decision.actor)")
+        print("  Source: \(decision.source)")
+        print("  Reason: \(decision.reason)")
+        print("  Decision: \(decision.id.uuidString)")
+        if let supersedes = decision.supersedesDecisionID {
+            print("  Supersedes: \(supersedes.uuidString)")
+        }
+        print("  History entries: \(explanation.history.count)")
+        print("  Next safe action: \(explanation.nextSafeAction)")
+    }
+
     static func findColumn(_ nameOrID: String, in board: KanbanBoard) -> KanbanColumn? {
         if let col = board.columns.first(where: {
             $0.name.localizedCaseInsensitiveCompare(nameOrID) == .orderedSame || $0.id == nameOrID
@@ -5792,6 +5927,12 @@ struct CiderCLI {
 
         CAPTURE
           cider-cli capture add <url> [--title <title>] [--folder <name|path>] [--json]
+
+        ROUTING
+          cider-cli routing explain <item-id> [--json]
+          cider-cli routing approve <item-id> [--actor user|agent] [--json]
+          cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+          cider-cli routing rerun <item-id> [--actor user|agent] [--json]
 
         BOOKMARKS (alias: bm)
           cider-cli bookmark list [--folder <name|path>] [--limit <n>]

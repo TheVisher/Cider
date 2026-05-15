@@ -38,10 +38,12 @@ struct CiderCaptureResult {
     }
 
     struct Routing {
+        var decisionID: UUID?
         var candidateTarget: Target?
         var reviewNeeded: Bool
         var confidence: Double
         var reason: String
+        var reviewState: String
     }
 
     var command: String
@@ -91,7 +93,9 @@ struct CiderCaptureResult {
             "reviewNeeded": routing.reviewNeeded,
             "confidence": routing.confidence,
             "reason": routing.reason,
+            "reviewState": routing.reviewState,
         ]
+        if let decisionID = routing.decisionID { routingDict["decisionID"] = decisionID.uuidString }
         if let target = routing.candidateTarget {
             var targetDict: [String: Any] = [
                 "kind": target.kind,
@@ -134,9 +138,14 @@ enum CiderCaptureError: LocalizedError {
 @MainActor
 final class CiderCaptureService {
     private let bookmarkService: VaultBookmarkService
+    private let routingDecisionService: CiderRoutingDecisionService?
 
-    init(bookmarkService: VaultBookmarkService = .shared) {
+    init(
+        bookmarkService: VaultBookmarkService = .shared,
+        routingDecisionService: CiderRoutingDecisionService? = CiderRoutingDecisionService()
+    ) {
         self.bookmarkService = bookmarkService
+        self.routingDecisionService = routingDecisionService
     }
 
     func add(
@@ -159,6 +168,20 @@ final class CiderCaptureService {
         let isDuplicate = existingIDs.contains(bookmark.id)
         let target = routingTarget(for: bookmark)
         let reviewNeeded = bookmark.folderID == nil
+        let reviewState = reviewNeeded ? "needs_review" : "accepted"
+        let reason = reviewNeeded
+            ? "No deterministic route was supplied, so Cider kept the capture in Inbox/Bookmarks for review."
+            : "Capture used the supplied deterministic target."
+        let routingDecision = try? routingDecisionService?.recordDecision(
+            itemID: bookmark.id,
+            itemType: "bookmark",
+            target: target.routingDecisionTarget,
+            confidence: reviewNeeded ? 0.0 : 1.0,
+            reason: reason,
+            actor: "agent",
+            source: "capture.add",
+            reviewState: reviewState
+        )
 
         return CiderCaptureResult(
             command: "capture.add",
@@ -188,12 +211,12 @@ final class CiderCaptureService {
                 existingItemID: isDuplicate ? bookmark.id : nil
             ),
             routing: .init(
+                decisionID: routingDecision?.id,
                 candidateTarget: target,
                 reviewNeeded: reviewNeeded,
                 confidence: reviewNeeded ? 0.0 : 1.0,
-                reason: reviewNeeded
-                    ? "No deterministic route was supplied, so Cider kept the capture in Inbox/Bookmarks for review."
-                    : "Capture used the supplied deterministic target."
+                reason: reason,
+                reviewState: reviewState
             ),
             nextSafeAction: isDuplicate ? "inspect_existing_item" : "enrich"
         )
@@ -232,6 +255,17 @@ final class CiderCaptureService {
             name: "Inbox/Bookmarks",
             relativePath: "Inbox/Bookmarks",
             folderID: nil
+        )
+    }
+}
+
+private extension CiderCaptureResult.Target {
+    var routingDecisionTarget: CiderRoutingDecisionTarget {
+        CiderRoutingDecisionTarget(
+            kind: kind,
+            name: name,
+            relativePath: relativePath,
+            folderID: folderID
         )
     }
 }

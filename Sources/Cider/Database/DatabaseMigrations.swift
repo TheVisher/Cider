@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 8
+    static let latestVersion: Int = 9
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -59,7 +59,27 @@ enum DatabaseMigrations {
         }
         if currentVersion < 8 {
             try migrateToV8(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 9 {
+            try migrateToV9(db)
+        }
+    }
+
+    // MARK: - V8 -> V9: Explainable routing decisions
+
+    private static func migrateToV9(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 9...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createRoutingDecisions)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_routing_decisions_item ON routing_decisions(item_id, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_routing_decisions_review ON routing_decisions(review_state);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (9);")
+        }
+
+        logger.info("Migration to v9 complete")
     }
 
     // MARK: - V7 -> V8: Direct action URLs for todos and events

@@ -43,7 +43,8 @@ struct CiderCaptureServiceTests {
     @Test("capture add stores a URL in Inbox immediately and returns agent state")
     func captureAddStoresURLImmediately() throws {
         try withIsolatedVault { db, bookmarks in
-            let service = CiderCaptureService(bookmarkService: bookmarks)
+            let routing = CiderRoutingDecisionService(database: db)
+            let service = CiderCaptureService(bookmarkService: bookmarks, routingDecisionService: routing)
 
             let result = try service.add("https://example.com/articles/42?utm_source=test")
 
@@ -59,6 +60,7 @@ struct CiderCaptureServiceTests {
             #expect(result.duplicate.status == "new")
             #expect(result.routing.reviewNeeded == true)
             #expect(result.routing.candidateTarget?.relativePath == "Inbox/Bookmarks")
+            #expect(result.routing.decisionID != nil)
             #expect(result.nextSafeAction == "enrich")
 
             let stored = bookmarks.bookmarks.first(where: { $0.id == result.item.id })
@@ -75,6 +77,14 @@ struct CiderCaptureServiceTests {
             bookmarkStatement.bind(result.item.id.uuidString, at: 1)
             #expect(try bookmarkStatement.step())
             #expect(bookmarkStatement.string(at: 0) == "https://example.com/articles/42?utm_source=test")
+
+            let explanation = try routing.explain(itemID: result.item.id)
+            #expect(explanation.item.id == result.item.id)
+            #expect(explanation.latestDecision?.id == result.routing.decisionID)
+            #expect(explanation.latestDecision?.target.relativePath == "Inbox/Bookmarks")
+            #expect(explanation.latestDecision?.reviewState == "needs_review")
+            #expect(explanation.latestDecision?.actor == "agent")
+            #expect(explanation.latestDecision?.source == "capture.add")
         }
     }
 
