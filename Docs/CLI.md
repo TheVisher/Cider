@@ -16,6 +16,7 @@ Status: canonical core doc.
 
 Use CLI commands for:
 
+- Cider-owned capture, routing, review, and recall
 - duplicate checks before bookmark capture
 - bookmark creation and enrichment
 - vault search and item lookup
@@ -71,6 +72,8 @@ Core commands:
 - `item doctor --json`: checks second-brain tables and SQLite integrity.
 - `space explain <name-or-id> --json`: returns purpose, routing hints, default views, and agent instructions for a Space.
 
+The second-brain command surface should support the product loop: capture -> enrich -> route -> review -> resurface/act. JSON output should make uncertainty, provenance, and next safe action visible.
+
 Kanban card details can be discovered with `board recent <board> --limit <count> --json`, which lists newest card activity with board, column, parent, priority, timestamps, recent edit/move/completion activity kind, and compact current-state/next-step context. Testing gates can be triaged with `board testing-summary <board> --json`, which groups cards in Testing/Ready to Test columns into `needsErik` and `agentCanVerify` queues. Exact cards can be inspected through `board card inspect <board> --card <id> --json`, which returns parsed dashboard lanes, sections, card metadata, hierarchy, links, routing decisions, and agent actions. Card details can be edited through `board section update <board> --card <id> --section <name> --value <text>`, `board evidence add <board> --card <id> --text <text>`, and `board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text>`. These update the YAML card and refresh its SQLite projection.
 
 Normal agent workflow for a Cider card:
@@ -92,9 +95,9 @@ Kanban projection lifecycle:
 - Restore/reload: restored or reloaded boards should be followed by `item backfill-kanban --board <board> --json` when an agent needs fresh search immediately.
 - Doctor: `item doctor --json` checks schema and table health. Projection drift detection is a follow-up, so suspected stale card projections should currently be repaired with backfill and verified with `item get card <id> --json` plus `item search <query> --json`.
 
-## Scheduled Briefing / Life-Assistant Reporting
+## Agenda And Life-Assistant Reporting
 
-Daily agent reports should reduce noise, not turn every dated item into an alarm. This should be solved in Cider's shared CLI/API layer so any agent, dashboard, or scheduled job gets the same answer without prompt-specific workarounds.
+Agent reports should reduce noise, not turn every dated item into an alarm. This belongs in Cider's shared CLI/API layer so Dashboard, agents, and scheduled jobs get the same relevance answer without prompt-specific workarounds.
 
 - Add or maintain a canonical agenda/briefing query path that returns agent-ready items with resolved relevance/status, not just raw todo/event records.
 - The daily brief should focus on items important/relevant today, plus reminders whose configured reminder rule says to surface today.
@@ -103,14 +106,14 @@ Daily agent reports should reduce noise, not turn every dated item into an alarm
 - Rent/monthly bills should only appear when the next due date is close, roughly within five days, or when the configured reminder rule says to surface today.
 - Birthdays/anniversaries should not appear in every daily report merely because they are future dated. Cider should support reminder policies such as "one week before," "on the day," or "start-of-month birthday digest," and the agenda API should return `surfaceToday`, reason, reminder policy, and next surface date.
 - The same reminder should not spam every daily report across its lead window unless explicitly configured as a repeating reminder.
-- CLI/date handling should make local-date semantics obvious. Agents observed `event update <id> --date 2026-06-01` producing a `startAt` of `2026-06-02T00:00:00Z`; this needs a regression test or clearer timezone/date normalization.
+## Current Hardening Cautions
 
-## Known Agent/CLI Hardening Findings
+Historical CLI and storage bug detail belongs on Kanban cards, not in this core doc. Durable cautions for agents:
 
-- 2026-05-09: Running the Cider app while Hermes uses `cider-cli` to capture/route bookmarks can create duplicate bookmarks. Repro observed with Steam/TikTok captures: CLI created and moved the bookmark, then the already-running app adopted the moved `.webloc` as an orphan because its in-memory bookmark list had not reloaded the CLI-created URL/ID. Result: same URL appears twice, often with `(... 2).webloc`, and later UI enrichment/labels apply to the duplicate. Fix direction: cross-process storage invalidation/reload or a URL/relative-path duplicate guard in app-side orphan adoption/sync before minting a new bookmark ID. Agent workaround until fixed: after CLI bookmark capture while Cider.app is running, run duplicate-check/search/get and report/cleanup duplicates rather than assuming one row.
-- 2026-05-11: `folder get "Inbox"` is not a reliable Inbox count source. Inbox is a reserved/virtual storage area for item-type subfolders, and current folder lookup may return `No folder found matching 'Inbox'` even while `snapshot --json` reports an Inbox folder count and item lists show `relativePath` values under `Inbox/...`. Agent/scheduled-brief workaround: use `snapshot --json` `folderCounts[name == "Inbox"]` for count, and use item lists filtered by `folder == "Inbox"` or `relativePath` beginning with `Inbox/` for actionable examples. Do not report Inbox as unavailable solely because folder lookup fails.
-- 2026-05-11: A dogfood audit found bulk duplicate top-level folders and exact-content duplicated Markdown notes after a Cider app launch around 2026-05-10 10:18 PDT. `status --json` rose from 63 folders to 189; SQLite shows 126 folder rows created in the same short window; examples include `Games`/`Games 2`, `Movies`/`Movies 2`, `TV Shows`/`TV Shows 2`, and duplicated files such as `Games Library 2.md`/`Games Library 3.md`. `folder doctor --json` currently reports no findings, so add doctor coverage for duplicate folder/note drift and investigate folder/sidebar/domain adoption paths before any cleanup. Tracking card: Cider board `d165bc`.
-- 2026-05-13 regression: After a prior cleanup/stabilization pass claimed zero active duplicates, the live vault regressed while Cider.app was running. `status --json` showed folders=190, notes=21, bookmarks=248, trash=504; `folder doctor --json` showed 105 warnings; filesystem scan found 37 top-level numeric-suffix dirs and 6 active exact-content Markdown duplicate groups, including `Media/Games/Games Library.md` vs `Media 2/Games/Games Library 2.md` vs `Games/Games Library 2 2.md`, plus the matching Movies/TV Shows library groups. Active duplicate bookmark URL groups also reappeared (7 groups), including Stonewards Steam where one copy had a Steam/page screenshot style thumbnail/title and another had the real game metadata. Treat this as an active recurrence, not stale solved cleanup debt. Update cards `d165bc` and `3281a2`; fix source before or alongside cleanup, then verify with status, doctor, numeric-suffix folder scan, exact-note hash scan, and duplicate URL scan after app launch/sync.
+- After CLI capture while Cider.app is running, verify the final item with duplicate/search/get commands instead of assuming a single row exists.
+- Inbox can be virtual or type-scoped. Prefer item lists, snapshot/status JSON, or review queue commands over raw folder lookup when reporting Inbox health.
+- Duplicate folder/note/bookmark regressions should be audited against the current second-brain backend before cleanup. Use the current roadmap/bug cards for exact evidence and acceptance criteria.
+- CLI/date handling must preserve local-date semantics for all-day events, birthdays, due dates, and Kanban `created` dates.
 
 ## CLI Quality Bar
 

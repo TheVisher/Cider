@@ -4,9 +4,17 @@ Status: canonical core doc.
 
 This doc tells agents how to work on Cider without growing a second project-management system in Markdown.
 
+## Current Product Line
+
+`main` is the second-brain Cider line. Treat Cider as a local-first Mac second brain and life command center, with the product direction summarized in `Docs/PRODUCT.md`.
+
+The pre-second-brain app is preserved on `legacy/pre-second-brain-cider` for reference only. Do not use legacy docs or old branch behavior as active instruction unless the durable fact has been promoted into the current core docs or a current Kanban card.
+
+The active roadmap source is the Second-Brain Roadmap v1 board, `~/CiderVault/.cider/boards/3d45ca.yaml`. For the docs reset, use card `f76ad1`.
+
 ## The Model
 
-Cider itself is the roadmap and QA system.
+Cider itself is the roadmap, QA, and handoff system.
 
 - Kanban is the active work surface.
 - Core docs are the durable development reference.
@@ -49,11 +57,13 @@ Use core docs for:
 Agents should be conservative operators over real Cider data:
 
 - Use `cider-cli` or Cider services for current facts whenever possible.
-- Do not treat memory as more current than the vault.
+- Do not treat memory as more current than the Cider store, CLI, vault, or active Kanban card.
 - Do not write AI-generated text into user-owned fields such as bookmark notes.
 - Use AI-owned enrichment fields for generated summaries.
 - Prefer capture, retrieval, and safe organization over broad autonomous cleanup.
 - When asked to organize or delete, present a small plan unless the user clearly asked for immediate mutation.
+- Do not make Spaces independent silos; they are surfaces over shared item, routing, review, saved-view, dashboard, and relevance state.
+- Do not build clever auto-filing that hides uncertainty from the user. Low-confidence decisions belong in review.
 
 ## Plans And Specs
 

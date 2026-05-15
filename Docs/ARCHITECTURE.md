@@ -2,7 +2,9 @@
 
 Status: canonical core doc.
 
-Cider is a SwiftUI + AppKit macOS app with local-first storage, a floating panel shell, SQLite-backed models, vault files, CLI access, and agent integrations.
+Cider is a SwiftUI + AppKit macOS app with local-first storage, a floating panel shell, SQLite-backed second-brain state, vault artifacts, CLI access, and agent integrations.
+
+The durable architecture supports the product loop: capture -> enrich -> route -> review -> resurface/act. Features should plug into that loop instead of building isolated storage and routing behavior.
 
 ## App Boundaries
 
@@ -38,9 +40,11 @@ Agent and AI services should route through narrow seams so runtime providers can
 
 The second-brain foundation lives in SQLite services, not in Markdown conventions or LLM memory. `SecondBrainStore` owns item sections, content chunks, FTS search, routing decisions, and agent action provenance. Feature-specific projectors, such as Kanban card projection, translate canonical feature storage into that shared graph without rewriting the feature's storage all at once.
 
+Spaces are product surfaces over shared state. They may have domain-specific dashboards and routing hints, but they should not become independent data silos or parallel memory systems.
+
 ## Agent Boundary
 
-Cider owns the native UI, vault data, stable logical chat identity, local state, commands, mirrored display history, and user-facing approval surfaces. Hermes or another runtime owns long-running agent execution, tool semantics, runtime session truth, and external session continuity.
+Cider owns the native UI, local memory state, vault artifacts, stable logical chat identity, commands, mirrored display history, and user-facing approval surfaces. Hermes or another runtime owns long-running agent execution, tool semantics, runtime session truth, and external session continuity.
 
 Raw runtime session IDs are rotating pointers, not product identity. Direct assumptions about one runtime should stay isolated in agent transport/client files. Prefer Runs/SSE-style APIs when available, with CLI/export fallback as a compatibility path.
 

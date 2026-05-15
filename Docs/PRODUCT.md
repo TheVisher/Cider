@@ -2,55 +2,75 @@
 
 Status: canonical core doc.
 
-Cider is a local-first Mac second brain and life command center: one place on the user's machine to capture and organize digital life, remember bills/events/reminders, control daily workflows, and talk to the user's main agent.
+Cider is a local-first Mac second brain and life command center. It is the user's calm native memory cockpit: fast capture, clear review, helpful resurfacing, and one trusted Main Brain over local personal context.
+
+The product is no longer the old general vault/bookmark app with extra features bolted on. Bookmarks, notes, files, todos, dates, contacts, screenshots, Kanban cards, and Spaces are parts of one second-brain system.
+
+The core loop is:
+
+1. Capture quickly.
+2. Enrich when possible.
+3. Route conservatively.
+4. Review uncertainty.
+5. Resurface useful context and actions.
 
 ## Product Principles
 
-- Local-first by default. The vault and SQLite database are the source of truth for personal data.
-- Fast capture matters more than perfect categorization at capture time.
-- Cider should help the user remember, resurface, connect, and act.
-- Cider is practical memory support, not vague productivity theater. It should notice gaps, resurface useful context, and reduce the cost of remembering.
-- Conservative routing beats clever misfiling. When confidence is low, keep the item visible in Inbox and ask.
-- Dashboard cards, reminders, and agent reports should explain why something matters, not just that something exists. Cider should compute relevance once in a shared agenda/briefing layer, then let Dashboard, CLI JSON, Telegram, and agents render that same truth.
-- Kanban is the product's work surface for roadmap, QA, bugs, and implementation history.
-- Docs should stay lean and durable.
-- Agents should be useful, cautious, and report what they changed.
+- Local-first by default. Personal memory belongs on the user's Mac first.
+- Capture must be fast and imperfect by design. The user should not need to decide the perfect folder, type, or tag before saving something.
+- Cider should reduce memory and ADHD friction by helping the user remember, connect, review, and act.
+- SQLite is the canonical memory and query layer for managed items, routing, review state, search, recall, agenda relevance, and agent context.
+- Vault files and Kanban YAML remain durable artifacts and workflow stores where the file itself matters.
+- Conservative routing beats clever misfiling. When confidence is low, Cider should keep uncertainty visible in review instead of hiding a bad guess.
+- Dashboard, reminders, CLI JSON, and agent reports should share the same relevance truth and explain why something matters.
+- Main Brain should be excellent before Cider grows a broad roster of agents.
+- Kanban is Cider's active roadmap, spec, testing, bug, and handoff surface.
+- Core docs should stay lean and durable.
+
+## Product Surfaces
+
+- Main Brain is the native Cider conversation and agent surface over the local second brain.
+- Dashboard/Home is the today/now command center: what matters, why it matters, and what action is available.
+- Capture is the lowest-friction intake path for URLs, notes, files, todos, reminders, dates, contacts, screenshots, and snippets.
+- Review Queue is the trust boundary for uncertain routing, metadata, duplicates, reminders, and agent suggestions.
+- Spaces are domain surfaces over shared memory state, such as Media, Food, Projects, Finance, People, and Recipes. They are not independent silos.
+- Library is the searchable inventory of captured and managed items.
+- Kanban is the product and development operating layer for roadmap work, QA, bugs, and agent handoff memory.
+- CLI is the agent-facing command surface for reliable inspection and mutation.
 
 ## Current Focus
 
-1. Make Cider's docs model lean: core docs for durable development knowledge, Kanban for roadmap and QA.
-2. Keep Kanban strong as the active planning and verification surface.
-3. Improve Main Brain reliability so Cider chat can stand in for remote Hermes workflows when the user is at the Mac.
-4. Turn Dashboard/Home into a useful second-brain command center rather than a static feed.
-5. Keep capture reliable across bookmarks, notes, files, todos, contacts, dates, and screen capture.
+1. Keep core docs lean and aligned with the second-brain product narrative.
+2. Keep Kanban strong enough to operate roadmap work without chasing perfect project-management polish.
+3. Build out capture -> enrich -> route -> review over the shared SQLite-backed item and routing layer.
+4. Make Dashboard/Home a useful command center, not a passive feed.
+5. Improve recall, search, and agent context bundles across item types and Spaces.
+6. Make Cider-owned reminders and life tracking reliable enough for bills, dates, follow-ups, and recurring obligations.
+7. Keep Main Brain focused, useful, cautious, and grounded in local Cider truth.
 
-## Product Shape
+## Legacy Framing
 
-Cider should feel like:
+Cider still keeps important older capabilities, but they should now serve the second-brain model.
 
-- a Mac-native command palette and floating panel
-- a local vault client
-- a capture inbox
-- a searchable memory system
-- a personal project board
-- a focused chat surface for the user's main agent
+- Bookmarks are one captured item type, not the product center.
+- Notes and files are durable memory artifacts plus searchable context.
+- Todos, dates, contacts, and reminders are life-memory objects, not side utilities.
+- Saved Views and Spaces are lenses over shared state, not separate storage systems.
+- Kanban is first-class as Cider's own work surface and agent handoff system, but Cider should not become a heavy project-management clone.
+- Historical Markdown plans, stale bug notes, and old roadmap clutter belong in Kanban or git history, not active docs.
 
-It should not become:
+## Non-Goals
 
-- a generic feed reader
-- a heavy project-management clone
-- a pile of stale Markdown plans
-- a multi-agent roster before the main Cider brain feels excellent
-
-## Product Decisions
-
-- Sidebar is for organization. Tabs and saved views are for views into the vault.
-- Home/Dashboard is the command center, not a generic news feed.
-- Saved Views absorb many older project/stacks concepts; avoid reintroducing a separate project system without a clear reason.
-- Time is metadata. Importance is presentation and prioritization, not a separate storage location.
-- Cider-owned reminders and tasks are product data; external systems can be delivery channels or fallbacks.
-- Main Brain parity matters more than a broad agent roster. Make the one native Cider brain excellent first.
+- Do not turn Cider into a cloud-first app.
+- Do not make Spaces independent data silos.
+- Do not make docs the roadmap.
+- Do not build clever auto-filing that hides uncertainty from the user.
+- Do not build a generic feed reader.
+- Do not build a broad multi-agent roster before Main Brain is excellent.
+- Do not preserve old Cider behavior as active direction just because it exists in legacy history.
 
 ## Roadmap Ownership
 
-Roadmap items live in Kanban. This doc may summarize current direction, but it should not become a second roadmap.
+The active roadmap lives in Kanban, especially the Second-Brain Roadmap v1 board. This doc is the durable product narrative; it should not become a duplicate roadmap, QA report, or implementation log.
+
+The pre-second-brain product line is preserved in git on `legacy/pre-second-brain-cider` for reference. It is not the default direction for new work.

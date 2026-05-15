@@ -2,7 +2,7 @@
 
 Status: canonical core doc.
 
-Cider is local-first. The user's vault and local SQLite database are the durable foundation.
+Cider is local-first. The user's local SQLite database is the canonical memory/query layer, and the vault holds durable user-visible artifacts.
 
 ## Sources Of Truth
 
@@ -15,7 +15,7 @@ Cider is local-first. The user's vault and local SQLite database are the durable
 
 Cider's durable second-brain foundation is SQLite-led. LLMs and Hermes reason over Cider; SQLite owns memory identity, structured state, retrieval hooks, routing records, and provenance.
 
-Schema v9 adds additive foundation tables:
+Current second-brain foundation tables include:
 
 - `item_sections`: typed visual/detail sections for an item or external owner such as a Kanban card.
 - `content_chunks`: searchable chunks derived from sections, notes, captures, or imported content.
@@ -24,6 +24,8 @@ Schema v9 adds additive foundation tables:
 - `agent_actions`: durable record of agent/CLI/tool actions against an item or projected owner.
 
 Vectors and embeddings may augment retrieval later, but they are not the source of truth. Hybrid retrieval should layer structured filters, FTS5, links/graph expansion, optional embeddings, and reranking.
+
+The storage model follows the product loop: capture source identity, enrich metadata/content, record routing/review state, and make resurfacing explainable.
 
 ## Kanban Projection Lifecycle
 
@@ -50,6 +52,8 @@ The target future model is native structured sections rendered into dashboard/so
 ## Vault Shape
 
 The vault stores user-readable artifacts in folders such as Inbox, Bookmarks, Notes, Todos, Date Cards, Contacts, and Files. Routing should be conservative when confidence is low.
+
+Spaces are surfaces over shared SQLite/vault state. A Space may correspond to folders, saved views, dashboard panels, routing hints, or domain-specific UI, but it must not become a separate authority for item identity or memory.
 
 Routing rules:
 

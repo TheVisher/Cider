@@ -2,7 +2,11 @@
 
 Status: canonical core doc.
 
-This folder should stay small. Cider uses Kanban for roadmap, QA evidence, active work, bugs, implementation notes, review findings, and completed plan history. Markdown docs exist only for durable development knowledge that should remain true after a card is done.
+This folder is Cider's durable documentation layer for the second-brain product line. It should stay small.
+
+Cider uses Kanban for roadmap, specs, QA evidence, active work, bugs, implementation notes, review findings, failed attempts, completed plan history, and handoff records. Markdown docs exist only for durable development knowledge that should remain true after a card is done.
+
+`main` is now the second-brain Cider line. The pre-second-brain product line is preserved for reference on `legacy/pre-second-brain-cider`; it is not active direction.
 
 ## Core Docs
 
@@ -27,12 +31,14 @@ This folder should stay small. Cider uses Kanban for roadmap, QA evidence, activ
 
 Git history is the archive for deleted Markdown. Do not keep stale docs alive just because they might be interesting later.
 
-## Existing Legacy Docs
+## Legacy Reference
 
-The older docs tree is being audited. During the audit, each old Markdown file should be processed once:
+The old Cider product/docs state is available through git, especially `legacy/pre-second-brain-cider`. Treat it as historical reference, not product instruction.
 
-1. Harvest durable facts into one of the core docs.
+When old Markdown or legacy branch content is consulted:
+
+1. Promote only still-current durable facts into a core doc.
 2. Convert active work, ideas, bugs, or QA evidence into Kanban if needed.
-3. Delete the old doc after harvesting.
+3. Leave historical context in git history or on the relevant Kanban card.
 
 Do not create a permanent audit report doc. Audit state belongs on the Kanban card tracking the cleanup.

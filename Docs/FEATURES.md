@@ -2,7 +2,7 @@
 
 Status: canonical core doc.
 
-This is a compact inventory of what Cider has. Keep summaries short. Roadmaps, bugs, QA evidence, and implementation history belong in Kanban.
+This is a compact inventory of Cider's durable product surfaces. Keep summaries short. Roadmaps, bugs, QA evidence, and implementation history belong in Kanban.
 
 ## Floating Panel
 
@@ -12,9 +12,15 @@ Key code: `Sources/Cider/App/`, `Sources/Cider/Views/CiderPanelView.swift`, `Sou
 
 ## Bookmarks
 
-Bookmarks capture URLs, metadata, thumbnails, tags, notes, related items, and vault placement. `.webloc` files are durable vault artifacts while SQLite stores canonical metadata. Bookmark detail should conserve memory: keep the active live page useful, but avoid warming every web/reader/extraction surface in the background.
+Bookmarks are one captured item type inside the second-brain loop. They capture URLs, metadata, thumbnails, tags, notes, related items, source provenance, routing/review state, and vault placement. `.webloc` files are durable vault artifacts while SQLite stores canonical metadata. Bookmark detail should conserve memory: keep the active live page useful, but avoid warming every web/reader/extraction surface in the background.
 
 Key code: `Sources/Cider/Views/Bookmarks/`, `Sources/Cider/Services/VaultBookmarkService.swift`, `Sources/Cider/Services/BookmarksStorage.swift`, `Sources/Cider/Services/BookmarkFileService.swift`.
+
+## Capture
+
+Capture is the lowest-friction intake path for URLs now, and should grow toward notes, files/images, todos, dates/reminders, contacts/context, screen snippets, and other source material. Capture should save source identity first, return agent-friendly JSON, and tolerate incomplete enrichment or routing.
+
+Key code: `Sources/Cider/Services/CiderCaptureService.swift`, `Sources/CiderCLI/CiderCLI.swift`.
 
 ## Notes
 
@@ -42,6 +48,12 @@ Second-brain recall adds structured sections, content chunks, FTS5 search, routi
 
 Key code: `Sources/Cider/Services/SearchService.swift`, `Sources/Cider/Services/SecondBrainStore.swift`, `Sources/Cider/Services/ItemLinkService.swift`, `Sources/Cider/Views/Search/SearchPaletteView.swift`, `Sources/Cider/Views/Bookmarks/RelatedItemsView.swift`.
 
+## Routing And Review
+
+Routing records where Cider thinks an item belongs, why, with what confidence, and whether it needs review. Review Queue is the trust boundary for uncertain routing, enrichment gaps, duplicate candidates, stale Inbox items, reminders, and agent suggestions. Approve/correct/defer actions should preserve provenance and improve future routing behavior.
+
+Key code: `Sources/Cider/Services/CiderRoutingDecisionService.swift`, `Sources/Cider/Services/CiderReviewQueueService.swift`, `Sources/Cider/Services/CiderSpaceCaptureDashboardService.swift`.
+
 ## Kanban
 
 Kanban is both a user feature and Cider's development workflow. It owns roadmap, active work, QA evidence, bugs, implementation notes, review findings, failed attempts, completed plan history, and handoff context. Markdown export is explicit and one-way; cards remain the source of truth.
@@ -67,6 +79,12 @@ Key code: `Sources/Cider/Views/Contacts/`, `Sources/Cider/Services/ContactStorag
 Dashboard/Home should become the user's command center: current work, vault pulse, reminders, resurfacing, docs health, inbox health, and agent summaries. It should be personal, explainable, and actionable. The quality bar is whether a card answers: why does this matter to me? Dashboard should share the same Cider-computed agenda/briefing relevance model used by CLI JSON and agent reports, so Telegram/agent briefings can be compact projections of dashboard truth rather than separate heuristics.
 
 Key code: `Sources/Cider/Views/Dashboard/`, `Sources/Cider/Views/Home/`, `Sources/Cider/Services/Dashboard/`.
+
+## Spaces
+
+Spaces are domain surfaces over shared second-brain state, such as Media, Food, Projects, Finance, People, and Recipes. They can provide dashboards, routing hints, saved views, and domain-specific workflows, but they must not become independent storage silos.
+
+Key code: `Sources/Cider/Views/Spaces/`, `Sources/Cider/Services/CiderSpaceStorage.swift`, `Sources/Cider/Services/CiderSpaceCaptureDashboardService.swift`.
 
 ## Main Brain Chat
 

@@ -2,7 +2,7 @@
 
 Status: canonical core doc.
 
-Cider should feel like a focused Mac utility: fast, calm, tactile, and useful.
+Cider should feel like a calm native memory cockpit: fast capture, clear review, useful resurfacing, and enough restraint that the user trusts it with real life context.
 
 ## Visual Principles
 
@@ -30,9 +30,11 @@ Cider should feel like a focused Mac utility: fast, calm, tactile, and useful.
 ## Feature Surfaces
 
 - Capture flows should be fast and forgiving.
+- Review surfaces should make uncertainty visible and correction cheap.
 - Detail views should reveal metadata without overwhelming the main content.
 - Kanban should optimize for scanning and handoff.
-- Dashboard should answer why something matters to the user.
+- Dashboard should answer what matters now, why it matters, and what action is available.
+- Spaces should feel like sibling command surfaces over the same memory system, not unrelated empty pages.
 - Chat should show state clearly: idle, running, awaiting approval, failed, repaired.
 
 ## Layout Contracts

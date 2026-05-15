@@ -19,10 +19,14 @@ Choose the narrowest meaningful verification:
 
 - launch and floating panel activation
 - focus behavior and resize behavior
+- capture -> enrich -> route -> review flow when touched
 - bookmark capture, enrichment, detail view, and trash/restore
 - note create/edit/save/reopen
 - search across saved items
+- item get/search/context JSON for second-brain recall changes
 - folder and tag navigation
+- Spaces dashboard/routed capture surfacing when touched
+- Review Queue list, approve, correct, and defer when touched
 - Kanban board load, card edit, movement, and YAML validity
 - todo/date/contact file watcher behavior
 - database backup listing and isolated restore
@@ -69,7 +73,7 @@ Reusable audits belong here; task evidence belongs on cards.
 - Storage-integrity audit: verify SQLite authority, vault artifacts, cache-only files, trash/restore, backups, and watcher behavior.
 - Threading/runtime audit: check UI work on main actor, background services off the click path, and clear logging.
 - Dead-code/code-health audit: identify oversized files, force unwraps, debug logs, stale feature paths, and unsafe direct file mutation.
-- Docs-health audit: compare active docs against core-doc policy, convert active work to Kanban, and delete harvested legacy docs.
+- Docs-health audit: compare active docs against `Docs/PRODUCT.md`, core-doc policy, and the active roadmap card; convert active work to Kanban and leave legacy context in git history.
 
 ## Release Scope
 
@@ -93,6 +97,7 @@ When fixing a regression:
 
 Regression areas worth checking after related changes:
 
+- capture/routing/review provenance and uncertainty handling
 - drag/drop URL and image flows
 - `.webloc` adoption, deduplication, rename, and URL rewrite behavior
 - FSEvents watcher loops and external edit adoption
@@ -100,6 +105,7 @@ Regression areas worth checking after related changes:
 - DatePicker/popover behavior in panel contexts
 - masonry/card sizing after window resize
 - note editor save/reopen/image serialization
+- Space dashboards and saved views over shared item state
 
 ## Notes Editor Smoke
 

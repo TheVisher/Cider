@@ -26,6 +26,10 @@ Status: canonical core doc.
 
 ## Storage And Data Safety
 
+- SQLite is the canonical memory/query layer for managed second-brain state.
+- Vault files and Kanban YAML are durable artifacts/workflow stores where the file itself matters.
+- Spaces are surfaces over shared item/routing/review state, not separate authorities.
+- Capture/routing code should preserve provenance, confidence, review state, and next safe action.
 - Watchers should compare before writing to avoid self-triggered loops.
 - Bookmark dedup/adoption should preserve stable identity and avoid folder-order flip-flops.
 - Trash/restore must handle sidecars and duplicate-delete cases without direct file removal.
@@ -35,10 +39,11 @@ Status: canonical core doc.
 ## Docs
 
 - The active docs are the core docs in `Docs/INDEX.md`.
+- `Docs/PRODUCT.md` is the canonical second-brain product narrative.
 - Update an existing core doc before creating a new doc.
 - Do not create docs for temporary implementation thinking.
 - Completed plans/specs are harvested and deleted.
-- Old docs are deleted after durable facts are moved into core docs or cards.
+- Legacy docs and branch history are reference material only; promote still-current facts into core docs or cards instead of preserving stale wording.
 
 ## Kanban
 
