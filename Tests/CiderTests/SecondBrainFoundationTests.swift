@@ -1054,23 +1054,42 @@ struct SecondBrainFoundationTests {
         ], vaultURL: vaultURL)
         let agentID = String(try #require(agentOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
 
+        _ = try runCLI([
+            "board", "add-card", "Testing Summary Smoke",
+            "--column", "Testing",
+            "--title", "Passed QA wording smoke",
+            "--notes", """
+            ## Test Evidence
+            - swift test --filter KanbanAgentWorkflowTests passed.
+
+            ## QA Results
+            - Step 1 passed: Confirm failed rows can be cleared.
+            - Step 2 passed: After recording a failed step, inspect testing summary.
+            """,
+        ], vaultURL: vaultURL)
+
         let summary = try jsonObject(from: runCLI([
             "board", "testing-summary", "Testing Summary Smoke",
             "--json",
         ], vaultURL: vaultURL))
 
         let counts = try #require(summary["counts"] as? [String: Any])
-        #expect(counts["total"] as? Int == 2)
+        #expect(counts["total"] as? Int == 3)
         #expect(counts["needsErik"] as? Int == 1)
         #expect(counts["agentCanVerify"] as? Int == 1)
+        #expect(counts["mixed"] as? Int == 1)
 
         let needsErik = try #require(summary["needsErik"] as? [[String: Any]])
-        #expect(needsErik.first?["id"] as? String == manualID)
-        #expect(needsErik.first?["owner"] as? String == "needs_erik")
+        let manual = try #require(needsErik.first { $0["id"] as? String == manualID })
+        #expect(manual["owner"] as? String == "needs_erik")
 
         let agentCanVerify = try #require(summary["agentCanVerify"] as? [[String: Any]])
-        #expect(agentCanVerify.first?["id"] as? String == agentID)
-        #expect(agentCanVerify.first?["owner"] as? String == "agent_can_verify")
+        let agentIDs = agentCanVerify.compactMap { $0["id"] as? String }
+        #expect(agentIDs.contains(agentID))
+        let mixed = try #require(summary["mixed"] as? [[String: Any]])
+        let allTestingCards = needsErik + agentCanVerify + mixed
+        let passedQA = try #require(allTestingCards.first { $0["title"] as? String == "Passed QA wording smoke" })
+        #expect((passedQA["failedQASteps"] as? [String])?.isEmpty == true)
     }
 
     @Test("Kanban testing guide panel payload keeps QA steps portable")
@@ -1120,5 +1139,58 @@ struct SecondBrainFoundationTests {
 
         restoredStore.toggle(guideID: "2afee0:abc123", stepID: step.id)
         #expect(!restoredStore.isCompleted(guideID: "2afee0:abc123", stepID: step.id))
+    }
+
+    @MainActor
+    @Test("Kanban testing guide persists failed step notes")
+    func kanbanTestingGuidePersistsFailedStepNotes() throws {
+        let suiteName = "KanbanTestingGuideResultStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let step = KanbanTestingGuideStep(id: "manual_qa_guidance-0", text: "Click approve.")
+        let store = KanbanTestingGuideProgressStore(defaults: defaults)
+        store.setResult(.failed, note: "Approve opened the slideout instead.", guideID: "2afee0:abc123", stepID: step.id)
+
+        let restoredStore = KanbanTestingGuideProgressStore(defaults: defaults)
+        let result = try #require(restoredStore.result(guideID: "2afee0:abc123", stepID: step.id))
+        #expect(result.status == .failed)
+        #expect(result.note == "Approve opened the slideout instead.")
+        #expect(restoredStore.failedCount(guideID: "2afee0:abc123", steps: [step]) == 1)
+    }
+
+    @Test("Kanban testing guide sync applies the clicked step result")
+    func kanbanTestingGuideSyncAppliesClickedStepResult() {
+        let firstStep = KanbanTestingGuideStep(id: "manual_qa_guidance-0", text: "Open the QA companion.")
+        let secondStep = KanbanTestingGuideStep(id: "manual_qa_guidance-1", text: "Confirm failed steps show notes.")
+        let steps = [firstStep, secondStep]
+
+        let passedResults = KanbanTestingGuideCardResultSync.resultsByApplying(
+            [:],
+            step: firstStep,
+            status: .passed,
+            note: nil
+        )
+        let failedResults = KanbanTestingGuideCardResultSync.resultsByApplying(
+            passedResults,
+            step: secondStep,
+            status: .failed,
+            note: "The note did not sync."
+        )
+
+        #expect(KanbanTestingGuideCardResultSync.qaResultsBody(steps: steps, results: failedResults) == """
+        - Step 1 passed: Open the QA companion.
+        - Step 2 failed: Confirm failed steps show notes. Note: The note did not sync.
+        """)
+
+        let clearedResults = KanbanTestingGuideCardResultSync.resultsByApplying(
+            failedResults,
+            step: secondStep,
+            status: nil,
+            note: nil
+        )
+        #expect(KanbanTestingGuideCardResultSync.qaResultsBody(steps: steps, results: clearedResults) == "- Step 1 passed: Open the QA companion.")
     }
 }

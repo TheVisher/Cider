@@ -11,6 +11,10 @@ struct KanbanTestingGuideFloatingView: View {
         progressStore.completedCount(guideID: payload.id, steps: payload.steps)
     }
 
+    private var failedStepCount: Int {
+        progressStore.failedCount(guideID: payload.id, steps: payload.steps)
+    }
+
     var body: some View {
         GenericItemDetailPanel(
             title: "What To Test",
@@ -75,13 +79,16 @@ struct KanbanTestingGuideFloatingView: View {
                         guideBadge(payload.cardID)
                         guideBadge("\(payload.steps.count) steps")
                         if completedStepCount > 0 {
-                            guideBadge("\(completedStepCount) done")
+                            guideBadge("\(completedStepCount) passed")
+                        }
+                        if failedStepCount > 0 {
+                            guideBadge("\(failedStepCount) failed")
                         }
                     }
                 }
             }
 
-            Text("Keep this open while you leave Kanban and test the app. Checkmarks stay with this card.")
+            Text("Keep this open while you leave Kanban and test the app. Results sync back to this card.")
                 .font(CiderFont.caption)
                 .foregroundColor(CiderColors.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -108,7 +115,9 @@ struct KanbanTestingGuideFloatingView: View {
     private func guideStep(index: Int, step: KanbanTestingGuideStep) -> some View {
         KanbanTestingGuideStepRow(
             guideID: payload.id,
+            payload: payload,
             step: step,
+            stepIndex: index,
             label: "Step \(index + 1)",
             textFont: CiderFont.body,
             showsSelectionEnabledText: true
@@ -153,26 +162,42 @@ struct KanbanTestingGuideFloatingView: View {
 
 struct KanbanTestingGuideStepRow: View {
     let guideID: String
+    var payload: KanbanTestingGuidePanelPayload?
     let step: KanbanTestingGuideStep
+    var stepIndex: Int = 0
     let label: String
     var textFont: Font = CiderFont.caption
     var showsSelectionEnabledText = false
 
     @ObservedObject private var progressStore = KanbanTestingGuideProgressStore.shared
+    @State private var noteDraft = ""
 
     private var isCompleted: Bool {
         progressStore.isCompleted(guideID: guideID, stepID: step.id)
     }
 
+    private var result: KanbanTestingGuideStepResult? {
+        progressStore.result(guideID: guideID, stepID: step.id)
+    }
+
+    private var isFailed: Bool {
+        result?.status == .failed
+    }
+
     var body: some View {
-        Button {
-            progressStore.toggle(guideID: guideID, stepID: step.id)
-        } label: {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(alignment: .top, spacing: Spacing.sm) {
-                Image(systemName: isCompleted ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(isCompleted ? CiderColors.success : CiderColors.tertiary)
-                    .frame(width: 20, height: 20)
+                Button {
+                    setStatus(isCompleted ? nil : .passed)
+                } label: {
+                    Image(systemName: isCompleted ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(isCompleted ? CiderColors.success : CiderColors.tertiary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(isCompleted ? "Clear passed result" : "Mark passed")
 
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     Text(label)
@@ -181,27 +206,109 @@ struct KanbanTestingGuideStepRow: View {
 
                     Text(step.text)
                         .font(textFont)
-                        .foregroundColor(isCompleted ? CiderColors.success : CiderColors.secondary)
+                        .foregroundColor(isCompleted ? CiderColors.success : (isFailed ? CiderColors.destructive : CiderColors.secondary))
                         .strikethrough(isCompleted, color: CiderColors.success.opacity(0.7))
                         .fixedSize(horizontal: false, vertical: true)
                         .modifier(KanbanTestingGuideTextSelection(enabled: showsSelectionEnabledText))
                 }
+
+                Spacer(minLength: Spacing.xs)
+
+                Button {
+                    setStatus(isFailed ? nil : .failed)
+                } label: {
+                    Image(systemName: isFailed ? "xmark.square.fill" : "xmark.square")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(isFailed ? CiderColors.destructive : CiderColors.tertiary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(isFailed ? "Clear failed result" : "Mark failed")
             }
-            .padding(Spacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isCompleted ? CiderColors.success.opacity(0.08) : CiderColors.surfaceInput)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .stroke(
-                        isCompleted ? CiderColors.success.opacity(0.25) : CiderColors.separator.opacity(0.65),
-                        lineWidth: CiderBorder.thinStrokeWidth
-                    )
-            )
+
+            if isFailed || !noteDraft.isEmpty {
+                HStack(spacing: Spacing.xs) {
+                    TextField("Failure note", text: $noteDraft)
+                        .textFieldStyle(.plain)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.primary)
+                        .padding(.horizontal, Spacing.sm)
+                        .padding(.vertical, Spacing.xs)
+                        .background(
+                            RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                .fill(CiderColors.surfaceElevated)
+                        )
+                        .onSubmit {
+                            setStatus(.failed, note: noteDraft)
+                        }
+
+                    Button {
+                        setStatus(.failed, note: noteDraft)
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.secondary)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Save failure note")
+                }
+                .padding(.leading, 28)
+            }
         }
-        .buttonStyle(.plain)
+        .padding(Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(rowBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .stroke(rowStroke, lineWidth: CiderBorder.thinStrokeWidth)
+        )
+        .onAppear {
+            noteDraft = result?.note ?? ""
+        }
+    }
+
+    private var rowBackground: Color {
+        if isCompleted { return CiderColors.success.opacity(0.08) }
+        if isFailed { return CiderColors.destructive.opacity(0.08) }
+        return CiderColors.surfaceInput
+    }
+
+    private var rowStroke: Color {
+        if isCompleted { return CiderColors.success.opacity(0.25) }
+        if isFailed { return CiderColors.destructive.opacity(0.25) }
+        return CiderColors.separator.opacity(0.65)
+    }
+
+    @MainActor
+    private func setStatus(_ status: KanbanTestingGuideStepStatus?, note: String? = nil) {
+        if let status {
+            progressStore.setResult(status, note: note, guideID: guideID, stepID: step.id)
+            if let payload {
+                KanbanTestingGuideCardResultSync.record(
+                    payload: payload,
+                    step: step,
+                    stepIndex: stepIndex,
+                    status: status,
+                    note: note
+                )
+            }
+        } else {
+            progressStore.removeResult(guideID: guideID, stepID: step.id)
+            if let payload {
+                KanbanTestingGuideCardResultSync.record(
+                    payload: payload,
+                    step: step,
+                    stepIndex: stepIndex,
+                    status: nil,
+                    note: nil
+                )
+            }
+        }
     }
 }
 

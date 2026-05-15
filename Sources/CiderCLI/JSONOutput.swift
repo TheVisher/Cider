@@ -344,6 +344,7 @@ func agendaBriefingItemToDict(_ item: AgendaBriefingItem, formatter: ISO8601Date
         "testEvidence": item.testEvidence,
         "agentVerificationSteps": item.agentVerificationSteps,
         "manualQASteps": item.manualQASteps,
+        "failedQASteps": item.failedQASteps,
     ]
     if let priority = item.card.priority { dict["priority"] = priority.rawValue }
     if let parentCardID = item.card.parentCardID { dict["parentCardID"] = parentCardID }

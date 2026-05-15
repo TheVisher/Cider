@@ -84,6 +84,7 @@ struct KanbanTestingTriageSummary: Equatable, Sendable {
         var testEvidence: [String]
         var agentVerificationSteps: [String]
         var manualQASteps: [String]
+        var failedQASteps: [String]
         var parentTitle: String?
     }
 
@@ -109,6 +110,7 @@ struct KanbanTestingTriageSummary: Equatable, Sendable {
                     testEvidence: triage.testEvidence,
                     agentVerificationSteps: triage.agentVerificationSteps,
                     manualQASteps: triage.manualQASteps,
+                    failedQASteps: triage.failedQASteps,
                     parentTitle: card.parentCardID.flatMap { titleByID[$0] }
                 )
             }
@@ -119,7 +121,7 @@ struct KanbanTestingTriageSummary: Equatable, Sendable {
     var agentCanVerify: [Item] { items.filter { $0.owner == .agentCanVerify } }
     var mixed: [Item] { items.filter { $0.owner == .mixed } }
 
-    private static func triage(card: KanbanCard) -> (owner: KanbanTestingOwner, reason: String, whatChanged: [String], testEvidence: [String], agentVerificationSteps: [String], manualQASteps: [String]) {
+    private static func triage(card: KanbanCard) -> (owner: KanbanTestingOwner, reason: String, whatChanged: [String], testEvidence: [String], agentVerificationSteps: [String], manualQASteps: [String], failedQASteps: [String]) {
         let notes = card.notes ?? ""
         let haystack = "\(card.title)\n\(notes)".lowercased()
         let qualityReport = KanbanCardQualityReport(notes: notes)
@@ -129,6 +131,8 @@ struct KanbanTestingTriageSummary: Equatable, Sendable {
         let testEvidence = extractListEntries(from: notes, headings: ["test evidence", "tests", "verification", "automated evidence", "build/qa evidence"])
         let agentVerificationSteps = extractListEntries(from: notes, headings: ["agent verification", "agent can verify", "automated verification", "agent qa"])
         let manualSteps = extractListEntries(from: notes, headings: ["manual qa guidance", "manual qa", "manual testing", "what to test"])
+        let failedQASteps = extractListEntries(from: notes, headings: ["qa results", "testing results", "manual qa results"])
+            .filter(isFailedQAResultLine)
 
         let manualSignals = [
             "manual qa", "manual testing", "needs erik", "erik should", "visual", "visually",
@@ -142,16 +146,19 @@ struct KanbanTestingTriageSummary: Equatable, Sendable {
         let hasManualSignal = hasManualQASection || manualSignals.contains { haystack.contains($0) }
         let hasAgentSignal = hasTestEvidenceSection || !testEvidence.isEmpty || !agentVerificationSteps.isEmpty || agentSignals.contains { haystack.contains($0) }
 
+        if !failedQASteps.isEmpty {
+            return (.agentCanVerify, "Manual QA failed; an agent should inspect and fix before asking Erik to retest.", whatChanged, testEvidence, agentVerificationSteps, manualSteps, failedQASteps)
+        }
         if hasManualSignal && hasAgentSignal {
-            return (.mixed, "Has manual/product QA guidance plus agent-verifiable test or build evidence.", whatChanged, testEvidence, agentVerificationSteps, manualSteps)
+            return (.mixed, "Has manual/product QA guidance plus agent-verifiable test or build evidence.", whatChanged, testEvidence, agentVerificationSteps, manualSteps, failedQASteps)
         }
         if hasManualSignal {
-            return (.needsErik, "Needs visual/manual product judgment that an agent cannot fully verify.", whatChanged, testEvidence, agentVerificationSteps, manualSteps)
+            return (.needsErik, "Needs visual/manual product judgment that an agent cannot fully verify.", whatChanged, testEvidence, agentVerificationSteps, manualSteps, failedQASteps)
         }
         if hasAgentSignal {
-            return (.agentCanVerify, "Looks verifiable through CLI/tests/build evidence without Erik at the Mac.", whatChanged, testEvidence, agentVerificationSteps, manualSteps)
+            return (.agentCanVerify, "Looks verifiable through CLI/tests/build evidence without Erik at the Mac.", whatChanged, testEvidence, agentVerificationSteps, manualSteps, failedQASteps)
         }
-        return (.mixed, "No clear QA evidence or manual guidance found; needs an agent pass to classify before asking Erik.", whatChanged, testEvidence, agentVerificationSteps, manualSteps)
+        return (.mixed, "No clear QA evidence or manual guidance found; needs an agent pass to classify before asking Erik.", whatChanged, testEvidence, agentVerificationSteps, manualSteps, failedQASteps)
     }
 
     private static func extractListEntries(from notes: String, headings: [String]) -> [String] {
@@ -179,6 +186,16 @@ struct KanbanTestingTriageSummary: Equatable, Sendable {
         }
 
         return Array(steps.prefix(5))
+    }
+
+    private static func isFailedQAResultLine(_ line: String) -> Bool {
+        let normalized = line
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-•* "))
+            .lowercased()
+        if normalized.range(of: #"^step\s+\d+\s+failed:"#, options: .regularExpression) != nil {
+            return true
+        }
+        return normalized.hasPrefix("failed:") || normalized.hasPrefix("failed ")
     }
 
     private static func normalizedHeading(_ line: String) -> String {

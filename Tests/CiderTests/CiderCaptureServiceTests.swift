@@ -23,7 +23,9 @@ struct CiderCaptureServiceTests {
         return db
     }
 
-    private func withIsolatedVault<T>(_ body: (CiderDatabase, VaultBookmarkService) throws -> T) throws -> T {
+    private func withIsolatedVault<T>(
+        _ body: (CiderDatabase, VaultBookmarkService, NotesStorage, TodoCardStorage, VaultFileStorage) throws -> T
+    ) throws -> T {
         let previousOverride = StoragePaths.vaultOverride
         let vault = try makeTempVault()
         StoragePaths.vaultOverride = vault
@@ -37,14 +39,24 @@ struct CiderCaptureServiceTests {
             try? FileManager.default.removeItem(at: vault)
         }
         let bookmarks = VaultBookmarkService(database: db, schedulesEnrichment: false)
-        return try body(db, bookmarks)
+        let notes = NotesStorage(database: db)
+        let todos = TodoCardStorage(database: db)
+        let files = VaultFileStorage(database: db)
+        return try body(db, bookmarks, notes, todos, files)
     }
 
     @Test("capture add stores a URL in Inbox immediately and returns agent state")
     func captureAddStoresURLImmediately() throws {
-        try withIsolatedVault { db, bookmarks in
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
             let routing = CiderRoutingDecisionService(database: db)
-            let service = CiderCaptureService(bookmarkService: bookmarks, routingDecisionService: routing)
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: routing
+            )
 
             let result = try service.add("https://example.com/articles/42?utm_source=test")
 
@@ -90,8 +102,14 @@ struct CiderCaptureServiceTests {
 
     @Test("capture add returns duplicate state for an existing URL")
     func captureAddReportsDuplicate() throws {
-        try withIsolatedVault { _, bookmarks in
-            let service = CiderCaptureService(bookmarkService: bookmarks)
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db
+            )
 
             let first = try service.add("https://example.com/duplicate")
             let second = try service.add("https://example.com/duplicate")
@@ -102,6 +120,120 @@ struct CiderCaptureServiceTests {
             #expect(second.duplicate.existingItemID == first.item.id)
             #expect(second.routing.reviewNeeded == true)
             #expect(second.nextSafeAction == "inspect_existing_item")
+        }
+    }
+
+    @Test("capture add stores plain text as a note through the shared result shape")
+    func captureAddStoresPlainTextAsNote() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let routing = CiderRoutingDecisionService(database: db)
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: routing
+            )
+
+            let result = try service.add(
+                "Cider should let me throw random thoughts into one capture box.",
+                title: "One capture box"
+            )
+
+            #expect(result.command == "capture.add")
+            #expect(result.source.kind == "text")
+            #expect(result.source.text == "Cider should let me throw random thoughts into one capture box.")
+            #expect(result.source.itemType == "note")
+            #expect(result.item.type == "note")
+            #expect(result.item.title == "One capture box")
+            #expect(result.item.relativePath?.hasPrefix("Inbox/Notes/") == true)
+            #expect(result.enrichment.status == "not_applicable")
+            #expect(result.duplicate.status == "not_checked")
+            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.candidateTarget?.relativePath == "Inbox/Notes")
+            #expect(result.nextSafeAction == "review_route")
+
+            let storedNote = notes.notes.first(where: { $0.id == result.item.id })
+            #expect(storedNote?.title == "One capture box")
+            #expect(notes.loadContent(for: storedNote!) == "Cider should let me throw random thoughts into one capture box.")
+
+            let explanation = try routing.explain(itemID: result.item.id)
+            #expect(explanation.item.type == "note")
+            #expect(explanation.latestDecision?.reviewState == "needs_review")
+            #expect(explanation.latestDecision?.target.relativePath == "Inbox/Notes")
+        }
+    }
+
+    @Test("capture add stores task-like text as a todo through the shared result shape")
+    func captureAddStoresTaskTextAsTodo() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let routing = CiderRoutingDecisionService(database: db)
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: routing
+            )
+
+            let result = try service.add("todo: Call the dentist next week")
+
+            #expect(result.source.kind == "text")
+            #expect(result.source.itemType == "todo")
+            #expect(result.item.type == "todo")
+            #expect(result.item.title == "Call the dentist next week")
+            #expect(result.item.relativePath?.hasPrefix("Inbox/Todos/") == true)
+            #expect(result.routing.candidateTarget?.relativePath == "Inbox/Todos")
+            #expect(result.nextSafeAction == "review_route")
+
+            let storedTodo = todos.todoCards.first(where: { $0.id == result.item.id })
+            #expect(storedTodo?.title == "Call the dentist next week")
+            let explanation = try routing.explain(itemID: result.item.id)
+            #expect(explanation.item.type == "todo")
+            #expect(explanation.latestDecision?.source == "capture.add")
+        }
+    }
+
+    @Test("capture add imports an existing file into Inbox files through the shared result shape")
+    func captureAddImportsExistingFile() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let routing = CiderRoutingDecisionService(database: db)
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: routing
+            )
+            let sourceURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cider-capture-source-\(UUID().uuidString).png")
+            try Data([0x89, 0x50, 0x4E, 0x47]).write(to: sourceURL)
+            defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+            let result = try service.add(sourceURL.path, title: "Receipt photo")
+
+            #expect(result.source.kind == "file")
+            #expect(result.source.file == sourceURL.path)
+            #expect(result.source.itemType == "vaultFile")
+            #expect(result.item.type == "vaultFile")
+            #expect(result.item.title == "Receipt photo")
+            #expect(result.item.relativePath?.hasPrefix("Inbox/Images/") == true)
+            #expect(result.routing.candidateTarget?.relativePath == "Inbox/Images")
+            #expect(result.nextSafeAction == "review_route")
+
+            let copiedPath = try #require(result.item.relativePath)
+            let copiedURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(copiedPath)
+            #expect(FileManager.default.fileExists(atPath: copiedURL.path))
+
+            let itemStatement = try db.prepare("SELECT type, title, relative_path FROM items WHERE id = ?;")
+            itemStatement.bind(result.item.id.uuidString, at: 1)
+            #expect(try itemStatement.step())
+            #expect(itemStatement.string(at: 0) == "vaultFile")
+            #expect(itemStatement.string(at: 1) == "Receipt photo")
+            #expect(itemStatement.string(at: 2).hasPrefix("Inbox/Images/"))
         }
     }
 }

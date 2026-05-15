@@ -5,6 +5,17 @@ struct KanbanTestingGuideStep: Hashable, Identifiable, Sendable {
     var text: String
 }
 
+enum KanbanTestingGuideStepStatus: String, Codable, Hashable, Sendable {
+    case passed
+    case failed
+}
+
+struct KanbanTestingGuideStepResult: Codable, Hashable, Sendable {
+    var status: KanbanTestingGuideStepStatus
+    var note: String?
+    var updatedAt: Date
+}
+
 struct KanbanTestingGuidePanelPayload: Hashable, Identifiable, Sendable {
     var boardID: String
     var boardName: String
@@ -57,6 +68,12 @@ struct KanbanTestingGuidePanelModel: Equatable {
 final class KanbanTestingGuideProgressStore: ObservableObject {
     static let shared = KanbanTestingGuideProgressStore()
 
+    @Published private var stepResultsByGuide: [String: [String: KanbanTestingGuideStepResult]] = [:] {
+        didSet {
+            persistStepResults()
+        }
+    }
+
     @Published private var completedStepIDsByGuide: [String: Set<String>] = [:] {
         didSet {
             persistCompletedStepIDs()
@@ -64,15 +81,23 @@ final class KanbanTestingGuideProgressStore: ObservableObject {
     }
 
     private let defaultsKey = "kanbanTestingGuide.completedStepIDsByGuide"
+    private let resultsDefaultsKey = "kanbanTestingGuide.stepResultsByGuide"
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         completedStepIDsByGuide = Self.loadCompletedStepIDs(from: defaults, key: defaultsKey)
+        stepResultsByGuide = Self.loadStepResults(from: defaults, key: resultsDefaultsKey)
+        migrateCompletedStepsIntoResults()
     }
 
     func isCompleted(guideID: String, stepID: String) -> Bool {
-        completedStepIDsByGuide[guideID, default: []].contains(stepID)
+        result(guideID: guideID, stepID: stepID)?.status == .passed
+            || completedStepIDsByGuide[guideID, default: []].contains(stepID)
+    }
+
+    func result(guideID: String, stepID: String) -> KanbanTestingGuideStepResult? {
+        stepResultsByGuide[guideID]?[stepID]
     }
 
     func toggle(guideID: String, stepID: String) {
@@ -80,13 +105,61 @@ final class KanbanTestingGuideProgressStore: ObservableObject {
     }
 
     func setCompleted(_ isCompleted: Bool, guideID: String, stepID: String) {
-        var completedStepIDs = completedStepIDsByGuide[guideID, default: []]
         if isCompleted {
+            setResult(.passed, note: nil, guideID: guideID, stepID: stepID)
+        } else {
+            removeResult(guideID: guideID, stepID: stepID)
+        }
+    }
+
+    func setResult(
+        _ status: KanbanTestingGuideStepStatus,
+        note: String? = nil,
+        guideID: String,
+        stepID: String
+    ) {
+        let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedNote = trimmedNote?.isEmpty == false ? trimmedNote : nil
+        var guideResults = stepResultsByGuide[guideID, default: [:]]
+        guideResults[stepID] = KanbanTestingGuideStepResult(
+            status: status,
+            note: normalizedNote,
+            updatedAt: Date()
+        )
+        stepResultsByGuide[guideID] = guideResults
+
+        var completedStepIDs = completedStepIDsByGuide[guideID, default: []]
+        if status == .passed {
             completedStepIDs.insert(stepID)
         } else {
             completedStepIDs.remove(stepID)
         }
+        setCompletedStepIDs(completedStepIDs, guideID: guideID)
+    }
 
+    func removeResult(guideID: String, stepID: String) {
+        var guideResults = stepResultsByGuide[guideID, default: [:]]
+        guideResults.removeValue(forKey: stepID)
+        if guideResults.isEmpty {
+            stepResultsByGuide.removeValue(forKey: guideID)
+        } else {
+            stepResultsByGuide[guideID] = guideResults
+        }
+
+        var completedStepIDs = completedStepIDsByGuide[guideID, default: []]
+        completedStepIDs.remove(stepID)
+        setCompletedStepIDs(completedStepIDs, guideID: guideID)
+    }
+
+    func completedCount(guideID: String, steps: [KanbanTestingGuideStep]) -> Int {
+        steps.filter { isCompleted(guideID: guideID, stepID: $0.id) }.count
+    }
+
+    func failedCount(guideID: String, steps: [KanbanTestingGuideStep]) -> Int {
+        steps.filter { result(guideID: guideID, stepID: $0.id)?.status == .failed }.count
+    }
+
+    private func setCompletedStepIDs(_ completedStepIDs: Set<String>, guideID: String) {
         if completedStepIDs.isEmpty {
             completedStepIDsByGuide.removeValue(forKey: guideID)
         } else {
@@ -94,14 +167,30 @@ final class KanbanTestingGuideProgressStore: ObservableObject {
         }
     }
 
-    func completedCount(guideID: String, steps: [KanbanTestingGuideStep]) -> Int {
-        let completedStepIDs = completedStepIDsByGuide[guideID, default: []]
-        return steps.filter { completedStepIDs.contains($0.id) }.count
-    }
-
     private func persistCompletedStepIDs() {
         let payload = completedStepIDsByGuide.mapValues { Array($0).sorted() }
         defaults.set(payload, forKey: defaultsKey)
+    }
+
+    private func persistStepResults() {
+        guard let data = try? JSONEncoder().encode(stepResultsByGuide) else { return }
+        defaults.set(data, forKey: resultsDefaultsKey)
+    }
+
+    private func migrateCompletedStepsIntoResults() {
+        var migrated = stepResultsByGuide
+        var didMigrate = false
+        for (guideID, stepIDs) in completedStepIDsByGuide {
+            var guideResults = migrated[guideID, default: [:]]
+            for stepID in stepIDs where guideResults[stepID] == nil {
+                guideResults[stepID] = KanbanTestingGuideStepResult(status: .passed, note: nil, updatedAt: Date())
+                didMigrate = true
+            }
+            migrated[guideID] = guideResults
+        }
+        if didMigrate {
+            stepResultsByGuide = migrated
+        }
     }
 
     private static func loadCompletedStepIDs(from defaults: UserDefaults, key: String) -> [String: Set<String>] {
@@ -109,5 +198,92 @@ final class KanbanTestingGuideProgressStore: ObservableObject {
             return [:]
         }
         return payload.mapValues(Set.init)
+    }
+
+    private static func loadStepResults(from defaults: UserDefaults, key: String) -> [String: [String: KanbanTestingGuideStepResult]] {
+        guard let data = defaults.data(forKey: key),
+              let payload = try? JSONDecoder().decode([String: [String: KanbanTestingGuideStepResult]].self, from: data) else {
+            return [:]
+        }
+        return payload
+    }
+}
+
+enum KanbanTestingGuideCardResultSync {
+    @MainActor
+    static func record(
+        payload: KanbanTestingGuidePanelPayload,
+        step: KanbanTestingGuideStep,
+        stepIndex: Int,
+        status: KanbanTestingGuideStepStatus?,
+        note: String?
+    ) {
+        guard let detail = KanbanStorage.shared.findCard(id: payload.cardID),
+              detail.board.id == payload.boardID else { return }
+
+        var card = detail.card
+        let currentResults = KanbanTestingGuideProgressStore.sharedResults(
+            guideID: payload.id,
+            steps: payload.steps
+        )
+        let results = resultsByApplying(
+            currentResults,
+            step: step,
+            status: status,
+            note: note
+        )
+        let body = qaResultsBody(steps: payload.steps, results: results)
+        card.notes = KanbanCardSectionParser.updatingSection(in: card.notes, title: "QA Results", body: body)
+        KanbanStorage.shared.updateCard(boardID: payload.boardID, card: card)
+    }
+
+    static func resultsByApplying(
+        _ existing: [String: KanbanTestingGuideStepResult],
+        step: KanbanTestingGuideStep,
+        status: KanbanTestingGuideStepStatus?,
+        note: String?
+    ) -> [String: KanbanTestingGuideStepResult] {
+        var results = existing
+        guard let status else {
+            results.removeValue(forKey: step.id)
+            return results
+        }
+
+        let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        results[step.id] = KanbanTestingGuideStepResult(
+            status: status,
+            note: trimmedNote?.isEmpty == false ? trimmedNote : nil,
+            updatedAt: Date()
+        )
+        return results
+    }
+
+    static func qaResultsBody(
+        steps: [KanbanTestingGuideStep],
+        results: [String: KanbanTestingGuideStepResult]
+    ) -> String {
+        steps.enumerated().compactMap { index, step -> String? in
+            guard let result = results[step.id] else { return nil }
+            let status = result.status == .passed ? "passed" : "failed"
+            var line = "- Step \(index + 1) \(status): \(step.text)"
+            let trimmedNote = result.note?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let note = trimmedNote, !note.isEmpty {
+                line += " Note: \(note)"
+            }
+            return line
+        }
+        .joined(separator: "\n")
+    }
+}
+
+private extension KanbanTestingGuideProgressStore {
+    static func sharedResults(
+        guideID: String,
+        steps: [KanbanTestingGuideStep]
+    ) -> [String: KanbanTestingGuideStepResult] {
+        Dictionary(uniqueKeysWithValues: steps.compactMap { step in
+            guard let result = shared.result(guideID: guideID, stepID: step.id) else { return nil }
+            return (step.id, result)
+        })
     }
 }

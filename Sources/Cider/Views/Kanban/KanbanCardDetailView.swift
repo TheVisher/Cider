@@ -312,6 +312,10 @@ private struct KanbanDashboardTestingGuidanceView: View {
         progressStore.completedCount(guideID: companionPayload.id, steps: companionPayload.steps)
     }
 
+    private var failedStepCount: Int {
+        progressStore.failedCount(guideID: companionPayload.id, steps: companionPayload.steps)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.xs) {
@@ -324,7 +328,10 @@ private struct KanbanDashboardTestingGuidanceView: View {
                 Spacer(minLength: Spacing.sm)
                 KanbanDashboardBadge(text: "\(entries.count)")
                 if completedStepCount > 0 {
-                    KanbanDashboardBadge(text: "\(completedStepCount) done")
+                    KanbanDashboardBadge(text: "\(completedStepCount) passed")
+                }
+                if failedStepCount > 0 {
+                    KanbanDashboardBadge(text: "\(failedStepCount) failed")
                 }
                 Button {
                     let surface = CiderFloatableSurface.kanbanTestingGuide(companionPayload)
@@ -348,7 +355,9 @@ private struct KanbanDashboardTestingGuidanceView: View {
                 ForEach(Array(visibleSteps.enumerated()), id: \.element.id) { index, step in
                     KanbanTestingGuideStepRow(
                         guideID: companionPayload.id,
+                        payload: companionPayload,
                         step: step,
+                        stepIndex: index,
                         label: "Step \(index + 1)",
                         textFont: CiderFont.caption
                     )

@@ -179,4 +179,73 @@ struct KanbanAgentWorkflowTests {
         ])
         #expect(item.manualQASteps == ["Open the card detail and confirm the Testing section is readable."])
     }
+
+    @Test("testing triage exposes failed manual QA as agent review work")
+    func testingTriageExposesFailedManualQAAsAgentReviewWork() {
+        let board = KanbanBoard(
+            id: "qa-results-board",
+            name: "QA Results Board",
+            columns: [
+                KanbanColumn(
+                    id: "testing",
+                    name: "Testing",
+                    cards: [
+                        KanbanCard(
+                            id: "failed",
+                            title: "Review queue action polish",
+                            notes: """
+                            ## Manual QA Guidance
+                            - Click Enrich and route from the Review Queue.
+
+                            ## QA Results
+                            - Step 1 failed: Click Enrich and route from the Review Queue. Note: It only opened the slideout.
+                            """
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        let item = KanbanTestingTriageSummary(board: board).items[0]
+
+        #expect(item.owner == .agentCanVerify)
+        #expect(item.failedQASteps == [
+            "Step 1 failed: Click Enrich and route from the Review Queue. Note: It only opened the slideout.",
+        ])
+        #expect(item.reason == "Manual QA failed; an agent should inspect and fix before asking Erik to retest.")
+    }
+
+    @Test("testing triage ignores passed QA steps whose instructions mention failure")
+    func testingTriageIgnoresPassedQAStepsWhoseInstructionsMentionFailure() {
+        let board = KanbanBoard(
+            id: "qa-results-board",
+            name: "QA Results Board",
+            columns: [
+                KanbanColumn(
+                    id: "testing",
+                    name: "Testing",
+                    cards: [
+                        KanbanCard(
+                            id: "passed",
+                            title: "QA companion polish",
+                            notes: """
+                            ## Test Evidence
+                            - swift test --filter KanbanAgentWorkflowTests passed.
+
+                            ## QA Results
+                            - Step 1 passed: Confirm failed rows can be cleared.
+                            - Step 2 passed: After recording a failed step, inspect testing summary.
+                            """
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        let item = KanbanTestingTriageSummary(board: board).items[0]
+
+        #expect(item.owner == .mixed)
+        #expect(item.failedQASteps.isEmpty)
+        #expect(item.reason != "Manual QA failed; an agent should inspect and fix before asking Erik to retest.")
+    }
 }

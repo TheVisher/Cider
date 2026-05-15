@@ -389,7 +389,7 @@ struct CiderCLI {
         switch subcommand {
         case "add":
             guard let source = args.first else {
-                print("Error: Source required. Usage: cider-cli capture add <url> [--title <title>] [--folder <name|path>] [--json]")
+                print("Error: Source required. Usage: cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--json]")
                 return
             }
 
@@ -401,7 +401,8 @@ struct CiderCLI {
             }
 
             do {
-                let result = try CiderCaptureService(bookmarkService: bookmarkService).add(
+                let database = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil
+                let result = try CiderCaptureService(bookmarkService: bookmarkService, database: database).add(
                     source,
                     title: parseFlag("--title", from: args),
                     folderID: targetFolder?.id
@@ -410,6 +411,8 @@ struct CiderCLI {
                     outputJSON(result.toDictionary())
                 } else {
                     print("Captured: \(result.item.title) (\(result.item.id.uuidString.prefix(8)))")
+                    print("  Type: \(result.item.type)")
+                    print("  Source: \(result.source.kind)")
                     if let relativePath = result.item.relativePath {
                         print("  Path: \(relativePath)")
                     }
@@ -423,7 +426,7 @@ struct CiderCLI {
             }
 
         case nil, "help", "--help", "-h":
-            print("Usage: cider-cli capture add <url> [--title <title>] [--folder <name|path>] [--json]")
+            print("Usage: cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--json]")
 
         default:
             print("Unknown capture command: \(subcommand ?? "nil")")
@@ -2459,12 +2462,14 @@ struct CiderCLI {
 
     static func handleItem(subcommand: String?, args: [String]) {
         let store = SecondBrainStore(database: .shared)
+        let contextService = CiderItemContextService(database: .shared, secondBrainStore: store)
         switch subcommand {
         case nil, "help", "--help", "-h":
             print("""
             Item graph commands:
               cider-cli item search <query> [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
+              cider-cli item related <type> <id-or-ref> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
               cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
               cider-cli item backfill-kanban [--board <name-or-id>] [--json]
@@ -2479,15 +2484,16 @@ struct CiderCLI {
             }
             let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 20
             do {
-                let results = try store.searchChunks(query: query, limit: limit)
+                let results = try contextService.search(query, limit: limit)
                 if jsonOutput {
-                    outputJSON(results.map(secondBrainSearchResultToDict))
+                    outputJSON(results.map(itemSearchResultToDict))
                 } else if results.isEmpty {
                     print("No item graph results for '\(query)'.")
                 } else {
                     print("Item graph search '\(query)' (\(results.count) results):")
                     for result in results {
-                        print("  [\(result.owner.ownerType):\(result.owner.ownerID)] \(result.title) — \(result.snippet)")
+                        let label = result.kind == .item ? "item" : "chunk"
+                        print("  [\(label) \(result.owner.ownerType):\(result.owner.ownerID)] \(result.title) — \(result.snippet)")
                     }
                 }
             } catch {
@@ -2498,6 +2504,35 @@ struct CiderCLI {
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
                 printCLIError("Usage: cider-cli item get <type> <id-or-ref> [--json]")
+                return
+            }
+            if let entityType = try? ItemLinkService.entityType(from: positional[0]) {
+                do {
+                    let ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
+                    let bundle = try contextService.context(for: ref)
+                    if jsonOutput {
+                        var dict = itemContextBundleToDict(bundle)
+                        dict["ok"] = true
+                        dict["exists"] = true
+                        dict["ownerResolved"] = true
+                        dict["sourceRef"] = [
+                            "type": positional[0],
+                            "ref": positional[1],
+                        ]
+                        outputJSON(dict)
+                    } else {
+                        print("\(bundle.item.type.rawValue):\(bundle.item.id.uuidString)")
+                        print("  Title: \(bundle.item.title)")
+                        if let relativePath = bundle.item.relativePath {
+                            print("  Path: \(relativePath)")
+                        }
+                        print("  Sections: \(bundle.sections.count)")
+                        print("  Chunks: \(bundle.chunks.count)")
+                        print("  Related: \(bundle.related.count)")
+                    }
+                } catch {
+                    printCLIError(error.localizedDescription)
+                }
                 return
             }
             let owner = normalizedOwner(type: positional[0], ref: positional[1])
@@ -2536,6 +2571,29 @@ struct CiderCLI {
                     }
                     if !actions.isEmpty {
                         print("  Agent actions: \(actions.count)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "related":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item related <type> <id-or-ref> [--json]")
+                return
+            }
+            do {
+                let type = try ItemLinkService.entityType(from: positional[0])
+                let ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+                let related = try contextService.related(for: ref)
+                if jsonOutput {
+                    outputJSON(related.map(itemLinkSummaryToDict))
+                } else if related.isEmpty {
+                    print("No related items.")
+                } else {
+                    for summary in related {
+                        print("  [\(summary.ref.entityID.uuidString.prefix(8))] \(summary.ref.type.rawValue): \(summary.title) — \(summary.subtitle)")
                     }
                 }
             } catch {
@@ -5781,6 +5839,12 @@ struct CiderCLI {
                     print("        • \(step)")
                 }
             }
+            if !item.failedQASteps.isEmpty {
+                print("      Failed QA:")
+                for step in item.failedQASteps.prefix(3) {
+                    print("        • \(step)")
+                }
+            }
             if !item.manualQASteps.isEmpty {
                 print("      Manual QA:")
                 for step in item.manualQASteps.prefix(3) {
@@ -6031,6 +6095,9 @@ struct CiderCLI {
 
     static func testingQueueOwnerReason(for card: KanbanCard) -> String {
         let model = KanbanCardDashboardModel(title: card.title, notes: card.notes)
+        if !failedQASteps(in: card.notes).isEmpty {
+            return "agent"
+        }
         let haystack = [
             card.title,
             card.notes ?? "",
@@ -6053,6 +6120,29 @@ struct CiderCLI {
             "approve",
         ]
         return manualSignals.contains { haystack.contains($0) } ? "manual" : "agent"
+    }
+
+    static func failedQASteps(in notes: String?) -> [String] {
+        KanbanCardSectionParser.sections(from: notes)
+            .filter { ["qa_results", "testing_results", "manual_qa_results"].contains($0.key) }
+            .flatMap { section in
+                section.body.components(separatedBy: .newlines).compactMap { rawLine -> String? in
+                    let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let stripped = line.trimmingCharacters(in: CharacterSet(charactersIn: "-* "))
+                    guard isFailedQAResultLine(stripped) else { return nil }
+                    return stripped.isEmpty ? nil : stripped
+                }
+            }
+    }
+
+    static func isFailedQAResultLine(_ line: String) -> Bool {
+        let normalized = line
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-•* "))
+            .lowercased()
+        if normalized.range(of: #"^step\s+\d+\s+failed:"#, options: .regularExpression) != nil {
+            return true
+        }
+        return normalized.hasPrefix("failed:") || normalized.hasPrefix("failed ")
     }
 
     static func sortTestingQueueEntries(_ entries: [BoardTestingSummaryEntry]) -> [BoardTestingSummaryEntry] {
@@ -6101,6 +6191,10 @@ struct CiderCLI {
         if let nextStep = model.nextStep {
             dict["nextStep"] = nextStep
         }
+        let failedSteps = failedQASteps(in: entry.card.notes)
+        if !failedSteps.isEmpty {
+            dict["failedQASteps"] = failedSteps
+        }
         if let parent = entry.parent {
             dict["parent"] = minimalCardToDict(parent)
         }
@@ -6147,6 +6241,10 @@ struct CiderCLI {
         }
         if let nextStep = model.nextStep {
             dict["nextStep"] = nextStep
+        }
+        let failedSteps = failedQASteps(in: entry.card.notes)
+        if !failedSteps.isEmpty {
+            dict["failedQASteps"] = failedSteps
         }
         if let parent = entry.parent {
             dict["parent"] = minimalCardToDict(parent)
@@ -6363,6 +6461,72 @@ struct CiderCLI {
             "snippet": result.snippet,
             "rank": result.rank,
         ]
+    }
+
+    static func itemSummaryToDict(_ item: CiderItemSummary) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": item.id.uuidString,
+            "type": item.type.rawValue,
+            "title": item.title,
+            "createdAt": ISO8601DateFormatter().string(from: item.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: item.updatedAt),
+        ]
+        if let relativePath = item.relativePath { dict["relativePath"] = relativePath }
+        if let folderID = item.folderID { dict["folderID"] = folderID.uuidString }
+        return dict
+    }
+
+    static func itemChunkToDict(_ chunk: CiderItemChunk) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": chunk.id,
+            "owner": ownerToDict(chunk.owner),
+            "source": chunk.source,
+            "title": chunk.title,
+            "body": chunk.body,
+            "chunkIndex": chunk.chunkIndex,
+            "metadata": chunk.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: chunk.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: chunk.updatedAt),
+        ]
+        if let itemID = chunk.itemID { dict["itemID"] = itemID.uuidString }
+        return dict
+    }
+
+    static func itemLinkSummaryToDict(_ summary: ItemLinkSummary) -> [String: Any] {
+        [
+            "type": summary.ref.type.rawValue,
+            "id": summary.ref.entityID.uuidString,
+            "title": summary.title,
+            "subtitle": summary.subtitle,
+            "symbol": summary.symbol,
+        ]
+    }
+
+    static func itemContextBundleToDict(_ bundle: CiderItemContextBundle) -> [String: Any] {
+        [
+            "item": itemSummaryToDict(bundle.item),
+            "owner": ownerToDict(bundle.owner),
+            "sections": bundle.sections.map(secondBrainSectionToDict),
+            "chunks": bundle.chunks.map(itemChunkToDict),
+            "related": bundle.related.map(itemLinkSummaryToDict),
+            "routingDecisions": bundle.routingDecisions.map(routingDecisionToDict),
+            "agentActions": bundle.agentActions.map(agentActionToDict),
+        ]
+    }
+
+    static func itemSearchResultToDict(_ result: CiderItemSearchResult) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": result.id,
+            "kind": result.kind.rawValue,
+            "owner": ownerToDict(result.owner),
+            "title": result.title,
+            "snippet": result.snippet,
+            "rank": result.rank,
+        ]
+        if let item = result.item {
+            dict["item"] = itemSummaryToDict(item)
+        }
+        return dict
     }
 
     static func routingDecisionToDict(_ decision: SecondBrainRoutingDecision) -> [String: Any] {
@@ -7112,7 +7276,7 @@ struct CiderCLI {
         CiderCLI — Full command-line interface to Cider's vault
 
         CAPTURE
-          cider-cli capture add <url> [--title <title>] [--folder <name|path>] [--json]
+          cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--json]
 
         ROUTING
           cider-cli routing explain <item-id> [--json]

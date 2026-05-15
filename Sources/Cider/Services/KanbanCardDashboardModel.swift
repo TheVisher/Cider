@@ -298,6 +298,9 @@ struct KanbanCardDashboardModel: Equatable {
         "implementation_evidence",
         "implementation_history",
         "verification",
+        "qa_results",
+        "testing_results",
+        "manual_qa_results",
         "latest_verification_snapshot",
         "failed_attempts",
     ]
