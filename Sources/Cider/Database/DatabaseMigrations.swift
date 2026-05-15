@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 8
+    static let latestVersion: Int = 10
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -59,7 +59,246 @@ enum DatabaseMigrations {
         }
         if currentVersion < 8 {
             try migrateToV8(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 9 {
+            try migrateToV9(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 10 {
+            try migrateToV10(db)
+        }
+    }
+
+    // MARK: - V9 -> V10: Repair legacy routing_decisions table shape
+
+    private struct LegacyRoutingDecisionRow {
+        var id: String
+        var itemID: String
+        var ownerType: String
+        var targetType: String
+        var targetID: String?
+        var targetPath: String?
+        var confidence: Double
+        var reason: String
+        var status: String
+        var actor: String
+        var source: String
+        var createdAt: Double
+    }
+
+    private static func migrateToV10(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 10...")
+
+        try withTransaction(db) {
+            try repairRoutingDecisionsSchemaIfNeeded(db)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_routing_decisions_item ON routing_decisions(item_id, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_routing_decisions_review ON routing_decisions(review_state);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (10);")
+        }
+
+        logger.info("Migration to v10 complete")
+    }
+
+    private static func repairRoutingDecisionsSchemaIfNeeded(_ db: OpaquePointer) throws {
+        guard try tableExists(db, table: "routing_decisions") else {
+            try runOnDB(db, CiderSchema.createRoutingDecisions)
+            return
+        }
+
+        let hasCurrentColumns = try columnExists(db, table: "routing_decisions", column: "item_type")
+            && columnExists(db, table: "routing_decisions", column: "target_kind")
+            && columnExists(db, table: "routing_decisions", column: "review_state")
+        if hasCurrentColumns { return }
+
+        let legacyTableName = try nextAvailableLegacyRoutingTableName(db)
+        try runOnDB(db, "ALTER TABLE routing_decisions RENAME TO \(quoteIdentifier(legacyTableName));")
+        try runOnDB(db, "DROP INDEX IF EXISTS idx_routing_decisions_item;")
+        try runOnDB(db, "DROP INDEX IF EXISTS idx_routing_decisions_review;")
+        try runOnDB(db, CiderSchema.createRoutingDecisions)
+
+        let legacyRows = try readLegacyRoutingDecisionRows(db, table: legacyTableName)
+        for legacyRow in legacyRows {
+            guard let itemType = try itemType(for: legacyRow.itemID, fallback: legacyRow.ownerType, db: db) else {
+                continue
+            }
+            try insertMigratedRoutingDecision(legacyRow, itemType: itemType, db: db)
+        }
+    }
+
+    private static func nextAvailableLegacyRoutingTableName(_ db: OpaquePointer) throws -> String {
+        let base = "routing_decisions_legacy_v9"
+        if !(try tableExists(db, table: base)) { return base }
+
+        var index = 2
+        while try tableExists(db, table: "\(base)_\(index)") {
+            index += 1
+        }
+        return "\(base)_\(index)"
+    }
+
+    private static func readLegacyRoutingDecisionRows(_ db: OpaquePointer, table: String) throws -> [LegacyRoutingDecisionRow] {
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        let sql = """
+            SELECT id, item_id, owner_type, target_type, target_id, target_path,
+                   confidence, reason, status, actor, source, created_at
+            FROM \(quoteIdentifier(table));
+            """
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw CiderDatabaseError.prepare(String(cString: sqlite3_errmsg(db)))
+        }
+
+        var rows: [LegacyRoutingDecisionRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            rows.append(LegacyRoutingDecisionRow(
+                id: sqliteString(stmt, 0) ?? UUID().uuidString,
+                itemID: sqliteString(stmt, 1) ?? "",
+                ownerType: sqliteString(stmt, 2) ?? "item",
+                targetType: sqliteString(stmt, 3) ?? "folder",
+                targetID: sqliteString(stmt, 4),
+                targetPath: sqliteString(stmt, 5),
+                confidence: sqlite3_column_double(stmt, 6),
+                reason: sqliteString(stmt, 7) ?? "Migrated from legacy routing decision schema.",
+                status: sqliteString(stmt, 8) ?? "needs_review",
+                actor: sqliteString(stmt, 9) ?? "unknown",
+                source: sqliteString(stmt, 10) ?? "routing.migration.v10",
+                createdAt: sqlite3_column_double(stmt, 11)
+            ))
+        }
+        return rows
+    }
+
+    private static func insertMigratedRoutingDecision(
+        _ row: LegacyRoutingDecisionRow,
+        itemType: String,
+        db: OpaquePointer
+    ) throws {
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        let sql = """
+            INSERT INTO routing_decisions (
+                id, item_id, item_type, target_kind, target_name, target_relative_path,
+                target_folder_id, confidence, reason, actor, source, review_state,
+                created_at, supersedes_decision_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL);
+            """
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw CiderDatabaseError.prepare(String(cString: sqlite3_errmsg(db)))
+        }
+
+        let targetPath = normalizedTargetPath(row.targetPath)
+        let targetFolderID = try existingFolderID(row.targetID, db: db)
+        bindText(stmt, 1, row.id)
+        bindText(stmt, 2, row.itemID)
+        bindText(stmt, 3, itemType)
+        bindText(stmt, 4, normalizedTargetKind(row.targetType, targetPath: targetPath))
+        bindText(stmt, 5, targetName(path: targetPath, folderID: targetFolderID, db: db))
+        bindText(stmt, 6, targetPath)
+        bindText(stmt, 7, targetFolderID)
+        sqlite3_bind_double(stmt, 8, row.confidence)
+        bindText(stmt, 9, row.reason.isEmpty ? "Migrated from legacy routing decision schema." : row.reason)
+        bindText(stmt, 10, row.actor.isEmpty ? "unknown" : row.actor)
+        bindText(stmt, 11, row.source.isEmpty ? "routing.migration.v10" : row.source)
+        bindText(stmt, 12, normalizedReviewState(row.status))
+        sqlite3_bind_double(stmt, 13, row.createdAt)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw CiderDatabaseError.step(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    private static func itemType(for itemID: String, fallback: String, db: OpaquePointer) throws -> String? {
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, "SELECT type FROM items WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK else {
+            throw CiderDatabaseError.prepare(String(cString: sqlite3_errmsg(db)))
+        }
+        bindText(stmt, 1, itemID)
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            return nil
+        }
+        if let type = sqliteString(stmt, 0), !type.isEmpty {
+            return type
+        }
+        let trimmed = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "item" : trimmed
+    }
+
+    private static func existingFolderID(_ candidate: String?, db: OpaquePointer) throws -> String? {
+        guard let candidate, !candidate.isEmpty else { return nil }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, "SELECT id FROM folders WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK else {
+            throw CiderDatabaseError.prepare(String(cString: sqlite3_errmsg(db)))
+        }
+        bindText(stmt, 1, candidate)
+        return sqlite3_step(stmt) == SQLITE_ROW ? candidate : nil
+    }
+
+    private static func folderRelativePath(for folderID: String?, db: OpaquePointer) -> String? {
+        guard let folderID, !folderID.isEmpty else { return nil }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, "SELECT relative_path FROM folders WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK else {
+            return nil
+        }
+        bindText(stmt, 1, folderID)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqliteString(stmt, 0)
+    }
+
+    private static func normalizedTargetPath(_ path: String?) -> String {
+        let trimmed = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Inbox/Bookmarks" : trimmed
+    }
+
+    private static func normalizedTargetKind(_ kind: String, targetPath: String) -> String {
+        let normalized = kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !normalized.isEmpty { return normalized }
+        return targetPath.lowercased().hasPrefix("inbox") ? "inbox" : "folder"
+    }
+
+    private static func targetName(path: String, folderID: String?, db: OpaquePointer) -> String {
+        let folderPath = folderRelativePath(for: folderID, db: db)
+        let source = folderPath?.isEmpty == false ? folderPath! : path
+        return source.split(separator: "/").last.map(String.init) ?? source
+    }
+
+    private static func normalizedReviewState(_ state: String) -> String {
+        let normalized = state.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "accepted", "corrected", "deferred", "suggested", "needs_review":
+            return normalized
+        case "approved":
+            return "accepted"
+        case "defer":
+            return "deferred"
+        default:
+            return "needs_review"
+        }
+    }
+
+    // MARK: - V8 -> V9: Explainable routing decisions
+
+    private static func migrateToV9(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 9...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createRoutingDecisions)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_routing_decisions_item ON routing_decisions(item_id, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_routing_decisions_review ON routing_decisions(review_state);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (9);")
+        }
+
+        logger.info("Migration to v9 complete")
     }
 
     // MARK: - V7 -> V8: Direct action URLs for todos and events
@@ -284,6 +523,27 @@ enum DatabaseMigrations {
             }
         }
         return false
+    }
+
+    private static func quoteIdentifier(_ identifier: String) -> String {
+        "\"\(identifier.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+
+    private static func sqliteString(_ stmt: OpaquePointer?, _ index: Int32) -> String? {
+        guard sqlite3_column_type(stmt, index) != SQLITE_NULL,
+              let text = sqlite3_column_text(stmt, index) else {
+            return nil
+        }
+        return String(cString: text)
+    }
+
+    private static func bindText(_ stmt: OpaquePointer?, _ index: Int32, _ value: String?) {
+        guard let value else {
+            sqlite3_bind_null(stmt, index)
+            return
+        }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(stmt, index, (value as NSString).utf8String, -1, transient)
     }
 
     // MARK: - V0 -> V1: Create all tables

@@ -3,6 +3,7 @@ import SwiftUI
 struct CiderSpaceOverviewView: View {
     let space: CiderSpace
     let rootURL: URL
+    let captureDashboard: CiderSpaceCaptureDashboard?
     let bookmarks: [Bookmark]
     let mediaItems: [MediaItem]
     let notes: [Note]
@@ -16,6 +17,7 @@ struct CiderSpaceOverviewView: View {
             MediaSpaceDashboardView(
                 space: space,
                 rootURL: rootURL,
+                captureDashboard: captureDashboard,
                 bookmarks: bookmarks,
                 mediaItems: mediaItems,
                 notes: notes,
@@ -27,6 +29,7 @@ struct CiderSpaceOverviewView: View {
             RecipeSpaceDashboardView(
                 space: space,
                 rootURL: rootURL,
+                captureDashboard: captureDashboard,
                 bookmarks: bookmarks,
                 notes: notes,
                 onTogglePinned: onTogglePinned,
@@ -45,6 +48,7 @@ struct CiderSpaceOverviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: HomeOverviewDesign.rowSpacing) {
                     overviewPanel
+                    captureRoutingPanel
                     defaultViewsPanel
                     instructionsPanel
                 }
@@ -102,6 +106,17 @@ struct CiderSpaceOverviewView: View {
             metadataRow(title: "Preset", value: space.preset.displayName)
             metadataRow(title: "Vault path", value: space.rootRelativePath)
             metadataRow(title: "Finder folder", value: rootURL.path)
+        }
+    }
+
+    @ViewBuilder
+    private var captureRoutingPanel: some View {
+        if let captureDashboard, captureDashboard.hasItems {
+            CiderSpaceCaptureRoutingPanel(
+                dashboard: captureDashboard,
+                bookmarks: bookmarks,
+                onOpenBookmark: onOpenBookmark
+            )
         }
     }
 
@@ -187,6 +202,141 @@ struct CiderSpaceOverviewView: View {
 
             Spacer(minLength: 0)
         }
+    }
+}
+
+struct CiderSpaceCaptureRoutingPanel: View {
+    let dashboard: CiderSpaceCaptureDashboard
+    let bookmarks: [Bookmark]
+    let onOpenBookmark: (Bookmark) -> Void
+
+    private var bookmarksByID: [UUID: Bookmark] {
+        Dictionary(uniqueKeysWithValues: bookmarks.map { ($0.id, $0) })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: HomeOverviewDesign.rowSpacing) {
+            if !dashboard.needsReview.isEmpty {
+                HomeOverviewPanel(title: "Routing Review") {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ForEach(Array(dashboard.needsReview.prefix(6))) { item in
+                            captureRow(item, tone: .review)
+                        }
+                    }
+                }
+            }
+
+            if !dashboard.recentRouted.isEmpty {
+                HomeOverviewPanel(title: "Recent Routed Captures") {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ForEach(Array(dashboard.recentRouted.prefix(6))) { item in
+                            captureRow(item, tone: .accepted)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func captureRow(_ item: CiderSpaceCaptureDashboardItem, tone: CaptureRowTone) -> some View {
+        if let bookmark = bookmarksByID[item.itemID] {
+            Button {
+                onOpenBookmark(bookmark)
+            } label: {
+                captureRowContent(item, tone: tone)
+            }
+            .buttonStyle(.plain)
+        } else {
+            captureRowContent(item, tone: tone)
+        }
+    }
+
+    private func captureRowContent(_ item: CiderSpaceCaptureDashboardItem, tone: CaptureRowTone) -> some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: tone.systemImage)
+                .font(CiderFont.bodyMedium)
+                .foregroundColor(tone.color)
+                .frame(width: Spacing.xl)
+
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                    Text(item.title)
+                        .font(CiderFont.labelSemibold)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    Text(item.reviewState.replacingOccurrences(of: "_", with: " "))
+                        .font(CiderFont.microBold)
+                        .foregroundColor(tone.color)
+                        .padding(.horizontal, Spacing.xs)
+                        .padding(.vertical, Spacing.hairline)
+                        .background(Capsule(style: .continuous).fill(tone.color.opacity(0.12)))
+                }
+
+                Text(item.reason)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(2)
+
+                HStack(spacing: Spacing.xs) {
+                    Label(item.target.relativePath, systemImage: "folder")
+                    Text("confidence \(formattedConfidence(item.confidence))")
+                    if let sourceURL = item.sourceURL {
+                        Text(sourceHost(sourceURL))
+                    }
+                }
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.secondary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.quaternary)
+        }
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.surfaceInput)
+        )
+    }
+
+    private func formattedConfidence(_ confidence: Double) -> String {
+        let percent = Int((confidence * 100).rounded())
+        return "\(percent)%"
+    }
+
+    private func sourceHost(_ rawURL: String) -> String {
+        URL(string: rawURL)?.host ?? rawURL
+    }
+
+    private enum CaptureRowTone {
+        case accepted
+        case review
+
+        var systemImage: String {
+            switch self {
+            case .accepted: "checkmark.circle"
+            case .review: "exclamationmark.triangle"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .accepted: CiderColors.success
+            case .review: CiderColors.warning
+            }
+        }
+    }
+}
+
+extension CiderSpaceCaptureDashboard {
+    var hasItems: Bool {
+        !recentRouted.isEmpty || !needsReview.isEmpty
     }
 }
 

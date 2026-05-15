@@ -333,6 +333,95 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.triageItems[1].suggestedAction, "Ask Erik")
     }
 
+    func testDashboardBuildsReviewCockpitFromSharedReviewQueue() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let bookmark = Bookmark(
+            id: UUID(),
+            title: "Routed capture",
+            urlString: "https://example.com/routed",
+            createdAt: now.addingTimeInterval(-300),
+            updatedAt: now.addingTimeInterval(-240),
+            folderID: nil,
+            enrichmentStatus: "complete",
+            lastEnrichedAt: now
+        )
+        let enrichmentBookmark = Bookmark(
+            id: UUID(),
+            title: "Needs metadata",
+            urlString: "https://example.com/metadata",
+            createdAt: now.addingTimeInterval(-200),
+            updatedAt: now.addingTimeInterval(-180),
+            folderID: nil,
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        let routingItem = CiderReviewQueueItem(
+            id: "review-routing-\(UUID().uuidString)",
+            kind: "low_confidence_routing",
+            source: "routing_decision",
+            itemID: bookmark.id,
+            itemType: "bookmark",
+            title: "Routed capture",
+            relativePath: "Inbox/Bookmarks/Routed capture.webloc",
+            reason: "Low confidence route.",
+            suggestedAction: "Approve or correct route",
+            reviewState: "needs_review",
+            confidence: 0.62,
+            routingDecisionID: UUID(),
+            target: CiderRoutingDecisionTarget(
+                kind: "folder",
+                name: "Research",
+                relativePath: "Spaces/Research",
+                folderID: nil
+            ),
+            createdAt: now.addingTimeInterval(-100),
+            safeActions: ["approve", "correct", "defer"]
+        )
+        let enrichmentItem = CiderReviewQueueItem(
+            id: "review-enrichment-\(UUID().uuidString)",
+            kind: "enrichment_failed",
+            source: "enrichment",
+            itemID: enrichmentBookmark.id,
+            itemType: "bookmark",
+            title: "Needs metadata",
+            relativePath: "Inbox/Bookmarks/Needs metadata.webloc",
+            reason: "Metadata fetch failed.",
+            suggestedAction: "Enrich before routing",
+            reviewState: "needs_review",
+            confidence: nil,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now.addingTimeInterval(-90),
+            safeActions: ["enrich", "correct", "defer"]
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.bookmark(bookmark), .bookmark(enrichmentBookmark)],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: [routingItem, enrichmentItem],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.reviewCockpitItems.map(\.title), ["Routed capture", "Needs metadata"])
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].kindLabel, "Routing")
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].reason, "Low confidence route.")
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].confidenceLabel, "62% confidence")
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].targetLabel, "Spaces/Research")
+        XCTAssertTrue(snapshot.reviewCockpitItems[0].canApprove)
+        XCTAssertTrue(snapshot.reviewCockpitItems[0].canCorrect)
+        XCTAssertTrue(snapshot.reviewCockpitItems[0].canDefer)
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].item?.id, "bookmark-\(bookmark.id.uuidString)")
+
+        XCTAssertEqual(snapshot.reviewCockpitItems[1].kindLabel, "Enrichment")
+        XCTAssertNil(snapshot.reviewCockpitItems[1].confidenceLabel)
+        XCTAssertEqual(snapshot.reviewCockpitItems[1].targetLabel, "Inbox/Bookmarks/Needs metadata.webloc")
+        XCTAssertFalse(snapshot.reviewCockpitItems[1].canApprove)
+        XCTAssertTrue(snapshot.reviewCockpitItems[1].canCorrect)
+        XCTAssertFalse(snapshot.reviewCockpitItems[1].canDefer)
+    }
+
     func testClosedTabsPreferRecentlyUpdatedViewsThatAreNotOpen() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let openView = SavedView(

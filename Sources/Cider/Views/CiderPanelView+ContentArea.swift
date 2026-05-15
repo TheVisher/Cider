@@ -223,9 +223,11 @@ extension CiderPanelView {
                 }
             case .spaceOverview(let spaceID, _):
                 if let space = spaceStorage.space(id: spaceID) {
+                    let captureDashboard = try? CiderSpaceCaptureDashboardService().dashboard(for: space)
                     CiderSpaceOverviewView(
                         space: space,
                         rootURL: spaceStorage.rootURL(for: space),
+                        captureDashboard: captureDashboard,
                         bookmarks: bookmarksViewModel.bookmarks,
                         mediaItems: mediaItemStorage.items,
                         notes: notesViewModel.notes,
@@ -268,6 +270,7 @@ extension CiderPanelView {
                     if case .kanban(let boardID) = savedView.kind {
                         KanbanBoardView(boardID: boardID, onOpenCard: openKanbanCardDetail)
                     } else if case .dashboard = savedView.kind {
+                        let reviewQueueItems = (try? CiderReviewQueueService().list(limit: 8).items) ?? []
                         DashboardHubView(showsTopicSwitcher: false, onOpenSourceURL: { url in
                             openURLSafely(url)
                         }) {
@@ -279,6 +282,7 @@ extension CiderPanelView {
                                     savedViews: savedViewStorage.savedViews,
                                     tabOrder: savedViewStorage.tabOrder,
                                     kanbanBoards: kanbanStorage.boards,
+                                    reviewQueueItems: reviewQueueItems,
                                     surfacingDays: CiderConfig.load().dateCardSurfacingDays
                                 ),
                                 onOpenItem: { item in openDashboardItem(item) },
@@ -287,6 +291,28 @@ extension CiderPanelView {
                                 onOpenKanbanCard: { boardID, cardID in
                                     selectedKanbanBoardID = boardID
                                     selectedKanbanCardID = cardID
+                                },
+                                onApproveReview: { reviewItem in
+                                    do {
+                                        try CiderReviewQueueService().approve(itemID: reviewItem.itemID, actor: "user")
+                                        return true
+                                    } catch {
+                                        print("Dashboard review approve failed: \(error.localizedDescription)")
+                                        return false
+                                    }
+                                },
+                                onDeferReview: { reviewItem in
+                                    do {
+                                        try CiderReviewQueueService().deferReview(
+                                            itemID: reviewItem.itemID,
+                                            reason: "Deferred from Dashboard review cockpit.",
+                                            actor: "user"
+                                        )
+                                        return true
+                                    } catch {
+                                        print("Dashboard review defer failed: \(error.localizedDescription)")
+                                        return false
+                                    }
                                 },
                                 onOpenSettings: {
                                     NotificationCenter.default.post(name: .openCiderSettings, object: nil)

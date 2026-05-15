@@ -25,6 +25,7 @@ enum KanbanCardMarkdownExporter {
         var lines: [String] = []
         lines.append("# \(card.title)")
         lines.append("")
+        lines.append("- Card ID: \(card.id)")
         lines.append("- Board: \(boardName)")
         lines.append("- Status: \(columnName)")
         if let priority = card.priority {
@@ -39,11 +40,24 @@ enum KanbanCardMarkdownExporter {
         if !card.tags.isEmpty {
             lines.append("- Tags: \(card.tags.joined(separator: ", "))")
         }
+        if let parentCardID = card.parentCardID, !parentCardID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("- Parent Card: \(parentCardID)")
+        }
+        if !card.relatedCardIDs.isEmpty {
+            lines.append("- Related Cards: \(card.relatedCardIDs.joined(separator: ", "))")
+        }
         lines.append("- Created: \(formattedDate(card.created))")
         if let completed = card.completed {
             lines.append("- Completed: \(formattedDate(completed))")
         }
         lines.append("")
+        if let summary = card.aiSummary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
+            lines.append("## Summary")
+            lines.append("")
+            lines.append(summary)
+            lines.append("")
+        }
+        appendHistory(to: &lines, card: card)
         lines.append("## Notes")
         lines.append("")
         if let notes = card.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -67,6 +81,26 @@ enum KanbanCardMarkdownExporter {
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return "\((cleaned.isEmpty ? "Kanban Card" : cleaned)).md"
+    }
+
+    private static func appendHistory(to lines: inout [String], card: KanbanCard) {
+        guard !card.historyEntries.isEmpty else { return }
+
+        lines.append("## History")
+        lines.append("")
+        for entry in card.historyEntries.sorted(by: historySort) {
+            let authorSuffix: String
+            if let author = entry.author?.trimmingCharacters(in: .whitespacesAndNewlines), !author.isEmpty {
+                authorSuffix = " — \(author)"
+            } else {
+                authorSuffix = ""
+            }
+            lines.append("### \(entry.type.displayName) — \(formattedDate(entry.createdAt))\(authorSuffix)")
+            lines.append("")
+            let body = entry.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            lines.append(body.isEmpty ? "_No details recorded._" : body)
+            lines.append("")
+        }
     }
 
     private static func appendLinkedReferences(
@@ -102,10 +136,14 @@ enum KanbanCardMarkdownExporter {
         }
     }
 
+    private static func historySort(_ lhs: KanbanCardHistoryEntry, _ rhs: KanbanCardHistoryEntry) -> Bool {
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+        return lhs.id < rhs.id
+    }
+
     private static func formattedDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: date)
     }
 }

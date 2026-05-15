@@ -10,6 +10,78 @@ enum KanbanPriority: String, Codable, CaseIterable, Sendable {
     case low, medium, high
 }
 
+enum KanbanCardHistoryEntryType: String, Codable, CaseIterable, Sendable {
+    case note
+    case failedAttempt = "failed_attempt"
+    case testEvidence = "test_evidence"
+    case finalSummary = "final_summary"
+    case commit
+
+    var displayName: String {
+        switch self {
+        case .note: "Note"
+        case .failedAttempt: "Failed Attempt"
+        case .testEvidence: "Test Evidence"
+        case .finalSummary: "Final Summary"
+        case .commit: "Commit"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .note: "note.text"
+        case .failedAttempt: "xmark.octagon"
+        case .testEvidence: "checkmark.seal"
+        case .finalSummary: "flag.checkered"
+        case .commit: "point.3.connected.trianglepath.dotted"
+        }
+    }
+}
+
+struct KanbanCardHistoryEntry: Codable, Identifiable, Equatable, Sendable {
+    var id: String
+    var type: KanbanCardHistoryEntryType
+    var body: String
+    var author: String?
+    var createdAt: Date
+
+    init(
+        id: String = KanbanID.generate(),
+        type: KanbanCardHistoryEntryType,
+        body: String,
+        author: String? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.type = type
+        self.body = body
+        self.author = author
+        self.createdAt = createdAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, body, author, createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        type = try c.decode(KanbanCardHistoryEntryType.self, forKey: .type)
+        body = try c.decode(String.self, forKey: .body)
+        author = try c.decodeIfPresent(String.self, forKey: .author)
+        createdAt = try c.decode(KanbanHistoryDate.self, forKey: .createdAt).date
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(type, forKey: .type)
+        try c.encode(body, forKey: .body)
+        try c.encodeIfPresent(author, forKey: .author)
+        try c.encode(KanbanHistoryDate(date: createdAt), forKey: .createdAt)
+    }
+}
+
 // MARK: - KanbanCard
 
 struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
@@ -24,6 +96,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
     var linkedEntities: [LibraryEntityRef]
     var relatedCardIDs: [String]
     var parentCardID: String?
+    var historyEntries: [KanbanCardHistoryEntry]
     var created: Date
     var completed: Date?
 
@@ -39,6 +112,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         linkedEntities: [LibraryEntityRef] = [],
         relatedCardIDs: [String] = [],
         parentCardID: String? = nil,
+        historyEntries: [KanbanCardHistoryEntry] = [],
         created: Date = Date(),
         completed: Date? = nil
     ) {
@@ -53,13 +127,14 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         self.linkedEntities = linkedEntities
         self.relatedCardIDs = relatedCardIDs
         self.parentCardID = parentCardID
+        self.historyEntries = historyEntries
         self.created = created
         self.completed = completed
     }
 
     // Custom Codable for date format and backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, aiSummary, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, created, completed
+        case id, title, notes, aiSummary, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, historyEntries, created, completed
     }
 
     init(from decoder: Decoder) throws {
@@ -75,6 +150,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         linkedEntities = (try c.decodeIfPresent([LibraryEntityRef].self, forKey: .linkedEntities)) ?? []
         relatedCardIDs = (try c.decodeIfPresent([String].self, forKey: .relatedCardIDs)) ?? []
         parentCardID = try c.decodeIfPresent(String.self, forKey: .parentCardID)
+        historyEntries = (try c.decodeIfPresent([KanbanCardHistoryEntry].self, forKey: .historyEntries)) ?? []
         created = (try c.decodeIfPresent(KanbanDate.self, forKey: .created))?.date ?? Date()
         completed = try c.decodeIfPresent(KanbanDate.self, forKey: .completed)?.date
     }
@@ -92,6 +168,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         if !linkedEntities.isEmpty { try c.encode(linkedEntities, forKey: .linkedEntities) }
         if !relatedCardIDs.isEmpty { try c.encode(relatedCardIDs, forKey: .relatedCardIDs) }
         try c.encodeIfPresent(parentCardID, forKey: .parentCardID)
+        if !historyEntries.isEmpty { try c.encode(historyEntries, forKey: .historyEntries) }
         try c.encode(KanbanDate(date: created), forKey: .created)
         try c.encodeIfPresent(completed.map { KanbanDate(date: $0) }, forKey: .completed)
     }
@@ -307,6 +384,41 @@ struct KanbanBoard: Codable, Identifiable, Equatable, Sendable {
                 columns[columnIndex].cards[cardIndex].parentCardID = nil
             }
         }
+    }
+}
+
+// MARK: - History Date Wrapper (ISO-8601)
+
+private struct KanbanHistoryDate: Codable, Sendable {
+    let date: Date
+
+    init(date: Date) { self.date = date }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let directDate = try? container.decode(Date.self) {
+            date = directDate
+            return
+        }
+        let string = try container.decode(String.self)
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallbackFormatter = ISO8601DateFormatter()
+        if let parsed = fractionalFormatter.date(from: string) ?? fallbackFormatter.date(from: string) {
+            date = parsed
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid history timestamp: \(string). Expected ISO-8601."
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var container = encoder.singleValueContainer()
+        try container.encode(formatter.string(from: date))
     }
 }
 

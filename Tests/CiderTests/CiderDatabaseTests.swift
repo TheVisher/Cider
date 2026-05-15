@@ -355,6 +355,99 @@ struct CiderDatabaseTests {
         }
     }
 
+    @Test("v10 migration repairs legacy routing_decisions table from a v9 database")
+    func v10RepairsLegacyRoutingDecisionsTable() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let folderID = UUID().uuidString
+        let itemID = UUID().uuidString
+        let decisionID = UUID().uuidString
+
+        do {
+            let db = CiderDatabase()
+            try db.open(at: url)
+            try db.runSQL("""
+                INSERT INTO folders (id, relative_path, created_at, updated_at)
+                VALUES ('\(folderID)', 'Spaces/Recipes', 0.0, 0.0);
+                """)
+            try db.runSQL("""
+                INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+                VALUES ('\(itemID)', 'bookmark', 'Legacy Route', 0.0, 0.0, '\(folderID)', 'Spaces/Recipes/Legacy Route.md');
+                """)
+            try db.runSQL("DROP TABLE routing_decisions;")
+            try db.runSQL("""
+                CREATE TABLE routing_decisions (
+                    id TEXT PRIMARY KEY,
+                    item_id TEXT,
+                    owner_type TEXT NOT NULL,
+                    owner_id TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_id TEXT,
+                    target_path TEXT,
+                    confidence REAL NOT NULL,
+                    reason TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    candidates_json TEXT,
+                    created_at REAL NOT NULL,
+                    reviewed_at REAL
+                );
+                """)
+            try db.runSQL("""
+                INSERT INTO routing_decisions (
+                    id, item_id, owner_type, owner_id, target_type, target_id,
+                    target_path, confidence, reason, status, actor, source,
+                    candidates_json, created_at, reviewed_at
+                ) VALUES (
+                    '\(decisionID)', '\(itemID)', 'bookmark', '\(itemID)', 'folder', '\(folderID)',
+                    'Spaces/Recipes', 0.82, 'Legacy candidate route.', 'needs_review',
+                    'agent', 'legacy.routing', '[]', 1234.0, NULL
+                );
+                """)
+            try db.runSQL("DELETE FROM schema_version;")
+            try db.runSQL("INSERT INTO schema_version (version) VALUES (9);")
+            db.close()
+        }
+
+        let migrated = CiderDatabase()
+        try migrated.open(at: url)
+        defer { migrated.close() }
+
+        let versionStmt = try migrated.prepare("SELECT MAX(version) FROM schema_version;")
+        #expect(try versionStmt.step())
+        #expect(versionStmt.int(at: 0) == DatabaseMigrations.latestVersion)
+
+        let stmt = try migrated.prepare("""
+            SELECT item_type, target_kind, target_name, target_relative_path,
+                   target_folder_id, confidence, reason, actor, source, review_state,
+                   created_at, supersedes_decision_id
+            FROM routing_decisions
+            WHERE id = ?;
+            """)
+        stmt.bind(decisionID, at: 1)
+        #expect(try stmt.step())
+        #expect(stmt.string(at: 0) == "bookmark")
+        #expect(stmt.string(at: 1) == "folder")
+        #expect(stmt.string(at: 2) == "Recipes")
+        #expect(stmt.string(at: 3) == "Spaces/Recipes")
+        #expect(stmt.string(at: 4) == folderID)
+        #expect(stmt.double(at: 5) == 0.82)
+        #expect(stmt.string(at: 6) == "Legacy candidate route.")
+        #expect(stmt.string(at: 7) == "agent")
+        #expect(stmt.string(at: 8) == "legacy.routing")
+        #expect(stmt.string(at: 9) == "needs_review")
+        #expect(stmt.double(at: 10) == 1234.0)
+        #expect(stmt.optionalString(at: 11) == nil)
+
+        let legacyBackup = try migrated.prepare(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'routing_decisions_legacy_v9';"
+        )
+        #expect(try legacyBackup.step())
+        #expect(legacyBackup.int(at: 0) == 1)
+    }
+
     // MARK: - Transactions
 
     @Test("Transaction commits on success")

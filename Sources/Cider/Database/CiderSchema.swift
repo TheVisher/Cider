@@ -239,6 +239,25 @@ enum CiderSchema {
         );
         """
 
+    static let createRoutingDecisions = """
+        CREATE TABLE IF NOT EXISTS routing_decisions (
+            id                    TEXT PRIMARY KEY,
+            item_id               TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+            item_type             TEXT NOT NULL,
+            target_kind           TEXT NOT NULL,
+            target_name           TEXT NOT NULL,
+            target_relative_path  TEXT NOT NULL,
+            target_folder_id      TEXT REFERENCES folders(id),
+            confidence            REAL NOT NULL,
+            reason                TEXT NOT NULL,
+            actor                 TEXT NOT NULL,
+            source                TEXT NOT NULL,
+            review_state          TEXT NOT NULL,
+            created_at            REAL NOT NULL,
+            supersedes_decision_id TEXT REFERENCES routing_decisions(id)
+        );
+        """
+
     // MARK: - Indexes
 
     static let createIndexes: [String] = [
@@ -256,6 +275,8 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_events_start      ON events(start_at);",
         "CREATE INDEX IF NOT EXISTS idx_mutation_audit_time ON mutation_audit(occurred_at);",
         "CREATE INDEX IF NOT EXISTS idx_mutation_audit_item ON mutation_audit(item_type, item_id, occurred_at);",
+        "CREATE INDEX IF NOT EXISTS idx_routing_decisions_item ON routing_decisions(item_id, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_routing_decisions_review ON routing_decisions(review_state);",
     ]
 
     // MARK: - All Tables in Dependency Order
@@ -279,6 +300,7 @@ enum CiderSchema {
         createItemLinks,
         createTrash,
         createMutationAudit,
+        createRoutingDecisions,
         createSchemaMigrations,
     ]
 }

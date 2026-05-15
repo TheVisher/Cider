@@ -229,6 +229,7 @@ func agendaBriefingItemToDict(_ item: AgendaBriefingItem, formatter: ISO8601Date
                         "title": card.title,
                         "created": ISO8601DateFormatter().string(from: card.created),
                     ]
+                    appendKanbanCardHandoffFields(card, to: &d)
                     if let notes = card.notes { d["notes"] = notes }
                     if let color = card.color { d["color"] = color.rawValue }
                     if let priority = card.priority { d["priority"] = priority.rawValue }
@@ -239,6 +240,107 @@ func agendaBriefingItemToDict(_ item: AgendaBriefingItem, formatter: ISO8601Date
                     return d
                 },
             ] as [String: Any]
+        },
+    ]
+}
+
+@MainActor private func appendKanbanCardHandoffFields(_ card: KanbanCard, to dict: inout [String: Any]) {
+    if let aiSummary = card.aiSummary, !aiSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        dict["aiSummary"] = aiSummary
+    }
+    if !card.relatedCardIDs.isEmpty {
+        dict["relatedCardIDs"] = card.relatedCardIDs
+    }
+    if !card.linkedEntities.isEmpty {
+        dict["linkedEntities"] = card.linkedEntities.map { ref in
+            [
+                "id": ref.id,
+                "type": ref.type.rawValue,
+                "entityID": ref.entityID.uuidString,
+            ]
+        }
+    }
+    if !card.historyEntries.isEmpty {
+        dict["historyEntries"] = card.historyEntries.map { entry in
+            var entryDict: [String: Any] = [
+                "id": entry.id,
+                "type": entry.type.rawValue,
+                "body": entry.body,
+                "createdAt": ISO8601DateFormatter().string(from: entry.createdAt),
+            ]
+            if let author = entry.author, !author.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                entryDict["author"] = author
+            }
+            return entryDict
+        }
+    }
+}
+
+@MainActor func kanbanAgentWorkflowSummaryToDict(_ summary: KanbanAgentWorkflowSummary) -> [String: Any] {
+    [
+        "boardID": summary.boardID,
+        "boardName": summary.boardName,
+        "agents": summary.agentNames,
+        "lanes": summary.laneSummaries.map { lane in
+            [
+                "role": lane.role.rawValue,
+                "columnID": lane.columnID,
+                "columnName": lane.columnName,
+                "cardCount": lane.count,
+                "cards": lane.cards.map { card in
+                    var d: [String: Any] = [
+                        "id": card.id,
+                        "title": card.title,
+                        "created": ISO8601DateFormatter().string(from: card.created),
+                    ]
+                    appendKanbanCardHandoffFields(card, to: &d)
+                    if let priority = card.priority { d["priority"] = priority.rawValue }
+                    if let agent = card.agent { d["agent"] = agent }
+                    if !card.tags.isEmpty { d["tags"] = card.tags }
+                    if let parentCardID = card.parentCardID { d["parentCardID"] = parentCardID }
+                    if let completed = card.completed { d["completed"] = ISO8601DateFormatter().string(from: completed) }
+                    return d
+                },
+            ] as [String: Any]
+        },
+        "nextImplementationCards": summary.nextImplementationCards.map(\.id),
+        "backlogCards": summary.backlogCards.map(\.id),
+        "activeAgentCards": summary.activeAgentCards.map(\.id),
+        "testingCards": summary.testingCards.map(\.id),
+        "needsFixCards": summary.needsFixCards.map(\.id),
+        "completedCards": summary.completedCards.map(\.id),
+    ]
+}
+
+@MainActor func kanbanTestingTriageSummaryToDict(_ summary: KanbanTestingTriageSummary) -> [String: Any] {
+    [
+        "boardID": summary.boardID,
+        "boardName": summary.boardName,
+        "counts": [
+            "total": summary.items.count,
+            "needsErik": summary.needsErik.count,
+            "agentCanVerify": summary.agentCanVerify.count,
+            "mixed": summary.mixed.count,
+        ],
+        "items": summary.items.map { item in
+            var dict: [String: Any] = [
+                "id": item.card.id,
+                "title": item.card.title,
+                "columnID": item.columnID,
+                "columnName": item.columnName,
+                "owner": item.owner.rawValue,
+                "ownerLabel": item.owner.displayName,
+                "reason": item.reason,
+                "whatChanged": item.whatChanged,
+                "testEvidence": item.testEvidence,
+                "agentVerificationSteps": item.agentVerificationSteps,
+                "manualQASteps": item.manualQASteps,
+            ]
+            if let priority = item.card.priority { dict["priority"] = priority.rawValue }
+            if let parentCardID = item.card.parentCardID { dict["parentCardID"] = parentCardID }
+            if let parentTitle = item.parentTitle { dict["parentTitle"] = parentTitle }
+            if !item.card.tags.isEmpty { dict["tags"] = item.card.tags }
+            return dict
         },
     ]
 }

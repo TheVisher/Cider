@@ -182,6 +182,59 @@ struct KanbanBoardFileLockingTests {
         }
     }
 
+    @Test("storage update persists structured history entries during stale merge")
+    @MainActor
+    func storageUpdatePersistsStructuredHistoryEntriesDuringStaleMerge() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "History Merge")
+        let card = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "History card"))
+        let secondWriterStorage = KanbanStorage()
+
+        var historyEdit = card
+        historyEdit.historyEntries = [
+            KanbanCardHistoryEntry(
+                id: "test-evidence",
+                type: .testEvidence,
+                body: "swift test --filter KanbanBoardFileLockingTests passed.",
+                author: "Hermes",
+                createdAt: Date(timeIntervalSince1970: 1_000)
+            )
+        ]
+        var priorityEdit = card
+        priorityEdit.priority = .medium
+
+        storage.updateCard(boardID: board.id, card: historyEdit)
+        secondWriterStorage.updateCard(boardID: board.id, card: priorityEdit)
+
+        let refreshed = try #require(KanbanStorage().findCard(id: card.id)?.card)
+        #expect(refreshed.historyEntries.map(\.id) == ["test-evidence"])
+        #expect(refreshed.historyEntries.first?.type == .testEvidence)
+        #expect(refreshed.priority == .medium)
+    }
+
+    @Test("board show rejects tag filters without values")
+    func boardShowRejectsTagFiltersWithoutValues() throws {
+        let cli = try #require(Self.ciderCLIURL())
+        let vault = try Self.makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        try Self.runCLI(cli, vault: vault, args: ["board", "create", "Tag Validation"])
+
+        let output = try Self.runCLI(cli, vault: vault, args: ["board", "show", "Tag Validation", "--tag", "--json"])
+
+        #expect(output.contains("Error: --tag requires a tag value."))
+        #expect(output.contains("Usage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]"))
+    }
+
     private static func ciderCLIURL() -> URL? {
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let candidates = [

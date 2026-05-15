@@ -78,6 +78,75 @@ struct KanbanCardMarkdownExporterTests {
         #expect(!markdown.contains("Stored notes"))
     }
 
+    @Test("markdown export includes agent handoff summary, relationships, and history")
+    func markdownExportIncludesAgentHandoffSummaryRelationshipsAndHistory() {
+        let card = KanbanCard(
+            id: "handoff-card",
+            title: "Fix import rail",
+            notes: "Raw implementation notes stay available.",
+            aiSummary: "Import rail now has focused evidence for the next agent.",
+            priority: .medium,
+            tags: ["kanban", "agent-handoff"],
+            relatedCardIDs: ["bug-123", "qa-456"],
+            parentCardID: "parent-999",
+            historyEntries: [
+                KanbanCardHistoryEntry(
+                    id: "late",
+                    type: .testEvidence,
+                    body: "swift test --filter ImportRailTests passed.",
+                    author: "Codex",
+                    createdAt: Date(timeIntervalSince1970: 200)
+                ),
+                KanbanCardHistoryEntry(
+                    id: "early",
+                    type: .failedAttempt,
+                    body: "Tried broad UI rewiring; rejected as scope creep.",
+                    author: "Hermes Review",
+                    createdAt: Date(timeIntervalSince1970: 100)
+                )
+            ],
+            created: Date(timeIntervalSince1970: 0)
+        )
+
+        let markdown = KanbanCardMarkdownExporter.markdown(
+            for: card,
+            boardName: "Cider",
+            columnName: "Testing"
+        )
+
+        #expect(markdown.contains("- Card ID: handoff-card"))
+        #expect(markdown.contains("- Parent Card: parent-999"))
+        #expect(markdown.contains("- Related Cards: bug-123, qa-456"))
+        #expect(markdown.contains("## Summary"))
+        #expect(markdown.contains("Import rail now has focused evidence for the next agent."))
+        #expect(markdown.contains("## History"))
+        #expect(markdown.contains("### Failed Attempt — 1970-01-01T00:01:40.000Z — Hermes Review"))
+        #expect(markdown.contains("Tried broad UI rewiring; rejected as scope creep."))
+        #expect(markdown.contains("### Test Evidence — 1970-01-01T00:03:20.000Z — Codex"))
+        #expect(markdown.contains("swift test --filter ImportRailTests passed."))
+        #expect(markdown.range(of: "### Failed Attempt")!.lowerBound < markdown.range(of: "### Test Evidence")!.lowerBound)
+    }
+
+    @Test("markdown history export is deterministic for equal timestamps")
+    func markdownHistoryExportIsDeterministicForEqualTimestamps() {
+        let timestamp = Date(timeIntervalSince1970: 1_000)
+        let card = KanbanCard(
+            id: "deterministic-history",
+            title: "Deterministic history",
+            historyEntries: [
+                KanbanCardHistoryEntry(id: "b-entry", type: .note, body: "Second by id", createdAt: timestamp),
+                KanbanCardHistoryEntry(id: "a-entry", type: .note, body: "First by id", createdAt: timestamp),
+            ],
+            created: timestamp
+        )
+
+        let markdown = KanbanCardMarkdownExporter.markdown(for: card, boardName: "Cider", columnName: "Testing")
+
+        #expect(markdown.contains("- Created: 1970-01-01T00:16:40.000Z"))
+        #expect(markdown.contains("### Note — 1970-01-01T00:16:40.000Z"))
+        #expect(markdown.range(of: "First by id")!.lowerBound < markdown.range(of: "Second by id")!.lowerBound)
+    }
+
     @Test("markdown export includes linked reference context for agent handoff")
     func markdownExportIncludesLinkedReferenceContextForAgentHandoff() {
         let refID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!

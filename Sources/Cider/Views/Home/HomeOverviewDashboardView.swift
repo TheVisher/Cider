@@ -6,14 +6,20 @@ struct HomeOverviewDashboardView: View {
     let onOpenTarget: (HomeOverviewActionTarget) -> Void
     let onOpenTab: (HomeOverviewClosedTabSummary) -> Void
     let onOpenKanbanCard: (String, String) -> Void
+    let onApproveReview: (HomeReviewCockpitItem) -> Bool
+    let onDeferReview: (HomeReviewCockpitItem) -> Bool
     let onOpenSettings: () -> Void
     let onSyncNow: () -> Void
     let onCreateNew: () -> Void
 
     private let calendar = Calendar.current
+    @State private var resolvedReviewIDs: Set<String> = []
     @ObservedObject private var authService = AuthService.shared
     @ObservedObject private var syncService = SyncService.shared
     private var layoutMetrics: HomeOverviewLayoutMetrics { HomeOverviewLayoutMetrics(snapshot: snapshot) }
+    private var visibleReviewItems: [HomeReviewCockpitItem] {
+        snapshot.reviewCockpitItems.filter { !resolvedReviewIDs.contains($0.id) }
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -90,7 +96,7 @@ struct HomeOverviewDashboardView: View {
                     .frame(width: tracks.recentWidth)
                 kanbanPulsePanel(fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight)
                     .frame(width: tracks.third)
-                triagePanel(fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight)
+                reviewQueuePanel(fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight)
                     .frame(width: tracks.third)
                 closedTabsPanel(
                     fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight,
@@ -112,7 +118,7 @@ struct HomeOverviewDashboardView: View {
                 recentActivityPanel()
             }
             kanbanPulsePanel()
-            triagePanel()
+            reviewQueuePanel()
             closedTabsPanel(columnCount: HomeOverviewDesign.closedTabsCompactColumnCount)
         }
     }
@@ -125,7 +131,7 @@ struct HomeOverviewDashboardView: View {
             todoPanel()
             recentActivityPanel()
             kanbanPulsePanel()
-            triagePanel()
+            reviewQueuePanel()
             closedTabsPanel(columnCount: HomeOverviewDesign.closedTabsSingleColumnCount)
         }
     }
@@ -457,16 +463,27 @@ struct HomeOverviewDashboardView: View {
         }
     }
 
-    private func triagePanel(fixedHeight: CGFloat? = nil) -> some View {
+    private func reviewQueuePanel(fixedHeight: CGFloat? = nil) -> some View {
         HomeOverviewPanel(
-            title: "Inbox Triage",
+            title: "Review Queue",
             minHeight: layoutMetrics.requiredHeight(for: .triage),
             fixedHeight: fixedHeight
         ) {
-            if snapshot.triageItems.isEmpty {
+            if !visibleReviewItems.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(visibleReviewItems) { reviewItem in
+                        reviewQueueRow(reviewItem)
+
+                        if reviewItem.id != visibleReviewItems.last?.id {
+                            Divider()
+                                .background(CiderColors.separator)
+                        }
+                    }
+                }
+            } else if snapshot.triageItems.isEmpty {
                 HomeOverviewEmptyStateCard(
-                    title: "Inbox looks healthy.",
-                    subtitle: "No obvious unfiled or under-enriched captures need attention."
+                    title: "Nothing needs review.",
+                    subtitle: "No shared review items or obvious Inbox triage hints need attention."
                 )
             } else {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -514,6 +531,125 @@ struct HomeOverviewDashboardView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func reviewQueueRow(_ reviewItem: HomeReviewCockpitItem) -> some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Button {
+                if let item = reviewItem.item {
+                    onOpenItem(item)
+                }
+            } label: {
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    Image(systemName: reviewIcon(for: reviewItem))
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(reviewAccentColor(for: reviewItem))
+                        .frame(width: 18)
+
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        Text(reviewItem.title)
+                            .font(CiderFont.labelMedium)
+                            .foregroundColor(CiderColors.primary)
+                            .lineLimit(1)
+
+                        Text(reviewItem.reason)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                            .lineLimit(1)
+
+                        HStack(spacing: Spacing.xs) {
+                            Text(reviewItem.suggestedAction)
+                                .font(CiderFont.captionSemibold)
+                                .foregroundColor(CiderColors.secondary)
+                                .lineLimit(1)
+
+                            Text(reviewItem.sourceLabel)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.quaternary)
+                                .lineLimit(1)
+
+                            Text(reviewItem.targetLabel ?? reviewItem.reviewStateLabel)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.quaternary)
+                                .lineLimit(1)
+
+                            if let confidenceLabel = reviewItem.confidenceLabel {
+                                Text(confidenceLabel)
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(CiderColors.quaternary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(reviewItem.item == nil)
+
+            HStack(spacing: Spacing.xxs) {
+                if reviewItem.canCorrect, let item = reviewItem.item {
+                    Button {
+                        onOpenItem(item)
+                    } label: {
+                        Image(systemName: "arrow.up.right.square")
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open item to correct routing")
+                    .accessibilityLabel("Open item to correct routing")
+                }
+
+                if reviewItem.canApprove {
+                    Button {
+                        if onApproveReview(reviewItem) {
+                            resolvedReviewIDs.insert(reviewItem.id)
+                        }
+                    } label: {
+                        Image(systemName: "checkmark.circle")
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Approve suggested route")
+                    .accessibilityLabel("Approve suggested route")
+                }
+
+                if reviewItem.canDefer {
+                    Button {
+                        if onDeferReview(reviewItem) {
+                            resolvedReviewIDs.insert(reviewItem.id)
+                        }
+                    } label: {
+                        Image(systemName: "clock")
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Defer review")
+                    .accessibilityLabel("Defer review")
+                }
+            }
+            .font(CiderFont.captionSemibold)
+            .foregroundColor(CiderColors.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func reviewIcon(for item: HomeReviewCockpitItem) -> String {
+        switch item.kindLabel {
+        case "Routing": return "arrow.triangle.branch"
+        case "Enrichment": return "sparkles"
+        case "Inbox": return "tray"
+        default: return "exclamationmark.bubble"
+        }
+    }
+
+    private func reviewAccentColor(for item: HomeReviewCockpitItem) -> Color {
+        switch item.kindLabel {
+        case "Routing": return CiderColors.controlAccent
+        case "Enrichment": return CiderColors.warning
+        case "Inbox": return CiderColors.tertiary
+        default: return CiderColors.secondary
         }
     }
 

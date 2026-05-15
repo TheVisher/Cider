@@ -85,6 +85,14 @@ struct CiderCLI {
         }
 
         switch command {
+        case "capture":
+            handleCapture(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
+        case "review":
+            handleReview(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
+        case "space", "spaces":
+            handleSpace(subcommand: subcommand, args: remaining)
+        case "routing", "route":
+            handleRouting(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
         case "bookmark", "bm":
             await handleBookmark(subcommand: subcommand, args: remaining, service: bookmarkService)
         case "note":
@@ -374,6 +382,315 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // MARK: - Bookmark Commands
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleCapture(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) {
+        switch subcommand {
+        case "add":
+            guard let source = args.first else {
+                print("Error: Source required. Usage: cider-cli capture add <url> [--title <title>] [--folder <name|path>] [--json]")
+                return
+            }
+
+            let targetFolder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: targetFolder = nil
+            case .resolved(let folder): targetFolder = folder
+            case .failed: return
+            }
+
+            do {
+                let result = try CiderCaptureService(bookmarkService: bookmarkService).add(
+                    source,
+                    title: parseFlag("--title", from: args),
+                    folderID: targetFolder?.id
+                )
+                if jsonOutput {
+                    outputJSON(result.toDictionary())
+                } else {
+                    print("Captured: \(result.item.title) (\(result.item.id.uuidString.prefix(8)))")
+                    if let relativePath = result.item.relativePath {
+                        print("  Path: \(relativePath)")
+                    }
+                    print("  Duplicate: \(result.duplicate.status)")
+                    print("  Enrichment: \(result.enrichment.status)")
+                    print("  Review needed: \(result.routing.reviewNeeded)")
+                    print("  Next safe action: \(result.nextSafeAction)")
+                }
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case nil, "help", "--help", "-h":
+            print("Usage: cider-cli capture add <url> [--title <title>] [--folder <name|path>] [--json]")
+
+        default:
+            print("Unknown capture command: \(subcommand ?? "nil")")
+            print("Commands: add")
+        }
+    }
+
+    static func handleReview(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) {
+        let service = CiderReviewQueueService()
+
+        switch subcommand {
+        case "list", "ls":
+            let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 50
+            do {
+                let result = try service.list(
+                    limit: limit,
+                    includeDeferred: args.contains("--include-deferred")
+                )
+                printReviewQueueResult(result)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "approve":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli review approve <item-id> [--actor user|agent] [--json]")
+                return
+            }
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.approve(
+                    itemID: itemID,
+                    actor: parseFlag("--actor", from: args) ?? "user"
+                )
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "correct":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
+                return
+            }
+
+            let target: CiderRoutingDecisionTarget
+            if args.contains("--inbox") {
+                target = CiderRoutingDecisionTarget(
+                    kind: "inbox",
+                    name: "Inbox/Bookmarks",
+                    relativePath: "Inbox/Bookmarks",
+                    folderID: nil
+                )
+            } else {
+                switch resolveFolderArg(from: args) {
+                case .unspecified:
+                    print("Error: review correct requires --folder, --path, or --inbox.")
+                    return
+                case .failed:
+                    return
+                case .resolved(let folder):
+                    target = CiderRoutingDecisionTarget(
+                        kind: "folder",
+                        name: folder.name,
+                        relativePath: folder.relativePath,
+                        folderID: folder.id
+                    )
+                }
+            }
+
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.correctBookmark(
+                    itemID: itemID,
+                    target: target,
+                    reason: parseFlag("--reason", from: args) ?? "Corrected from review queue.",
+                    actor: parseFlag("--actor", from: args) ?? "user",
+                    bookmarkService: bookmarkService
+                )
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "defer":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]")
+                return
+            }
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.deferReview(
+                    itemID: itemID,
+                    reason: parseFlag("--reason", from: args) ?? "Deferred from review queue.",
+                    actor: parseFlag("--actor", from: args) ?? "user"
+                )
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case nil, "help", "--help", "-h":
+            print("""
+            Usage:
+              cider-cli review list [--include-deferred] [--limit <n>] [--json]
+              cider-cli review approve <item-id> [--actor user|agent] [--json]
+              cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+              cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
+            """)
+
+        default:
+            print("Unknown review command: \(subcommand ?? "nil")")
+            print("Commands: list, approve, correct, defer")
+        }
+    }
+
+    static func handleSpace(subcommand: String?, args: [String]) {
+        let storage = CiderSpaceStorage.shared
+
+        switch subcommand {
+        case "captures", "capture-dashboard":
+            guard let spaceRef = args.first else {
+                print("Error: Usage: cider-cli space captures <space-id|name> [--limit <n>] [--json]")
+                return
+            }
+            guard let space = resolveSpace(spaceRef, storage: storage) else { return }
+            let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 10
+            do {
+                let dashboard = try CiderSpaceCaptureDashboardService().dashboard(
+                    for: space,
+                    recentLimit: limit,
+                    reviewLimit: limit
+                )
+                printSpaceCaptureDashboard(dashboard)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "list", "ls":
+            let spaces = storage.spaces.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            if jsonOutput {
+                outputJSON(spaces.map(spaceToDict))
+            } else if spaces.isEmpty {
+                print("No Spaces found.")
+            } else {
+                for space in spaces {
+                    print("[\(space.id.prefix(8))] \(space.name) — \(space.rootRelativePath)")
+                }
+            }
+
+        case nil, "help", "--help", "-h":
+            print("""
+            Usage:
+              cider-cli space list [--json]
+              cider-cli space captures <space-id|name> [--limit <n>] [--json]
+            """)
+
+        default:
+            print("Unknown space command: \(subcommand ?? "nil")")
+            print("Commands: list, captures")
+        }
+    }
+
+    static func handleRouting(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) {
+        let service = CiderRoutingDecisionService()
+
+        switch subcommand {
+        case "explain":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli routing explain <item-id> [--json]")
+                return
+            }
+            do {
+                let explanation = try service.explain(itemRef: itemRef)
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "approve":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli routing approve <item-id> [--actor user|agent] [--json]")
+                return
+            }
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.approve(itemID: itemID, actor: parseFlag("--actor", from: args) ?? "user")
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "correct":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
+                return
+            }
+
+            let target: CiderRoutingDecisionTarget
+            if args.contains("--inbox") {
+                target = CiderRoutingDecisionTarget(
+                    kind: "inbox",
+                    name: "Inbox/Bookmarks",
+                    relativePath: "Inbox/Bookmarks",
+                    folderID: nil
+                )
+            } else {
+                switch resolveFolderArg(from: args) {
+                case .unspecified:
+                    print("Error: routing correct requires --folder, --path, or --inbox.")
+                    return
+                case .failed:
+                    return
+                case .resolved(let folder):
+                    target = CiderRoutingDecisionTarget(
+                        kind: "folder",
+                        name: folder.name,
+                        relativePath: folder.relativePath,
+                        folderID: folder.id
+                    )
+                }
+            }
+
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.correctBookmark(
+                    itemID: itemID,
+                    target: target,
+                    reason: parseFlag("--reason", from: args) ?? "Corrected route.",
+                    actor: parseFlag("--actor", from: args) ?? "user",
+                    bookmarkService: bookmarkService
+                )
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "rerun":
+            guard let itemRef = args.first else {
+                print("Error: Usage: cider-cli routing rerun <item-id> [--actor user|agent] [--json]")
+                return
+            }
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let explanation = try service.rerunDeterministic(
+                    itemID: itemID,
+                    actor: parseFlag("--actor", from: args) ?? "agent"
+                )
+                printRoutingExplanation(explanation)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case nil, "help", "--help", "-h":
+            print("""
+            Usage:
+              cider-cli routing explain <item-id> [--json]
+              cider-cli routing approve <item-id> [--actor user|agent] [--json]
+              cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+              cider-cli routing rerun <item-id> [--actor user|agent] [--json]
+            """)
+
+        default:
+            print("Unknown routing command: \(subcommand ?? "nil")")
+            print("Commands: explain, approve, correct, rerun")
+        }
+    }
 
     static func handleBookmark(subcommand: String?, args: [String], service: VaultBookmarkService) async {
         switch subcommand {
@@ -2995,11 +3312,16 @@ struct CiderCLI {
                 return
             }
             if let board = storage.boards.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame || $0.id == name }) {
+                guard let tagFilters = parseBoardTagFilters(from: args) else { return }
+                let visibleBoard = board.filteredByTags(tagFilters)
                 if jsonOutput {
-                    outputJSON(boardToDict(board))
+                    outputJSON(boardToDict(visibleBoard))
                 } else {
-                    print("Board: \(board.name) (\(board.id))")
-                    for col in board.columns {
+                    print("Board: \(visibleBoard.name) (\(visibleBoard.id))")
+                    if !tagFilters.isEmpty {
+                        print("Filtered by tags: \(tagFilters.joined(separator: ", "))")
+                    }
+                    for col in visibleBoard.columns {
                         let done = col.isDoneColumn ? " ✅" : ""
                         print("\n  ── \(col.name)\(done) (\(col.cards.count)) ──")
                         for card in col.cards {
@@ -3014,6 +3336,62 @@ struct CiderCLI {
                 }
             } else {
                 print("Error: Board '\(name)' not found")
+            }
+
+        case "tags":
+            if jsonOutput {
+                outputJSON([
+                    "coreTags": KanbanCardTagTaxonomy.coreTags,
+                    "usage": "Use cider-cli board show <board> --tag <tag> [--tag <tag>] [--tags <csv>] [--json] to filter cards by all requested tags.",
+                ])
+            } else {
+                print("Core Kanban tags:")
+                for tag in KanbanCardTagTaxonomy.coreTags {
+                    print("  - \(tag)")
+                }
+                print("\nFilter cards: cider-cli board show <board> --tag bug --tag kanban [--tags qa,agent-handoff] [--json]")
+            }
+
+        case "workflow":
+            guard let boardRef = args.first else {
+                print("Error: Usage: cider-cli board workflow <board> [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            let summary = KanbanAgentWorkflowSummary(board: board)
+            if jsonOutput {
+                outputJSON(kanbanAgentWorkflowSummaryToDict(summary))
+            } else {
+                print("Agent workflow for: \(summary.boardName) [\(summary.boardID)]")
+                if summary.laneSummaries.isEmpty {
+                    print("  No standard workflow lanes found. Expected columns like Queued, In Progress, Testing, Needs Fix, Done.")
+                } else {
+                    for lane in summary.laneSummaries {
+                        print("\n  ── \(lane.columnName) / \(lane.role.rawValue) (\(lane.count)) ──")
+                        for card in lane.cards {
+                            let agent = card.agent.map { " @\($0)" } ?? ""
+                            let priority = card.priority.map { " [\($0.rawValue)]" } ?? ""
+                            print("    [\(card.id)] \(card.title)\(agent)\(priority)")
+                        }
+                    }
+                }
+            }
+
+        case "testing-summary":
+            guard let boardRef = args.first else {
+                print("Error: Usage: cider-cli board testing-summary <board> [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            let summary = KanbanTestingTriageSummary(board: board)
+            if jsonOutput {
+                outputJSON(kanbanTestingTriageSummaryToDict(summary))
+            } else {
+                print("Testing summary for: \(summary.boardName) [\(summary.boardID)]")
+                print("  Needs Erik: \(summary.needsErik.count)  Agent can verify: \(summary.agentCanVerify.count)  Mixed: \(summary.mixed.count)")
+                printTestingTriageSection("Needs Erik", items: summary.needsErik)
+                printTestingTriageSection("Agent can verify", items: summary.agentCanVerify)
+                printTestingTriageSection("Mixed / needs triage", items: summary.mixed)
             }
 
         case "children":
@@ -3318,7 +3696,7 @@ struct CiderCLI {
 
         default:
             print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, create, rename, delete, add-card, update-card, move-card, delete-card, children, add-column, rename-column, delete-column")
+            print("Commands: list, show, create, rename, delete, add-card, update-card, move-card, delete-card, tags, workflow, testing-summary, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -4978,6 +5356,177 @@ struct CiderCLI {
         return nil
     }
 
+    static func printTestingTriageSection(_ title: String, items: [KanbanTestingTriageSummary.Item]) {
+        print("\n  ── \(title) (\(items.count)) ──")
+        if items.isEmpty {
+            print("    None")
+            return
+        }
+        for item in items {
+            let priority = item.card.priority.map { " [\($0.rawValue)]" } ?? ""
+            let parent = item.parentTitle.map { " — parent: \($0)" } ?? ""
+            print("    [\(item.card.id)] \(item.card.title)\(priority) — \(item.reason)\(parent)")
+            if !item.whatChanged.isEmpty {
+                print("      What changed:")
+                for change in item.whatChanged.prefix(2) {
+                    print("        • \(change)")
+                }
+            }
+            if !item.testEvidence.isEmpty {
+                print("      Test evidence:")
+                for evidence in item.testEvidence.prefix(2) {
+                    print("        • \(evidence)")
+                }
+            }
+            if !item.agentVerificationSteps.isEmpty {
+                print("      Agent can verify:")
+                for step in item.agentVerificationSteps.prefix(2) {
+                    print("        • \(step)")
+                }
+            }
+            if !item.manualQASteps.isEmpty {
+                print("      Manual QA:")
+                for step in item.manualQASteps.prefix(3) {
+                    print("        • \(step)")
+                }
+            }
+        }
+    }
+
+    static func printRoutingExplanation(_ explanation: CiderRoutingExplanation) {
+        if jsonOutput {
+            outputJSON(explanation.toDictionary())
+            return
+        }
+
+        print("Item: \(explanation.item.title) [\(explanation.item.type)] \(explanation.item.id.uuidString.prefix(8))")
+        guard let decision = explanation.latestDecision else {
+            print("  Routing: none recorded")
+            print("  Review needed: true")
+            print("  Next safe action: \(explanation.nextSafeAction)")
+            return
+        }
+
+        print("  Target: \(decision.target.relativePath)")
+        print("  Confidence: \(decision.confidence)")
+        print("  Review state: \(decision.reviewState)")
+        print("  Actor: \(decision.actor)")
+        print("  Source: \(decision.source)")
+        print("  Reason: \(decision.reason)")
+        print("  Decision: \(decision.id.uuidString)")
+        if let supersedes = decision.supersedesDecisionID {
+            print("  Supersedes: \(supersedes.uuidString)")
+        }
+        print("  History entries: \(explanation.history.count)")
+        print("  Next safe action: \(explanation.nextSafeAction)")
+    }
+
+    static func printReviewQueueResult(_ result: CiderReviewQueueResult) {
+        if jsonOutput {
+            outputJSON(result.toDictionary())
+            return
+        }
+
+        guard !result.items.isEmpty else {
+            print("No review items.")
+            return
+        }
+
+        print("Review queue (\(result.items.count)):")
+        for item in result.items {
+            let id = item.itemID.uuidString.prefix(8)
+            print("  [\(id)] \(item.title)")
+            print("    Kind: \(item.kind)")
+            print("    State: \(item.reviewState)")
+            if let relativePath = item.relativePath {
+                print("    Path: \(relativePath)")
+            }
+            if let target = item.target {
+                print("    Candidate target: \(target.relativePath)")
+            }
+            if let confidence = item.confidence {
+                print("    Confidence: \(confidence)")
+            }
+            print("    Reason: \(item.reason)")
+            print("    Suggested action: \(item.suggestedAction)")
+            print("    Safe actions: \(item.safeActions.joined(separator: ", "))")
+        }
+    }
+
+    static func printSpaceCaptureDashboard(_ dashboard: CiderSpaceCaptureDashboard) {
+        if jsonOutput {
+            outputJSON(dashboard.toDictionary())
+            return
+        }
+
+        print("Space captures: \(dashboard.spaceName) — \(dashboard.rootRelativePath)")
+
+        if dashboard.needsReview.isEmpty {
+            print("  Needs review: none")
+        } else {
+            print("  Needs review:")
+            for item in dashboard.needsReview {
+                print("    [\(item.itemID.uuidString.prefix(8))] \(item.title)")
+                print("      State: \(item.reviewState) confidence=\(item.confidence)")
+                print("      Reason: \(item.reason)")
+                print("      Explain: \(item.routingExplanationCommand)")
+            }
+        }
+
+        if dashboard.recentRouted.isEmpty {
+            print("  Recent routed: none")
+        } else {
+            print("  Recent routed:")
+            for item in dashboard.recentRouted {
+                print("    [\(item.itemID.uuidString.prefix(8))] \(item.title)")
+                print("      Target: \(item.target.relativePath)")
+                print("      Reason: \(item.reason)")
+                if let sourceURL = item.sourceURL {
+                    print("      Source: \(sourceURL)")
+                }
+            }
+        }
+    }
+
+    static func resolveSpace(_ ref: String, storage: CiderSpaceStorage) -> CiderSpace? {
+        let normalized = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercased = normalized.lowercased()
+        let idMatches = storage.spaces.filter {
+            $0.id.lowercased().hasPrefix(lowercased)
+        }
+        if idMatches.count == 1 { return idMatches[0] }
+        if idMatches.count > 1 {
+            print("Error: Space ID prefix '\(ref)' is ambiguous.")
+            return nil
+        }
+
+        let nameMatches = storage.spaces.filter {
+            $0.name.localizedCaseInsensitiveCompare(normalized) == .orderedSame
+        }
+        if nameMatches.count == 1 { return nameMatches[0] }
+        if nameMatches.count > 1 {
+            print("Error: Space name '\(ref)' is ambiguous. Use an ID prefix.")
+            return nil
+        }
+
+        print("Error: No Space found for '\(ref)'")
+        return nil
+    }
+
+    static func spaceToDict(_ space: CiderSpace) -> [String: Any] {
+        [
+            "id": space.id,
+            "name": space.name,
+            "systemImage": space.systemImage,
+            "purpose": space.purpose,
+            "preset": space.preset.rawValue,
+            "isPinned": space.isPinned,
+            "rootRelativePath": space.rootRelativePath,
+            "routingHints": space.routingHints,
+            "defaultViews": space.defaultViews.map(\.rawValue),
+        ]
+    }
+
     static func findColumn(_ nameOrID: String, in board: KanbanBoard) -> KanbanColumn? {
         if let col = board.columns.first(where: {
             $0.name.localizedCaseInsensitiveCompare(nameOrID) == .orderedSame || $0.id == nameOrID
@@ -4995,6 +5544,26 @@ struct CiderCLI {
         arg.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+
+    static func parseBoardTagFilters(from args: [String]) -> [String]? {
+        var values: [String] = []
+        var i = 0
+        while i < args.count {
+            let token = args[i]
+            guard token == "--tag" || token == "--tags" else {
+                i += 1
+                continue
+            }
+            guard i + 1 < args.count, !args[i + 1].hasPrefix("--") else {
+                print("Error: \(token) requires a tag value.")
+                print("Usage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]")
+                return nil
+            }
+            values.append(args[i + 1])
+            i += 2
+        }
+        return KanbanCardTagTaxonomy.normalizedTags(from: values)
     }
 
     /// Parse every occurrence of `--flag <value>` in `args`. Used for
@@ -5624,6 +6193,25 @@ struct CiderCLI {
         print("""
         CiderCLI — Full command-line interface to Cider's vault
 
+        CAPTURE
+          cider-cli capture add <url> [--title <title>] [--folder <name|path>] [--json]
+
+        ROUTING
+          cider-cli routing explain <item-id> [--json]
+          cider-cli routing approve <item-id> [--actor user|agent] [--json]
+          cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+          cider-cli routing rerun <item-id> [--actor user|agent] [--json]
+
+        REVIEW
+          cider-cli review list [--include-deferred] [--limit <n>] [--json]
+          cider-cli review approve <item-id> [--actor user|agent] [--json]
+          cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+          cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
+
+        SPACES
+          cider-cli space list [--json]
+          cider-cli space captures <space-id|name> [--limit <n>] [--json]
+
         BOOKMARKS (alias: bm)
           cider-cli bookmark list [--folder <name|path>] [--limit <n>]
           cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--timeout <seconds>|--no-wait]
@@ -5727,7 +6315,8 @@ struct CiderCLI {
 
         BOARDS (Kanban)
           cider-cli board list
-          cider-cli board show <board-name-or-id>
+          cider-cli board show <board-name-or-id> [--tag <tag>] [--tags <csv>] [--json]
+          cider-cli board tags [--json]
           cider-cli board create <name>
           cider-cli board rename <name|id> --to <new-name>
           cider-cli board delete <name|id>
@@ -5738,6 +6327,8 @@ struct CiderCLI {
                                          [--parent <card-id>] [--clear-parent]
           cider-cli board move-card <board> --card <id> --to <column>
           cider-cli board delete-card <board> --card <id>
+          cider-cli board workflow <board> [--json]
+          cider-cli board testing-summary <board> [--json]
           cider-cli board children <board> --card <id> [--json]
           cider-cli board add-column <board> --name <col-name> [--done]
           cider-cli board rename-column <board> --column <col> --to <new-name>
