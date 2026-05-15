@@ -3,6 +3,7 @@ import SwiftUI
 struct RecipeSpaceDashboardView: View {
     let space: CiderSpace
     let rootURL: URL
+    let captureDashboard: CiderSpaceCaptureDashboard?
     let bookmarks: [Bookmark]
     let notes: [Note]
     let onTogglePinned: () -> Void
@@ -39,6 +40,7 @@ struct RecipeSpaceDashboardView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: HomeOverviewDesign.rowSpacing) {
                         heroPanel(model: model)
+                        captureRoutingPanel
                         sourceAndTastePanel(model: model)
 
                         if let selectedItem {
@@ -57,6 +59,17 @@ struct RecipeSpaceDashboardView: View {
                 }
                 .scrollIndicators(.hidden)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var captureRoutingPanel: some View {
+        if let captureDashboard, captureDashboard.hasItems {
+            CiderSpaceCaptureRoutingPanel(
+                dashboard: captureDashboard,
+                bookmarks: bookmarks,
+                onOpenBookmark: onOpenBookmark
+            )
         }
     }
 
@@ -455,4 +468,3 @@ private struct RecipeCollectionCardView: View {
         }
     }
 }
-

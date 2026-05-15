@@ -223,9 +223,11 @@ extension CiderPanelView {
                 }
             case .spaceOverview(let spaceID, _):
                 if let space = spaceStorage.space(id: spaceID) {
+                    let captureDashboard = try? CiderSpaceCaptureDashboardService().dashboard(for: space)
                     CiderSpaceOverviewView(
                         space: space,
                         rootURL: spaceStorage.rootURL(for: space),
+                        captureDashboard: captureDashboard,
                         bookmarks: bookmarksViewModel.bookmarks,
                         mediaItems: mediaItemStorage.items,
                         notes: notesViewModel.notes,

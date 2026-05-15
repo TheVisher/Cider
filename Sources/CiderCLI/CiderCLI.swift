@@ -89,6 +89,8 @@ struct CiderCLI {
             handleCapture(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
         case "review":
             handleReview(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
+        case "space", "spaces":
+            handleSpace(subcommand: subcommand, args: remaining)
         case "routing", "route":
             handleRouting(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
         case "bookmark", "bm":
@@ -533,6 +535,55 @@ struct CiderCLI {
         default:
             print("Unknown review command: \(subcommand ?? "nil")")
             print("Commands: list, approve, correct, defer")
+        }
+    }
+
+    static func handleSpace(subcommand: String?, args: [String]) {
+        let storage = CiderSpaceStorage.shared
+
+        switch subcommand {
+        case "captures", "capture-dashboard":
+            guard let spaceRef = args.first else {
+                print("Error: Usage: cider-cli space captures <space-id|name> [--limit <n>] [--json]")
+                return
+            }
+            guard let space = resolveSpace(spaceRef, storage: storage) else { return }
+            let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 10
+            do {
+                let dashboard = try CiderSpaceCaptureDashboardService().dashboard(
+                    for: space,
+                    recentLimit: limit,
+                    reviewLimit: limit
+                )
+                printSpaceCaptureDashboard(dashboard)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "list", "ls":
+            let spaces = storage.spaces.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            if jsonOutput {
+                outputJSON(spaces.map(spaceToDict))
+            } else if spaces.isEmpty {
+                print("No Spaces found.")
+            } else {
+                for space in spaces {
+                    print("[\(space.id.prefix(8))] \(space.name) — \(space.rootRelativePath)")
+                }
+            }
+
+        case nil, "help", "--help", "-h":
+            print("""
+            Usage:
+              cider-cli space list [--json]
+              cider-cli space captures <space-id|name> [--limit <n>] [--json]
+            """)
+
+        default:
+            print("Unknown space command: \(subcommand ?? "nil")")
+            print("Commands: list, captures")
         }
     }
 
@@ -5402,6 +5453,80 @@ struct CiderCLI {
         }
     }
 
+    static func printSpaceCaptureDashboard(_ dashboard: CiderSpaceCaptureDashboard) {
+        if jsonOutput {
+            outputJSON(dashboard.toDictionary())
+            return
+        }
+
+        print("Space captures: \(dashboard.spaceName) — \(dashboard.rootRelativePath)")
+
+        if dashboard.needsReview.isEmpty {
+            print("  Needs review: none")
+        } else {
+            print("  Needs review:")
+            for item in dashboard.needsReview {
+                print("    [\(item.itemID.uuidString.prefix(8))] \(item.title)")
+                print("      State: \(item.reviewState) confidence=\(item.confidence)")
+                print("      Reason: \(item.reason)")
+                print("      Explain: \(item.routingExplanationCommand)")
+            }
+        }
+
+        if dashboard.recentRouted.isEmpty {
+            print("  Recent routed: none")
+        } else {
+            print("  Recent routed:")
+            for item in dashboard.recentRouted {
+                print("    [\(item.itemID.uuidString.prefix(8))] \(item.title)")
+                print("      Target: \(item.target.relativePath)")
+                print("      Reason: \(item.reason)")
+                if let sourceURL = item.sourceURL {
+                    print("      Source: \(sourceURL)")
+                }
+            }
+        }
+    }
+
+    static func resolveSpace(_ ref: String, storage: CiderSpaceStorage) -> CiderSpace? {
+        let normalized = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercased = normalized.lowercased()
+        let idMatches = storage.spaces.filter {
+            $0.id.lowercased().hasPrefix(lowercased)
+        }
+        if idMatches.count == 1 { return idMatches[0] }
+        if idMatches.count > 1 {
+            print("Error: Space ID prefix '\(ref)' is ambiguous.")
+            return nil
+        }
+
+        let nameMatches = storage.spaces.filter {
+            $0.name.localizedCaseInsensitiveCompare(normalized) == .orderedSame
+        }
+        if nameMatches.count == 1 { return nameMatches[0] }
+        if nameMatches.count > 1 {
+            print("Error: Space name '\(ref)' is ambiguous. Use an ID prefix.")
+            return nil
+        }
+
+        print("Error: No Space found for '\(ref)'")
+        return nil
+    }
+
+    static func spaceToDict(_ space: CiderSpace) -> [String: Any] {
+        [
+            "id": space.id,
+            "name": space.name,
+            "systemImage": space.systemImage,
+            "purpose": space.purpose,
+            "preset": space.preset.rawValue,
+            "isPinned": space.isPinned,
+            "rootRelativePath": space.rootRelativePath,
+            "routingHints": space.routingHints,
+            "defaultViews": space.defaultViews.map(\.rawValue),
+        ]
+    }
+
     static func findColumn(_ nameOrID: String, in board: KanbanBoard) -> KanbanColumn? {
         if let col = board.columns.first(where: {
             $0.name.localizedCaseInsensitiveCompare(nameOrID) == .orderedSame || $0.id == nameOrID
@@ -6082,6 +6207,10 @@ struct CiderCLI {
           cider-cli review approve <item-id> [--actor user|agent] [--json]
           cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
+
+        SPACES
+          cider-cli space list [--json]
+          cider-cli space captures <space-id|name> [--limit <n>] [--json]
 
         BOOKMARKS (alias: bm)
           cider-cli bookmark list [--folder <name|path>] [--limit <n>]

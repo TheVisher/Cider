@@ -3,6 +3,7 @@ import SwiftUI
 struct MediaSpaceDashboardView: View {
     let space: CiderSpace
     let rootURL: URL
+    let captureDashboard: CiderSpaceCaptureDashboard?
     let bookmarks: [Bookmark]
     let mediaItems: [MediaItem]
     let notes: [Note]
@@ -33,6 +34,7 @@ struct MediaSpaceDashboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: HomeOverviewDesign.rowSpacing) {
                     headerPanel
+                    captureRoutingPanel
                     sectionFilterBar
 
                     if let selectedItem {
@@ -71,6 +73,17 @@ struct MediaSpaceDashboardView: View {
             mediaItems: mediaItems,
             notes: notes
         )
+    }
+
+    @ViewBuilder
+    private var captureRoutingPanel: some View {
+        if let captureDashboard, captureDashboard.hasItems {
+            CiderSpaceCaptureRoutingPanel(
+                dashboard: captureDashboard,
+                bookmarks: bookmarks,
+                onOpenBookmark: onOpenBookmark
+            )
+        }
     }
 
     private var headerPanel: some View {
