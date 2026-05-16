@@ -855,6 +855,22 @@ struct CiderCLI {
                 print("Error: \(error.localizedDescription)")
             }
 
+        case "enrich":
+            guard let itemRef = args.first else {
+                printCLIError("Usage: cider-cli review enrich <item-id> [--actor user|agent] [--json]")
+                return
+            }
+            do {
+                let itemID = try service.resolveItemID(ref: itemRef)
+                let result = try service.enrich(
+                    itemID: itemID,
+                    actor: parseFlag("--actor", from: args) ?? "user"
+                )
+                printReviewQueueActionResult(result)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case nil, "help", "--help", "-h":
             print("""
             Usage:
@@ -862,11 +878,12 @@ struct CiderCLI {
               cider-cli review approve <item-id> [--actor user|agent] [--json]
               cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
               cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
+              cider-cli review enrich <item-id> [--actor user|agent] [--json]
             """)
 
         default:
             print("Unknown review command: \(subcommand ?? "nil")")
-            print("Commands: list, approve, correct, defer")
+            print("Commands: list, approve, correct, defer, enrich")
         }
     }
 
@@ -6396,6 +6413,20 @@ struct CiderCLI {
             print("    Suggested action: \(item.suggestedAction)")
             print("    Safe actions: \(item.safeActions.joined(separator: ", "))")
         }
+    }
+
+    static func printReviewQueueActionResult(_ result: CiderReviewQueueActionResult) {
+        if jsonOutput {
+            outputJSON(result.toDictionary())
+            return
+        }
+
+        print("\(result.status.capitalized): \(result.title) (\(result.itemID.uuidString.prefix(8)))")
+        print("  Action: \(result.action)")
+        print("  Type: \(result.itemType)")
+        print("  Actor: \(result.actor)")
+        print("  Message: \(result.message)")
+        print("  Safe actions: \(result.safeActions.joined(separator: ", "))")
     }
 
     static func printSpaceCaptureDashboard(_ dashboard: CiderSpaceCaptureDashboard) {

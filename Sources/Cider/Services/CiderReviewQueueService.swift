@@ -64,10 +64,52 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     }
 }
 
+struct CiderReviewQueueActionResult: Equatable {
+    var action: String
+    var itemID: UUID
+    var itemType: String
+    var title: String
+    var status: String
+    var message: String
+    var actor: String
+    var safeActions: [String]
+
+    func toDictionary() -> [String: Any] {
+        [
+            "action": action,
+            "itemID": itemID.uuidString,
+            "itemType": itemType,
+            "title": title,
+            "status": status,
+            "message": message,
+            "actor": actor,
+            "safeActions": safeActions,
+        ]
+    }
+}
+
+enum CiderReviewQueueActionError: Error, LocalizedError {
+    case itemNotFound(UUID)
+    case unsupportedItemType(String)
+    case noEnrichmentIssue(UUID)
+
+    var errorDescription: String? {
+        switch self {
+        case .itemNotFound(let id):
+            return "No review item found for \(id.uuidString)."
+        case .unsupportedItemType(let type):
+            return "Review enrichment is only supported for bookmarks, not \(type)."
+        case .noEnrichmentIssue(let id):
+            return "No active enrichment review issue found for \(id.uuidString)."
+        }
+    }
+}
+
 @MainActor
 final class CiderReviewQueueService {
     private let database: CiderDatabase?
     private let routingDecisionService: CiderRoutingDecisionService
+    private let enrichmentScheduler: (UUID) -> Void
 
     private var resolvedDatabase: CiderDatabase? {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
@@ -75,10 +117,14 @@ final class CiderReviewQueueService {
 
     init(
         database: CiderDatabase? = nil,
-        routingDecisionService: CiderRoutingDecisionService? = nil
+        routingDecisionService: CiderRoutingDecisionService? = nil,
+        enrichmentScheduler: ((UUID) -> Void)? = nil
     ) {
         self.database = database
         self.routingDecisionService = routingDecisionService ?? CiderRoutingDecisionService(database: database)
+        self.enrichmentScheduler = enrichmentScheduler ?? { bookmarkID in
+            VaultBookmarkService.shared.refetchMetadata(for: bookmarkID)
+        }
     }
 
     func list(
@@ -182,6 +228,36 @@ final class CiderReviewQueueService {
             supersedesDecisionID: latest.id
         )
         return try routingDecisionService.explain(itemID: itemID)
+    }
+
+    @discardableResult
+    func enrich(itemID: UUID, actor: String = "user") throws -> CiderReviewQueueActionResult {
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
+        let items = try itemSummaries(in: db)
+        guard let item = items[itemID] else {
+            throw CiderReviewQueueActionError.itemNotFound(itemID)
+        }
+        guard item.type == "bookmark" else {
+            throw CiderReviewQueueActionError.unsupportedItemType(item.type)
+        }
+
+        let bookmarkDetails = try bookmarkDetails(in: db)
+        guard let details = bookmarkDetails[itemID],
+              enrichmentReviewItem(item: item, details: details, now: Date()) != nil else {
+            throw CiderReviewQueueActionError.noEnrichmentIssue(itemID)
+        }
+
+        enrichmentScheduler(itemID)
+        return CiderReviewQueueActionResult(
+            action: "review.enrich",
+            itemID: item.id,
+            itemType: item.type,
+            title: item.title,
+            status: "scheduled",
+            message: "Scheduled bookmark enrichment. The review item remains until metadata completes.",
+            actor: actor,
+            safeActions: ["review list", "bookmark get"]
+        )
     }
 
     func resolveItemID(ref: String) throws -> UUID {

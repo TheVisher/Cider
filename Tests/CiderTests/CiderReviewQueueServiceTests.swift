@@ -173,4 +173,56 @@ struct CiderReviewQueueServiceTests {
         #expect(items.first { $0.itemID == enrichmentID }?.suggestedAction == "Enrichment failed")
         #expect(items.first { $0.itemID == inboxID }?.kind == "inbox_backlog")
     }
+
+    @Test("review queue enrich action schedules bookmark enrichment")
+    func reviewQueueEnrichActionSchedulesBookmarkEnrichment() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let bookmarkID = try insertBookmark(
+            db,
+            title: "Needs Metadata",
+            relativePath: "Inbox/Bookmarks/Needs Metadata.webloc",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        var scheduledIDs: [UUID] = []
+        let queue = CiderReviewQueueService(
+            database: db,
+            enrichmentScheduler: { scheduledIDs.append($0) }
+        )
+
+        let result = try queue.enrich(itemID: bookmarkID, actor: "agent")
+
+        #expect(scheduledIDs == [bookmarkID])
+        #expect(result.action == "review.enrich")
+        #expect(result.itemID == bookmarkID)
+        #expect(result.itemType == "bookmark")
+        #expect(result.status == "scheduled")
+        #expect(result.actor == "agent")
+        #expect(result.safeActions.contains("review list"))
+        #expect(result.safeActions.contains("bookmark get"))
+    }
+
+    @Test("review queue enrich action rejects bookmarks without enrichment issue")
+    func reviewQueueEnrichActionRejectsCompleteBookmarks() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let bookmarkID = try insertBookmark(
+            db,
+            title: "Complete Metadata",
+            relativePath: "Inbox/Bookmarks/Complete Metadata.webloc",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date()
+        )
+        var scheduledIDs: [UUID] = []
+        let queue = CiderReviewQueueService(
+            database: db,
+            enrichmentScheduler: { scheduledIDs.append($0) }
+        )
+
+        #expect(throws: CiderReviewQueueActionError.self) {
+            _ = try queue.enrich(itemID: bookmarkID, actor: "agent")
+        }
+        #expect(scheduledIDs.isEmpty)
+    }
 }
