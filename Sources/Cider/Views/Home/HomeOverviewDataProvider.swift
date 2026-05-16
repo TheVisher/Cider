@@ -612,7 +612,7 @@ enum HomeOverviewDataProvider {
 
     static func bookmarkDateSuggestionResults(
         from items: [LibraryItemV2],
-        service: CiderBookmarkDateSuggestionService = CiderBookmarkDateSuggestionService()
+        service: CiderBookmarkDateSuggestionService = CiderBookmarkDateSuggestionService(maximumFieldLength: 2_000)
     ) -> [CiderBookmarkDateSuggestionResult] {
         items.compactMap { item in
             guard case .bookmark(let bookmark) = item else { return nil }

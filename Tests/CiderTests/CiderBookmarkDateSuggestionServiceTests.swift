@@ -46,6 +46,24 @@ struct CiderBookmarkDateSuggestionServiceTests {
         #expect(suggestions.isEmpty)
     }
 
+    @Test("dashboard date suggestion scan can be bounded for large text fields")
+    func dashboardDateSuggestionScanCanBeBoundedForLargeTextFields() {
+        let bookmark = Bookmark(
+            title: "Conference notes",
+            urlString: "https://example.com/conference",
+            notes: String(repeating: "background ", count: 200)
+                + "Conference event September 12, 2026"
+        )
+        let boundedService = CiderBookmarkDateSuggestionService(maximumFieldLength: 120)
+
+        let results = HomeOverviewDataProvider.bookmarkDateSuggestionResults(
+            from: [.bookmark(bookmark)],
+            service: boundedService
+        )
+
+        #expect(results.isEmpty)
+    }
+
     @Test("date suggestion JSON exposes agent safe fields")
     func dateSuggestionJSONExposesAgentSafeFields() throws {
         let suggestion = CiderBookmarkDateSuggestion(

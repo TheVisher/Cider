@@ -63,13 +63,16 @@ struct CiderBookmarkDateSuggestionResult: Equatable {
 final class CiderBookmarkDateSuggestionService {
     private let nowProvider: () -> Date
     private let calendar: Calendar
+    private let maximumFieldLength: Int?
 
     init(
         nowProvider: @escaping () -> Date = { Date() },
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        maximumFieldLength: Int? = nil
     ) {
         self.nowProvider = nowProvider
         self.calendar = calendar
+        self.maximumFieldLength = maximumFieldLength
     }
 
     func suggestions(for bookmark: Bookmark) -> [CiderBookmarkDateSuggestion] {
@@ -78,7 +81,9 @@ final class CiderBookmarkDateSuggestionService {
             ("notes", bookmark.notes),
             ("aiSummary", bookmark.aiSummary ?? ""),
             ("ocrText", bookmark.ocrText ?? ""),
-        ].filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        ]
+            .map { field in (name: field.0, text: boundedFieldText(field.1)) }
+            .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else {
             return []
@@ -173,6 +178,13 @@ final class CiderBookmarkDateSuggestionService {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard collapsed.count > 180 else { return collapsed }
         return String(collapsed.prefix(177)) + "..."
+    }
+
+    private func boundedFieldText(_ text: String) -> String {
+        guard let maximumFieldLength, maximumFieldLength >= 0, text.count > maximumFieldLength else {
+            return text
+        }
+        return String(text.prefix(maximumFieldLength))
     }
 
     private func dedupeKey(kind: String, date: Date, field: String) -> String {
