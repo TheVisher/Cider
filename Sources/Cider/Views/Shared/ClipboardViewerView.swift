@@ -434,7 +434,9 @@ struct ClipboardViewerView: View {
         switch item.type {
         case .url:
             if let urlString = item.textContent {
-                if let bookmark = VaultBookmarkService.shared.add(urlString: urlString, title: nil) {
+                if let bookmark = try? CiderBookmarkCaptureAdapter()
+                    .addURLBookmark(urlString: urlString)
+                    .bookmark {
                     resultID = bookmark.id
                     NotificationCenter.default.post(
                         name: .showBookmarkCaptureToast,

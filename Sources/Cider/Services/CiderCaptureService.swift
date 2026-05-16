@@ -694,6 +694,46 @@ final class CiderCaptureService {
     }
 }
 
+struct CiderBookmarkCaptureAdapterResult {
+    var bookmark: Bookmark
+    var captureResult: CiderCaptureResult
+}
+
+@MainActor
+final class CiderBookmarkCaptureAdapter {
+    private let bookmarkService: VaultBookmarkService
+    private let database: CiderDatabase?
+
+    init(
+        bookmarkService: VaultBookmarkService = .shared,
+        database: CiderDatabase? = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil
+    ) {
+        self.bookmarkService = bookmarkService
+        self.database = database
+    }
+
+    func addURLBookmark(
+        urlString: String,
+        title: String? = nil,
+        folderID: UUID? = nil
+    ) throws -> CiderBookmarkCaptureAdapterResult {
+        let captureResult = try CiderCaptureService(
+            bookmarkService: bookmarkService,
+            database: database
+        ).add(
+            urlString,
+            title: title,
+            folderID: folderID
+        )
+        guard captureResult.item.type == "bookmark",
+              let bookmark = bookmarkService.bookmarks.first(where: { $0.id == captureResult.item.id })
+        else {
+            throw CiderCaptureError.storeFailed(urlString)
+        }
+        return CiderBookmarkCaptureAdapterResult(bookmark: bookmark, captureResult: captureResult)
+    }
+}
+
 private extension CiderCaptureResult.Target {
     var routingDecisionTarget: CiderRoutingDecisionTarget {
         CiderRoutingDecisionTarget(

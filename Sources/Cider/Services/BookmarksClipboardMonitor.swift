@@ -109,7 +109,7 @@ final class BookmarksClipboardMonitor {
                     )
                     return
                 }
-            } else if VaultBookmarkService.shared.add(urlString: value, title: nil) != nil {
+            } else if (try? CiderBookmarkCaptureAdapter().addURLBookmark(urlString: value)) != nil {
                 NotificationCenter.default.post(
                     name: .showBookmarkCaptureToast,
                     object: nil,

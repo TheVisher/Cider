@@ -250,7 +250,7 @@ extension AppDelegate {
             },
             onSave: { [weak self] in
                 guard let self else { return }
-                let saved = VaultBookmarkService.shared.add(urlString: normalized, title: nil) != nil
+                let saved = (try? CiderBookmarkCaptureAdapter().addURLBookmark(urlString: normalized)) != nil
                 self.showBookmarkCaptureToast(
                     message: saved ? "Saved copied URL" : "Could not save copied URL",
                     isSuccess: saved

@@ -70,6 +70,34 @@ struct SecondBrainFoundationTests {
         return (object as? [[String: Any]]) ?? []
     }
 
+    @Test("bookmark add records unified capture routing review metadata")
+    func bookmarkAddRecordsUnifiedCaptureRoutingReviewMetadata() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-bookmark-add-cutover-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let output = try runCLI([
+            "bookmark", "add", "https://example.com/cutover",
+            "--no-wait",
+            "--json",
+        ], vaultURL: vault)
+        let bookmark = try jsonObject(from: output)
+        let idString = try #require(bookmark["id"] as? String)
+        let itemID = try #require(UUID(uuidString: idString))
+
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        let db = CiderDatabase()
+        try db.open(at: dbURL)
+        defer { db.close() }
+
+        let explanation = try CiderRoutingDecisionService(database: db).explain(itemID: itemID)
+        #expect(explanation.latestDecision?.reviewState == "needs_review")
+        #expect(explanation.latestDecision?.source == "capture.add")
+        #expect(explanation.latestDecision?.actor == "agent")
+        #expect(explanation.latestDecision?.target.relativePath == "Inbox/Bookmarks")
+    }
+
     private func makeTestDB() throws -> (CiderDatabase, URL) {
         let url = makeTempDBURL()
         let db = CiderDatabase()

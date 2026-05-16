@@ -984,20 +984,26 @@ struct AddBookmarkTool: Tool {
         guard !urlString.isEmpty else { return "URL cannot be empty." }
 
         let title = arguments.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let bookmark = VaultBookmarkService.shared.add(urlString: urlString, title: title) else {
+        let targetFolder: VaultFolder?
+        if let folderName = arguments.folderName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !folderName.isEmpty {
+            targetFolder = VaultFolderService.shared.folders.first {
+                $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
+            }
+        } else {
+            targetFolder = nil
+        }
+        guard let bookmark = try? CiderBookmarkCaptureAdapter()
+            .addURLBookmark(urlString: urlString, title: title, folderID: targetFolder?.id)
+            .bookmark else {
             return "Failed to create bookmark for \"\(urlString)\"."
         }
 
         var actions: [String] = ["Saved bookmark \"\(bookmark.title)\""]
 
         // Move to folder
-        if let folderName = arguments.folderName?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !folderName.isEmpty,
-           let folder = VaultFolderService.shared.folders.first(where: {
-               $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
-           }) {
-            _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folder.id)
-            actions.append("moved to folder \"\(folder.name)\"")
+        if let targetFolder {
+            actions.append("moved to folder \"\(targetFolder.name)\"")
         }
 
         // Apply tag

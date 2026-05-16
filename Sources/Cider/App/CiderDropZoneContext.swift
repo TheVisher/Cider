@@ -324,7 +324,9 @@ final class CiderDropZoneContext: ObservableObject {
 
         resetDismissProgress()
         status = .processing("Saving bookmark...")
-        guard let bookmark = VaultBookmarkService.shared.add(urlString: rawValue, title: nil) else {
+        guard let bookmark = try? CiderBookmarkCaptureAdapter()
+            .addURLBookmark(urlString: rawValue)
+            .bookmark else {
             resetDismissProgress()
             status = .failure("That URL could not be saved.")
             return true

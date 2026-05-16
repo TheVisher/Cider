@@ -27,7 +27,7 @@ final class CiderServicesProvider: NSObject {
         if let url = URL(string: trimmed),
            let scheme = url.scheme?.lowercased(),
            scheme == "http" || scheme == "https" {
-            let saved = VaultBookmarkService.shared.add(urlString: url.absoluteString, title: nil) != nil
+            let saved = (try? CiderBookmarkCaptureAdapter().addURLBookmark(urlString: url.absoluteString)) != nil
             postToast(message: saved ? "Saved from Services" : "Could not save URL", isSuccess: saved)
             return
         }

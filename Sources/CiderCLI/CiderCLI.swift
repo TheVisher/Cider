@@ -1134,11 +1134,14 @@ struct CiderCLI {
             case .failed: return
             }
             let title = parseFlag("--title", from: args)
-            let bookmark = service.add(urlString: url, title: title)
-            if let bookmark {
-                if let targetFolder {
-                    _ = service.assignBookmark(bookmark.id, toFolder: targetFolder.id)
-                }
+            do {
+                let database = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil
+                let result = try CiderBookmarkCaptureAdapter(bookmarkService: service, database: database).addURLBookmark(
+                    urlString: url,
+                    title: title,
+                    folderID: targetFolder?.id
+                )
+                let bookmark = result.bookmark
                 let waitResult: BookmarkNativeCaptureWaitResult?
                 if let timeout = bookmarkNativeCaptureWaitTimeout(from: args) {
                     waitResult = await waitForNativeBookmarkCapture(
@@ -1163,7 +1166,7 @@ struct CiderCLI {
                         print("  Native capture: still running after \(Int(waitResult.elapsedSeconds.rounded()))s")
                     }
                 }
-            } else {
+            } catch {
                 print("Error: Could not create bookmark for URL: \(url)")
             }
 

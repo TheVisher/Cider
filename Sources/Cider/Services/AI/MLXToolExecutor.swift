@@ -682,18 +682,21 @@ enum MLXToolExecutor {
         guard !urlString.isEmpty else { return "URL cannot be empty." }
 
         let title = optString("title", from: args)
-        guard let bookmark = VaultBookmarkService.shared.add(urlString: urlString, title: title) else {
+        let targetFolder = optString("folderName", from: args).flatMap { folderName in
+            VaultFolderService.shared.folders.first {
+                $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
+            }
+        }
+        guard let bookmark = try? CiderBookmarkCaptureAdapter()
+            .addURLBookmark(urlString: urlString, title: title, folderID: targetFolder?.id)
+            .bookmark else {
             return "Failed to create bookmark for \"\(urlString)\"."
         }
 
         var actions: [String] = ["Saved bookmark \"\(bookmark.title)\""]
 
-        if let folderName = optString("folderName", from: args),
-           let folder = VaultFolderService.shared.folders.first(where: {
-               $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
-           }) {
-            _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folder.id)
-            actions.append("moved to folder \"\(folder.name)\"")
+        if let targetFolder {
+            actions.append("moved to folder \"\(targetFolder.name)\"")
         }
         if let tagName = optString("tagName", from: args) {
             let label = CardLabelStorage.shared.findOrCreate(name: tagName)

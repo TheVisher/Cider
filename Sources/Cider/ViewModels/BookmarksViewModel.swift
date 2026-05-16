@@ -79,12 +79,24 @@ final class BookmarksViewModel: ObservableObject {
 
     @discardableResult
     func addBookmark(urlString: String, title: String?, folderID: UUID? = nil) -> Bool {
-        VaultBookmarkService.shared.add(urlString: urlString, title: title, folderID: folderID) != nil
+        (try? CiderBookmarkCaptureAdapter().addURLBookmark(
+            urlString: urlString,
+            title: title,
+            folderID: folderID
+        )) != nil
     }
 
     @discardableResult
     func addBookmarkFromPasteboard() -> Bool {
-        VaultBookmarkService.shared.addFromPasteboard() != nil
+        let pasteboard = NSPasteboard.general
+        if let string = pasteboard.string(forType: .string) {
+            return addBookmark(urlString: string, title: nil)
+        }
+        if let values = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           let first = values.first {
+            return addBookmark(urlString: first.absoluteString, title: nil)
+        }
+        return false
     }
 
     @discardableResult
