@@ -8,9 +8,18 @@ struct CiderBookmarkDateSuggestionApprovalDraft: Equatable {
     let actionURLString: String?
 }
 
+struct CiderBookmarkDateSuggestionTodoApprovalDraft: Equatable {
+    let title: String
+    let details: String
+    let dueDate: Date
+    let actionURLString: String?
+}
+
 enum CiderBookmarkDateSuggestionApprovalAction: String, Equatable {
     case createdDateCard = "created_date_card"
     case reusedExistingDateCard = "reused_existing_date_card"
+    case createdTodo = "created_todo"
+    case reusedExistingTodo = "reused_existing_todo"
 }
 
 struct CiderBookmarkDateSuggestionApprovalResult: Equatable {
@@ -20,10 +29,21 @@ struct CiderBookmarkDateSuggestionApprovalResult: Equatable {
     let sourceURL: String
     let suggestion: CiderBookmarkDateSuggestion
     let action: CiderBookmarkDateSuggestionApprovalAction
-    let dateCard: DateCard
+    let dateCard: DateCard?
+    let todo: TodoCard?
 
-    var created: Bool { action == .createdDateCard }
-    var reused: Bool { action == .reusedExistingDateCard }
+    var created: Bool {
+        switch action {
+        case .createdDateCard, .createdTodo: true
+        case .reusedExistingDateCard, .reusedExistingTodo: false
+        }
+    }
+
+    var reused: Bool { !created }
+
+    var createdItemType: LibraryEntityType {
+        todo == nil ? .dateCard : .todo
+    }
 }
 
 enum CiderBookmarkDateSuggestionApprovalError: Error, LocalizedError, Equatable {
@@ -39,7 +59,7 @@ enum CiderBookmarkDateSuggestionApprovalError: Error, LocalizedError, Equatable 
         case .suggestionNotFound(let bookmarkID, let index):
             return "No date suggestion \(index) found for bookmark \(bookmarkID.uuidString)"
         case .createFailed(let bookmarkID):
-            return "Failed to create date card for bookmark \(bookmarkID.uuidString)"
+            return "Failed to create approved date suggestion item for bookmark \(bookmarkID.uuidString)"
         case .linkFailed(let message):
             return "Failed to link date suggestion approval: \(message)"
         }
@@ -50,8 +70,10 @@ enum CiderBookmarkDateSuggestionApprovalError: Error, LocalizedError, Equatable 
 final class CiderBookmarkDateSuggestionApprovalService {
     private let bookmarkProvider: () -> [Bookmark]
     private let dateCardProvider: () -> [DateCard]
+    private let todoProvider: () -> [TodoCard]
     private let dateSuggestionProvider: (Bookmark) -> [CiderBookmarkDateSuggestion]
     private let createDateCard: (CiderBookmarkDateSuggestionApprovalDraft) -> DateCard?
+    private let createTodo: (CiderBookmarkDateSuggestionTodoApprovalDraft) -> TodoCard?
     private let linkItems: (LibraryEntityRef, LibraryEntityRef) throws -> Void
     private let calendar: Calendar
 
@@ -64,6 +86,7 @@ final class CiderBookmarkDateSuggestionApprovalService {
     ) {
         self.bookmarkProvider = { bookmarkService.bookmarks }
         self.dateCardProvider = { dateCardStorage.dateCards }
+        self.todoProvider = { TodoCardStorage.shared.todoCards }
         self.dateSuggestionProvider = { dateSuggestionService.suggestions(for: $0) }
         self.createDateCard = { draft in
             var card = dateCardStorage.createDateCard(
@@ -77,6 +100,17 @@ final class CiderBookmarkDateSuggestionApprovalService {
             _ = dateCardStorage.updateDateCard(card)
             return dateCardStorage.dateCard(for: card.id) ?? card
         }
+        self.createTodo = { draft in
+            var todo = TodoCardStorage.shared.createTodoCard(
+                title: draft.title,
+                dueDate: draft.dueDate
+            )
+            guard TodoCardStorage.shared.todoCards.contains(where: { $0.id == todo.id }) else { return nil }
+            todo.details = draft.details
+            todo.actionURLString = draft.actionURLString
+            _ = TodoCardStorage.shared.updateTodoCard(todo)
+            return TodoCardStorage.shared.todoCards.first(where: { $0.id == todo.id }) ?? todo
+        }
         self.linkItems = { source, target in
             try itemLinkService.addLink(from: source, to: target)
         }
@@ -86,15 +120,19 @@ final class CiderBookmarkDateSuggestionApprovalService {
     init(
         bookmarkProvider: @escaping () -> [Bookmark],
         dateCardProvider: @escaping () -> [DateCard],
+        todoProvider: @escaping () -> [TodoCard] = { [] },
         dateSuggestionProvider: @escaping (Bookmark) -> [CiderBookmarkDateSuggestion],
         createDateCard: @escaping (CiderBookmarkDateSuggestionApprovalDraft) -> DateCard?,
+        createTodo: @escaping (CiderBookmarkDateSuggestionTodoApprovalDraft) -> TodoCard? = { _ in nil },
         linkItems: @escaping (LibraryEntityRef, LibraryEntityRef) throws -> Void,
         calendar: Calendar = .current
     ) {
         self.bookmarkProvider = bookmarkProvider
         self.dateCardProvider = dateCardProvider
+        self.todoProvider = todoProvider
         self.dateSuggestionProvider = dateSuggestionProvider
         self.createDateCard = createDateCard
+        self.createTodo = createTodo
         self.linkItems = linkItems
         self.calendar = calendar
     }
@@ -113,6 +151,17 @@ final class CiderBookmarkDateSuggestionApprovalService {
         }
         let suggestion = suggestions[suggestionIndex]
 
+        if shouldCreateTodo(for: suggestion) {
+            return try approveTodoSuggestion(bookmark: bookmark, suggestion: suggestion)
+        }
+
+        return try approveDateCardSuggestion(bookmark: bookmark, suggestion: suggestion)
+    }
+
+    private func approveDateCardSuggestion(
+        bookmark: Bookmark,
+        suggestion: CiderBookmarkDateSuggestion
+    ) throws -> CiderBookmarkDateSuggestionApprovalResult {
         if let existing = existingDateCard(for: suggestion, bookmarkID: bookmark.id) {
             return result(
                 bookmark: bookmark,
@@ -150,6 +199,46 @@ final class CiderBookmarkDateSuggestionApprovalService {
         )
     }
 
+    private func approveTodoSuggestion(
+        bookmark: Bookmark,
+        suggestion: CiderBookmarkDateSuggestion
+    ) throws -> CiderBookmarkDateSuggestionApprovalResult {
+        if let existing = existingTodo(for: suggestion, bookmarkID: bookmark.id) {
+            return result(
+                bookmark: bookmark,
+                suggestion: suggestion,
+                action: .reusedExistingTodo,
+                todo: existing
+            )
+        }
+
+        let draft = CiderBookmarkDateSuggestionTodoApprovalDraft(
+            title: bookmark.title,
+            details: details(for: suggestion),
+            dueDate: suggestion.date,
+            actionURLString: bookmark.urlString
+        )
+        guard let created = createTodo(draft) else {
+            throw CiderBookmarkDateSuggestionApprovalError.createFailed(bookmarkID: bookmark.id)
+        }
+
+        let bookmarkRef = LibraryEntityRef(type: .bookmark, entityID: bookmark.id)
+        let todoRef = LibraryEntityRef(type: .todo, entityID: created.id)
+        do {
+            try linkItems(bookmarkRef, todoRef)
+        } catch {
+            throw CiderBookmarkDateSuggestionApprovalError.linkFailed(error.localizedDescription)
+        }
+
+        let linkedTodo = todoProvider().first(where: { $0.id == created.id }) ?? created
+        return result(
+            bookmark: bookmark,
+            suggestion: suggestion,
+            action: .createdTodo,
+            todo: linkedTodo
+        )
+    }
+
     private func existingDateCard(for suggestion: CiderBookmarkDateSuggestion, bookmarkID: UUID) -> DateCard? {
         let bookmarkRef = LibraryEntityRef(type: .bookmark, entityID: bookmarkID)
         return dateCardProvider()
@@ -165,11 +254,27 @@ final class CiderBookmarkDateSuggestionApprovalService {
             .first
     }
 
+    private func existingTodo(for suggestion: CiderBookmarkDateSuggestion, bookmarkID: UUID) -> TodoCard? {
+        let bookmarkRef = LibraryEntityRef(type: .bookmark, entityID: bookmarkID)
+        return todoProvider()
+            .filter { todo in
+                todo.linkedEntities.contains(bookmarkRef)
+                    && todo.dueDate.map { calendar.isDate($0, inSameDayAs: suggestion.date) } == true
+                    && todo.details.localizedCaseInsensitiveContains("Date suggestion kind: \(suggestion.kind)")
+            }
+            .sorted { lhs, rhs in
+                if lhs.createdAt == rhs.createdAt { return lhs.id.uuidString < rhs.id.uuidString }
+                return lhs.createdAt < rhs.createdAt
+            }
+            .first
+    }
+
     private func result(
         bookmark: Bookmark,
         suggestion: CiderBookmarkDateSuggestion,
         action: CiderBookmarkDateSuggestionApprovalAction,
-        dateCard: DateCard
+        dateCard: DateCard? = nil,
+        todo: TodoCard? = nil
     ) -> CiderBookmarkDateSuggestionApprovalResult {
         CiderBookmarkDateSuggestionApprovalResult(
             command: "bookmark.date-suggestion.approve",
@@ -178,8 +283,18 @@ final class CiderBookmarkDateSuggestionApprovalService {
             sourceURL: bookmark.urlString,
             suggestion: suggestion,
             action: action,
-            dateCard: dateCard
+            dateCard: dateCard,
+            todo: todo
         )
+    }
+
+    private func shouldCreateTodo(for suggestion: CiderBookmarkDateSuggestion) -> Bool {
+        switch suggestion.kind {
+        case "deadline", "sale_end":
+            return true
+        default:
+            return false
+        }
     }
 
     private func details(for suggestion: CiderBookmarkDateSuggestion) -> String {

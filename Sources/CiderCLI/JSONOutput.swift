@@ -315,10 +315,24 @@ func bookmarkDateSuggestionToDict(_ suggestion: CiderBookmarkDateSuggestion) -> 
 }
 
 @MainActor func bookmarkDateSuggestionApprovalResultToDict(_ result: CiderBookmarkDateSuggestionApprovalResult) -> [String: Any] {
-    var dateCard = eventToDict(result.dateCard)
-    dateCard["linkedEntities"] = result.dateCard.linkedEntities.map(libraryEntityRefToDict)
+    let links: [LibraryEntityRef]
+    let createdItem: [String: Any]
+    if let todo = result.todo {
+        var todoDict = todoToDict(todo)
+        todoDict["linkedEntities"] = todo.linkedEntities.map(libraryEntityRefToDict)
+        links = todo.linkedEntities
+        createdItem = todoDict
+    } else if let dateCard = result.dateCard {
+        var dateCardDict = eventToDict(dateCard)
+        dateCardDict["linkedEntities"] = dateCard.linkedEntities.map(libraryEntityRefToDict)
+        links = dateCard.linkedEntities
+        createdItem = dateCardDict
+    } else {
+        links = []
+        createdItem = [:]
+    }
 
-    return [
+    var dictionary: [String: Any] = [
         "command": result.command,
         "bookmarkID": result.bookmarkID.uuidString,
         "bookmarkTitle": result.bookmarkTitle,
@@ -327,9 +341,19 @@ func bookmarkDateSuggestionToDict(_ suggestion: CiderBookmarkDateSuggestion) -> 
         "action": result.action.rawValue,
         "created": result.created,
         "reused": result.reused,
-        "dateCard": dateCard,
-        "links": result.dateCard.linkedEntities.map(libraryEntityRefToDict),
+        "createdItemType": result.createdItemType.rawValue,
+        "createdItem": createdItem,
+        "links": links.map(libraryEntityRefToDict),
     ]
+    if let todo = result.todo {
+        dictionary["todo"] = createdItem
+        dictionary["todoID"] = todo.id.uuidString
+    }
+    if let dateCard = result.dateCard {
+        dictionary["dateCard"] = createdItem
+        dictionary["dateCardID"] = dateCard.id.uuidString
+    }
+    return dictionary
 }
 
 private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {

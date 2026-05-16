@@ -1258,7 +1258,11 @@ struct CiderCLI {
                         outputJSON(bookmarkDateSuggestionApprovalResultToDict(result))
                     } else {
                         let action = result.created ? "Created" : "Reused"
-                        print("\(action) date card: \(result.dateCard.title) (\(result.dateCard.id.uuidString.prefix(8)))")
+                        if let todo = result.todo {
+                            print("\(action) todo: \(todo.title) (\(todo.id.uuidString.prefix(8)))")
+                        } else if let dateCard = result.dateCard {
+                            print("\(action) date card: \(dateCard.title) (\(dateCard.id.uuidString.prefix(8)))")
+                        }
                         print("  Date suggestion: \(result.suggestion.kind)")
                         print("  Source bookmark: \(result.bookmarkTitle) (\(result.bookmarkID.uuidString.prefix(8)))")
                     }
