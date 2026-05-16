@@ -320,6 +320,10 @@ final class SecondBrainStore {
     }
 
     func routingDecisions(for owner: SecondBrainOwnerRef) throws -> [SecondBrainRoutingDecision] {
+        guard try tableExists("second_brain_routing_decisions") else {
+            return []
+        }
+
         let stmt = try database.prepare("""
             SELECT id, item_id, target_type, target_id, target_path, confidence,
                    reason, status, actor, source, candidates_json, created_at, reviewed_at
@@ -352,6 +356,17 @@ final class SecondBrainStore {
             )
         }
         return decisions
+    }
+
+    private func tableExists(_ tableName: String) throws -> Bool {
+        let stmt = try database.prepare("""
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+            LIMIT 1;
+            """)
+        stmt.bind(tableName, at: 1)
+        return try stmt.step()
     }
 
     func recordAgentAction(_ action: SecondBrainAgentAction) throws {

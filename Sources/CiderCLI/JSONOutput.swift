@@ -182,6 +182,90 @@ func reminderActionResultToDict(_ result: CiderReminderActionResult) -> [String:
     return dict
 }
 
+func recallScorecardToDict(_ scorecard: CiderRecallScorecard) -> [String: Any] {
+    [
+        "generatedAt": ISO8601DateFormatter().string(from: scorecard.generatedAt),
+        "totalProbeCount": scorecard.totalProbeCount,
+        "passedProbeCount": scorecard.passedProbeCount,
+        "failedProbeCount": scorecard.failedProbeCount,
+        "passRate": scorecard.passRate,
+        "capabilityScores": CiderRecallCapability.allCases.map { capability in
+            recallCapabilityScoreToDict(
+                scorecard.capabilityScores[capability]
+                    ?? CiderRecallCapabilityScore(capability: capability, passed: 0, failed: 0)
+            )
+        },
+        "results": scorecard.results.map(recallProbeResultToDict),
+    ]
+}
+
+func recallProbeToDict(_ probe: CiderRecallProbe) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": probe.id,
+        "title": probe.title,
+        "query": probe.query,
+        "expectedRef": recallLibraryEntityRefToDict(probe.expectedRef),
+        "expectedRelatedRefs": probe.expectedRelatedRefs.map(recallLibraryEntityRefToDict),
+    ]
+    if let expectsSurfaceToday = probe.expectsSurfaceToday {
+        dict["expectsSurfaceToday"] = expectsSurfaceToday
+    }
+    return dict
+}
+
+func recallCapabilityScoreToDict(_ score: CiderRecallCapabilityScore) -> [String: Any] {
+    [
+        "capability": score.capability.rawValue,
+        "passed": score.passed,
+        "failed": score.failed,
+        "total": score.total,
+    ]
+}
+
+func recallProbeResultToDict(_ result: CiderRecallProbeResult) -> [String: Any] {
+    [
+        "id": result.id,
+        "probe": recallProbeToDict(result.probe),
+        "passed": result.passed,
+        "checks": result.checks.map(recallProbeCheckToDict),
+        "topResults": result.topResults.map(recallTopResultToDict),
+    ]
+}
+
+func recallProbeCheckToDict(_ check: CiderRecallProbeCheck) -> [String: Any] {
+    [
+        "capability": check.capability.rawValue,
+        "passed": check.passed,
+        "detail": check.detail,
+    ]
+}
+
+func recallTopResultToDict(_ result: CiderRecallTopResult) -> [String: Any] {
+    [
+        "rank": result.rank,
+        "kind": result.kind.rawValue,
+        "owner": recallOwnerToDict(result.owner),
+        "title": result.title,
+        "snippet": result.snippet,
+        "matchedExpected": result.matchedExpected,
+    ]
+}
+
+private func recallLibraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
+    [
+        "id": ref.id,
+        "type": ref.type.rawValue,
+        "entityID": ref.entityID.uuidString,
+    ]
+}
+
+private func recallOwnerToDict(_ owner: SecondBrainOwnerRef) -> [String: Any] {
+    [
+        "ownerType": owner.ownerType,
+        "ownerID": owner.ownerID,
+    ]
+}
+
 @MainActor func contactToDict(_ contact: ContactCard) -> [String: Any] {
     var d: [String: Any] = [
         "id": contact.id.uuidString,

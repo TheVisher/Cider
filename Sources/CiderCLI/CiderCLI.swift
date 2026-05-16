@@ -143,6 +143,8 @@ struct CiderCLI {
             handleAgenda(args: Array(args.dropFirst()))
         case "reminder", "reminders":
             handleReminder(subcommand: subcommand, args: remaining)
+        case "recall":
+            handleRecall(subcommand: subcommand, args: remaining)
         case "embeddings":
             if subcommand == "backfill" {
                 let store = EmbeddingStore.shared
@@ -161,6 +163,67 @@ struct CiderCLI {
             printUsage()
         default:
             print("Unknown command: \(command). Run 'cider-cli help' for usage.")
+        }
+    }
+
+    // MARK: - Recall / Evaluation Commands
+
+    static func handleRecall(subcommand: String?, args: [String]) {
+        let service = CiderRecallScorecardService()
+        switch subcommand {
+        case nil, "help", "--help", "-h":
+            print("""
+            Recall evaluation commands:
+              cider-cli recall scorecard [--limit <n>] [--search-limit <n>] [--json]
+              cider-cli recall probes [--limit <n>] [--json]
+            """)
+
+        case "scorecard", "evaluate", "run":
+            let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 12
+            let searchLimit = Int(parseFlag("--search-limit", from: args) ?? "") ?? 5
+            do {
+                let scorecard = try service.evaluateSuggested(limit: limit, searchLimit: searchLimit)
+                if jsonOutput {
+                    outputJSON(recallScorecardToDict(scorecard))
+                } else {
+                    print("Recall scorecard: \(scorecard.passedProbeCount)/\(scorecard.totalProbeCount) probes passed")
+                    for capability in CiderRecallCapability.allCases {
+                        let score = scorecard.capabilityScores[capability]
+                            ?? CiderRecallCapabilityScore(capability: capability, passed: 0, failed: 0)
+                        print("  \(capability.rawValue): \(score.passed)/\(score.total)")
+                    }
+                    for result in scorecard.results where !result.passed {
+                        print("  Failed: \(result.probe.title)")
+                        for check in result.checks where !check.passed {
+                            print("    \(check.capability.rawValue): \(check.detail)")
+                        }
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "probes":
+            let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 12
+            do {
+                let probes = try service.suggestedProbes(limit: limit)
+                if jsonOutput {
+                    outputJSON(probes.map(recallProbeToDict))
+                } else if probes.isEmpty {
+                    print("No recall probes available.")
+                } else {
+                    print("Recall probes (\(probes.count)):")
+                    for probe in probes {
+                        print("  \(probe.id): \(probe.query) -> \(probe.expectedRef.type.rawValue):\(probe.expectedRef.entityID.uuidString)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        default:
+            print("Unknown recall command: \(subcommand ?? "nil")")
+            print("Commands: scorecard, probes")
         }
     }
 
@@ -7620,6 +7683,10 @@ struct CiderCLI {
         REMINDERS
           cider-cli reminder complete <todo|dateCard> <id-prefix> [--json]
           cider-cli reminder snooze <todo|dateCard> <id-prefix> --until yyyy-MM-dd [--time "h:mm a"] [--json]
+
+        RECALL
+          cider-cli recall scorecard [--limit <n>] [--search-limit <n>] [--json]
+          cider-cli recall probes [--limit <n>] [--json]
 
         SPACES
           cider-cli space list [--json]

@@ -755,8 +755,8 @@ struct SecondBrainFoundationTests {
         #expect(try store.searchChunks(query: "surviving-card", limit: 5).count == 1)
     }
 
-    @Test("v8 database migrates to v9 second brain tables")
-    func v8DatabaseMigratesToV9SecondBrainTables() throws {
+    @Test("v8 database migrates to current second brain tables")
+    func v8DatabaseMigratesToCurrentSecondBrainTables() throws {
         let url = makeTempDBURL()
         defer { cleanup(url) }
 
@@ -782,7 +782,7 @@ struct SecondBrainFoundationTests {
 
         let version = try migrated.prepare("SELECT MAX(version) FROM schema_version;")
         try version.step()
-        #expect(version.int(at: 0) == 10)
+        #expect(version.int(at: 0) == DatabaseMigrations.latestVersion)
 
         for table in ["item_sections", "content_chunks", "content_chunks_fts", "routing_decisions", "second_brain_routing_decisions", "agent_actions"] {
             let stmt = try migrated.prepare("SELECT count(*) FROM sqlite_master WHERE name = ?;")
