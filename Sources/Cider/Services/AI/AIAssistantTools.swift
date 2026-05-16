@@ -97,91 +97,10 @@ struct SearchItemsTool: Tool {
     }
 
     nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
-        let query = arguments.query.lowercased()
-        var results: [String] = []
-
-        let typeFilter = arguments.itemType?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let searchAll = typeFilter == nil || typeFilter == "" || typeFilter == "all"
-
-        // Search bookmarks
-        if searchAll || typeFilter == "bookmarks" || typeFilter == "bookmark" {
-            let matches = VaultBookmarkService.shared.bookmarks.filter { bookmark in
-                bookmark.title.localizedStandardContains(query) ||
-                bookmark.urlString.localizedStandardContains(query) ||
-                bookmark.notes.localizedStandardContains(query) ||
-                bookmark.tags.contains(where: { $0.localizedStandardContains(query) }) ||
-                (bookmark.aiSummary?.localizedStandardContains(query) ?? false)
-            }
-            for b in matches.prefix(10) {
-                var desc = "Bookmark: \"\(b.title)\" (\(b.urlString))"
-                if let summary = b.aiSummary { desc += " — \(summary)" }
-                results.append(desc)
-            }
-            if matches.count > 10 { results.append("...and \(matches.count - 10) more bookmarks") }
-        }
-
-        // Search notes (title + content preview)
-        if searchAll || typeFilter == "notes" || typeFilter == "note" {
-            let matches = NotesStorage.shared.notes.filter { note in
-                note.title.localizedStandardContains(query) ||
-                note.contentPreview.localizedStandardContains(query)
-            }
-            for n in matches.prefix(10) {
-                var desc = "Note: \"\(n.title)\""
-                let preview = String(n.contentPreview.prefix(80))
-                if !preview.isEmpty { desc += " — \(preview)" }
-                results.append(desc)
-            }
-            if matches.count > 10 { results.append("...and \(matches.count - 10) more notes") }
-        }
-
-        // Search events
-        if searchAll || typeFilter == "events" || typeFilter == "event" {
-            let matches = DateCardStorage.shared.dateCards.filter { card in
-                card.title.localizedStandardContains(query) ||
-                card.details.localizedStandardContains(query) ||
-                card.location.localizedStandardContains(query)
-            }
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            for e in matches.prefix(10) {
-                results.append("Event: \"\(e.title)\" on \(formatter.string(from: e.startAt))")
-            }
-            if matches.count > 10 { results.append("...and \(matches.count - 10) more events") }
-        }
-
-        // Search todos
-        if searchAll || typeFilter == "todos" || typeFilter == "todo" {
-            let matches = TodoCardStorage.shared.todoCards.filter { todo in
-                todo.title.localizedStandardContains(query) ||
-                todo.details.localizedStandardContains(query)
-            }
-            for t in matches.prefix(10) {
-                let status = t.isCompleted ? "✓" : "○"
-                results.append("Todo: \(status) \"\(t.title)\"")
-            }
-            if matches.count > 10 { results.append("...and \(matches.count - 10) more todos") }
-        }
-
-        // Search contacts
-        if searchAll || typeFilter == "contacts" || typeFilter == "contact" {
-            let matches = ContactStorage.shared.contacts.filter { contact in
-                contact.displayName.localizedStandardContains(query) ||
-                contact.email.localizedStandardContains(query) ||
-                contact.notes.localizedStandardContains(query)
-            }
-            for c in matches.prefix(10) {
-                var desc = "Contact: \"\(c.displayName)\""
-                if !c.email.isEmpty { desc += " (\(c.email))" }
-                results.append(desc)
-            }
-            if matches.count > 10 { results.append("...and \(matches.count - 10) more contacts") }
-        }
-
-        if results.isEmpty {
-            return ("No items found matching \"\(arguments.query)\".")
-        }
-        return ("Found \(results.count) results:\n" + results.joined(separator: "\n"))
+        CiderAgentItemSearchFormatter.searchResponseOrMessage(
+            query: arguments.query,
+            itemType: arguments.itemType
+        )
     } } }
 }
 

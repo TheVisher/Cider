@@ -137,85 +137,10 @@ enum MLXToolExecutor {
     }
 
     private static func searchItems(_ args: [String: Any]) -> String {
-        let query = string("query", from: args).lowercased()
-        let typeFilter = optString("itemType", from: args)?.lowercased()
-        let searchAll = typeFilter == nil || typeFilter == "all"
-        var results: [String] = []
-
-        if searchAll || typeFilter == "bookmarks" || typeFilter == "bookmark" {
-            let matches = VaultBookmarkService.shared.bookmarks.filter {
-                $0.title.localizedStandardContains(query) ||
-                $0.urlString.localizedStandardContains(query) ||
-                $0.notes.localizedStandardContains(query) ||
-                $0.tags.contains(where: { $0.localizedStandardContains(query) }) ||
-                ($0.aiSummary?.localizedStandardContains(query) ?? false)
-            }
-            for b in matches.prefix(10) {
-                var desc = "Bookmark: \"\(b.title)\" (\(b.urlString))"
-                if let summary = b.aiSummary { desc += " — \(summary)" }
-                results.append(desc)
-            }
-            if matches.count > 10 { results.append("...and \(matches.count - 10) more bookmarks") }
-        }
-
-        if searchAll || typeFilter == "notes" || typeFilter == "note" {
-            let matches = NotesStorage.shared.notes.filter {
-                $0.title.localizedStandardContains(query) ||
-                $0.contentPreview.localizedStandardContains(query)
-            }
-            for n in matches.prefix(10) {
-                var desc = "Note: \"\(n.title)\""
-                let preview = String(n.contentPreview.prefix(80))
-                if !preview.isEmpty { desc += " — \(preview)" }
-                results.append(desc)
-            }
-            if matches.count > 10 { results.append("...and \(matches.count - 10) more notes") }
-        }
-
-        if searchAll || typeFilter == "events" || typeFilter == "event" {
-            let matches = DateCardStorage.shared.dateCards.filter {
-                $0.title.localizedStandardContains(query) ||
-                $0.details.localizedStandardContains(query) ||
-                $0.location.localizedStandardContains(query)
-            }
-            let fmt = DateFormatter()
-            fmt.dateStyle = .medium
-            for e in matches.prefix(10) {
-                results.append("Event: \"\(e.title)\" on \(fmt.string(from: e.startAt))")
-            }
-            if matches.count > 10 { results.append("...and \(matches.count - 10) more events") }
-        }
-
-        if searchAll || typeFilter == "todos" || typeFilter == "todo" {
-            let matches = TodoCardStorage.shared.todoCards.filter {
-                $0.title.localizedStandardContains(query) ||
-                $0.details.localizedStandardContains(query)
-            }
-            for t in matches.prefix(10) {
-                let status = t.isCompleted ? "done" : "incomplete"
-                results.append("Todo: \"\(t.title)\" (\(status))")
-            }
-            if matches.count > 10 { results.append("...and \(matches.count - 10) more todos") }
-        }
-
-        if searchAll || typeFilter == "contacts" || typeFilter == "contact" {
-            let matches = ContactStorage.shared.contacts.filter {
-                $0.displayName.localizedStandardContains(query) ||
-                $0.email.localizedStandardContains(query) ||
-                $0.notes.localizedStandardContains(query)
-            }
-            for c in matches.prefix(10) {
-                var desc = "Contact: \"\(c.displayName)\""
-                if !c.email.isEmpty { desc += " (\(c.email))" }
-                results.append(desc)
-            }
-            if matches.count > 10 { results.append("...and \(matches.count - 10) more contacts") }
-        }
-
-        if results.isEmpty {
-            return "No items found matching \"\(string("query", from: args))\"."
-        }
-        return "Found \(results.count) results:\n" + results.joined(separator: "\n")
+        CiderAgentItemSearchFormatter.searchResponseOrMessage(
+            query: string("query", from: args),
+            itemType: optString("itemType", from: args)
+        )
     }
 
     private static func listFolders() -> String {
