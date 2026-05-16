@@ -7061,8 +7061,24 @@ struct CiderCLI {
                 print("    \(blocker)")
             }
         }
+        if !result.selectedItems.isEmpty {
+            print("  Selected items:")
+        }
+        for item in result.selectedItems {
+            print("    [\(item.itemID.uuidString.prefix(8))] \(item.title)")
+            print("    Group: \(item.groupID)")
+            if let proposedStatus = item.proposedStatus {
+                print("    Proposed status: \(proposedStatus)")
+            }
+            if !item.evidence.isEmpty {
+                print("    Evidence: \(item.evidence.joined(separator: ", "))")
+            }
+        }
+        if !result.appliedItems.isEmpty {
+            print("  Applied items:")
+        }
         for item in result.appliedItems {
-            print("  [\(item.itemID.uuidString.prefix(8))] \(item.title)")
+            print("    [\(item.itemID.uuidString.prefix(8))] \(item.title)")
             print("    Group: \(item.groupID)")
             if let proposedStatus = item.proposedStatus {
                 print("    Proposed status: \(proposedStatus)")

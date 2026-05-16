@@ -291,6 +291,7 @@ struct CiderReviewEnrichmentReconciliationApplyResult: Equatable {
     var appliedCount: Int
     var skippedCount: Int
     var blockers: [String]
+    var selectedItems: [CiderReviewEnrichmentReconciliationPlanItem]
     var appliedItems: [CiderReviewEnrichmentReconciliationPlanItem]
     var safeActions: [String] = ["review summary", "review enrichment-reconcile-plan", "review enrichment-reconcile-samples"]
 
@@ -313,6 +314,7 @@ struct CiderReviewEnrichmentReconciliationApplyResult: Equatable {
             "appliedCount": appliedCount,
             "skippedCount": skippedCount,
             "blockers": blockers,
+            "selectedItems": selectedItems.map { $0.toDictionary() },
             "appliedItems": appliedItems.map { $0.toDictionary() },
             "safeActions": safeActions,
         ]
@@ -1004,6 +1006,7 @@ final class CiderReviewQueueService {
             appliedCount: 0,
             skippedCount: candidates.matchingCandidateCount,
             blockers: [],
+            selectedItems: Array(proposedCandidates.prefix(selectedCount)),
             appliedItems: []
         )
 
@@ -1015,8 +1018,7 @@ final class CiderReviewQueueService {
         guard execute else {
             result.status = "planned"
             result.blockers.append("dry-run only; pass --execute with the exact approval token to mutate")
-            result.appliedItems = Array(proposedCandidates.prefix(cappedLimit))
-            result.skippedCount = max(0, candidates.matchingCandidateCount - result.appliedItems.count)
+            result.skippedCount = max(0, candidates.matchingCandidateCount - result.selectedItems.count)
             return result
         }
         guard approvalToken == requiredApprovalToken else {
