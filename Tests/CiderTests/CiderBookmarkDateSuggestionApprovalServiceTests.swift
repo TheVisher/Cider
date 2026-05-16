@@ -55,6 +55,47 @@ struct CiderBookmarkDateSuggestionApprovalServiceTests {
         #expect(linkedPairs.first?.1 == LibraryEntityRef(type: .dateCard, entityID: dateCard.id))
     }
 
+    @Test("approving a bookmark date suggestion by stable key creates and links a date card")
+    func approvingSuggestionByStableKeyCreatesLinkedDateCard() throws {
+        let bookmark = Bookmark(
+            id: UUID(uuidString: "12121212-1212-1212-1212-121212121212")!,
+            title: "Concert September 12, 2026",
+            urlString: "https://example.com/concert",
+            notes: "Tickets open soon."
+        )
+        let olderSuggestion = makeSuggestion(bookmark: bookmark, kind: "event_date")
+        var targetSuggestion = makeSuggestion(bookmark: bookmark, kind: "presale_date")
+        targetSuggestion.sourceSnippet = "Presale starts September 12, 2026"
+        var dateCards: [DateCard] = []
+
+        let service = CiderBookmarkDateSuggestionApprovalService(
+            bookmarkProvider: { [bookmark] },
+            dateCardProvider: { dateCards },
+            dateSuggestionProvider: { _ in [olderSuggestion, targetSuggestion] },
+            createDateCard: { draft in
+                let card = DateCard(
+                    title: draft.title,
+                    details: draft.details,
+                    startAt: draft.startAt,
+                    allDay: draft.allDay,
+                    actionURLString: draft.actionURLString
+                )
+                dateCards.append(card)
+                return card
+            },
+            linkItems: { source, target in
+                guard let index = dateCards.firstIndex(where: { $0.id == target.entityID }) else { return }
+                dateCards[index].linkedEntities.append(source)
+            }
+        )
+
+        let result = try service.approve(bookmarkID: bookmark.id, suggestionKey: targetSuggestion.suggestionKey)
+
+        #expect(result.action == .createdDateCard)
+        #expect(result.suggestion == targetSuggestion)
+        #expect(result.dateCard?.details.contains("Date suggestion kind: presale_date") == true)
+    }
+
     @Test("re-approving the same bookmark suggestion reuses existing linked date card")
     func approvingSuggestionReusesExistingLinkedDateCard() throws {
         let bookmark = Bookmark(

@@ -71,5 +71,72 @@ struct CiderBookmarkDateSuggestionServiceTests {
         #expect(dict["sourceSnippet"] as? String == "Tickets on sale May 30, 2026 at 10:00 AM")
         #expect(dict["nextSafeAction"] as? String == "review_date_suggestion")
         #expect(dict["date"] as? String != nil)
+        #expect(dict["suggestionKey"] as? String == suggestion.suggestionKey)
+        #expect((dict["suggestionKey"] as? String)?.isEmpty == false)
+    }
+
+    @Test("date suggestion key is stable for approval identity")
+    func dateSuggestionKeyIsStableForApprovalIdentity() {
+        let bookmarkID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let date = Date(timeIntervalSince1970: 1_780_150_400)
+        let first = CiderBookmarkDateSuggestion(
+            bookmarkID: bookmarkID,
+            bookmarkTitle: "Tickets on sale May 30, 2026 at 10:00 AM",
+            sourceURL: "https://example.com/tickets",
+            kind: "presale_date",
+            confidence: 0.94,
+            date: date,
+            sourceField: "notes",
+            sourceSnippet: "Tickets on sale May 30, 2026 at 10:00 AM",
+            nextSafeAction: "review_date_suggestion"
+        )
+        var reranked = first
+        reranked.confidence = 0.71
+        var changedEvidence = first
+        changedEvidence.sourceSnippet = "General sale begins June 1, 2026"
+
+        #expect(first.suggestionKey == reranked.suggestionKey)
+        #expect(first.suggestionKey != changedEvidence.suggestionKey)
+    }
+
+    @Test("human date suggestion lines expose stable indices")
+    @MainActor
+    func humanDateSuggestionLinesExposeStableIndices() {
+        let bookmarkID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let first = CiderBookmarkDateSuggestion(
+            bookmarkID: bookmarkID,
+            bookmarkTitle: "Tickets on sale May 30, 2026",
+            sourceURL: "https://example.com/tickets",
+            kind: "presale_date",
+            confidence: 0.94,
+            date: Date(timeIntervalSince1970: 1_780_150_400),
+            sourceField: "title",
+            sourceSnippet: "Tickets on sale May 30, 2026",
+            nextSafeAction: "review_date_suggestion"
+        )
+        let second = CiderBookmarkDateSuggestion(
+            bookmarkID: bookmarkID,
+            bookmarkTitle: "Tickets on sale May 30, 2026",
+            sourceURL: "https://example.com/tickets",
+            kind: "event_date",
+            confidence: 0.84,
+            date: Date(timeIntervalSince1970: 1_789_171_200),
+            sourceField: "notes",
+            sourceSnippet: "Concert September 12, 2026",
+            nextSafeAction: "review_date_suggestion"
+        )
+        let result = CiderBookmarkDateSuggestionResult(
+            command: "bookmark.date-suggestions",
+            bookmarkID: bookmarkID,
+            bookmarkTitle: "Tickets on sale May 30, 2026",
+            sourceURL: "https://example.com/tickets",
+            suggestions: [first, second]
+        )
+
+        let lines = CiderCLI.bookmarkDateSuggestionHumanLines(result: result)
+
+        #expect(lines.contains { $0.contains("[0] presale_date:") })
+        #expect(lines.contains { $0.contains("[1] event_date:") })
+        #expect(lines.contains { $0.contains("Key: \(first.suggestionKey)") })
     }
 }

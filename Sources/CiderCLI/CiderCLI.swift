@@ -1296,20 +1296,30 @@ struct CiderCLI {
                 let approvalArgs = Array(args.dropFirst())
                 let approvalPositionals = approvalArgs.filter { !$0.hasPrefix("--") }
                 guard let idPrefix = approvalPositionals.first else {
-                    printCLIError("ID prefix required. Usage: cider-cli bookmark date-suggestions approve <id> [--index <n>] [--json]")
+                    printCLIError("ID prefix required. Usage: cider-cli bookmark date-suggestions approve <id> [--index <n>|--key <suggestion-key>] [--json]")
                     return
                 }
+                let suggestionKey = parseFlag("--key", from: approvalArgs)
+                    ?? parseFlag("--suggestion-key", from: approvalArgs)
                 let suggestionIndex = parseFlag("--index", from: approvalArgs).flatMap(Int.init) ?? 0
-                guard suggestionIndex >= 0 else {
-                    printCLIError("--index must be 0 or greater")
-                    return
+                if suggestionKey == nil {
+                    guard suggestionIndex >= 0 else {
+                        printCLIError("--index must be 0 or greater")
+                        return
+                    }
                 }
                 guard let bm = findBookmark(idPrefix, in: service) else { return }
                 do {
-                    let result = try CiderBookmarkDateSuggestionApprovalService().approve(
-                        bookmarkID: bm.id,
-                        suggestionIndex: suggestionIndex
-                    )
+                    let approvalService = CiderBookmarkDateSuggestionApprovalService()
+                    let result: CiderBookmarkDateSuggestionApprovalResult
+                    if let suggestionKey {
+                        result = try approvalService.approve(bookmarkID: bm.id, suggestionKey: suggestionKey)
+                    } else {
+                        result = try approvalService.approve(
+                            bookmarkID: bm.id,
+                            suggestionIndex: suggestionIndex
+                        )
+                    }
                     if jsonOutput {
                         outputJSON(bookmarkDateSuggestionApprovalResultToDict(result))
                     } else {
@@ -1342,15 +1352,7 @@ struct CiderCLI {
                     if result.suggestions.isEmpty {
                         print("  No clear date suggestions.")
                     } else {
-                        let formatter = DateFormatter()
-                        formatter.dateStyle = .medium
-                        formatter.timeStyle = .short
-                        for suggestion in result.suggestions {
-                            print("  \(suggestion.kind): \(formatter.string(from: suggestion.date))")
-                            print("    Confidence: \(String(format: "%.2f", suggestion.confidence))")
-                            print("    Source: \(suggestion.sourceField) — \(suggestion.sourceSnippet)")
-                            print("    Next safe action: \(suggestion.nextSafeAction)")
-                        }
+                        bookmarkDateSuggestionHumanLines(result: result).forEach { print($0) }
                     }
                 }
             }
@@ -1450,6 +1452,21 @@ struct CiderCLI {
         default:
             print("Unknown bookmark command: \(subcommand ?? "nil")")
             print("Commands: list, add, get, search, move, tag, untag, delete, enrich, update, date-suggestions, similar, carousel-add, carousel-remove, carousel-reorder")
+        }
+    }
+
+    static func bookmarkDateSuggestionHumanLines(result: CiderBookmarkDateSuggestionResult) -> [String] {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return result.suggestions.enumerated().flatMap { index, suggestion in
+            [
+                "  [\(index)] \(suggestion.kind): \(formatter.string(from: suggestion.date))",
+                "    Confidence: \(String(format: "%.2f", suggestion.confidence))",
+                "    Source: \(suggestion.sourceField) - \(suggestion.sourceSnippet)",
+                "    Key: \(suggestion.suggestionKey)",
+                "    Next safe action: \(suggestion.nextSafeAction)",
+            ]
         }
     }
 
@@ -7896,7 +7913,7 @@ struct CiderCLI {
           cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
                     [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]
           cider-cli bookmark date-suggestions <id-prefix> [--json]
-          cider-cli bookmark date-suggestions approve <id-prefix> [--index <n>] [--json]
+          cider-cli bookmark date-suggestions approve <id-prefix> [--index <n>|--key <suggestion-key>] [--json]
           cider-cli bookmark similar <id-prefix> [--limit <n>]
           cider-cli bookmark carousel-add <id-prefix> <image-path>
           cider-cli bookmark carousel-remove <id-prefix> --index <n>

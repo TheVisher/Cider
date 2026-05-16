@@ -10,6 +10,46 @@ struct CiderBookmarkDateSuggestion: Codable, Equatable {
     var sourceField: String
     var sourceSnippet: String
     var nextSafeAction: String
+
+    var suggestionKey: String {
+        let components = [
+            bookmarkID.uuidString.lowercased(),
+            kind.lowercased(),
+            normalizedDayKey(for: date),
+            sourceField.lowercased(),
+            normalizedIdentityText(sourceURL),
+            normalizedIdentityText(sourceSnippet),
+        ]
+        return "bds_" + fnv1a64Hex(components.joined(separator: "\u{1F}"))
+    }
+
+    private func normalizedDayKey(for date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+    }
+
+    private func normalizedIdentityText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func fnv1a64Hex(_ text: String) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x100000001b3
+        }
+        return String(format: "%016llx", hash)
+    }
 }
 
 struct CiderBookmarkDateSuggestionResult: Equatable {

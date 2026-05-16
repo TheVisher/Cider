@@ -305,6 +305,7 @@ func bookmarkDateSuggestionToDict(_ suggestion: CiderBookmarkDateSuggestion) -> 
         "bookmarkID": suggestion.bookmarkID.uuidString,
         "bookmarkTitle": suggestion.bookmarkTitle,
         "sourceURL": suggestion.sourceURL,
+        "suggestionKey": suggestion.suggestionKey,
         "kind": suggestion.kind,
         "confidence": suggestion.confidence,
         "date": ISO8601DateFormatter().string(from: suggestion.date),

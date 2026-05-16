@@ -49,6 +49,7 @@ struct CiderBookmarkDateSuggestionApprovalResult: Equatable {
 enum CiderBookmarkDateSuggestionApprovalError: Error, LocalizedError, Equatable {
     case bookmarkNotFound(UUID)
     case suggestionNotFound(bookmarkID: UUID, index: Int)
+    case suggestionKeyNotFound(bookmarkID: UUID, key: String)
     case createFailed(bookmarkID: UUID)
     case linkFailed(String)
 
@@ -58,6 +59,8 @@ enum CiderBookmarkDateSuggestionApprovalError: Error, LocalizedError, Equatable 
             return "No bookmark found with id \(id.uuidString)"
         case .suggestionNotFound(let bookmarkID, let index):
             return "No date suggestion \(index) found for bookmark \(bookmarkID.uuidString)"
+        case .suggestionKeyNotFound(let bookmarkID, let key):
+            return "No date suggestion key \(key) found for bookmark \(bookmarkID.uuidString)"
         case .createFailed(let bookmarkID):
             return "Failed to create approved date suggestion item for bookmark \(bookmarkID.uuidString)"
         case .linkFailed(let message):
@@ -151,6 +154,28 @@ final class CiderBookmarkDateSuggestionApprovalService {
         }
         let suggestion = suggestions[suggestionIndex]
 
+        return try approve(bookmark: bookmark, suggestion: suggestion)
+    }
+
+    func approve(bookmarkID: UUID, suggestionKey: String) throws -> CiderBookmarkDateSuggestionApprovalResult {
+        guard let bookmark = bookmarkProvider().first(where: { $0.id == bookmarkID }) else {
+            throw CiderBookmarkDateSuggestionApprovalError.bookmarkNotFound(bookmarkID)
+        }
+
+        guard let suggestion = dateSuggestionProvider(bookmark).first(where: { $0.suggestionKey == suggestionKey }) else {
+            throw CiderBookmarkDateSuggestionApprovalError.suggestionKeyNotFound(
+                bookmarkID: bookmarkID,
+                key: suggestionKey
+            )
+        }
+
+        return try approve(bookmark: bookmark, suggestion: suggestion)
+    }
+
+    private func approve(
+        bookmark: Bookmark,
+        suggestion: CiderBookmarkDateSuggestion
+    ) throws -> CiderBookmarkDateSuggestionApprovalResult {
         if shouldCreateTodo(for: suggestion) {
             return try approveTodoSuggestion(bookmark: bookmark, suggestion: suggestion)
         }
