@@ -672,6 +672,123 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.reviewCockpitSummary.generatedAt, now)
     }
 
+    func testReviewCockpitSummaryBuildsVisibleLanesAndExplicitBatchControl() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let enrichmentID = UUID()
+        let routingID = UUID()
+        let enrichmentItem = CiderReviewQueueItem(
+            id: "review-enrichment-\(enrichmentID.uuidString)",
+            kind: "enrichment",
+            source: "bookmark",
+            itemID: enrichmentID,
+            itemType: "bookmark",
+            title: "Needs Metadata",
+            relativePath: "Inbox/Bookmarks/Needs Metadata.webloc",
+            reason: "Bookmark enrichment failed.",
+            suggestedAction: "Enrichment failed",
+            reviewState: "needs_review",
+            confidence: nil,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now,
+            safeActions: ["enrich", "correct", "defer"]
+        )
+        let routingItem = CiderReviewQueueItem(
+            id: "review-routing-\(routingID.uuidString)",
+            kind: "low_confidence_routing",
+            source: "routing",
+            itemID: routingID,
+            itemType: "bookmark",
+            title: "Confirm Route",
+            relativePath: "Inbox/Bookmarks/Confirm Route.webloc",
+            reason: "Routing confidence is low.",
+            suggestedAction: "Approve or correct route",
+            reviewState: "needs_review",
+            confidence: 0.62,
+            routingDecisionID: UUID(),
+            target: CiderRoutingDecisionTarget(
+                kind: "folder",
+                name: "Research",
+                relativePath: "Spaces/Research",
+                folderID: nil
+            ),
+            createdAt: now.addingTimeInterval(-60),
+            safeActions: ["approve", "correct", "defer"]
+        )
+        let summary = HomeOverviewDataProvider.makeSnapshot(
+            items: [],
+            recentItems: [],
+            folders: [],
+            reviewQueueSummary: CiderReviewQueueSummaryResult(
+                command: "review.summary",
+                generatedAt: now,
+                totalCount: 236,
+                countsByKind: ["enrichment": 234, "low_confidence_routing": 2],
+                countsByItemType: ["bookmark": 236],
+                countsByReviewState: ["needs_review": 236],
+                countsBySafeAction: ["enrich": 234, "approve": 2, "correct": 2, "defer": 2],
+                groups: [
+                    CiderReviewQueueGroup(
+                        id: "enrichment:needs_review:enrich:bookmark",
+                        kind: "enrichment",
+                        reviewState: "needs_review",
+                        requiredSafeAction: "enrich",
+                        itemType: "bookmark",
+                        count: 234,
+                        sampleItems: [enrichmentItem]
+                    ),
+                    CiderReviewQueueGroup(
+                        id: "low_confidence_routing:needs_review:approve:bookmark",
+                        kind: "low_confidence_routing",
+                        reviewState: "needs_review",
+                        requiredSafeAction: "approve",
+                        itemType: "bookmark",
+                        count: 2,
+                        sampleItems: [routingItem]
+                    ),
+                ],
+                batchEnrichmentPreview: CiderReviewQueueBatchEnrichmentPreview(
+                    action: "review.enrich",
+                    isMutating: false,
+                    candidateCount: 234,
+                    candidateSampleLimit: 10,
+                    candidateSamples: [enrichmentItem],
+                    excludedCount: 2,
+                    exclusionsByReason: ["routing_requires_explicit_approval": 2]
+                )
+            ),
+            surfacingDays: 7,
+            now: now
+        ).reviewCockpitSummary
+
+        XCTAssertEqual(
+            summary.visibleLanes,
+            [
+                HomeReviewCockpitLane(
+                    id: "enrichment:needs_review:enrich:bookmark",
+                    title: "Enrichment",
+                    count: 234,
+                    actionLabel: "Enrich",
+                    sampleTitles: ["Needs Metadata"],
+                    keepsRoutingSeparate: true
+                ),
+                HomeReviewCockpitLane(
+                    id: "low_confidence_routing:needs_review:approve:bookmark",
+                    title: "Routing",
+                    count: 2,
+                    actionLabel: "Approve",
+                    sampleTitles: ["Confirm Route"],
+                    keepsRoutingSeparate: false
+                ),
+            ]
+        )
+        XCTAssertEqual(summary.batchEnrichmentPreview.primaryActionTitle, "Enrich 234 bookmarks")
+        XCTAssertEqual(summary.batchEnrichmentPreview.previewDetailLine, "Preview sample: Needs Metadata")
+        XCTAssertEqual(summary.batchEnrichmentPreview.exclusionDetailLine, "2 routing items require explicit approval")
+        XCTAssertTrue(summary.batchEnrichmentPreview.canRunExplicitBatchAction)
+        XCTAssertFalse(summary.batchEnrichmentPreview.isMutating)
+    }
+
     func testReviewCockpitItemsExposeDateSuggestionApprovalDestinations() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let deadlineDate = now.addingTimeInterval(60 * 60 * 24 * 10)

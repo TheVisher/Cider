@@ -8,12 +8,14 @@ struct HomeOverviewDashboardView: View {
     let onOpenKanbanCard: (String, String) -> Void
     let onApproveReview: (HomeReviewCockpitItem) -> Bool
     let onDeferReview: (HomeReviewCockpitItem) -> Bool
+    let onEnrichReviewBatch: () -> Bool
     let onOpenSettings: () -> Void
     let onSyncNow: () -> Void
     let onCreateNew: () -> Void
 
     private let calendar = Calendar.current
     @State private var resolvedReviewIDs: Set<String> = []
+    @State private var batchEnrichmentRequested = false
     @ObservedObject private var authService = AuthService.shared
     @ObservedObject private var syncService = SyncService.shared
     private var layoutMetrics: HomeOverviewLayoutMetrics { HomeOverviewLayoutMetrics(snapshot: snapshot) }
@@ -469,6 +471,15 @@ struct HomeOverviewDashboardView: View {
             minHeight: layoutMetrics.requiredHeight(for: .triage),
             fixedHeight: fixedHeight
         ) {
+            if !snapshot.reviewCockpitSummary.visibleLanes.isEmpty {
+                reviewCockpitLaneSummary
+            }
+
+            if snapshot.reviewCockpitSummary.batchEnrichmentPreview.candidateCount > 0
+                || snapshot.reviewCockpitSummary.batchEnrichmentPreview.excludedCount > 0 {
+                reviewCockpitBatchControl(snapshot.reviewCockpitSummary.batchEnrichmentPreview)
+            }
+
             if !visibleReviewItems.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(visibleReviewItems) { reviewItem in
@@ -532,6 +543,94 @@ struct HomeOverviewDashboardView: View {
                 }
             }
         }
+    }
+
+    private var reviewCockpitLaneSummary: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 112), spacing: Spacing.xs)],
+            alignment: .leading,
+            spacing: Spacing.xs
+        ) {
+            ForEach(snapshot.reviewCockpitSummary.visibleLanes) { lane in
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    HStack(spacing: Spacing.xs) {
+                        Text("\(lane.count)")
+                            .font(CiderFont.labelSemibold)
+                            .foregroundColor(CiderColors.primary)
+                            .monospacedDigit()
+                        Text(lane.title)
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Text(lane.actionLabel)
+                        .font(CiderFont.caption)
+                        .foregroundColor(lane.keepsRoutingSeparate ? CiderColors.warning : CiderColors.quaternary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                        )
+                )
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    private func reviewCockpitBatchControl(_ preview: HomeReviewCockpitBatchEnrichmentPreview) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            HStack(alignment: .center, spacing: Spacing.sm) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(preview.primaryActionTitle)
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    Text(preview.previewDetailLine)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button {
+                    if onEnrichReviewBatch() {
+                        batchEnrichmentRequested = true
+                    }
+                } label: {
+                    Image(systemName: batchEnrichmentRequested ? "checkmark.circle" : "sparkles")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .disabled(!preview.canRunExplicitBatchAction || batchEnrichmentRequested)
+                .help(preview.primaryActionTitle)
+                .accessibilityLabel(preview.primaryActionTitle)
+            }
+
+            if let exclusionDetailLine = preview.exclusionDetailLine {
+                Text(exclusionDetailLine)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.quaternary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.surfaceSubtle)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                )
+        )
     }
 
     private func reviewQueueRow(_ reviewItem: HomeReviewCockpitItem) -> some View {

@@ -195,6 +195,15 @@ struct HomeReviewCockpitGroup: Equatable, Identifiable {
     let sampleTitles: [String]
 }
 
+struct HomeReviewCockpitLane: Equatable, Identifiable {
+    let id: String
+    let title: String
+    let count: Int
+    let actionLabel: String
+    let sampleTitles: [String]
+    let keepsRoutingSeparate: Bool
+}
+
 struct HomeReviewCockpitBatchEnrichmentPreview: Equatable {
     let action: String
     let isMutating: Bool
@@ -214,6 +223,82 @@ struct HomeReviewCockpitSummary: Equatable {
     let groups: [HomeReviewCockpitGroup]
     let batchEnrichmentPreview: HomeReviewCockpitBatchEnrichmentPreview
     let generatedAt: Date
+}
+
+extension HomeReviewCockpitSummary {
+    var visibleLanes: [HomeReviewCockpitLane] {
+        groups.map { group in
+            HomeReviewCockpitLane(
+                id: group.id,
+                title: group.label,
+                count: group.count,
+                actionLabel: HomeReviewCockpitSummary.actionLabel(for: group.requiredSafeAction),
+                sampleTitles: group.sampleTitles,
+                keepsRoutingSeparate: group.requiredSafeAction == "enrich"
+            )
+        }
+    }
+
+    private static func actionLabel(for action: String) -> String {
+        switch action {
+        case "approve": return "Approve"
+        case "correct": return "Correct"
+        case "defer": return "Defer"
+        case "enrich": return "Enrich"
+        case "open": return "Open"
+        default:
+            return action
+                .split(separator: "_")
+                .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+                .joined(separator: " ")
+        }
+    }
+}
+
+extension HomeReviewCockpitBatchEnrichmentPreview {
+    var canRunExplicitBatchAction: Bool {
+        action == "review.enrich" && candidateCount > 0
+    }
+
+    var primaryActionTitle: String {
+        "Enrich \(candidateCount) \(candidateCount == 1 ? "bookmark" : "bookmarks")"
+    }
+
+    var previewDetailLine: String {
+        guard candidateSampleTitles.isEmpty == false else {
+            return "No preview samples"
+        }
+        return "Preview sample: \(candidateSampleTitles.prefix(3).joined(separator: ", "))"
+    }
+
+    var exclusionDetailLine: String? {
+        guard excludedCount > 0 else { return nil }
+        if exclusionsByReason.count == 1,
+           let reason = exclusionsByReason.first {
+            return "\(reason.value) \(exclusionLabel(for: reason.key, count: reason.value))"
+        }
+
+        let reasonLabels = exclusionsByReason
+            .sorted { $0.key < $1.key }
+            .map { "\($0.value) \(exclusionLabel(for: $0.key, count: $0.value))" }
+            .joined(separator: ", ")
+        return "\(excludedCount) excluded: \(reasonLabels)"
+    }
+
+    private func exclusionLabel(for reason: String, count: Int) -> String {
+        switch reason {
+        case "routing_requires_explicit_approval":
+            return count == 1 ? "routing item requires explicit approval" : "routing items require explicit approval"
+        case "manual_routing_required":
+            return count == 1 ? "item needs manual routing" : "items need manual routing"
+        case "unsupported_item_type":
+            return count == 1 ? "item has unsupported type" : "items have unsupported types"
+        case "not_enrichment_candidate":
+            return count == 1 ? "item is not an enrichment candidate" : "items are not enrichment candidates"
+        default:
+            return reason
+        }
+    }
 }
 
 struct HomeKanbanPulseItem: Equatable, Identifiable {

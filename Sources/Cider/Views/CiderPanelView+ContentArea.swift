@@ -333,6 +333,24 @@ extension CiderPanelView {
                                         return false
                                     }
                                 },
+                                onEnrichReviewBatch: {
+                                    do {
+                                        let service = CiderReviewQueueService()
+                                        let candidates = try service.list(
+                                            limit: Int.max,
+                                            kind: "enrichment",
+                                            itemType: "bookmark",
+                                            requiredSafeAction: "enrich"
+                                        ).items
+                                        for candidate in candidates {
+                                            try service.enrich(itemID: candidate.itemID, actor: "user")
+                                        }
+                                        return true
+                                    } catch {
+                                        print("Dashboard review batch enrich failed: \(error.localizedDescription)")
+                                        return false
+                                    }
+                                },
                                 onOpenSettings: {
                                     NotificationCenter.default.post(name: .openCiderSettings, object: nil)
                                 },
