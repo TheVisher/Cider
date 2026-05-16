@@ -310,6 +310,99 @@ struct NotesSQLiteTests {
         #expect(titles == Set(["First", "Second", "Third"]))
     }
 
+    @Test("SQLite load collapses exact duplicate note rows into one displayed note")
+    func sqliteLoadCollapsesExactDuplicateNoteRows() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let canonicalID = UUID()
+        let duplicateID = UUID()
+        let service = makeService(db)
+        let content = "Purpose: Track movies Erik loves, taste anchors, favorite genres/vibes, and future recommendation signals."
+
+        let canonical = Note(
+            id: canonicalID,
+            title: "Movies Library",
+            content: content,
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            modifiedAt: Date(timeIntervalSince1970: 2_000),
+            relativePath: "Media/Movies Library.md",
+            tags: ["media"]
+        )
+        let duplicate = Note(
+            id: duplicateID,
+            title: "Movies Library 2 2",
+            content: content,
+            summary: "Duplicate row summary that should be preserved.",
+            createdAt: Date(timeIntervalSince1970: 1_500),
+            modifiedAt: Date(timeIntervalSince1970: 3_000),
+            relativePath: "Media/Movies Library 2 2.md",
+            tags: ["duplicate"]
+        )
+
+        service.persistNoteToDatabase(db, note: canonical)
+        service.persistNoteToDatabase(db, note: duplicate)
+
+        let displayService = makeService(db)
+        displayService.loadNotesFromDatabase(db)
+
+        #expect(displayService.notes.count == 1)
+        let displayed = try #require(displayService.notes.first)
+        #expect(displayed.id == canonicalID)
+        #expect(displayed.title == "Movies Library")
+        #expect(displayed.content == content)
+        #expect(displayed.summary == "Duplicate row summary that should be preserved.")
+        #expect(Set(displayed.tags) == Set(["media", "duplicate"]))
+        #expect(displayed.relativePath == "Media/Movies Library.md")
+
+        let reloaded = makeService(db)
+        reloaded.loadNotesFromDatabase(db)
+        #expect(reloaded.notes.count == 1)
+        #expect(reloaded.notes.first?.id == canonicalID)
+    }
+
+    @Test("SQLite load collapses duplicate note rows with dated titles")
+    func sqliteLoadCollapsesDatedDuplicateNoteRows() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let canonicalID = UUID()
+        let duplicateID = UUID()
+        let service = makeService(db)
+
+        let canonical = Note(
+            id: canonicalID,
+            title: "QA Cider thought save test 20260515-1349",
+            content: "",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            modifiedAt: Date(timeIntervalSince1970: 2_000),
+            relativePath: "Inbox/Notes/QA Cider thought save test 20260515-1349.md",
+            tags: ["qa"]
+        )
+        let duplicate = Note(
+            id: duplicateID,
+            title: "QA Cider thought save test 20260515-1349 2",
+            content: "",
+            createdAt: Date(timeIntervalSince1970: 1_500),
+            modifiedAt: Date(timeIntervalSince1970: 3_000),
+            relativePath: "Inbox/Notes/QA Cider thought save test 20260515-1349 2.md",
+            tags: ["duplicate"]
+        )
+
+        service.persistNoteToDatabase(db, note: canonical)
+        service.persistNoteToDatabase(db, note: duplicate)
+
+        let displayService = makeService(db)
+        displayService.loadNotesFromDatabase(db)
+
+        #expect(displayService.notes.count == 1)
+        let displayed = try #require(displayService.notes.first)
+        #expect(displayed.id == canonicalID)
+        #expect(displayed.title == "QA Cider thought save test 20260515-1349")
+        #expect(Set(displayed.tags) == Set(["qa", "duplicate"]))
+        #expect(displayed.relativePath == "Inbox/Notes/QA Cider thought save test 20260515-1349.md")
+    }
+
     // MARK: - Label IDs
 
     @Test("Label IDs round-trip through item_labels join table")

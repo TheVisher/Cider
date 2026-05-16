@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Cider
+@testable import CiderCLI
 
 @Suite("Cider Capture Service Tests")
 @MainActor
@@ -43,6 +44,28 @@ struct CiderCaptureServiceTests {
         let todos = TodoCardStorage(database: db)
         let files = VaultFileStorage(database: db)
         return try body(db, bookmarks, notes, todos, files)
+    }
+
+    private func withIsolatedVault<T>(
+        _ body: (CiderDatabase, VaultBookmarkService, NotesStorage, TodoCardStorage, VaultFileStorage) async throws -> T
+    ) async throws -> T {
+        let previousOverride = StoragePaths.vaultOverride
+        let vault = try makeTempVault()
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        StoragePaths.ensureVaultStructure()
+        let db = try makeTempDatabase(in: vault)
+        defer {
+            db.close()
+            StoragePaths.vaultOverride = previousOverride
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        let bookmarks = VaultBookmarkService(database: db, schedulesEnrichment: false)
+        let notes = NotesStorage(database: db)
+        let todos = TodoCardStorage(database: db)
+        let files = VaultFileStorage(database: db)
+        return try await body(db, bookmarks, notes, todos, files)
     }
 
     @Test("capture add stores a URL in Inbox immediately and returns agent state")
@@ -120,6 +143,89 @@ struct CiderCaptureServiceTests {
             #expect(second.duplicate.existingItemID == first.item.id)
             #expect(second.routing.reviewNeeded == true)
             #expect(second.nextSafeAction == "inspect_existing_item")
+        }
+    }
+
+    @Test("capture add duplicate preserves existing bookmark location when no folder is supplied")
+    func captureAddDuplicatePreservesExistingLocation() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let existingFolderID = UUID()
+            let existingID = UUID()
+            let existing = Bookmark(
+                id: existingID,
+                title: "Already Routed",
+                urlString: "https://example.com/already-routed",
+                createdAt: Date(timeIntervalSince1970: 1_000),
+                updatedAt: Date(timeIntervalSince1970: 2_000),
+                folderID: existingFolderID,
+                relativePath: nil
+            )
+            let folder = VaultFolder(id: existingFolderID, relativePath: "Saved/Bookmarks")
+            VaultFolderService(database: db).persistToDatabase(db, folder: folder)
+            bookmarks.persistBookmarkToDatabase(db, bookmark: existing)
+            bookmarks.loadBookmarksFromDatabase(db)
+
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db
+            )
+
+            let result = try service.add("https://example.com/already-routed")
+
+            #expect(result.duplicate.status == "duplicate")
+            #expect(result.item.id == existingID)
+            #expect(bookmarks.bookmarks.count == 1)
+            #expect(bookmarks.bookmarks.first?.folderID == existingFolderID)
+
+            let reloaded = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            reloaded.loadBookmarksFromDatabase(db)
+            #expect(reloaded.bookmarks.first?.folderID == existingFolderID)
+        }
+    }
+
+    @Test("capture wait holds for late canonical metadata convergence")
+    func captureWaitHoldsForLateCanonicalMetadataConvergence() async throws {
+        try await withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db
+            )
+
+            let result = try service.add("https://www.tiktok.com/@wealth/video/12345?is_from_webapp=1&sender_device=pc")
+            let bookmarkID = result.item.id
+
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(700))
+                let legacyMetadata = Bookmark(
+                    id: UUID(),
+                    title: "Sharks Loved This TINY Charger",
+                    urlString: "https://www.tiktok.com/@wealth/video/12345?sender_device=pc&is_from_webapp=1",
+                    createdAt: Date(timeIntervalSince1970: 2_000),
+                    updatedAt: Date(timeIntervalSince1970: 3_000),
+                    notes: "Sharks Loved This TINY Charger\n\nBy wealth\nVia TikTok",
+                    tags: ["tiktok"],
+                    thumbnailRemoteURLString: "https://p16-sign-va.tiktokcdn.com/example.jpeg",
+                    metadataUpdatedAt: Date(timeIntervalSince1970: 3_000),
+                    relativePath: "Inbox/Bookmarks/Sharks Loved This TINY Charger.webloc"
+                )
+                bookmarks.mergeLegacyIndexBookmarks([legacyMetadata])
+            }
+
+            let waitResult = await CiderCLI.waitForNativeBookmarkCapture(
+                bookmarkID,
+                in: bookmarks,
+                timeout: 2
+            )
+
+            #expect(waitResult.timedOut == false)
+            #expect(waitResult.bookmark?.title == "Sharks Loved This TINY Charger")
+            #expect(waitResult.bookmark?.notes.contains("By wealth") == true)
         }
     }
 

@@ -359,6 +359,8 @@ final class NotesStorage: ObservableObject {
         // 3. Pick up already-indexed vault folder notes (in case step 2 added
         //    new index entries).
         loadVaultFolderNotes()
+        notes = canonicalizedScannedNotes(notes)
+        index = rebuiltNoteIndex(from: notes)
 
         // 4. Sync the full in-memory state to SQLite. Upsert everything we
         //    have now, and delete rows for notes that disappeared.
@@ -1691,7 +1693,6 @@ final class NotesStorage: ObservableObject {
                 ORDER BY n.is_pinned DESC, i.created_at DESC;
                 """)
             var loaded: [Note] = []
-            var rebuiltIndex: [UUID: NoteIndexEntry] = [:]
             while try stmt.step() {
                 guard let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
                 let folderID = DatabaseHelpers.decodeUUID(stmt.optionalString(at: 4) ?? "")
@@ -1717,28 +1718,199 @@ final class NotesStorage: ObservableObject {
                 note.labelIDs = try loadLabelIDs(db, itemID: id)
                 note.tags = try loadTags(db, itemID: id)
 
-                // Derive filename: last path component of relativePath, or {title}.md fallback.
-                let lastComponent = (relativePath as NSString).lastPathComponent
-                let filename = lastComponent.isEmpty ? "\(title).md" : lastComponent
-
-                rebuiltIndex[id] = NoteIndexEntry(
-                    filename: filename,
-                    folderID: folderID,
-                    labelIDs: note.labelIDs.isEmpty ? nil : note.labelIDs,
-                    createdAt: createdAt,
-                    isPinned: isPinned ? true : nil
-                )
-
                 loaded.append(note)
             }
-            notes = loaded
-            index = rebuiltIndex
-            logger.info("Loaded \(loaded.count) notes from database")
+            let canonicalized = canonicalizedLoadedNotes(loaded, repairing: db)
+            notes = canonicalized
+            index = rebuiltNoteIndex(from: canonicalized)
+            logger.info("Loaded \(canonicalized.count) notes from database")
         } catch {
             logger.error("Failed to load notes from database: \(error.localizedDescription)")
             notes = []
             index = [:]
         }
+    }
+
+    private func canonicalizedLoadedNotes(_ loaded: [Note], repairing db: CiderDatabase) -> [Note] {
+        let result = canonicalizedNoteGroups(loaded)
+        repairCanonicalDuplicateNotes(db, mergedNotes: result.mergedNotes, removedIDs: result.removedIDs)
+        return result.notes
+    }
+
+    private func canonicalizedScannedNotes(_ loaded: [Note]) -> [Note] {
+        canonicalizedNoteGroups(loaded).notes
+    }
+
+    private func canonicalizedNoteGroups(_ loaded: [Note]) -> (notes: [Note], mergedNotes: [Note], removedIDs: [UUID]) {
+        var groups: [String: [Note]] = [:]
+        var orderedKeys: [String] = []
+        for note in loaded {
+            let key = noteDedupKey(note)
+            guard !key.isEmpty else {
+                let uniqueKey = "id:\(note.id.uuidString)"
+                orderedKeys.append(uniqueKey)
+                groups[uniqueKey] = [note]
+                continue
+            }
+            if groups[key] == nil {
+                orderedKeys.append(key)
+                groups[key] = []
+            }
+            groups[key]?.append(note)
+        }
+
+        var repaired: [Note] = []
+        var mergedNotes: [Note] = []
+        var removedIDs: [UUID] = []
+
+        for key in orderedKeys {
+            guard let group = groups[key], !group.isEmpty else { continue }
+            if group.count == 1 {
+                repaired.append(group[0])
+                continue
+            }
+
+            let winner = group.max { lhs, rhs in
+                noteCanonicalScore(lhs) < noteCanonicalScore(rhs)
+            } ?? group[0]
+            var merged = winner
+            for duplicate in group where duplicate.id != winner.id {
+                merged = mergeLoadedDuplicateNote(existing: merged, duplicate: duplicate)
+                removedIDs.append(duplicate.id)
+            }
+            repaired.append(merged)
+            mergedNotes.append(merged)
+        }
+
+        return (repaired, mergedNotes, removedIDs)
+    }
+
+    private func noteDedupKey(_ note: Note) -> String {
+        let relativePath = note.relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let content = note.resolvedContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nameKey = VaultDuplicateAuditor.normalizedDuplicateName(note.title.isEmpty ? note.relativePath : note.title)
+        if !nameKey.isEmpty {
+            return "exact:\(nameKey)|\(content)"
+        }
+        if !relativePath.isEmpty {
+            return "path:\(relativePath.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current).lowercased())"
+        }
+        return ""
+    }
+
+    private func repairCanonicalDuplicateNotes(
+        _ db: CiderDatabase,
+        mergedNotes: [Note],
+        removedIDs: [UUID]
+    ) {
+        guard !removedIDs.isEmpty else { return }
+        do {
+            try db.withTransaction {
+                for note in mergedNotes {
+                    try persistNoteToDatabaseInner(db, note: note)
+                }
+
+                let deleteStmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+                for id in removedIDs {
+                    deleteStmt.reset()
+                    deleteStmt.bind(DatabaseHelpers.encode(id), at: 1)
+                    try deleteStmt.step()
+                }
+            }
+            logger.info("Repaired \(removedIDs.count) duplicate note row(s)")
+        } catch {
+            logger.error("Failed to repair duplicate note rows: \(error.localizedDescription)")
+        }
+    }
+
+    private func noteCanonicalScore(_ note: Note) -> Int {
+        var score = 0
+        if !hasDuplicateNumericSuffix(note.title) { score += 200 }
+        if !hasDuplicateNumericSuffix((note.relativePath as NSString).deletingPathExtension) { score += 100 }
+        if !note.relativePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 50 }
+        if note.folderID != nil { score += 25 }
+        if !note.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 20 }
+        if note.summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false { score += 10 }
+        if note.isPinned { score += 5 }
+        return score
+    }
+
+    private func hasDuplicateNumericSuffix(_ rawValue: String) -> Bool {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let normalized = VaultDuplicateAuditor.normalizedDuplicateName(trimmed)
+        let strippedExtension = URL(fileURLWithPath: trimmed).deletingPathExtension().lastPathComponent
+        let folded = strippedExtension
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return !normalized.isEmpty && normalized != folded
+    }
+
+    private func mergeLoadedDuplicateNote(existing: Note, duplicate: Note) -> Note {
+        var merged = existing
+        if duplicate.modifiedAt > merged.modifiedAt {
+            merged.modifiedAt = duplicate.modifiedAt
+        }
+        if merged.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !duplicate.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            merged.content = duplicate.content
+        }
+        if merged.summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+           duplicate.summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            merged.summary = duplicate.summary
+        }
+        if merged.folderID == nil { merged.folderID = duplicate.folderID }
+        if merged.relativePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            merged.relativePath = duplicate.relativePath
+        }
+        merged.isPinned = merged.isPinned || duplicate.isPinned
+        merged.labelIDs = deduplicatedNoteUUIDs(from: merged.labelIDs + duplicate.labelIDs)
+        merged.tags = deduplicatedNoteTags(from: merged.tags + duplicate.tags)
+        return merged
+    }
+
+    private func rebuiltNoteIndex(from source: [Note]) -> [UUID: NoteIndexEntry] {
+        Dictionary(uniqueKeysWithValues: source.map { note in
+            let lastComponent = (note.relativePath as NSString).lastPathComponent
+            let filename = lastComponent.isEmpty ? "\(note.title).md" : lastComponent
+            return (
+                note.id,
+                NoteIndexEntry(
+                    filename: filename,
+                    folderID: note.folderID,
+                    labelIDs: note.labelIDs.isEmpty ? nil : note.labelIDs,
+                    createdAt: note.createdAt,
+                    isPinned: note.isPinned ? true : nil
+                )
+            )
+        })
+    }
+
+    private func deduplicatedNoteUUIDs(from rawIDs: [UUID]) -> [UUID] {
+        var result: [UUID] = []
+        result.reserveCapacity(rawIDs.count)
+        var seen = Set<UUID>()
+        for id in rawIDs where !seen.contains(id) {
+            seen.insert(id)
+            result.append(id)
+        }
+        return result
+    }
+
+    private func deduplicatedNoteTags(from rawTags: [String]) -> [String] {
+        var result: [String] = []
+        result.reserveCapacity(rawTags.count)
+        var seen = Set<String>()
+        for raw in rawTags {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let key = trimmed.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            result.append(trimmed)
+        }
+        return result
     }
 
     /// Load label IDs from the item_labels join table for a given item.

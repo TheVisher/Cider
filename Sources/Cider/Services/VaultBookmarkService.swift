@@ -112,7 +112,8 @@ final class VaultBookmarkService: ObservableObject {
             loadBookmarksFromDatabase(db)
             if !bookmarks.isEmpty {
                 let importedLegacySidecars = migrateLegacyBookmarkSidecarsIfNeeded()
-                if importedLegacySidecars {
+                let mergedLegacyIndexCache = mergeLegacyIndexCacheIntoCanonicalBookmarks()
+                if importedLegacySidecars || mergedLegacyIndexCache {
                     persistAllBookmarksToDatabase()
                     writeIndexCache()
                 }
@@ -400,6 +401,45 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     @discardableResult
+    private func mergeLegacyIndexCacheIntoCanonicalBookmarks() -> Bool {
+        guard let cached = loadFromIndexCache(), !cached.isEmpty else { return false }
+        return mergeLegacyIndexBookmarks(cached, persistChanges: false)
+    }
+
+    /// Public to same-module callers that need to collapse cache-only bookmark
+    /// metadata into the SQLite canonical bookmark while another process is
+    /// still enriching/saving through the app path.
+    @discardableResult
+    func reconcileLegacyIndexCacheIntoCanonicalBookmarks() -> Bool {
+        guard let cached = loadFromIndexCache(), !cached.isEmpty else { return false }
+        return mergeLegacyIndexBookmarks(cached, persistChanges: true)
+    }
+
+    /// Merges richer legacy/index-cache bookmark metadata into already-loaded
+    /// SQLite bookmarks without adopting the legacy cache row as a second item.
+    @discardableResult
+    func mergeLegacyIndexBookmarks(_ legacyBookmarks: [Bookmark], persistChanges: Bool = true) -> Bool {
+        var changed = false
+        for legacy in legacyBookmarks {
+            let key = bookmarkURLDedupKey(legacy.urlString)
+            guard !key.isEmpty,
+                  let index = bookmarks.firstIndex(where: {
+                      $0.id != legacy.id && bookmarkURLDedupKey($0.urlString) == key
+                  }) else { continue }
+
+            let merged = mergeLoadedDuplicateBookmark(existing: bookmarks[index], duplicate: legacy)
+            if merged != bookmarks[index] {
+                bookmarks[index] = merged
+                changed = true
+            }
+        }
+        if changed, persistChanges {
+            persist()
+        }
+        return changed
+    }
+
+    @discardableResult
     static func mergeLegacySidecarEntry(
         _ entry: BookmarkFileService.BookmarkSidecarEntry,
         into bookmark: inout Bookmark,
@@ -556,7 +596,7 @@ final class VaultBookmarkService: ObservableObject {
             existing.isEnriching = false
             bookmarks.insert(existing, at: 0)
             persist()
-            if existing.folderID != folderID {
+            if let folderID, existing.folderID != folderID {
                 _ = assignBookmark(existing.id, toFolder: folderID)
             }
             startEnrichmentIfNeeded(for: existing.id)
@@ -2576,10 +2616,43 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     private func isHostDerivedTitle(_ bookmark: Bookmark, sourceURL: URL) -> Bool {
-        let current = bookmark.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let current = duplicateSuffixStrippedTitle(bookmark.title)
         guard !current.isEmpty else { return true }
         let hostTitle = resolvedTitle(for: sourceURL, override: nil)
         return current.caseInsensitiveCompare(hostTitle) == .orderedSame
+    }
+
+    private func isProviderGenericTitle(_ title: String, sourceURL: URL) -> Bool {
+        let normalized = duplicateSuffixStrippedTitle(title)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return true }
+
+        let host = sourceURL.host?.lowercased() ?? ""
+        let genericTitles: [String]
+        if host.contains("tiktok.com") {
+            genericTitles = ["tiktok - make your day"]
+        } else if host.contains("instagram.com") {
+            genericTitles = ["instagram"]
+        } else if host.contains("reddit.com") {
+            genericTitles = ["reddit - dive into anything"]
+        } else if host.contains("x.com") || host.contains("twitter.com") {
+            genericTitles = ["x", "twitter"]
+        } else {
+            genericTitles = []
+        }
+
+        return genericTitles.contains(normalized)
+            || normalized == "just a moment..."
+            || normalized == "attention required!"
+    }
+
+    private func duplicateSuffixStrippedTitle(_ title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let range = trimmed.range(of: #" \(\d+\)$"#, options: .regularExpression) else {
+            return trimmed
+        }
+        return String(trimmed[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func normalizedHost(from url: URL) -> String {
@@ -2726,11 +2799,185 @@ final class VaultBookmarkService: ObservableObject {
 
                 loaded.append(bookmark)
             }
-            bookmarks = loaded
+            bookmarks = canonicalizedLoadedBookmarks(loaded, repairing: db)
         } catch {
             logger.error("Failed to load bookmarks from database: \(error.localizedDescription)")
             bookmarks = []
         }
+    }
+
+    private func canonicalizedLoadedBookmarks(_ loaded: [Bookmark], repairing db: CiderDatabase) -> [Bookmark] {
+        var groups: [String: [Bookmark]] = [:]
+        var orderedKeys: [String] = []
+        for bookmark in loaded {
+            let key = bookmarkURLDedupKey(bookmark.urlString)
+            guard !key.isEmpty else {
+                let uniqueKey = "id:\(bookmark.id.uuidString)"
+                orderedKeys.append(uniqueKey)
+                groups[uniqueKey] = [bookmark]
+                continue
+            }
+            if groups[key] == nil {
+                orderedKeys.append(key)
+                groups[key] = []
+            }
+            groups[key]?.append(bookmark)
+        }
+
+        var repaired: [Bookmark] = []
+        var mergedBookmarks: [Bookmark] = []
+        var removedIDs: [UUID] = []
+
+        for key in orderedKeys {
+            guard let group = groups[key], !group.isEmpty else { continue }
+            if group.count == 1 {
+                repaired.append(group[0])
+                continue
+            }
+
+            let winner = group.max { lhs, rhs in
+                bookmarkCanonicalScore(lhs) < bookmarkCanonicalScore(rhs)
+            } ?? group[0]
+            var merged = winner
+            for duplicate in group where duplicate.id != winner.id {
+                merged = mergeLoadedDuplicateBookmark(existing: merged, duplicate: duplicate)
+                removedIDs.append(duplicate.id)
+            }
+            repaired.append(merged)
+            mergedBookmarks.append(merged)
+        }
+
+        repairCanonicalDuplicateBookmarks(db, mergedBookmarks: mergedBookmarks, removedIDs: removedIDs)
+        return repaired
+    }
+
+    private func repairCanonicalDuplicateBookmarks(
+        _ db: CiderDatabase,
+        mergedBookmarks: [Bookmark],
+        removedIDs: [UUID]
+    ) {
+        guard !removedIDs.isEmpty else { return }
+        do {
+            try db.withTransaction {
+                for bookmark in mergedBookmarks {
+                    try persistBookmarkToDatabaseInner(db, bookmark: bookmark)
+                }
+
+                let deleteStmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+                for id in removedIDs {
+                    deleteStmt.reset()
+                    deleteStmt.bind(DatabaseHelpers.encode(id), at: 1)
+                    try deleteStmt.step()
+                }
+            }
+            logger.info("Repaired \(removedIDs.count) duplicate canonical bookmark row(s)")
+        } catch {
+            logger.error("Failed to repair duplicate canonical bookmark rows: \(error.localizedDescription)")
+        }
+    }
+
+    private func bookmarkCanonicalScore(_ bookmark: Bookmark) -> Int {
+        var score = 0
+        if bookmark.titleManuallySet { score += 1_000 }
+        if let sourceURL = URL(string: bookmark.urlString), !isHostDerivedTitle(bookmark, sourceURL: sourceURL) {
+            score += 200
+        }
+        if !bookmark.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            score += 50
+        }
+        if bookmark.relativePath != nil { score += 30 }
+        if bookmark.folderID != nil { score += 20 }
+        if !bookmark.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 15 }
+        if bookmark.aiSummary != nil { score += 10 }
+        if bookmark.thumbnailRemoteURLString != nil || bookmark.thumbnailRelativePath != nil { score += 8 }
+        if bookmark.lastEnrichedAt != nil { score += 5 }
+        if bookmark.title.localizedCaseInsensitiveContains(" (2)") { score -= 25 }
+        if bookmark.title.localizedCaseInsensitiveContains(" copy") { score -= 25 }
+        return score
+    }
+
+    private func mergeLoadedDuplicateBookmark(existing: Bookmark, duplicate: Bookmark) -> Bookmark {
+        var merged = existing
+        if duplicate.updatedAt > merged.updatedAt {
+            merged.updatedAt = duplicate.updatedAt
+        }
+
+        if shouldApplyDuplicateBookmarkTitle(duplicate.title, from: duplicate, to: merged) {
+            merged.title = duplicate.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            merged.titleManuallySet = duplicate.titleManuallySet
+        }
+
+        if merged.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !duplicate.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !merged.notesManuallySet {
+            merged.notes = duplicate.notes
+            merged.notesManuallySet = duplicate.notesManuallySet
+        }
+
+        merged.tags = deduplicatedTags(from: merged.tags + duplicate.tags)
+        merged.labelIDs = deduplicatedUUIDs(from: merged.labelIDs + duplicate.labelIDs)
+        merged.dismissedLabelIDs = deduplicatedUUIDs(from: merged.dismissedLabelIDs + duplicate.dismissedLabelIDs)
+
+        if merged.folderID == nil { merged.folderID = duplicate.folderID }
+        if merged.relativePath == nil { merged.relativePath = duplicate.relativePath }
+        if merged.thumbnailRemoteURLString == nil { merged.thumbnailRemoteURLString = duplicate.thumbnailRemoteURLString }
+        if merged.thumbnailRelativePath == nil { merged.thumbnailRelativePath = duplicate.thumbnailRelativePath }
+        if merged.originalImageRelativePath == nil { merged.originalImageRelativePath = duplicate.originalImageRelativePath }
+        if merged.metadataUpdatedAt == nil { merged.metadataUpdatedAt = duplicate.metadataUpdatedAt }
+        if merged.aiSummary == nil { merged.aiSummary = duplicate.aiSummary }
+        if merged.ocrText == nil { merged.ocrText = duplicate.ocrText }
+        if merged.dominantColors == nil { merged.dominantColors = duplicate.dominantColors }
+        if merged.mediaType == nil { merged.mediaType = duplicate.mediaType }
+        if merged.carouselImagePaths == nil { merged.carouselImagePaths = duplicate.carouselImagePaths }
+        if merged.readerUnavailable == nil { merged.readerUnavailable = duplicate.readerUnavailable }
+        if merged.preferredHeroMode == nil { merged.preferredHeroMode = duplicate.preferredHeroMode }
+        if merged.enrichmentStatus == nil { merged.enrichmentStatus = duplicate.enrichmentStatus }
+        if merged.lastEnrichedAt == nil || (duplicate.lastEnrichedAt ?? .distantPast) > (merged.lastEnrichedAt ?? .distantPast) {
+            merged.lastEnrichedAt = duplicate.lastEnrichedAt
+        }
+        return merged
+    }
+
+    private func shouldApplyDuplicateBookmarkTitle(
+        _ title: String,
+        from duplicate: Bookmark,
+        to bookmark: Bookmark
+    ) -> Bool {
+        if bookmark.titleManuallySet { return false }
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        if bookmark.title.caseInsensitiveCompare(normalized) == .orderedSame { return false }
+        guard let duplicateURL = URL(string: duplicate.urlString) else { return false }
+        if isHostDerivedTitle(duplicate, sourceURL: duplicateURL) { return false }
+
+        if shouldApplyEnrichedTitle(normalized, to: bookmark, sourceURL: duplicateURL) {
+            return true
+        }
+        if duplicate.titleManuallySet {
+            return true
+        }
+        if isProviderGenericTitle(bookmark.title, sourceURL: duplicateURL) {
+            return true
+        }
+
+        let duplicateHasRicherContext =
+            !duplicate.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || duplicate.thumbnailRemoteURLString != nil
+            || duplicate.thumbnailRelativePath != nil
+            || duplicate.aiSummary != nil
+        return duplicateHasRicherContext
+            && bookmarkCanonicalScore(duplicate) > bookmarkCanonicalScore(bookmark)
+    }
+
+    private func deduplicatedUUIDs(from rawIDs: [UUID]) -> [UUID] {
+        var result: [UUID] = []
+        result.reserveCapacity(rawIDs.count)
+        var seen = Set<UUID>()
+        for id in rawIDs where !seen.contains(id) {
+            seen.insert(id)
+            result.append(id)
+        }
+        return result
     }
 
     /// Load label IDs from the item_labels join table for a given item.

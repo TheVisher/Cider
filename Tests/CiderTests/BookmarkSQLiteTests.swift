@@ -840,6 +840,121 @@ struct BookmarkSQLiteTests {
         #expect(service2.bookmarks.first?.id == existingID)
     }
 
+    @Test("SQLite load collapses canonical duplicate URL rows into one displayed bookmark")
+    func sqliteLoadCollapsesCanonicalDuplicateURLRows() throws {
+        let (db, url) = try makeTestDB()
+        defer {
+            db.close()
+            cleanup(url)
+        }
+
+        let canonicalID = UUID()
+        let staleID = UUID()
+        let service = makeService(db)
+
+        let canonical = Bookmark(
+            id: canonicalID,
+            title: "Fatty Fish Sushi Everett review — CiderGuyRatesIt",
+            urlString: "https://www.tiktok.com/t/ZP8pPEsky/",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            notes: "",
+            tags: ["restaurants"],
+            relativePath: "Food/Restaurants/Everett/Fatty Fish Sushi Everett review — CiderGuyRatesIt.webloc"
+        )
+        let stale = Bookmark(
+            id: staleID,
+            title: "Tiktok.Com (2)",
+            urlString: "https://www.tiktok.com/t/ZP8pPEsky/?utm_source=ios#caption",
+            createdAt: Date(timeIntervalSince1970: 1_500),
+            updatedAt: Date(timeIntervalSince1970: 3_000),
+            notes: "Useful TikTok caption from the stale representation.",
+            tags: ["tiktok"],
+            relativePath: "Food/Restaurants/Everett/Tiktok.Com (2).webloc"
+        )
+
+        service.persistBookmarkToDatabase(db, bookmark: canonical)
+        service.persistBookmarkToDatabase(db, bookmark: stale)
+
+        let displayService = makeService(db)
+        displayService.loadBookmarksFromDatabase(db)
+
+        #expect(displayService.bookmarks.count == 1)
+        let displayed = try #require(displayService.bookmarks.first)
+        #expect(displayed.id == canonicalID)
+        #expect(displayed.title == "Fatty Fish Sushi Everett review — CiderGuyRatesIt")
+        #expect(displayed.urlString == "https://www.tiktok.com/t/ZP8pPEsky/")
+        #expect(displayed.notes == "Useful TikTok caption from the stale representation.")
+        #expect(Set(displayed.tags) == Set(["restaurants", "tiktok"]))
+        #expect(displayed.relativePath == "Food/Restaurants/Everett/Fatty Fish Sushi Everett review — CiderGuyRatesIt.webloc")
+
+        let reloaded = makeService(db)
+        reloaded.loadBookmarksFromDatabase(db)
+        #expect(reloaded.bookmarks.count == 1)
+        #expect(reloaded.bookmarks.first?.id == canonicalID)
+    }
+
+    @Test("Legacy index metadata merges into the SQLite canonical bookmark for the same URL")
+    func legacyIndexMetadataMergesIntoSQLiteCanonicalBookmark() throws {
+        let (db, url) = try makeTestDB()
+        defer {
+            db.close()
+            cleanup(url)
+        }
+
+        let canonicalID = UUID()
+        let legacyID = UUID()
+        let service = makeService(db)
+        let canonical = Bookmark(
+            id: canonicalID,
+            title: "TikTok - Make Your Day",
+            urlString: "https://www.tiktok.com/@heyjosh_13/video/7635788415757258002?is_from_webapp=1&sender_device=pc",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            notes: "",
+            tags: [],
+            thumbnailRemoteURLString: nil,
+            thumbnailRelativePath: ".thumbnails/canonical.png",
+            relativePath: "Inbox/Bookmarks/Tiktok.Com (3).webloc"
+        )
+        let legacyIndexed = Bookmark(
+            id: legacyID,
+            title: "No Josh's were harmed in the making of this video... Maybe.",
+            urlString: "https://www.tiktok.com/@heyjosh_13/video/7635788415757258002?sender_device=pc&is_from_webapp=1",
+            createdAt: Date(timeIntervalSince1970: 1_500),
+            updatedAt: Date(timeIntervalSince1970: 3_000),
+            notes: "No Josh's were harmed in the making of this video... Maybe.\n\nBy HeyJosh_\nVia TikTok",
+            tags: ["tiktok"],
+            thumbnailRemoteURLString: "https://p16-sign-va.tiktokcdn.com/example.jpeg",
+            thumbnailRelativePath: ".thumbnails/legacy.png",
+            metadataUpdatedAt: Date(timeIntervalSince1970: 3_000),
+            relativePath: "Inbox/Bookmarks/No Josh's were harmed.webloc",
+            titleManuallySet: true,
+            notesManuallySet: true
+        )
+
+        service.persistBookmarkToDatabase(db, bookmark: canonical)
+        service.loadBookmarksFromDatabase(db)
+
+        #expect(service.mergeLegacyIndexBookmarks([legacyIndexed]) == true)
+        #expect(service.bookmarks.count == 1)
+        let merged = try #require(service.bookmarks.first)
+        #expect(merged.id == canonicalID)
+        #expect(merged.title == "No Josh's were harmed in the making of this video... Maybe.")
+        #expect(merged.notes == "No Josh's were harmed in the making of this video... Maybe.\n\nBy HeyJosh_\nVia TikTok")
+        #expect(Set(merged.tags) == Set(["tiktok"]))
+        #expect(merged.thumbnailRelativePath == ".thumbnails/canonical.png")
+        #expect(merged.thumbnailRemoteURLString == "https://p16-sign-va.tiktokcdn.com/example.jpeg")
+        #expect(merged.relativePath == "Inbox/Bookmarks/Tiktok.Com (3).webloc")
+
+        let reloaded = makeService(db)
+        reloaded.loadBookmarksFromDatabase(db)
+        #expect(reloaded.bookmarks.count == 1)
+        #expect(reloaded.bookmarks.first?.id == canonicalID)
+        #expect(reloaded.bookmarks.first?.title == "No Josh's were harmed in the making of this video... Maybe.")
+        #expect(reloaded.bookmarks.first?.notes.contains("By HeyJosh_") == true)
+    }
+
     // MARK: - Empty Database
 
     @Test("Empty database loads empty bookmarks array")
