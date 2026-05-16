@@ -557,18 +557,103 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.reviewCockpitItems[0].targetLabel, "Todo due date")
         XCTAssertEqual(snapshot.reviewCockpitItems[0].confidenceLabel, "84% confidence")
         XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.suggestionIndex, 0)
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.suggestionKey, deadlineSuggestion.suggestionKey)
         XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.destination, .todo)
         XCTAssertTrue(snapshot.reviewCockpitItems[0].canApprove)
         XCTAssertTrue(snapshot.reviewCockpitItems[0].canCorrect)
+        XCTAssertFalse(snapshot.reviewCockpitItems[0].safeActions.contains("correct"))
+        XCTAssertTrue(snapshot.reviewCockpitItems[0].safeActions.contains("open"))
         XCTAssertFalse(snapshot.reviewCockpitItems[0].canDefer)
 
         XCTAssertEqual(snapshot.reviewCockpitItems[1].suggestedAction, "Approve Date Card")
         XCTAssertEqual(snapshot.reviewCockpitItems[1].targetLabel, "Date card")
         XCTAssertEqual(snapshot.reviewCockpitItems[1].dateSuggestionApproval?.suggestionIndex, 0)
+        XCTAssertEqual(snapshot.reviewCockpitItems[1].dateSuggestionApproval?.suggestionKey, releaseSuggestion.suggestionKey)
         XCTAssertEqual(snapshot.reviewCockpitItems[1].dateSuggestionApproval?.destination, .dateCard)
         XCTAssertTrue(snapshot.reviewCockpitItems[1].canApprove)
         XCTAssertTrue(snapshot.reviewCockpitItems[1].canCorrect)
+        XCTAssertFalse(snapshot.reviewCockpitItems[1].safeActions.contains("correct"))
+        XCTAssertTrue(snapshot.reviewCockpitItems[1].safeActions.contains("open"))
         XCTAssertFalse(snapshot.reviewCockpitItems[1].canDefer)
+    }
+
+    func testReviewCockpitReservesSlotForDateSuggestionWhenQueueIsFull() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let reviewBookmarks = (0..<6).map { index in
+            Bookmark(
+                id: UUID(),
+                title: "Routing review \(index)",
+                urlString: "https://example.com/routing-\(index)",
+                createdAt: now.addingTimeInterval(TimeInterval(-index * 60)),
+                updatedAt: now,
+                folderID: nil
+            )
+        }
+        let reviewItems = reviewBookmarks.enumerated().map { index, bookmark in
+            CiderReviewQueueItem(
+                id: "review-routing-\(index)",
+                kind: "low_confidence_routing",
+                source: "routing_decision",
+                itemID: bookmark.id,
+                itemType: "bookmark",
+                title: bookmark.title,
+                relativePath: "Inbox/Bookmarks/\(bookmark.title).webloc",
+                reason: "Low confidence route.",
+                suggestedAction: "Approve or correct route",
+                reviewState: "needs_review",
+                confidence: 0.62,
+                routingDecisionID: UUID(),
+                target: CiderRoutingDecisionTarget(
+                    kind: "folder",
+                    name: "Research",
+                    relativePath: "Spaces/Research",
+                    folderID: nil
+                ),
+                createdAt: now.addingTimeInterval(TimeInterval(-index)),
+                safeActions: ["approve", "correct", "defer"]
+            )
+        }
+        let deadlineBookmark = Bookmark(
+            id: UUID(),
+            title: "Grant application",
+            urlString: "https://example.com/grant",
+            createdAt: now,
+            updatedAt: now,
+            folderID: nil
+        )
+        let suggestion = CiderBookmarkDateSuggestion(
+            bookmarkID: deadlineBookmark.id,
+            bookmarkTitle: deadlineBookmark.title,
+            sourceURL: deadlineBookmark.urlString,
+            kind: "deadline",
+            confidence: 0.84,
+            date: now.addingTimeInterval(60 * 60 * 24 * 10),
+            sourceField: "title",
+            sourceSnippet: "Apply by May 30, 2026",
+            nextSafeAction: "review_date_suggestion"
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: reviewBookmarks.map(LibraryItemV2.bookmark) + [.bookmark(deadlineBookmark)],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: reviewItems,
+            bookmarkDateSuggestionResults: [
+                CiderBookmarkDateSuggestionResult(
+                    command: "bookmark.date-suggestions",
+                    bookmarkID: deadlineBookmark.id,
+                    bookmarkTitle: deadlineBookmark.title,
+                    sourceURL: deadlineBookmark.urlString,
+                    suggestions: [suggestion]
+                )
+            ],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.reviewCockpitItems.count, 6)
+        XCTAssertTrue(snapshot.reviewCockpitItems.contains { $0.kindLabel == "Date Suggestion" })
+        XCTAssertEqual(snapshot.reviewCockpitItems.last?.title, "Grant application")
     }
 
     func testReviewCockpitSkipsDateSuggestionsAlreadyApprovedIntoLinkedItems() {

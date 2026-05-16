@@ -116,6 +116,7 @@ struct HomeRecentCaptureItem: Equatable, Identifiable {
 struct HomeReviewCockpitDateSuggestionApproval: Equatable {
     let bookmarkID: UUID
     let suggestionIndex: Int
+    let suggestionKey: String
     let destination: LibraryEntityType
 }
 

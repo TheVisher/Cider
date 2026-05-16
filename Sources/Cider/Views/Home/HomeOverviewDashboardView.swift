@@ -597,8 +597,8 @@ struct HomeOverviewDashboardView: View {
                             .frame(width: 20, height: 20)
                     }
                     .buttonStyle(.plain)
-                    .help("Open item to correct routing")
-                    .accessibilityLabel("Open item to correct routing")
+                    .help(reviewOpenHelp(for: reviewItem))
+                    .accessibilityLabel(reviewOpenHelp(for: reviewItem))
                 }
 
                 if reviewItem.canApprove {
@@ -660,6 +660,10 @@ struct HomeOverviewDashboardView: View {
             return approval.destination == .todo ? "Approve Todo due date" : "Approve Date Card"
         }
         return "Approve suggested route"
+    }
+
+    private func reviewOpenHelp(for item: HomeReviewCockpitItem) -> String {
+        item.dateSuggestionApproval == nil ? "Open item to correct routing" : "Open bookmark details"
     }
 
     private func recentActivityPanel(fixedHeight: CGFloat? = nil) -> some View {

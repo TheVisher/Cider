@@ -306,7 +306,7 @@ extension CiderPanelView {
                                         if let approval = reviewItem.dateSuggestionApproval {
                                             _ = try CiderBookmarkDateSuggestionApprovalService().approve(
                                                 bookmarkID: approval.bookmarkID,
-                                                suggestionIndex: approval.suggestionIndex
+                                                suggestionKey: approval.suggestionKey
                                             )
                                         } else {
                                             try CiderReviewQueueService().approve(itemID: reviewItem.itemID, actor: "user")

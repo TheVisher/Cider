@@ -593,7 +593,21 @@ enum HomeOverviewDataProvider {
             }
         }
 
-        return Array((queueItems + suggestionItems).prefix(6))
+        return cappedReviewCockpitItems(queueItems: queueItems, suggestionItems: suggestionItems)
+    }
+
+    private static func cappedReviewCockpitItems(
+        queueItems: [HomeReviewCockpitItem],
+        suggestionItems: [HomeReviewCockpitItem],
+        limit: Int = 6
+    ) -> [HomeReviewCockpitItem] {
+        guard limit > 0 else { return [] }
+        guard !suggestionItems.isEmpty else { return Array(queueItems.prefix(limit)) }
+        guard queueItems.count >= limit else {
+            return Array((queueItems + suggestionItems).prefix(limit))
+        }
+
+        return Array(queueItems.prefix(limit - 1)) + Array(suggestionItems.prefix(1))
     }
 
     static func bookmarkDateSuggestionResults(
@@ -617,8 +631,8 @@ enum HomeOverviewDataProvider {
         let destination = dateSuggestionDestination(for: suggestion)
 
         return HomeReviewCockpitItem(
-            id: "review-cockpit-date-suggestion-\(result.bookmarkID.uuidString)-\(suggestionIndex)",
-            sourceReviewID: "date-suggestion-\(result.bookmarkID.uuidString)-\(suggestionIndex)",
+            id: "review-cockpit-date-suggestion-\(result.bookmarkID.uuidString)-\(suggestion.suggestionKey)",
+            sourceReviewID: "date-suggestion-\(result.bookmarkID.uuidString)-\(suggestion.suggestionKey)",
             itemID: result.bookmarkID,
             itemType: "bookmark",
             item: linkedItem,
@@ -633,10 +647,11 @@ enum HomeOverviewDataProvider {
             canApprove: true,
             canCorrect: true,
             canDefer: false,
-            safeActions: ["approve", "correct"],
+            safeActions: ["approve", "open"],
             dateSuggestionApproval: HomeReviewCockpitDateSuggestionApproval(
                 bookmarkID: result.bookmarkID,
                 suggestionIndex: suggestionIndex,
+                suggestionKey: suggestion.suggestionKey,
                 destination: destination
             )
         )
