@@ -273,6 +273,52 @@ struct CiderReviewEnrichmentReconciliationSampleResult: Equatable {
     }
 }
 
+struct CiderReviewEnrichmentReconciliationApplyResult: Equatable {
+    var command: String = "review.enrichment.reconciliationApply"
+    var generatedAt: Date
+    var status: String
+    var actor: String
+    var isMutating: Bool
+    var approvalRequired: Bool = true
+    var requiredApprovalToken: String
+    var groupID: String?
+    var limit: Int
+    var totalCandidateCount: Int
+    var matchingCandidateCount: Int
+    var proposedChangeCount: Int
+    var appliedCount: Int
+    var skippedCount: Int
+    var blockers: [String]
+    var appliedItems: [CiderReviewEnrichmentReconciliationPlanItem]
+    var safeActions: [String] = ["review summary", "review enrichment-reconcile-plan", "review enrichment-reconcile-samples"]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        var dictionary: [String: Any] = [
+            "command": command,
+            "generatedAt": formatter.string(from: generatedAt),
+            "status": status,
+            "actor": actor,
+            "isMutating": isMutating,
+            "approvalRequired": approvalRequired,
+            "requiredApprovalToken": requiredApprovalToken,
+            "limit": limit,
+            "totalCandidateCount": totalCandidateCount,
+            "matchingCandidateCount": matchingCandidateCount,
+            "proposedChangeCount": proposedChangeCount,
+            "appliedCount": appliedCount,
+            "skippedCount": skippedCount,
+            "blockers": blockers,
+            "appliedItems": appliedItems.map { $0.toDictionary() },
+            "safeActions": safeActions,
+        ]
+        if let groupID {
+            dictionary["groupID"] = groupID
+        }
+        return dictionary
+    }
+}
+
 struct CiderReviewEnrichmentReconciliationPlanItem: Equatable {
     var groupID: String = ""
     var itemID: UUID
@@ -919,6 +965,112 @@ final class CiderReviewQueueService {
         )
     }
 
+    func applyEnrichmentReconciliation(
+        groupID: String? = nil,
+        limit: Int = 10,
+        approvalToken: String?,
+        execute: Bool = false,
+        actor: String = "user",
+        now: Date = Date()
+    ) throws -> CiderReviewEnrichmentReconciliationApplyResult {
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
+        let cappedLimit = max(0, limit)
+        let candidates = try enrichmentReconciliationCandidates(groupID: groupID, now: now)
+        let proposedCandidates = candidates.items.filter { $0.proposedStatus != nil && $0.proposedLastEnrichedAt != nil }
+        let requiredApprovalToken = Self.enrichmentReconciliationApprovalToken(
+            groupID: groupID,
+            limit: cappedLimit,
+            matchingCandidateCount: candidates.matchingCandidateCount,
+            proposedChangeCount: proposedCandidates.count
+        )
+        var result = CiderReviewEnrichmentReconciliationApplyResult(
+            generatedAt: now,
+            status: execute ? "refused" : "planned",
+            actor: actor,
+            isMutating: false,
+            requiredApprovalToken: requiredApprovalToken,
+            groupID: groupID,
+            limit: cappedLimit,
+            totalCandidateCount: candidates.totalCandidateCount,
+            matchingCandidateCount: candidates.matchingCandidateCount,
+            proposedChangeCount: proposedCandidates.count,
+            appliedCount: 0,
+            skippedCount: candidates.matchingCandidateCount,
+            blockers: [],
+            appliedItems: []
+        )
+
+        guard !proposedCandidates.isEmpty else {
+            result.status = "refused"
+            result.blockers.append("no proposed enrichment status changes are available for this selection")
+            return result
+        }
+        guard execute else {
+            result.status = "planned"
+            result.blockers.append("dry-run only; pass --execute with the exact approval token to mutate")
+            result.appliedItems = Array(proposedCandidates.prefix(cappedLimit))
+            result.skippedCount = max(0, candidates.matchingCandidateCount - result.appliedItems.count)
+            return result
+        }
+        guard approvalToken == requiredApprovalToken else {
+            result.status = "refused"
+            result.blockers.append("exact approval token required: \(requiredApprovalToken)")
+            return result
+        }
+
+        for item in proposedCandidates.prefix(cappedLimit) {
+            guard let proposedStatus = item.proposedStatus,
+                  let proposedLastEnrichedAt = item.proposedLastEnrichedAt else {
+                continue
+            }
+            try updateBookmarkEnrichmentStatus(
+                itemID: item.itemID,
+                status: proposedStatus,
+                lastEnrichedAt: proposedLastEnrichedAt,
+                in: db
+            )
+            MutationAuditService(database: db).record(
+                action: "review.enrichment.reconciliationApply",
+                itemType: "bookmark",
+                itemID: item.itemID,
+                before: [
+                    "enrichmentStatus": item.currentStatus ?? "",
+                    "lastEnrichedAt": item.currentLastEnrichedAt.map { ISO8601DateFormatter().string(from: $0) } ?? "",
+                ],
+                after: [
+                    "enrichmentStatus": proposedStatus,
+                    "lastEnrichedAt": ISO8601DateFormatter().string(from: proposedLastEnrichedAt),
+                ],
+                metadata: [
+                    "actor": actor,
+                    "groupID": item.groupID,
+                    "evidence": item.evidence.joined(separator: ","),
+                    "requiredApprovalToken": requiredApprovalToken,
+                    "matchingCandidateCount": String(candidates.matchingCandidateCount),
+                    "proposedChangeCount": String(proposedCandidates.count),
+                ].filter { !$0.value.isEmpty },
+                source: actor == "agent" ? .agent : nil
+            )
+            result.appliedItems.append(item)
+        }
+
+        result.status = "applied"
+        result.isMutating = true
+        result.appliedCount = result.appliedItems.count
+        result.skippedCount = max(0, candidates.matchingCandidateCount - result.appliedCount)
+        return result
+    }
+
+    static func enrichmentReconciliationApprovalToken(
+        groupID: String?,
+        limit: Int,
+        matchingCandidateCount: Int,
+        proposedChangeCount: Int
+    ) -> String {
+        let selection = groupID ?? "all"
+        return "review.enrichment.reconciliationApply:\(selection):limit=\(max(0, limit)):matching=\(matchingCandidateCount):proposed=\(proposedChangeCount)"
+    }
+
     @discardableResult
     func approve(itemID: UUID, actor: String = "user") throws -> CiderReviewRoutingActionResult {
         let before = try routingDecisionService.explain(itemID: itemID)
@@ -1232,6 +1384,12 @@ final class CiderReviewQueueService {
         var preferredHeroMode: String?
     }
 
+    private struct EnrichmentReconciliationCandidateSet {
+        var totalCandidateCount: Int
+        var matchingCandidateCount: Int
+        var items: [CiderReviewEnrichmentReconciliationPlanItem]
+    }
+
     private func bookmarkDetails(in db: CiderDatabase) throws -> [UUID: BookmarkReviewDetails] {
         let stmt = try db.prepare("""
             SELECT item_id, url, enrichment_status, last_enriched_at,
@@ -1260,6 +1418,67 @@ final class CiderReviewQueueService {
             )
         }
         return details
+    }
+
+    private func enrichmentReconciliationCandidates(
+        groupID: String?,
+        now: Date
+    ) throws -> EnrichmentReconciliationCandidateSet {
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
+        let items = try itemSummaries(in: db)
+        let bookmarkDetails = try bookmarkDetails(in: db)
+        var totalCandidateCount = 0
+        var matchingCandidateCount = 0
+        var matchedItems: [CiderReviewEnrichmentReconciliationPlanItem] = []
+
+        for item in items.values
+            .filter({ $0.type == "bookmark" })
+            .sorted(by: enrichmentDiagnosisSort)
+        {
+            guard let details = bookmarkDetails[item.id],
+                  enrichmentReviewItem(item: item, details: details, now: now) != nil else {
+                continue
+            }
+
+            totalCandidateCount += 1
+            let plan = enrichmentReconciliationProposal(item: item, details: details)
+            if let groupID, plan.groupID != groupID {
+                continue
+            }
+
+            matchingCandidateCount += 1
+            matchedItems.append(
+                enrichmentReconciliationPlanItem(
+                    item: item,
+                    details: details,
+                    plan: plan
+                )
+            )
+        }
+
+        return EnrichmentReconciliationCandidateSet(
+            totalCandidateCount: totalCandidateCount,
+            matchingCandidateCount: matchingCandidateCount,
+            items: matchedItems
+        )
+    }
+
+    private func updateBookmarkEnrichmentStatus(
+        itemID: UUID,
+        status: String,
+        lastEnrichedAt: Date,
+        in db: CiderDatabase
+    ) throws {
+        let stmt = try db.prepare("""
+            UPDATE bookmarks
+            SET enrichment_status = ?,
+                last_enriched_at = ?
+            WHERE item_id = ?;
+            """)
+        stmt.bind(status, at: 1)
+            .bind(DatabaseHelpers.encode(lastEnrichedAt), at: 2)
+            .bind(itemID.uuidString, at: 3)
+        try stmt.step()
     }
 
     private func routingReviewItem(

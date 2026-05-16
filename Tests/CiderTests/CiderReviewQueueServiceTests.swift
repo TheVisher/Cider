@@ -20,6 +20,23 @@ struct CiderReviewQueueServiceTests {
         try? fm.removeItem(atPath: url.path + "-shm")
     }
 
+    private func bookmarkEnrichmentState(_ db: CiderDatabase, itemID: UUID) throws -> (status: String?, lastEnrichedAt: Date?) {
+        let stmt = try db.prepare("""
+            SELECT enrichment_status, last_enriched_at
+            FROM bookmarks
+            WHERE item_id = ?;
+            """)
+        stmt.bind(itemID.uuidString, at: 1)
+        guard try stmt.step() else {
+            Issue.record("bookmark missing")
+            return (nil, nil)
+        }
+        return (
+            stmt.optionalString(at: 0),
+            stmt.optionalDouble(at: 1).map(DatabaseHelpers.decodeDate)
+        )
+    }
+
     private func insertBookmark(
         _ db: CiderDatabase,
         id: UUID = UUID(),
@@ -621,6 +638,106 @@ struct CiderReviewQueueServiceTests {
         #expect(dictionary["command"] as? String == "review.enrichment.reconciliationSamples")
         #expect(dictionary["isMutating"] as? Bool == false)
         #expect(dictionary["approvalRequired"] as? Bool == true)
+    }
+
+    @Test("review enrichment reconciliation apply refuses missing exact approval without mutation")
+    func reviewEnrichmentReconciliationApplyRefusesMissingExactApprovalWithoutMutation() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let itemID = try insertBookmark(
+            db,
+            title: "AI Evidence",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            aiSummary: "A concise useful summary."
+        )
+        let queue = CiderReviewQueueService(database: db)
+
+        let result = try queue.applyEnrichmentReconciliation(
+            groupID: "can_mark_complete_from_ai_fields",
+            limit: 1,
+            approvalToken: nil,
+            execute: true,
+            actor: "agent",
+            now: Date(timeIntervalSince1970: 400)
+        )
+
+        #expect(result.command == "review.enrichment.reconciliationApply")
+        #expect(result.status == "refused")
+        #expect(result.isMutating == false)
+        #expect(result.approvalRequired == true)
+        #expect(result.requiredApprovalToken == "review.enrichment.reconciliationApply:can_mark_complete_from_ai_fields:limit=1:matching=1:proposed=1")
+        #expect(result.blockers.contains { $0.contains("exact approval") })
+        let state = try bookmarkEnrichmentState(db, itemID: itemID)
+        #expect(state.status == nil)
+        #expect(state.lastEnrichedAt == nil)
+        #expect(MutationAuditService(database: db).loadEntries().isEmpty)
+    }
+
+    @Test("review enrichment reconciliation apply updates bounded selected candidates and records audit")
+    func reviewEnrichmentReconciliationApplyUpdatesBoundedSelectedCandidatesAndRecordsAudit() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let firstID = try insertBookmark(
+            db,
+            title: "First AI Evidence",
+            relativePath: "Inbox/Bookmarks/First AI Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            aiSummary: "A concise useful summary."
+        )
+        let secondID = try insertBookmark(
+            db,
+            title: "Second AI Evidence",
+            relativePath: "Inbox/Bookmarks/Second AI Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 200),
+            ocrText: "Detected text."
+        )
+        let partialID = try insertBookmark(
+            db,
+            title: "Metadata Evidence",
+            relativePath: "Inbox/Bookmarks/Metadata Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 300),
+            thumbnailRemoteURL: "https://example.com/thumb.jpg"
+        )
+        let queue = CiderReviewQueueService(database: db)
+
+        let result = try queue.applyEnrichmentReconciliation(
+            groupID: "can_mark_complete_from_ai_fields",
+            limit: 1,
+            approvalToken: "review.enrichment.reconciliationApply:can_mark_complete_from_ai_fields:limit=1:matching=2:proposed=2",
+            execute: true,
+            actor: "agent",
+            now: Date(timeIntervalSince1970: 400)
+        )
+
+        #expect(result.status == "applied")
+        #expect(result.isMutating == true)
+        #expect(result.totalCandidateCount == 3)
+        #expect(result.matchingCandidateCount == 2)
+        #expect(result.appliedCount == 1)
+        #expect(result.skippedCount == 1)
+        #expect(result.appliedItems.map(\.itemID) == [firstID])
+        #expect(result.appliedItems.first?.proposedStatus == "complete")
+        let firstState = try bookmarkEnrichmentState(db, itemID: firstID)
+        #expect(firstState.status == "complete")
+        #expect(firstState.lastEnrichedAt == Date(timeIntervalSince1970: 100))
+        #expect(try bookmarkEnrichmentState(db, itemID: secondID).status == nil)
+        #expect(try bookmarkEnrichmentState(db, itemID: partialID).status == nil)
+        let audit = MutationAuditService(database: db).loadEntries().first {
+            $0.itemID == firstID && $0.action == "review.enrichment.reconciliationApply"
+        }
+        #expect(audit?.source == .agent)
+        #expect(audit?.beforeState["enrichmentStatus"] == "")
+        #expect(audit?.afterState["enrichmentStatus"] == "complete")
+        #expect(audit?.metadata["groupID"] == "can_mark_complete_from_ai_fields")
+        #expect(audit?.metadata["requiredApprovalToken"] == result.requiredApprovalToken)
     }
 
     @Test("review lane drilldown returns bounded items for summary groups")

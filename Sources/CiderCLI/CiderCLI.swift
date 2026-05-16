@@ -902,6 +902,22 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "enrichment-reconcile-apply", "reconcile-enrichment-apply", "enrichment-apply":
+            do {
+                let result = try service.applyEnrichmentReconciliation(
+                    groupID: parseFlag("--group", from: args),
+                    limit: parseFlag("--limit", from: args).flatMap(Int.init)
+                        ?? parseFlag("--sample-limit", from: args).flatMap(Int.init)
+                        ?? 10,
+                    approvalToken: parseFlag("--approve", from: args),
+                    execute: args.contains("--execute"),
+                    actor: parseFlag("--actor", from: args) ?? "user"
+                )
+                printReviewEnrichmentReconciliationApplyResult(result)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case "drilldown", "lane":
             guard let groupID = args.first else {
                 printCLIError("Usage: cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]")
@@ -1058,6 +1074,7 @@ struct CiderCLI {
               cider-cli review enrichment-diagnosis [--sample-limit <n>] [--json]
               cider-cli review enrichment-reconcile-plan [--sample-limit <n>] [--json]
               cider-cli review enrichment-reconcile-samples [--group <group-id>] [--limit <n>] [--json]
+              cider-cli review enrichment-reconcile-apply [--group <group-id>] [--limit <n>] [--approve <token>] [--actor user|agent] [--execute] [--json]
               cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]
               cider-cli review approve <item-id> [--actor user|agent] [--json]
               cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
@@ -1069,7 +1086,7 @@ struct CiderCLI {
 
         default:
             print("Unknown review command: \(subcommand ?? "nil")")
-            print("Commands: list, summary, enrichment-diagnosis, enrichment-reconcile-plan, enrichment-reconcile-samples, drilldown, approve, correct, defer, enrich, enrich-batch, jobs")
+            print("Commands: list, summary, enrichment-diagnosis, enrichment-reconcile-plan, enrichment-reconcile-samples, enrichment-reconcile-apply, drilldown, approve, correct, defer, enrich, enrich-batch, jobs")
         }
     }
 
@@ -7017,6 +7034,43 @@ struct CiderCLI {
         }
     }
 
+    static func printReviewEnrichmentReconciliationApplyResult(_ result: CiderReviewEnrichmentReconciliationApplyResult) {
+        if jsonOutput {
+            outputJSON(result.toDictionary())
+            return
+        }
+
+        print("Review enrichment reconciliation apply")
+        print("  Status: \(result.status)")
+        print("  Mutating: \(result.isMutating)")
+        print("  Approval required: \(result.approvalRequired)")
+        print("  Required approval token: \(result.requiredApprovalToken)")
+        if let groupID = result.groupID {
+            print("  Group: \(groupID)")
+        }
+        print("  Limit: \(result.limit)")
+        print("  Candidates: \(result.matchingCandidateCount) matching of \(result.totalCandidateCount)")
+        print("  Proposed changes: \(result.proposedChangeCount)")
+        print("  Applied: \(result.appliedCount)")
+        print("  Skipped: \(result.skippedCount)")
+        if !result.blockers.isEmpty {
+            print("  Blockers:")
+            for blocker in result.blockers {
+                print("    \(blocker)")
+            }
+        }
+        for item in result.appliedItems {
+            print("  [\(item.itemID.uuidString.prefix(8))] \(item.title)")
+            print("    Group: \(item.groupID)")
+            if let proposedStatus = item.proposedStatus {
+                print("    Proposed status: \(proposedStatus)")
+            }
+            if !item.evidence.isEmpty {
+                print("    Evidence: \(item.evidence.joined(separator: ", "))")
+            }
+        }
+    }
+
     static func printReviewQueueDrilldownResult(_ result: CiderReviewQueueDrilldownResult) {
         if jsonOutput {
             outputJSON(result.toDictionary())
@@ -8790,6 +8844,7 @@ struct CiderCLI {
           cider-cli review enrichment-diagnosis [--sample-limit <n>] [--json]
           cider-cli review enrichment-reconcile-plan [--sample-limit <n>] [--json]
           cider-cli review enrichment-reconcile-samples [--group <group-id>] [--limit <n>] [--json]
+          cider-cli review enrichment-reconcile-apply [--group <group-id>] [--limit <n>] [--approve <token>] [--actor user|agent] [--execute] [--json]
           cider-cli review approve <item-id> [--actor user|agent] [--json]
           cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
