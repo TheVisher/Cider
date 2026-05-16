@@ -187,46 +187,61 @@ struct CiderCaptureServiceTests {
     }
 
     @Test("capture wait holds for late canonical metadata convergence")
-    func captureWaitHoldsForLateCanonicalMetadataConvergence() async throws {
-        try await withIsolatedVault { db, bookmarks, notes, todos, files in
-            let service = CiderCaptureService(
-                bookmarkService: bookmarks,
-                notesStorage: notes,
-                todoStorage: todos,
-                vaultFileStorage: files,
-                database: db
-            )
+    func captureWaitHoldsForLateCanonicalMetadataConvergence() throws {
+        let startedAt = Date(timeIntervalSince1970: 10_000)
+        var state = CiderCLI.BookmarkNativeCaptureWaitState()
+        let initial = Bookmark(
+            id: UUID(),
+            title: "Tiktok.Com",
+            urlString: "https://www.tiktok.com/@wealth/video/12345?is_from_webapp=1&sender_device=pc",
+            createdAt: startedAt,
+            updatedAt: startedAt
+        )
+        let enriched = Bookmark(
+            id: initial.id,
+            title: "Sharks Loved This TINY Charger",
+            urlString: "https://www.tiktok.com/@wealth/video/12345?sender_device=pc&is_from_webapp=1",
+            createdAt: Date(timeIntervalSince1970: 2_000),
+            updatedAt: Date(timeIntervalSince1970: 3_000),
+            notes: "Sharks Loved This TINY Charger\n\nBy wealth\nVia TikTok",
+            tags: ["tiktok"],
+            thumbnailRemoteURLString: "https://p16-sign-va.tiktokcdn.com/example.jpeg",
+            metadataUpdatedAt: Date(timeIntervalSince1970: 3_000),
+            relativePath: "Inbox/Bookmarks/Sharks Loved This TINY Charger.webloc"
+        )
 
-            let result = try service.add("https://www.tiktok.com/@wealth/video/12345?is_from_webapp=1&sender_device=pc")
-            let bookmarkID = result.item.id
+        #expect(
+            CiderCLI.shouldReturnNativeBookmarkCapture(
+                bookmark: initial,
+                state: &state,
+                startedAt: startedAt,
+                now: startedAt,
+                timeout: 2
+            ) == false
+        )
+        state.polls += 1
 
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(700))
-                let legacyMetadata = Bookmark(
-                    id: UUID(),
-                    title: "Sharks Loved This TINY Charger",
-                    urlString: "https://www.tiktok.com/@wealth/video/12345?sender_device=pc&is_from_webapp=1",
-                    createdAt: Date(timeIntervalSince1970: 2_000),
-                    updatedAt: Date(timeIntervalSince1970: 3_000),
-                    notes: "Sharks Loved This TINY Charger\n\nBy wealth\nVia TikTok",
-                    tags: ["tiktok"],
-                    thumbnailRemoteURLString: "https://p16-sign-va.tiktokcdn.com/example.jpeg",
-                    metadataUpdatedAt: Date(timeIntervalSince1970: 3_000),
-                    relativePath: "Inbox/Bookmarks/Sharks Loved This TINY Charger.webloc"
-                )
-                bookmarks.mergeLegacyIndexBookmarks([legacyMetadata])
-            }
+        #expect(
+            CiderCLI.shouldReturnNativeBookmarkCapture(
+                bookmark: enriched,
+                state: &state,
+                startedAt: startedAt,
+                now: startedAt.addingTimeInterval(0.7),
+                timeout: 2
+            ) == false
+        )
+        #expect(state.candidateFirstSeenAt == startedAt.addingTimeInterval(0.7))
+        state.polls += 1
 
-            let waitResult = await CiderCLI.waitForNativeBookmarkCapture(
-                bookmarkID,
-                in: bookmarks,
+        #expect(
+            CiderCLI.shouldReturnNativeBookmarkCapture(
+                bookmark: enriched,
+                state: &state,
+                startedAt: startedAt,
+                now: startedAt.addingTimeInterval(1.7),
                 timeout: 2
             )
-
-            #expect(waitResult.timedOut == false)
-            #expect(waitResult.bookmark?.title == "Sharks Loved This TINY Charger")
-            #expect(waitResult.bookmark?.notes.contains("By wealth") == true)
-        }
+        )
     }
 
     @Test("capture add stores plain text as a note through the shared result shape")

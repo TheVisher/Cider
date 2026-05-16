@@ -5919,46 +5919,29 @@ struct CiderCLI {
     ) async -> BookmarkNativeCaptureWaitResult {
         let startedAt = Date()
         let deadline = startedAt.addingTimeInterval(timeout)
-        let minimumSettleDelay = min(timeout, 1.5)
-        let stableSettleWindow: TimeInterval = 0.25
-        var sawEnrichmentRunning = false
-        var polls = 0
-        var lastCandidateFingerprint: String?
-        var candidateFirstSeenAt: Date?
+        var state = BookmarkNativeCaptureWaitState()
 
         while Date() <= deadline {
             service.reconcileLegacyIndexCacheIntoCanonicalBookmarks()
             if let bookmark = service.bookmarks.first(where: { $0.id == bookmarkID }) {
-                if bookmark.isEnriching {
-                    sawEnrichmentRunning = true
-                    lastCandidateFingerprint = nil
-                    candidateFirstSeenAt = nil
-                } else if sawEnrichmentRunning
-                    || bookmark.metadataUpdatedAt != nil
-                    || bookmark.thumbnailRelativePath != nil
-                    || bookmark.thumbnailRemoteURLString != nil
-                    || polls >= 2 {
-                    let now = Date()
-                    let fingerprint = nativeCaptureFingerprint(for: bookmark)
-                    if fingerprint != lastCandidateFingerprint {
-                        lastCandidateFingerprint = fingerprint
-                        candidateFirstSeenAt = now
-                    }
-
-                    let waitedLongEnough = now.timeIntervalSince(startedAt) >= minimumSettleDelay
-                    let candidateStableLongEnough = now.timeIntervalSince(candidateFirstSeenAt ?? now) >= stableSettleWindow
-                    if waitedLongEnough && candidateStableLongEnough {
-                        return BookmarkNativeCaptureWaitResult(
-                            bookmark: bookmark,
-                            elapsedSeconds: now.timeIntervalSince(startedAt),
-                            timedOut: false
-                        )
-                    }
+                let now = Date()
+                if shouldReturnNativeBookmarkCapture(
+                    bookmark: bookmark,
+                    state: &state,
+                    startedAt: startedAt,
+                    now: now,
+                    timeout: timeout
+                ) {
+                    return BookmarkNativeCaptureWaitResult(
+                        bookmark: bookmark,
+                        elapsedSeconds: now.timeIntervalSince(startedAt),
+                        timedOut: false
+                    )
                 }
             }
 
             if timeout == 0 { break }
-            polls += 1
+            state.polls += 1
             try? await Task.sleep(for: .milliseconds(250))
         }
 
@@ -5967,6 +5950,49 @@ struct CiderCLI {
             elapsedSeconds: Date().timeIntervalSince(startedAt),
             timedOut: true
         )
+    }
+
+    struct BookmarkNativeCaptureWaitState {
+        var sawEnrichmentRunning = false
+        var polls = 0
+        var lastCandidateFingerprint: String?
+        var candidateFirstSeenAt: Date?
+    }
+
+    static func shouldReturnNativeBookmarkCapture(
+        bookmark: Bookmark,
+        state: inout BookmarkNativeCaptureWaitState,
+        startedAt: Date,
+        now: Date,
+        timeout: TimeInterval
+    ) -> Bool {
+        let minimumSettleDelay = min(timeout, 1.5)
+        let stableSettleWindow: TimeInterval = 0.25
+
+        if bookmark.isEnriching {
+            state.sawEnrichmentRunning = true
+            state.lastCandidateFingerprint = nil
+            state.candidateFirstSeenAt = nil
+            return false
+        }
+
+        guard state.sawEnrichmentRunning
+            || bookmark.metadataUpdatedAt != nil
+            || bookmark.thumbnailRelativePath != nil
+            || bookmark.thumbnailRemoteURLString != nil
+            || state.polls >= 2 else {
+            return false
+        }
+
+        let fingerprint = nativeCaptureFingerprint(for: bookmark)
+        if fingerprint != state.lastCandidateFingerprint {
+            state.lastCandidateFingerprint = fingerprint
+            state.candidateFirstSeenAt = now
+        }
+
+        let waitedLongEnough = now.timeIntervalSince(startedAt) >= minimumSettleDelay
+        let candidateStableLongEnough = now.timeIntervalSince(state.candidateFirstSeenAt ?? now) >= stableSettleWindow
+        return waitedLongEnough && candidateStableLongEnough
     }
 
     static func nativeCaptureFingerprint(for bookmark: Bookmark) -> String {
