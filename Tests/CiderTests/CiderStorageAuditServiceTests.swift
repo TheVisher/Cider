@@ -24,6 +24,18 @@ struct CiderStorageAuditServiceTests {
         return (db, url)
     }
 
+    private func sqliteObjectExists(_ name: String, type: String, in db: CiderDatabase) throws -> Bool {
+        let stmt = try db.prepare("""
+            SELECT count(*)
+            FROM sqlite_master
+            WHERE type = ? AND name = ?;
+            """)
+        stmt.bind(type, at: 1)
+        stmt.bind(name, at: 2)
+        try stmt.step()
+        return stmt.int(at: 0) == 1
+    }
+
     @Test("storage audit compares model counts SQLite rows filesystem artifacts and finding groups")
     func storageAuditComparesCountsAndFindings() throws {
         let (db, dbURL) = try makeTestDB()
@@ -264,6 +276,48 @@ struct CiderStorageAuditServiceTests {
         #expect(repair.remainingFindings.isEmpty)
         let afterRepair = try service.audit()
         #expect(afterRepair.schemaFindings.isEmpty)
+    }
+
+    @Test("storage audit repair restores content chunk FTS artifacts")
+    func storageAuditRepairRestoresContentChunkFTSArtifacts() throws {
+        let (db, dbURL) = try makeTestDB()
+        defer { db.close(); cleanup(dbURL) }
+
+        try db.runSQL("DROP TRIGGER IF EXISTS content_chunks_ai;")
+        try db.runSQL("DROP TRIGGER IF EXISTS content_chunks_ad;")
+        try db.runSQL("DROP TRIGGER IF EXISTS content_chunks_au;")
+        try db.runSQL("DROP TABLE IF EXISTS content_chunks_fts;")
+        try db.runSQL("DROP TABLE content_chunks;")
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: FileManager.default.temporaryDirectory,
+            modelCountsProvider: { [:] },
+            doctorReportProvider: {
+                VaultDoctor.Report(
+                    startedAt: Date(timeIntervalSince1970: 10),
+                    finishedAt: Date(timeIntervalSince1970: 11),
+                    findings: []
+                )
+            },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let beforeRepair = try service.audit()
+        let missingContentChunksFinding = beforeRepair.schemaFindings.contains { finding in
+            finding.id == "missing_expected_table:content_chunks" &&
+            finding.isRepairable
+        }
+        #expect(missingContentChunksFinding)
+
+        let repair = try service.repairSchemaFindings()
+
+        #expect(repair.repairedFindingIDs.contains("missing_expected_table:content_chunks"))
+        #expect(try sqliteObjectExists("content_chunks", type: "table", in: db))
+        #expect(try sqliteObjectExists("content_chunks_fts", type: "table", in: db))
+        #expect(try sqliteObjectExists("content_chunks_ai", type: "trigger", in: db))
+        #expect(try sqliteObjectExists("content_chunks_ad", type: "trigger", in: db))
+        #expect(try sqliteObjectExists("content_chunks_au", type: "trigger", in: db))
     }
 
     @Test("storage audit flags legacy routing table columns")

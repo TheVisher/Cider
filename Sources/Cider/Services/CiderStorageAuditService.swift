@@ -110,8 +110,8 @@ final class CiderStorageAuditService {
             }
             try database.withTransaction {
                 try database.runSQL(repair.createTableSQL)
-                for indexSQL in repair.indexSQL {
-                    try database.runSQL(indexSQL)
+                for sql in repair.additionalSQL {
+                    try database.runSQL(sql)
                 }
             }
             repairedFindingIDs.append(finding.id)
@@ -292,7 +292,7 @@ final class CiderStorageAuditService {
 
     private func nextSafeActionForMissingTable(named tableName: String) -> String {
         if missingTableRepairs[tableName] != nil {
-            return "Run \(repairSchemaCommand) to create the missing table and indexes, then rerun storage audit."
+            return "Run \(repairSchemaCommand) to create the missing table and related schema artifacts, then rerun storage audit."
         }
         return columnDriftSafeAction
     }
@@ -303,42 +303,46 @@ final class CiderStorageAuditService {
 
     private struct MissingTableRepair {
         var createTableSQL: String
-        var indexSQL: [String]
+        var additionalSQL: [String]
     }
 
     private var missingTableRepairs: [String: MissingTableRepair] {
         [
             "routing_decisions": MissingTableRepair(
                 createTableSQL: CiderSchema.createRoutingDecisions,
-                indexSQL: [
+                additionalSQL: [
                     "CREATE INDEX IF NOT EXISTS idx_routing_decisions_item ON routing_decisions(item_id, created_at);",
                     "CREATE INDEX IF NOT EXISTS idx_routing_decisions_review ON routing_decisions(review_state);",
                 ]
             ),
             "second_brain_routing_decisions": MissingTableRepair(
                 createTableSQL: CiderSchema.createSecondBrainRoutingDecisions,
-                indexSQL: [
+                additionalSQL: [
                     "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_owner ON second_brain_routing_decisions(owner_type, owner_id, created_at);",
                     "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_status ON second_brain_routing_decisions(status, created_at);",
                 ]
             ),
             "item_sections": MissingTableRepair(
                 createTableSQL: CiderSchema.createItemSections,
-                indexSQL: [
+                additionalSQL: [
                     "CREATE INDEX IF NOT EXISTS idx_item_sections_owner ON item_sections(owner_type, owner_id, sort_order);",
                     "CREATE INDEX IF NOT EXISTS idx_item_sections_item ON item_sections(item_id) WHERE item_id IS NOT NULL;",
                 ]
             ),
             "content_chunks": MissingTableRepair(
                 createTableSQL: CiderSchema.createContentChunks,
-                indexSQL: [
+                additionalSQL: [
                     "CREATE INDEX IF NOT EXISTS idx_content_chunks_owner ON content_chunks(owner_type, owner_id, chunk_index);",
                     "CREATE INDEX IF NOT EXISTS idx_content_chunks_section ON content_chunks(section_id) WHERE section_id IS NOT NULL;",
+                    CiderSchema.createContentChunksFTS,
+                    CiderSchema.createContentChunksFTSInsertTrigger,
+                    CiderSchema.createContentChunksFTSDeleteTrigger,
+                    CiderSchema.createContentChunksFTSUpdateTrigger,
                 ]
             ),
             "agent_actions": MissingTableRepair(
                 createTableSQL: CiderSchema.createAgentActions,
-                indexSQL: [
+                additionalSQL: [
                     "CREATE INDEX IF NOT EXISTS idx_agent_actions_owner ON agent_actions(owner_type, owner_id, created_at);",
                     "CREATE INDEX IF NOT EXISTS idx_agent_actions_tool ON agent_actions(tool_name, created_at);",
                 ]
