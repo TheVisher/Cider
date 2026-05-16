@@ -205,6 +205,56 @@ struct CiderReviewQueueServiceTests {
         #expect(correctableItems.map(\.itemID).contains(inboxID))
     }
 
+    @Test("review queue summary counts mixed queue composition")
+    func reviewQueueSummaryCountsMixedQueueComposition() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let routingID = try insertBookmark(db, title: "Route Me", enrichmentStatus: "complete", lastEnrichedAt: Date())
+        let enrichmentID = try insertBookmark(
+            db,
+            title: "Needs Metadata",
+            relativePath: "Inbox/Bookmarks/Needs Metadata.webloc",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        let inboxID = try insertBookmark(
+            db,
+            title: "Needs Filing",
+            url: "https://example.com/file-me",
+            relativePath: "Inbox/Bookmarks/Needs Filing.webloc",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date()
+        )
+        let routing = CiderRoutingDecisionService(database: db)
+        _ = try routing.recordDecision(
+            itemID: routingID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0.1,
+            reason: "Needs a human route.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        let queue = CiderReviewQueueService(database: db, routingDecisionService: routing)
+
+        let summary = try queue.summary()
+
+        #expect(summary.totalCount == 3)
+        #expect(summary.countsByKind["low_confidence_routing"] == 1)
+        #expect(summary.countsByKind["enrichment"] == 1)
+        #expect(summary.countsByKind["inbox_backlog"] == 1)
+        #expect(summary.countsByItemType["bookmark"] == 3)
+        #expect(summary.countsByReviewState["needs_review"] == 3)
+        #expect(summary.countsBySafeAction["approve"] == 1)
+        #expect(summary.countsBySafeAction["enrich"] == 1)
+        #expect(summary.countsBySafeAction["correct"] == 3)
+        #expect(summary.countsBySafeAction["defer"] == 3)
+        #expect(summary.toDictionary()["totalCount"] as? Int == 3)
+        _ = enrichmentID
+        _ = inboxID
+    }
+
     @Test("review queue enrich action schedules bookmark enrichment")
     func reviewQueueEnrichActionSchedulesBookmarkEnrichment() throws {
         let (db, url) = try makeTempDB()

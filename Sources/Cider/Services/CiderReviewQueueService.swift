@@ -16,6 +16,29 @@ struct CiderReviewQueueResult: Equatable {
     }
 }
 
+struct CiderReviewQueueSummaryResult: Equatable {
+    var command: String
+    var generatedAt: Date
+    var totalCount: Int
+    var countsByKind: [String: Int]
+    var countsByItemType: [String: Int]
+    var countsByReviewState: [String: Int]
+    var countsBySafeAction: [String: Int]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        return [
+            "command": command,
+            "generatedAt": formatter.string(from: generatedAt),
+            "totalCount": totalCount,
+            "countsByKind": countsByKind,
+            "countsByItemType": countsByItemType,
+            "countsByReviewState": countsByReviewState,
+            "countsBySafeAction": countsBySafeAction,
+        ]
+    }
+}
+
 struct CiderReviewQueueItem: Identifiable, Equatable {
     var id: String
     var kind: String
@@ -197,6 +220,27 @@ final class CiderReviewQueueService {
             command: "review.list",
             generatedAt: now,
             items: Array(sorted.prefix(max(0, limit)))
+        )
+    }
+
+    func summary(
+        includeDeferred: Bool = false,
+        now: Date = Date()
+    ) throws -> CiderReviewQueueSummaryResult {
+        let items = try list(
+            limit: Int.max,
+            includeDeferred: includeDeferred,
+            now: now
+        ).items
+
+        return CiderReviewQueueSummaryResult(
+            command: "review.summary",
+            generatedAt: now,
+            totalCount: items.count,
+            countsByKind: groupedCounts(items.map(\.kind)),
+            countsByItemType: groupedCounts(items.map(\.itemType)),
+            countsByReviewState: groupedCounts(items.map(\.reviewState)),
+            countsBySafeAction: groupedCounts(items.flatMap(\.safeActions))
         )
     }
 
@@ -456,5 +500,13 @@ final class CiderReviewQueueService {
         default:
             return 4
         }
+    }
+
+    private func groupedCounts(_ values: [String]) -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for value in values {
+            counts[value, default: 0] += 1
+        }
+        return counts
     }
 }

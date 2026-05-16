@@ -781,6 +781,16 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "summary":
+            do {
+                let result = try service.summary(
+                    includeDeferred: args.contains("--include-deferred")
+                )
+                printReviewQueueSummaryResult(result)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case "approve":
             guard let itemRef = args.first else {
                 print("Error: Usage: cider-cli review approve <item-id> [--actor user|agent] [--json]")
@@ -879,6 +889,7 @@ struct CiderCLI {
             print("""
             Usage:
               cider-cli review list [--include-deferred] [--limit <n>] [--kind <kind>] [--item-type <type>] [--state <state>] [--safe-action <action>] [--json]
+              cider-cli review summary [--include-deferred] [--json]
               cider-cli review approve <item-id> [--actor user|agent] [--json]
               cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
               cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
@@ -887,7 +898,7 @@ struct CiderCLI {
 
         default:
             print("Unknown review command: \(subcommand ?? "nil")")
-            print("Commands: list, approve, correct, defer, enrich")
+            print("Commands: list, summary, approve, correct, defer, enrich")
         }
     }
 
@@ -6417,6 +6428,30 @@ struct CiderCLI {
             print("    Suggested action: \(item.suggestedAction)")
             print("    Safe actions: \(item.safeActions.joined(separator: ", "))")
         }
+    }
+
+    static func printReviewQueueSummaryResult(_ result: CiderReviewQueueSummaryResult) {
+        if jsonOutput {
+            outputJSON(result.toDictionary())
+            return
+        }
+
+        print("Review summary: \(result.totalCount) item(s)")
+        print("  By kind: \(formatCounts(result.countsByKind))")
+        print("  By item type: \(formatCounts(result.countsByItemType))")
+        print("  By state: \(formatCounts(result.countsByReviewState))")
+        print("  By safe action: \(formatCounts(result.countsBySafeAction))")
+    }
+
+    private static func formatCounts(_ counts: [String: Int]) -> String {
+        if counts.isEmpty { return "none" }
+        return counts
+            .sorted { lhs, rhs in
+                if lhs.value != rhs.value { return lhs.value > rhs.value }
+                return lhs.key < rhs.key
+            }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ", ")
     }
 
     static func printReviewQueueActionResult(_ result: CiderReviewQueueActionResult) {
