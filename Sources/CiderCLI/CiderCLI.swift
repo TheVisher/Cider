@@ -1393,14 +1393,33 @@ struct CiderCLI {
 
         case "enrich":
             if args.first == "--all" {
+                guard args.contains("--confirm") else {
+                    printCLIError("Usage: cider-cli bookmark enrich --all --confirm [--timeout <seconds>|--no-wait] [--json]. Legacy bookmark batch enrichment requires explicit confirmation; prefer 'cider-cli review enrich-batch --confirm' for review-backed batch work.")
+                    return
+                }
                 let count = service.bookmarks.count
-                print("Scheduling AI re-enrichment for \(count) bookmark(s)...")
+                if jsonOutput {
+                    outputJSON([
+                        "ok": true,
+                        "command": "bookmark.enrich.all",
+                        "deprecated": true,
+                        "preferredCommand": "review.enrich-batch --confirm",
+                        "scheduledCount": count,
+                        "message": "Legacy bookmark batch enrichment queued after explicit confirmation.",
+                    ] as [String: Any])
+                } else {
+                    print("Warning: bookmark enrich --all is a legacy batch path. Prefer 'cider-cli review enrich-batch --confirm' for review-backed batch work.")
+                    print("Scheduling AI re-enrichment for \(count) bookmark(s)...")
+                }
                 BookmarkAIEnrichment.shared.retagAll()
+                if jsonOutput {
+                    return
+                }
                 print("Batch enrichment queued (runs in background).")
                 return
             }
             guard let idPrefix = args.first else {
-                print("Error: ID prefix or --all required. Usage: cider-cli bookmark enrich <id> [--timeout <seconds>|--no-wait] | --all")
+                print("Error: ID prefix or --all required. Usage: cider-cli bookmark enrich <id> [--timeout <seconds>|--no-wait] | --all --confirm")
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
@@ -8429,7 +8448,7 @@ struct CiderCLI {
           cider-cli bookmark tag <id-prefix> <label-name>
           cider-cli bookmark untag <id-prefix> <label-name>
           cider-cli bookmark delete <id-prefix>
-          cider-cli bookmark enrich <id-prefix> [--timeout <seconds>|--no-wait] | --all
+          cider-cli bookmark enrich <id-prefix> [--timeout <seconds>|--no-wait] | --all --confirm
           cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
                     [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]
           cider-cli bookmark date-suggestions <id-prefix> [--json]

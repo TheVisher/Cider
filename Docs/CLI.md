@@ -76,6 +76,8 @@ The second-brain command surface should support the product loop: capture -> enr
 
 Legacy bookmark creation is a compatibility surface over the unified capture backend. `bookmark add --json` preserves bookmark fields and includes `command: bookmark.add`, `backendCommand: capture.add`, and a nested `capture` result so agents can see the capture/routing/review contract without switching commands mid-workflow.
 
+Legacy bookmark batch enrichment remains available as `bookmark enrich --all --confirm`, but agents should prefer `review enrich-batch --confirm` so enrichment work is review-backed and records batch history.
+
 Kanban card details can be discovered with `board recent <board> --limit <count> --json`, which lists newest card activity with board, column, parent, priority, timestamps, recent edit/move/completion activity kind, and compact current-state/next-step context. Testing gates can be triaged with `board testing-summary <board> --json`, which groups cards in Testing/Ready to Test columns into `needsErik` and `agentCanVerify` queues. Exact cards can be inspected through `board card inspect <board> --card <id> --json`, which returns parsed dashboard lanes, sections, card metadata, hierarchy, links, routing decisions, and agent actions. Card details can be edited through `board section update <board> --card <id> --section <name> --value <text>`, `board evidence add <board> --card <id> --text <text>`, and `board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text>`. These update the YAML card and refresh its SQLite projection.
 
 Normal agent workflow for a Cider card:

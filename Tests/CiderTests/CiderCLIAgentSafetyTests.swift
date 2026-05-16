@@ -42,6 +42,16 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("--confirm") == true)
     }
 
+    @Test("legacy bookmark batch enrichment requires explicit confirmation")
+    func legacyBookmarkBatchEnrichmentRequiresExplicitConfirmation() throws {
+        let result = try runCLI(args: ["bookmark", "enrich", "--all", "--json"])
+
+        let dict = try parseJSONObject(result.stdout)
+        #expect(dict["ok"] as? Bool == false)
+        #expect((dict["error"] as? String)?.contains("--confirm") == true)
+        #expect((dict["error"] as? String)?.contains("bookmark enrich --all") == true)
+    }
+
     @Test("reminder mutation ID resolution rejects ambiguous prefixes")
     func reminderMutationIDResolutionRejectsAmbiguousPrefixes() throws {
         let first = UUID(uuidString: "aaaaaaaa-1111-1111-1111-111111111111")!
