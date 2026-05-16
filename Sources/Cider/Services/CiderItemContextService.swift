@@ -426,6 +426,7 @@ final class CiderItemContextService {
         let id = bundle.item.id.uuidString
         var commands = [
             "cider-cli item get \(type) \(id) --json",
+            "cider-cli item context \(type) \(id) --json",
             "cider-cli item related \(type) \(id) --json",
             "cider-cli item search \"\(escapedCommandArgument(bundle.item.title))\" --limit 5 --json",
         ]

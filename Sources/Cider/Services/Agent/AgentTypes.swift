@@ -57,6 +57,7 @@ struct AgentContext: Sendable {
     var currentEvent: EventContext?
     var currentContact: ContactContext?
     var currentTodo: TodoContext?
+    var currentItemContextDescription: String?
     var selectedItemCount: Int = 0
     var reminderContext: ReminderContext?
 
@@ -85,7 +86,7 @@ struct AgentContext: Sendable {
     var isEmpty: Bool {
         currentBookmark == nil && currentNote == nil && currentFolder == nil &&
         currentEvent == nil && currentContact == nil && currentTodo == nil &&
-        reminderContext == nil
+        currentItemContextDescription == nil && reminderContext == nil
     }
 
     /// Builds a context string for injection into the system prompt.
@@ -119,6 +120,9 @@ struct AgentContext: Sendable {
         }
         if let todo = currentTodo {
             parts.append("The user is viewing a todo: \"\(todo.title)\" (\(todo.status))")
+        }
+        if let currentItemContextDescription, !currentItemContextDescription.isEmpty {
+            parts.append(currentItemContextDescription)
         }
         if let reminder = reminderContext {
             parts.append("Delivering reminder: \"\(reminder.title)\" — due \(reminder.occurrence)")

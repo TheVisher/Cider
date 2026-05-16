@@ -76,7 +76,8 @@ extension CiderPanelView {
 
         let excerpt = String(note.contentPreview.prefix(200))
         AIAssistantViewModel.shared.updateContext(
-            note: (title: note.title, excerpt: excerpt)
+            note: (title: note.title, excerpt: excerpt),
+            itemRef: LibraryEntityRef(type: .note, entityID: note.id)
         )
     }
 

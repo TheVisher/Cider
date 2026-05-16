@@ -284,7 +284,8 @@ extension CiderPanelView {
 
         // Update AI context
         AIAssistantViewModel.shared.updateContext(
-            bookmark: (title: bookmark.title, url: bookmark.urlString, summary: bookmark.aiSummary)
+            bookmark: (title: bookmark.title, url: bookmark.urlString, summary: bookmark.aiSummary),
+            itemRef: LibraryEntityRef(type: .bookmark, entityID: bookmark.id)
         )
     }
 
@@ -320,7 +321,8 @@ extension CiderPanelView {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         AIAssistantViewModel.shared.updateContext(
-            event: (title: dateCard.title, date: formatter.string(from: dateCard.startAt), location: dateCard.location)
+            event: (title: dateCard.title, date: formatter.string(from: dateCard.startAt), location: dateCard.location),
+            itemRef: LibraryEntityRef(type: .dateCard, entityID: dateCard.id)
         )
     }
 
@@ -342,7 +344,8 @@ extension CiderPanelView {
         }
 
         AIAssistantViewModel.shared.updateContext(
-            contact: (name: contact.displayName, email: contact.email)
+            contact: (name: contact.displayName, email: contact.email),
+            itemRef: LibraryEntityRef(type: .contact, entityID: contact.id)
         )
     }
 
@@ -365,7 +368,8 @@ extension CiderPanelView {
 
         let status = todoCard.isCompleted ? "completed" : "incomplete"
         AIAssistantViewModel.shared.updateContext(
-            todo: (title: todoCard.title, status: status)
+            todo: (title: todoCard.title, status: status),
+            itemRef: LibraryEntityRef(type: .todo, entityID: todoCard.id)
         )
     }
 
@@ -378,6 +382,9 @@ extension CiderPanelView {
         genericMetadataVisible = true
 
         selectedVaultFile = file
+        AIAssistantViewModel.shared.updateContext(
+            itemRef: LibraryEntityRef(type: .vaultFile, entityID: file.id)
+        )
         if !wasExpanded, detailViewMode == .slideOut {
             NotificationCenter.default.post(
                 name: .expandCiderPanelForSlideOut,

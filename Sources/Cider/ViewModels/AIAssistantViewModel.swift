@@ -1219,6 +1219,7 @@ final class AIAssistantViewModel: ObservableObject {
         if let todo = context.currentTodo {
             agentCtx.currentTodo = .init(title: todo.title, status: todo.status)
         }
+        agentCtx.currentItemContextDescription = context.currentItemContext?.assistantContextDescription
         agentCtx.selectedItemCount = context.selectedItemCount
 
         return agentCtx
@@ -1514,6 +1515,7 @@ final class AIAssistantViewModel: ObservableObject {
                        event: (title: String, date: String, location: String)? = nil,
                        contact: (name: String, email: String)? = nil,
                        todo: (title: String, status: String)? = nil,
+                       itemRef: LibraryEntityRef? = nil,
                        selectedCount: Int = 0) {
         context.currentBookmark = bookmark
         context.currentNote = note
@@ -1521,6 +1523,8 @@ final class AIAssistantViewModel: ObservableObject {
         context.currentEvent = event
         context.currentContact = contact
         context.currentTodo = todo
+        context.currentItemRef = itemRef
+        context.currentItemContext = Self.currentItemContext(for: itemRef)
         context.selectedItemCount = selectedCount
     }
 
@@ -1533,6 +1537,11 @@ final class AIAssistantViewModel: ObservableObject {
         Task {
             runtimeHealth = await AgentOrchestrator.shared.runtimeHealth()
         }
+    }
+
+    private static func currentItemContext(for ref: LibraryEntityRef?) -> CiderItemAgentContextPacket? {
+        guard let ref else { return nil }
+        return try? CiderItemContextService().agentContext(for: ref)
     }
 
     private func persistRuntimeSelection(_ selection: AIAgentRuntimeSelection) {

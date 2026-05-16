@@ -97,11 +97,14 @@ struct AIAssistantContext {
     var currentEvent: (title: String, date: String, location: String)?
     var currentContact: (name: String, email: String)?
     var currentTodo: (title: String, status: String)?
+    var currentItemRef: LibraryEntityRef?
+    var currentItemContext: CiderItemAgentContextPacket?
     var selectedItemCount: Int = 0
 
     var isEmpty: Bool {
         currentBookmark == nil && currentNote == nil && currentFolder == nil &&
-        currentEvent == nil && currentContact == nil && currentTodo == nil
+        currentEvent == nil && currentContact == nil && currentTodo == nil &&
+        currentItemContext == nil
     }
 
     /// Builds a context string for injection into the system prompt.
@@ -136,11 +139,52 @@ struct AIAssistantContext {
         if let todo = currentTodo {
             parts.append("The user is viewing a todo: \"\(todo.title)\" (\(todo.status))")
         }
+        if let currentItemContext {
+            parts.append(currentItemContext.assistantContextDescription)
+        }
         if selectedItemCount > 1 {
             parts.append("The user has \(selectedItemCount) items selected.")
         }
 
         return parts.isEmpty ? "" : parts.joined(separator: "\n")
+    }
+}
+
+extension CiderItemAgentContextPacket {
+    var assistantContextDescription: String {
+        var parts: [String] = [
+            "Unified current item context: \(item.type.rawValue) \"\(item.title)\" (\(item.id.uuidString))",
+            "Summary: \(summary)",
+        ]
+
+        if !provenance.isEmpty {
+            parts.append("Provenance: \(provenance.joined(separator: "; "))")
+        }
+        if let review {
+            var reviewLine = "Review: \(review.status) - \(review.reason)"
+            if let targetPath = review.targetPath {
+                reviewLine += " -> \(targetPath)"
+            }
+            parts.append(reviewLine)
+        }
+        if !contentBlocks.isEmpty {
+            let blockSummaries = contentBlocks
+                .prefix(2)
+                .map { "\($0.title): \($0.body)" }
+                .joined(separator: " | ")
+            parts.append("Context blocks: \(blockSummaries)")
+        }
+        if !related.isEmpty {
+            parts.append("Related items: \(related.prefix(3).map(\.title).joined(separator: "; "))")
+        }
+        if !recentHistory.isEmpty {
+            parts.append("Recent history: \(recentHistory.prefix(3).map(\.summary).joined(separator: "; "))")
+        }
+        if !safeCommands.isEmpty {
+            parts.append("Safe commands: \(safeCommands.joined(separator: "; "))")
+        }
+
+        return parts.joined(separator: "\n")
     }
 }
 
