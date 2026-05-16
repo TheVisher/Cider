@@ -98,6 +98,33 @@ struct SecondBrainFoundationTests {
         #expect(explanation.latestDecision?.target.relativePath == "Inbox/Bookmarks")
     }
 
+    @Test("bookmark add JSON reports capture backend shim metadata")
+    func bookmarkAddJSONReportsCaptureBackendShimMetadata() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-bookmark-add-shim-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let output = try runCLI([
+            "bookmark", "add", "https://example.com/shim",
+            "--no-wait",
+            "--json",
+        ], vaultURL: vault)
+        let bookmark = try jsonObject(from: output)
+
+        #expect(bookmark["command"] as? String == "bookmark.add")
+        #expect(bookmark["backendCommand"] as? String == "capture.add")
+        #expect(bookmark["id"] as? String != nil)
+
+        let capture = try #require(bookmark["capture"] as? [String: Any])
+        #expect(capture["command"] as? String == "capture.add")
+        let source = try #require(capture["source"] as? [String: Any])
+        #expect(source["kind"] as? String == "url")
+        let routing = try #require(capture["routing"] as? [String: Any])
+        #expect(routing["reviewState"] as? String == "needs_review")
+        #expect(routing["reviewNeeded"] as? Bool == true)
+    }
+
     @Test("bookmark move records manual routing provenance")
     func bookmarkMoveRecordsManualRoutingProvenance() throws {
         let vault = FileManager.default.temporaryDirectory

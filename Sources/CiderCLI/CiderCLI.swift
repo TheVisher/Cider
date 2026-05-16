@@ -1221,6 +1221,9 @@ struct CiderCLI {
                 let finalBookmark = waitResult?.bookmark ?? service.bookmarks.first(where: { $0.id == bookmark.id }) ?? bookmark
                 if jsonOutput {
                     var dict = bookmarkToDict(finalBookmark)
+                    dict["command"] = "bookmark.add"
+                    dict["backendCommand"] = result.captureResult.command
+                    dict["capture"] = result.captureResult.toDictionary()
                     if let waitResult {
                         dict["nativeCaptureStatus"] = waitResult.timedOut ? "timedOut" : "settled"
                         dict["nativeCaptureElapsedSeconds"] = waitResult.elapsedSeconds
