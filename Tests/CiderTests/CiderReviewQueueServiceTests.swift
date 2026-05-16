@@ -28,7 +28,12 @@ struct CiderReviewQueueServiceTests {
         folderID: UUID? = nil,
         relativePath: String = "Inbox/Bookmarks/Example.webloc",
         enrichmentStatus: String? = "complete",
-        lastEnrichedAt: Date? = Date()
+        lastEnrichedAt: Date? = Date(),
+        updatedAt: Date = Date(),
+        aiSummary: String? = nil,
+        ocrText: String? = nil,
+        thumbnailRelativePath: String? = nil,
+        thumbnailRemoteURL: String? = nil
     ) throws -> UUID {
         try db.withTransaction {
             let item = try db.prepare("""
@@ -38,7 +43,7 @@ struct CiderReviewQueueServiceTests {
             item.bind(id.uuidString, at: 1)
                 .bind(title, at: 2)
                 .bind(Date().timeIntervalSince1970, at: 3)
-                .bind(Date().timeIntervalSince1970, at: 4)
+                .bind(updatedAt.timeIntervalSince1970, at: 4)
                 .bind(folderID?.uuidString, at: 5)
                 .bind(relativePath, at: 6)
             try item.step()
@@ -46,13 +51,18 @@ struct CiderReviewQueueServiceTests {
             let bookmark = try db.prepare("""
                 INSERT INTO bookmarks (
                     item_id, url, notes, notes_manually_set, title_manually_set,
+                    ai_summary, ocr_text, thumbnail_relative_path, thumbnail_remote_url,
                     enrichment_status, last_enriched_at
-                ) VALUES (?, ?, '', 0, 0, ?, ?);
+                ) VALUES (?, ?, '', 0, 0, ?, ?, ?, ?, ?, ?);
                 """)
             bookmark.bind(id.uuidString, at: 1)
                 .bind(url, at: 2)
-                .bind(enrichmentStatus, at: 3)
-                .bind(lastEnrichedAt.map { $0.timeIntervalSince1970 }, at: 4)
+                .bind(aiSummary, at: 3)
+                .bind(ocrText, at: 4)
+                .bind(thumbnailRelativePath, at: 5)
+                .bind(thumbnailRemoteURL, at: 6)
+                .bind(enrichmentStatus, at: 7)
+                .bind(lastEnrichedAt.map { $0.timeIntervalSince1970 }, at: 8)
             try bookmark.step()
         }
         return id
@@ -478,6 +488,79 @@ struct CiderReviewQueueServiceTests {
         #expect(dictionary["totalCandidateCount"] as? Int == 5)
         #expect(dictionary["isMutating"] as? Bool == false)
         #expect((dictionary["groups"] as? [[String: Any]])?.count == 5)
+    }
+
+    @Test("review enrichment reconciliation plan proposes bounded safe dry-run actions")
+    func reviewEnrichmentReconciliationPlanProposesBoundedSafeDryRunActions() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let aiEvidenceUpdatedAt = Date(timeIntervalSince1970: 100)
+        let metadataEvidenceUpdatedAt = Date(timeIntervalSince1970: 200)
+        let aiEvidenceID = try insertBookmark(
+            db,
+            title: "AI Evidence",
+            relativePath: "Inbox/Bookmarks/AI Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: aiEvidenceUpdatedAt,
+            aiSummary: "A concise useful summary."
+        )
+        let metadataEvidenceID = try insertBookmark(
+            db,
+            title: "Metadata Evidence",
+            relativePath: "Inbox/Bookmarks/Metadata Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: metadataEvidenceUpdatedAt,
+            thumbnailRemoteURL: "https://example.com/thumb.jpg"
+        )
+        let noEvidenceID = try insertBookmark(
+            db,
+            title: "No Evidence",
+            relativePath: "Inbox/Bookmarks/No Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil
+        )
+        _ = try insertBookmark(
+            db,
+            title: "Already Complete",
+            relativePath: "Inbox/Bookmarks/Already Complete.webloc",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date(timeIntervalSince1970: 300),
+            aiSummary: "Already complete."
+        )
+        let queue = CiderReviewQueueService(database: db)
+
+        let plan = try queue.enrichmentReconciliationPlan(sampleLimit: 1, now: Date(timeIntervalSince1970: 400))
+
+        #expect(plan.command == "review.enrichment.reconciliationPlan")
+        #expect(plan.isMutating == false)
+        #expect(plan.approvalRequired == true)
+        #expect(plan.totalCandidateCount == 3)
+        #expect(plan.proposedChangeCount == 2)
+        #expect(plan.blockedCount == 1)
+        #expect(plan.groups.map(\.id) == [
+            "can_mark_complete_from_ai_fields",
+            "can_mark_partial_from_metadata_fields",
+            "needs_enrichment_run",
+        ])
+        let completeSample = plan.groups.first { $0.id == "can_mark_complete_from_ai_fields" }?.sampleItems.first
+        #expect(completeSample?.itemID == aiEvidenceID)
+        #expect(completeSample?.proposedStatus == "complete")
+        #expect(completeSample?.proposedLastEnrichedAt == aiEvidenceUpdatedAt)
+        #expect(completeSample?.evidence.contains("ai_summary") == true)
+        let partialSample = plan.groups.first { $0.id == "can_mark_partial_from_metadata_fields" }?.sampleItems.first
+        #expect(partialSample?.itemID == metadataEvidenceID)
+        #expect(partialSample?.proposedStatus == "partial")
+        #expect(partialSample?.proposedLastEnrichedAt == metadataEvidenceUpdatedAt)
+        #expect(partialSample?.evidence.contains("thumbnail_remote_url") == true)
+        let blockedSample = plan.groups.first { $0.id == "needs_enrichment_run" }?.sampleItems.first
+        #expect(blockedSample?.itemID == noEvidenceID)
+        #expect(blockedSample?.proposedStatus == nil)
+        let dictionary = plan.toDictionary()
+        #expect(dictionary["command"] as? String == "review.enrichment.reconciliationPlan")
+        #expect(dictionary["isMutating"] as? Bool == false)
+        #expect(dictionary["approvalRequired"] as? Bool == true)
     }
 
     @Test("review lane drilldown returns bounded items for summary groups")

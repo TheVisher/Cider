@@ -59,6 +59,7 @@ struct CiderRoutingItemSummary: Equatable {
     var title: String
     var relativePath: String?
     var folderID: UUID?
+    var updatedAt: Date? = nil
 
     func toDictionary() -> [String: Any] {
         var dictionary: [String: Any] = [
@@ -424,7 +425,7 @@ final class CiderRoutingDecisionService {
     private func itemSummary(for itemID: UUID) throws -> CiderRoutingItemSummary {
         guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
         let stmt = try db.prepare("""
-            SELECT id, type, title, relative_path, folder_id
+            SELECT id, type, title, relative_path, folder_id, updated_at
             FROM items
             WHERE id = ?;
             """)
@@ -438,7 +439,8 @@ final class CiderRoutingDecisionService {
             type: stmt.string(at: 1),
             title: stmt.string(at: 2),
             relativePath: stmt.optionalString(at: 3),
-            folderID: stmt.optionalString(at: 4).flatMap(UUID.init(uuidString:))
+            folderID: stmt.optionalString(at: 4).flatMap(UUID.init(uuidString:)),
+            updatedAt: stmt.optionalDouble(at: 5).map(DatabaseHelpers.decodeDate)
         )
     }
 

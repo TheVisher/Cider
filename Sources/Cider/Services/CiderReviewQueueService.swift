@@ -196,6 +196,91 @@ struct CiderReviewEnrichmentDiagnosisItem: Equatable {
     }
 }
 
+struct CiderReviewEnrichmentReconciliationPlanResult: Equatable {
+    var command: String = "review.enrichment.reconciliationPlan"
+    var generatedAt: Date
+    var isMutating: Bool = false
+    var approvalRequired: Bool = true
+    var totalCandidateCount: Int
+    var proposedChangeCount: Int
+    var blockedCount: Int
+    var sampleLimit: Int
+    var groups: [CiderReviewEnrichmentReconciliationPlanGroup]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        return [
+            "command": command,
+            "generatedAt": formatter.string(from: generatedAt),
+            "isMutating": isMutating,
+            "approvalRequired": approvalRequired,
+            "totalCandidateCount": totalCandidateCount,
+            "proposedChangeCount": proposedChangeCount,
+            "blockedCount": blockedCount,
+            "sampleLimit": sampleLimit,
+            "groups": groups.map { $0.toDictionary() },
+        ]
+    }
+}
+
+struct CiderReviewEnrichmentReconciliationPlanGroup: Equatable {
+    var id: String
+    var summary: String
+    var count: Int
+    var proposedChangeCount: Int
+    var blockedCount: Int
+    var sampleItems: [CiderReviewEnrichmentReconciliationPlanItem]
+
+    func toDictionary() -> [String: Any] {
+        [
+            "id": id,
+            "summary": summary,
+            "count": count,
+            "proposedChangeCount": proposedChangeCount,
+            "blockedCount": blockedCount,
+            "sampleItems": sampleItems.map { $0.toDictionary() },
+        ]
+    }
+}
+
+struct CiderReviewEnrichmentReconciliationPlanItem: Equatable {
+    var itemID: UUID
+    var title: String
+    var relativePath: String?
+    var currentStatus: String?
+    var currentLastEnrichedAt: Date?
+    var proposedStatus: String?
+    var proposedLastEnrichedAt: Date?
+    var proposalReason: String
+    var evidence: [String]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        var dictionary: [String: Any] = [
+            "itemID": itemID.uuidString,
+            "title": title,
+            "proposalReason": proposalReason,
+            "evidence": evidence,
+        ]
+        if let relativePath {
+            dictionary["relativePath"] = relativePath
+        }
+        if let currentStatus {
+            dictionary["currentStatus"] = currentStatus
+        }
+        if let currentLastEnrichedAt {
+            dictionary["currentLastEnrichedAt"] = formatter.string(from: currentLastEnrichedAt)
+        }
+        if let proposedStatus {
+            dictionary["proposedStatus"] = proposedStatus
+        }
+        if let proposedLastEnrichedAt {
+            dictionary["proposedLastEnrichedAt"] = formatter.string(from: proposedLastEnrichedAt)
+        }
+        return dictionary
+    }
+}
+
 struct CiderReviewQueueItem: Identifiable, Equatable {
     var id: String
     var kind: String
@@ -680,6 +765,82 @@ final class CiderReviewQueueService {
         )
     }
 
+    func enrichmentReconciliationPlan(
+        sampleLimit: Int = 10,
+        now: Date = Date()
+    ) throws -> CiderReviewEnrichmentReconciliationPlanResult {
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
+        let items = try itemSummaries(in: db)
+        let bookmarkDetails = try bookmarkDetails(in: db)
+        let cappedLimit = max(0, sampleLimit)
+        let orderedGroupIDs = [
+            "can_mark_complete_from_ai_fields",
+            "can_mark_partial_from_metadata_fields",
+            "needs_enrichment_run",
+        ]
+        var counts: [String: Int] = [:]
+        var proposedCounts: [String: Int] = [:]
+        var blockedCounts: [String: Int] = [:]
+        var samples: [String: [CiderReviewEnrichmentReconciliationPlanItem]] = [:]
+        var summaries: [String: String] = [:]
+
+        for item in items.values
+            .filter({ $0.type == "bookmark" })
+            .sorted(by: enrichmentDiagnosisSort)
+        {
+            guard let details = bookmarkDetails[item.id],
+                  enrichmentReviewItem(item: item, details: details, now: now) != nil else {
+                continue
+            }
+
+            let plan = enrichmentReconciliationProposal(item: item, details: details)
+            counts[plan.groupID, default: 0] += 1
+            summaries[plan.groupID] = plan.summary
+            if plan.proposedStatus == nil {
+                blockedCounts[plan.groupID, default: 0] += 1
+            } else {
+                proposedCounts[plan.groupID, default: 0] += 1
+            }
+
+            if samples[plan.groupID, default: []].count < cappedLimit {
+                samples[plan.groupID, default: []].append(
+                    CiderReviewEnrichmentReconciliationPlanItem(
+                        itemID: item.id,
+                        title: item.title,
+                        relativePath: item.relativePath,
+                        currentStatus: details.enrichmentStatus,
+                        currentLastEnrichedAt: details.lastEnrichedAt,
+                        proposedStatus: plan.proposedStatus,
+                        proposedLastEnrichedAt: plan.proposedLastEnrichedAt,
+                        proposalReason: plan.summary,
+                        evidence: plan.evidence
+                    )
+                )
+            }
+        }
+
+        let groups = orderedGroupIDs.compactMap { id -> CiderReviewEnrichmentReconciliationPlanGroup? in
+            guard let count = counts[id], count > 0 else { return nil }
+            return CiderReviewEnrichmentReconciliationPlanGroup(
+                id: id,
+                summary: summaries[id] ?? id,
+                count: count,
+                proposedChangeCount: proposedCounts[id] ?? 0,
+                blockedCount: blockedCounts[id] ?? 0,
+                sampleItems: samples[id] ?? []
+            )
+        }
+
+        return CiderReviewEnrichmentReconciliationPlanResult(
+            generatedAt: now,
+            totalCandidateCount: counts.values.reduce(0, +),
+            proposedChangeCount: proposedCounts.values.reduce(0, +),
+            blockedCount: blockedCounts.values.reduce(0, +),
+            sampleLimit: cappedLimit,
+            groups: groups
+        )
+    }
+
     @discardableResult
     func approve(itemID: UUID, actor: String = "user") throws -> CiderReviewRoutingActionResult {
         let before = try routingDecisionService.explain(itemID: itemID)
@@ -959,7 +1120,7 @@ final class CiderReviewQueueService {
 
     private func itemSummaries(in db: CiderDatabase) throws -> [UUID: CiderRoutingItemSummary] {
         let stmt = try db.prepare("""
-            SELECT id, type, title, relative_path, folder_id
+            SELECT id, type, title, relative_path, folder_id, updated_at
             FROM items;
             """)
         var items: [UUID: CiderRoutingItemSummary] = [:]
@@ -970,7 +1131,8 @@ final class CiderReviewQueueService {
                 type: stmt.string(at: 1),
                 title: stmt.string(at: 2),
                 relativePath: stmt.optionalString(at: 3),
-                folderID: stmt.optionalString(at: 4).flatMap(UUID.init(uuidString:))
+                folderID: stmt.optionalString(at: 4).flatMap(UUID.init(uuidString:)),
+                updatedAt: stmt.optionalDouble(at: 5).map(DatabaseHelpers.decodeDate)
             )
         }
         return items
@@ -980,11 +1142,24 @@ final class CiderReviewQueueService {
         var url: String
         var enrichmentStatus: String?
         var lastEnrichedAt: Date?
+        var aiSummary: String?
+        var ocrText: String?
+        var dominantColors: String?
+        var mediaType: String?
+        var thumbnailRelativePath: String?
+        var thumbnailRemoteURL: String?
+        var originalImagePath: String?
+        var carouselImagePaths: String?
+        var readerUnavailable: Bool?
+        var preferredHeroMode: String?
     }
 
     private func bookmarkDetails(in db: CiderDatabase) throws -> [UUID: BookmarkReviewDetails] {
         let stmt = try db.prepare("""
-            SELECT item_id, url, enrichment_status, last_enriched_at
+            SELECT item_id, url, enrichment_status, last_enriched_at,
+                   ai_summary, ocr_text, dominant_colors, media_type,
+                   thumbnail_relative_path, thumbnail_remote_url, original_image_path,
+                   carousel_image_paths, reader_unavailable, preferred_hero_mode
             FROM bookmarks;
             """)
         var details: [UUID: BookmarkReviewDetails] = [:]
@@ -993,7 +1168,17 @@ final class CiderReviewQueueService {
             details[itemID] = BookmarkReviewDetails(
                 url: stmt.string(at: 1),
                 enrichmentStatus: stmt.optionalString(at: 2),
-                lastEnrichedAt: stmt.optionalDouble(at: 3).map(DatabaseHelpers.decodeDate)
+                lastEnrichedAt: stmt.optionalDouble(at: 3).map(DatabaseHelpers.decodeDate),
+                aiSummary: stmt.optionalString(at: 4),
+                ocrText: stmt.optionalString(at: 5),
+                dominantColors: stmt.optionalString(at: 6),
+                mediaType: stmt.optionalString(at: 7),
+                thumbnailRelativePath: stmt.optionalString(at: 8),
+                thumbnailRemoteURL: stmt.optionalString(at: 9),
+                originalImagePath: stmt.optionalString(at: 10),
+                carouselImagePaths: stmt.optionalString(at: 11),
+                readerUnavailable: stmt.optionalBool(at: 12),
+                preferredHeroMode: stmt.optionalString(at: 13)
             )
         }
         return details
@@ -1084,6 +1269,68 @@ final class CiderReviewQueueService {
             "never_enriched",
             "Bookmark has no enrichment timestamp and is still incomplete."
         )
+    }
+
+    private func enrichmentReconciliationProposal(
+        item: CiderRoutingItemSummary,
+        details: BookmarkReviewDetails
+    ) -> (
+        groupID: String,
+        summary: String,
+        proposedStatus: String?,
+        proposedLastEnrichedAt: Date?,
+        evidence: [String]
+    ) {
+        let aiEvidence = compactEvidence([
+            ("ai_summary", details.aiSummary),
+            ("ocr_text", details.ocrText),
+            ("dominant_colors", details.dominantColors),
+        ])
+        if !aiEvidence.isEmpty {
+            return (
+                "can_mark_complete_from_ai_fields",
+                "Bookmark has AI enrichment fields but no enrichment status; dry-run proposes marking it complete.",
+                "complete",
+                details.lastEnrichedAt ?? item.updatedAt,
+                aiEvidence
+            )
+        }
+
+        let metadataEvidence = compactEvidence([
+            ("media_type", details.mediaType),
+            ("thumbnail_relative_path", details.thumbnailRelativePath),
+            ("thumbnail_remote_url", details.thumbnailRemoteURL),
+            ("original_image_path", details.originalImagePath),
+            ("carousel_image_paths", details.carouselImagePaths),
+            ("preferred_hero_mode", details.preferredHeroMode),
+        ]) + (details.readerUnavailable == nil ? [] : ["reader_unavailable"])
+        if !metadataEvidence.isEmpty {
+            return (
+                "can_mark_partial_from_metadata_fields",
+                "Bookmark has non-AI metadata fields but no enrichment status; dry-run proposes marking it partial.",
+                "partial",
+                details.lastEnrichedAt ?? item.updatedAt,
+                metadataEvidence
+            )
+        }
+
+        return (
+            "needs_enrichment_run",
+            "Bookmark has no stored enrichment evidence; leave it queued for enrichment.",
+            nil,
+            nil,
+            []
+        )
+    }
+
+    private func compactEvidence(_ pairs: [(String, String?)]) -> [String] {
+        pairs.compactMap { key, value in
+            guard let value,
+                  !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return nil
+            }
+            return key
+        }
     }
 
     private func enrichmentDiagnosisSort(
