@@ -770,11 +770,15 @@ struct CiderCLI {
             do {
                 let result = try service.list(
                     limit: limit,
-                    includeDeferred: args.contains("--include-deferred")
+                    includeDeferred: args.contains("--include-deferred"),
+                    kind: parseFlag("--kind", from: args),
+                    itemType: parseFlag("--item-type", from: args),
+                    reviewState: parseFlag("--state", from: args),
+                    requiredSafeAction: parseFlag("--safe-action", from: args)
                 )
                 printReviewQueueResult(result)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printCLIError(error.localizedDescription)
             }
 
         case "approve":
@@ -874,7 +878,7 @@ struct CiderCLI {
         case nil, "help", "--help", "-h":
             print("""
             Usage:
-              cider-cli review list [--include-deferred] [--limit <n>] [--json]
+              cider-cli review list [--include-deferred] [--limit <n>] [--kind <kind>] [--item-type <type>] [--state <state>] [--safe-action <action>] [--json]
               cider-cli review approve <item-id> [--actor user|agent] [--json]
               cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
               cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]

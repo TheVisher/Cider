@@ -174,6 +174,37 @@ struct CiderReviewQueueServiceTests {
         #expect(items.first { $0.itemID == inboxID }?.kind == "inbox_backlog")
     }
 
+    @Test("review queue filters by kind and required safe action")
+    func reviewQueueFiltersByKindAndRequiredSafeAction() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let enrichmentID = try insertBookmark(
+            db,
+            title: "Needs Metadata",
+            relativePath: "Inbox/Bookmarks/Needs Metadata.webloc",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        let inboxID = try insertBookmark(
+            db,
+            title: "Needs Filing",
+            url: "https://example.com/file-me",
+            relativePath: "Inbox/Bookmarks/Needs Filing.webloc",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date()
+        )
+        let queue = CiderReviewQueueService(database: db)
+
+        let enrichmentItems = try queue.list(kind: "enrichment").items
+        let enrichableItems = try queue.list(requiredSafeAction: "enrich").items
+        let correctableItems = try queue.list(requiredSafeAction: "correct").items
+
+        #expect(enrichmentItems.map(\.itemID) == [enrichmentID])
+        #expect(enrichableItems.map(\.itemID) == [enrichmentID])
+        #expect(correctableItems.map(\.itemID).contains(enrichmentID))
+        #expect(correctableItems.map(\.itemID).contains(inboxID))
+    }
+
     @Test("review queue enrich action schedules bookmark enrichment")
     func reviewQueueEnrichActionSchedulesBookmarkEnrichment() throws {
         let (db, url) = try makeTempDB()

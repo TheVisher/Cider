@@ -130,6 +130,10 @@ final class CiderReviewQueueService {
     func list(
         limit: Int = 50,
         includeDeferred: Bool = false,
+        kind: String? = nil,
+        itemType: String? = nil,
+        reviewState: String? = nil,
+        requiredSafeAction: String? = nil,
         now: Date = Date()
     ) throws -> CiderReviewQueueResult {
         guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
@@ -173,7 +177,15 @@ final class CiderReviewQueueService {
             }
         }
 
-        let sorted = reviewItems.sorted { lhs, rhs in
+        let filtered = reviewItems.filter { item in
+            if let kind, item.kind != kind { return false }
+            if let itemType, item.itemType != itemType { return false }
+            if let reviewState, item.reviewState != reviewState { return false }
+            if let requiredSafeAction, !item.safeActions.contains(requiredSafeAction) { return false }
+            return true
+        }
+
+        let sorted = filtered.sorted { lhs, rhs in
             let lhsRank = sortRank(lhs)
             let rhsRank = sortRank(rhs)
             if lhsRank != rhsRank { return lhsRank < rhsRank }
