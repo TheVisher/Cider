@@ -114,7 +114,7 @@ struct SecondBrainFoundationTests {
 
         #expect(bookmark["command"] as? String == "bookmark.add")
         #expect(bookmark["backendCommand"] as? String == "capture.add")
-        #expect(bookmark["id"] as? String != nil)
+        let bookmarkID = try #require(bookmark["id"] as? String)
 
         let capture = try #require(bookmark["capture"] as? [String: Any])
         #expect(capture["command"] as? String == "capture.add")
@@ -123,6 +123,16 @@ struct SecondBrainFoundationTests {
         let routing = try #require(capture["routing"] as? [String: Any])
         #expect(routing["reviewState"] as? String == "needs_review")
         #expect(routing["reviewNeeded"] as? Bool == true)
+
+        let itemGet = try jsonObject(from: runCLI([
+            "item", "get", "bookmark", bookmarkID,
+            "--json",
+        ], vaultURL: vault))
+        #expect(itemGet["deprecated"] == nil)
+        #expect(itemGet["legacyOwnerInspection"] == nil)
+        let item = try #require(itemGet["item"] as? [String: Any])
+        #expect(item["type"] as? String == "bookmark")
+        #expect(item["id"] as? String == bookmarkID)
     }
 
     @Test("bookmark move records manual routing provenance")
@@ -951,6 +961,10 @@ struct SecondBrainFoundationTests {
             .appendingPathComponent("cider-cli-agent-workflow-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
+        let itemHelp = try runCLI(["item", "--help"], vaultURL: vaultURL)
+        #expect(itemHelp.contains("item get <type> <id-or-ref>"))
+        #expect(itemHelp.contains("item owner-get <owner-type> <owner-id-or-ref>"))
+
         _ = try runCLI(["board", "create", "Agent Workflow Smoke"], vaultURL: vaultURL)
         let addOutput = try runCLI([
             "board", "add-card", "Agent Workflow Smoke",
@@ -1037,9 +1051,11 @@ struct SecondBrainFoundationTests {
         ], vaultURL: vaultURL)
 
         let item = try jsonObject(from: runCLI([
-            "item", "get", "card", cardRef,
+            "item", "owner-get", "card", cardRef,
             "--json",
         ], vaultURL: vaultURL))
+        #expect(item["command"] as? String == "item.owner-get")
+        #expect(item["legacyOwnerInspection"] as? Bool == true)
         let sections = try #require(item["sections"] as? [[String: Any]])
         #expect(sections.contains { $0["sectionKey"] as? String == "current_state" })
         #expect(sections.contains {
@@ -1060,6 +1076,14 @@ struct SecondBrainFoundationTests {
             }
             return ownerID.hasSuffix("/\(cardRef)")
         })
+
+        let legacyFallback = try jsonObject(from: runCLI([
+            "item", "get", "card", cardRef,
+            "--json",
+        ], vaultURL: vaultURL))
+        #expect(legacyFallback["command"] as? String == "item.get.legacy-owner-fallback")
+        #expect(legacyFallback["deprecated"] as? Bool == true)
+        #expect((legacyFallback["deprecationMessage"] as? String)?.contains("item owner-get") == true)
     }
 
     @Test("process CLI exposes parent child rollup on card inspect")

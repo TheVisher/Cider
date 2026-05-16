@@ -66,11 +66,14 @@ Agents should prefer `cider-cli item ...` and `cider-cli space ...` for second-b
 Core commands:
 
 - `item search <query> --json`: FTS-backed search over projected chunks.
-- `item get <type> <id-or-ref> --json`: structured sections, routing decisions, agent actions, and owner resolution metadata for an owner.
+- `item get <type> <id-or-ref> --json`: unified item context for library item refs such as bookmark, note, todo, dateCard/event, contact, and vaultFile.
+- `item owner-get <owner-type> <owner-id-or-ref> --json`: legacy owner-section inspection for projected owners such as Kanban cards; returns structured sections, routing decisions, agent actions, and owner resolution metadata.
 - `item route <type> <id-or-ref> --target-type <space|folder|board> --reason <text> --json`: records a routing decision without silently moving files.
 - `item backfill-kanban [--board <name-or-id>] --json`: rebuilds Kanban card projections from YAML into SQLite sections/chunks.
 - `item doctor --json`: checks second-brain tables and SQLite integrity.
 - `space explain <name-or-id> --json`: returns purpose, routing hints, default views, and agent instructions for a Space.
+
+`item get` still accepts legacy non-library owner refs as a deprecated compatibility fallback and marks JSON with `command: item.get.legacy-owner-fallback`, `deprecated: true`, and a `deprecationMessage`. New callers should use `item owner-get` for owner projections and `item context`/`item get` for unified library items.
 
 The second-brain command surface should support the product loop: capture -> enrich -> route -> review -> resurface/act. JSON output should make uncertainty, provenance, and next safe action visible.
 
@@ -97,7 +100,7 @@ Kanban projection lifecycle:
 - Refresh: `item backfill-kanban --board <board> --json` rebuilds all card projections for a board from canonical YAML; omit `--board` to refresh every board.
 - Deletion: deleting a Kanban card or board removes its projected sections/chunks so `item search` stops finding stale card content.
 - Restore/reload: restored or reloaded boards should be followed by `item backfill-kanban --board <board> --json` when an agent needs fresh search immediately.
-- Doctor: `item doctor --json` checks schema and table health. Projection drift detection is a follow-up, so suspected stale card projections should currently be repaired with backfill and verified with `item get card <id> --json` plus `item search <query> --json`.
+- Doctor: `item doctor --json` checks schema and table health. Projection drift detection is a follow-up, so suspected stale card projections should currently be repaired with backfill and verified with `item owner-get card <id> --json` plus `item search <query> --json`.
 
 ## Agenda And Life-Assistant Reporting
 

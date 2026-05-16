@@ -3042,6 +3042,7 @@ struct CiderCLI {
             Item graph commands:
               cider-cli item search <query> [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
+              cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
               cider-cli item related <type> <id-or-ref> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
@@ -3070,6 +3071,24 @@ struct CiderCLI {
                         print("  [\(label) \(result.owner.ownerType):\(result.owner.ownerID)] \(result.title) — \(result.snippet)")
                     }
                 }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "owner-get", "owner-inspect":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]")
+                return
+            }
+            do {
+                try printOwnerInspection(
+                    type: positional[0],
+                    ref: positional[1],
+                    store: store,
+                    command: "item.owner-get",
+                    deprecated: false
+                )
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -3109,44 +3128,14 @@ struct CiderCLI {
                 }
                 return
             }
-            let owner = normalizedOwner(type: positional[0], ref: positional[1])
-            let ownerResolved = ownerExists(type: positional[0], ref: positional[1], owner: owner)
             do {
-                let sections = try store.sections(for: owner)
-                let routes = try store.routingDecisions(for: owner)
-                let actions = try store.agentActions(for: owner)
-                let dict: [String: Any] = [
-                    "ok": true,
-                    "exists": ownerResolved,
-                    "ownerResolved": ownerResolved,
-                    "sourceRef": [
-                        "type": positional[0],
-                        "ref": positional[1],
-                    ],
-                    "owner": ownerToDict(owner),
-                    "sections": sections.map(secondBrainSectionToDict),
-                    "routingDecisions": routes.map(routingDecisionToDict),
-                    "agentActions": actions.map(agentActionToDict),
-                ]
-                if jsonOutput {
-                    outputJSON(dict)
-                } else {
-                    print("\(owner.ownerType):\(owner.ownerID)")
-                    if sections.isEmpty {
-                        print("  No structured sections.")
-                    } else {
-                        for section in sections {
-                            print("  ## \(section.title)")
-                            print("  \(section.body.replacingOccurrences(of: "\n", with: "\n  "))")
-                        }
-                    }
-                    if !routes.isEmpty {
-                        print("  Routing decisions: \(routes.count)")
-                    }
-                    if !actions.isEmpty {
-                        print("  Agent actions: \(actions.count)")
-                    }
-                }
+                try printOwnerInspection(
+                    type: positional[0],
+                    ref: positional[1],
+                    store: store,
+                    command: "item.get.legacy-owner-fallback",
+                    deprecated: true
+                )
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -7277,6 +7266,86 @@ struct CiderCLI {
         }
 
         return SecondBrainOwnerRef(ownerType: normalizedType, ownerID: rawRef)
+    }
+
+    static let itemGetLegacyOwnerDeprecationMessage = "item get with non-library owner refs is deprecated; use cider-cli item owner-get <owner-type> <owner-id-or-ref> --json for legacy owner-section inspection."
+
+    static func ownerInspectionPayload(
+        type rawType: String,
+        ref rawRef: String,
+        store: SecondBrainStore,
+        command: String,
+        deprecated: Bool
+    ) throws -> (
+        owner: SecondBrainOwnerRef,
+        sections: [SecondBrainSection],
+        routes: [SecondBrainRoutingDecision],
+        actions: [SecondBrainAgentAction],
+        dict: [String: Any]
+    ) {
+        let owner = normalizedOwner(type: rawType, ref: rawRef)
+        let ownerResolved = ownerExists(type: rawType, ref: rawRef, owner: owner)
+        let sections = try store.sections(for: owner)
+        let routes = try store.routingDecisions(for: owner)
+        let actions = try store.agentActions(for: owner)
+        var dict: [String: Any] = [
+            "ok": true,
+            "command": command,
+            "exists": ownerResolved,
+            "ownerResolved": ownerResolved,
+            "legacyOwnerInspection": true,
+            "sourceRef": [
+                "type": rawType,
+                "ref": rawRef,
+            ],
+            "owner": ownerToDict(owner),
+            "sections": sections.map(secondBrainSectionToDict),
+            "routingDecisions": routes.map(routingDecisionToDict),
+            "agentActions": actions.map(agentActionToDict),
+        ]
+        if deprecated {
+            dict["deprecated"] = true
+            dict["deprecationMessage"] = itemGetLegacyOwnerDeprecationMessage
+        }
+        return (owner, sections, routes, actions, dict)
+    }
+
+    static func printOwnerInspection(
+        type rawType: String,
+        ref rawRef: String,
+        store: SecondBrainStore,
+        command: String,
+        deprecated: Bool
+    ) throws {
+        let payload = try ownerInspectionPayload(
+            type: rawType,
+            ref: rawRef,
+            store: store,
+            command: command,
+            deprecated: deprecated
+        )
+        if jsonOutput {
+            outputJSON(payload.dict)
+            return
+        }
+        if deprecated {
+            print("Warning: \(itemGetLegacyOwnerDeprecationMessage)")
+        }
+        print("\(payload.owner.ownerType):\(payload.owner.ownerID)")
+        if payload.sections.isEmpty {
+            print("  No structured sections.")
+        } else {
+            for section in payload.sections {
+                print("  ## \(section.title)")
+                print("  \(section.body.replacingOccurrences(of: "\n", with: "\n  "))")
+            }
+        }
+        if !payload.routes.isEmpty {
+            print("  Routing decisions: \(payload.routes.count)")
+        }
+        if !payload.actions.isEmpty {
+            print("  Agent actions: \(payload.actions.count)")
+        }
     }
 
     static func ownerExists(type rawType: String, ref rawRef: String, owner: SecondBrainOwnerRef) -> Bool {
