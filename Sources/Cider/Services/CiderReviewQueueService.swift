@@ -131,6 +131,71 @@ struct CiderReviewQueueBatchEnrichmentPreview: Equatable {
     }
 }
 
+struct CiderReviewEnrichmentDiagnosisResult: Equatable {
+    var command: String = "review.enrichment.diagnosis"
+    var generatedAt: Date
+    var isMutating: Bool = false
+    var totalCandidateCount: Int
+    var sampleLimit: Int
+    var groups: [CiderReviewEnrichmentDiagnosisGroup]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        return [
+            "command": command,
+            "generatedAt": formatter.string(from: generatedAt),
+            "isMutating": isMutating,
+            "totalCandidateCount": totalCandidateCount,
+            "sampleLimit": sampleLimit,
+            "groups": groups.map { $0.toDictionary() },
+        ]
+    }
+}
+
+struct CiderReviewEnrichmentDiagnosisGroup: Equatable {
+    var id: String
+    var summary: String
+    var count: Int
+    var sampleItems: [CiderReviewEnrichmentDiagnosisItem]
+
+    func toDictionary() -> [String: Any] {
+        [
+            "id": id,
+            "summary": summary,
+            "count": count,
+            "sampleItems": sampleItems.map { $0.toDictionary() },
+        ]
+    }
+}
+
+struct CiderReviewEnrichmentDiagnosisItem: Equatable {
+    var itemID: UUID
+    var title: String
+    var relativePath: String?
+    var enrichmentStatus: String?
+    var lastEnrichedAt: Date?
+    var diagnosisReason: String
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        var dictionary: [String: Any] = [
+            "itemID": itemID.uuidString,
+            "title": title,
+            "diagnosisReason": diagnosisReason,
+        ]
+        if let relativePath {
+            dictionary["relativePath"] = relativePath
+        }
+        if let enrichmentStatus {
+            dictionary["enrichmentStatus"] = enrichmentStatus
+        }
+        if let lastEnrichedAt {
+            dictionary["lastEnrichedAt"] = formatter.string(from: lastEnrichedAt)
+        }
+        return dictionary
+    }
+}
+
 struct CiderReviewQueueItem: Identifiable, Equatable {
     var id: String
     var kind: String
@@ -547,6 +612,74 @@ final class CiderReviewQueueService {
         )
     }
 
+    func enrichmentDiagnosis(
+        sampleLimit: Int = 10,
+        now: Date = Date()
+    ) throws -> CiderReviewEnrichmentDiagnosisResult {
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
+        let items = try itemSummaries(in: db)
+        let bookmarkDetails = try bookmarkDetails(in: db)
+        let cappedLimit = max(0, sampleLimit)
+        let orderedGroupIDs = [
+            "missing_status",
+            "never_enriched",
+            "failed",
+            "complete_missing_timestamp",
+            "attempted_incomplete",
+        ]
+
+        var counts: [String: Int] = [:]
+        var samples: [String: [CiderReviewEnrichmentDiagnosisItem]] = [:]
+        var summaries: [String: String] = [:]
+
+        for item in items.values
+            .filter({ $0.type == "bookmark" })
+            .sorted(by: enrichmentDiagnosisSort)
+        {
+            guard let details = bookmarkDetails[item.id],
+                  enrichmentReviewItem(item: item, details: details, now: now) != nil else {
+                continue
+            }
+
+            let reason = enrichmentDiagnosisReason(
+                status: details.enrichmentStatus,
+                lastEnrichedAt: details.lastEnrichedAt
+            )
+            counts[reason.id, default: 0] += 1
+            summaries[reason.id] = reason.summary
+
+            if samples[reason.id, default: []].count < cappedLimit {
+                samples[reason.id, default: []].append(
+                    CiderReviewEnrichmentDiagnosisItem(
+                        itemID: item.id,
+                        title: item.title,
+                        relativePath: item.relativePath,
+                        enrichmentStatus: details.enrichmentStatus,
+                        lastEnrichedAt: details.lastEnrichedAt,
+                        diagnosisReason: reason.summary
+                    )
+                )
+            }
+        }
+
+        let groups = orderedGroupIDs.compactMap { id -> CiderReviewEnrichmentDiagnosisGroup? in
+            guard let count = counts[id], count > 0 else { return nil }
+            return CiderReviewEnrichmentDiagnosisGroup(
+                id: id,
+                summary: summaries[id] ?? id,
+                count: count,
+                sampleItems: samples[id] ?? []
+            )
+        }
+
+        return CiderReviewEnrichmentDiagnosisResult(
+            generatedAt: now,
+            totalCandidateCount: counts.values.reduce(0, +),
+            sampleLimit: cappedLimit,
+            groups: groups
+        )
+    }
+
     @discardableResult
     func approve(itemID: UUID, actor: String = "user") throws -> CiderReviewRoutingActionResult {
         let before = try routingDecisionService.explain(itemID: itemID)
@@ -916,6 +1049,54 @@ final class CiderReviewQueueService {
             createdAt: now,
             safeActions: ["enrich", "correct", "defer"]
         )
+    }
+
+    private func enrichmentDiagnosisReason(
+        status: String?,
+        lastEnrichedAt: Date?
+    ) -> (id: String, summary: String) {
+        let normalizedStatus = status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedStatus?.isEmpty != false {
+            return (
+                "missing_status",
+                "Bookmark has no enrichment status."
+            )
+        }
+        if normalizedStatus == "complete", lastEnrichedAt == nil {
+            return (
+                "complete_missing_timestamp",
+                "Bookmark says enrichment is complete but has no last enriched timestamp."
+            )
+        }
+        if normalizedStatus == "failed" || normalizedStatus == "error" {
+            return (
+                "failed",
+                "Bookmark enrichment previously failed or errored."
+            )
+        }
+        if lastEnrichedAt != nil {
+            return (
+                "attempted_incomplete",
+                "Bookmark has an enrichment timestamp but is not marked complete."
+            )
+        }
+        return (
+            "never_enriched",
+            "Bookmark has no enrichment timestamp and is still incomplete."
+        )
+    }
+
+    private func enrichmentDiagnosisSort(
+        _ lhs: CiderRoutingItemSummary,
+        _ rhs: CiderRoutingItemSummary
+    ) -> Bool {
+        if lhs.relativePath != rhs.relativePath {
+            return (lhs.relativePath ?? "") < (rhs.relativePath ?? "")
+        }
+        if lhs.title != rhs.title {
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 
     private func inboxReviewItem(

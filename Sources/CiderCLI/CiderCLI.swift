@@ -865,6 +865,18 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "enrichment-diagnosis", "diagnose-enrichment", "diagnosis":
+            do {
+                let result = try service.enrichmentDiagnosis(
+                    sampleLimit: parseFlag("--sample-limit", from: args).flatMap(Int.init)
+                        ?? parseFlag("--limit", from: args).flatMap(Int.init)
+                        ?? 10
+                )
+                printReviewEnrichmentDiagnosisResult(result)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case "drilldown", "lane":
             guard let groupID = args.first else {
                 printCLIError("Usage: cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]")
@@ -1018,6 +1030,7 @@ struct CiderCLI {
             Usage:
               cider-cli review list [--include-deferred] [--limit <n>] [--kind <kind>] [--item-type <type>] [--state <state>] [--safe-action <action>] [--json]
               cider-cli review summary [--include-deferred] [--json]
+              cider-cli review enrichment-diagnosis [--sample-limit <n>] [--json]
               cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]
               cider-cli review approve <item-id> [--actor user|agent] [--json]
               cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
@@ -1029,7 +1042,7 @@ struct CiderCLI {
 
         default:
             print("Unknown review command: \(subcommand ?? "nil")")
-            print("Commands: list, summary, drilldown, approve, correct, defer, enrich, enrich-batch, jobs")
+            print("Commands: list, summary, enrichment-diagnosis, drilldown, approve, correct, defer, enrich, enrich-batch, jobs")
         }
     }
 
@@ -6884,6 +6897,33 @@ struct CiderCLI {
         print("  Batch enrichment preview: \(preview.candidateCount) candidate(s), \(preview.excludedCount) excluded, mutating=\(preview.isMutating)")
     }
 
+    static func printReviewEnrichmentDiagnosisResult(_ result: CiderReviewEnrichmentDiagnosisResult) {
+        if jsonOutput {
+            outputJSON(result.toDictionary())
+            return
+        }
+
+        print("Review enrichment diagnosis: \(result.totalCandidateCount) candidate(s)")
+        print("  Mutating: \(result.isMutating)")
+        print("  Sample limit: \(result.sampleLimit)")
+        for group in result.groups {
+            print("  \(group.id): \(group.count)")
+            print("    \(group.summary)")
+            for item in group.sampleItems {
+                print("    [\(item.itemID.uuidString.prefix(8))] \(item.title)")
+                if let relativePath = item.relativePath {
+                    print("      Path: \(relativePath)")
+                }
+                if let enrichmentStatus = item.enrichmentStatus {
+                    print("      Status: \(enrichmentStatus)")
+                }
+                if let lastEnrichedAt = item.lastEnrichedAt {
+                    print("      Last enriched: \(ISO8601DateFormatter().string(from: lastEnrichedAt))")
+                }
+            }
+        }
+    }
+
     static func printReviewQueueDrilldownResult(_ result: CiderReviewQueueDrilldownResult) {
         if jsonOutput {
             outputJSON(result.toDictionary())
@@ -8653,6 +8693,8 @@ struct CiderCLI {
 
         REVIEW
           cider-cli review list [--include-deferred] [--limit <n>] [--json]
+          cider-cli review summary [--include-deferred] [--json]
+          cider-cli review enrichment-diagnosis [--sample-limit <n>] [--json]
           cider-cli review approve <item-id> [--actor user|agent] [--json]
           cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]

@@ -407,6 +407,79 @@ struct CiderReviewQueueServiceTests {
         _ = inboxID
     }
 
+    @Test("review enrichment diagnosis explains pending reason groups")
+    func reviewEnrichmentDiagnosisExplainsPendingReasonGroups() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let missingStatusID = try insertBookmark(
+            db,
+            title: "Missing Status",
+            relativePath: "Inbox/Bookmarks/Missing Status.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil
+        )
+        let neverEnrichedID = try insertBookmark(
+            db,
+            title: "Never Enriched",
+            relativePath: "Inbox/Bookmarks/Never Enriched.webloc",
+            enrichmentStatus: "pending",
+            lastEnrichedAt: nil
+        )
+        let failedID = try insertBookmark(
+            db,
+            title: "Failed Enrichment",
+            relativePath: "Inbox/Bookmarks/Failed Enrichment.webloc",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        let completeMissingTimestampID = try insertBookmark(
+            db,
+            title: "Complete Missing Timestamp",
+            relativePath: "Inbox/Bookmarks/Complete Missing Timestamp.webloc",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: nil
+        )
+        let attemptedIncompleteID = try insertBookmark(
+            db,
+            title: "Attempted Incomplete",
+            relativePath: "Inbox/Bookmarks/Attempted Incomplete.webloc",
+            enrichmentStatus: "partial",
+            lastEnrichedAt: Date(timeIntervalSince1970: 12)
+        )
+        _ = try insertBookmark(
+            db,
+            title: "Complete",
+            relativePath: "Inbox/Bookmarks/Complete.webloc",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date(timeIntervalSince1970: 20)
+        )
+        let queue = CiderReviewQueueService(database: db)
+
+        let diagnosis = try queue.enrichmentDiagnosis(sampleLimit: 2, now: Date(timeIntervalSince1970: 30))
+
+        #expect(diagnosis.command == "review.enrichment.diagnosis")
+        #expect(diagnosis.totalCandidateCount == 5)
+        #expect(diagnosis.isMutating == false)
+        #expect(diagnosis.groups.map(\.id) == [
+            "missing_status",
+            "never_enriched",
+            "failed",
+            "complete_missing_timestamp",
+            "attempted_incomplete",
+        ])
+        #expect(diagnosis.groups.first { $0.id == "missing_status" }?.sampleItems.map(\.itemID) == [missingStatusID])
+        #expect(diagnosis.groups.first { $0.id == "never_enriched" }?.sampleItems.map(\.itemID) == [neverEnrichedID])
+        #expect(diagnosis.groups.first { $0.id == "failed" }?.sampleItems.map(\.itemID) == [failedID])
+        #expect(diagnosis.groups.first { $0.id == "complete_missing_timestamp" }?.sampleItems.map(\.itemID) == [completeMissingTimestampID])
+        #expect(diagnosis.groups.first { $0.id == "attempted_incomplete" }?.sampleItems.map(\.itemID) == [attemptedIncompleteID])
+        #expect(diagnosis.groups.first { $0.id == "attempted_incomplete" }?.sampleItems.first?.lastEnrichedAt == Date(timeIntervalSince1970: 12))
+        let dictionary = diagnosis.toDictionary()
+        #expect(dictionary["command"] as? String == "review.enrichment.diagnosis")
+        #expect(dictionary["totalCandidateCount"] as? Int == 5)
+        #expect(dictionary["isMutating"] as? Bool == false)
+        #expect((dictionary["groups"] as? [[String: Any]])?.count == 5)
+    }
+
     @Test("review lane drilldown returns bounded items for summary groups")
     func reviewLaneDrilldownReturnsBoundedItemsForSummaryGroups() throws {
         let (db, url) = try makeTempDB()
