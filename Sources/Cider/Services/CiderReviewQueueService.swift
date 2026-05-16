@@ -24,6 +24,8 @@ struct CiderReviewQueueSummaryResult: Equatable {
     var countsByItemType: [String: Int]
     var countsByReviewState: [String: Int]
     var countsBySafeAction: [String: Int]
+    var groups: [CiderReviewQueueGroup] = []
+    var batchEnrichmentPreview: CiderReviewQueueBatchEnrichmentPreview = .empty
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -35,6 +37,59 @@ struct CiderReviewQueueSummaryResult: Equatable {
             "countsByItemType": countsByItemType,
             "countsByReviewState": countsByReviewState,
             "countsBySafeAction": countsBySafeAction,
+            "groups": groups.map { $0.toDictionary() },
+            "batchEnrichmentPreview": batchEnrichmentPreview.toDictionary(),
+        ]
+    }
+}
+
+struct CiderReviewQueueGroup: Equatable {
+    var id: String
+    var kind: String
+    var reviewState: String
+    var requiredSafeAction: String
+    var itemType: String
+    var count: Int
+    var sampleItems: [CiderReviewQueueItem]
+
+    func toDictionary() -> [String: Any] {
+        [
+            "id": id,
+            "kind": kind,
+            "reviewState": reviewState,
+            "requiredSafeAction": requiredSafeAction,
+            "itemType": itemType,
+            "count": count,
+            "sampleItems": sampleItems.map { $0.toDictionary() },
+        ]
+    }
+}
+
+struct CiderReviewQueueBatchEnrichmentPreview: Equatable {
+    static let empty = CiderReviewQueueBatchEnrichmentPreview(
+        action: "review.enrich",
+        isMutating: false,
+        candidateCount: 0,
+        candidates: [],
+        excludedCount: 0,
+        exclusionsByReason: [:]
+    )
+
+    var action: String
+    var isMutating: Bool
+    var candidateCount: Int
+    var candidates: [CiderReviewQueueItem]
+    var excludedCount: Int
+    var exclusionsByReason: [String: Int]
+
+    func toDictionary() -> [String: Any] {
+        [
+            "action": action,
+            "isMutating": isMutating,
+            "candidateCount": candidateCount,
+            "candidates": candidates.map { $0.toDictionary() },
+            "excludedCount": excludedCount,
+            "exclusionsByReason": exclusionsByReason,
         ]
     }
 }
@@ -240,7 +295,9 @@ final class CiderReviewQueueService {
             countsByKind: groupedCounts(items.map(\.kind)),
             countsByItemType: groupedCounts(items.map(\.itemType)),
             countsByReviewState: groupedCounts(items.map(\.reviewState)),
-            countsBySafeAction: groupedCounts(items.flatMap(\.safeActions))
+            countsBySafeAction: groupedCounts(items.flatMap(\.safeActions)),
+            groups: reviewGroups(for: items),
+            batchEnrichmentPreview: batchEnrichmentPreview(for: items)
         )
     }
 
@@ -499,6 +556,119 @@ final class CiderReviewQueueService {
             return 3
         default:
             return 4
+        }
+    }
+
+    private func reviewGroups(for items: [CiderReviewQueueItem]) -> [CiderReviewQueueGroup] {
+        struct Accumulator {
+            var kind: String
+            var reviewState: String
+            var requiredSafeAction: String
+            var itemType: String
+            var count: Int
+            var sampleItems: [CiderReviewQueueItem]
+        }
+
+        var accumulators: [String: Accumulator] = [:]
+        for item in items {
+            let safeAction = primarySafeAction(for: item)
+            let id = "\(item.kind):\(item.reviewState):\(safeAction):\(item.itemType)"
+            if var accumulator = accumulators[id] {
+                accumulator.count += 1
+                if accumulator.sampleItems.count < 3 {
+                    accumulator.sampleItems.append(item)
+                }
+                accumulators[id] = accumulator
+            } else {
+                accumulators[id] = Accumulator(
+                    kind: item.kind,
+                    reviewState: item.reviewState,
+                    requiredSafeAction: safeAction,
+                    itemType: item.itemType,
+                    count: 1,
+                    sampleItems: [item]
+                )
+            }
+        }
+
+        return accumulators
+            .values
+            .map { accumulator in
+                CiderReviewQueueGroup(
+                    id: "\(accumulator.kind):\(accumulator.reviewState):\(accumulator.requiredSafeAction):\(accumulator.itemType)",
+                    kind: accumulator.kind,
+                    reviewState: accumulator.reviewState,
+                    requiredSafeAction: accumulator.requiredSafeAction,
+                    itemType: accumulator.itemType,
+                    count: accumulator.count,
+                    sampleItems: accumulator.sampleItems
+                )
+            }
+            .sorted { lhs, rhs in
+                let lhsRank = groupSortRank(lhs)
+                let rhsRank = groupSortRank(rhs)
+                if lhsRank != rhsRank { return lhsRank < rhsRank }
+                if lhs.count != rhs.count { return lhs.count > rhs.count }
+                return lhs.id < rhs.id
+            }
+    }
+
+    private func batchEnrichmentPreview(for items: [CiderReviewQueueItem]) -> CiderReviewQueueBatchEnrichmentPreview {
+        let candidates = items.filter { item in
+            item.kind == "enrichment"
+                && item.itemType == "bookmark"
+                && item.safeActions.contains("enrich")
+        }
+        let exclusions = items.compactMap { batchEnrichmentExclusionReason(for: $0) }
+
+        return CiderReviewQueueBatchEnrichmentPreview(
+            action: "review.enrich",
+            isMutating: false,
+            candidateCount: candidates.count,
+            candidates: candidates,
+            excludedCount: exclusions.count,
+            exclusionsByReason: groupedCounts(exclusions)
+        )
+    }
+
+    private func batchEnrichmentExclusionReason(for item: CiderReviewQueueItem) -> String? {
+        if item.kind == "enrichment",
+           item.itemType == "bookmark",
+           item.safeActions.contains("enrich") {
+            return nil
+        }
+        switch item.kind {
+        case "low_confidence_routing", "deferred_routing":
+            return "routing_requires_explicit_approval"
+        case "inbox_backlog":
+            return "manual_routing_required"
+        default:
+            if item.itemType != "bookmark" {
+                return "unsupported_item_type"
+            }
+            return "not_enrichment_candidate"
+        }
+    }
+
+    private func primarySafeAction(for item: CiderReviewQueueItem) -> String {
+        for action in ["enrich", "approve", "correct", "defer"] where item.safeActions.contains(action) {
+            return action
+        }
+        return item.safeActions.first ?? "none"
+    }
+
+    private func groupSortRank(_ group: CiderReviewQueueGroup) -> Int {
+        switch group.kind {
+        case "low_confidence_routing":
+            return 0
+        case "enrichment":
+            return group.reviewState == "needs_review" ? 1 : 2
+        case "inbox_backlog":
+            return 3
+        case "deferred_routing":
+            return 4
+        default:
+            return 5
         }
     }
 

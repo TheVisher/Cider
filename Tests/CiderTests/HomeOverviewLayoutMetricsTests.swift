@@ -95,6 +95,14 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
                 itemTypeCounts: [:],
                 reviewStateCounts: [:],
                 safeActionCounts: [:],
+                groups: [],
+                batchEnrichmentPreview: HomeReviewCockpitBatchEnrichmentPreview(
+                    action: "review.enrich",
+                    isMutating: false,
+                    candidateCount: 0,
+                    excludedCount: 0,
+                    exclusionsByReason: [:]
+                ),
                 generatedAt: Date(timeIntervalSince1970: 1_745_084_400)
             ),
             triageItems: [],

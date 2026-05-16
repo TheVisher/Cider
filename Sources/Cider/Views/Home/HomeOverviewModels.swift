@@ -185,12 +185,32 @@ struct HomeReviewCockpitBadge: Equatable, Identifiable {
     let value: Int
 }
 
+struct HomeReviewCockpitGroup: Equatable, Identifiable {
+    let id: String
+    let label: String
+    let reviewState: String
+    let requiredSafeAction: String
+    let itemType: String
+    let count: Int
+    let sampleTitles: [String]
+}
+
+struct HomeReviewCockpitBatchEnrichmentPreview: Equatable {
+    let action: String
+    let isMutating: Bool
+    let candidateCount: Int
+    let excludedCount: Int
+    let exclusionsByReason: [String: Int]
+}
+
 struct HomeReviewCockpitSummary: Equatable {
     let totalCount: Int
     let badges: [HomeReviewCockpitBadge]
     let itemTypeCounts: [String: Int]
     let reviewStateCounts: [String: Int]
     let safeActionCounts: [String: Int]
+    let groups: [HomeReviewCockpitGroup]
+    let batchEnrichmentPreview: HomeReviewCockpitBatchEnrichmentPreview
     let generatedAt: Date
 }
 

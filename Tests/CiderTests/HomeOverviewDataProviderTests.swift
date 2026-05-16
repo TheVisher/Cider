@@ -550,6 +550,7 @@ final class HomeOverviewDataProviderTests: XCTestCase {
 
     func testReviewCockpitSummaryBuildsBadgesFromQueueSummary() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let bookmarkID = UUID()
         let snapshot = HomeOverviewDataProvider.makeSnapshot(
             items: [],
             recentItems: [],
@@ -570,7 +571,44 @@ final class HomeOverviewDataProviderTests: XCTestCase {
                     "correct": 7,
                     "defer": 5,
                     "enrich": 4,
-                ]
+                ],
+                groups: [
+                    CiderReviewQueueGroup(
+                        id: "enrichment:needs_review:enrich:bookmark",
+                        kind: "enrichment",
+                        reviewState: "needs_review",
+                        requiredSafeAction: "enrich",
+                        itemType: "bookmark",
+                        count: 4,
+                        sampleItems: [
+                            CiderReviewQueueItem(
+                                id: "review-enrichment-\(bookmarkID.uuidString)",
+                                kind: "enrichment",
+                                source: "bookmark",
+                                itemID: bookmarkID,
+                                itemType: "bookmark",
+                                title: "Needs Metadata",
+                                relativePath: "Inbox/Bookmarks/Needs Metadata.webloc",
+                                reason: "Bookmark enrichment failed.",
+                                suggestedAction: "Enrichment failed",
+                                reviewState: "needs_review",
+                                confidence: nil,
+                                routingDecisionID: nil,
+                                target: nil,
+                                createdAt: now,
+                                safeActions: ["enrich", "correct", "defer"]
+                            ),
+                        ]
+                    ),
+                ],
+                batchEnrichmentPreview: CiderReviewQueueBatchEnrichmentPreview(
+                    action: "review.enrich",
+                    isMutating: false,
+                    candidateCount: 4,
+                    candidates: [],
+                    excludedCount: 5,
+                    exclusionsByReason: ["routing_requires_explicit_approval": 3, "manual_routing_required": 2]
+                )
             ),
             surfacingDays: 7,
             now: now
@@ -586,6 +624,30 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             ]
         )
         XCTAssertEqual(snapshot.reviewCockpitSummary.safeActionCounts["enrich"], 4)
+        XCTAssertEqual(
+            snapshot.reviewCockpitSummary.groups,
+            [
+                HomeReviewCockpitGroup(
+                    id: "enrichment:needs_review:enrich:bookmark",
+                    label: "Enrichment",
+                    reviewState: "needs_review",
+                    requiredSafeAction: "enrich",
+                    itemType: "bookmark",
+                    count: 4,
+                    sampleTitles: ["Needs Metadata"]
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            snapshot.reviewCockpitSummary.batchEnrichmentPreview,
+            HomeReviewCockpitBatchEnrichmentPreview(
+                action: "review.enrich",
+                isMutating: false,
+                candidateCount: 4,
+                excludedCount: 5,
+                exclusionsByReason: ["routing_requires_explicit_approval": 3, "manual_routing_required": 2]
+            )
+        )
         XCTAssertEqual(snapshot.reviewCockpitSummary.generatedAt, now)
     }
 

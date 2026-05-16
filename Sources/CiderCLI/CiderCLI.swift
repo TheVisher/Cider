@@ -6471,6 +6471,14 @@ struct CiderCLI {
         print("  By item type: \(formatCounts(result.countsByItemType))")
         print("  By state: \(formatCounts(result.countsByReviewState))")
         print("  By safe action: \(formatCounts(result.countsBySafeAction))")
+        if !result.groups.isEmpty {
+            print("  Groups:")
+            for group in result.groups {
+                print("    \(group.kind) state=\(group.reviewState) action=\(group.requiredSafeAction) type=\(group.itemType) count=\(group.count)")
+            }
+        }
+        let preview = result.batchEnrichmentPreview
+        print("  Batch enrichment preview: \(preview.candidateCount) candidate(s), \(preview.excludedCount) excluded, mutating=\(preview.isMutating)")
     }
 
     private static func formatCounts(_ counts: [String: Int]) -> String {

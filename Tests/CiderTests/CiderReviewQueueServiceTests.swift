@@ -255,6 +255,70 @@ struct CiderReviewQueueServiceTests {
         _ = inboxID
     }
 
+    @Test("review queue summary groups actionable work and previews batch enrichment")
+    func reviewQueueSummaryGroupsActionableWorkAndPreviewsBatchEnrichment() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let routingID = try insertBookmark(db, title: "Route Me", enrichmentStatus: "complete", lastEnrichedAt: Date())
+        let firstEnrichmentID = try insertBookmark(
+            db,
+            title: "Needs Metadata A",
+            relativePath: "Inbox/Bookmarks/Needs Metadata A.webloc",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        let secondEnrichmentID = try insertBookmark(
+            db,
+            title: "Needs Metadata B",
+            relativePath: "Inbox/Bookmarks/Needs Metadata B.webloc",
+            enrichmentStatus: "pending",
+            lastEnrichedAt: nil
+        )
+        let inboxID = try insertBookmark(
+            db,
+            title: "Needs Filing",
+            url: "https://example.com/file-me",
+            relativePath: "Inbox/Bookmarks/Needs Filing.webloc",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date()
+        )
+        let routing = CiderRoutingDecisionService(database: db)
+        _ = try routing.recordDecision(
+            itemID: routingID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0.1,
+            reason: "Needs a human route.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        let queue = CiderReviewQueueService(database: db, routingDecisionService: routing)
+
+        let summary = try queue.summary()
+
+        #expect(summary.groups.map(\.id) == [
+            "low_confidence_routing:needs_review:approve:bookmark",
+            "enrichment:needs_review:enrich:bookmark",
+            "enrichment:pending:enrich:bookmark",
+            "inbox_backlog:needs_review:correct:bookmark",
+        ])
+        #expect(summary.groups.first { $0.id == "low_confidence_routing:needs_review:approve:bookmark" }?.count == 1)
+        #expect(summary.groups.first { $0.id == "enrichment:needs_review:enrich:bookmark" }?.count == 1)
+        #expect(summary.groups.first { $0.id == "enrichment:pending:enrich:bookmark" }?.sampleItems.first?.itemID == secondEnrichmentID)
+        #expect(summary.batchEnrichmentPreview.action == "review.enrich")
+        #expect(summary.batchEnrichmentPreview.isMutating == false)
+        #expect(summary.batchEnrichmentPreview.candidateCount == 2)
+        #expect(summary.batchEnrichmentPreview.candidates.map(\.itemID) == [firstEnrichmentID, secondEnrichmentID])
+        #expect(summary.batchEnrichmentPreview.excludedCount == 2)
+        #expect(summary.batchEnrichmentPreview.exclusionsByReason["routing_requires_explicit_approval"] == 1)
+        #expect(summary.batchEnrichmentPreview.exclusionsByReason["manual_routing_required"] == 1)
+        let dictionary = summary.toDictionary()
+        #expect((dictionary["groups"] as? [[String: Any]])?.count == 4)
+        #expect((dictionary["batchEnrichmentPreview"] as? [String: Any])?["candidateCount"] as? Int == 2)
+        _ = inboxID
+    }
+
     @Test("review queue enrich action schedules bookmark enrichment")
     func reviewQueueEnrichActionSchedulesBookmarkEnrichment() throws {
         let (db, url) = try makeTempDB()

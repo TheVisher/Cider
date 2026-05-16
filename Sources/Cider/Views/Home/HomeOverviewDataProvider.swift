@@ -672,6 +672,8 @@ enum HomeOverviewDataProvider {
                 itemTypeCounts: summary.countsByItemType,
                 reviewStateCounts: summary.countsByReviewState,
                 safeActionCounts: summary.countsBySafeAction,
+                groups: reviewCockpitGroups(from: summary.groups),
+                batchEnrichmentPreview: reviewCockpitBatchEnrichmentPreview(from: summary.batchEnrichmentPreview),
                 generatedAt: summary.generatedAt
             )
         }
@@ -682,8 +684,101 @@ enum HomeOverviewDataProvider {
             itemTypeCounts: groupedCounts(fallbackItems.map(\.itemType)),
             reviewStateCounts: groupedCounts(fallbackItems.map(\.reviewState)),
             safeActionCounts: groupedCounts(fallbackItems.flatMap(\.safeActions)),
+            groups: reviewCockpitGroups(from: fallbackReviewCockpitGroups(for: fallbackItems)),
+            batchEnrichmentPreview: fallbackBatchEnrichmentPreview(for: fallbackItems),
             generatedAt: now
         )
+    }
+
+    private static func reviewCockpitGroups(from groups: [CiderReviewQueueGroup]) -> [HomeReviewCockpitGroup] {
+        groups.map { group in
+            HomeReviewCockpitGroup(
+                id: group.id,
+                label: reviewKindLabel(group.kind),
+                reviewState: group.reviewState,
+                requiredSafeAction: group.requiredSafeAction,
+                itemType: group.itemType,
+                count: group.count,
+                sampleTitles: group.sampleItems.map(\.title)
+            )
+        }
+    }
+
+    private static func reviewCockpitBatchEnrichmentPreview(
+        from preview: CiderReviewQueueBatchEnrichmentPreview
+    ) -> HomeReviewCockpitBatchEnrichmentPreview {
+        HomeReviewCockpitBatchEnrichmentPreview(
+            action: preview.action,
+            isMutating: preview.isMutating,
+            candidateCount: preview.candidateCount,
+            excludedCount: preview.excludedCount,
+            exclusionsByReason: preview.exclusionsByReason
+        )
+    }
+
+    private static func fallbackReviewCockpitGroups(for items: [CiderReviewQueueItem]) -> [CiderReviewQueueGroup] {
+        let grouped = Dictionary(grouping: items) { item in
+            "\(item.kind):\(item.reviewState):\(primaryReviewCockpitSafeAction(for: item)):\(item.itemType)"
+        }
+
+        return grouped.map { id, items in
+            let first = items[0]
+            return CiderReviewQueueGroup(
+                id: id,
+                kind: first.kind,
+                reviewState: first.reviewState,
+                requiredSafeAction: primaryReviewCockpitSafeAction(for: first),
+                itemType: first.itemType,
+                count: items.count,
+                sampleItems: Array(items.prefix(3))
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.count != rhs.count { return lhs.count > rhs.count }
+            return lhs.id < rhs.id
+        }
+    }
+
+    private static func fallbackBatchEnrichmentPreview(
+        for items: [CiderReviewQueueItem]
+    ) -> HomeReviewCockpitBatchEnrichmentPreview {
+        let candidates = items.filter { item in
+            item.kind == "enrichment"
+                && item.itemType == "bookmark"
+                && item.safeActions.contains("enrich")
+        }
+        let excludedReasons = items.compactMap { fallbackBatchEnrichmentExclusionReason(for: $0) }
+
+        return HomeReviewCockpitBatchEnrichmentPreview(
+            action: "review.enrich",
+            isMutating: false,
+            candidateCount: candidates.count,
+            excludedCount: excludedReasons.count,
+            exclusionsByReason: groupedCounts(excludedReasons)
+        )
+    }
+
+    private static func fallbackBatchEnrichmentExclusionReason(for item: CiderReviewQueueItem) -> String? {
+        if item.kind == "enrichment",
+           item.itemType == "bookmark",
+           item.safeActions.contains("enrich") {
+            return nil
+        }
+        switch item.kind {
+        case "low_confidence_routing", "deferred_routing":
+            return "routing_requires_explicit_approval"
+        case "inbox_backlog":
+            return "manual_routing_required"
+        default:
+            return item.itemType == "bookmark" ? "not_enrichment_candidate" : "unsupported_item_type"
+        }
+    }
+
+    private static func primaryReviewCockpitSafeAction(for item: CiderReviewQueueItem) -> String {
+        for action in ["enrich", "approve", "correct", "defer"] where item.safeActions.contains(action) {
+            return action
+        }
+        return item.safeActions.first ?? "none"
     }
 
     private static func reviewCockpitBadges(from countsByKind: [String: Int]) -> [HomeReviewCockpitBadge] {
