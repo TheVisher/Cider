@@ -199,6 +199,8 @@ struct HomeReviewCockpitBatchEnrichmentPreview: Equatable {
     let action: String
     let isMutating: Bool
     let candidateCount: Int
+    let candidateSampleLimit: Int
+    let candidateSampleTitles: [String]
     let excludedCount: Int
     let exclusionsByReason: [String: Int]
 }

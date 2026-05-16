@@ -605,7 +605,26 @@ final class HomeOverviewDataProviderTests: XCTestCase {
                     action: "review.enrich",
                     isMutating: false,
                     candidateCount: 4,
-                    candidates: [],
+                    candidateSampleLimit: 3,
+                    candidateSamples: [
+                        CiderReviewQueueItem(
+                            id: "review-enrichment-\(bookmarkID.uuidString)",
+                            kind: "enrichment",
+                            source: "bookmark",
+                            itemID: bookmarkID,
+                            itemType: "bookmark",
+                            title: "Needs Metadata",
+                            relativePath: "Inbox/Bookmarks/Needs Metadata.webloc",
+                            reason: "Bookmark enrichment failed.",
+                            suggestedAction: "Enrichment failed",
+                            reviewState: "needs_review",
+                            confidence: nil,
+                            routingDecisionID: nil,
+                            target: nil,
+                            createdAt: now,
+                            safeActions: ["enrich", "correct", "defer"]
+                        ),
+                    ],
                     excludedCount: 5,
                     exclusionsByReason: ["routing_requires_explicit_approval": 3, "manual_routing_required": 2]
                 )
@@ -644,6 +663,8 @@ final class HomeOverviewDataProviderTests: XCTestCase {
                 action: "review.enrich",
                 isMutating: false,
                 candidateCount: 4,
+                candidateSampleLimit: 3,
+                candidateSampleTitles: ["Needs Metadata"],
                 excludedCount: 5,
                 exclusionsByReason: ["routing_requires_explicit_approval": 3, "manual_routing_required": 2]
             )

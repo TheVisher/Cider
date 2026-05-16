@@ -100,6 +100,8 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
                     action: "review.enrich",
                     isMutating: false,
                     candidateCount: 0,
+                    candidateSampleLimit: 0,
+                    candidateSampleTitles: [],
                     excludedCount: 0,
                     exclusionsByReason: [:]
                 ),

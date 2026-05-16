@@ -711,6 +711,8 @@ enum HomeOverviewDataProvider {
             action: preview.action,
             isMutating: preview.isMutating,
             candidateCount: preview.candidateCount,
+            candidateSampleLimit: preview.candidateSampleLimit,
+            candidateSampleTitles: preview.candidateSamples.map(\.title),
             excludedCount: preview.excludedCount,
             exclusionsByReason: preview.exclusionsByReason
         )
@@ -753,6 +755,8 @@ enum HomeOverviewDataProvider {
             action: "review.enrich",
             isMutating: false,
             candidateCount: candidates.count,
+            candidateSampleLimit: 10,
+            candidateSampleTitles: candidates.prefix(10).map(\.title),
             excludedCount: excludedReasons.count,
             exclusionsByReason: groupedCounts(excludedReasons)
         )

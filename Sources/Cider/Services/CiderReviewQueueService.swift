@@ -70,7 +70,8 @@ struct CiderReviewQueueBatchEnrichmentPreview: Equatable {
         action: "review.enrich",
         isMutating: false,
         candidateCount: 0,
-        candidates: [],
+        candidateSampleLimit: 0,
+        candidateSamples: [],
         excludedCount: 0,
         exclusionsByReason: [:]
     )
@@ -78,7 +79,8 @@ struct CiderReviewQueueBatchEnrichmentPreview: Equatable {
     var action: String
     var isMutating: Bool
     var candidateCount: Int
-    var candidates: [CiderReviewQueueItem]
+    var candidateSampleLimit: Int
+    var candidateSamples: [CiderReviewQueueItem]
     var excludedCount: Int
     var exclusionsByReason: [String: Int]
 
@@ -87,7 +89,8 @@ struct CiderReviewQueueBatchEnrichmentPreview: Equatable {
             "action": action,
             "isMutating": isMutating,
             "candidateCount": candidateCount,
-            "candidates": candidates.map { $0.toDictionary() },
+            "candidateSampleLimit": candidateSampleLimit,
+            "candidateSamples": candidateSamples.map { $0.toDictionary() },
             "excludedCount": excludedCount,
             "exclusionsByReason": exclusionsByReason,
         ]
@@ -280,6 +283,7 @@ final class CiderReviewQueueService {
 
     func summary(
         includeDeferred: Bool = false,
+        batchEnrichmentSampleLimit: Int = 10,
         now: Date = Date()
     ) throws -> CiderReviewQueueSummaryResult {
         let items = try list(
@@ -297,7 +301,10 @@ final class CiderReviewQueueService {
             countsByReviewState: groupedCounts(items.map(\.reviewState)),
             countsBySafeAction: groupedCounts(items.flatMap(\.safeActions)),
             groups: reviewGroups(for: items),
-            batchEnrichmentPreview: batchEnrichmentPreview(for: items)
+            batchEnrichmentPreview: batchEnrichmentPreview(
+                for: items,
+                sampleLimit: batchEnrichmentSampleLimit
+            )
         )
     }
 
@@ -613,19 +620,24 @@ final class CiderReviewQueueService {
             }
     }
 
-    private func batchEnrichmentPreview(for items: [CiderReviewQueueItem]) -> CiderReviewQueueBatchEnrichmentPreview {
+    private func batchEnrichmentPreview(
+        for items: [CiderReviewQueueItem],
+        sampleLimit: Int
+    ) -> CiderReviewQueueBatchEnrichmentPreview {
         let candidates = items.filter { item in
             item.kind == "enrichment"
                 && item.itemType == "bookmark"
                 && item.safeActions.contains("enrich")
         }
         let exclusions = items.compactMap { batchEnrichmentExclusionReason(for: $0) }
+        let cappedLimit = max(0, sampleLimit)
 
         return CiderReviewQueueBatchEnrichmentPreview(
             action: "review.enrich",
             isMutating: false,
             candidateCount: candidates.count,
-            candidates: candidates,
+            candidateSampleLimit: cappedLimit,
+            candidateSamples: Array(candidates.prefix(cappedLimit)),
             excludedCount: exclusions.count,
             exclusionsByReason: groupedCounts(exclusions)
         )

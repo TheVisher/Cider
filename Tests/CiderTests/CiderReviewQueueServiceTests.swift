@@ -309,7 +309,7 @@ struct CiderReviewQueueServiceTests {
         #expect(summary.batchEnrichmentPreview.action == "review.enrich")
         #expect(summary.batchEnrichmentPreview.isMutating == false)
         #expect(summary.batchEnrichmentPreview.candidateCount == 2)
-        #expect(summary.batchEnrichmentPreview.candidates.map(\.itemID) == [firstEnrichmentID, secondEnrichmentID])
+        #expect(summary.batchEnrichmentPreview.candidateSamples.map(\.itemID) == [firstEnrichmentID, secondEnrichmentID])
         #expect(summary.batchEnrichmentPreview.excludedCount == 2)
         #expect(summary.batchEnrichmentPreview.exclusionsByReason["routing_requires_explicit_approval"] == 1)
         #expect(summary.batchEnrichmentPreview.exclusionsByReason["manual_routing_required"] == 1)
@@ -317,6 +317,37 @@ struct CiderReviewQueueServiceTests {
         #expect((dictionary["groups"] as? [[String: Any]])?.count == 4)
         #expect((dictionary["batchEnrichmentPreview"] as? [String: Any])?["candidateCount"] as? Int == 2)
         _ = inboxID
+    }
+
+    @Test("review queue batch enrichment preview caps sample payload while preserving candidate count")
+    func reviewQueueBatchEnrichmentPreviewCapsSamplePayload() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        var enrichmentIDs: [UUID] = []
+        for index in 1...7 {
+            let id = try insertBookmark(
+                db,
+                title: "Needs Metadata \(index)",
+                relativePath: "Inbox/Bookmarks/Needs Metadata \(index).webloc",
+                enrichmentStatus: "failed",
+                lastEnrichedAt: nil
+            )
+            enrichmentIDs.append(id)
+        }
+        let queue = CiderReviewQueueService(database: db)
+
+        let summary = try queue.summary(batchEnrichmentSampleLimit: 3)
+        let dictionary = summary.toDictionary()
+        let previewDictionary = try #require(dictionary["batchEnrichmentPreview"] as? [String: Any])
+
+        #expect(summary.batchEnrichmentPreview.candidateCount == 7)
+        #expect(summary.batchEnrichmentPreview.candidateSampleLimit == 3)
+        #expect(summary.batchEnrichmentPreview.candidateSamples.map(\.itemID) == Array(enrichmentIDs.prefix(3)))
+        #expect(summary.batchEnrichmentPreview.candidateSamples.count == 3)
+        #expect(previewDictionary["candidateCount"] as? Int == 7)
+        #expect(previewDictionary["candidateSampleLimit"] as? Int == 3)
+        #expect((previewDictionary["candidateSamples"] as? [[String: Any]])?.count == 3)
+        #expect(previewDictionary["candidates"] == nil)
     }
 
     @Test("review queue enrich action schedules bookmark enrichment")
