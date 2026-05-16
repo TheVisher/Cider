@@ -699,7 +699,12 @@ struct HomeOverviewDashboardView: View {
                                         .foregroundColor(CiderColors.tertiary)
                                         .lineLimit(1)
 
-                                    Text(capture.suggestedAction)
+                                    Text(capture.visibleWhyLine)
+                                        .font(CiderFont.caption)
+                                        .foregroundColor(CiderColors.quaternary)
+                                        .lineLimit(1)
+
+                                    Text(capture.visibleNextActionLine)
                                         .font(CiderFont.captionSemibold)
                                         .foregroundColor(CiderColors.secondary)
                                         .lineLimit(1)
@@ -924,6 +929,20 @@ struct HomeOverviewDashboardView: View {
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
                         .lineLimit(2)
+
+                    if let whyLine = item.visibleWhyLine {
+                        Text(whyLine)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.quaternary)
+                            .lineLimit(1)
+                    }
+
+                    if let nextActionLine = item.visibleNextActionLine {
+                        Text(nextActionLine)
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer(minLength: 0)

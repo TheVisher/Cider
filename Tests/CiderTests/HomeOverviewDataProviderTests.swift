@@ -187,6 +187,8 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(focusItem?.surfacingExplanation?.sourceSignal, "reminder_relevance")
         XCTAssertEqual(focusItem?.surfacingExplanation?.suggestedAction, "open action URL")
         XCTAssertEqual(focusItem?.surfacingExplanation?.actionURLString, "https://rent.example.com")
+        XCTAssertEqual(focusItem?.visibleWhyLine, "Why: Due today")
+        XCTAssertEqual(focusItem?.visibleNextActionLine, "Next: open action URL")
     }
 
     func testRecentCaptureSummariesIncludeVerifiedPathTypeAndNextAction() {
@@ -262,6 +264,8 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(explanation.reviewState, "needs_review")
         XCTAssertEqual(explanation.actionURLString, "https://example.com/article")
         XCTAssertEqual(snapshot.recentCaptureItems[0].suggestedAction, explanation.suggestedAction)
+        XCTAssertEqual(snapshot.recentCaptureItems[0].visibleWhyLine, "Why: Generic host-only bookmark title")
+        XCTAssertEqual(snapshot.recentCaptureItems[0].visibleNextActionLine, "Next: Clean up title")
     }
 
     func testRecentTimelineKeepsSixRecentItemsForDashboardRail() {

@@ -66,6 +66,19 @@ struct HomeDailyBriefItem: Equatable, Identifiable {
     let systemImage: String
     let target: HomeDailyBriefTarget
     var surfacingExplanation: CiderSurfacingExplanation? = nil
+
+    var visibleWhyLine: String? {
+        surfacingExplanation.map { "Why: \(Self.sentenceCased($0.reason))" }
+    }
+
+    var visibleNextActionLine: String? {
+        surfacingExplanation.map { "Next: \($0.suggestedAction)" }
+    }
+
+    private static func sentenceCased(_ text: String) -> String {
+        guard let first = text.first else { return text }
+        return first.uppercased() + text.dropFirst()
+    }
 }
 
 struct HomeDailyBriefSummaryChip: Equatable, Identifiable {
@@ -111,6 +124,14 @@ struct HomeRecentCaptureItem: Equatable, Identifiable {
     let locationLabel: String
     let suggestedAction: String
     let surfacingExplanation: CiderSurfacingExplanation
+
+    var visibleWhyLine: String {
+        "Why: \(surfacingExplanation.reason)"
+    }
+
+    var visibleNextActionLine: String {
+        "Next: \(surfacingExplanation.suggestedAction)"
+    }
 }
 
 struct HomeReviewCockpitDateSuggestionApproval: Equatable {
