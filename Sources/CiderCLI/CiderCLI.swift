@@ -899,6 +899,16 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "jobs", "history":
+            do {
+                let result = try service.actionJobHistory(
+                    limit: parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+                )
+                printReviewActionJobHistoryResult(result)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case nil, "help", "--help", "-h":
             print("""
             Usage:
@@ -909,11 +919,12 @@ struct CiderCLI {
               cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
               cider-cli review enrich <item-id> [--actor user|agent] [--json]
               cider-cli review enrich-batch --confirm [--actor user|agent] [--json]
+              cider-cli review jobs [--limit <n>] [--json]
             """)
 
         default:
             print("Unknown review command: \(subcommand ?? "nil")")
-            print("Commands: list, summary, approve, correct, defer, enrich, enrich-batch")
+            print("Commands: list, summary, approve, correct, defer, enrich, enrich-batch, jobs")
         }
     }
 
@@ -6572,6 +6583,29 @@ struct CiderCLI {
             }
         }
         print("  Safe actions: \(result.safeActions.joined(separator: ", "))")
+    }
+
+    static func printReviewActionJobHistoryResult(_ result: CiderReviewActionJobHistoryResult) {
+        if jsonOutput {
+            outputJSON(result.toDictionary())
+            return
+        }
+
+        print("Review action jobs: \(result.jobs.count)")
+        for job in result.jobs {
+            print("\(job.action): \(job.batchID.uuidString)")
+            print("  Scheduled: \(job.scheduledCount)/\(job.candidateCount)")
+            print("  Excluded: \(job.excludedCount)")
+            print("  Failed: \(job.failedCount)")
+            print("  Actor: \(job.actor)")
+            if !job.itemSamples.isEmpty {
+                print("  Item samples:")
+                for item in job.itemSamples {
+                    print("    \(item.title) (\(item.itemID.uuidString.prefix(8))) - \(item.status)")
+                }
+            }
+            print("  Safe actions: \(job.safeActions.joined(separator: ", "))")
+        }
     }
 
     static func printSpaceCaptureDashboard(_ dashboard: CiderSpaceCaptureDashboard) {

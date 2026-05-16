@@ -220,6 +220,71 @@ struct CiderReviewQueueBatchEnrichmentResult: Equatable {
     }
 }
 
+struct CiderReviewActionJobHistoryResult: Equatable {
+    var command: String
+    var generatedAt: Date
+    var jobs: [CiderReviewActionJobSummary]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        return [
+            "command": command,
+            "generatedAt": formatter.string(from: generatedAt),
+            "count": jobs.count,
+            "jobs": jobs.map { $0.toDictionary() },
+        ]
+    }
+}
+
+struct CiderReviewActionJobSummary: Equatable {
+    var action: String
+    var batchID: UUID
+    var firstScheduledAt: Date
+    var lastScheduledAt: Date
+    var actor: String
+    var source: String
+    var candidateCount: Int
+    var scheduledCount: Int
+    var excludedCount: Int
+    var failedCount: Int
+    var itemSamples: [CiderReviewActionJobItemSample]
+    var safeActions: [String]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        return [
+            "action": action,
+            "batchID": batchID.uuidString,
+            "firstScheduledAt": formatter.string(from: firstScheduledAt),
+            "lastScheduledAt": formatter.string(from: lastScheduledAt),
+            "actor": actor,
+            "source": source,
+            "candidateCount": candidateCount,
+            "scheduledCount": scheduledCount,
+            "excludedCount": excludedCount,
+            "failedCount": failedCount,
+            "itemSamples": itemSamples.map { $0.toDictionary() },
+            "safeActions": safeActions,
+        ]
+    }
+}
+
+struct CiderReviewActionJobItemSample: Equatable {
+    var itemID: UUID
+    var itemType: String
+    var title: String
+    var status: String
+
+    func toDictionary() -> [String: Any] {
+        [
+            "itemID": itemID.uuidString,
+            "itemType": itemType,
+            "title": title,
+            "status": status,
+        ]
+    }
+}
+
 enum CiderReviewQueueActionError: Error, LocalizedError {
     case itemNotFound(UUID)
     case unsupportedItemType(String)
@@ -495,6 +560,30 @@ final class CiderReviewQueueService {
             exclusionsByReason: groupedCounts(exclusions),
             failures: failures,
             safeActions: ["review summary", "review list", "bookmark get"]
+        )
+    }
+
+    func actionJobHistory(
+        limit: Int = 20,
+        itemSampleLimit: Int = 10,
+        now: Date = Date()
+    ) throws -> CiderReviewActionJobHistoryResult {
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
+        let entries = MutationAuditService(database: db).loadEntries().filter { entry in
+            entry.action == "review.enrich.batch.schedule"
+                && entry.metadata["batchID"] != nil
+        }
+        let items = try itemSummaries(in: db)
+
+        return CiderReviewActionJobHistoryResult(
+            command: "review.jobs",
+            generatedAt: now,
+            jobs: batchJobSummaries(
+                from: entries,
+                items: items,
+                limit: limit,
+                itemSampleLimit: itemSampleLimit
+            )
         )
     }
 
@@ -811,6 +900,65 @@ final class CiderReviewQueueService {
         default:
             return 5
         }
+    }
+
+    private func batchJobSummaries(
+        from entries: [MutationAuditEntry],
+        items: [UUID: CiderRoutingItemSummary],
+        limit: Int,
+        itemSampleLimit: Int
+    ) -> [CiderReviewActionJobSummary] {
+        let grouped = Dictionary(grouping: entries) { entry in
+            entry.metadata["batchID"] ?? ""
+        }
+        let cappedLimit = max(0, limit)
+        let cappedSampleLimit = max(0, itemSampleLimit)
+
+        return grouped.compactMap { rawBatchID, entries -> CiderReviewActionJobSummary? in
+            guard let batchID = UUID(uuidString: rawBatchID) else { return nil }
+            let sortedEntries = entries.sorted {
+                if $0.occurredAt != $1.occurredAt {
+                    return $0.occurredAt > $1.occurredAt
+                }
+                return $0.id.uuidString > $1.id.uuidString
+            }
+            guard let newest = sortedEntries.first,
+                  let oldest = sortedEntries.last else { return nil }
+            let candidateCount = newest.metadata["candidateCount"].flatMap(Int.init) ?? entries.count
+            let excludedCount = newest.metadata["excludedCount"].flatMap(Int.init) ?? 0
+            let samples = sortedEntries.prefix(cappedSampleLimit).map { entry in
+                let item = items[entry.itemID]
+                return CiderReviewActionJobItemSample(
+                    itemID: entry.itemID,
+                    itemType: entry.itemType,
+                    title: item?.title ?? entry.itemID.uuidString,
+                    status: entry.afterState["status"] ?? "scheduled"
+                )
+            }
+
+            return CiderReviewActionJobSummary(
+                action: "review.enrich.batch",
+                batchID: batchID,
+                firstScheduledAt: oldest.occurredAt,
+                lastScheduledAt: newest.occurredAt,
+                actor: newest.source.rawValue,
+                source: newest.source.rawValue,
+                candidateCount: candidateCount,
+                scheduledCount: entries.count,
+                excludedCount: excludedCount,
+                failedCount: max(0, candidateCount - entries.count),
+                itemSamples: samples,
+                safeActions: ["review summary", "review list", "bookmark get"]
+            )
+        }
+        .sorted {
+            if $0.lastScheduledAt != $1.lastScheduledAt {
+                return $0.lastScheduledAt > $1.lastScheduledAt
+            }
+            return $0.batchID.uuidString > $1.batchID.uuidString
+        }
+        .prefix(cappedLimit)
+        .map { $0 }
     }
 
     private func groupedCounts(_ values: [String]) -> [String: Int] {

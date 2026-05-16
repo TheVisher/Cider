@@ -474,4 +474,73 @@ struct CiderReviewQueueServiceTests {
         #expect(Set(auditEntries.map { $0.metadata["candidateCount"] }) == ["2"])
         #expect(Set(auditEntries.map { $0.metadata["excludedCount"] }) == ["1"])
     }
+
+    @Test("review action job history summarizes batch enrichment audit rows")
+    func reviewActionJobHistorySummarizesBatchEnrichmentAuditRows() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let firstEnrichmentID = try insertBookmark(
+            db,
+            title: "Needs Metadata A",
+            relativePath: "Inbox/Bookmarks/Needs Metadata A.webloc",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        let secondEnrichmentID = try insertBookmark(
+            db,
+            title: "Needs Metadata B",
+            relativePath: "Inbox/Bookmarks/Needs Metadata B.webloc",
+            enrichmentStatus: "pending",
+            lastEnrichedAt: nil
+        )
+        let routingID = try insertBookmark(
+            db,
+            title: "Needs Routing",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date()
+        )
+        let routing = CiderRoutingDecisionService(database: db)
+        _ = try routing.recordDecision(
+            itemID: routingID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0.1,
+            reason: "Needs a human route.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        let queue = CiderReviewQueueService(
+            database: db,
+            routingDecisionService: routing,
+            enrichmentScheduler: { _ in }
+        )
+        let batch = try queue.enrichBatch(actor: "agent", sampleFailureLimit: 3)
+
+        let history = try queue.actionJobHistory(limit: 10)
+
+        #expect(history.command == "review.jobs")
+        #expect(history.jobs.count == 1)
+        let job = try #require(history.jobs.first)
+        #expect(job.action == "review.enrich.batch")
+        #expect(job.batchID == batch.batchID)
+        #expect(job.actor == "agent")
+        #expect(job.source == "agent")
+        #expect(job.candidateCount == 2)
+        #expect(job.scheduledCount == 2)
+        #expect(job.excludedCount == 1)
+        #expect(job.failedCount == 0)
+        #expect(job.itemSamples.map(\.itemID) == [secondEnrichmentID, firstEnrichmentID])
+        #expect(job.itemSamples.map(\.title) == ["Needs Metadata B", "Needs Metadata A"])
+        #expect(job.safeActions.contains("review summary"))
+
+        let dictionary = history.toDictionary()
+        #expect(dictionary["command"] as? String == "review.jobs")
+        let jobs = try #require(dictionary["jobs"] as? [[String: Any]])
+        let jobDictionary = try #require(jobs.first)
+        #expect(jobDictionary["batchID"] as? String == batch.batchID.uuidString)
+        #expect(jobDictionary["scheduledCount"] as? Int == 2)
+        #expect(jobDictionary["excludedCount"] as? Int == 1)
+        #expect((jobDictionary["itemSamples"] as? [[String: Any]])?.count == 2)
+    }
 }
