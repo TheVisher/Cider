@@ -335,16 +335,7 @@ extension CiderPanelView {
                                 },
                                 onEnrichReviewBatch: {
                                     do {
-                                        let service = CiderReviewQueueService()
-                                        let candidates = try service.list(
-                                            limit: Int.max,
-                                            kind: "enrichment",
-                                            itemType: "bookmark",
-                                            requiredSafeAction: "enrich"
-                                        ).items
-                                        for candidate in candidates {
-                                            try service.enrich(itemID: candidate.itemID, actor: "user")
-                                        }
+                                        _ = try CiderReviewQueueService().enrichBatch(actor: "user")
                                         return true
                                     } catch {
                                         print("Dashboard review batch enrich failed: \(error.localizedDescription)")

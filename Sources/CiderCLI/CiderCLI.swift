@@ -885,6 +885,20 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "enrich-batch":
+            guard args.contains("--confirm") else {
+                printCLIError("Usage: cider-cli review enrich-batch --confirm [--actor user|agent] [--json]")
+                return
+            }
+            do {
+                let result = try service.enrichBatch(
+                    actor: parseFlag("--actor", from: args) ?? "user"
+                )
+                printReviewQueueBatchEnrichmentResult(result)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case nil, "help", "--help", "-h":
             print("""
             Usage:
@@ -894,11 +908,12 @@ struct CiderCLI {
               cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
               cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
               cider-cli review enrich <item-id> [--actor user|agent] [--json]
+              cider-cli review enrich-batch --confirm [--actor user|agent] [--json]
             """)
 
         default:
             print("Unknown review command: \(subcommand ?? "nil")")
-            print("Commands: list, summary, approve, correct, defer, enrich")
+            print("Commands: list, summary, approve, correct, defer, enrich, enrich-batch")
         }
     }
 
@@ -6506,6 +6521,29 @@ struct CiderCLI {
         print("  Safe actions: \(result.safeActions.joined(separator: ", "))")
     }
 
+    static func printReviewQueueBatchEnrichmentResult(_ result: CiderReviewQueueBatchEnrichmentResult) {
+        if jsonOutput {
+            outputJSON(result.toDictionary())
+            return
+        }
+
+        print("Batch enrichment: \(result.scheduledCount)/\(result.candidateCount) scheduled")
+        print("  Batch: \(result.batchID.uuidString)")
+        print("  Actor: \(result.actor)")
+        print("  Excluded: \(result.excludedCount)")
+        print("  Failed: \(result.failedCount)")
+        if !result.exclusionsByReason.isEmpty {
+            print("  Exclusions: \(formatCounts(result.exclusionsByReason))")
+        }
+        if !result.failures.isEmpty {
+            print("  Failure samples:")
+            for failure in result.failures {
+                print("    \(failure.title): \(failure.reason)")
+            }
+        }
+        print("  Safe actions: \(result.safeActions.joined(separator: ", "))")
+    }
+
     static func printSpaceCaptureDashboard(_ dashboard: CiderSpaceCaptureDashboard) {
         if jsonOutput {
             outputJSON(dashboard.toDictionary())
@@ -8079,6 +8117,8 @@ struct CiderCLI {
           cider-cli review approve <item-id> [--actor user|agent] [--json]
           cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
+          cider-cli review enrich <item-id> [--actor user|agent] [--json]
+          cider-cli review enrich-batch --confirm [--actor user|agent] [--json]
 
         REMINDERS
           cider-cli reminder complete <todo|dateCard> <id-prefix> [--json]

@@ -401,4 +401,77 @@ struct CiderReviewQueueServiceTests {
         }
         #expect(scheduledIDs.isEmpty)
     }
+
+    @Test("review queue batch enrichment schedules eligible bookmarks and reports exclusions")
+    func reviewQueueBatchEnrichmentSchedulesEligibleBookmarksAndReportsExclusions() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let firstEnrichmentID = try insertBookmark(
+            db,
+            title: "Needs Metadata A",
+            relativePath: "Inbox/Bookmarks/Needs Metadata A.webloc",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        let secondEnrichmentID = try insertBookmark(
+            db,
+            title: "Needs Metadata B",
+            relativePath: "Inbox/Bookmarks/Needs Metadata B.webloc",
+            enrichmentStatus: "pending",
+            lastEnrichedAt: nil
+        )
+        let routingID = try insertBookmark(
+            db,
+            title: "Needs Routing",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date()
+        )
+        let routing = CiderRoutingDecisionService(database: db)
+        _ = try routing.recordDecision(
+            itemID: routingID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0.1,
+            reason: "Needs a human route.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        var scheduledIDs: [UUID] = []
+        let queue = CiderReviewQueueService(
+            database: db,
+            routingDecisionService: routing,
+            enrichmentScheduler: { scheduledIDs.append($0) }
+        )
+
+        let result = try queue.enrichBatch(actor: "agent", sampleFailureLimit: 3)
+
+        #expect(scheduledIDs == [firstEnrichmentID, secondEnrichmentID])
+        #expect(result.action == "review.enrich.batch")
+        #expect(result.actor == "agent")
+        #expect(result.isMutating)
+        #expect(result.candidateCount == 2)
+        #expect(result.scheduledCount == 2)
+        #expect(result.excludedCount == 1)
+        #expect(result.skippedCount == 0)
+        #expect(result.failedCount == 0)
+        #expect(result.exclusionsByReason["routing_requires_explicit_approval"] == 1)
+        #expect(result.failures.isEmpty)
+        #expect(result.safeActions.contains("review summary"))
+
+        let dictionary = result.toDictionary()
+        #expect(dictionary["action"] as? String == "review.enrich.batch")
+        #expect(dictionary["scheduledCount"] as? Int == 2)
+        #expect(dictionary["excludedCount"] as? Int == 1)
+        #expect((dictionary["batchID"] as? String)?.isEmpty == false)
+
+        let auditEntries = MutationAuditService(database: db).loadEntries()
+        #expect(auditEntries.count == 2)
+        #expect(Set(auditEntries.map(\.itemID)) == Set([firstEnrichmentID, secondEnrichmentID]))
+        #expect(Set(auditEntries.map(\.action)) == ["review.enrich.batch.schedule"])
+        #expect(Set(auditEntries.map(\.source)) == [.agent])
+        #expect(Set(auditEntries.map { $0.metadata["batchID"] }) == [result.batchID.uuidString])
+        #expect(Set(auditEntries.map { $0.metadata["candidateCount"] }) == ["2"])
+        #expect(Set(auditEntries.map { $0.metadata["excludedCount"] }) == ["1"])
+    }
 }

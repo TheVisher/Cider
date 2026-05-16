@@ -169,6 +169,57 @@ struct CiderReviewQueueActionResult: Equatable {
     }
 }
 
+struct CiderReviewQueueBatchEnrichmentFailure: Equatable {
+    var itemID: UUID
+    var itemType: String
+    var title: String
+    var reason: String
+
+    func toDictionary() -> [String: Any] {
+        [
+            "itemID": itemID.uuidString,
+            "itemType": itemType,
+            "title": title,
+            "reason": reason,
+        ]
+    }
+}
+
+struct CiderReviewQueueBatchEnrichmentResult: Equatable {
+    var action: String
+    var batchID: UUID
+    var generatedAt: Date
+    var actor: String
+    var isMutating: Bool
+    var candidateCount: Int
+    var scheduledCount: Int
+    var excludedCount: Int
+    var skippedCount: Int
+    var failedCount: Int
+    var exclusionsByReason: [String: Int]
+    var failures: [CiderReviewQueueBatchEnrichmentFailure]
+    var safeActions: [String]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        return [
+            "action": action,
+            "batchID": batchID.uuidString,
+            "generatedAt": formatter.string(from: generatedAt),
+            "actor": actor,
+            "isMutating": isMutating,
+            "candidateCount": candidateCount,
+            "scheduledCount": scheduledCount,
+            "excludedCount": excludedCount,
+            "skippedCount": skippedCount,
+            "failedCount": failedCount,
+            "exclusionsByReason": exclusionsByReason,
+            "failures": failures.map { $0.toDictionary() },
+            "safeActions": safeActions,
+        ]
+    }
+}
+
 enum CiderReviewQueueActionError: Error, LocalizedError {
     case itemNotFound(UUID)
     case unsupportedItemType(String)
@@ -380,8 +431,86 @@ final class CiderReviewQueueService {
         )
     }
 
+    func enrichBatch(
+        actor: String = "user",
+        sampleFailureLimit: Int = 10,
+        now: Date = Date()
+    ) throws -> CiderReviewQueueBatchEnrichmentResult {
+        let items = try list(limit: Int.max, now: now).items
+        let candidates = items.filter { item in
+            item.kind == "enrichment"
+                && item.itemType == "bookmark"
+                && item.safeActions.contains("enrich")
+        }
+        let exclusions = items.compactMap { batchEnrichmentExclusionReason(for: $0) }
+        let batchID = UUID()
+        let failureLimit = max(0, sampleFailureLimit)
+        var scheduledCount = 0
+        var failures: [CiderReviewQueueBatchEnrichmentFailure] = []
+
+        for candidate in candidates {
+            do {
+                _ = try enrich(itemID: candidate.itemID, actor: actor)
+                MutationAuditService(database: resolvedDatabase).record(
+                    action: "review.enrich.batch.schedule",
+                    itemType: candidate.itemType,
+                    itemID: candidate.itemID,
+                    after: [
+                        "reviewAction": "enrich",
+                        "status": "scheduled",
+                    ],
+                    metadata: [
+                        "batchID": batchID.uuidString,
+                        "candidateCount": String(candidates.count),
+                        "excludedCount": String(exclusions.count),
+                    ],
+                    source: mutationAuditSource(for: actor)
+                )
+                scheduledCount += 1
+            } catch {
+                if failures.count < failureLimit {
+                    failures.append(
+                        CiderReviewQueueBatchEnrichmentFailure(
+                            itemID: candidate.itemID,
+                            itemType: candidate.itemType,
+                            title: candidate.title,
+                            reason: error.localizedDescription
+                        )
+                    )
+                }
+            }
+        }
+
+        return CiderReviewQueueBatchEnrichmentResult(
+            action: "review.enrich.batch",
+            batchID: batchID,
+            generatedAt: now,
+            actor: actor,
+            isMutating: true,
+            candidateCount: candidates.count,
+            scheduledCount: scheduledCount,
+            excludedCount: exclusions.count,
+            skippedCount: 0,
+            failedCount: candidates.count - scheduledCount,
+            exclusionsByReason: groupedCounts(exclusions),
+            failures: failures,
+            safeActions: ["review summary", "review list", "bookmark get"]
+        )
+    }
+
     func resolveItemID(ref: String) throws -> UUID {
         try routingDecisionService.resolveItemID(ref: ref)
+    }
+
+    private func mutationAuditSource(for actor: String) -> MutationAuditSource? {
+        switch actor.lowercased() {
+        case "agent":
+            return .agent
+        case "cli":
+            return .cli
+        default:
+            return nil
+        }
     }
 
     private func shouldSurface(_ reviewState: String, includeDeferred: Bool) -> Bool {
