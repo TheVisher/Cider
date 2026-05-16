@@ -1237,6 +1237,37 @@ struct CiderCLI {
             }
 
         case "date-suggestions", "dates":
+            if args.first == "approve" {
+                let approvalArgs = Array(args.dropFirst())
+                guard let idPrefix = approvalArgs.first else {
+                    print("Error: ID prefix required. Usage: cider-cli bookmark date-suggestions approve <id> [--index <n>] [--json]")
+                    return
+                }
+                let suggestionIndex = parseFlag("--index", from: approvalArgs).flatMap(Int.init) ?? 0
+                guard suggestionIndex >= 0 else {
+                    print("Error: --index must be 0 or greater")
+                    return
+                }
+                guard let bm = findBookmark(idPrefix, in: service) else { return }
+                do {
+                    let result = try CiderBookmarkDateSuggestionApprovalService().approve(
+                        bookmarkID: bm.id,
+                        suggestionIndex: suggestionIndex
+                    )
+                    if jsonOutput {
+                        outputJSON(bookmarkDateSuggestionApprovalResultToDict(result))
+                    } else {
+                        let action = result.created ? "Created" : "Reused"
+                        print("\(action) date card: \(result.dateCard.title) (\(result.dateCard.id.uuidString.prefix(8)))")
+                        print("  Date suggestion: \(result.suggestion.kind)")
+                        print("  Source bookmark: \(result.bookmarkTitle) (\(result.bookmarkID.uuidString.prefix(8)))")
+                    }
+                } catch {
+                    print("Error: \(error.localizedDescription)")
+                }
+                return
+            }
+
             guard let idPrefix = args.first else {
                 print("Error: ID prefix required. Usage: cider-cli bookmark date-suggestions <id> [--json]")
                 return
@@ -7796,6 +7827,7 @@ struct CiderCLI {
           cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
                     [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]
           cider-cli bookmark date-suggestions <id-prefix> [--json]
+          cider-cli bookmark date-suggestions approve <id-prefix> [--index <n>] [--json]
           cider-cli bookmark similar <id-prefix> [--limit <n>]
           cider-cli bookmark carousel-add <id-prefix> <image-path>
           cider-cli bookmark carousel-remove <id-prefix> --index <n>

@@ -49,7 +49,7 @@ The expected capture loop is:
 
 Keep command details in CLI help and tests, not sprawling docs. The core command areas agents rely on are:
 
-- bookmarks: add, get, list/search, move, tag/update, enrich, duplicate-check
+- bookmarks: add, get, list/search, move, tag/update, enrich, duplicate-check, date-suggestions, date-suggestions approve
 - notes: create, list, update
 - todos/events/contacts/files: create, list, update where supported
 - links: related/backlink operations where available

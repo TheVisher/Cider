@@ -314,6 +314,32 @@ func bookmarkDateSuggestionToDict(_ suggestion: CiderBookmarkDateSuggestion) -> 
     ]
 }
 
+@MainActor func bookmarkDateSuggestionApprovalResultToDict(_ result: CiderBookmarkDateSuggestionApprovalResult) -> [String: Any] {
+    var dateCard = eventToDict(result.dateCard)
+    dateCard["linkedEntities"] = result.dateCard.linkedEntities.map(libraryEntityRefToDict)
+
+    return [
+        "command": result.command,
+        "bookmarkID": result.bookmarkID.uuidString,
+        "bookmarkTitle": result.bookmarkTitle,
+        "sourceURL": result.sourceURL,
+        "suggestion": bookmarkDateSuggestionToDict(result.suggestion),
+        "action": result.action.rawValue,
+        "created": result.created,
+        "reused": result.reused,
+        "dateCard": dateCard,
+        "links": result.dateCard.linkedEntities.map(libraryEntityRefToDict),
+    ]
+}
+
+private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
+    [
+        "id": ref.id,
+        "type": ref.type.rawValue,
+        "entityID": ref.entityID.uuidString,
+    ]
+}
+
 @MainActor func contactToDict(_ contact: ContactCard) -> [String: Any] {
     var d: [String: Any] = [
         "id": contact.id.uuidString,
