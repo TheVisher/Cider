@@ -135,6 +135,78 @@ struct SecondBrainFoundationTests {
         #expect(item["id"] as? String == bookmarkID)
     }
 
+    @Test("process CLI note todo and file creates emit capture provenance")
+    func processCLINoteTodoAndFileCreateEmitCaptureProvenance() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-note-todo-file-capture-shim-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteOutput = try runCLI([
+            "note", "create", "Kitchen idea",
+            "--content", "Ferment lemons with salt.",
+            "--json",
+        ], vaultURL: vault)
+        let notePayload = try jsonObject(from: noteOutput)
+        #expect(notePayload["command"] as? String == "note.create")
+        #expect(notePayload["backendCommand"] as? String == "capture.add")
+        let noteCapture = try #require(notePayload["capture"] as? [String: Any])
+        let noteItem = try #require(noteCapture["item"] as? [String: Any])
+        let noteRouting = try #require(noteCapture["routing"] as? [String: Any])
+        #expect(noteItem["type"] as? String == "note")
+        #expect(noteItem["title"] as? String == "Kitchen idea")
+        #expect(noteRouting["reviewState"] as? String == "needs_review")
+
+        let todoOutput = try runCLI([
+            "todo", "create", "Call dentist",
+            "--due", "2026-05-18",
+            "--priority", "high",
+            "--json",
+        ], vaultURL: vault)
+        let todoPayload = try jsonObject(from: todoOutput)
+        #expect(todoPayload["command"] as? String == "todo.create")
+        #expect(todoPayload["backendCommand"] as? String == "capture.add")
+        let todoCapture = try #require(todoPayload["capture"] as? [String: Any])
+        let todoItem = try #require(todoCapture["item"] as? [String: Any])
+        let todoRouting = try #require(todoCapture["routing"] as? [String: Any])
+        #expect(todoItem["type"] as? String == "todo")
+        #expect(todoItem["title"] as? String == "Call dentist")
+        #expect(todoRouting["reviewState"] as? String == "needs_review")
+
+        let sourceURL = vault.appendingPathComponent("receipt.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: sourceURL)
+        let fileOutput = try runCLI([
+            "file", "import", sourceURL.path,
+            "--title", "Receipt photo",
+            "--json",
+        ], vaultURL: vault)
+        let filePayload = try jsonObject(from: fileOutput)
+        #expect(filePayload["command"] as? String == "file.import")
+        #expect(filePayload["backendCommand"] as? String == "capture.add")
+        let fileCapture = try #require(filePayload["capture"] as? [String: Any])
+        let fileItem = try #require(fileCapture["item"] as? [String: Any])
+        let fileRouting = try #require(fileCapture["routing"] as? [String: Any])
+        #expect(fileItem["type"] as? String == "vaultFile")
+        #expect(fileItem["title"] as? String == "Receipt photo")
+        #expect(fileRouting["reviewState"] as? String == "needs_review")
+
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        let db = CiderDatabase()
+        try db.open(at: dbURL)
+        defer { db.close() }
+
+        let routing = CiderRoutingDecisionService(database: db)
+        let noteIDString = try #require(notePayload["id"] as? String)
+        let todoIDString = try #require(todoPayload["id"] as? String)
+        let fileIDString = try #require(filePayload["id"] as? String)
+        let noteID = try #require(UUID(uuidString: noteIDString))
+        let todoID = try #require(UUID(uuidString: todoIDString))
+        let fileID = try #require(UUID(uuidString: fileIDString))
+        #expect(try routing.explain(itemID: noteID).latestDecision?.source == "capture.add")
+        #expect(try routing.explain(itemID: todoID).latestDecision?.source == "capture.add")
+        #expect(try routing.explain(itemID: fileID).latestDecision?.source == "capture.add")
+    }
+
     @Test("bookmark move records manual routing provenance")
     func bookmarkMoveRecordsManualRoutingProvenance() throws {
         let vault = FileManager.default.temporaryDirectory

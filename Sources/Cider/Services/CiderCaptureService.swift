@@ -266,15 +266,29 @@ final class CiderCaptureService {
         title: String?,
         folderID: UUID?
     ) throws -> CiderCaptureResult {
-        let note = notesStorage.createNew(initialContent: source)
-        if let title = normalizedTitle(title) ?? derivedTextTitle(from: source) {
-            notesStorage.rename(note: note, to: title)
+        try addNoteCapture(title: title, content: source, folderID: folderID)
+    }
+
+    func addNoteCapture(
+        title: String?,
+        content: String,
+        folderID: UUID?
+    ) throws -> CiderCaptureResult {
+        let manualTitle = normalizedTitle(title)
+        let derivedTitle = derivedTextTitle(from: content)
+        guard manualTitle != nil || derivedTitle != nil || !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CiderCaptureError.missingSource
+        }
+
+        let note = notesStorage.createNew(initialContent: content)
+        if let noteTitle = manualTitle ?? derivedTitle {
+            notesStorage.rename(note: note, to: noteTitle)
         }
         if let folderID {
             _ = notesStorage.assignNote(note.id, toFolder: folderID)
         }
         guard let stored = notesStorage.notes.first(where: { $0.id == note.id }) else {
-            throw CiderCaptureError.storeFailed(source)
+            throw CiderCaptureError.storeFailed(content)
         }
 
         let target = routingTarget(
@@ -296,7 +310,7 @@ final class CiderCaptureService {
             sourceKind: "text",
             sourceURL: nil,
             sourceFile: nil,
-            sourceText: source,
+            sourceText: content,
             itemID: stored.id,
             itemType: "note",
             title: stored.title,
@@ -304,7 +318,7 @@ final class CiderCaptureService {
             folderID: stored.folderID,
             folderName: target.name,
             enrichmentStatus: "not_applicable",
-            titleState: normalizedTitle(title) == nil ? "derived" : "manual",
+            titleState: manualTitle == nil ? "derived" : "manual",
             duplicateStatus: "not_checked",
             routing: routing,
             nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item"
@@ -316,14 +330,31 @@ final class CiderCaptureService {
         title: String?,
         folderID: UUID?
     ) throws -> CiderCaptureResult {
-        let todoTitle = normalizedTitle(title) ?? derivedTodoTitle(from: source)
-        var todo = todoStorage.createTodoCard(title: todoTitle)
+        try addTodoCapture(
+            title: normalizedTitle(title) ?? derivedTodoTitle(from: source),
+            sourceText: source,
+            dueDate: nil,
+            priority: nil,
+            folderID: folderID,
+            titleState: normalizedTitle(title) == nil ? "derived" : "manual"
+        )
+    }
+
+    func addTodoCapture(
+        title: String,
+        sourceText: String?,
+        dueDate: Date?,
+        priority: TodoPriority?,
+        folderID: UUID?,
+        titleState: String = "manual"
+    ) throws -> CiderCaptureResult {
+        var todo = todoStorage.createTodoCard(title: title, dueDate: dueDate, priority: priority)
         if let folderID {
             todo.folderID = folderID
             _ = todoStorage.updateTodoCard(todo)
         }
         guard let stored = todoStorage.todoCards.first(where: { $0.id == todo.id }) else {
-            throw CiderCaptureError.storeFailed(source)
+            throw CiderCaptureError.storeFailed(title)
         }
 
         let relativePath = itemRelativePathFromDatabase(itemID: stored.id) ?? "Inbox/Todos"
@@ -346,7 +377,7 @@ final class CiderCaptureService {
             sourceKind: "text",
             sourceURL: nil,
             sourceFile: nil,
-            sourceText: source,
+            sourceText: sourceText ?? title,
             itemID: stored.id,
             itemType: "todo",
             title: stored.title,
@@ -354,7 +385,7 @@ final class CiderCaptureService {
             folderID: stored.folderID,
             folderName: target.name,
             enrichmentStatus: "not_applicable",
-            titleState: normalizedTitle(title) == nil ? "derived" : "manual",
+            titleState: titleState,
             duplicateStatus: "not_checked",
             routing: routing,
             nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item"
@@ -366,6 +397,16 @@ final class CiderCaptureService {
         title: String?,
         folderID: UUID?
     ) throws -> CiderCaptureResult {
+        try addFileCapture(sourcePath: source, title: title, folderID: folderID)
+    }
+
+    func addFileCapture(
+        sourcePath: String,
+        title: String?,
+        folderID: UUID?
+    ) throws -> CiderCaptureResult {
+        let source = sourcePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty else { throw CiderCaptureError.missingSource }
         let sourceURL = URL(fileURLWithPath: NSString(string: source).expandingTildeInPath)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory),

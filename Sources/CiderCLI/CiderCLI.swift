@@ -1708,14 +1708,27 @@ struct CiderCLI {
             let content = (parseFlag("--content", from: args) ?? "")
                 .replacingOccurrences(of: "\\n", with: "\n")
                 .replacingOccurrences(of: "\\t", with: "\t")
-            let note = storage.createNew(initialContent: content)
-            if !title.isEmpty, title != "Untitled" {
-                storage.rename(note: note, to: title)
+            do {
+                let database = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil
+                let result = try CiderCaptureService(notesStorage: storage, database: database).addNoteCapture(
+                    title: title,
+                    content: content,
+                    folderID: targetFolder?.id
+                )
+                let note = storage.notes.first(where: { $0.id == result.item.id })
+                if jsonOutput, let note {
+                    var dict = noteToDict(note)
+                    dict["content"] = storage.loadContent(for: note)
+                    dict["command"] = "note.create"
+                    dict["backendCommand"] = result.command
+                    dict["capture"] = result.toDictionary()
+                    outputJSON(dict)
+                } else {
+                    print("Created note: \(result.item.title) (\(result.item.id.uuidString.prefix(8)))")
+                }
+            } catch {
+                print("Error: \(error.localizedDescription)")
             }
-            if let targetFolder {
-                _ = storage.assignNote(note.id, toFolder: targetFolder.id)
-            }
-            print("Created note: \(title) (\(note.id.uuidString.prefix(8)))")
 
         case "get", "show":
             guard let idPrefix = args.first else {
@@ -2024,16 +2037,31 @@ struct CiderCLI {
                 default: return nil
                 }
             }()
-            var todo = storage.createTodoCard(title: title, dueDate: dueDate, priority: priority)
-            guard storage.todoCards.contains(where: { $0.id == todo.id }) else {
-                print("Error: Failed to create todo (disk write failed)")
-                return
+            do {
+                let database = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil
+                let result = try CiderCaptureService(todoStorage: storage, database: database).addTodoCapture(
+                    title: title,
+                    sourceText: title,
+                    dueDate: dueDate,
+                    priority: priority,
+                    folderID: targetFolder?.id
+                )
+                if let todo = storage.todoCards.first(where: { $0.id == result.item.id }) {
+                    if jsonOutput {
+                        var dict = todoToDict(todo)
+                        dict["command"] = "todo.create"
+                        dict["backendCommand"] = result.command
+                        dict["capture"] = result.toDictionary()
+                        outputJSON(dict)
+                    } else {
+                        print("Created todo: \(todo.title) (\(todo.id.uuidString.prefix(8)))")
+                    }
+                } else {
+                    print("Error: Failed to create todo (disk write failed)")
+                }
+            } catch {
+                print("Error: \(error.localizedDescription)")
             }
-            if let targetFolder {
-                todo.folderID = targetFolder.id
-                _ = storage.updateTodoCard(todo)
-            }
-            print("Created todo: \(todo.title) (\(todo.id.uuidString.prefix(8)))")
 
         case "complete", "done":
             guard let idPrefix = args.first else {
@@ -3335,6 +3363,54 @@ struct CiderCLI {
 
     static func handleFile(subcommand: String?, args: [String], service: VaultFileService) {
         switch subcommand {
+        case "add", "import":
+            guard let sourcePath = args.first else {
+                print("Error: Source path required. Usage: cider-cli file import <path> [--title <title>] [--folder <name|path>] [--json]")
+                return
+            }
+
+            let targetFolder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: targetFolder = nil
+            case .resolved(let folder): targetFolder = folder
+            case .failed: return
+            }
+
+            do {
+                let database = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil
+                let result = try CiderCaptureService(vaultFileStorage: VaultFileStorage.shared, database: database).addFileCapture(
+                    sourcePath: sourcePath,
+                    title: parseFlag("--title", from: args),
+                    folderID: targetFolder?.id
+                )
+                if jsonOutput {
+                    if let file = service.files.first(where: { $0.id == result.item.id }) {
+                        var dict = vaultFileToDict(file)
+                        dict["command"] = "file.import"
+                        dict["backendCommand"] = result.command
+                        dict["capture"] = result.toDictionary()
+                        outputJSON(dict)
+                    } else {
+                        var dict: [String: Any] = [
+                            "id": result.item.id.uuidString,
+                            "displayTitle": result.item.title,
+                            "folder": result.item.folderName,
+                            "command": "file.import",
+                            "backendCommand": result.command,
+                            "capture": result.toDictionary(),
+                        ]
+                        if let relativePath = result.item.relativePath {
+                            dict["relativePath"] = relativePath
+                        }
+                        outputJSON(dict)
+                    }
+                } else {
+                    print("Imported file: \(result.item.title) (\(result.item.id.uuidString.prefix(8)))")
+                }
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
         case "list", "ls":
             let typeFilter = parseFlag("--type", from: args)
             let folderName = parseFlag("--folder", from: args)
@@ -3518,7 +3594,7 @@ struct CiderCLI {
 
         default:
             print("Unknown file command: \(subcommand ?? "nil")")
-            print("Commands: list, get, move, delete, update, tag, untag, enrich")
+            print("Commands: import, add, list, get, move, delete, update, tag, untag, enrich")
         }
     }
 
