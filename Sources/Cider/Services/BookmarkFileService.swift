@@ -211,6 +211,35 @@ final class BookmarkFileService {
         return relativePath
     }
 
+    /// Renames a bookmark artifact within its current folder without changing
+    /// the bookmark's routed location.
+    func renameInPlace(
+        bookmark: Bookmark,
+        filename: String,
+        in dirURL: URL,
+        dirRelativePath: String
+    ) throws -> String {
+        let destFilename = uniqueFilename(
+            for: sanitizedFilename(bookmark.title.isEmpty ? "Untitled" : bookmark.title),
+            extension: "webloc",
+            in: dirURL
+        )
+        guard destFilename != filename else {
+            return dirRelativePath.isEmpty ? filename : "\(dirRelativePath)/\(filename)"
+        }
+
+        let sourceFileURL = dirURL.appendingPathComponent(filename)
+        let destFileURL = dirURL.appendingPathComponent(destFilename)
+        try fm.moveItem(at: sourceFileURL, to: destFileURL)
+
+        removeSidecarEntry(at: dirURL, filename: filename)
+        removeSidecarEntry(at: dirURL, filename: destFilename)
+
+        let relativePath = dirRelativePath.isEmpty ? destFilename : "\(dirRelativePath)/\(destFilename)"
+        logger.info("Renamed bookmark artifact: \(filename) → \(relativePath)")
+        return relativePath
+    }
+
     // MARK: - Delete
 
     /// Deletes a bookmark's `.webloc` file using the in-memory bookmark metadata

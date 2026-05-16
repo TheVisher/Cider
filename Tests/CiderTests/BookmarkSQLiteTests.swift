@@ -955,6 +955,180 @@ struct BookmarkSQLiteTests {
         #expect(reloaded.bookmarks.first?.notes.contains("By HeyJosh_") == true)
     }
 
+    @Test("Legacy index metadata renames generic bookmark artifact after rich title merge")
+    func legacyIndexMetadataRenamesGenericArtifactAfterRichTitleMerge() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-bookmark-artifact-rename-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let oldRelativePath = "Inbox/Bookmarks/Tiktok.Com (2).webloc"
+        let oldURL = vault.appendingPathComponent(oldRelativePath)
+        let plist = ["URL": "https://www.tiktok.com/@petalbnesnp/video/7624097886959291678?is_from_webapp=1"]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: oldURL, options: .atomic)
+
+        let canonicalID = UUID()
+        let service = makeService(db)
+        let canonical = Bookmark(
+            id: canonicalID,
+            title: "Tiktok.Com (2)",
+            urlString: "https://www.tiktok.com/@petalbnesnp/video/7624097886959291678?is_from_webapp=1",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            notes: "",
+            tags: [],
+            relativePath: oldRelativePath
+        )
+        let rich = Bookmark(
+            id: UUID(),
+            title: "This tiny dog has opinions about Mondays",
+            urlString: "https://www.tiktok.com/@petalbnesnp/video/7624097886959291678?is_from_webapp=1",
+            createdAt: Date(timeIntervalSince1970: 1_500),
+            updatedAt: Date(timeIntervalSince1970: 3_000),
+            notes: "This tiny dog has opinions about Mondays.\n\nVia TikTok",
+            tags: ["tiktok"],
+            thumbnailRemoteURLString: "https://p16-sign-va.tiktokcdn.com/dog.jpeg",
+            metadataUpdatedAt: Date(timeIntervalSince1970: 3_000),
+            relativePath: "Inbox/Bookmarks/This tiny dog has opinions about Mondays.webloc",
+            titleManuallySet: true,
+            notesManuallySet: true
+        )
+
+        service.persistBookmarkToDatabase(db, bookmark: canonical)
+        service.loadBookmarksFromDatabase(db)
+
+        #expect(service.mergeLegacyIndexBookmarks([rich]) == true)
+
+        let merged = try #require(service.bookmarks.first)
+        #expect(merged.id == canonicalID)
+        #expect(merged.title == "This tiny dog has opinions about Mondays")
+        #expect(merged.relativePath == "Inbox/Bookmarks/This tiny dog has opinions about Mondays.webloc")
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Inbox/Bookmarks/This tiny dog has opinions about Mondays.webloc").path))
+        #expect(!fm.fileExists(atPath: oldURL.path))
+
+        let stmt = try db.prepare("""
+            SELECT i.relative_path, b.url
+            FROM items i
+            JOIN bookmarks b ON b.item_id = i.id
+            WHERE i.id = ?;
+            """)
+        stmt.bind(DatabaseHelpers.encode(canonicalID), at: 1)
+        #expect(try stmt.step())
+        #expect(stmt.optionalString(at: 0) == "Inbox/Bookmarks/This tiny dog has opinions about Mondays.webloc")
+        #expect(stmt.string(at: 1) == "https://www.tiktok.com/@petalbnesnp/video/7624097886959291678?is_from_webapp=1")
+    }
+
+    @Test("OEmbed title enrichment renames generic bookmark artifact")
+    func oEmbedTitleEnrichmentRenamesGenericArtifact() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-oembed-artifact-rename-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let oldRelativePath = "Inbox/Bookmarks/Tiktok.Com.webloc"
+        let oldURL = vault.appendingPathComponent(oldRelativePath)
+        let sourceURL = "https://www.tiktok.com/@petalbnesnp/video/7624097886959291678"
+        let plist = ["URL": sourceURL]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: oldURL, options: .atomic)
+
+        let bookmarkID = UUID()
+        let service = makeService(db)
+        let bookmark = Bookmark(
+            id: bookmarkID,
+            title: "Tiktok.Com",
+            urlString: sourceURL,
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            relativePath: oldRelativePath
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        service.applyOEmbedResults(
+            for: bookmarkID,
+            title: "This tiny dog has opinions about Mondays",
+            notes: "This tiny dog has opinions about Mondays."
+        )
+
+        let updated = try #require(service.bookmarks.first)
+        #expect(updated.title == "This tiny dog has opinions about Mondays")
+        #expect(updated.relativePath == "Inbox/Bookmarks/This tiny dog has opinions about Mondays.webloc")
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Inbox/Bookmarks/This tiny dog has opinions about Mondays.webloc").path))
+        #expect(!fm.fileExists(atPath: oldURL.path))
+    }
+
+    @Test("OEmbed title enrichment preserves curated bookmark artifact path")
+    func oEmbedTitleEnrichmentPreservesCuratedArtifactPath() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-oembed-curated-artifact-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let folder = vault.appendingPathComponent("Projects/Dogs", isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let curatedRelativePath = "Projects/Dogs/Tiny dog research.webloc"
+        let curatedURL = vault.appendingPathComponent(curatedRelativePath)
+        let sourceURL = "https://www.tiktok.com/@petalbnesnp/video/7624097886959291678"
+        let plist = ["URL": sourceURL]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: curatedURL, options: .atomic)
+
+        let bookmarkID = UUID()
+        let service = makeService(db)
+        let bookmark = Bookmark(
+            id: bookmarkID,
+            title: "Tiktok.Com",
+            urlString: sourceURL,
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            relativePath: curatedRelativePath
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        service.applyOEmbedResults(
+            for: bookmarkID,
+            title: "This tiny dog has opinions about Mondays",
+            notes: nil
+        )
+
+        let updated = try #require(service.bookmarks.first)
+        #expect(updated.title == "This tiny dog has opinions about Mondays")
+        #expect(updated.relativePath == curatedRelativePath)
+        #expect(fm.fileExists(atPath: curatedURL.path))
+        #expect(!fm.fileExists(atPath: vault.appendingPathComponent("Projects/Dogs/This tiny dog has opinions about Mondays.webloc").path))
+    }
+
     // MARK: - Empty Database
 
     @Test("Empty database loads empty bookmarks array")

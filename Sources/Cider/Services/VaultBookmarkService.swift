@@ -427,7 +427,9 @@ final class VaultBookmarkService: ObservableObject {
                       $0.id != legacy.id && bookmarkURLDedupKey($0.urlString) == key
                   }) else { continue }
 
-            let merged = mergeLoadedDuplicateBookmark(existing: bookmarks[index], duplicate: legacy)
+            let existing = bookmarks[index]
+            var merged = mergeLoadedDuplicateBookmark(existing: existing, duplicate: legacy)
+            merged = renameBookmarkArtifactAfterTitleUpgrade(previous: existing, updated: merged)
             if merged != bookmarks[index] {
                 bookmarks[index] = merged
                 changed = true
@@ -586,14 +588,14 @@ final class VaultBookmarkService: ObservableObject {
             bookmarkURLDedupKey($0.urlString) == canonicalDedupKey
         }) {
             var existing = bookmarks.remove(at: existingIndex)
+            let previous = existing
             if let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 existing.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
             }
-            // TODO: Cosmetic issue — the .webloc filename on disk still reflects the old title.
-            // The SQLite-backed bookmark title is correct, so the UI still renders the curated title.
             existing.updatedAt = Date()
             existing.urlString = canonical
             existing.isEnriching = false
+            existing = renameBookmarkArtifactAfterTitleUpgrade(previous: previous, updated: existing)
             bookmarks.insert(existing, at: 0)
             persist()
             if let folderID, existing.folderID != folderID {
@@ -1482,6 +1484,7 @@ final class VaultBookmarkService: ObservableObject {
         title: String? = nil
     ) {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        let previous = bookmarks[index]
         var bookmark = bookmarks[index]
         var changed = false
         if bookmark.tags != tags { bookmark.tags = tags; changed = true }
@@ -1489,6 +1492,7 @@ final class VaultBookmarkService: ObservableObject {
         if bookmark.dominantColors != dominantColors { bookmark.dominantColors = dominantColors; changed = true }
         if let title, !title.isEmpty, bookmark.title != title, !bookmark.titleManuallySet { bookmark.title = title; changed = true }
         guard changed else { return }
+        bookmark = renameBookmarkArtifactAfterTitleUpgrade(previous: previous, updated: bookmark)
         bookmarks[index] = bookmark
         persist()
     }
@@ -1499,6 +1503,7 @@ final class VaultBookmarkService: ObservableObject {
         notes: String?
     ) {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        let previous = bookmarks[index]
         var bookmark = bookmarks[index]
         var changed = false
         if let title, !title.isEmpty, bookmark.title != title, !bookmark.titleManuallySet {
@@ -1509,6 +1514,7 @@ final class VaultBookmarkService: ObservableObject {
             bookmark.notes = notes; changed = true
         }
         guard changed else { return }
+        bookmark = renameBookmarkArtifactAfterTitleUpgrade(previous: previous, updated: bookmark)
         bookmarks[index] = bookmark
         persist()
     }
@@ -2936,6 +2942,59 @@ final class VaultBookmarkService: ObservableObject {
             merged.lastEnrichedAt = duplicate.lastEnrichedAt
         }
         return merged
+    }
+
+    private func renameBookmarkArtifactAfterTitleUpgrade(previous: Bookmark, updated: Bookmark) -> Bookmark {
+        guard previous.title != updated.title,
+              !previous.titleManuallySet,
+              let relativePath = previous.relativePath,
+              relativePath.hasSuffix(".webloc"),
+              let sourceURL = URL(string: previous.urlString),
+              !isHostDerivedTitle(Bookmark(title: updated.title, urlString: sourceURL.absoluteString), sourceURL: sourceURL),
+              !isProviderGenericTitle(updated.title, sourceURL: sourceURL),
+              shouldRenameArtifactForTitleUpgrade(relativePath: relativePath, oldTitle: previous.title, sourceURL: sourceURL)
+        else { return updated }
+
+        let sourceFileURL = vaultRoot.appendingPathComponent(relativePath)
+        guard FileManager.default.fileExists(atPath: sourceFileURL.path) else { return updated }
+
+        let dirURL = sourceFileURL.deletingLastPathComponent()
+        let filename = sourceFileURL.lastPathComponent
+        let dirRelativePath = (relativePath as NSString).deletingLastPathComponent
+        let normalizedDirRelativePath = dirRelativePath == "." ? "" : dirRelativePath
+
+        do {
+            var renamed = updated
+            let newRelativePath = try BookmarkFileService.shared.renameInPlace(
+                bookmark: updated,
+                filename: filename,
+                in: dirURL,
+                dirRelativePath: normalizedDirRelativePath
+            )
+            renamed.relativePath = newRelativePath
+            return renamed
+        } catch {
+            logger.error("Failed to rename bookmark artifact after title upgrade: \(error.localizedDescription)")
+            return updated
+        }
+    }
+
+    private func shouldRenameArtifactForTitleUpgrade(relativePath: String, oldTitle: String, sourceURL: URL) -> Bool {
+        let filename = (relativePath as NSString).lastPathComponent
+        let fileTitle = ((filename as NSString).deletingPathExtension)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let strippedFileTitle = duplicateSuffixStrippedTitle(fileTitle)
+        let strippedOldTitle = duplicateSuffixStrippedTitle(oldTitle)
+        guard !strippedFileTitle.isEmpty, !strippedOldTitle.isEmpty else { return false }
+
+        if strippedFileTitle.caseInsensitiveCompare(strippedOldTitle) == .orderedSame {
+            return isHostDerivedTitle(Bookmark(title: oldTitle, urlString: sourceURL.absoluteString), sourceURL: sourceURL)
+                || isProviderGenericTitle(oldTitle, sourceURL: sourceURL)
+        }
+
+        let hostTitle = resolvedTitle(for: sourceURL, override: nil)
+        return strippedFileTitle.caseInsensitiveCompare(hostTitle) == .orderedSame
+            || isProviderGenericTitle(strippedFileTitle, sourceURL: sourceURL)
     }
 
     private func shouldApplyDuplicateBookmarkTitle(
