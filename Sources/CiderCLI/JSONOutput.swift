@@ -289,6 +289,31 @@ func storageAuditMismatchToDict(_ mismatch: CiderStorageAuditMismatch) -> [Strin
     ]
 }
 
+func bookmarkDateSuggestionResultToDict(_ result: CiderBookmarkDateSuggestionResult) -> [String: Any] {
+    [
+        "command": result.command,
+        "bookmarkID": result.bookmarkID.uuidString,
+        "bookmarkTitle": result.bookmarkTitle,
+        "sourceURL": result.sourceURL,
+        "count": result.suggestions.count,
+        "suggestions": result.suggestions.map(bookmarkDateSuggestionToDict),
+    ]
+}
+
+func bookmarkDateSuggestionToDict(_ suggestion: CiderBookmarkDateSuggestion) -> [String: Any] {
+    [
+        "bookmarkID": suggestion.bookmarkID.uuidString,
+        "bookmarkTitle": suggestion.bookmarkTitle,
+        "sourceURL": suggestion.sourceURL,
+        "kind": suggestion.kind,
+        "confidence": suggestion.confidence,
+        "date": ISO8601DateFormatter().string(from: suggestion.date),
+        "sourceField": suggestion.sourceField,
+        "sourceSnippet": suggestion.sourceSnippet,
+        "nextSafeAction": suggestion.nextSafeAction,
+    ]
+}
+
 @MainActor func contactToDict(_ contact: ContactCard) -> [String: Any] {
     var d: [String: Any] = [
         "id": contact.id.uuidString,

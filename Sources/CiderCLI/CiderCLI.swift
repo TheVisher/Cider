@@ -626,6 +626,9 @@ struct CiderCLI {
                     }
                     if let finalBookmark {
                         dict["bookmark"] = bookmarkToDict(finalBookmark)
+                        dict["dateSuggestions"] = CiderBookmarkDateSuggestionService()
+                            .suggestions(for: finalBookmark)
+                            .map(bookmarkDateSuggestionToDict)
                         var item = (dict["item"] as? [String: Any]) ?? [:]
                         item["title"] = finalBookmark.title
                         item["folderName"] = finalBookmark.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
@@ -1233,6 +1236,33 @@ struct CiderCLI {
                 }
             }
 
+        case "date-suggestions", "dates":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli bookmark date-suggestions <id> [--json]")
+                return
+            }
+            if let bm = findBookmark(idPrefix, in: service) {
+                let result = CiderBookmarkDateSuggestionService().result(for: bm)
+                if jsonOutput {
+                    outputJSON(bookmarkDateSuggestionResultToDict(result))
+                } else {
+                    print("Date suggestions for '\(bm.title)' (\(result.suggestions.count)):")
+                    if result.suggestions.isEmpty {
+                        print("  No clear date suggestions.")
+                    } else {
+                        let formatter = DateFormatter()
+                        formatter.dateStyle = .medium
+                        formatter.timeStyle = .short
+                        for suggestion in result.suggestions {
+                            print("  \(suggestion.kind): \(formatter.string(from: suggestion.date))")
+                            print("    Confidence: \(String(format: "%.2f", suggestion.confidence))")
+                            print("    Source: \(suggestion.sourceField) — \(suggestion.sourceSnippet)")
+                            print("    Next safe action: \(suggestion.nextSafeAction)")
+                        }
+                    }
+                }
+            }
+
         case "carousel-add":
             guard let idPrefix = args.first else {
                 print("Error: Usage: cider-cli bookmark carousel-add <id> <image-path>")
@@ -1327,7 +1357,7 @@ struct CiderCLI {
 
         default:
             print("Unknown bookmark command: \(subcommand ?? "nil")")
-            print("Commands: list, add, get, search, move, tag, untag, delete, enrich, update, similar, carousel-add, carousel-remove, carousel-reorder")
+            print("Commands: list, add, get, search, move, tag, untag, delete, enrich, update, date-suggestions, similar, carousel-add, carousel-remove, carousel-reorder")
         }
     }
 
@@ -7765,6 +7795,7 @@ struct CiderCLI {
           cider-cli bookmark enrich <id-prefix> [--timeout <seconds>|--no-wait] | --all
           cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
                     [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]
+          cider-cli bookmark date-suggestions <id-prefix> [--json]
           cider-cli bookmark similar <id-prefix> [--limit <n>]
           cider-cli bookmark carousel-add <id-prefix> <image-path>
           cider-cli bookmark carousel-remove <id-prefix> --index <n>
