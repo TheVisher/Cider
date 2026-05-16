@@ -558,6 +558,43 @@ struct BookmarkSQLiteTests {
         #expect(abs(loaded.lastEnrichedAt!.timeIntervalSince(enrichedDate)) < 0.001)
     }
 
+    @Test("OEmbed enrichment completion clears bookmark review issue")
+    func oEmbedEnrichmentCompletionClearsBookmarkReviewIssue() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+        let bookmark = Bookmark(
+            title: "Dynamic Dungeons - Animated Gaming Table",
+            urlString: "https://www.tiktok.com/t/example/",
+            notes: "",
+            relativePath: "Hobbies/Gaming/Dynamic Dungeons - Animated Gaming Table.webloc",
+            titleManuallySet: true
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        let queueBefore = CiderReviewQueueService(database: db)
+        #expect(try queueBefore.list().items.map(\.itemID) == [bookmark.id])
+
+        service.applyOEmbedResults(
+            for: bookmark.id,
+            title: "Ignored because title is manual",
+            notes: "By Dynamic Dungeons\nVia TikTok"
+        )
+
+        let service2 = makeService(db)
+        service2.loadBookmarksFromDatabase(db)
+        let enriched = try #require(service2.bookmarks.first)
+        #expect(enriched.title == "Dynamic Dungeons - Animated Gaming Table")
+        #expect(enriched.notes == "By Dynamic Dungeons\nVia TikTok")
+        #expect(enriched.enrichmentStatus == "complete")
+        #expect(enriched.lastEnrichedAt != nil)
+
+        let queueAfter = CiderReviewQueueService(database: db)
+        #expect(try queueAfter.list().items.isEmpty)
+    }
+
     @Test("Nil enrichment fields round-trip as nil")
     func enrichmentFieldsNil() throws {
         let (db, url) = try makeTestDB()

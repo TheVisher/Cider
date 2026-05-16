@@ -207,7 +207,9 @@ struct CiderCaptureServiceTests {
             tags: ["tiktok"],
             thumbnailRemoteURLString: "https://p16-sign-va.tiktokcdn.com/example.jpeg",
             metadataUpdatedAt: Date(timeIntervalSince1970: 3_000),
-            relativePath: "Inbox/Bookmarks/Sharks Loved This TINY Charger.webloc"
+            relativePath: "Inbox/Bookmarks/Sharks Loved This TINY Charger.webloc",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: startedAt.addingTimeInterval(1.2)
         )
 
         #expect(
@@ -241,6 +243,44 @@ struct CiderCaptureServiceTests {
                 now: startedAt.addingTimeInterval(1.7),
                 timeout: 2
             )
+        )
+    }
+
+    @Test("capture wait does not settle before enrichment completion")
+    func captureWaitDoesNotSettleBeforeEnrichmentCompletion() throws {
+        let startedAt = Date(timeIntervalSince1970: 10_000)
+        var state = CiderCLI.BookmarkNativeCaptureWaitState(
+            sawEnrichmentRunning: true,
+            polls: 3
+        )
+        let metadataOnly = Bookmark(
+            id: UUID(),
+            title: "GitHub - nodes-app/swift-markdown-engine",
+            urlString: "https://github.com/nodes-app/swift-markdown-engine",
+            createdAt: startedAt,
+            updatedAt: startedAt.addingTimeInterval(1),
+            thumbnailRemoteURLString: "https://opengraph.githubassets.com/example",
+            metadataUpdatedAt: startedAt.addingTimeInterval(1),
+            relativePath: "Inbox/Bookmarks/Github.Com.webloc"
+        )
+
+        #expect(
+            CiderCLI.shouldReturnNativeBookmarkCapture(
+                bookmark: metadataOnly,
+                state: &state,
+                startedAt: startedAt,
+                now: startedAt.addingTimeInterval(2),
+                timeout: 30
+            ) == false
+        )
+        #expect(
+            CiderCLI.shouldReturnNativeBookmarkCapture(
+                bookmark: metadataOnly,
+                state: &state,
+                startedAt: startedAt,
+                now: startedAt.addingTimeInterval(2.5),
+                timeout: 30
+            ) == false
         )
     }
 

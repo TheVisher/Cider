@@ -697,6 +697,65 @@ struct CiderReviewQueueServiceTests {
         #expect((jobDictionary["itemSamples"] as? [[String: Any]])?.count == 2)
     }
 
+    @Test("review action job history summarizes batch enrichment result rows")
+    func reviewActionJobHistorySummarizesBatchEnrichmentResultRows() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let completedID = try insertBookmark(
+            db,
+            title: "Completed Metadata",
+            relativePath: "Inbox/Bookmarks/Completed Metadata.webloc",
+            enrichmentStatus: "pending",
+            lastEnrichedAt: nil
+        )
+        let timedOutID = try insertBookmark(
+            db,
+            title: "Timed Out Metadata",
+            relativePath: "Inbox/Bookmarks/Timed Out Metadata.webloc",
+            enrichmentStatus: "pending",
+            lastEnrichedAt: nil
+        )
+        let queue = CiderReviewQueueService(
+            database: db,
+            enrichmentScheduler: { _ in }
+        )
+        let batch = try queue.enrichBatch(actor: "agent", sampleFailureLimit: 3)
+        let audit = MutationAuditService(database: db)
+        for (itemID, status) in [(completedID, "completed"), (timedOutID, "timed_out")] {
+            audit.record(
+                action: "review.enrich.batch.result",
+                itemType: "bookmark",
+                itemID: itemID,
+                after: [
+                    "reviewAction": "enrich",
+                    "status": status,
+                ],
+                metadata: [
+                    "batchID": batch.batchID.uuidString,
+                    "candidateCount": "2",
+                    "excludedCount": "0",
+                ],
+                source: .agent
+            )
+        }
+
+        let history = try queue.actionJobHistory(limit: 10)
+
+        let job = try #require(history.jobs.first)
+        #expect(job.batchID == batch.batchID)
+        #expect(job.resultState == "partial")
+        #expect(job.candidateCount == 2)
+        #expect(job.scheduledCount == 2)
+        #expect(job.failedCount == 1)
+        #expect(job.itemSamples.map(\.status) == ["timed_out", "completed"])
+
+        let dictionary = history.toDictionary()
+        let jobs = try #require(dictionary["jobs"] as? [[String: Any]])
+        let jobDictionary = try #require(jobs.first)
+        #expect(jobDictionary["resultState"] as? String == "partial")
+        #expect(jobDictionary["failedCount"] as? Int == 1)
+    }
+
     @Test("review action job history mixes enrichment batches and routing actions")
     func reviewActionJobHistoryMixesEnrichmentBatchesAndRoutingActions() throws {
         let (db, url) = try makeTempDB()

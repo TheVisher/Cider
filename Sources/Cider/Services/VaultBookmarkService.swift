@@ -1499,6 +1499,7 @@ final class VaultBookmarkService: ObservableObject {
         if bookmark.ocrText != ocrText { bookmark.ocrText = ocrText; changed = true }
         if bookmark.dominantColors != dominantColors { bookmark.dominantColors = dominantColors; changed = true }
         if let title, !title.isEmpty, bookmark.title != title, !bookmark.titleManuallySet { bookmark.title = title; changed = true }
+        changed = markEnrichmentComplete(&bookmark) || changed
         guard changed else { return }
         bookmark = renameBookmarkArtifactAfterTitleUpgrade(previous: previous, updated: bookmark)
         bookmarks[index] = bookmark
@@ -1521,6 +1522,7 @@ final class VaultBookmarkService: ObservableObject {
         if let notes, !notes.isEmpty, bookmark.notes.isEmpty, !bookmark.notesManuallySet {
             bookmark.notes = notes; changed = true
         }
+        changed = markEnrichmentComplete(&bookmark) || changed
         guard changed else { return }
         bookmark = renameBookmarkArtifactAfterTitleUpgrade(previous: previous, updated: bookmark)
         bookmarks[index] = bookmark
@@ -1885,6 +1887,7 @@ final class VaultBookmarkService: ObservableObject {
 
         bookmark.isEnriching = false
         bookmark.metadataUpdatedAt = Date()
+        changed = markEnrichmentComplete(&bookmark) || changed
         if changed { bookmark.updatedAt = Date() }
 
         bookmarks[index] = bookmark
@@ -1922,6 +1925,20 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     private static let recipeExtractionMarker = "Cider native recipe extraction source:"
+
+    @discardableResult
+    private func markEnrichmentComplete(_ bookmark: inout Bookmark, now: Date = Date()) -> Bool {
+        var changed = false
+        if bookmark.enrichmentStatus != "complete" {
+            bookmark.enrichmentStatus = "complete"
+            changed = true
+        }
+        if bookmark.lastEnrichedAt == nil {
+            bookmark.lastEnrichedAt = now
+            changed = true
+        }
+        return changed
+    }
 
     private func shouldApplyRecipeExtractionText(_ recipeExtractionText: String, to bookmark: Bookmark) -> Bool {
         let trimmed = recipeExtractionText.trimmingCharacters(in: .whitespacesAndNewlines)

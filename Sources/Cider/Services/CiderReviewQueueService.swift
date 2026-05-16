@@ -720,7 +720,8 @@ final class CiderReviewQueueService {
         guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
         let entries = MutationAuditService(database: db).loadEntries()
         let batchEntries = entries.filter { entry in
-            entry.action == "review.enrich.batch.schedule"
+            (entry.action == "review.enrich.batch.schedule"
+                || entry.action == "review.enrich.batch.result")
                 && entry.metadata["batchID"] != nil
         }
         let routingEntries = entries.filter { entry in
@@ -1097,7 +1098,39 @@ final class CiderReviewQueueService {
                   let oldest = sortedEntries.last else { return nil }
             let candidateCount = newest.metadata["candidateCount"].flatMap(Int.init) ?? entries.count
             let excludedCount = newest.metadata["excludedCount"].flatMap(Int.init) ?? 0
-            let samples = sortedEntries.prefix(cappedSampleLimit).map { entry in
+            let scheduleEntries = entries.filter { $0.action == "review.enrich.batch.schedule" }
+            let resultEntries = entries.filter { $0.action == "review.enrich.batch.result" }
+            let latestByItem = Dictionary(grouping: sortedEntries, by: \.itemID)
+                .compactMapValues { grouped in grouped.sorted {
+                    if $0.occurredAt != $1.occurredAt {
+                        return $0.occurredAt > $1.occurredAt
+                    }
+                    if $0.action != $1.action {
+                        return $0.action == "review.enrich.batch.result"
+                    }
+                    return $0.id.uuidString > $1.id.uuidString
+                }.first }
+            let sampleEntries = latestByItem.values.sorted {
+                if $0.occurredAt != $1.occurredAt {
+                    return $0.occurredAt > $1.occurredAt
+                }
+                return $0.id.uuidString > $1.id.uuidString
+            }
+            let failures = resultEntries.filter { entry in
+                let status = entry.afterState["status"] ?? "scheduled"
+                return status != "completed" && status != "skipped"
+            }
+            let resultState: String
+            if resultEntries.isEmpty {
+                resultState = "scheduled"
+            } else if failures.isEmpty && resultEntries.count >= scheduleEntries.count {
+                resultState = "completed"
+            } else if failures.count == resultEntries.count && resultEntries.count >= scheduleEntries.count {
+                resultState = "failed"
+            } else {
+                resultState = "partial"
+            }
+            let samples = sampleEntries.prefix(cappedSampleLimit).map { entry in
                 let item = items[entry.itemID]
                 return CiderReviewActionJobItemSample(
                     itemID: entry.itemID,
@@ -1116,11 +1149,11 @@ final class CiderReviewQueueService {
                 lastScheduledAt: newest.occurredAt,
                 actor: newest.source.rawValue,
                 source: newest.source.rawValue,
-                resultState: "scheduled",
+                resultState: resultState,
                 candidateCount: candidateCount,
-                scheduledCount: entries.count,
+                scheduledCount: scheduleEntries.count,
                 excludedCount: excludedCount,
-                failedCount: max(0, candidateCount - entries.count),
+                failedCount: failures.count + max(0, candidateCount - scheduleEntries.count),
                 itemSamples: samples,
                 safeActions: ["review summary", "review list", "bookmark get"]
             )

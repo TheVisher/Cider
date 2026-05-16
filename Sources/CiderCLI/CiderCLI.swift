@@ -88,7 +88,7 @@ struct CiderCLI {
         case "capture":
             await handleCapture(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
         case "review":
-            handleReview(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
+            await handleReview(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
         case "space", "spaces":
             handleSpace(subcommand: subcommand, args: remaining)
         case "routing", "route":
@@ -761,7 +761,7 @@ struct CiderCLI {
         }
     }
 
-    static func handleReview(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) {
+    static func handleReview(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) async {
         let service = CiderReviewQueueService()
 
         switch subcommand {
@@ -903,13 +903,27 @@ struct CiderCLI {
 
         case "enrich-batch":
             guard args.contains("--confirm") else {
-                printCLIError("Usage: cider-cli review enrich-batch --confirm [--actor user|agent] [--json]")
+                printCLIError("Usage: cider-cli review enrich-batch --confirm [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]")
                 return
             }
             do {
+                let candidates = try service.list(limit: Int.max).items.filter { item in
+                    item.kind == "enrichment"
+                        && item.itemType == "bookmark"
+                        && item.safeActions.contains("enrich")
+                }
                 let result = try service.enrichBatch(
                     actor: parseFlag("--actor", from: args) ?? "user"
                 )
+                if let timeout = reviewBatchWaitTimeout(from: args) {
+                    await recordReviewBatchEnrichmentResults(
+                        result,
+                        candidates: candidates,
+                        actor: parseFlag("--actor", from: args) ?? "user",
+                        timeout: timeout,
+                        bookmarkService: bookmarkService
+                    )
+                }
                 printReviewQueueBatchEnrichmentResult(result)
             } catch {
                 printCLIError(error.localizedDescription)
@@ -935,7 +949,7 @@ struct CiderCLI {
               cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
               cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
               cider-cli review enrich <item-id> [--actor user|agent] [--json]
-              cider-cli review enrich-batch --confirm [--actor user|agent] [--json]
+              cider-cli review enrich-batch --confirm [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
               cider-cli review jobs [--limit <n>] [--json]
             """)
 
@@ -5989,6 +6003,115 @@ struct CiderCLI {
         return seconds
     }
 
+    static func reviewBatchWaitTimeout(from args: [String]) -> TimeInterval? {
+        if args.contains("--no-wait") { return nil }
+        let rawValue = parseFlag("--timeout", from: args)
+            ?? parseFlag("--wait-timeout", from: args)
+        guard let rawValue else { return nil }
+        guard let seconds = TimeInterval(rawValue), seconds >= 0 else { return nil }
+        return seconds
+    }
+
+    static func recordReviewBatchEnrichmentResults(
+        _ result: CiderReviewQueueBatchEnrichmentResult,
+        candidates: [CiderReviewQueueItem],
+        actor: String,
+        timeout: TimeInterval,
+        bookmarkService: VaultBookmarkService
+    ) async {
+        let audit = MutationAuditService(database: CiderDatabase.shared)
+        for candidate in candidates {
+            let waitResult = await waitForBookmarkEnrichmentCompletion(
+                candidate.itemID,
+                in: bookmarkService,
+                timeout: timeout
+            )
+            audit.record(
+                action: "review.enrich.batch.result",
+                itemType: candidate.itemType,
+                itemID: candidate.itemID,
+                after: [
+                    "reviewAction": "enrich",
+                    "status": waitResult.completed ? "completed" : "timed_out",
+                    "elapsedSeconds": String(format: "%.1f", waitResult.elapsedSeconds),
+                ],
+                metadata: [
+                    "batchID": result.batchID.uuidString,
+                    "candidateCount": String(result.candidateCount),
+                    "excludedCount": String(result.excludedCount),
+                    "actor": actor,
+                ],
+                source: reviewMutationAuditSource(for: actor)
+            )
+        }
+    }
+
+    struct BookmarkEnrichmentCompletionWaitResult {
+        var completed: Bool
+        var elapsedSeconds: TimeInterval
+    }
+
+    static func waitForBookmarkEnrichmentCompletion(
+        _ bookmarkID: UUID,
+        in service: VaultBookmarkService,
+        timeout: TimeInterval
+    ) async -> BookmarkEnrichmentCompletionWaitResult {
+        let startedAt = Date()
+        let deadline = startedAt.addingTimeInterval(timeout)
+
+        while Date() <= deadline {
+            service.reconcileLegacyIndexCacheIntoCanonicalBookmarks()
+            if isBookmarkEnrichmentComplete(bookmarkID, in: service)
+                || isBookmarkEnrichmentCompleteInDatabase(bookmarkID) {
+                return BookmarkEnrichmentCompletionWaitResult(
+                    completed: true,
+                    elapsedSeconds: Date().timeIntervalSince(startedAt)
+                )
+            }
+
+            if timeout == 0 { break }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+
+        return BookmarkEnrichmentCompletionWaitResult(
+            completed: isBookmarkEnrichmentComplete(bookmarkID, in: service)
+                || isBookmarkEnrichmentCompleteInDatabase(bookmarkID),
+            elapsedSeconds: Date().timeIntervalSince(startedAt)
+        )
+    }
+
+    static func isBookmarkEnrichmentComplete(_ bookmarkID: UUID, in service: VaultBookmarkService) -> Bool {
+        guard let bookmark = service.bookmarks.first(where: { $0.id == bookmarkID }) else {
+            return false
+        }
+        return bookmark.enrichmentStatus == "complete" && bookmark.lastEnrichedAt != nil
+    }
+
+    static func isBookmarkEnrichmentCompleteInDatabase(_ bookmarkID: UUID) -> Bool {
+        guard CiderDatabase.shared.isOpen else { return false }
+        do {
+            let stmt = try CiderDatabase.shared.prepare("""
+                SELECT enrichment_status, last_enriched_at IS NOT NULL
+                FROM bookmarks
+                WHERE item_id = ?
+                LIMIT 1;
+            """)
+            stmt.bind(bookmarkID.uuidString, at: 1)
+            guard try stmt.step() else { return false }
+            return stmt.string(at: 0) == "complete" && stmt.bool(at: 1)
+        } catch {
+            return false
+        }
+    }
+
+    static func reviewMutationAuditSource(for actor: String) -> MutationAuditSource {
+        switch actor.lowercased() {
+        case "agent": return .agent
+        case "cli": return .cli
+        default: return .ui
+        }
+    }
+
     static func waitForNativeBookmarkCapture(
         _ bookmarkID: UUID,
         in service: VaultBookmarkService,
@@ -6058,6 +6181,10 @@ struct CiderCLI {
             || bookmark.thumbnailRelativePath != nil
             || bookmark.thumbnailRemoteURLString != nil
             || state.polls >= 2 else {
+            return false
+        }
+        guard bookmark.enrichmentStatus == "complete",
+              bookmark.lastEnrichedAt != nil else {
             return false
         }
 
@@ -8247,7 +8374,7 @@ struct CiderCLI {
           cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
           cider-cli review enrich <item-id> [--actor user|agent] [--json]
-          cider-cli review enrich-batch --confirm [--actor user|agent] [--json]
+          cider-cli review enrich-batch --confirm [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
 
         REMINDERS
           cider-cli reminder complete <todo|dateCard> <id-prefix> [--json]
