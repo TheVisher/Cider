@@ -157,6 +157,20 @@ struct CiderSpaceCaptureDashboardServiceTests {
         #expect(dashboard.recentRouted[0].sourceURL == "https://example.com/sqlite")
         #expect(dashboard.needsReview[0].reviewState == "needs_review")
         #expect(dashboard.needsReview[0].safeActions == ["routing explain", "review approve", "review correct", "review defer"])
+        #expect(dashboard.recentRouted[0].itemContextCommands == [
+            "cider-cli item get bookmark \(acceptedID.uuidString) --json",
+            "cider-cli item context bookmark \(acceptedID.uuidString) --json",
+            "cider-cli item related bookmark \(acceptedID.uuidString) --json",
+        ])
+        #expect(dashboard.needsReview[0].itemContextCommands == [
+            "cider-cli item get bookmark \(reviewID.uuidString) --json",
+            "cider-cli item context bookmark \(reviewID.uuidString) --json",
+            "cider-cli item related bookmark \(reviewID.uuidString) --json",
+        ])
+
+        let recentJSON = try #require(dashboard.toDictionary()["recentRouted"] as? [[String: Any]])
+        let commands = try #require(recentJSON.first?["itemContextCommands"] as? [String])
+        #expect(commands.contains("cider-cli item context bookmark \(acceptedID.uuidString) --json"))
     }
 
     @Test("space dashboard uses the latest routing decision for each item")

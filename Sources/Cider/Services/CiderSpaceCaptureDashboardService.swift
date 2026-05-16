@@ -49,6 +49,14 @@ struct CiderSpaceCaptureDashboardItem: Identifiable, Equatable {
         "cider-cli routing explain \(itemID.uuidString.prefix(8)) --json"
     }
 
+    var itemContextCommands: [String] {
+        [
+            "cider-cli item get \(itemType) \(itemID.uuidString) --json",
+            "cider-cli item context \(itemType) \(itemID.uuidString) --json",
+            "cider-cli item related \(itemType) \(itemID.uuidString) --json",
+        ]
+    }
+
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
         var dictionary: [String: Any] = [
@@ -64,6 +72,7 @@ struct CiderSpaceCaptureDashboardItem: Identifiable, Equatable {
             "routedAt": formatter.string(from: routedAt),
             "safeActions": safeActions,
             "routingExplanationCommand": routingExplanationCommand,
+            "itemContextCommands": itemContextCommands,
         ]
         if let sourceURL {
             dictionary["sourceURL"] = sourceURL
