@@ -789,6 +789,49 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertFalse(summary.batchEnrichmentPreview.isMutating)
     }
 
+    func testBatchEnrichmentPreviewBuildsConfirmationAndResultPresentation() {
+        let preview = HomeReviewCockpitBatchEnrichmentPreview(
+            action: "review.enrich",
+            isMutating: false,
+            candidateCount: 234,
+            candidateSampleLimit: 10,
+            candidateSampleTitles: ["Needs Metadata", "Another Bookmark"],
+            excludedCount: 2,
+            exclusionsByReason: ["routing_requires_explicit_approval": 2]
+        )
+
+        XCTAssertEqual(
+            preview.controlPresentation(isConfirming: false, scheduledCount: nil),
+            HomeReviewCockpitBatchEnrichmentControlPresentation(
+                accessibilityLabel: "Review 234 bookmark enrichments",
+                help: "Review 234 bookmark enrichments before scheduling",
+                statusLine: "Preview sample: Needs Metadata, Another Bookmark",
+                systemImage: "sparkles",
+                isEnabled: true
+            )
+        )
+        XCTAssertEqual(
+            preview.controlPresentation(isConfirming: true, scheduledCount: nil),
+            HomeReviewCockpitBatchEnrichmentControlPresentation(
+                accessibilityLabel: "Confirm enrichment for 234 bookmarks",
+                help: "Confirm enrichment for 234 bookmarks. Routing items are excluded.",
+                statusLine: "2 routing items require explicit approval",
+                systemImage: "checkmark.circle",
+                isEnabled: true
+            )
+        )
+        XCTAssertEqual(
+            preview.controlPresentation(isConfirming: false, scheduledCount: 234),
+            HomeReviewCockpitBatchEnrichmentControlPresentation(
+                accessibilityLabel: "Scheduled enrichment for 234 bookmarks",
+                help: "Scheduled enrichment for 234 bookmarks",
+                statusLine: "Scheduled enrichment for 234 bookmarks. Routing items were not changed.",
+                systemImage: "checkmark.circle.fill",
+                isEnabled: false
+            )
+        )
+    }
+
     func testReviewCockpitItemsExposeDateSuggestionApprovalDestinations() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let deadlineDate = now.addingTimeInterval(60 * 60 * 24 * 10)

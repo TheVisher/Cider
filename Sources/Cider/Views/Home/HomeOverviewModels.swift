@@ -214,6 +214,14 @@ struct HomeReviewCockpitBatchEnrichmentPreview: Equatable {
     let exclusionsByReason: [String: Int]
 }
 
+struct HomeReviewCockpitBatchEnrichmentControlPresentation: Equatable {
+    let accessibilityLabel: String
+    let help: String
+    let statusLine: String
+    let systemImage: String
+    let isEnabled: Bool
+}
+
 struct HomeReviewCockpitSummary: Equatable {
     let totalCount: Int
     let badges: [HomeReviewCockpitBadge]
@@ -298,6 +306,42 @@ extension HomeReviewCockpitBatchEnrichmentPreview {
         default:
             return reason
         }
+    }
+
+    func controlPresentation(
+        isConfirming: Bool,
+        scheduledCount: Int?
+    ) -> HomeReviewCockpitBatchEnrichmentControlPresentation {
+        if let scheduledCount {
+            let scheduledTitle = "Scheduled enrichment for \(scheduledCount) \(scheduledCount == 1 ? "bookmark" : "bookmarks")"
+            return HomeReviewCockpitBatchEnrichmentControlPresentation(
+                accessibilityLabel: scheduledTitle,
+                help: scheduledTitle,
+                statusLine: "\(scheduledTitle). Routing items were not changed.",
+                systemImage: "checkmark.circle.fill",
+                isEnabled: false
+            )
+        }
+
+        if isConfirming {
+            let confirmTitle = "Confirm enrichment for \(candidateCount) \(candidateCount == 1 ? "bookmark" : "bookmarks")"
+            return HomeReviewCockpitBatchEnrichmentControlPresentation(
+                accessibilityLabel: confirmTitle,
+                help: "\(confirmTitle). Routing items are excluded.",
+                statusLine: exclusionDetailLine ?? previewDetailLine,
+                systemImage: "checkmark.circle",
+                isEnabled: canRunExplicitBatchAction
+            )
+        }
+
+        let reviewTitle = "Review \(candidateCount) bookmark \(candidateCount == 1 ? "enrichment" : "enrichments")"
+        return HomeReviewCockpitBatchEnrichmentControlPresentation(
+            accessibilityLabel: reviewTitle,
+            help: "\(reviewTitle) before scheduling",
+            statusLine: previewDetailLine,
+            systemImage: "sparkles",
+            isEnabled: canRunExplicitBatchAction
+        )
     }
 }
 

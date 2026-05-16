@@ -15,7 +15,8 @@ struct HomeOverviewDashboardView: View {
 
     private let calendar = Calendar.current
     @State private var resolvedReviewIDs: Set<String> = []
-    @State private var batchEnrichmentRequested = false
+    @State private var batchEnrichmentIsConfirming = false
+    @State private var scheduledBatchEnrichmentCount: Int?
     @ObservedObject private var authService = AuthService.shared
     @ObservedObject private var syncService = SyncService.shared
     private var layoutMetrics: HomeOverviewLayoutMetrics { HomeOverviewLayoutMetrics(snapshot: snapshot) }
@@ -586,7 +587,12 @@ struct HomeOverviewDashboardView: View {
     }
 
     private func reviewCockpitBatchControl(_ preview: HomeReviewCockpitBatchEnrichmentPreview) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xxs) {
+        let presentation = preview.controlPresentation(
+            isConfirming: batchEnrichmentIsConfirming,
+            scheduledCount: scheduledBatchEnrichmentCount
+        )
+
+        return VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(alignment: .center, spacing: Spacing.sm) {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     Text(preview.primaryActionTitle)
@@ -594,7 +600,7 @@ struct HomeOverviewDashboardView: View {
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
-                    Text(preview.previewDetailLine)
+                    Text(presentation.statusLine)
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
                         .lineLimit(1)
@@ -602,20 +608,27 @@ struct HomeOverviewDashboardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Button {
-                    if onEnrichReviewBatch() {
-                        batchEnrichmentRequested = true
+                    if batchEnrichmentIsConfirming {
+                        if onEnrichReviewBatch() {
+                            scheduledBatchEnrichmentCount = preview.candidateCount
+                            batchEnrichmentIsConfirming = false
+                        }
+                    } else {
+                        batchEnrichmentIsConfirming = true
                     }
                 } label: {
-                    Image(systemName: batchEnrichmentRequested ? "checkmark.circle" : "sparkles")
+                    Image(systemName: presentation.systemImage)
                         .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain)
-                .disabled(!preview.canRunExplicitBatchAction || batchEnrichmentRequested)
-                .help(preview.primaryActionTitle)
-                .accessibilityLabel(preview.primaryActionTitle)
+                .disabled(!presentation.isEnabled)
+                .help(presentation.help)
+                .accessibilityLabel(presentation.accessibilityLabel)
             }
 
-            if let exclusionDetailLine = preview.exclusionDetailLine {
+            if !batchEnrichmentIsConfirming,
+               scheduledBatchEnrichmentCount == nil,
+               let exclusionDetailLine = preview.exclusionDetailLine {
                 Text(exclusionDetailLine)
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
