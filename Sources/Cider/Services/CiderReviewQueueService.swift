@@ -322,7 +322,7 @@ final class CiderReviewQueueService {
             title: item.title,
             relativePath: item.relativePath,
             reason: failed ? "Bookmark enrichment failed." : "Bookmark enrichment is incomplete.",
-            suggestedAction: failed ? "Retry enrichment or correct route" : "Enrich and route",
+            suggestedAction: failed ? "Enrichment failed" : "Needs enrichment",
             reviewState: failed ? "needs_review" : "pending",
             confidence: nil,
             routingDecisionID: nil,

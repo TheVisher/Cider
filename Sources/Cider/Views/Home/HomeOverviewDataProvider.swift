@@ -367,7 +367,7 @@ enum HomeOverviewDataProvider {
         switch item {
         case .bookmark(let bookmark):
             if bookmarkGenericTitleReason(bookmark) != nil { return "Clean up title" }
-            if bookmarkNeedsEnrichment(bookmark) { return "Enrich and route" }
+            if bookmarkNeedsEnrichment(bookmark) { return "Needs enrichment" }
             if bookmark.folderID == nil { return "Route to folder" }
             return "Open"
         case .note(let note):
@@ -571,7 +571,7 @@ enum HomeOverviewDataProvider {
                     id: "triage-\(item.id)-enrichment",
                     item: item,
                     reason: bookmarkGenericTitleReason(bookmark) ?? "Bookmark needs enrichment",
-                    suggestedAction: "Enrich and route",
+                    suggestedAction: "Needs enrichment",
                     confidenceLabel: "Needs approval"
                 )
             }
@@ -612,7 +612,7 @@ enum HomeOverviewDataProvider {
 
     private static func triageSortPriority(_ item: HomeTriageItem) -> Int {
         switch item.suggestedAction {
-        case "Enrich and route": 0
+        case "Needs enrichment": 0
         case "Route to folder": 1
         default: 2
         }

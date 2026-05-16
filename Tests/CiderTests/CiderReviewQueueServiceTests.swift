@@ -170,6 +170,7 @@ struct CiderReviewQueueServiceTests {
         #expect(items.map(\.itemID).contains(enrichmentID))
         #expect(items.map(\.itemID).contains(inboxID))
         #expect(items.first { $0.itemID == enrichmentID }?.kind == "enrichment")
+        #expect(items.first { $0.itemID == enrichmentID }?.suggestedAction == "Enrichment failed")
         #expect(items.first { $0.itemID == inboxID }?.kind == "inbox_backlog")
     }
 }

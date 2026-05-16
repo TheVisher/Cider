@@ -327,7 +327,7 @@ final class HomeOverviewDataProviderTests: XCTestCase {
 
         XCTAssertEqual(snapshot.triageItems.map(\.item.id), ["bookmark-\(genericBookmark.id.uuidString)", "note-\(untitledNote.id.uuidString)"])
         XCTAssertEqual(snapshot.triageItems[0].reason, "Generic host-only bookmark title")
-        XCTAssertEqual(snapshot.triageItems[0].suggestedAction, "Enrich and route")
+        XCTAssertEqual(snapshot.triageItems[0].suggestedAction, "Needs enrichment")
         XCTAssertEqual(snapshot.triageItems[0].confidenceLabel, "Needs approval")
         XCTAssertEqual(snapshot.triageItems[1].reason, "Untitled inbox note")
         XCTAssertEqual(snapshot.triageItems[1].suggestedAction, "Ask Erik")
