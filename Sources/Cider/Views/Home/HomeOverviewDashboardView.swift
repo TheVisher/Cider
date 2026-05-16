@@ -694,7 +694,7 @@ struct HomeOverviewDashboardView: View {
                                         .foregroundColor(CiderColors.primary)
                                         .lineLimit(1)
 
-                                    Text("\(capture.typeLabel) • \(capture.locationLabel)")
+                                    Text("\(capture.sourceTypeLabel) • \(capture.destinationLabel) • \(capture.reviewStateLabel)")
                                         .font(CiderFont.caption)
                                         .foregroundColor(CiderColors.tertiary)
                                         .lineLimit(1)
@@ -704,7 +704,7 @@ struct HomeOverviewDashboardView: View {
                                         .foregroundColor(CiderColors.quaternary)
                                         .lineLimit(1)
 
-                                    Text(capture.visibleNextActionLine)
+                                    Text(capture.visibleSafeFollowUpLine)
                                         .font(CiderFont.captionSemibold)
                                         .foregroundColor(CiderColors.secondary)
                                         .lineLimit(1)

@@ -121,9 +121,22 @@ struct HomeRecentCaptureItem: Equatable, Identifiable {
     let item: LibraryItemV2
     let title: String
     let typeLabel: String
+    let sourceTypeLabel: String
+    let itemTypeLabel: String
     let locationLabel: String
+    let destinationLabel: String
+    let reviewState: String
+    let reviewNeeded: Bool
     let suggestedAction: String
+    let safeFollowUpActions: [String]
     let surfacingExplanation: CiderSurfacingExplanation
+
+    var reviewStateLabel: String {
+        reviewState
+            .split(separator: "_")
+            .map { word in word.prefix(1).uppercased() + word.dropFirst() }
+            .joined(separator: " ")
+    }
 
     var visibleWhyLine: String {
         "Why: \(surfacingExplanation.reason)"
@@ -131,6 +144,10 @@ struct HomeRecentCaptureItem: Equatable, Identifiable {
 
     var visibleNextActionLine: String {
         "Next: \(surfacingExplanation.suggestedAction)"
+    }
+
+    var visibleSafeFollowUpLine: String {
+        "Safe: \(safeFollowUpActions.prefix(3).joined(separator: ", "))"
     }
 }
 

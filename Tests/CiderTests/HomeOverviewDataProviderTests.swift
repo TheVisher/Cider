@@ -268,6 +268,66 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.recentCaptureItems[0].visibleNextActionLine, "Next: Clean up title")
     }
 
+    func testRecentCaptureResultAffordancesCoverMultiTypeCapture() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let folder = Folder(id: UUID(), name: "Research")
+        let bookmark = Bookmark(
+            id: UUID(),
+            title: "Example.com",
+            urlString: "https://example.com/article",
+            createdAt: now.addingTimeInterval(-10),
+            updatedAt: now.addingTimeInterval(-9),
+            notes: "",
+            tags: [],
+            labelIDs: [],
+            dismissedLabelIDs: [],
+            folderID: nil,
+            enrichmentStatus: "complete",
+            lastEnrichedAt: now
+        )
+        let note = Note(
+            id: UUID(),
+            title: "Garden idea",
+            createdAt: now.addingTimeInterval(-20),
+            modifiedAt: now.addingTimeInterval(-19),
+            relativePath: "Inbox/Notes/Garden idea.md",
+            folderID: nil
+        )
+        let todo = TodoCard(
+            title: "Call the dentist",
+            folderID: folder.id,
+            createdAt: now.addingTimeInterval(-30),
+            updatedAt: now.addingTimeInterval(-29)
+        )
+        let image = VaultFile(
+            id: UUID(),
+            filename: "receipt.png",
+            relativePath: "Inbox/Images/receipt.png",
+            fileType: .image,
+            fileSize: 42,
+            createdAt: now.addingTimeInterval(-40),
+            modifiedAt: now.addingTimeInterval(-39),
+            folderID: nil
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.bookmark(bookmark), .note(note), .todo(todo), .vaultFile(image)],
+            recentItems: [.bookmark(bookmark), .note(note), .todo(todo), .vaultFile(image)],
+            folders: [folder],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.recentCaptureItems.map(\.sourceTypeLabel), ["URL", "Text", "Todo", "Image"])
+        XCTAssertEqual(snapshot.recentCaptureItems.map(\.itemTypeLabel), ["Bookmark", "Note", "Todo", "File"])
+        XCTAssertEqual(snapshot.recentCaptureItems.map(\.destinationLabel), ["Inbox / Unfiled", "Inbox / Unfiled", "Research", "Inbox / Unfiled"])
+        XCTAssertEqual(snapshot.recentCaptureItems.map(\.reviewState), ["needs_review", "needs_review", "pending", "needs_review"])
+        XCTAssertEqual(snapshot.recentCaptureItems.map(\.reviewNeeded), [true, true, false, true])
+        XCTAssertEqual(snapshot.recentCaptureItems[0].safeFollowUpActions, ["Review", "Check metadata", "Open item", "Defer"])
+        XCTAssertEqual(snapshot.recentCaptureItems[2].safeFollowUpActions, ["Review reminder", "Open item", "Defer"])
+        XCTAssertFalse(snapshot.recentCaptureItems[2].safeFollowUpActions.contains("Create reminder"))
+    }
+
     func testRecentTimelineKeepsSixRecentItemsForDashboardRail() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let recentItems: [LibraryItemV2] = (0..<8).map { index in

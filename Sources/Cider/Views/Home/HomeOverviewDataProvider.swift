@@ -346,13 +346,20 @@ enum HomeOverviewDataProvider {
         let folderNames = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0.name) })
         return recentItems.prefix(6).map { item in
             let explanation = recentCaptureSurfacingExplanation(for: item)
+            let destinationLabel = locationLabel(for: item, folderNames: folderNames)
             return HomeRecentCaptureItem(
                 id: "recent-capture-\(item.id)",
                 item: item,
                 title: item.title,
                 typeLabel: typeLabel(for: item),
-                locationLabel: locationLabel(for: item, folderNames: folderNames),
+                sourceTypeLabel: sourceTypeLabel(for: item),
+                itemTypeLabel: typeLabel(for: item),
+                locationLabel: destinationLabel,
+                destinationLabel: destinationLabel,
+                reviewState: explanation.reviewState,
+                reviewNeeded: explanation.reviewState == "needs_review",
                 suggestedAction: explanation.suggestedAction,
+                safeFollowUpActions: safeFollowUpActions(for: item, explanation: explanation),
                 surfacingExplanation: explanation
             )
         }
@@ -373,6 +380,23 @@ enum HomeOverviewDataProvider {
         case .contact: return "Contact"
         case .todo: return "Todo"
         case .vaultFile: return "File"
+        }
+    }
+
+    private static func sourceTypeLabel(for item: LibraryItemV2) -> String {
+        switch item {
+        case .bookmark:
+            return "URL"
+        case .note:
+            return "Text"
+        case .todo:
+            return "Todo"
+        case .vaultFile(let file):
+            return file.fileType == .image ? "Image" : "File"
+        case .dateCard:
+            return "Date"
+        case .contact:
+            return "Contact"
         }
     }
 
@@ -397,6 +421,26 @@ enum HomeOverviewDataProvider {
             return dateCard.actionURL == nil ? "Add action URL" : "Review"
         case .contact:
             return "Open"
+        }
+    }
+
+    private static func safeFollowUpActions(for item: LibraryItemV2, explanation: CiderSurfacingExplanation) -> [String] {
+        switch explanation.reviewState {
+        case "needs_review":
+            var actions = ["Review"]
+            if ["Clean up title", "Needs enrichment"].contains(explanation.suggestedAction) {
+                actions.append("Check metadata")
+            }
+            actions.append("Open item")
+            actions.append("Defer")
+            return actions
+        case "pending":
+            if case .todo = item, explanation.suggestedAction == "Add reminder" {
+                return ["Review reminder", "Open item", "Defer"]
+            }
+            return ["Review", "Open item", "Defer"]
+        default:
+            return ["Open item"]
         }
     }
 
