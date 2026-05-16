@@ -282,13 +282,27 @@ func storageAuditReportToDict(_ report: CiderStorageAuditReport) -> [String: Any
 }
 
 func storageAuditSchemaFindingToDict(_ finding: CiderStorageAuditSchemaFinding) -> [String: Any] {
-    [
+    var dict: [String: Any] = [
         "id": finding.id,
         "severity": finding.severity,
         "affectedTable": finding.affectedTable,
         "summary": finding.summary,
         "detail": finding.detail,
         "nextSafeAction": finding.nextSafeAction,
+        "isRepairable": finding.isRepairable,
+    ]
+    if let repairCommand = finding.repairCommand {
+        dict["repairCommand"] = repairCommand
+    }
+    return dict
+}
+
+func storageAuditSchemaRepairReportToDict(_ report: CiderStorageAuditSchemaRepairReport) -> [String: Any] {
+    [
+        "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
+        "repairedFindingIDs": report.repairedFindingIDs,
+        "skippedFindingIDs": report.skippedFindingIDs,
+        "remainingFindings": report.remainingFindings.map(storageAuditSchemaFindingToDict),
     ]
 }
 

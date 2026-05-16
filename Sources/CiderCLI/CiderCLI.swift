@@ -176,6 +176,7 @@ struct CiderCLI {
             print("""
             Storage commands:
               cider-cli storage audit [--json]
+              cider-cli storage repair-schema [--json]
             """)
 
         case "audit":
@@ -226,9 +227,34 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "repair-schema":
+            do {
+                let report = try CiderStorageAuditService().repairSchemaFindings()
+                if jsonOutput {
+                    outputJSON(storageAuditSchemaRepairReportToDict(report))
+                } else {
+                    print("Storage schema repair")
+                    print("  Repaired: \(report.repairedFindingIDs.count)")
+                    for id in report.repairedFindingIDs {
+                        print("    \(id)")
+                    }
+                    print("  Skipped: \(report.skippedFindingIDs.count)")
+                    for id in report.skippedFindingIDs {
+                        print("    \(id)")
+                    }
+                    print("  Remaining findings: \(report.remainingFindings.count)")
+                    for finding in report.remainingFindings {
+                        print("    [\(finding.severity)] \(finding.summary)")
+                        print("      \(finding.nextSafeAction)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         default:
             print("Unknown storage command: \(subcommand ?? "nil")")
-            print("Commands: audit")
+            print("Commands: audit, repair-schema")
         }
     }
 

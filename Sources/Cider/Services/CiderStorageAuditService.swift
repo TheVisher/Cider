@@ -27,6 +27,15 @@ struct CiderStorageAuditSchemaFinding: Codable, Equatable {
     var summary: String
     var detail: String
     var nextSafeAction: String
+    var isRepairable: Bool = false
+    var repairCommand: String? = nil
+}
+
+struct CiderStorageAuditSchemaRepairReport: Equatable {
+    var generatedAt: Date
+    var repairedFindingIDs: [String]
+    var skippedFindingIDs: [String]
+    var remainingFindings: [CiderStorageAuditSchemaFinding]
 }
 
 @MainActor
@@ -85,6 +94,37 @@ final class CiderStorageAuditService {
         )
     }
 
+    func repairSchemaFindings() throws -> CiderStorageAuditSchemaRepairReport {
+        let findings = try schemaFindings()
+        var repairedFindingIDs: [String] = []
+        var skippedFindingIDs: [String] = []
+
+        for finding in findings {
+            guard finding.isRepairable else {
+                skippedFindingIDs.append(finding.id)
+                continue
+            }
+            guard let repair = missingTableRepairs[finding.affectedTable] else {
+                skippedFindingIDs.append(finding.id)
+                continue
+            }
+            try database.withTransaction {
+                try database.runSQL(repair.createTableSQL)
+                for indexSQL in repair.indexSQL {
+                    try database.runSQL(indexSQL)
+                }
+            }
+            repairedFindingIDs.append(finding.id)
+        }
+
+        return CiderStorageAuditSchemaRepairReport(
+            generatedAt: nowProvider(),
+            repairedFindingIDs: repairedFindingIDs.sorted(),
+            skippedFindingIDs: skippedFindingIDs.sorted(),
+            remainingFindings: try schemaFindings()
+        )
+    }
+
     private func sqliteCountsByEntity() throws -> [String: Int] {
         var counts: [String: Int] = [:]
         if try tableExists("folders") {
@@ -132,7 +172,9 @@ final class CiderStorageAuditService {
                         affectedTable: table.name,
                         summary: "Missing expected second-brain table \(table.name).",
                         detail: table.purpose,
-                        nextSafeAction: migrationSafeAction
+                        nextSafeAction: nextSafeActionForMissingTable(named: table.name),
+                        isRepairable: missingTableRepairs[table.name] != nil,
+                        repairCommand: missingTableRepairs[table.name] == nil ? nil : repairSchemaCommand
                     )
                 )
                 continue
@@ -147,7 +189,7 @@ final class CiderStorageAuditService {
                         affectedTable: table.name,
                         summary: "Missing expected column \(table.name).\(column).",
                         detail: table.purpose,
-                        nextSafeAction: migrationSafeAction
+                        nextSafeAction: columnDriftSafeAction
                     )
                 )
             }
@@ -244,8 +286,64 @@ final class CiderStorageAuditService {
         raw == "event" ? "dateCard" : raw
     }
 
-    private var migrationSafeAction: String {
-        "Run the current Cider app or CLI against this vault to apply database migrations, then rerun storage audit."
+    private var repairSchemaCommand: String {
+        "cider-cli storage repair-schema --json"
+    }
+
+    private func nextSafeActionForMissingTable(named tableName: String) -> String {
+        if missingTableRepairs[tableName] != nil {
+            return "Run \(repairSchemaCommand) to create the missing table and indexes, then rerun storage audit."
+        }
+        return columnDriftSafeAction
+    }
+
+    private var columnDriftSafeAction: String {
+        "Create a targeted migration or schema repair for this table; do not rely on startup migrations if schema_version is already current."
+    }
+
+    private struct MissingTableRepair {
+        var createTableSQL: String
+        var indexSQL: [String]
+    }
+
+    private var missingTableRepairs: [String: MissingTableRepair] {
+        [
+            "routing_decisions": MissingTableRepair(
+                createTableSQL: CiderSchema.createRoutingDecisions,
+                indexSQL: [
+                    "CREATE INDEX IF NOT EXISTS idx_routing_decisions_item ON routing_decisions(item_id, created_at);",
+                    "CREATE INDEX IF NOT EXISTS idx_routing_decisions_review ON routing_decisions(review_state);",
+                ]
+            ),
+            "second_brain_routing_decisions": MissingTableRepair(
+                createTableSQL: CiderSchema.createSecondBrainRoutingDecisions,
+                indexSQL: [
+                    "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_owner ON second_brain_routing_decisions(owner_type, owner_id, created_at);",
+                    "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_status ON second_brain_routing_decisions(status, created_at);",
+                ]
+            ),
+            "item_sections": MissingTableRepair(
+                createTableSQL: CiderSchema.createItemSections,
+                indexSQL: [
+                    "CREATE INDEX IF NOT EXISTS idx_item_sections_owner ON item_sections(owner_type, owner_id, sort_order);",
+                    "CREATE INDEX IF NOT EXISTS idx_item_sections_item ON item_sections(item_id) WHERE item_id IS NOT NULL;",
+                ]
+            ),
+            "content_chunks": MissingTableRepair(
+                createTableSQL: CiderSchema.createContentChunks,
+                indexSQL: [
+                    "CREATE INDEX IF NOT EXISTS idx_content_chunks_owner ON content_chunks(owner_type, owner_id, chunk_index);",
+                    "CREATE INDEX IF NOT EXISTS idx_content_chunks_section ON content_chunks(section_id) WHERE section_id IS NOT NULL;",
+                ]
+            ),
+            "agent_actions": MissingTableRepair(
+                createTableSQL: CiderSchema.createAgentActions,
+                indexSQL: [
+                    "CREATE INDEX IF NOT EXISTS idx_agent_actions_owner ON agent_actions(owner_type, owner_id, created_at);",
+                    "CREATE INDEX IF NOT EXISTS idx_agent_actions_tool ON agent_actions(tool_name, created_at);",
+                ]
+            ),
+        ]
     }
 
     private var expectedSecondBrainTables: [(name: String, requiredColumns: [String], purpose: String)] {

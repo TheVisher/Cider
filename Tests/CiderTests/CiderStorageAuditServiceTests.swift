@@ -130,7 +130,9 @@ struct CiderStorageAuditServiceTests {
                     affectedTable: "routing_decisions",
                     summary: "Missing expected second-brain table routing_decisions.",
                     detail: "The routing_decisions table is required for explainable capture routing and review queues.",
-                    nextSafeAction: "Run the current Cider app or CLI against this vault to apply database migrations, then rerun storage audit."
+                    nextSafeAction: "Run cider-cli storage repair-schema --json to create the missing table and indexes, then rerun storage audit.",
+                    isRepairable: true,
+                    repairCommand: "cider-cli storage repair-schema --json"
                 )
             ],
             mismatches: [
@@ -157,10 +159,42 @@ struct CiderStorageAuditServiceTests {
             $0["id"] as? String == "missing_expected_table:routing_decisions" &&
             $0["severity"] as? String == "error" &&
             $0["affectedTable"] as? String == "routing_decisions" &&
-            $0["nextSafeAction"] as? String != nil
+            $0["nextSafeAction"] as? String != nil &&
+            $0["isRepairable"] as? Bool == true &&
+            $0["repairCommand"] as? String == "cider-cli storage repair-schema --json"
         })
         let doctorGroups = try #require(dict["doctorFindingGroups"] as? [String: Int])
         #expect(doctorGroups["warning:duplicateNoteContent"] == 1)
+    }
+
+    @Test("storage audit repair JSON exposes repaired skipped and remaining findings")
+    func storageAuditRepairJSONExposesRepairState() throws {
+        let report = CiderStorageAuditSchemaRepairReport(
+            generatedAt: Date(timeIntervalSince1970: 12),
+            repairedFindingIDs: ["missing_expected_table:second_brain_routing_decisions"],
+            skippedFindingIDs: ["missing_expected_column:routing_decisions:item_type"],
+            remainingFindings: [
+                CiderStorageAuditSchemaFinding(
+                    id: "missing_expected_column:routing_decisions:item_type",
+                    severity: "error",
+                    affectedTable: "routing_decisions",
+                    summary: "Missing expected column routing_decisions.item_type.",
+                    detail: "The routing_decisions table is required for explainable capture routing and review queues.",
+                    nextSafeAction: "Create a targeted migration or schema repair for this table; do not rely on startup migrations if schema_version is already current."
+                )
+            ]
+        )
+
+        let dict = storageAuditSchemaRepairReportToDict(report)
+
+        #expect(dict["repairedFindingIDs"] as? [String] == ["missing_expected_table:second_brain_routing_decisions"])
+        #expect(dict["skippedFindingIDs"] as? [String] == ["missing_expected_column:routing_decisions:item_type"])
+        let remainingFindings = try #require(dict["remainingFindings"] as? [[String: Any]])
+        #expect(remainingFindings.contains {
+            $0["id"] as? String == "missing_expected_column:routing_decisions:item_type" &&
+            $0["isRepairable"] as? Bool == false &&
+            $0["repairCommand"] == nil
+        })
     }
 
     @Test("storage audit flags missing second brain routing table")
@@ -186,12 +220,50 @@ struct CiderStorageAuditServiceTests {
 
         let report = try service.audit()
 
-        #expect(report.schemaFindings.contains {
-            $0.id == "missing_expected_table:routing_decisions" &&
-            $0.severity == "error" &&
-            $0.affectedTable == "routing_decisions" &&
-            $0.nextSafeAction.contains("migrations")
-        })
+        let missingRoutingTableFinding = report.schemaFindings.contains { finding in
+            finding.id == "missing_expected_table:routing_decisions" &&
+            finding.severity == "error" &&
+            finding.affectedTable == "routing_decisions" &&
+            finding.isRepairable &&
+            finding.repairCommand == "cider-cli storage repair-schema --json"
+        }
+        #expect(missingRoutingTableFinding)
+    }
+
+    @Test("storage audit repairs missing expected second brain table")
+    func storageAuditRepairsMissingExpectedSecondBrainTable() throws {
+        let (db, dbURL) = try makeTestDB()
+        defer { db.close(); cleanup(dbURL) }
+
+        try db.runSQL("DROP TABLE second_brain_routing_decisions;")
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: FileManager.default.temporaryDirectory,
+            modelCountsProvider: { [:] },
+            doctorReportProvider: {
+                VaultDoctor.Report(
+                    startedAt: Date(timeIntervalSince1970: 10),
+                    finishedAt: Date(timeIntervalSince1970: 11),
+                    findings: []
+                )
+            },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let beforeRepair = try service.audit()
+        let missingSecondBrainRoutingTableFinding = beforeRepair.schemaFindings.contains { finding in
+            finding.id == "missing_expected_table:second_brain_routing_decisions" &&
+            finding.isRepairable
+        }
+        #expect(missingSecondBrainRoutingTableFinding)
+
+        let repair = try service.repairSchemaFindings()
+
+        #expect(repair.repairedFindingIDs.contains("missing_expected_table:second_brain_routing_decisions"))
+        #expect(repair.remainingFindings.isEmpty)
+        let afterRepair = try service.audit()
+        #expect(afterRepair.schemaFindings.isEmpty)
     }
 
     @Test("storage audit flags legacy routing table columns")
@@ -229,10 +301,14 @@ struct CiderStorageAuditServiceTests {
 
         let report = try service.audit()
 
-        #expect(report.schemaFindings.contains {
-            $0.id == "missing_expected_column:routing_decisions:item_type" &&
-            $0.severity == "error" &&
-            $0.affectedTable == "routing_decisions"
-        })
+        let missingColumnFinding = report.schemaFindings.contains { finding in
+            finding.id == "missing_expected_column:routing_decisions:item_type" &&
+            finding.severity == "error" &&
+            finding.affectedTable == "routing_decisions" &&
+            !finding.isRepairable &&
+            finding.repairCommand == nil &&
+            finding.nextSafeAction.contains("targeted migration")
+        }
+        #expect(missingColumnFinding)
     }
 }
