@@ -113,6 +113,12 @@ struct HomeRecentCaptureItem: Equatable, Identifiable {
     let surfacingExplanation: CiderSurfacingExplanation
 }
 
+struct HomeReviewCockpitDateSuggestionApproval: Equatable {
+    let bookmarkID: UUID
+    let suggestionIndex: Int
+    let destination: LibraryEntityType
+}
+
 struct HomeReviewCockpitItem: Equatable, Identifiable {
     let id: String
     let sourceReviewID: String
@@ -131,6 +137,7 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
     let canCorrect: Bool
     let canDefer: Bool
     let safeActions: [String]
+    let dateSuggestionApproval: HomeReviewCockpitDateSuggestionApproval?
 }
 
 struct HomeKanbanPulseItem: Equatable, Identifiable {

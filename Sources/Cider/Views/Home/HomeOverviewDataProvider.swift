@@ -49,6 +49,7 @@ enum HomeOverviewDataProvider {
         tabOrder: [UUID] = [],
         kanbanBoards: [KanbanBoard] = [],
         reviewQueueItems: [CiderReviewQueueItem] = [],
+        bookmarkDateSuggestionResults: [CiderBookmarkDateSuggestionResult] = [],
         surfacingDays: Int,
         now: Date = Date()
     ) -> HomeOverviewSnapshot {
@@ -118,7 +119,11 @@ enum HomeOverviewDataProvider {
             }
             .prefix(4)
             .map { $0 }
-        let reviewCockpitItems = reviewCockpitItems(from: reviewQueueItems, libraryItems: items)
+        let reviewCockpitItems = reviewCockpitItems(
+            from: reviewQueueItems,
+            bookmarkDateSuggestionResults: bookmarkDateSuggestionResults,
+            libraryItems: items
+        )
         let triageItems = triageItems(from: items)
         let kanbanPulseItems = kanbanPulseItems(from: kanbanBoards)
 
@@ -535,13 +540,14 @@ enum HomeOverviewDataProvider {
 
     private static func reviewCockpitItems(
         from reviewItems: [CiderReviewQueueItem],
+        bookmarkDateSuggestionResults: [CiderBookmarkDateSuggestionResult],
         libraryItems: [LibraryItemV2]
     ) -> [HomeReviewCockpitItem] {
         let itemsByUUID = Dictionary(uniqueKeysWithValues: libraryItems.compactMap { item in
             itemUUID(for: item).map { ($0, item) }
         })
 
-        return reviewItems.prefix(6).map { reviewItem in
+        let queueItems = reviewItems.map { reviewItem in
             let linkedItem = itemsByUUID[reviewItem.itemID]
             let safeActions = Set(reviewItem.safeActions.map { $0.lowercased() })
             let hasRoutingDecision = reviewItem.routingDecisionID != nil
@@ -563,8 +569,118 @@ enum HomeOverviewDataProvider {
                 canApprove: hasRoutingDecision && safeActions.contains("approve"),
                 canCorrect: linkedItem != nil && safeActions.contains("correct"),
                 canDefer: hasRoutingDecision && safeActions.contains("defer"),
-                safeActions: reviewItem.safeActions
+                safeActions: reviewItem.safeActions,
+                dateSuggestionApproval: nil
             )
+        }
+
+        let suggestionItems: [HomeReviewCockpitItem] = bookmarkDateSuggestionResults.flatMap { result in
+            result.suggestions.enumerated().compactMap { index, suggestion in
+                guard approvedDateSuggestionExists(
+                    bookmarkID: result.bookmarkID,
+                    suggestion: suggestion,
+                    libraryItems: libraryItems
+                ) == false else {
+                    return nil
+                }
+
+                return dateSuggestionReviewItem(
+                    result: result,
+                    suggestion: suggestion,
+                    suggestionIndex: index,
+                    linkedItem: itemsByUUID[result.bookmarkID]
+                )
+            }
+        }
+
+        return Array((queueItems + suggestionItems).prefix(6))
+    }
+
+    static func bookmarkDateSuggestionResults(
+        from items: [LibraryItemV2],
+        service: CiderBookmarkDateSuggestionService = CiderBookmarkDateSuggestionService()
+    ) -> [CiderBookmarkDateSuggestionResult] {
+        items.compactMap { item in
+            guard case .bookmark(let bookmark) = item else { return nil }
+            let result = service.result(for: bookmark)
+            return result.suggestions.isEmpty ? nil : result
+        }
+    }
+
+    private static func dateSuggestionReviewItem(
+        result: CiderBookmarkDateSuggestionResult,
+        suggestion: CiderBookmarkDateSuggestion,
+        suggestionIndex: Int,
+        linkedItem: LibraryItemV2?
+    ) -> HomeReviewCockpitItem? {
+        guard linkedItem != nil else { return nil }
+        let destination = dateSuggestionDestination(for: suggestion)
+
+        return HomeReviewCockpitItem(
+            id: "review-cockpit-date-suggestion-\(result.bookmarkID.uuidString)-\(suggestionIndex)",
+            sourceReviewID: "date-suggestion-\(result.bookmarkID.uuidString)-\(suggestionIndex)",
+            itemID: result.bookmarkID,
+            itemType: "bookmark",
+            item: linkedItem,
+            title: result.bookmarkTitle,
+            kindLabel: "Date Suggestion",
+            reason: dateSuggestionReason(for: suggestion),
+            suggestedAction: destination == .todo ? "Approve Todo" : "Approve Date Card",
+            reviewStateLabel: "Needs Review",
+            confidenceLabel: confidenceLabel(suggestion.confidence),
+            targetLabel: destination == .todo ? "Todo due date" : "Date card",
+            sourceLabel: "Bookmark",
+            canApprove: true,
+            canCorrect: true,
+            canDefer: false,
+            safeActions: ["approve", "correct"],
+            dateSuggestionApproval: HomeReviewCockpitDateSuggestionApproval(
+                bookmarkID: result.bookmarkID,
+                suggestionIndex: suggestionIndex,
+                destination: destination
+            )
+        )
+    }
+
+    private static func dateSuggestionDestination(for suggestion: CiderBookmarkDateSuggestion) -> LibraryEntityType {
+        switch suggestion.kind {
+        case "deadline", "sale_end":
+            return .todo
+        default:
+            return .dateCard
+        }
+    }
+
+    private static func dateSuggestionReason(for suggestion: CiderBookmarkDateSuggestion) -> String {
+        let kind = suggestion.kind
+            .split(separator: "_")
+            .map { word in word.prefix(1).uppercased() + word.dropFirst() }
+            .joined(separator: " ")
+        return "\(kind) from \(suggestion.sourceField): \(suggestion.sourceSnippet)"
+    }
+
+    private static func approvedDateSuggestionExists(
+        bookmarkID: UUID,
+        suggestion: CiderBookmarkDateSuggestion,
+        libraryItems: [LibraryItemV2],
+        calendar: Calendar = .current
+    ) -> Bool {
+        let bookmarkRef = LibraryEntityRef(type: .bookmark, entityID: bookmarkID)
+        let destination = dateSuggestionDestination(for: suggestion)
+
+        return libraryItems.contains { item in
+            switch (destination, item) {
+            case (.todo, .todo(let todo)):
+                return todo.linkedEntities.contains(bookmarkRef)
+                    && todo.dueDate.map { calendar.isDate($0, inSameDayAs: suggestion.date) } == true
+                    && todo.details.localizedCaseInsensitiveContains("Date suggestion kind: \(suggestion.kind)")
+            case (.dateCard, .dateCard(let dateCard)):
+                return dateCard.linkedEntities.contains(bookmarkRef)
+                    && calendar.isDate(dateCard.startAt, inSameDayAs: suggestion.date)
+                    && dateCard.details.localizedCaseInsensitiveContains("Date suggestion kind: \(suggestion.kind)")
+            default:
+                return false
+            }
         }
     }
 

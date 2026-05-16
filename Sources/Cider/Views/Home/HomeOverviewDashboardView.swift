@@ -611,8 +611,8 @@ struct HomeOverviewDashboardView: View {
                             .frame(width: 20, height: 20)
                     }
                     .buttonStyle(.plain)
-                    .help("Approve suggested route")
-                    .accessibilityLabel("Approve suggested route")
+                    .help(reviewApproveHelp(for: reviewItem))
+                    .accessibilityLabel(reviewApproveHelp(for: reviewItem))
                 }
 
                 if reviewItem.canDefer {
@@ -640,6 +640,7 @@ struct HomeOverviewDashboardView: View {
         case "Routing": return "arrow.triangle.branch"
         case "Enrichment": return "sparkles"
         case "Inbox": return "tray"
+        case "Date Suggestion": return item.dateSuggestionApproval?.destination == .todo ? "checklist" : "calendar.badge.plus"
         default: return "exclamationmark.bubble"
         }
     }
@@ -649,8 +650,16 @@ struct HomeOverviewDashboardView: View {
         case "Routing": return CiderColors.controlAccent
         case "Enrichment": return CiderColors.warning
         case "Inbox": return CiderColors.tertiary
+        case "Date Suggestion": return CiderColors.success
         default: return CiderColors.secondary
         }
+    }
+
+    private func reviewApproveHelp(for item: HomeReviewCockpitItem) -> String {
+        if let approval = item.dateSuggestionApproval {
+            return approval.destination == .todo ? "Approve Todo due date" : "Approve Date Card"
+        }
+        return "Approve suggested route"
     }
 
     private func recentActivityPanel(fixedHeight: CGFloat? = nil) -> some View {
