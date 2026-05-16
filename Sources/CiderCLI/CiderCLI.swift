@@ -287,35 +287,57 @@ struct CiderCLI {
 
     // MARK: - Reminder Action Commands
 
+    struct CiderReminderIDCandidate: Equatable {
+        let id: UUID
+        let title: String
+    }
+
+    enum CiderReminderIDResolution: Equatable {
+        case missing
+        case notFound(String)
+        case unique(UUID)
+        case ambiguous([CiderReminderIDCandidate])
+    }
+
     static func handleReminder(subcommand: String?, args: [String]) {
         let service = CiderReminderActionService()
+        let positionalArgs = args.filter { !$0.hasPrefix("--") }
         do {
             let result: CiderReminderActionResult
             switch subcommand {
             case "complete", "done":
-                guard let itemType = parseReminderItemType(args.first),
-                      let id = resolveReminderID(type: itemType, prefix: args.dropFirst().first) else {
-                    print("Error: Usage: cider-cli reminder complete <todo|dateCard> <id-prefix> [--json]")
+                let usage = "Usage: cider-cli reminder complete <todo|dateCard> <id-prefix> [--json]"
+                guard let itemType = parseReminderItemType(positionalArgs.first) else {
+                    printCLIError(usage)
+                    return
+                }
+                let idResolution = resolveUniqueReminderID(type: itemType, prefix: positionalArgs.dropFirst().first)
+                guard case .unique(let id) = idResolution else {
+                    printReminderIDResolutionError(idResolution, itemType: itemType, usage: usage)
                     return
                 }
                 result = try service.complete(itemType, id: id)
 
             case "snooze", "defer":
-                guard let itemType = parseReminderItemType(args.first),
-                      let id = resolveReminderID(type: itemType, prefix: args.dropFirst().first) else {
-                    print("Error: Usage: cider-cli reminder snooze <todo|dateCard> <id-prefix> --until yyyy-MM-dd [--time \"h:mm a\"] [--json]")
+                let usage = "Usage: cider-cli reminder snooze <todo|dateCard> <id-prefix> --until yyyy-MM-dd [--time \"h:mm a\"] [--json]"
+                guard let itemType = parseReminderItemType(positionalArgs.first) else {
+                    printCLIError(usage)
+                    return
+                }
+                let idResolution = resolveUniqueReminderID(type: itemType, prefix: positionalArgs.dropFirst().first)
+                guard case .unique(let id) = idResolution else {
+                    printReminderIDResolutionError(idResolution, itemType: itemType, usage: usage)
                     return
                 }
                 guard let untilString = parseFlag("--until", from: args) ?? parseFlag("--date", from: args),
                       let until = resolveEventStartAt(dateString: untilString, timeString: parseFlag("--time", from: args)) else {
-                    print("Error: --until yyyy-MM-dd required for reminder snooze")
+                    printCLIError("--until yyyy-MM-dd required for reminder snooze")
                     return
                 }
                 result = try service.snooze(itemType, id: id, until: until)
 
             default:
-                print("Unknown reminder command: \(subcommand ?? "nil")")
-                print("Commands: complete, snooze")
+                printCLIError("Unknown reminder command: \(subcommand ?? "nil"). Commands: complete, snooze")
                 return
             }
 
@@ -331,7 +353,7 @@ struct CiderCLI {
                 }
             }
         } catch {
-            print("Error: \(error.localizedDescription)")
+            printCLIError(error.localizedDescription)
         }
     }
 
@@ -346,18 +368,51 @@ struct CiderCLI {
         }
     }
 
-    private static func resolveReminderID(type: CiderReminderActionItemType, prefix: String?) -> UUID? {
-        guard let prefix else { return nil }
+    static func resolveUniqueReminderID(
+        prefix: String?,
+        candidates: [CiderReminderIDCandidate]
+    ) -> CiderReminderIDResolution {
+        guard let prefix else { return .missing }
         let normalized = prefix.lowercased()
+        let matches = candidates.filter { $0.id.uuidString.lowercased().hasPrefix(normalized) }
+        if matches.isEmpty { return .notFound(prefix) }
+        if matches.count == 1, let match = matches.first { return .unique(match.id) }
+        return .ambiguous(matches)
+    }
+
+    private static func resolveUniqueReminderID(
+        type: CiderReminderActionItemType,
+        prefix: String?
+    ) -> CiderReminderIDResolution {
+        let candidates: [CiderReminderIDCandidate]
         switch type {
         case .todo:
-            return TodoCardStorage.shared.todoCards
-                .first { $0.id.uuidString.lowercased().hasPrefix(normalized) }?
-                .id
+            candidates = TodoCardStorage.shared.todoCards.map { CiderReminderIDCandidate(id: $0.id, title: $0.title) }
         case .dateCard:
-            return DateCardStorage.shared.dateCards
-                .first { $0.id.uuidString.lowercased().hasPrefix(normalized) }?
-                .id
+            candidates = DateCardStorage.shared.dateCards.map { CiderReminderIDCandidate(id: $0.id, title: $0.title) }
+        }
+        return resolveUniqueReminderID(prefix: prefix, candidates: candidates)
+    }
+
+    private static func printReminderIDResolutionError(
+        _ resolution: CiderReminderIDResolution,
+        itemType: CiderReminderActionItemType,
+        usage: String
+    ) {
+        switch resolution {
+        case .missing:
+            printCLIError(usage)
+        case .notFound(let prefix):
+            printCLIError("No \(itemType.rawValue) found with ID prefix: \(prefix)")
+        case .ambiguous(let matches):
+            printCLIError(
+                "Ambiguous \(itemType.rawValue) ID prefix. Use more characters.",
+                details: [
+                    "matches": matches.map { ["id": $0.id.uuidString, "title": $0.title] }
+                ]
+            )
+        case .unique:
+            return
         }
     }
 
@@ -1239,13 +1294,14 @@ struct CiderCLI {
         case "date-suggestions", "dates":
             if args.first == "approve" {
                 let approvalArgs = Array(args.dropFirst())
-                guard let idPrefix = approvalArgs.first else {
-                    print("Error: ID prefix required. Usage: cider-cli bookmark date-suggestions approve <id> [--index <n>] [--json]")
+                let approvalPositionals = approvalArgs.filter { !$0.hasPrefix("--") }
+                guard let idPrefix = approvalPositionals.first else {
+                    printCLIError("ID prefix required. Usage: cider-cli bookmark date-suggestions approve <id> [--index <n>] [--json]")
                     return
                 }
                 let suggestionIndex = parseFlag("--index", from: approvalArgs).flatMap(Int.init) ?? 0
                 guard suggestionIndex >= 0 else {
-                    print("Error: --index must be 0 or greater")
+                    printCLIError("--index must be 0 or greater")
                     return
                 }
                 guard let bm = findBookmark(idPrefix, in: service) else { return }
@@ -1267,13 +1323,14 @@ struct CiderCLI {
                         print("  Source bookmark: \(result.bookmarkTitle) (\(result.bookmarkID.uuidString.prefix(8)))")
                     }
                 } catch {
-                    print("Error: \(error.localizedDescription)")
+                    printCLIError(error.localizedDescription)
                 }
                 return
             }
 
-            guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli bookmark date-suggestions <id> [--json]")
+            let dateSuggestionPositionals = args.filter { !$0.hasPrefix("--") }
+            guard let idPrefix = dateSuggestionPositionals.first else {
+                printCLIError("ID prefix required. Usage: cider-cli bookmark date-suggestions <id> [--json]")
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
@@ -6681,8 +6738,16 @@ struct CiderCLI {
     }
 
     static func printCLIError(_ message: String) {
+        printCLIError(message, details: nil)
+    }
+
+    static func printCLIError(_ message: String, details: [String: Any]?) {
         if jsonOutput {
-            outputJSON(["ok": false, "error": message])
+            var dict: [String: Any] = ["ok": false, "error": message]
+            if let details {
+                dict["details"] = details
+            }
+            outputJSON(dict)
         } else {
             print("Error: \(message)")
         }
@@ -7358,7 +7423,7 @@ struct CiderCLI {
 
     static func findBookmark(_ idPrefix: String, in service: VaultBookmarkService) -> Bookmark? {
         let bm = service.bookmarks.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) })
-        if bm == nil { print("Error: No bookmark found with ID prefix: \(idPrefix)") }
+        if bm == nil { printCLIError("No bookmark found with ID prefix: \(idPrefix)") }
         return bm
     }
 
