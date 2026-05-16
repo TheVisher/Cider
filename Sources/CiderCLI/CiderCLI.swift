@@ -176,6 +176,7 @@ struct CiderCLI {
             print("""
             Storage commands:
               cider-cli storage audit [--json]
+              cider-cli storage doctor-plan [--limit <n>] [--json]
               cider-cli storage repair-schema [--json]
             """)
 
@@ -227,6 +228,29 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "doctor-plan":
+            let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+            let report = CiderStorageAuditService().doctorRemediationPlan(limit: limit)
+            if jsonOutput {
+                outputJSON(storageDoctorRemediationPlanReportToDict(report))
+            } else {
+                print("Storage doctor remediation dry-run plan")
+                print("  Mutating: \(report.isMutating ? "yes" : "no")")
+                print("  Approval required: \(report.approvalRequired ? "yes" : "no")")
+                print("  Plans: \(report.plans.count)")
+                for plan in report.plans {
+                    print("    [\(plan.severity)] \(plan.summary)")
+                    if let canonical = plan.candidateCanonicalRelativePath {
+                        print("      Candidate canonical path: \(canonical)")
+                    }
+                    if !plan.duplicateRelativePaths.isEmpty {
+                        print("      Duplicate path(s): \(plan.duplicateRelativePaths.joined(separator: ", "))")
+                    }
+                    print("      Action: \(plan.proposedAction) (\(plan.confidence))")
+                    print("      No files or folders were changed.")
+                }
+            }
+
         case "repair-schema":
             do {
                 let report = try CiderStorageAuditService().repairSchemaFindings()
@@ -254,7 +278,7 @@ struct CiderCLI {
 
         default:
             print("Unknown storage command: \(subcommand ?? "nil")")
-            print("Commands: audit, repair-schema")
+            print("Commands: audit, doctor-plan, repair-schema")
         }
     }
 
@@ -8386,6 +8410,8 @@ struct CiderCLI {
 
         STORAGE
           cider-cli storage audit [--json]
+          cider-cli storage doctor-plan [--limit <n>] [--json]
+          cider-cli storage repair-schema [--json]
 
         SPACES
           cider-cli space list [--json]

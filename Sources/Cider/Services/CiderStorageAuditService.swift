@@ -53,6 +53,31 @@ struct CiderStorageAuditSchemaRepairReport: Equatable {
     var remainingFindings: [CiderStorageAuditSchemaFinding]
 }
 
+struct CiderStorageDoctorRemediationPlanReport: Equatable {
+    var command: String = "storage.doctor.plan"
+    var generatedAt: Date
+    var isMutating: Bool = false
+    var approvalRequired: Bool = true
+    var planLimit: Int
+    var plans: [CiderStorageDoctorRemediationPlan]
+}
+
+struct CiderStorageDoctorRemediationPlan: Equatable {
+    var findingID: String
+    var kind: String
+    var severity: String
+    var summary: String
+    var proposedAction: String
+    var confidence: String
+    var candidateCanonicalRelativePath: String?
+    var duplicateRelativePaths: [String]
+    var affectedRelativePaths: [String]
+    var blockers: [String]
+    var isMutating: Bool = false
+    var approvalRequired: Bool = true
+    var approvalCommand: String? = nil
+}
+
 @MainActor
 final class CiderStorageAuditService {
     private static let defaultDoctorFindingSampleLimit = 20
@@ -146,6 +171,20 @@ final class CiderStorageAuditService {
             repairedFindingIDs: repairedFindingIDs.sorted(),
             skippedFindingIDs: skippedFindingIDs.sorted(),
             remainingFindings: try schemaFindings()
+        )
+    }
+
+    func doctorRemediationPlan(limit: Int = defaultDoctorFindingSampleLimit) -> CiderStorageDoctorRemediationPlanReport {
+        let normalizedLimit = max(0, limit)
+        let doctorReport = doctorReportProvider()
+        let plans = doctorReport.findings
+            .compactMap(storageDoctorRemediationPlan)
+            .prefix(normalizedLimit)
+
+        return CiderStorageDoctorRemediationPlanReport(
+            generatedAt: nowProvider(),
+            planLimit: normalizedLimit,
+            plans: Array(plans)
         )
     }
 
@@ -366,6 +405,60 @@ final class CiderStorageAuditService {
         }
     }
 
+    private func storageDoctorRemediationPlan(
+        for finding: VaultDoctor.Finding
+    ) -> CiderStorageDoctorRemediationPlan? {
+        guard finding.kind == .suspiciousFlattenedFolderDuplicate else { return nil }
+        guard let relativePath = finding.payload.relativePath else { return nil }
+
+        let relatedPaths = finding.payload.relatedRelativePaths ?? []
+        let affectedPaths = ([relativePath] + relatedPaths).deduplicatedSorted()
+        let canonicalPath = candidateCanonicalRelativePath(
+            relativePath: relativePath,
+            relatedPaths: relatedPaths
+        )
+        let duplicatePaths = affectedPaths
+            .filter { $0 != canonicalPath }
+            .deduplicatedSorted()
+
+        return CiderStorageDoctorRemediationPlan(
+            findingID: finding.id,
+            kind: finding.kind.rawValue,
+            severity: finding.severity.rawValue,
+            summary: finding.summary,
+            proposedAction: "manual_merge_review",
+            confidence: "review_required",
+            candidateCanonicalRelativePath: canonicalPath,
+            duplicateRelativePaths: duplicatePaths,
+            affectedRelativePaths: affectedPaths,
+            blockers: [
+                "manual approval required before any file or folder mutation",
+                "inspect files in every affected path before choosing merge, move, or delete",
+                "no automatic remediation command is available for this finding"
+            ]
+        )
+    }
+
+    private func candidateCanonicalRelativePath(
+        relativePath: String,
+        relatedPaths: [String]
+    ) -> String? {
+        let affectedPaths = ([relativePath] + relatedPaths).deduplicatedSorted()
+        if let nestedPath = affectedPaths.first(where: { $0.contains("/") && !hasNumericSuffixPathComponent($0) }) {
+            return nestedPath
+        }
+        if let nonNumericPath = affectedPaths.first(where: { !hasNumericSuffixPathComponent($0) }) {
+            return nonNumericPath
+        }
+        return affectedPaths.first
+    }
+
+    private func hasNumericSuffixPathComponent(_ path: String) -> Bool {
+        path.split(separator: "/").contains { component in
+            component.range(of: #" \d+$"#, options: .regularExpression) != nil
+        }
+    }
+
     private func groupedDuplicateFindings(_ findings: [VaultDuplicateAuditor.Finding]) -> [String: Int] {
         var groups: [String: Int] = [:]
         for finding in findings {
@@ -524,5 +617,11 @@ final class CiderStorageAuditService {
                 "The agent_actions table stores auditable agent actions against Cider entities."
             ),
         ]
+    }
+}
+
+private extension Array where Element == String {
+    func deduplicatedSorted() -> [String] {
+        Array(Set(self)).sorted()
     }
 }

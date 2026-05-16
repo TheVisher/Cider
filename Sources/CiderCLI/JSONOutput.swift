@@ -319,6 +319,40 @@ func storageAuditSchemaFindingToDict(_ finding: CiderStorageAuditSchemaFinding) 
     return dict
 }
 
+func storageDoctorRemediationPlanReportToDict(_ report: CiderStorageDoctorRemediationPlanReport) -> [String: Any] {
+    [
+        "command": report.command,
+        "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
+        "isMutating": report.isMutating,
+        "approvalRequired": report.approvalRequired,
+        "planLimit": report.planLimit,
+        "plans": report.plans.map(storageDoctorRemediationPlanToDict),
+    ]
+}
+
+func storageDoctorRemediationPlanToDict(_ plan: CiderStorageDoctorRemediationPlan) -> [String: Any] {
+    var dict: [String: Any] = [
+        "findingID": plan.findingID,
+        "kind": plan.kind,
+        "severity": plan.severity,
+        "summary": plan.summary,
+        "proposedAction": plan.proposedAction,
+        "confidence": plan.confidence,
+        "duplicateRelativePaths": plan.duplicateRelativePaths,
+        "affectedRelativePaths": plan.affectedRelativePaths,
+        "blockers": plan.blockers,
+        "isMutating": plan.isMutating,
+        "approvalRequired": plan.approvalRequired,
+    ]
+    if let canonicalPath = plan.candidateCanonicalRelativePath {
+        dict["candidateCanonicalRelativePath"] = canonicalPath
+    }
+    if let approvalCommand = plan.approvalCommand {
+        dict["approvalCommand"] = approvalCommand
+    }
+    return dict
+}
+
 func storageAuditSchemaRepairReportToDict(_ report: CiderStorageAuditSchemaRepairReport) -> [String: Any] {
     [
         "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),

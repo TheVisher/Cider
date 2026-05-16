@@ -275,6 +275,68 @@ struct CiderStorageAuditServiceTests {
         #expect((sample["nextSafeAction"] as? String)?.contains("manual") == true)
     }
 
+    @Test("storage doctor dry-run plan exposes non-mutating flattened duplicate remediation")
+    func storageDoctorDryRunPlanExposesNonMutatingFlattenedDuplicateRemediation() throws {
+        let doctorReport = VaultDoctor.Report(
+            startedAt: Date(timeIntervalSince1970: 11),
+            finishedAt: Date(timeIntervalSince1970: 12),
+            findings: [
+                VaultDoctor.Finding(
+                    id: "flattened-folder-root-games",
+                    kind: .suspiciousFlattenedFolderDuplicate,
+                    severity: .warning,
+                    summary: "Possible flattened folder duplicate: Games",
+                    detail: "Root folder 'Games' has the same normalized name as nested folder path(s): Media/Games.",
+                    isFixable: false,
+                    fixLabel: nil,
+                    payload: VaultDoctor.Finding.Payload(
+                        relativePath: "Games",
+                        relatedRelativePaths: ["Media 2/Games", "Media/Games"]
+                    )
+                ),
+                VaultDoctor.Finding(
+                    id: "duplicate-bookmark-url",
+                    kind: .duplicateBookmarkURL,
+                    severity: .warning,
+                    summary: "Duplicate bookmark URL",
+                    detail: "Duplicate bookmark URL.",
+                    isFixable: false,
+                    fixLabel: nil,
+                    payload: VaultDoctor.Finding.Payload(relativePath: "Bookmarks/Dupe")
+                )
+            ]
+        )
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let service = CiderStorageAuditService(
+            database: db,
+            doctorReportProvider: { doctorReport },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let dict = storageDoctorRemediationPlanReportToDict(service.doctorRemediationPlan(limit: 10))
+
+        #expect(dict["command"] as? String == "storage.doctor.plan")
+        #expect(dict["isMutating"] as? Bool == false)
+        #expect(dict["approvalRequired"] as? Bool == true)
+        #expect(dict["planLimit"] as? Int == 10)
+        let plans = try #require(dict["plans"] as? [[String: Any]])
+        #expect(plans.count == 1)
+        let plan = try #require(plans.first)
+        #expect(plan["findingID"] as? String == "flattened-folder-root-games")
+        #expect(plan["kind"] as? String == "suspiciousFlattenedFolderDuplicate")
+        #expect(plan["proposedAction"] as? String == "manual_merge_review")
+        #expect(plan["candidateCanonicalRelativePath"] as? String == "Media/Games")
+        #expect(plan["duplicateRelativePaths"] as? [String] == ["Games", "Media 2/Games"])
+        #expect(plan["affectedRelativePaths"] as? [String] == ["Games", "Media 2/Games", "Media/Games"])
+        #expect(plan["isMutating"] as? Bool == false)
+        #expect(plan["approvalRequired"] as? Bool == true)
+        #expect(plan["approvalCommand"] as? String == nil)
+        let blockers = try #require(plan["blockers"] as? [String])
+        #expect(blockers.contains { $0.contains("manual approval") })
+    }
+
     @Test("storage audit repair JSON exposes repaired skipped and remaining findings")
     func storageAuditRepairJSONExposesRepairState() throws {
         let report = CiderStorageAuditSchemaRepairReport(
