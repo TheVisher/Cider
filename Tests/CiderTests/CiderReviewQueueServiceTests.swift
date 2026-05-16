@@ -721,8 +721,10 @@ struct CiderReviewQueueServiceTests {
         #expect(result.isMutating == true)
         #expect(result.totalCandidateCount == 3)
         #expect(result.matchingCandidateCount == 2)
+        #expect(result.selectedCount == 1)
         #expect(result.appliedCount == 1)
         #expect(result.skippedCount == 1)
+        #expect(result.projectedRemainingCandidateCount == 2)
         #expect(result.appliedItems.map(\.itemID) == [firstID])
         #expect(result.appliedItems.first?.proposedStatus == "complete")
         let firstState = try bookmarkEnrichmentState(db, itemID: firstID)
@@ -738,6 +740,61 @@ struct CiderReviewQueueServiceTests {
         #expect(audit?.afterState["enrichmentStatus"] == "complete")
         #expect(audit?.metadata["groupID"] == "can_mark_complete_from_ai_fields")
         #expect(audit?.metadata["requiredApprovalToken"] == result.requiredApprovalToken)
+    }
+
+    @Test("review enrichment reconciliation apply dry run projects remaining candidates")
+    func reviewEnrichmentReconciliationApplyDryRunProjectsRemainingCandidates() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        _ = try insertBookmark(
+            db,
+            title: "First AI Evidence",
+            relativePath: "Inbox/Bookmarks/First AI Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            aiSummary: "A concise useful summary."
+        )
+        _ = try insertBookmark(
+            db,
+            title: "Second AI Evidence",
+            relativePath: "Inbox/Bookmarks/Second AI Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 200),
+            ocrText: "Detected text."
+        )
+        _ = try insertBookmark(
+            db,
+            title: "Metadata Evidence",
+            relativePath: "Inbox/Bookmarks/Metadata Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 300),
+            thumbnailRemoteURL: "https://example.com/thumb.jpg"
+        )
+        let queue = CiderReviewQueueService(database: db)
+
+        let result = try queue.applyEnrichmentReconciliation(
+            groupID: "can_mark_complete_from_ai_fields",
+            limit: 1,
+            approvalToken: nil,
+            execute: false,
+            actor: "agent",
+            now: Date(timeIntervalSince1970: 400)
+        )
+
+        #expect(result.status == "planned")
+        #expect(result.isMutating == false)
+        #expect(result.totalCandidateCount == 3)
+        #expect(result.matchingCandidateCount == 2)
+        #expect(result.proposedChangeCount == 2)
+        #expect(result.selectedCount == 1)
+        #expect(result.appliedCount == 0)
+        #expect(result.projectedRemainingCandidateCount == 2)
+        let dictionary = result.toDictionary()
+        #expect(dictionary["selectedCount"] as? Int == 1)
+        #expect(dictionary["projectedRemainingCandidateCount"] as? Int == 2)
     }
 
     @Test("review lane drilldown returns bounded items for summary groups")

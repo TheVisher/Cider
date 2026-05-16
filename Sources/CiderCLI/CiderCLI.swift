@@ -7051,6 +7051,8 @@ struct CiderCLI {
         print("  Limit: \(result.limit)")
         print("  Candidates: \(result.matchingCandidateCount) matching of \(result.totalCandidateCount)")
         print("  Proposed changes: \(result.proposedChangeCount)")
+        print("  Selected: \(result.selectedCount)")
+        print("  Projected remaining candidates: \(result.projectedRemainingCandidateCount)")
         print("  Applied: \(result.appliedCount)")
         print("  Skipped: \(result.skippedCount)")
         if !result.blockers.isEmpty {

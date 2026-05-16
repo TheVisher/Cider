@@ -286,6 +286,8 @@ struct CiderReviewEnrichmentReconciliationApplyResult: Equatable {
     var totalCandidateCount: Int
     var matchingCandidateCount: Int
     var proposedChangeCount: Int
+    var selectedCount: Int
+    var projectedRemainingCandidateCount: Int
     var appliedCount: Int
     var skippedCount: Int
     var blockers: [String]
@@ -306,6 +308,8 @@ struct CiderReviewEnrichmentReconciliationApplyResult: Equatable {
             "totalCandidateCount": totalCandidateCount,
             "matchingCandidateCount": matchingCandidateCount,
             "proposedChangeCount": proposedChangeCount,
+            "selectedCount": selectedCount,
+            "projectedRemainingCandidateCount": projectedRemainingCandidateCount,
             "appliedCount": appliedCount,
             "skippedCount": skippedCount,
             "blockers": blockers,
@@ -977,6 +981,7 @@ final class CiderReviewQueueService {
         let cappedLimit = max(0, limit)
         let candidates = try enrichmentReconciliationCandidates(groupID: groupID, now: now)
         let proposedCandidates = candidates.items.filter { $0.proposedStatus != nil && $0.proposedLastEnrichedAt != nil }
+        let selectedCount = min(cappedLimit, proposedCandidates.count)
         let requiredApprovalToken = Self.enrichmentReconciliationApprovalToken(
             groupID: groupID,
             limit: cappedLimit,
@@ -994,6 +999,8 @@ final class CiderReviewQueueService {
             totalCandidateCount: candidates.totalCandidateCount,
             matchingCandidateCount: candidates.matchingCandidateCount,
             proposedChangeCount: proposedCandidates.count,
+            selectedCount: selectedCount,
+            projectedRemainingCandidateCount: max(0, candidates.totalCandidateCount - selectedCount),
             appliedCount: 0,
             skippedCount: candidates.matchingCandidateCount,
             blockers: [],
@@ -1057,6 +1064,7 @@ final class CiderReviewQueueService {
         result.status = "applied"
         result.isMutating = true
         result.appliedCount = result.appliedItems.count
+        result.projectedRemainingCandidateCount = max(0, candidates.totalCandidateCount - result.appliedCount)
         result.skippedCount = max(0, candidates.matchingCandidateCount - result.appliedCount)
         return result
     }
