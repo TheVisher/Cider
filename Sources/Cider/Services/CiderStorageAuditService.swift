@@ -104,13 +104,12 @@ final class CiderStorageAuditService {
                 skippedFindingIDs.append(finding.id)
                 continue
             }
-            guard let repair = missingTableRepairs[finding.affectedTable] else {
+            guard let repairSQL = repairSQL(for: finding) else {
                 skippedFindingIDs.append(finding.id)
                 continue
             }
             try database.withTransaction {
-                try database.runSQL(repair.createTableSQL)
-                for sql in repair.additionalSQL {
+                for sql in repairSQL {
                     try database.runSQL(sql)
                 }
             }
@@ -155,6 +154,17 @@ final class CiderStorageAuditService {
         return try stmt.step()
     }
 
+    private func triggerExists(_ triggerName: String) throws -> Bool {
+        let stmt = try database.prepare("""
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'trigger' AND name = ?
+            LIMIT 1;
+            """)
+        stmt.bind(triggerName, at: 1)
+        return try stmt.step()
+    }
+
     private func rowCount(table: String) throws -> Int {
         let safeTable = table.replacingOccurrences(of: "\"", with: "\"\"")
         let stmt = try database.prepare("SELECT COUNT(*) FROM \"\(safeTable)\";")
@@ -194,6 +204,46 @@ final class CiderStorageAuditService {
                 )
             }
         }
+        findings.append(contentsOf: try contentChunkFTSArtifactFindings())
+        return findings
+    }
+
+    private func contentChunkFTSArtifactFindings() throws -> [CiderStorageAuditSchemaFinding] {
+        guard try tableExists("content_chunks") else { return [] }
+
+        var findings: [CiderStorageAuditSchemaFinding] = []
+        if try !tableExists("content_chunks_fts") {
+            findings.append(
+                CiderStorageAuditSchemaFinding(
+                    id: "missing_expected_table:content_chunks_fts",
+                    severity: "error",
+                    affectedTable: "content_chunks_fts",
+                    summary: "Missing expected content chunk FTS table content_chunks_fts.",
+                    detail: contentChunkFTSPurpose,
+                    nextSafeAction: "Run \(repairSchemaCommand) to create the missing FTS table, rebuild its index from content_chunks, and recreate sync triggers.",
+                    isRepairable: true,
+                    repairCommand: repairSchemaCommand
+                )
+            )
+        }
+
+        for triggerName in expectedContentChunkFTSTriggers {
+            if try !triggerExists(triggerName) {
+                findings.append(
+                    CiderStorageAuditSchemaFinding(
+                        id: "missing_expected_trigger:\(triggerName)",
+                        severity: "error",
+                        affectedTable: triggerName,
+                        summary: "Missing expected content chunk FTS trigger \(triggerName).",
+                        detail: contentChunkFTSPurpose,
+                        nextSafeAction: "Run \(repairSchemaCommand) to recreate the missing content chunk FTS trigger, then rerun storage audit.",
+                        isRepairable: true,
+                        repairCommand: repairSchemaCommand
+                    )
+                )
+            }
+        }
+
         return findings
     }
 
@@ -306,6 +356,38 @@ final class CiderStorageAuditService {
         var additionalSQL: [String]
     }
 
+    private func repairSQL(for finding: CiderStorageAuditSchemaFinding) -> [String]? {
+        if let repair = missingTableRepairs[finding.affectedTable] {
+            return [repair.createTableSQL] + repair.additionalSQL
+        }
+
+        switch finding.id {
+        case "missing_expected_table:content_chunks_fts":
+            return contentChunkFTSRepairSQL(rebuild: true)
+        case "missing_expected_trigger:content_chunks_ai":
+            return [CiderSchema.createContentChunksFTSInsertTrigger]
+        case "missing_expected_trigger:content_chunks_ad":
+            return [CiderSchema.createContentChunksFTSDeleteTrigger]
+        case "missing_expected_trigger:content_chunks_au":
+            return [CiderSchema.createContentChunksFTSUpdateTrigger]
+        default:
+            return nil
+        }
+    }
+
+    private func contentChunkFTSRepairSQL(rebuild: Bool) -> [String] {
+        var sql = [
+            CiderSchema.createContentChunksFTS,
+            CiderSchema.createContentChunksFTSInsertTrigger,
+            CiderSchema.createContentChunksFTSDeleteTrigger,
+            CiderSchema.createContentChunksFTSUpdateTrigger,
+        ]
+        if rebuild {
+            sql.append("INSERT INTO content_chunks_fts(content_chunks_fts) VALUES('rebuild');")
+        }
+        return sql
+    }
+
     private var missingTableRepairs: [String: MissingTableRepair] {
         [
             "routing_decisions": MissingTableRepair(
@@ -334,11 +416,7 @@ final class CiderStorageAuditService {
                 additionalSQL: [
                     "CREATE INDEX IF NOT EXISTS idx_content_chunks_owner ON content_chunks(owner_type, owner_id, chunk_index);",
                     "CREATE INDEX IF NOT EXISTS idx_content_chunks_section ON content_chunks(section_id) WHERE section_id IS NOT NULL;",
-                    CiderSchema.createContentChunksFTS,
-                    CiderSchema.createContentChunksFTSInsertTrigger,
-                    CiderSchema.createContentChunksFTSDeleteTrigger,
-                    CiderSchema.createContentChunksFTSUpdateTrigger,
-                ]
+                ] + contentChunkFTSRepairSQL(rebuild: false)
             ),
             "agent_actions": MissingTableRepair(
                 createTableSQL: CiderSchema.createAgentActions,
@@ -348,6 +426,14 @@ final class CiderStorageAuditService {
                 ]
             ),
         ]
+    }
+
+    private var contentChunkFTSPurpose: String {
+        "The content_chunks_fts table and sync triggers keep content chunk recall searchable."
+    }
+
+    private var expectedContentChunkFTSTriggers: [String] {
+        ["content_chunks_ai", "content_chunks_ad", "content_chunks_au"]
     }
 
     private var expectedSecondBrainTables: [(name: String, requiredColumns: [String], purpose: String)] {

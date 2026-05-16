@@ -36,6 +36,57 @@ struct CiderStorageAuditServiceTests {
         return stmt.int(at: 0) == 1
     }
 
+    private func makeStorageAuditService(db: CiderDatabase) -> CiderStorageAuditService {
+        CiderStorageAuditService(
+            database: db,
+            vaultRoot: FileManager.default.temporaryDirectory,
+            modelCountsProvider: { [:] },
+            doctorReportProvider: {
+                VaultDoctor.Report(
+                    startedAt: Date(timeIntervalSince1970: 10),
+                    finishedAt: Date(timeIntervalSince1970: 11),
+                    findings: []
+                )
+            },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+    }
+
+    private func insertContentChunk(
+        _ db: CiderDatabase,
+        id: UUID = UUID(),
+        title: String = "Recall Seed",
+        body: String = "The searchable token is moonstone."
+    ) throws {
+        let now = DatabaseHelpers.encode(Date())
+        let stmt = try db.prepare("""
+            INSERT INTO content_chunks (
+                id, owner_type, owner_id, source, title, body,
+                chunk_index, content_hash, created_at, updated_at
+            )
+            VALUES (?, 'kanban_card', ?, 'test', ?, ?, 0, 'hash', ?, ?);
+            """)
+        stmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(DatabaseHelpers.encode(UUID()), at: 2)
+            .bind(title, at: 3)
+            .bind(body, at: 4)
+            .bind(now, at: 5)
+            .bind(now, at: 6)
+        try stmt.step()
+    }
+
+    private func contentChunkFTSMatchCount(_ query: String, in db: CiderDatabase) throws -> Int {
+        let stmt = try db.prepare("""
+            SELECT COUNT(*)
+            FROM content_chunks_fts
+            WHERE content_chunks_fts MATCH ?;
+            """)
+        stmt.bind(query, at: 1)
+        try stmt.step()
+        return Int(stmt.int64(at: 0))
+    }
+
     @Test("storage audit compares model counts SQLite rows filesystem artifacts and finding groups")
     func storageAuditComparesCountsAndFindings() throws {
         let (db, dbURL) = try makeTestDB()
@@ -318,6 +369,62 @@ struct CiderStorageAuditServiceTests {
         #expect(try sqliteObjectExists("content_chunks_ai", type: "trigger", in: db))
         #expect(try sqliteObjectExists("content_chunks_ad", type: "trigger", in: db))
         #expect(try sqliteObjectExists("content_chunks_au", type: "trigger", in: db))
+    }
+
+    @Test("storage audit repairs standalone missing content chunk FTS table")
+    func storageAuditRepairsStandaloneMissingContentChunkFTSTable() throws {
+        let (db, dbURL) = try makeTestDB()
+        defer { db.close(); cleanup(dbURL) }
+
+        try insertContentChunk(db)
+        try db.runSQL("DROP TRIGGER IF EXISTS content_chunks_ai;")
+        try db.runSQL("DROP TRIGGER IF EXISTS content_chunks_ad;")
+        try db.runSQL("DROP TRIGGER IF EXISTS content_chunks_au;")
+        try db.runSQL("DROP TABLE IF EXISTS content_chunks_fts;")
+        let service = makeStorageAuditService(db: db)
+
+        let beforeRepair = try service.audit()
+        let missingFTSFinding = beforeRepair.schemaFindings.contains { finding in
+            finding.id == "missing_expected_table:content_chunks_fts" &&
+            finding.affectedTable == "content_chunks_fts" &&
+            finding.isRepairable &&
+            finding.repairCommand == "cider-cli storage repair-schema --json"
+        }
+        #expect(missingFTSFinding)
+
+        let repair = try service.repairSchemaFindings()
+
+        #expect(repair.repairedFindingIDs.contains("missing_expected_table:content_chunks_fts"))
+        #expect(try sqliteObjectExists("content_chunks_fts", type: "table", in: db))
+        #expect(try sqliteObjectExists("content_chunks_ai", type: "trigger", in: db))
+        #expect(try sqliteObjectExists("content_chunks_ad", type: "trigger", in: db))
+        #expect(try sqliteObjectExists("content_chunks_au", type: "trigger", in: db))
+        #expect(try contentChunkFTSMatchCount("moonstone", in: db) == 1)
+        #expect(try service.audit().schemaFindings.isEmpty)
+    }
+
+    @Test("storage audit repairs standalone missing content chunk FTS trigger")
+    func storageAuditRepairsStandaloneMissingContentChunkFTSTrigger() throws {
+        let (db, dbURL) = try makeTestDB()
+        defer { db.close(); cleanup(dbURL) }
+
+        try db.runSQL("DROP TRIGGER IF EXISTS content_chunks_au;")
+        let service = makeStorageAuditService(db: db)
+
+        let beforeRepair = try service.audit()
+        let missingTriggerFinding = beforeRepair.schemaFindings.contains { finding in
+            finding.id == "missing_expected_trigger:content_chunks_au" &&
+            finding.affectedTable == "content_chunks_au" &&
+            finding.isRepairable &&
+            finding.repairCommand == "cider-cli storage repair-schema --json"
+        }
+        #expect(missingTriggerFinding)
+
+        let repair = try service.repairSchemaFindings()
+
+        #expect(repair.repairedFindingIDs.contains("missing_expected_trigger:content_chunks_au"))
+        #expect(try sqliteObjectExists("content_chunks_au", type: "trigger", in: db))
+        #expect(try service.audit().schemaFindings.isEmpty)
     }
 
     @Test("storage audit flags legacy routing table columns")
