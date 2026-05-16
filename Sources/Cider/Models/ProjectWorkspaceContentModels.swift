@@ -125,6 +125,7 @@ struct ProjectWorkspaceOverviewModel: Equatable {
     let totals: ProjectWorkspaceCardTotals
     let boardSummaries: [ProjectWorkspaceBoardSummary]
     let projectRows: [ProjectWorkspaceProjectRow]
+    let boardCreationActionTitle: String?
 }
 
 struct ProjectWorkspaceCardTotals: Equatable {
@@ -187,7 +188,8 @@ enum ProjectWorkspaceOverviewProvider {
             workspace: workspace,
             totals: aggregate(boardSummaries.map(\.totals)),
             boardSummaries: boardSummaries,
-            projectRows: projectRows
+            projectRows: projectRows,
+            boardCreationActionTitle: workspace.kind == .project ? "New Board" : nil
         )
     }
 

@@ -119,4 +119,16 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(homeModel.projectRows.map(\.projectID), ["cider", "cider-web"])
         XCTAssertEqual(homeModel.totals.queued, 2)
     }
+
+    func testProjectOverviewExposesBoardCreationActionForProjectsOnly() {
+        let board = KanbanBoard(id: "2afee0", name: "Cider")
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [board])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+
+        let projectModel = ProjectWorkspaceOverviewProvider.model(for: ciderWorkspace, catalog: catalog, boards: [board])
+        let homeModel = ProjectWorkspaceOverviewProvider.model(for: catalog.home, catalog: catalog, boards: [board])
+
+        XCTAssertEqual(projectModel.boardCreationActionTitle, "New Board")
+        XCTAssertNil(homeModel.boardCreationActionTitle)
+    }
 }

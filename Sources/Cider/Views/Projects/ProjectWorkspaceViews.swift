@@ -4,6 +4,7 @@ struct ProjectWorkspaceOverviewView: View {
     let model: ProjectWorkspaceOverviewModel
     var onOpenProject: (ProjectWorkspaceProjectRow) -> Void
     var onOpenBoard: (String) -> Void
+    var onCreateBoard: () -> Void
 
     var body: some View {
         ScrollView {
@@ -96,7 +97,21 @@ struct ProjectWorkspaceOverviewView: View {
 
     private var boardSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            sectionTitle("Related Boards")
+            HStack(spacing: Spacing.sm) {
+                sectionTitle("Related Boards")
+                Spacer(minLength: 0)
+                if let actionTitle = model.boardCreationActionTitle {
+                    Button {
+                        onCreateBoard()
+                    } label: {
+                        Label(actionTitle, systemImage: "plus")
+                            .font(CiderFont.captionSemibold)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Create a board in \(model.workspace.title)")
+                }
+            }
             if model.boardSummaries.isEmpty {
                 EmptyStateView(
                     icon: "square.split.2x1",

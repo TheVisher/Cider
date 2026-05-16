@@ -154,6 +154,8 @@ extension CiderPanelView {
                         },
                         onOpenBoard: { boardID in
                             openProjectBoard(boardID)
+                        },
+                        onCreateBoard: {
                         }
                     )
                 } else {
@@ -184,6 +186,9 @@ extension CiderPanelView {
                         onOpenProject: { _ in },
                         onOpenBoard: { boardID in
                             openProjectBoard(boardID)
+                        },
+                        onCreateBoard: {
+                            createProjectBoard(in: project)
                         }
                     )
                 } else {
@@ -667,12 +672,21 @@ extension CiderPanelView {
     }
 
     func openProjectBoard(_ boardID: String) {
-        guard let savedView = savedViewStorage.savedViews.first(where: { savedView in
-            if case .kanban(let candidateBoardID) = savedView.kind {
-                return candidateBoardID == boardID
-            }
-            return false
-        }) else { return }
+        guard let board = kanbanStorage.boards.first(where: { $0.id == boardID }) else { return }
+        let savedView = savedViewStorage.ensureKanbanView(name: board.name, boardID: board.id)
+        selectedFolderID = nil
+        selectedTab = .savedView(id: savedView.id, name: savedView.name)
+    }
+
+    func createProjectBoard(in project: ProjectWorkspace) {
+        let board = kanbanStorage.createBoard(name: "Untitled Board")
+        let savedView = ProjectBoardRegistrationService.register(
+            board: board,
+            projectID: project.id,
+            savedViewStorage: savedViewStorage,
+            associationStore: projectAssociationStore
+        )
+        selectedProjectWorkspaceID = project.id
         selectedFolderID = nil
         selectedTab = .savedView(id: savedView.id, name: savedView.name)
     }
