@@ -89,6 +89,14 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
             completedTodoItems: [],
             resurfacedItems: Array(repeating: makeItem(title: "Resurfaced"), count: resurfacedCount),
             reviewCockpitItems: [],
+            reviewCockpitSummary: HomeReviewCockpitSummary(
+                totalCount: 0,
+                badges: [],
+                itemTypeCounts: [:],
+                reviewStateCounts: [:],
+                safeActionCounts: [:],
+                generatedAt: Date(timeIntervalSince1970: 1_745_084_400)
+            ),
             triageItems: [],
             kanbanPulseItems: [],
             closedTabs: Array(repeating: makeClosedTab(name: "Library"), count: closedTabCount)

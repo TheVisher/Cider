@@ -162,6 +162,21 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
     let dateSuggestionApproval: HomeReviewCockpitDateSuggestionApproval?
 }
 
+struct HomeReviewCockpitBadge: Equatable, Identifiable {
+    let id: String
+    let label: String
+    let value: Int
+}
+
+struct HomeReviewCockpitSummary: Equatable {
+    let totalCount: Int
+    let badges: [HomeReviewCockpitBadge]
+    let itemTypeCounts: [String: Int]
+    let reviewStateCounts: [String: Int]
+    let safeActionCounts: [String: Int]
+    let generatedAt: Date
+}
+
 struct HomeKanbanPulseItem: Equatable, Identifiable {
     let id: String
     let boardID: String
@@ -188,6 +203,7 @@ struct HomeOverviewSnapshot: Equatable {
     let completedTodoItems: [TodoCard]
     let resurfacedItems: [LibraryItemV2]
     let reviewCockpitItems: [HomeReviewCockpitItem]
+    let reviewCockpitSummary: HomeReviewCockpitSummary
     let triageItems: [HomeTriageItem]
     let kanbanPulseItems: [HomeKanbanPulseItem]
     let closedTabs: [HomeOverviewClosedTabSummary]

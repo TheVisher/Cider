@@ -488,6 +488,47 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertFalse(snapshot.reviewCockpitItems[1].canDefer)
     }
 
+    func testReviewCockpitSummaryBuildsBadgesFromQueueSummary() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [],
+            recentItems: [],
+            folders: [],
+            reviewQueueSummary: CiderReviewQueueSummaryResult(
+                command: "review.summary",
+                generatedAt: now,
+                totalCount: 9,
+                countsByKind: [
+                    "enrichment_failed": 4,
+                    "low_confidence_routing": 3,
+                    "inbox_backlog": 2,
+                ],
+                countsByItemType: ["bookmark": 9],
+                countsByReviewState: ["needs_review": 9],
+                countsBySafeAction: [
+                    "approve": 3,
+                    "correct": 7,
+                    "defer": 5,
+                    "enrich": 4,
+                ]
+            ),
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.reviewCockpitSummary.totalCount, 9)
+        XCTAssertEqual(
+            snapshot.reviewCockpitSummary.badges,
+            [
+                HomeReviewCockpitBadge(id: "kind-enrichment_failed", label: "Enrichment", value: 4),
+                HomeReviewCockpitBadge(id: "kind-low_confidence_routing", label: "Routing", value: 3),
+                HomeReviewCockpitBadge(id: "kind-inbox_backlog", label: "Inbox", value: 2),
+            ]
+        )
+        XCTAssertEqual(snapshot.reviewCockpitSummary.safeActionCounts["enrich"], 4)
+        XCTAssertEqual(snapshot.reviewCockpitSummary.generatedAt, now)
+    }
+
     func testReviewCockpitItemsExposeDateSuggestionApprovalDestinations() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let deadlineDate = now.addingTimeInterval(60 * 60 * 24 * 10)

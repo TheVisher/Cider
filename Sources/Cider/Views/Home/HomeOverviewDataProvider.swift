@@ -49,6 +49,7 @@ enum HomeOverviewDataProvider {
         tabOrder: [UUID] = [],
         kanbanBoards: [KanbanBoard] = [],
         reviewQueueItems: [CiderReviewQueueItem] = [],
+        reviewQueueSummary: CiderReviewQueueSummaryResult? = nil,
         bookmarkDateSuggestionResults: [CiderBookmarkDateSuggestionResult] = [],
         surfacingDays: Int,
         now: Date = Date()
@@ -260,6 +261,11 @@ enum HomeOverviewDataProvider {
             completedTodoItems: Array(completedTodoItems(from: items).prefix(4)),
             resurfacedItems: resurfacedItems,
             reviewCockpitItems: reviewCockpitItems,
+            reviewCockpitSummary: reviewCockpitSummary(
+                from: reviewQueueSummary,
+                fallbackItems: reviewQueueItems,
+                now: now
+            ),
             triageItems: triageItems,
             kanbanPulseItems: kanbanPulseItems,
             closedTabs: closedTabs
@@ -608,6 +614,54 @@ enum HomeOverviewDataProvider {
         }
 
         return Array(queueItems.prefix(limit - 1)) + Array(suggestionItems.prefix(1))
+    }
+
+    private static func reviewCockpitSummary(
+        from summary: CiderReviewQueueSummaryResult?,
+        fallbackItems: [CiderReviewQueueItem],
+        now: Date
+    ) -> HomeReviewCockpitSummary {
+        if let summary {
+            return HomeReviewCockpitSummary(
+                totalCount: summary.totalCount,
+                badges: reviewCockpitBadges(from: summary.countsByKind),
+                itemTypeCounts: summary.countsByItemType,
+                reviewStateCounts: summary.countsByReviewState,
+                safeActionCounts: summary.countsBySafeAction,
+                generatedAt: summary.generatedAt
+            )
+        }
+
+        return HomeReviewCockpitSummary(
+            totalCount: fallbackItems.count,
+            badges: reviewCockpitBadges(from: groupedCounts(fallbackItems.map(\.kind))),
+            itemTypeCounts: groupedCounts(fallbackItems.map(\.itemType)),
+            reviewStateCounts: groupedCounts(fallbackItems.map(\.reviewState)),
+            safeActionCounts: groupedCounts(fallbackItems.flatMap(\.safeActions)),
+            generatedAt: now
+        )
+    }
+
+    private static func reviewCockpitBadges(from countsByKind: [String: Int]) -> [HomeReviewCockpitBadge] {
+        countsByKind
+            .filter { $0.value > 0 }
+            .sorted { lhs, rhs in
+                if lhs.value != rhs.value { return lhs.value > rhs.value }
+                return reviewKindLabel(lhs.key).localizedCaseInsensitiveCompare(reviewKindLabel(rhs.key)) == .orderedAscending
+            }
+            .map { kind, count in
+                HomeReviewCockpitBadge(
+                    id: "kind-\(kind)",
+                    label: reviewKindLabel(kind),
+                    value: count
+                )
+            }
+    }
+
+    private static func groupedCounts(_ values: [String]) -> [String: Int] {
+        values.reduce(into: [:]) { counts, value in
+            counts[value, default: 0] += 1
+        }
     }
 
     static func bookmarkDateSuggestionResults(

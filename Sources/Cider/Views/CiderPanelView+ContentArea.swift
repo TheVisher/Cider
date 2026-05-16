@@ -275,7 +275,9 @@ extension CiderPanelView {
                     if case .kanban(let boardID) = savedView.kind {
                         KanbanBoardView(boardID: boardID, onOpenCard: openKanbanCardDetail)
                     } else if case .dashboard = savedView.kind {
-                        let reviewQueueItems = (try? CiderReviewQueueService().list(limit: 8).items) ?? []
+                        let reviewQueueService = CiderReviewQueueService()
+                        let reviewQueueItems = (try? reviewQueueService.list(limit: 8).items) ?? []
+                        let reviewQueueSummary = try? reviewQueueService.summary()
                         let bookmarkDateSuggestionResults = HomeOverviewDataProvider.bookmarkDateSuggestionResults(
                             from: libraryViewModel.items
                         )
@@ -291,6 +293,7 @@ extension CiderPanelView {
                                     tabOrder: savedViewStorage.tabOrder,
                                     kanbanBoards: kanbanStorage.boards,
                                     reviewQueueItems: reviewQueueItems,
+                                    reviewQueueSummary: reviewQueueSummary,
                                     bookmarkDateSuggestionResults: bookmarkDateSuggestionResults,
                                     surfacingDays: CiderConfig.load().dateCardSurfacingDays
                                 ),
