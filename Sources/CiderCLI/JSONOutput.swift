@@ -134,6 +134,21 @@ func agendaBriefingItemToDict(_ item: AgendaBriefingItem, formatter: ISO8601Date
     if let actionURLString = item.actionURLString { dict["actionURL"] = actionURLString }
     dict["reminderPolicy"] = item.reminderPolicy
     if let suggestedAction = item.suggestedAction { dict["suggestedAction"] = suggestedAction }
+    dict["surfacing"] = surfacingExplanationToDict(item.surfacingExplanation)
+    return dict
+}
+
+func surfacingExplanationToDict(_ explanation: CiderSurfacingExplanation) -> [String: Any] {
+    var dict: [String: Any] = [
+        "reason": explanation.reason,
+        "urgency": explanation.urgency,
+        "sourceSignal": explanation.sourceSignal,
+        "reviewState": explanation.reviewState,
+        "suggestedAction": explanation.suggestedAction,
+    ]
+    if let actionURLString = explanation.actionURLString {
+        dict["actionURLString"] = actionURLString
+    }
     return dict
 }
 

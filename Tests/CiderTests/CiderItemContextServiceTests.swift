@@ -240,4 +240,40 @@ struct CiderItemContextServiceTests {
         #expect(packet.safeCommands.contains("cider-cli item related note \(note.entityID.uuidString) --json"))
         #expect(packet.safeCommands.contains("cider-cli routing explain \(note.entityID.uuidString) --json"))
     }
+
+    @Test("agent context uses shared reminder relevance for todo surfacing")
+    func agentContextUsesReminderRelevanceForTodoSurfacing() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let todoID = UUID()
+        let todoRef = LibraryEntityRef(type: .todo, entityID: todoID)
+        let todo = TodoCard(
+            id: todoID,
+            title: "Pay rent",
+            dueDate: now,
+            priority: .high,
+            actionURLString: "https://rent.example.com",
+            createdAt: now.addingTimeInterval(-86_400),
+            updatedAt: now
+        )
+        try insertItem(todoRef, title: "Pay rent", relativePath: "Inbox/Todos/Pay rent.md", into: db)
+
+        let service = CiderItemContextService(
+            database: db,
+            todoProvider: { [todo] },
+            dateCardProvider: { [] },
+            nowProvider: { now }
+        )
+
+        let packet = try service.agentContext(for: todoRef)
+
+        #expect(packet.surfacing.reason == "due today")
+        #expect(packet.surfacing.urgency == "today")
+        #expect(packet.surfacing.sourceSignal == "reminder_relevance")
+        #expect(packet.surfacing.reviewState == "ok")
+        #expect(packet.surfacing.suggestedAction == "open action URL")
+        #expect(packet.surfacing.actionURLString == "https://rent.example.com")
+    }
 }

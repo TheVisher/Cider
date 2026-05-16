@@ -738,7 +738,8 @@ enum HomeOverviewDataProvider {
                 title: agendaItem.title,
                 subtitle: agendaItem.reason,
                 systemImage: agendaItem.itemType == .todo ? "checkmark.circle" : "calendar.badge.clock",
-                target: libraryItems.first(where: { $0.id == "\(agendaItem.itemType.rawValue)-\(agendaItem.id.uuidString)" }).map { .item($0) } ?? .action(upcomingTarget)
+                target: libraryItems.first(where: { $0.id == "\(agendaItem.itemType.rawValue)-\(agendaItem.id.uuidString)" }).map { .item($0) } ?? .action(upcomingTarget),
+                surfacingExplanation: agendaItem.surfacingExplanation
             )
         }
 

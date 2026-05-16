@@ -43,14 +43,7 @@ enum CiderReminderRelevanceService {
             title: item.title,
             surfaceToday: item.surfaceToday,
             dueAt: item.dueAt,
-            surfacing: CiderSurfacingExplanation(
-                reason: item.reason,
-                urgency: urgency(for: item),
-                sourceSignal: "reminder_relevance",
-                reviewState: reviewState(for: item),
-                suggestedAction: suggestedAction(for: item),
-                actionURLString: item.actionURLString
-            )
+            surfacing: item.surfacingExplanation
         )
     }
 
@@ -70,33 +63,6 @@ enum CiderReminderRelevanceService {
                 actionURLString: todo.actionURLString
             )
         )
-    }
-
-    private static func urgency(for item: AgendaBriefingItem) -> String {
-        switch item.status {
-        case .overdue: return "overdue"
-        case .today: return "today"
-        case .upcoming: return "upcoming"
-        case .active: return "action"
-        case .completed, .suppressed, .later: return "normal"
-        }
-    }
-
-    private static func reviewState(for item: AgendaBriefingItem) -> String {
-        if item.itemType == .dateCard && item.actionURLString == nil && item.surfaceToday {
-            return "pending"
-        }
-        return "ok"
-    }
-
-    private static func suggestedAction(for item: AgendaBriefingItem) -> String {
-        if let suggestedAction = item.suggestedAction {
-            return suggestedAction
-        }
-        if item.itemType == .dateCard && item.actionURLString == nil && item.surfaceToday {
-            return "Add action URL"
-        }
-        return item.surfaceToday ? "Do next" : "Wait"
     }
 
     private static func sortItems(_ lhs: CiderReminderRelevanceItem, _ rhs: CiderReminderRelevanceItem) -> Bool {

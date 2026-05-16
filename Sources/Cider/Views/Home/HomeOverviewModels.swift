@@ -65,6 +65,7 @@ struct HomeDailyBriefItem: Equatable, Identifiable {
     let subtitle: String
     let systemImage: String
     let target: HomeDailyBriefTarget
+    var surfacingExplanation: CiderSurfacingExplanation? = nil
 }
 
 struct HomeDailyBriefSummaryChip: Equatable, Identifiable {

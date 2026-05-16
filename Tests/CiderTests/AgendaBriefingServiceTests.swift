@@ -122,6 +122,26 @@ final class AgendaBriefingServiceTests: XCTestCase {
         XCTAssertEqual(brief.items[0].suggestedAction, "open action URL")
     }
 
+    func testAgendaItemsExposeSharedReminderSurfacingExplanation() {
+        let now = date(2026, 5, 7)
+        let todo = TodoCard(
+            title: "Pay rent",
+            dueDate: date(2026, 5, 7),
+            priority: .high,
+            actionURLString: "https://rent.example.com"
+        )
+
+        let brief = AgendaBriefingService.build(todos: [todo], dateCards: [], now: now, calendar: calendar)
+        let surfacing = brief.items[0].surfacingExplanation
+
+        XCTAssertEqual(surfacing.reason, "due today")
+        XCTAssertEqual(surfacing.urgency, "today")
+        XCTAssertEqual(surfacing.sourceSignal, "reminder_relevance")
+        XCTAssertEqual(surfacing.reviewState, "ok")
+        XCTAssertEqual(surfacing.suggestedAction, "open action URL")
+        XCTAssertEqual(surfacing.actionURLString, "https://rent.example.com")
+    }
+
     func testDateCardReminderPolicyIsIncluded() {
         let now = date(2026, 5, 7)
         let birthday = DateCard(

@@ -44,6 +44,46 @@ struct AgendaBriefingItem: Identifiable, Equatable {
     let suggestedAction: String?
 }
 
+extension AgendaBriefingItem {
+    var surfacingExplanation: CiderSurfacingExplanation {
+        CiderSurfacingExplanation(
+            reason: reason,
+            urgency: surfacingUrgency,
+            sourceSignal: "reminder_relevance",
+            reviewState: surfacingReviewState,
+            suggestedAction: surfacingSuggestedAction,
+            actionURLString: actionURLString
+        )
+    }
+
+    private var surfacingUrgency: String {
+        switch status {
+        case .overdue: return "overdue"
+        case .today: return "today"
+        case .upcoming: return "upcoming"
+        case .active: return "action"
+        case .completed, .suppressed, .later: return "normal"
+        }
+    }
+
+    private var surfacingReviewState: String {
+        if itemType == .dateCard && actionURLString == nil && surfaceToday {
+            return "pending"
+        }
+        return "ok"
+    }
+
+    private var surfacingSuggestedAction: String {
+        if let suggestedAction {
+            return suggestedAction
+        }
+        if itemType == .dateCard && actionURLString == nil && surfaceToday {
+            return "Add action URL"
+        }
+        return surfaceToday ? "Do next" : "Wait"
+    }
+}
+
 struct AgendaBriefingOptions: Equatable {
     var todoLeadDays: Int = 7
     var dateCardLeadDays: Int = 7

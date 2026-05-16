@@ -118,15 +118,24 @@ final class CiderItemContextService {
     private let database: CiderDatabase
     private let linkService: ItemLinkService
     private let secondBrainStore: SecondBrainStore
+    private let todoProvider: () -> [TodoCard]
+    private let dateCardProvider: () -> [DateCard]
+    private let nowProvider: () -> Date
 
     init(
         database: CiderDatabase = .shared,
         linkService: ItemLinkService? = nil,
-        secondBrainStore: SecondBrainStore? = nil
+        secondBrainStore: SecondBrainStore? = nil,
+        todoProvider: @escaping () -> [TodoCard] = { TodoCardStorage.shared.todoCards },
+        dateCardProvider: @escaping () -> [DateCard] = { DateCardStorage.shared.dateCards },
+        nowProvider: @escaping () -> Date = { Date() }
     ) {
         self.database = database
         self.linkService = linkService ?? ItemLinkService(database: database)
         self.secondBrainStore = secondBrainStore ?? SecondBrainStore(database: database)
+        self.todoProvider = todoProvider
+        self.dateCardProvider = dateCardProvider
+        self.nowProvider = nowProvider
     }
 
     func context(for ref: LibraryEntityRef) throws -> CiderItemContextBundle {
@@ -347,6 +356,9 @@ final class CiderItemContextService {
                 actionURLString: nil
             )
         }
+        if let reminderSurfacing = reminderSurfacingExplanation(for: bundle.item) {
+            return reminderSurfacing
+        }
         return CiderSurfacingExplanation(
             reason: summary(for: bundle),
             urgency: "normal",
@@ -355,6 +367,26 @@ final class CiderItemContextService {
             suggestedAction: "Open",
             actionURLString: nil
         )
+    }
+
+    private func reminderSurfacingExplanation(for item: CiderItemSummary) -> CiderSurfacingExplanation? {
+        let itemType: CiderReminderRelevanceItem.ItemType
+        switch item.type {
+        case .todo:
+            itemType = .todo
+        case .dateCard:
+            itemType = .dateCard
+        default:
+            return nil
+        }
+
+        return CiderReminderRelevanceService.relevance(
+            todos: todoProvider(),
+            dateCards: dateCardProvider(),
+            now: nowProvider()
+        )
+        .first { $0.id == item.id && $0.itemType == itemType }?
+        .surfacing
     }
 
     private func recentHistory(

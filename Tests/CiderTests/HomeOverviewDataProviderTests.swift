@@ -161,6 +161,34 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         }
     }
 
+    func testDailyBriefAgendaFocusUsesSharedReminderSurfacingExplanation() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let todo = TodoCard(
+            id: UUID(),
+            title: "Pay rent",
+            dueDate: now,
+            priority: .high,
+            actionURLString: "https://rent.example.com",
+            createdAt: now.addingTimeInterval(-86_400),
+            updatedAt: now.addingTimeInterval(-3_600)
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.todo(todo)],
+            recentItems: [],
+            folders: [],
+            surfacingDays: 7,
+            now: now
+        )
+
+        let focusItem = snapshot.dailyBrief.focusItems.first
+        XCTAssertEqual(focusItem?.title, "Pay rent")
+        XCTAssertEqual(focusItem?.subtitle, "due today")
+        XCTAssertEqual(focusItem?.surfacingExplanation?.sourceSignal, "reminder_relevance")
+        XCTAssertEqual(focusItem?.surfacingExplanation?.suggestedAction, "open action URL")
+        XCTAssertEqual(focusItem?.surfacingExplanation?.actionURLString, "https://rent.example.com")
+    }
+
     func testRecentCaptureSummariesIncludeVerifiedPathTypeAndNextAction() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let folderID = UUID()
