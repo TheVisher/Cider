@@ -177,6 +177,7 @@ struct CiderCLI {
             Storage commands:
               cider-cli storage audit [--json]
               cider-cli storage doctor-plan [--limit <n>] [--json]
+              cider-cli storage doctor-apply --finding <id> --canonical <path> --duplicate <path> --approve <token> [--execute] [--json]
               cider-cli storage repair-schema [--json]
             """)
 
@@ -251,6 +252,55 @@ struct CiderCLI {
                 }
             }
 
+        case "doctor-apply":
+            guard let findingID = parseFlag("--finding", from: args),
+                  let canonicalPath = parseFlag("--canonical", from: args),
+                  let duplicatePath = parseFlag("--duplicate", from: args) else {
+                printCLIError("Usage: cider-cli storage doctor-apply --finding <id> --canonical <path> --duplicate <path> --approve <token> [--execute] [--json]")
+                return
+            }
+            let approvalToken = parseFlag("--approve", from: args)
+            let report = CiderStorageAuditService().applyDoctorRemediation(
+                findingID: findingID,
+                canonicalRelativePath: canonicalPath,
+                duplicateRelativePath: duplicatePath,
+                approvalToken: approvalToken,
+                execute: args.contains("--execute")
+            )
+            if jsonOutput {
+                outputJSON(storageDoctorRemediationApplyReportToDict(report))
+            } else {
+                print("Storage doctor approved remediation")
+                print("  Status: \(report.status)")
+                print("  Mutating: \(report.isMutating ? "yes" : "no")")
+                print("  Approval required: \(report.approvalRequired ? "yes" : "no")")
+                print("  Finding: \(report.findingID)")
+                print("  Canonical path: \(report.canonicalRelativePath)")
+                print("  Duplicate path: \(report.duplicateRelativePath)")
+                print("  Required approval token: \(report.requiredApprovalToken)")
+                if !report.plannedActions.isEmpty {
+                    print("  Planned actions:")
+                    for action in report.plannedActions {
+                        print("    \(action)")
+                    }
+                }
+                if !report.appliedActions.isEmpty {
+                    print("  Applied actions:")
+                    for action in report.appliedActions {
+                        print("    \(action)")
+                    }
+                }
+                if let trashPath = report.trashRelativePath {
+                    print("  Trash path: \(trashPath)")
+                }
+                if !report.blockers.isEmpty {
+                    print("  Blockers:")
+                    for blocker in report.blockers {
+                        print("    \(blocker)")
+                    }
+                }
+            }
+
         case "repair-schema":
             do {
                 let report = try CiderStorageAuditService().repairSchemaFindings()
@@ -278,7 +328,7 @@ struct CiderCLI {
 
         default:
             print("Unknown storage command: \(subcommand ?? "nil")")
-            print("Commands: audit, doctor-plan, repair-schema")
+            print("Commands: audit, doctor-plan, doctor-apply, repair-schema")
         }
     }
 
@@ -8620,6 +8670,7 @@ struct CiderCLI {
         STORAGE
           cider-cli storage audit [--json]
           cider-cli storage doctor-plan [--limit <n>] [--json]
+          cider-cli storage doctor-apply --finding <id> --canonical <path> --duplicate <path> --approve <token> [--execute] [--json]
           cider-cli storage repair-schema [--json]
 
         SPACES

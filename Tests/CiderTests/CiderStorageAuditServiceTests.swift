@@ -24,6 +24,64 @@ struct CiderStorageAuditServiceTests {
         return (db, url)
     }
 
+    private func makeTempVault() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-storage-doctor-apply-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func makeDirectories(_ relativePaths: [String], under root: URL) throws {
+        for path in relativePaths {
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent(path, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+    }
+
+    private func insertFolder(_ db: CiderDatabase, id: UUID, relativePath: String) throws {
+        let now = DatabaseHelpers.encode(Date(timeIntervalSince1970: 10))
+        let stmt = try db.prepare("""
+            INSERT INTO folders (id, relative_path, created_at, updated_at)
+            VALUES (?, ?, ?, ?);
+            """)
+        stmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(relativePath, at: 2)
+            .bind(now, at: 3)
+            .bind(now, at: 4)
+        try stmt.step()
+    }
+
+    private func folderExists(_ db: CiderDatabase, relativePath: String) throws -> Bool {
+        let stmt = try db.prepare("SELECT 1 FROM folders WHERE relative_path = ? LIMIT 1;")
+        stmt.bind(relativePath, at: 1)
+        return try stmt.step()
+    }
+
+    private func flattenedFolderDoctorReport(folderID: UUID) -> VaultDoctor.Report {
+        VaultDoctor.Report(
+            startedAt: Date(timeIntervalSince1970: 11),
+            finishedAt: Date(timeIntervalSince1970: 12),
+            findings: [
+                VaultDoctor.Finding(
+                    id: "flattened-folder-root-games",
+                    kind: .suspiciousFlattenedFolderDuplicate,
+                    severity: .warning,
+                    summary: "Possible flattened folder duplicate: Games",
+                    detail: "Root folder 'Games' has the same normalized name as nested folder path(s): Media/Games.",
+                    isFixable: false,
+                    fixLabel: nil,
+                    payload: VaultDoctor.Finding.Payload(
+                        folderID: folderID,
+                        relativePath: "Games",
+                        relatedRelativePaths: ["Media/Games"]
+                    )
+                )
+            ]
+        )
+    }
+
     private func sqliteObjectExists(_ name: String, type: String, in db: CiderDatabase) throws -> Bool {
         let stmt = try db.prepare("""
             SELECT count(*)
@@ -335,6 +393,145 @@ struct CiderStorageAuditServiceTests {
         #expect(plan["approvalCommand"] as? String == nil)
         let blockers = try #require(plan["blockers"] as? [String])
         #expect(blockers.contains { $0.contains("manual approval") })
+    }
+
+    @Test("storage doctor approved remediation refuses without exact approval")
+    func storageDoctorApprovedRemediationRefusesWithoutExactApproval() throws {
+        let folderID = UUID()
+        let doctorReport = flattenedFolderDoctorReport(folderID: folderID)
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try makeDirectories(["Games", "Media/Games"], under: vault)
+        try insertFolder(db, id: folderID, relativePath: "Games")
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            doctorReportProvider: { doctorReport },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let result = service.applyDoctorRemediation(
+            findingID: "flattened-folder-root-games",
+            canonicalRelativePath: "Media/Games",
+            duplicateRelativePath: "Games",
+            approvalToken: nil,
+            execute: true
+        )
+
+        #expect(result.status == "refused")
+        #expect(result.isMutating == false)
+        #expect(result.requiredApprovalToken == "flattened-folder-root-games:Games=>Media/Games")
+        #expect(result.blockers.contains { $0.contains("exact approval") })
+        #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent("Games").path))
+        #expect(try folderExists(db, relativePath: "Games"))
+    }
+
+    @Test("storage doctor approved remediation moves empty duplicate to trash and records audit")
+    func storageDoctorApprovedRemediationMovesEmptyDuplicateToTrashAndRecordsAudit() throws {
+        let folderID = UUID()
+        let doctorReport = flattenedFolderDoctorReport(folderID: folderID)
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try makeDirectories(["Games", "Media/Games"], under: vault)
+        try insertFolder(db, id: folderID, relativePath: "Games")
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            doctorReportProvider: { doctorReport },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let result = service.applyDoctorRemediation(
+            findingID: "flattened-folder-root-games",
+            canonicalRelativePath: "Media/Games",
+            duplicateRelativePath: "Games",
+            approvalToken: "flattened-folder-root-games:Games=>Media/Games",
+            execute: true
+        )
+
+        #expect(result.status == "applied")
+        #expect(result.isMutating == true)
+        #expect(result.appliedActions == ["move_duplicate_to_storage_doctor_trash", "delete_duplicate_folder_row", "record_mutation_audit"])
+        #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent("Games").path) == false)
+        let trashPath = try #require(result.trashRelativePath)
+        #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent(trashPath).path))
+        #expect(try folderExists(db, relativePath: "Games") == false)
+        let audit = MutationAuditService(database: db).loadEntries().first
+        #expect(audit?.action == "storage.doctor.apply")
+        #expect(audit?.source == .cleanup)
+        #expect(audit?.metadata["findingID"] == "flattened-folder-root-games")
+    }
+
+    @Test("storage doctor apply JSON exposes approval mutation and audit state")
+    func storageDoctorApplyJSONExposesApprovalMutationAndAuditState() {
+        let report = CiderStorageDoctorRemediationApplyReport(
+            generatedAt: Date(timeIntervalSince1970: 12),
+            findingID: "flattened-folder-root-games",
+            status: "planned",
+            isMutating: false,
+            requiredApprovalToken: "flattened-folder-root-games:Games=>Media/Games",
+            canonicalRelativePath: "Media/Games",
+            duplicateRelativePath: "Games",
+            plannedActions: ["move_duplicate_to_storage_doctor_trash"],
+            appliedActions: [],
+            blockers: ["dry-run only"],
+            trashRelativePath: ".cider/storage-doctor-trash/flattened-folder-root-games-12/Games",
+            auditRecorded: false
+        )
+
+        let dict = storageDoctorRemediationApplyReportToDict(report)
+
+        #expect(dict["command"] as? String == "storage.doctor.apply")
+        #expect(dict["findingID"] as? String == "flattened-folder-root-games")
+        #expect(dict["status"] as? String == "planned")
+        #expect(dict["isMutating"] as? Bool == false)
+        #expect(dict["approvalRequired"] as? Bool == true)
+        #expect(dict["requiredApprovalToken"] as? String == "flattened-folder-root-games:Games=>Media/Games")
+        #expect(dict["canonicalRelativePath"] as? String == "Media/Games")
+        #expect(dict["duplicateRelativePath"] as? String == "Games")
+        #expect(dict["plannedActions"] as? [String] == ["move_duplicate_to_storage_doctor_trash"])
+        #expect(dict["blockers"] as? [String] == ["dry-run only"])
+        #expect(dict["trashRelativePath"] as? String == ".cider/storage-doctor-trash/flattened-folder-root-games-12/Games")
+        #expect(dict["auditRecorded"] as? Bool == false)
+    }
+
+    @Test("storage doctor approved remediation refuses non-empty duplicate folders")
+    func storageDoctorApprovedRemediationRefusesNonEmptyDuplicateFolders() throws {
+        let folderID = UUID()
+        let doctorReport = flattenedFolderDoctorReport(folderID: folderID)
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try makeDirectories(["Games", "Media/Games"], under: vault)
+        try "important".write(to: vault.appendingPathComponent("Games/save.txt"), atomically: true, encoding: .utf8)
+        try insertFolder(db, id: folderID, relativePath: "Games")
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            doctorReportProvider: { doctorReport },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let result = service.applyDoctorRemediation(
+            findingID: "flattened-folder-root-games",
+            canonicalRelativePath: "Media/Games",
+            duplicateRelativePath: "Games",
+            approvalToken: "flattened-folder-root-games:Games=>Media/Games",
+            execute: true
+        )
+
+        #expect(result.status == "refused")
+        #expect(result.blockers.contains { $0.contains("non-empty") })
+        #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent("Games/save.txt").path))
+        #expect(try folderExists(db, relativePath: "Games"))
     }
 
     @Test("storage audit repair JSON exposes repaired skipped and remaining findings")

@@ -78,6 +78,23 @@ struct CiderStorageDoctorRemediationPlan: Equatable {
     var approvalCommand: String? = nil
 }
 
+struct CiderStorageDoctorRemediationApplyReport: Equatable {
+    var command: String = "storage.doctor.apply"
+    var generatedAt: Date
+    var findingID: String
+    var status: String
+    var isMutating: Bool
+    var approvalRequired: Bool = true
+    var requiredApprovalToken: String
+    var canonicalRelativePath: String
+    var duplicateRelativePath: String
+    var plannedActions: [String]
+    var appliedActions: [String]
+    var blockers: [String]
+    var trashRelativePath: String?
+    var auditRecorded: Bool = false
+}
+
 @MainActor
 final class CiderStorageAuditService {
     private static let defaultDoctorFindingSampleLimit = 20
@@ -186,6 +203,140 @@ final class CiderStorageAuditService {
             planLimit: normalizedLimit,
             plans: Array(plans)
         )
+    }
+
+    func applyDoctorRemediation(
+        findingID: String,
+        canonicalRelativePath: String,
+        duplicateRelativePath: String,
+        approvalToken: String?,
+        execute: Bool = false
+    ) -> CiderStorageDoctorRemediationApplyReport {
+        let requiredApprovalToken = Self.doctorRemediationApprovalToken(
+            findingID: findingID,
+            duplicateRelativePath: duplicateRelativePath,
+            canonicalRelativePath: canonicalRelativePath
+        )
+        let plannedActions = ["move_duplicate_to_storage_doctor_trash", "delete_duplicate_folder_row", "record_mutation_audit"]
+        var result = CiderStorageDoctorRemediationApplyReport(
+            generatedAt: nowProvider(),
+            findingID: findingID,
+            status: execute ? "refused" : "planned",
+            isMutating: false,
+            requiredApprovalToken: requiredApprovalToken,
+            canonicalRelativePath: canonicalRelativePath,
+            duplicateRelativePath: duplicateRelativePath,
+            plannedActions: plannedActions,
+            appliedActions: [],
+            blockers: [],
+            trashRelativePath: nil
+        )
+
+        guard let plan = doctorRemediationPlan(limit: Int.max).plans.first(where: { $0.findingID == findingID }) else {
+            result.status = "refused"
+            result.blockers.append("finding not present in current storage doctor plan")
+            return result
+        }
+        guard plan.proposedAction == "empty_duplicate_folder_removal" else {
+            result.status = "refused"
+            result.blockers.append("only empty_duplicate_folder_removal plans can be applied")
+            return result
+        }
+        guard plan.candidateCanonicalRelativePath == canonicalRelativePath,
+              plan.duplicateRelativePaths.contains(duplicateRelativePath) else {
+            result.status = "refused"
+            result.blockers.append("requested canonical and duplicate paths do not exactly match the current plan")
+            return result
+        }
+        guard isSafeRelativePath(canonicalRelativePath),
+              isSafeRelativePath(duplicateRelativePath) else {
+            result.status = "refused"
+            result.blockers.append("paths must be vault-relative and cannot contain traversal")
+            return result
+        }
+        guard approvalToken == requiredApprovalToken else {
+            result.status = "refused"
+            result.blockers.append("exact approval token required: \(requiredApprovalToken)")
+            return result
+        }
+
+        let canonicalURL = vaultRoot.appendingPathComponent(canonicalRelativePath, isDirectory: true)
+        let duplicateURL = vaultRoot.appendingPathComponent(duplicateRelativePath, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: canonicalURL.path) else {
+            result.status = "refused"
+            result.blockers.append("canonical path does not exist on disk")
+            return result
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: duplicateURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            result.status = "refused"
+            result.blockers.append("duplicate path does not exist as a directory on disk")
+            return result
+        }
+        guard directoryIsEmpty(duplicateURL) else {
+            result.status = "refused"
+            result.blockers.append("duplicate folder is non-empty; manual merge review is required")
+            return result
+        }
+        guard execute else {
+            result.status = "planned"
+            result.blockers.append("dry-run only; pass --execute with the exact approval token to mutate")
+            return result
+        }
+
+        let trashRelativePath = ".cider/storage-doctor-trash/\(safeTrashComponent(findingID))-\(Int(nowProvider().timeIntervalSince1970))/\(duplicateRelativePath)"
+        let trashURL = vaultRoot.appendingPathComponent(trashRelativePath, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: trashURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.moveItem(at: duplicateURL, to: trashURL)
+            result.appliedActions.append("move_duplicate_to_storage_doctor_trash")
+            result.trashRelativePath = trashRelativePath
+
+            if deleteFolderRow(relativePath: duplicateRelativePath) {
+                result.appliedActions.append("delete_duplicate_folder_row")
+            }
+
+            if let folderID = planFolderID(for: plan) {
+                MutationAuditService(database: database).record(
+                    action: "storage.doctor.apply",
+                    itemType: "vaultFolder",
+                    itemID: folderID,
+                    before: [
+                        "relativePath": duplicateRelativePath,
+                    ],
+                    after: [
+                        "trashRelativePath": trashRelativePath,
+                        "canonicalRelativePath": canonicalRelativePath,
+                    ],
+                    metadata: [
+                        "findingID": findingID,
+                        "requiredApprovalToken": requiredApprovalToken,
+                        "proposedAction": plan.proposedAction,
+                    ],
+                    source: .cleanup
+                )
+                result.auditRecorded = true
+                result.appliedActions.append("record_mutation_audit")
+            }
+            result.status = "applied"
+            result.isMutating = true
+            return result
+        } catch {
+            result.status = "failed"
+            result.blockers.append(error.localizedDescription)
+            return result
+        }
+    }
+
+    static func doctorRemediationApprovalToken(
+        findingID: String,
+        duplicateRelativePath: String,
+        canonicalRelativePath: String
+    ) -> String {
+        "\(findingID):\(duplicateRelativePath)=>\(canonicalRelativePath)"
     }
 
     private func sqliteCountsByEntity() throws -> [String: Int] {
@@ -421,12 +572,25 @@ final class CiderStorageAuditService {
             .filter { $0 != canonicalPath }
             .deduplicatedSorted()
 
+        let proposedAction = duplicatePaths.count == 1 ? "empty_duplicate_folder_removal" : "manual_merge_review"
+        let approvalCommand: String? = {
+            guard proposedAction == "empty_duplicate_folder_removal",
+                  let canonicalPath,
+                  let duplicatePath = duplicatePaths.first else { return nil }
+            let token = Self.doctorRemediationApprovalToken(
+                findingID: finding.id,
+                duplicateRelativePath: duplicatePath,
+                canonicalRelativePath: canonicalPath
+            )
+            return "cider-cli storage doctor-apply --finding \(Self.shellQuoted(finding.id)) --canonical \(Self.shellQuoted(canonicalPath)) --duplicate \(Self.shellQuoted(duplicatePath)) --approve \(Self.shellQuoted(token)) --execute --json"
+        }()
+
         return CiderStorageDoctorRemediationPlan(
             findingID: finding.id,
             kind: finding.kind.rawValue,
             severity: finding.severity.rawValue,
             summary: finding.summary,
-            proposedAction: "manual_merge_review",
+            proposedAction: proposedAction,
             confidence: "review_required",
             candidateCanonicalRelativePath: canonicalPath,
             duplicateRelativePaths: duplicatePaths,
@@ -434,8 +598,11 @@ final class CiderStorageAuditService {
             blockers: [
                 "manual approval required before any file or folder mutation",
                 "inspect files in every affected path before choosing merge, move, or delete",
-                "no automatic remediation command is available for this finding"
-            ]
+                proposedAction == "empty_duplicate_folder_removal"
+                    ? "approved command refuses unless the duplicate folder is empty"
+                    : "no automatic remediation command is available for this finding"
+            ],
+            approvalCommand: approvalCommand
         )
     }
 
@@ -451,6 +618,51 @@ final class CiderStorageAuditService {
             return nonNumericPath
         }
         return affectedPaths.first
+    }
+
+    private func deleteFolderRow(relativePath: String) -> Bool {
+        do {
+            let stmt = try database.prepare("DELETE FROM folders WHERE relative_path = ?;")
+            stmt.bind(relativePath, at: 1)
+            try stmt.step()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func planFolderID(for plan: CiderStorageDoctorRemediationPlan) -> UUID? {
+        doctorReportProvider().findings
+            .first { $0.id == plan.findingID }?
+            .payload
+            .folderID
+    }
+
+    private func directoryIsEmpty(_ url: URL) -> Bool {
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: nil,
+            options: []
+        )) ?? []
+        return contents.isEmpty
+    }
+
+    private func isSafeRelativePath(_ path: String) -> Bool {
+        !path.isEmpty
+            && !path.hasPrefix("/")
+            && path.split(separator: "/").allSatisfy { component in
+                component != "." && component != ".."
+            }
+    }
+
+    private func safeTrashComponent(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let filtered = String(value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" })
+        return filtered.isEmpty ? UUID().uuidString : filtered
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
     private func hasNumericSuffixPathComponent(_ path: String) -> Bool {

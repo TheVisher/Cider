@@ -353,6 +353,28 @@ func storageDoctorRemediationPlanToDict(_ plan: CiderStorageDoctorRemediationPla
     return dict
 }
 
+func storageDoctorRemediationApplyReportToDict(_ report: CiderStorageDoctorRemediationApplyReport) -> [String: Any] {
+    var dict: [String: Any] = [
+        "command": report.command,
+        "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
+        "findingID": report.findingID,
+        "status": report.status,
+        "isMutating": report.isMutating,
+        "approvalRequired": report.approvalRequired,
+        "requiredApprovalToken": report.requiredApprovalToken,
+        "canonicalRelativePath": report.canonicalRelativePath,
+        "duplicateRelativePath": report.duplicateRelativePath,
+        "plannedActions": report.plannedActions,
+        "appliedActions": report.appliedActions,
+        "blockers": report.blockers,
+        "auditRecorded": report.auditRecorded,
+    ]
+    if let trashRelativePath = report.trashRelativePath {
+        dict["trashRelativePath"] = trashRelativePath
+    }
+    return dict
+}
+
 func storageAuditSchemaRepairReportToDict(_ report: CiderStorageAuditSchemaRepairReport) -> [String: Any] {
     [
         "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
