@@ -563,6 +563,66 @@ struct CiderReviewQueueServiceTests {
         #expect(dictionary["approvalRequired"] as? Bool == true)
     }
 
+    @Test("review enrichment reconciliation samples are bounded and group filterable")
+    func reviewEnrichmentReconciliationSamplesAreBoundedAndGroupFilterable() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let firstAIEvidenceID = try insertBookmark(
+            db,
+            title: "First AI Evidence",
+            url: "https://example.com/first-ai",
+            relativePath: "Inbox/Bookmarks/First AI Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            aiSummary: "A concise useful summary."
+        )
+        _ = try insertBookmark(
+            db,
+            title: "Second AI Evidence",
+            url: "https://example.com/second-ai",
+            relativePath: "Inbox/Bookmarks/Second AI Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 200),
+            ocrText: "Detected text."
+        )
+        _ = try insertBookmark(
+            db,
+            title: "Metadata Evidence",
+            url: "https://example.com/metadata",
+            relativePath: "Inbox/Bookmarks/Metadata Evidence.webloc",
+            enrichmentStatus: nil,
+            lastEnrichedAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 300),
+            thumbnailRemoteURL: "https://example.com/thumb.jpg"
+        )
+        let queue = CiderReviewQueueService(database: db)
+
+        let samples = try queue.enrichmentReconciliationSamples(
+            groupID: "can_mark_complete_from_ai_fields",
+            limit: 1,
+            now: Date(timeIntervalSince1970: 400)
+        )
+
+        #expect(samples.command == "review.enrichment.reconciliationSamples")
+        #expect(samples.isMutating == false)
+        #expect(samples.approvalRequired == true)
+        #expect(samples.totalCandidateCount == 3)
+        #expect(samples.matchingCandidateCount == 2)
+        #expect(samples.limit == 1)
+        #expect(samples.sampleItems.count == 1)
+        #expect(samples.sampleItems.first?.itemID == firstAIEvidenceID)
+        #expect(samples.sampleItems.first?.groupID == "can_mark_complete_from_ai_fields")
+        #expect(samples.sampleItems.first?.url == "https://example.com/first-ai")
+        #expect(samples.sampleItems.first?.proposedStatus == "complete")
+        #expect(samples.sampleItems.first?.evidence.contains("ai_summary") == true)
+        let dictionary = samples.toDictionary()
+        #expect(dictionary["command"] as? String == "review.enrichment.reconciliationSamples")
+        #expect(dictionary["isMutating"] as? Bool == false)
+        #expect(dictionary["approvalRequired"] as? Bool == true)
+    }
+
     @Test("review lane drilldown returns bounded items for summary groups")
     func reviewLaneDrilldownReturnsBoundedItemsForSummaryGroups() throws {
         let (db, url) = try makeTempDB()

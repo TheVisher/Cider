@@ -243,9 +243,41 @@ struct CiderReviewEnrichmentReconciliationPlanGroup: Equatable {
     }
 }
 
+struct CiderReviewEnrichmentReconciliationSampleResult: Equatable {
+    var command: String = "review.enrichment.reconciliationSamples"
+    var generatedAt: Date
+    var isMutating: Bool = false
+    var approvalRequired: Bool = true
+    var groupID: String?
+    var totalCandidateCount: Int
+    var matchingCandidateCount: Int
+    var limit: Int
+    var sampleItems: [CiderReviewEnrichmentReconciliationPlanItem]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        var dictionary: [String: Any] = [
+            "command": command,
+            "generatedAt": formatter.string(from: generatedAt),
+            "isMutating": isMutating,
+            "approvalRequired": approvalRequired,
+            "totalCandidateCount": totalCandidateCount,
+            "matchingCandidateCount": matchingCandidateCount,
+            "limit": limit,
+            "sampleItems": sampleItems.map { $0.toDictionary() },
+        ]
+        if let groupID {
+            dictionary["groupID"] = groupID
+        }
+        return dictionary
+    }
+}
+
 struct CiderReviewEnrichmentReconciliationPlanItem: Equatable {
+    var groupID: String = ""
     var itemID: UUID
     var title: String
+    var url: String = ""
     var relativePath: String?
     var currentStatus: String?
     var currentLastEnrichedAt: Date?
@@ -257,8 +289,10 @@ struct CiderReviewEnrichmentReconciliationPlanItem: Equatable {
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
         var dictionary: [String: Any] = [
+            "groupID": groupID,
             "itemID": itemID.uuidString,
             "title": title,
+            "url": url,
             "proposalReason": proposalReason,
             "evidence": evidence,
         ]
@@ -804,16 +838,10 @@ final class CiderReviewQueueService {
 
             if samples[plan.groupID, default: []].count < cappedLimit {
                 samples[plan.groupID, default: []].append(
-                    CiderReviewEnrichmentReconciliationPlanItem(
-                        itemID: item.id,
-                        title: item.title,
-                        relativePath: item.relativePath,
-                        currentStatus: details.enrichmentStatus,
-                        currentLastEnrichedAt: details.lastEnrichedAt,
-                        proposedStatus: plan.proposedStatus,
-                        proposedLastEnrichedAt: plan.proposedLastEnrichedAt,
-                        proposalReason: plan.summary,
-                        evidence: plan.evidence
+                    enrichmentReconciliationPlanItem(
+                        item: item,
+                        details: details,
+                        plan: plan
                     )
                 )
             }
@@ -838,6 +866,56 @@ final class CiderReviewQueueService {
             blockedCount: blockedCounts.values.reduce(0, +),
             sampleLimit: cappedLimit,
             groups: groups
+        )
+    }
+
+    func enrichmentReconciliationSamples(
+        groupID: String? = nil,
+        limit: Int = 10,
+        now: Date = Date()
+    ) throws -> CiderReviewEnrichmentReconciliationSampleResult {
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
+        let items = try itemSummaries(in: db)
+        let bookmarkDetails = try bookmarkDetails(in: db)
+        let cappedLimit = max(0, limit)
+        var totalCandidateCount = 0
+        var matchingCandidateCount = 0
+        var samples: [CiderReviewEnrichmentReconciliationPlanItem] = []
+
+        for item in items.values
+            .filter({ $0.type == "bookmark" })
+            .sorted(by: enrichmentDiagnosisSort)
+        {
+            guard let details = bookmarkDetails[item.id],
+                  enrichmentReviewItem(item: item, details: details, now: now) != nil else {
+                continue
+            }
+
+            totalCandidateCount += 1
+            let plan = enrichmentReconciliationProposal(item: item, details: details)
+            if let groupID, plan.groupID != groupID {
+                continue
+            }
+
+            matchingCandidateCount += 1
+            if samples.count < cappedLimit {
+                samples.append(
+                    enrichmentReconciliationPlanItem(
+                        item: item,
+                        details: details,
+                        plan: plan
+                    )
+                )
+            }
+        }
+
+        return CiderReviewEnrichmentReconciliationSampleResult(
+            generatedAt: now,
+            groupID: groupID,
+            totalCandidateCount: totalCandidateCount,
+            matchingCandidateCount: matchingCandidateCount,
+            limit: cappedLimit,
+            sampleItems: samples
         )
     }
 
@@ -1320,6 +1398,32 @@ final class CiderReviewQueueService {
             nil,
             nil,
             []
+        )
+    }
+
+    private func enrichmentReconciliationPlanItem(
+        item: CiderRoutingItemSummary,
+        details: BookmarkReviewDetails,
+        plan: (
+            groupID: String,
+            summary: String,
+            proposedStatus: String?,
+            proposedLastEnrichedAt: Date?,
+            evidence: [String]
+        )
+    ) -> CiderReviewEnrichmentReconciliationPlanItem {
+        CiderReviewEnrichmentReconciliationPlanItem(
+            groupID: plan.groupID,
+            itemID: item.id,
+            title: item.title,
+            url: details.url,
+            relativePath: item.relativePath,
+            currentStatus: details.enrichmentStatus,
+            currentLastEnrichedAt: details.lastEnrichedAt,
+            proposedStatus: plan.proposedStatus,
+            proposedLastEnrichedAt: plan.proposedLastEnrichedAt,
+            proposalReason: plan.summary,
+            evidence: plan.evidence
         )
     }
 
