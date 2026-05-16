@@ -25,8 +25,12 @@ extension CiderPanelView {
             createSavedViewFromCurrentState()
         case .newKanban:
             let board = KanbanStorage.shared.createBoard(name: "Untitled Board")
-            let savedView = savedViewStorage.createKanbanView(name: board.name, boardID: board.id)
-            savedViewStorage.addToTabOrder(savedView.id)
+            let savedView = ProjectBoardRegistrationService.register(
+                board: board,
+                projectID: selectedProjectWorkspaceID,
+                savedViewStorage: savedViewStorage,
+                associationStore: projectAssociationStore
+            )
             selectedFolderID = nil
             selectedTab = .savedView(id: savedView.id, name: savedView.name)
         case .openSettings:

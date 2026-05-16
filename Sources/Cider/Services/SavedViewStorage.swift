@@ -14,13 +14,18 @@ final class SavedViewStorage: ObservableObject {
     @Published private(set) var tabOrder: [UUID] = []
 
     private let fileName = "_cider_saved_views.json"
+    private let storageFileURL: URL?
     private var fileURL: URL {
+        if let storageFileURL {
+            return storageFileURL
+        }
         let dir = StoragePaths.directoryURL(for: .savedViews)
         StoragePaths.ensureDirectory(dir)
         return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
     }
 
-    private init() {
+    init(storageFileURL: URL? = nil) {
+        self.storageFileURL = storageFileURL
         load()
     }
 
@@ -131,6 +136,26 @@ final class SavedViewStorage: ObservableObject {
         tabOrder.append(savedView.id)
         persist()
         return savedView
+    }
+
+    func kanbanView(for boardID: String) -> SavedView? {
+        savedViews.first { view in
+            if case .kanban(let candidateBoardID) = view.kind {
+                return candidateBoardID == boardID
+            }
+            return false
+        }
+    }
+
+    @discardableResult
+    func ensureKanbanView(name: String, boardID: String) -> SavedView {
+        if let existing = kanbanView(for: boardID) {
+            if !tabOrder.contains(existing.id) {
+                addToTabOrder(existing.id)
+            }
+            return existing
+        }
+        return createKanbanView(name: name, boardID: boardID)
     }
 
     @discardableResult

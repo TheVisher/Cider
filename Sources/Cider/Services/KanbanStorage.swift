@@ -525,18 +525,9 @@ final class KanbanStorage: ObservableObject {
     /// Call once at app launch after both KanbanStorage and SavedViewStorage have loaded.
     func syncTabsWithBoards() {
         let savedViewStorage = SavedViewStorage.shared
-        let existingBoardIDs = Set(
-            savedViewStorage.savedViews
-                .compactMap { sv -> String? in
-                    if case .kanban(let id) = sv.kind { return id }
-                    return nil
-                }
-        )
-
-        for board in boards where !existingBoardIDs.contains(board.id) {
-            let savedView = savedViewStorage.createKanbanView(name: board.name, boardID: board.id)
-            savedViewStorage.addToTabOrder(savedView.id)
-            logger.info("Auto-created tab for board: \(board.name, privacy: .public)")
+        for board in boards {
+            _ = savedViewStorage.ensureKanbanView(name: board.name, boardID: board.id)
+            logger.info("Ensured tab for board: \(board.name, privacy: .public)")
         }
     }
 }

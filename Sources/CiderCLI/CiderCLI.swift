@@ -4124,7 +4124,13 @@ struct CiderCLI {
         case "create":
             let name = args.first ?? "New Board"
             let board = storage.createBoard(name: name)
+            let projectID = ProjectBoardRegistrationService.normalizedProjectID(parseFlag("--project", from: args))
+            let savedView = ProjectBoardRegistrationService.register(board: board, projectID: projectID)
             print("Created board: \(board.name) (\(board.id))")
+            print("Registered kanban view: \(savedView.name) (\(savedView.id.uuidString.prefix(8)))")
+            if let projectID {
+                print("Added to project: \(projectID)")
+            }
 
         case "rename":
             guard let nameOrID = args.first, let newName = parseFlag("--to", from: args) else {
@@ -7523,7 +7529,7 @@ struct CiderCLI {
           cider-cli board recent <board> [--limit <count>] [--json]
           cider-cli board testing-summary <board> [--json]
           cider-cli board card inspect <board> --card <id> [--json]
-          cider-cli board create <name>
+          cider-cli board create <name> [--project <project-id-or-name>]
           cider-cli board rename <name|id> --to <new-name>
           cider-cli board delete <name|id>
           cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>]
