@@ -6656,8 +6656,10 @@ struct CiderCLI {
 
         print("Review action jobs: \(result.jobs.count)")
         for job in result.jobs {
-            print("\(job.action): \(job.batchID.uuidString)")
+            print("\(job.action): \(job.jobID)")
+            print("  Family: \(job.actionFamily)")
             print("  Scheduled: \(job.scheduledCount)/\(job.candidateCount)")
+            print("  Result: \(job.resultState)")
             print("  Excluded: \(job.excludedCount)")
             print("  Failed: \(job.failedCount)")
             print("  Actor: \(job.actor)")

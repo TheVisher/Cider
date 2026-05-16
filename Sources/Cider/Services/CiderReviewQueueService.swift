@@ -309,11 +309,14 @@ struct CiderReviewActionJobHistoryResult: Equatable {
 
 struct CiderReviewActionJobSummary: Equatable {
     var action: String
-    var batchID: UUID
+    var actionFamily: String
+    var jobID: String
+    var batchID: UUID?
     var firstScheduledAt: Date
     var lastScheduledAt: Date
     var actor: String
     var source: String
+    var resultState: String
     var candidateCount: Int
     var scheduledCount: Int
     var excludedCount: Int
@@ -323,13 +326,15 @@ struct CiderReviewActionJobSummary: Equatable {
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
-        return [
+        var dictionary: [String: Any] = [
             "action": action,
-            "batchID": batchID.uuidString,
+            "actionFamily": actionFamily,
+            "jobID": jobID,
             "firstScheduledAt": formatter.string(from: firstScheduledAt),
             "lastScheduledAt": formatter.string(from: lastScheduledAt),
             "actor": actor,
             "source": source,
+            "resultState": resultState,
             "candidateCount": candidateCount,
             "scheduledCount": scheduledCount,
             "excludedCount": excludedCount,
@@ -337,6 +342,10 @@ struct CiderReviewActionJobSummary: Equatable {
             "itemSamples": itemSamples.map { $0.toDictionary() },
             "safeActions": safeActions,
         ]
+        if let batchID {
+            dictionary["batchID"] = batchID.uuidString
+        }
+        return dictionary
     }
 }
 
@@ -709,21 +718,43 @@ final class CiderReviewQueueService {
         now: Date = Date()
     ) throws -> CiderReviewActionJobHistoryResult {
         guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
-        let entries = MutationAuditService(database: db).loadEntries().filter { entry in
+        let entries = MutationAuditService(database: db).loadEntries()
+        let batchEntries = entries.filter { entry in
             entry.action == "review.enrich.batch.schedule"
                 && entry.metadata["batchID"] != nil
         }
+        let routingEntries = entries.filter { entry in
+            entry.action.hasPrefix("review.routing.")
+                && entry.metadata["routingDecisionID"] != nil
+        }
         let items = try itemSummaries(in: db)
+        let cappedLimit = max(0, limit)
+        let jobs = (
+            batchJobSummaries(
+                from: batchEntries,
+                items: items,
+                limit: Int.max,
+                itemSampleLimit: itemSampleLimit
+            )
+            + routingActionJobSummaries(
+                from: routingEntries,
+                items: items,
+                itemSampleLimit: itemSampleLimit
+            )
+        )
+        .sorted {
+            if $0.lastScheduledAt != $1.lastScheduledAt {
+                return $0.lastScheduledAt > $1.lastScheduledAt
+            }
+            return $0.jobID > $1.jobID
+        }
+        .prefix(cappedLimit)
+        .map { $0 }
 
         return CiderReviewActionJobHistoryResult(
             command: "review.jobs",
             generatedAt: now,
-            jobs: batchJobSummaries(
-                from: entries,
-                items: items,
-                limit: limit,
-                itemSampleLimit: itemSampleLimit
-            )
+            jobs: jobs
         )
     }
 
@@ -1078,11 +1109,14 @@ final class CiderReviewQueueService {
 
             return CiderReviewActionJobSummary(
                 action: "review.enrich.batch",
+                actionFamily: "enrichment",
+                jobID: batchID.uuidString,
                 batchID: batchID,
                 firstScheduledAt: oldest.occurredAt,
                 lastScheduledAt: newest.occurredAt,
                 actor: newest.source.rawValue,
                 source: newest.source.rawValue,
+                resultState: "scheduled",
                 candidateCount: candidateCount,
                 scheduledCount: entries.count,
                 excludedCount: excludedCount,
@@ -1095,10 +1129,51 @@ final class CiderReviewQueueService {
             if $0.lastScheduledAt != $1.lastScheduledAt {
                 return $0.lastScheduledAt > $1.lastScheduledAt
             }
-            return $0.batchID.uuidString > $1.batchID.uuidString
+            return $0.jobID > $1.jobID
         }
         .prefix(cappedLimit)
         .map { $0 }
+    }
+
+    private func routingActionJobSummaries(
+        from entries: [MutationAuditEntry],
+        items: [UUID: CiderRoutingItemSummary],
+        itemSampleLimit: Int
+    ) -> [CiderReviewActionJobSummary] {
+        let cappedSampleLimit = max(0, itemSampleLimit)
+        return entries.compactMap { entry in
+            guard let routingDecisionID = entry.metadata["routingDecisionID"] else { return nil }
+            let item = items[entry.itemID]
+            let resultState = entry.afterState["reviewState"] ?? entry.action.replacingOccurrences(of: "review.routing.", with: "")
+            let samples = cappedSampleLimit > 0
+                ? [
+                    CiderReviewActionJobItemSample(
+                        itemID: entry.itemID,
+                        itemType: entry.itemType,
+                        title: item?.title ?? entry.itemID.uuidString,
+                        status: resultState
+                    ),
+                ]
+                : []
+
+            return CiderReviewActionJobSummary(
+                action: entry.action,
+                actionFamily: "routing",
+                jobID: routingDecisionID,
+                batchID: nil,
+                firstScheduledAt: entry.occurredAt,
+                lastScheduledAt: entry.occurredAt,
+                actor: entry.metadata["actor"] ?? entry.source.rawValue,
+                source: entry.source.rawValue,
+                resultState: resultState,
+                candidateCount: 1,
+                scheduledCount: 1,
+                excludedCount: 0,
+                failedCount: 0,
+                itemSamples: samples,
+                safeActions: ["review summary", "review list", "routing explain"]
+            )
+        }
     }
 
     private func routingActionResult(

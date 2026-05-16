@@ -696,4 +696,69 @@ struct CiderReviewQueueServiceTests {
         #expect(jobDictionary["excludedCount"] as? Int == 1)
         #expect((jobDictionary["itemSamples"] as? [[String: Any]])?.count == 2)
     }
+
+    @Test("review action job history mixes enrichment batches and routing actions")
+    func reviewActionJobHistoryMixesEnrichmentBatchesAndRoutingActions() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let enrichmentID = try insertBookmark(
+            db,
+            title: "Needs Metadata",
+            relativePath: "Inbox/Bookmarks/Needs Metadata.webloc",
+            enrichmentStatus: "pending",
+            lastEnrichedAt: nil
+        )
+        let routingID = try insertBookmark(
+            db,
+            title: "Needs Routing",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date()
+        )
+        let routing = CiderRoutingDecisionService(database: db)
+        _ = try routing.recordDecision(
+            itemID: routingID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0.2,
+            reason: "Needs a human route.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        let queue = CiderReviewQueueService(
+            database: db,
+            routingDecisionService: routing,
+            enrichmentScheduler: { _ in }
+        )
+        let batch = try queue.enrichBatch(actor: "agent")
+        let routingResult = try queue.approve(itemID: routingID, actor: "agent")
+
+        let history = try queue.actionJobHistory(limit: 10)
+
+        #expect(history.jobs.count == 2)
+        #expect(history.jobs.map(\.action) == ["review.routing.approve", "review.enrich.batch"])
+        let routingJob = try #require(history.jobs.first)
+        #expect(routingJob.actionFamily == "routing")
+        #expect(routingJob.resultState == "accepted")
+        #expect(routingJob.jobID == routingResult.routingDecisionID.uuidString)
+        #expect(routingJob.batchID == nil)
+        #expect(routingJob.scheduledCount == 1)
+        #expect(routingJob.candidateCount == 1)
+        #expect(routingJob.itemSamples.map(\.itemID) == [routingID])
+        #expect(routingJob.itemSamples.map(\.status) == ["accepted"])
+        #expect(routingJob.safeActions.contains("routing explain"))
+
+        let enrichmentJob = try #require(history.jobs.last)
+        #expect(enrichmentJob.actionFamily == "enrichment")
+        #expect(enrichmentJob.resultState == "scheduled")
+        #expect(enrichmentJob.jobID == batch.batchID.uuidString)
+        #expect(enrichmentJob.batchID == batch.batchID)
+        #expect(enrichmentJob.itemSamples.map(\.itemID) == [enrichmentID])
+
+        let dictionary = history.toDictionary()
+        let jobs = try #require(dictionary["jobs"] as? [[String: Any]])
+        #expect(jobs[0]["actionFamily"] as? String == "routing")
+        #expect(jobs[0]["batchID"] == nil)
+        #expect(jobs[1]["batchID"] as? String == batch.batchID.uuidString)
+    }
 }
