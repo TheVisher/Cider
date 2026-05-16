@@ -76,6 +76,12 @@ enum LibraryItemEditor {
         created.recurrenceRule = recurrenceRule
         created.rules = rules
         _ = DateCardStorage.shared.updateDateCard(created)
+        _ = try? CiderRoutingDecisionService().recordCreateProvenance(
+            itemID: created.id,
+            source: "library.editor.event.create",
+            reviewReason: "Cider created an event and kept it in Inbox for review.",
+            acceptedReason: "Cider created an event in the selected folder."
+        )
     }
 
     // MARK: - Contact
@@ -127,6 +133,12 @@ enum LibraryItemEditor {
         created.labelIDs = labelIDs
         created.customFields = customFields ?? []
         _ = ContactStorage.shared.updateContact(created)
+        _ = try? CiderRoutingDecisionService().recordCreateProvenance(
+            itemID: created.id,
+            source: "library.editor.contact.create",
+            reviewReason: "Cider created a contact and kept it in Inbox for review.",
+            acceptedReason: "Cider created a contact in the selected folder."
+        )
 
         if addBirthdayDateCard, let birthday {
             createOrUpdateBirthdayDateCard(for: created, birthday: birthday)
@@ -135,8 +147,9 @@ enum LibraryItemEditor {
 
     // MARK: - Birthday Date Card
 
+    @discardableResult
     @MainActor
-    static func createOrUpdateBirthdayDateCard(for contact: ContactCard, birthday: Date) {
+    static func createOrUpdateBirthdayDateCard(for contact: ContactCard, birthday: Date) -> DateCard? {
         var refreshedContact = ContactStorage.shared.contact(for: contact.id) ?? contact
         let targetStart = nextBirthdayOccurrence(from: birthday)
 
@@ -157,7 +170,13 @@ enum LibraryItemEditor {
                 refreshedContact.linkedEntities.append(LibraryEntityRef(type: .dateCard, entityID: existingBirthdayCard.id))
                 _ = ContactStorage.shared.updateContact(refreshedContact)
             }
-            return
+            _ = try? CiderRoutingDecisionService().recordCreateProvenance(
+                itemID: existingBirthdayCard.id,
+                source: "contact.birthday_date_card",
+                reviewReason: "Cider updated a birthday date card from explicit contact birthday metadata and kept it in Inbox for review.",
+                acceptedReason: "Cider updated a birthday date card from explicit contact birthday metadata."
+            )
+            return existingBirthdayCard
         }
 
         var createdBirthdayCard = DateCardStorage.shared.createDateCard(
@@ -175,6 +194,13 @@ enum LibraryItemEditor {
             refreshedContact.linkedEntities.append(LibraryEntityRef(type: .dateCard, entityID: createdBirthdayCard.id))
             _ = ContactStorage.shared.updateContact(refreshedContact)
         }
+        _ = try? CiderRoutingDecisionService().recordCreateProvenance(
+            itemID: createdBirthdayCard.id,
+            source: "contact.birthday_date_card",
+            reviewReason: "Cider created a birthday date card from explicit contact birthday metadata and kept it in Inbox for review.",
+            acceptedReason: "Cider created a birthday date card from explicit contact birthday metadata."
+        )
+        return createdBirthdayCard
     }
 
     // MARK: - Helpers

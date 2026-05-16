@@ -2407,7 +2407,22 @@ struct CiderCLI {
                 needsUpdate = true
             }
             if needsUpdate { _ = storage.updateDateCard(card) }
-            print("Created event: \(card.title) (\(card.id.uuidString.prefix(8)))")
+            let routing = try? CiderRoutingDecisionService().recordCreateProvenance(
+                itemID: card.id,
+                source: "event.create",
+                reviewReason: "Cider created an event and kept it in Inbox for review.",
+                acceptedReason: "Cider created an event in the selected folder."
+            )
+            if jsonOutput {
+                var dict = eventToDict(storage.dateCard(for: card.id) ?? card)
+                dict["command"] = "event.create"
+                if let routing {
+                    dict["routing"] = routing.toDictionary()
+                }
+                outputJSON(dict)
+            } else {
+                print("Created event: \(card.title) (\(card.id.uuidString.prefix(8)))")
+            }
 
         case "delete", "rm":
             guard let idPrefix = args.first else {
@@ -2576,6 +2591,7 @@ struct CiderCLI {
             let notes = parseFlag("--notes", from: args)
             let relationship = parseFlag("--relationship", from: args)
             let birthdayStr = parseFlag("--birthday", from: args)
+            var birthdayDate: Date?
             var contact = storage.createContact(displayName: name)
             guard storage.contacts.contains(where: { $0.id == contact.id }) else {
                 print("Error: Failed to create contact (disk write failed)")
@@ -2593,14 +2609,40 @@ struct CiderCLI {
                 localDF.timeZone = .current
                 if let birthday = localDF.date(from: birthdayStr) {
                     contact.birthday = birthday; needsUpdate = true
-                    LibraryItemEditor.createOrUpdateBirthdayDateCard(for: contact, birthday: birthday)
+                    birthdayDate = birthday
                 }
             }
             if let targetFolder {
                 contact.folderID = targetFolder.id; needsUpdate = true
             }
             if needsUpdate { _ = storage.updateContact(contact) }
-            print("Created contact: \(contact.displayName) (\(contact.id.uuidString.prefix(8)))")
+            let birthdayDateCard = birthdayDate.flatMap {
+                LibraryItemEditor.createOrUpdateBirthdayDateCard(for: storage.contact(for: contact.id) ?? contact, birthday: $0)
+            }
+            let refreshedContact = storage.contact(for: contact.id) ?? contact
+            let routing = try? CiderRoutingDecisionService().recordCreateProvenance(
+                itemID: refreshedContact.id,
+                source: "contact.create",
+                reviewReason: "Cider created a contact and kept it in Inbox for review.",
+                acceptedReason: "Cider created a contact in the selected folder."
+            )
+            if jsonOutput {
+                var dict = contactToDict(refreshedContact)
+                dict["command"] = "contact.create"
+                if let routing {
+                    dict["routing"] = routing.toDictionary()
+                }
+                if let birthdayDateCard {
+                    var birthdayDict = eventToDict(birthdayDateCard)
+                    if let birthdayRouting = try? CiderRoutingDecisionService().explain(itemID: birthdayDateCard.id) {
+                        birthdayDict["routing"] = birthdayRouting.toDictionary()
+                    }
+                    dict["birthdayDateCard"] = birthdayDict
+                }
+                outputJSON(dict)
+            } else {
+                print("Created contact: \(refreshedContact.displayName) (\(refreshedContact.id.uuidString.prefix(8)))")
+            }
 
         case "delete", "rm":
             guard let idPrefix = args.first else {

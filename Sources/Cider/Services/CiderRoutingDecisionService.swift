@@ -215,6 +215,32 @@ final class CiderRoutingDecisionService {
     }
 
     @discardableResult
+    func recordCreateProvenance(
+        itemID: UUID,
+        source: String,
+        actor: String = "user",
+        reviewReason: String,
+        acceptedReason: String
+    ) throws -> CiderRoutingExplanation {
+        let item = try itemSummary(for: itemID)
+        let previous = try? latestDecision(for: itemID)
+        let target = targetFromCurrentItem(item)
+        let isInbox = target.kind == "inbox"
+        _ = try recordDecision(
+            itemID: itemID,
+            itemType: item.type,
+            target: target,
+            confidence: isInbox ? 0 : 1,
+            reason: isInbox ? reviewReason : acceptedReason,
+            actor: actor,
+            source: source,
+            reviewState: isInbox ? "needs_review" : "accepted",
+            supersedesDecisionID: previous?.id
+        )
+        return try explain(itemID: itemID)
+    }
+
+    @discardableResult
     func approve(itemID: UUID, actor: String = "user") throws -> CiderRoutingExplanation {
         let latest = try latestDecision(for: itemID)
         _ = try recordDecision(

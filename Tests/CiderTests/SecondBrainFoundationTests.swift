@@ -207,6 +207,63 @@ struct SecondBrainFoundationTests {
         #expect(try routing.explain(itemID: fileID).latestDecision?.source == "capture.add")
     }
 
+    @Test("process CLI event and contact creates record provenance")
+    func processCLIEventAndContactCreatesRecordProvenance() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-event-contact-provenance-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let eventOutput = try runCLI([
+            "event", "create", "Passport appointment",
+            "--date", "2026-05-20",
+            "--time", "10:30 AM",
+            "--location", "City Hall",
+            "--json",
+        ], vaultURL: vault)
+        let eventPayload = try jsonObject(from: eventOutput)
+        #expect(eventPayload["command"] as? String == "event.create")
+        let eventRouting = try #require(eventPayload["routing"] as? [String: Any])
+        let eventLatest = try #require(eventRouting["routing"] as? [String: Any])
+        #expect(eventLatest["source"] as? String == "event.create")
+        #expect(eventLatest["reviewState"] as? String == "needs_review")
+
+        let contactOutput = try runCLI([
+            "contact", "create", "Avery Example",
+            "--email", "avery@example.com",
+            "--birthday", "2016-06-15",
+            "--json",
+        ], vaultURL: vault)
+        let contactPayload = try jsonObject(from: contactOutput)
+        #expect(contactPayload["command"] as? String == "contact.create")
+        let contactRouting = try #require(contactPayload["routing"] as? [String: Any])
+        let contactLatest = try #require(contactRouting["routing"] as? [String: Any])
+        #expect(contactLatest["source"] as? String == "contact.create")
+        #expect(contactLatest["reviewState"] as? String == "needs_review")
+
+        let birthdayDateCard = try #require(contactPayload["birthdayDateCard"] as? [String: Any])
+        let birthdayRouting = try #require(birthdayDateCard["routing"] as? [String: Any])
+        let birthdayLatest = try #require(birthdayRouting["routing"] as? [String: Any])
+        #expect(birthdayLatest["source"] as? String == "contact.birthday_date_card")
+        #expect(birthdayLatest["reviewState"] as? String == "needs_review")
+
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        let db = CiderDatabase()
+        try db.open(at: dbURL)
+        defer { db.close() }
+
+        let routing = CiderRoutingDecisionService(database: db)
+        let eventIDString = try #require(eventPayload["id"] as? String)
+        let contactIDString = try #require(contactPayload["id"] as? String)
+        let birthdayIDString = try #require(birthdayDateCard["id"] as? String)
+        let eventID = try #require(UUID(uuidString: eventIDString))
+        let contactID = try #require(UUID(uuidString: contactIDString))
+        let birthdayID = try #require(UUID(uuidString: birthdayIDString))
+        #expect(try routing.explain(itemID: eventID).latestDecision?.source == "event.create")
+        #expect(try routing.explain(itemID: contactID).latestDecision?.source == "contact.create")
+        #expect(try routing.explain(itemID: birthdayID).latestDecision?.source == "contact.birthday_date_card")
+    }
+
     @Test("bookmark move records manual routing provenance")
     func bookmarkMoveRecordsManualRoutingProvenance() throws {
         let vault = FileManager.default.temporaryDirectory
