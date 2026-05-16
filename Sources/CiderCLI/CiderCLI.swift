@@ -145,6 +145,8 @@ struct CiderCLI {
             handleReminder(subcommand: subcommand, args: remaining)
         case "recall":
             handleRecall(subcommand: subcommand, args: remaining)
+        case "storage":
+            handleStorage(subcommand: subcommand, args: remaining)
         case "embeddings":
             if subcommand == "backfill" {
                 let store = EmbeddingStore.shared
@@ -163,6 +165,62 @@ struct CiderCLI {
             printUsage()
         default:
             print("Unknown command: \(command). Run 'cider-cli help' for usage.")
+        }
+    }
+
+    // MARK: - Storage Audit Commands
+
+    static func handleStorage(subcommand: String?, args: [String]) {
+        switch subcommand {
+        case nil, "help", "--help", "-h":
+            print("""
+            Storage commands:
+              cider-cli storage audit [--json]
+            """)
+
+        case "audit":
+            do {
+                let report = try CiderStorageAuditService().audit()
+                if jsonOutput {
+                    outputJSON(storageAuditReportToDict(report))
+                } else {
+                    print("Storage audit")
+                    print("  Doctor findings: \(report.totalDoctorFindings) (\(report.fixableDoctorFindings) fixable)")
+                    print("  Mismatches: \(report.mismatches.count)")
+                    print("  Model counts:")
+                    for key in report.modelCounts.keys.sorted() {
+                        print("    \(key): \(report.modelCounts[key] ?? 0)")
+                    }
+                    print("  SQLite counts:")
+                    for key in report.sqliteCounts.keys.sorted() {
+                        print("    \(key): \(report.sqliteCounts[key] ?? 0)")
+                    }
+                    if !report.mismatches.isEmpty {
+                        print("  Count mismatches:")
+                        for mismatch in report.mismatches {
+                            print("    \(mismatch.detail)")
+                        }
+                    }
+                    if !report.doctorFindingGroups.isEmpty {
+                        print("  Doctor groups:")
+                        for key in report.doctorFindingGroups.keys.sorted() {
+                            print("    \(key): \(report.doctorFindingGroups[key] ?? 0)")
+                        }
+                    }
+                    if !report.duplicateFindingGroups.isEmpty {
+                        print("  Duplicate groups:")
+                        for key in report.duplicateFindingGroups.keys.sorted() {
+                            print("    \(key): \(report.duplicateFindingGroups[key] ?? 0)")
+                        }
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        default:
+            print("Unknown storage command: \(subcommand ?? "nil")")
+            print("Commands: audit")
         }
     }
 
@@ -7687,6 +7745,9 @@ struct CiderCLI {
         RECALL
           cider-cli recall scorecard [--limit <n>] [--search-limit <n>] [--json]
           cider-cli recall probes [--limit <n>] [--json]
+
+        STORAGE
+          cider-cli storage audit [--json]
 
         SPACES
           cider-cli space list [--json]

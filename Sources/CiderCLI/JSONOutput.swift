@@ -266,6 +266,29 @@ private func recallOwnerToDict(_ owner: SecondBrainOwnerRef) -> [String: Any] {
     ]
 }
 
+func storageAuditReportToDict(_ report: CiderStorageAuditReport) -> [String: Any] {
+    [
+        "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
+        "modelCounts": report.modelCounts,
+        "sqliteCounts": report.sqliteCounts,
+        "fileArtifactCounts": report.fileArtifactCounts,
+        "doctorFindingGroups": report.doctorFindingGroups,
+        "duplicateFindingGroups": report.duplicateFindingGroups,
+        "totalDoctorFindings": report.totalDoctorFindings,
+        "fixableDoctorFindings": report.fixableDoctorFindings,
+        "mismatches": report.mismatches.map(storageAuditMismatchToDict),
+    ]
+}
+
+func storageAuditMismatchToDict(_ mismatch: CiderStorageAuditMismatch) -> [String: Any] {
+    [
+        "key": mismatch.key,
+        "modelCount": mismatch.modelCount,
+        "sqliteCount": mismatch.sqliteCount,
+        "detail": mismatch.detail,
+    ]
+}
+
 @MainActor func contactToDict(_ contact: ContactCard) -> [String: Any] {
     var d: [String: Any] = [
         "id": contact.id.uuidString,
