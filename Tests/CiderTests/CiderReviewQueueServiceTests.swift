@@ -407,6 +407,71 @@ struct CiderReviewQueueServiceTests {
         _ = inboxID
     }
 
+    @Test("review lane drilldown returns bounded items for summary groups")
+    func reviewLaneDrilldownReturnsBoundedItemsForSummaryGroups() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let enrichmentIDs = try (0..<4).map { index in
+            try insertBookmark(
+                db,
+                title: "Needs Metadata \(index)",
+                relativePath: "Inbox/Bookmarks/Needs Metadata \(index).webloc",
+                enrichmentStatus: "pending",
+                lastEnrichedAt: nil
+            )
+        }
+        let routingID = try insertBookmark(
+            db,
+            title: "Needs Routing",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date()
+        )
+        let routing = CiderRoutingDecisionService(database: db)
+        _ = try routing.recordDecision(
+            itemID: routingID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0.15,
+            reason: "Needs explicit destination.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        let queue = CiderReviewQueueService(database: db, routingDecisionService: routing)
+
+        let enrichmentLane = try queue.drilldown(
+            groupID: "enrichment:pending:enrich:bookmark",
+            limit: 2
+        )
+        #expect(enrichmentLane.command == "review.drilldown")
+        #expect(enrichmentLane.groupID == "enrichment:pending:enrich:bookmark")
+        #expect(enrichmentLane.kind == "enrichment")
+        #expect(enrichmentLane.reviewState == "pending")
+        #expect(enrichmentLane.requiredSafeAction == "enrich")
+        #expect(enrichmentLane.totalCount == 4)
+        #expect(enrichmentLane.items.count == 2)
+        #expect(enrichmentLane.hasMore == true)
+        #expect(enrichmentLane.items.map(\.itemID) == Array(enrichmentIDs.prefix(2)))
+        #expect(enrichmentLane.items.allSatisfy { $0.safeActions.contains("enrich") })
+
+        let routingLane = try queue.drilldown(
+            groupID: "low_confidence_routing:needs_review:approve:bookmark",
+            limit: 10
+        )
+        #expect(routingLane.totalCount == 1)
+        #expect(routingLane.hasMore == false)
+        #expect(routingLane.items.map(\.itemID) == [routingID])
+        #expect(routingLane.items[0].target?.relativePath == "Inbox/Bookmarks")
+        #expect(routingLane.items[0].safeActions == ["approve", "correct", "defer"])
+
+        let dictionary = enrichmentLane.toDictionary()
+        #expect(dictionary["command"] as? String == "review.drilldown")
+        #expect(dictionary["groupID"] as? String == "enrichment:pending:enrich:bookmark")
+        #expect(dictionary["totalCount"] as? Int == 4)
+        #expect(dictionary["count"] as? Int == 2)
+        #expect(dictionary["hasMore"] as? Bool == true)
+    }
+
     @Test("review queue batch enrichment preview caps sample payload while preserving candidate count")
     func reviewQueueBatchEnrichmentPreviewCapsSamplePayload() throws {
         let (db, url) = try makeTempDB()

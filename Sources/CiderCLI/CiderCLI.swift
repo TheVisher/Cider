@@ -791,6 +791,22 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "drilldown", "lane":
+            guard let groupID = args.first else {
+                printCLIError("Usage: cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]")
+                return
+            }
+            do {
+                let result = try service.drilldown(
+                    groupID: groupID,
+                    limit: parseFlag("--limit", from: args).flatMap(Int.init) ?? 50,
+                    offset: parseFlag("--offset", from: args).flatMap(Int.init) ?? 0
+                )
+                printReviewQueueDrilldownResult(result)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case "approve":
             guard let itemRef = args.first else {
                 print("Error: Usage: cider-cli review approve <item-id> [--actor user|agent] [--json]")
@@ -914,6 +930,7 @@ struct CiderCLI {
             Usage:
               cider-cli review list [--include-deferred] [--limit <n>] [--kind <kind>] [--item-type <type>] [--state <state>] [--safe-action <action>] [--json]
               cider-cli review summary [--include-deferred] [--json]
+              cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]
               cider-cli review approve <item-id> [--actor user|agent] [--json]
               cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
               cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
@@ -924,7 +941,7 @@ struct CiderCLI {
 
         default:
             print("Unknown review command: \(subcommand ?? "nil")")
-            print("Commands: list, summary, approve, correct, defer, enrich, enrich-batch, jobs")
+            print("Commands: list, summary, drilldown, approve, correct, defer, enrich, enrich-batch, jobs")
         }
     }
 
@@ -6535,6 +6552,31 @@ struct CiderCLI {
         }
         let preview = result.batchEnrichmentPreview
         print("  Batch enrichment preview: \(preview.candidateCount) candidate(s), \(preview.excludedCount) excluded, mutating=\(preview.isMutating)")
+    }
+
+    static func printReviewQueueDrilldownResult(_ result: CiderReviewQueueDrilldownResult) {
+        if jsonOutput {
+            outputJSON(result.toDictionary())
+            return
+        }
+
+        print("Review lane \(result.groupID): \(result.items.count)/\(result.totalCount) item(s)")
+        print("  Offset: \(result.offset)")
+        print("  Limit: \(result.limit)")
+        print("  Has more: \(result.hasMore)")
+        for item in result.items {
+            print("  [\(item.itemID.uuidString.prefix(8))] \(item.title)")
+            print("    Kind: \(item.kind)")
+            print("    State: \(item.reviewState)")
+            if let relativePath = item.relativePath {
+                print("    Path: \(relativePath)")
+            }
+            if let target = item.target {
+                print("    Candidate target: \(target.relativePath)")
+            }
+            print("    Reason: \(item.reason)")
+            print("    Safe actions: \(item.safeActions.joined(separator: ", "))")
+        }
     }
 
     private static func formatCounts(_ counts: [String: Int]) -> String {

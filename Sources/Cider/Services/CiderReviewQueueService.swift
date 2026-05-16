@@ -65,6 +65,40 @@ struct CiderReviewQueueGroup: Equatable {
     }
 }
 
+struct CiderReviewQueueDrilldownResult: Equatable {
+    var command: String
+    var generatedAt: Date
+    var groupID: String
+    var kind: String
+    var reviewState: String
+    var requiredSafeAction: String
+    var itemType: String
+    var totalCount: Int
+    var limit: Int
+    var offset: Int
+    var hasMore: Bool
+    var items: [CiderReviewQueueItem]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        return [
+            "command": command,
+            "generatedAt": formatter.string(from: generatedAt),
+            "groupID": groupID,
+            "kind": kind,
+            "reviewState": reviewState,
+            "requiredSafeAction": requiredSafeAction,
+            "itemType": itemType,
+            "totalCount": totalCount,
+            "count": items.count,
+            "limit": limit,
+            "offset": offset,
+            "hasMore": hasMore,
+            "items": items.map { $0.toDictionary() },
+        ]
+    }
+}
+
 struct CiderReviewQueueBatchEnrichmentPreview: Equatable {
     static let empty = CiderReviewQueueBatchEnrichmentPreview(
         action: "review.enrich",
@@ -458,6 +492,49 @@ final class CiderReviewQueueService {
                 for: items,
                 sampleLimit: batchEnrichmentSampleLimit
             )
+        )
+    }
+
+    func drilldown(
+        groupID: String,
+        limit: Int = 50,
+        offset: Int = 0,
+        now: Date = Date()
+    ) throws -> CiderReviewQueueDrilldownResult {
+        let parts = groupID.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        let kind = parts.count > 0 ? parts[0] : ""
+        let reviewState = parts.count > 1 ? parts[1] : ""
+        let requiredSafeAction = parts.count > 2 ? parts[2] : ""
+        let itemType = parts.count > 3 ? parts[3] : ""
+        let cappedLimit = max(0, limit)
+        let cappedOffset = max(0, offset)
+        let includeDeferred = kind == "deferred_routing" || reviewState == "deferred"
+        let items = try list(
+            limit: Int.max,
+            includeDeferred: includeDeferred,
+            kind: kind.isEmpty ? nil : kind,
+            itemType: itemType.isEmpty ? nil : itemType,
+            reviewState: reviewState.isEmpty ? nil : reviewState,
+            requiredSafeAction: requiredSafeAction == "none" || requiredSafeAction.isEmpty ? nil : requiredSafeAction,
+            now: now
+        ).items.filter { item in
+            groupID == "\(item.kind):\(item.reviewState):\(primarySafeAction(for: item)):\(item.itemType)"
+        }
+        let page = Array(items.dropFirst(cappedOffset).prefix(cappedLimit))
+
+        return CiderReviewQueueDrilldownResult(
+            command: "review.drilldown",
+            generatedAt: now,
+            groupID: groupID,
+            kind: kind,
+            reviewState: reviewState,
+            requiredSafeAction: requiredSafeAction,
+            itemType: itemType,
+            totalCount: items.count,
+            limit: cappedLimit,
+            offset: cappedOffset,
+            hasMore: cappedOffset + page.count < items.count,
+            items: page
         )
     }
 
