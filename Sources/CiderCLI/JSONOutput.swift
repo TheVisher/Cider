@@ -276,9 +276,31 @@ func storageAuditReportToDict(_ report: CiderStorageAuditReport) -> [String: Any
         "duplicateFindingGroups": report.duplicateFindingGroups,
         "totalDoctorFindings": report.totalDoctorFindings,
         "fixableDoctorFindings": report.fixableDoctorFindings,
+        "doctorFindingSampleLimit": report.doctorFindingSampleLimit,
+        "doctorFindingSamples": report.doctorFindingSamples.map(storageAuditDoctorFindingSampleToDict),
         "schemaFindings": report.schemaFindings.map(storageAuditSchemaFindingToDict),
         "mismatches": report.mismatches.map(storageAuditMismatchToDict),
     ]
+}
+
+func storageAuditDoctorFindingSampleToDict(_ sample: CiderStorageAuditDoctorFindingSample) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": sample.id,
+        "severity": sample.severity,
+        "kind": sample.kind,
+        "summary": sample.summary,
+        "detail": sample.detail,
+        "isFixable": sample.isFixable,
+        "relatedRelativePaths": sample.relatedRelativePaths,
+        "nextSafeAction": sample.nextSafeAction,
+    ]
+    if let fixLabel = sample.fixLabel {
+        dict["fixLabel"] = fixLabel
+    }
+    if let relativePath = sample.relativePath {
+        dict["relativePath"] = relativePath
+    }
+    return dict
 }
 
 func storageAuditSchemaFindingToDict(_ finding: CiderStorageAuditSchemaFinding) -> [String: Any] {

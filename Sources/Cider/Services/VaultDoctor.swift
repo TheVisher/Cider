@@ -78,6 +78,7 @@ final class VaultDoctor {
             var itemID: UUID?
             var sessionID: UUID?
             var relativePath: String?
+            var relatedRelativePaths: [String]?
             var breadcrumbFile: String?
         }
     }
@@ -401,7 +402,11 @@ final class VaultDoctor {
                 detail: "Root folder '\(folder.relativePath)' has the same normalized name as nested folder path(s): \(matchPaths). This can happen when sync receives a child folder before its parent and must be reviewed before merging or deleting files.",
                 isFixable: false,
                 fixLabel: nil,
-                payload: Finding.Payload(folderID: folder.id, relativePath: folder.relativePath)
+                payload: Finding.Payload(
+                    folderID: folder.id,
+                    relativePath: folder.relativePath,
+                    relatedRelativePaths: nestedPaths
+                )
             ))
         }
 
@@ -424,6 +429,9 @@ final class VaultDoctor {
                 peerDescription = "a same-parent canonical folder exists: \(canonicalPaths.joined(separator: ", "))"
             }
             for folder in siblings where Self.hasNumericSuffix(folder.name) {
+                let relatedPaths = (canonicalPaths + numericSuffixPaths)
+                    .filter { $0 != folder.relativePath }
+                    .sorted()
                 out.append(Finding(
                     id: "numeric-suffix-folder-\(folder.id.uuidString)",
                     kind: .suspiciousFlattenedFolderDuplicate,
@@ -432,7 +440,11 @@ final class VaultDoctor {
                     detail: "Folder '\(folder.relativePath)' has a numeric-suffix name and \(peerDescription). Review before merging or deleting files.",
                     isFixable: false,
                     fixLabel: nil,
-                    payload: Finding.Payload(folderID: folder.id, relativePath: folder.relativePath)
+                    payload: Finding.Payload(
+                        folderID: folder.id,
+                        relativePath: folder.relativePath,
+                        relatedRelativePaths: relatedPaths
+                    )
                 ))
             }
         }

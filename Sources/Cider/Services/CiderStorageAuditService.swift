@@ -7,6 +7,19 @@ struct CiderStorageAuditMismatch: Codable, Equatable {
     var detail: String
 }
 
+struct CiderStorageAuditDoctorFindingSample: Codable, Equatable {
+    var id: String
+    var severity: String
+    var kind: String
+    var summary: String
+    var detail: String
+    var isFixable: Bool
+    var fixLabel: String?
+    var relativePath: String?
+    var relatedRelativePaths: [String]
+    var nextSafeAction: String
+}
+
 struct CiderStorageAuditReport: Equatable {
     var generatedAt: Date
     var modelCounts: [String: Int]
@@ -16,6 +29,8 @@ struct CiderStorageAuditReport: Equatable {
     var duplicateFindingGroups: [String: Int]
     var totalDoctorFindings: Int
     var fixableDoctorFindings: Int
+    var doctorFindingSampleLimit: Int = 20
+    var doctorFindingSamples: [CiderStorageAuditDoctorFindingSample] = []
     var schemaFindings: [CiderStorageAuditSchemaFinding]
     var mismatches: [CiderStorageAuditMismatch]
 }
@@ -40,12 +55,15 @@ struct CiderStorageAuditSchemaRepairReport: Equatable {
 
 @MainActor
 final class CiderStorageAuditService {
+    private static let defaultDoctorFindingSampleLimit = 20
+
     private let database: CiderDatabase
     private let vaultRoot: URL
     private let modelCountsProvider: () -> [String: Int]
     private let doctorReportProvider: () -> VaultDoctor.Report
     private let duplicateFindingsProvider: () -> [VaultDuplicateAuditor.Finding]
     private let nowProvider: () -> Date
+    private let doctorFindingSampleLimit: Int
 
     init(
         database: CiderDatabase = .shared,
@@ -53,6 +71,7 @@ final class CiderStorageAuditService {
         modelCountsProvider: (() -> [String: Int])? = nil,
         doctorReportProvider: @escaping () -> VaultDoctor.Report = { VaultDoctor.shared.scan() },
         duplicateFindingsProvider: @escaping () -> [VaultDuplicateAuditor.Finding] = { VaultDuplicateAuditor.scan() },
+        doctorFindingSampleLimit: Int = CiderStorageAuditService.defaultDoctorFindingSampleLimit,
         nowProvider: @escaping () -> Date = { Date() }
     ) {
         self.database = database
@@ -70,6 +89,7 @@ final class CiderStorageAuditService {
         }
         self.doctorReportProvider = doctorReportProvider
         self.duplicateFindingsProvider = duplicateFindingsProvider
+        self.doctorFindingSampleLimit = doctorFindingSampleLimit
         self.nowProvider = nowProvider
     }
 
@@ -89,6 +109,11 @@ final class CiderStorageAuditService {
             duplicateFindingGroups: groupedDuplicateFindings(duplicateFindings),
             totalDoctorFindings: doctorReport.findings.count,
             fixableDoctorFindings: doctorReport.fixableCount,
+            doctorFindingSampleLimit: doctorFindingSampleLimit,
+            doctorFindingSamples: doctorFindingSamples(
+                doctorReport.findings,
+                limit: doctorFindingSampleLimit
+            ),
             schemaFindings: try schemaFindings(),
             mismatches: mismatches(modelCounts: modelCounts, sqliteCounts: sqliteCounts)
         )
@@ -304,6 +329,41 @@ final class CiderStorageAuditService {
             groups["\(finding.severity.rawValue):\(finding.kind.rawValue)", default: 0] += 1
         }
         return groups
+    }
+
+    private func doctorFindingSamples(
+        _ findings: [VaultDoctor.Finding],
+        limit: Int
+    ) -> [CiderStorageAuditDoctorFindingSample] {
+        findings.prefix(max(0, limit)).map { finding in
+            CiderStorageAuditDoctorFindingSample(
+                id: finding.id,
+                severity: finding.severity.rawValue,
+                kind: finding.kind.rawValue,
+                summary: finding.summary,
+                detail: finding.detail,
+                isFixable: finding.isFixable,
+                fixLabel: finding.fixLabel,
+                relativePath: finding.payload.relativePath,
+                relatedRelativePaths: finding.payload.relatedRelativePaths ?? [],
+                nextSafeAction: nextSafeAction(for: finding)
+            )
+        }
+    }
+
+    private func nextSafeAction(for finding: VaultDoctor.Finding) -> String {
+        if finding.isFixable {
+            return "Review the finding details, then run the matching explicit doctor fix action only after confirming the target."
+        }
+
+        switch finding.kind {
+        case .suspiciousFlattenedFolderDuplicate:
+            return "Inspect the listed folder paths and choose a manual merge, move, or delete plan; do not run automatic repair."
+        case .duplicateNoteContent, .duplicateBookmarkURL, .duplicateContactEmail, .duplicateContactPhone:
+            return "Review the listed duplicate candidates manually before merging, deleting, or changing any vault item."
+        default:
+            return "Review this finding manually; no automatic repair is advertised for this issue."
+        }
     }
 
     private func groupedDuplicateFindings(_ findings: [VaultDuplicateAuditor.Finding]) -> [String: Int] {

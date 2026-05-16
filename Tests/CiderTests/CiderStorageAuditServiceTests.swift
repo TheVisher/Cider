@@ -230,6 +230,51 @@ struct CiderStorageAuditServiceTests {
         #expect(doctorGroups["warning:duplicateNoteContent"] == 1)
     }
 
+    @Test("storage audit JSON exposes actionable doctor finding samples")
+    func storageAuditJSONExposesActionableDoctorFindingSamples() throws {
+        let doctorReport = VaultDoctor.Report(
+            startedAt: Date(timeIntervalSince1970: 11),
+            finishedAt: Date(timeIntervalSince1970: 12),
+            findings: [
+                VaultDoctor.Finding(
+                    id: "flattened-folder-root-games",
+                    kind: .suspiciousFlattenedFolderDuplicate,
+                    severity: .warning,
+                    summary: "Possible flattened folder duplicate: Games",
+                    detail: "Root folder 'Games' has the same normalized name as nested folder path(s): Media/Games. This can happen when sync receives a child folder before its parent and must be reviewed before merging or deleting files.",
+                    isFixable: false,
+                    fixLabel: nil,
+                    payload: VaultDoctor.Finding.Payload(
+                        relativePath: "Games",
+                        relatedRelativePaths: ["Media/Games"]
+                    )
+                )
+            ]
+        )
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let service = CiderStorageAuditService(
+            database: db,
+            doctorReportProvider: { doctorReport },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let dict = try storageAuditReportToDict(service.audit())
+
+        #expect(dict["doctorFindingSampleLimit"] as? Int == 20)
+        let samples = try #require(dict["doctorFindingSamples"] as? [[String: Any]])
+        let sample = try #require(samples.first)
+        #expect(sample["id"] as? String == "flattened-folder-root-games")
+        #expect(sample["kind"] as? String == "suspiciousFlattenedFolderDuplicate")
+        #expect(sample["severity"] as? String == "warning")
+        #expect(sample["relativePath"] as? String == "Games")
+        #expect(sample["relatedRelativePaths"] as? [String] == ["Media/Games"])
+        #expect(sample["isFixable"] as? Bool == false)
+        #expect((sample["detail"] as? String)?.contains("Media/Games") == true)
+        #expect((sample["nextSafeAction"] as? String)?.contains("manual") == true)
+    }
+
     @Test("storage audit repair JSON exposes repaired skipped and remaining findings")
     func storageAuditRepairJSONExposesRepairState() throws {
         let report = CiderStorageAuditSchemaRepairReport(
