@@ -115,7 +115,15 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
             title: title,
             typeLabel: "Note",
             locationLabel: "Inbox / Unfiled",
-            suggestedAction: "Open"
+            suggestedAction: "Open",
+            surfacingExplanation: CiderSurfacingExplanation(
+                reason: "Layout test item",
+                urgency: "normal",
+                sourceSignal: "test",
+                reviewState: "ok",
+                suggestedAction: "Open",
+                actionURLString: nil
+            )
         )
     }
 

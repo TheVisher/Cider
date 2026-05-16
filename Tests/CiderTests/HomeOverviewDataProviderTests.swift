@@ -202,6 +202,40 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.recentCaptureItems[1].suggestedAction, "Ask Erik")
     }
 
+    func testRecentCaptureSummariesExposeWhySurfacedExplanation() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let bookmark = Bookmark(
+            id: UUID(),
+            title: "Example.com",
+            urlString: "https://example.com/article",
+            createdAt: now.addingTimeInterval(-120),
+            updatedAt: now.addingTimeInterval(-60),
+            notes: "",
+            tags: [],
+            labelIDs: [],
+            dismissedLabelIDs: [],
+            folderID: nil,
+            enrichmentStatus: "complete",
+            lastEnrichedAt: now
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.bookmark(bookmark)],
+            recentItems: [.bookmark(bookmark)],
+            folders: [],
+            surfacingDays: 7,
+            now: now
+        )
+
+        let explanation = snapshot.recentCaptureItems[0].surfacingExplanation
+        XCTAssertEqual(explanation.reason, "Generic host-only bookmark title")
+        XCTAssertEqual(explanation.urgency, "review")
+        XCTAssertEqual(explanation.sourceSignal, "recent_capture")
+        XCTAssertEqual(explanation.reviewState, "needs_review")
+        XCTAssertEqual(explanation.actionURLString, "https://example.com/article")
+        XCTAssertEqual(snapshot.recentCaptureItems[0].suggestedAction, explanation.suggestedAction)
+    }
+
     func testRecentTimelineKeepsSixRecentItemsForDashboardRail() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let recentItems: [LibraryItemV2] = (0..<8).map { index in

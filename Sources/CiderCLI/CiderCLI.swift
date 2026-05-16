@@ -6698,6 +6698,7 @@ struct CiderCLI {
             "provenance": packet.provenance,
             "contentBlocks": packet.contentBlocks.map(itemAgentContextBlockToDict),
             "related": packet.related.map(itemLinkSummaryToDict),
+            "surfacing": surfacingExplanationToDict(packet.surfacing),
             "recentHistory": packet.recentHistory.map(itemAgentContextHistoryToDict),
             "safeCommands": packet.safeCommands,
             "limits": [
@@ -6710,6 +6711,20 @@ struct CiderCLI {
         ]
         if let review = packet.review {
             dict["review"] = itemAgentReviewStateToDict(review)
+        }
+        return dict
+    }
+
+    static func surfacingExplanationToDict(_ explanation: CiderSurfacingExplanation) -> [String: Any] {
+        var dict: [String: Any] = [
+            "reason": explanation.reason,
+            "urgency": explanation.urgency,
+            "sourceSignal": explanation.sourceSignal,
+            "reviewState": explanation.reviewState,
+            "suggestedAction": explanation.suggestedAction,
+        ]
+        if let actionURLString = explanation.actionURLString {
+            dict["actionURLString"] = actionURLString
         }
         return dict
     }

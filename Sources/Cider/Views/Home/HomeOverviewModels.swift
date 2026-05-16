@@ -109,6 +109,7 @@ struct HomeRecentCaptureItem: Equatable, Identifiable {
     let typeLabel: String
     let locationLabel: String
     let suggestedAction: String
+    let surfacingExplanation: CiderSurfacingExplanation
 }
 
 struct HomeReviewCockpitItem: Equatable, Identifiable {

@@ -78,6 +78,7 @@ struct CiderItemAgentContextPacket: Equatable {
     var contentBlocks: [CiderItemAgentContextBlock]
     var related: [ItemLinkSummary]
     var review: CiderItemAgentReviewState?
+    var surfacing: CiderSurfacingExplanation
     var recentHistory: [CiderItemAgentContextHistoryEntry]
     var safeCommands: [String]
     var limits: CiderItemAgentContextLimits
@@ -156,6 +157,7 @@ final class CiderItemContextService {
             contentBlocks: contentBlocks(for: bundle, limits: normalizedLimits),
             related: Array(bundle.related.prefix(normalizedLimits.maxRelated)),
             review: reviewState(for: bundle),
+            surfacing: surfacingExplanation(for: bundle),
             recentHistory: recentHistory(for: bundle, limit: normalizedLimits.maxHistory),
             safeCommands: safeCommands(for: bundle),
             limits: normalizedLimits
@@ -331,6 +333,27 @@ final class CiderItemContextService {
             targetPath: decision.targetPath,
             source: decision.source,
             createdAt: decision.createdAt
+        )
+    }
+
+    private func surfacingExplanation(for bundle: CiderItemContextBundle) -> CiderSurfacingExplanation {
+        if let review = reviewState(for: bundle) {
+            return CiderSurfacingExplanation(
+                reason: review.reason,
+                urgency: review.status == "needs_review" ? "review" : "normal",
+                sourceSignal: "item_context",
+                reviewState: review.status,
+                suggestedAction: review.status == "needs_review" ? "Approve or correct route" : "Open",
+                actionURLString: nil
+            )
+        }
+        return CiderSurfacingExplanation(
+            reason: summary(for: bundle),
+            urgency: "normal",
+            sourceSignal: "item_context",
+            reviewState: "ok",
+            suggestedAction: "Open",
+            actionURLString: nil
         )
     }
 
