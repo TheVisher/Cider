@@ -7,7 +7,7 @@ extension CiderCLI {
         case "identify":
             let mode: MediaBackfillMode = args.contains("--apply") ? .apply : .dryRun
             let storage = MediaItemStorage()
-            let service = MediaBackfillService(storage: storage)
+            let service = MediaBackfillService(storage: storage, secondBrainStore: SecondBrainStore())
 
             do {
                 let report = try service.identify(bookmarks: bookmarks, mode: mode)
@@ -80,6 +80,30 @@ extension CiderCLI {
             "updatedCount": report.updatedCount,
             "proposedItems": report.proposedItems.map(mediaItemToDict),
             "reviewItems": report.reviewItems.map(mediaIdentificationResultToDict),
+            "reviewLane": mediaReviewLaneToDict(report.reviewItems),
+            "actionRecords": report.actionRecords.map(mediaBackfillActionRecordToDict),
+        ]
+    }
+
+    private static func mediaReviewLaneToDict(_ reviewItems: [MediaIdentificationResult]) -> [String: Any] {
+        [
+            "id": "media.identify.review",
+            "title": "Media identification review",
+            "count": reviewItems.count,
+            "items": reviewItems.map(mediaIdentificationResultToDict),
+            "safeActions": [
+                "media identify --dry-run --json",
+                "media identify --apply --json",
+            ],
+        ]
+    }
+
+    private static func mediaBackfillActionRecordToDict(_ record: MediaBackfillActionRecord) -> [String: Any] {
+        [
+            "mediaItemID": record.mediaItemID,
+            "action": record.action,
+            "status": record.status,
+            "summary": record.summary,
         ]
     }
 

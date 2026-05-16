@@ -177,9 +177,66 @@ final class MediaMetadataIdentifierTests: XCTestCase {
         XCTAssertEqual(storage.items.map(\.id), ["steam-1145350"])
     }
 
+    @MainActor
+    func testApplyRecordsSecondBrainActionProvenance() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-media-backfill-provenance-\(UUID().uuidString)", isDirectory: true)
+        let dbURL = tempRoot.appendingPathComponent(".cider/cider.db")
+        defer {
+            try? FileManager.default.removeItem(at: tempRoot)
+            cleanupDatabase(at: dbURL)
+        }
+
+        try FileManager.default.createDirectory(
+            at: dbURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let db = CiderDatabase()
+        try db.open(at: dbURL)
+        defer { db.close() }
+
+        let bookmarks = [
+            Bookmark(title: "Hades II", urlString: "https://store.steampowered.com/app/1145350/Hades_II/")
+        ]
+        let storage = MediaItemStorage(vaultRoot: tempRoot)
+        let store = SecondBrainStore(database: db)
+        let service = MediaBackfillService(storage: storage, secondBrainStore: store)
+
+        let dryRun = try service.identify(bookmarks: bookmarks, mode: .dryRun)
+        XCTAssertTrue(dryRun.actionRecords.isEmpty)
+        XCTAssertTrue(try store.agentActions(for: SecondBrainOwnerRef(ownerType: "media_item", ownerID: "steam-1145350")).isEmpty)
+
+        let apply = try service.identify(bookmarks: bookmarks, mode: .apply)
+        XCTAssertEqual(apply.actionRecords.map(\.action), ["media.backfill.create"])
+        let actions = try store.agentActions(for: SecondBrainOwnerRef(ownerType: "media_item", ownerID: "steam-1145350"))
+        XCTAssertEqual(actions.map(\.toolName), ["media.identify"])
+        XCTAssertEqual(actions.map(\.actionType), ["media.backfill.create"])
+        XCTAssertEqual(actions.map(\.source), ["media.identify.apply"])
+        XCTAssertEqual(actions.map(\.status), ["succeeded"])
+    }
+
+    func testPlannerSurfacesLowConfidenceMediaReviewItems() {
+        let bookmarks = [
+            Bookmark(title: "A long video essay", urlString: "https://www.youtube.com/watch?v=abc123")
+        ]
+
+        let report = MediaBackfillPlanner().plan(bookmarks: bookmarks, existingItems: [])
+
+        XCTAssertTrue(report.proposedItems.isEmpty)
+        XCTAssertEqual(report.reviewItems.count, 1)
+        XCTAssertEqual(report.reviewItems.first?.disposition, .review)
+        XCTAssertEqual(report.reviewItems.first?.candidate?.type, .reference)
+    }
+
     private func candidate(_ urlString: String) throws -> MediaIdentificationCandidate {
         let bookmark = Bookmark(title: "Saved media", urlString: urlString)
         let result = MediaMetadataIdentifier().identify(bookmark: bookmark)
         return try XCTUnwrap(result.candidate, "Expected candidate for \(urlString)")
+    }
+
+    private func cleanupDatabase(at url: URL) {
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(atPath: url.path + "-wal")
+        try? FileManager.default.removeItem(atPath: url.path + "-shm")
     }
 }

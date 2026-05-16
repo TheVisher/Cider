@@ -312,6 +312,14 @@ struct MediaBackfillReport: Hashable {
     var skippedCount: Int
     var createdCount: Int
     var updatedCount: Int
+    var actionRecords: [MediaBackfillActionRecord] = []
+}
+
+struct MediaBackfillActionRecord: Hashable {
+    var mediaItemID: String
+    var action: String
+    var status: String
+    var summary: String
 }
 
 struct MediaBackfillPlanner {
@@ -395,7 +403,13 @@ enum MediaBackfillMode {
 @MainActor
 struct MediaBackfillService {
     let storage: MediaItemStorage
+    let secondBrainStore: SecondBrainStore?
     private let planner = MediaBackfillPlanner()
+
+    init(storage: MediaItemStorage, secondBrainStore: SecondBrainStore? = nil) {
+        self.storage = storage
+        self.secondBrainStore = secondBrainStore
+    }
 
     func identify(bookmarks: [Bookmark], mode: MediaBackfillMode) throws -> MediaBackfillReport {
         var report = planner.plan(bookmarks: bookmarks, existingItems: storage.items)
@@ -403,16 +417,55 @@ struct MediaBackfillService {
 
         var created = 0
         var updated = 0
+        var actionRecords: [MediaBackfillActionRecord] = []
         for item in report.proposedItems {
-            if storage.item(id: item.id) == nil {
+            let isCreate = storage.item(id: item.id) == nil
+            if isCreate {
                 created += 1
             } else {
                 updated += 1
             }
-            try storage.upsert(item)
+            let storedItem = try storage.upsert(item)
+            if let record = try recordBackfillAction(item: storedItem, isCreate: isCreate) {
+                actionRecords.append(record)
+            }
         }
         report.createdCount = created
         report.updatedCount = updated
+        report.actionRecords = actionRecords
         return report
+    }
+
+    private func recordBackfillAction(item: MediaItem, isCreate: Bool) throws -> MediaBackfillActionRecord? {
+        guard let secondBrainStore else { return nil }
+        let action = isCreate ? "media.backfill.create" : "media.backfill.update"
+        let summary = "\(isCreate ? "Created" : "Updated") media item \(item.title) from media identify --apply."
+        let owner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: item.id)
+        try secondBrainStore.recordAgentAction(
+            SecondBrainAgentAction(
+                owner: owner,
+                toolName: "media.identify",
+                actionType: action,
+                source: "media.identify.apply",
+                status: "succeeded",
+                summary: summary,
+                argumentsJSON: DatabaseHelpers.encodeJSON([
+                    "mode": "apply",
+                    "mediaItemID": item.id,
+                ]),
+                resultJSON: DatabaseHelpers.encodeJSON([
+                    "status": "succeeded",
+                    "mediaItemID": item.id,
+                    "sourceBookmarkCount": String(item.sourceBookmarkIDs.count),
+                    "confidence": String(item.confidence),
+                ])
+            )
+        )
+        return MediaBackfillActionRecord(
+            mediaItemID: item.id,
+            action: action,
+            status: "succeeded",
+            summary: summary
+        )
     }
 }
