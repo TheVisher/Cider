@@ -241,7 +241,16 @@ final class CiderRoutingDecisionService {
     ) throws -> CiderRoutingExplanation {
         let item = try itemSummary(for: itemID)
         guard item.type == "bookmark" else { throw CiderRoutingDecisionError.unsupportedItemType(item.type) }
-        guard bookmarkService.assignBookmark(itemID, toFolder: target.folderID) else {
+        guard bookmarkService.assignBookmark(
+            itemID,
+            toFolder: target.folderID,
+            auditMetadata: [
+                "classification": "routing_correction",
+                "routingSource": "routing.correct",
+                "actor": actor,
+                "targetRelativePath": target.relativePath,
+            ]
+        ) else {
             throw CiderRoutingDecisionError.correctionFailed(itemID)
         }
 
@@ -255,6 +264,45 @@ final class CiderRoutingDecisionService {
             actor: actor,
             source: "routing.correct",
             reviewState: "corrected",
+            supersedesDecisionID: previous?.id
+        )
+        return try explain(itemID: itemID)
+    }
+
+    @discardableResult
+    func moveBookmarkManually(
+        itemID: UUID,
+        target: CiderRoutingDecisionTarget,
+        reason: String,
+        actor: String = "user",
+        source: String = "bookmark.move",
+        bookmarkService: VaultBookmarkService
+    ) throws -> CiderRoutingExplanation {
+        let item = try itemSummary(for: itemID)
+        guard item.type == "bookmark" else { throw CiderRoutingDecisionError.unsupportedItemType(item.type) }
+        guard bookmarkService.assignBookmark(
+            itemID,
+            toFolder: target.folderID,
+            auditMetadata: [
+                "classification": "manual_routing_move",
+                "routingSource": source,
+                "actor": actor,
+                "targetRelativePath": target.relativePath,
+            ]
+        ) else {
+            throw CiderRoutingDecisionError.correctionFailed(itemID)
+        }
+
+        let previous = try? latestDecision(for: itemID)
+        _ = try recordDecision(
+            itemID: itemID,
+            itemType: item.type,
+            target: target,
+            confidence: 1,
+            reason: reason,
+            actor: actor,
+            source: source,
+            reviewState: "manual_move",
             supersedesDecisionID: previous?.id
         )
         return try explain(itemID: itemID)

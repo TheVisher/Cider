@@ -899,7 +899,11 @@ final class VaultBookmarkService: ObservableObject {
     // MARK: - Folder Assignment
 
     @discardableResult
-    func assignBookmark(_ bookmarkID: UUID, toFolder folderID: UUID?) -> Bool {
+    func assignBookmark(
+        _ bookmarkID: UUID,
+        toFolder folderID: UUID?,
+        auditMetadata: [String: String]? = nil
+    ) -> Bool {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
 
         if let folderID, VaultFolderService.shared.folder(for: folderID) == nil {
@@ -945,7 +949,11 @@ final class VaultBookmarkService: ObservableObject {
             itemType: "bookmark",
             itemID: bookmarkID,
             before: before,
-            after: MutationAuditSnapshots.bookmark(bookmarks[index])
+            after: MutationAuditSnapshots.bookmark(bookmarks[index]),
+            metadata: auditMetadata ?? [
+                "classification": "manual_organization",
+                "routingSource": "none",
+            ]
         )
         return true
     }

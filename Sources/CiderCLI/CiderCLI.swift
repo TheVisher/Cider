@@ -1239,9 +1239,36 @@ struct CiderCLI {
                     continue
                 }
                 let oldFolder = bm.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
-                _ = service.assignBookmark(bm.id, toFolder: folder?.id)
-                print("Moved '\(bm.title)' from \(oldFolder) → \(newFolderName)")
-                moved += 1
+                let target: CiderRoutingDecisionTarget
+                if let folder {
+                    target = CiderRoutingDecisionTarget(
+                        kind: "folder",
+                        name: folder.name,
+                        relativePath: folder.relativePath,
+                        folderID: folder.id
+                    )
+                } else {
+                    target = CiderRoutingDecisionTarget(
+                        kind: "inbox",
+                        name: "Inbox/Bookmarks",
+                        relativePath: "Inbox/Bookmarks",
+                        folderID: nil
+                    )
+                }
+                do {
+                    _ = try CiderRoutingDecisionService().moveBookmarkManually(
+                        itemID: bm.id,
+                        target: target,
+                        reason: "Moved with bookmark move.",
+                        actor: "user",
+                        source: "bookmark.move",
+                        bookmarkService: service
+                    )
+                    print("Moved '\(bm.title)' from \(oldFolder) → \(newFolderName)")
+                    moved += 1
+                } catch {
+                    print("Error: Could not move '\(bm.title)': \(error.localizedDescription)")
+                }
             }
             if prefixes.count > 1 {
                 print("Total moved: \(moved)/\(prefixes.count)")

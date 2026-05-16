@@ -98,6 +98,88 @@ struct SecondBrainFoundationTests {
         #expect(explanation.latestDecision?.target.relativePath == "Inbox/Bookmarks")
     }
 
+    @Test("bookmark move records manual routing provenance")
+    func bookmarkMoveRecordsManualRoutingProvenance() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-bookmark-move-provenance-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(["folder", "create", "Research"], vaultURL: vault)
+        let output = try runCLI([
+            "bookmark", "add", "https://example.com/manual-move",
+            "--no-wait",
+            "--json",
+        ], vaultURL: vault)
+        let bookmark = try jsonObject(from: output)
+        let idString = try #require(bookmark["id"] as? String)
+        let itemID = try #require(UUID(uuidString: idString))
+
+        _ = try runCLI([
+            "bookmark", "move", String(idString.prefix(8)),
+            "--folder", "Research",
+        ], vaultURL: vault)
+
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        let db = CiderDatabase()
+        try db.open(at: dbURL)
+        defer { db.close() }
+
+        let explanation = try CiderRoutingDecisionService(database: db).explain(itemID: itemID)
+        #expect(explanation.latestDecision?.source == "bookmark.move")
+        #expect(explanation.latestDecision?.reviewState == "manual_move")
+        #expect(explanation.latestDecision?.actor == "user")
+        #expect(explanation.latestDecision?.target.relativePath == "Research")
+        #expect(explanation.reviewNeeded == false)
+
+        let assignment = MutationAuditService(database: db)
+            .loadEntries()
+            .first { $0.itemID == itemID && $0.action == "reassign_folder" }
+        #expect(assignment?.metadata["classification"] == "manual_routing_move")
+        #expect(assignment?.metadata["routingSource"] == "bookmark.move")
+        #expect(assignment?.metadata["targetRelativePath"] == "Research")
+    }
+
+    @Test("review correct labels folder assignment as routing correction")
+    func reviewCorrectLabelsFolderAssignmentAsRoutingCorrection() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-review-correct-provenance-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(["folder", "create", "Research"], vaultURL: vault)
+        let output = try runCLI([
+            "bookmark", "add", "https://example.com/review-correct",
+            "--no-wait",
+            "--json",
+        ], vaultURL: vault)
+        let bookmark = try jsonObject(from: output)
+        let idString = try #require(bookmark["id"] as? String)
+        let itemID = try #require(UUID(uuidString: idString))
+
+        _ = try runCLI([
+            "review", "correct", idString,
+            "--folder", "Research",
+            "--reason", "Corrected during review.",
+        ], vaultURL: vault)
+
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        let db = CiderDatabase()
+        try db.open(at: dbURL)
+        defer { db.close() }
+
+        let explanation = try CiderRoutingDecisionService(database: db).explain(itemID: itemID)
+        #expect(explanation.latestDecision?.source == "routing.correct")
+        #expect(explanation.latestDecision?.reviewState == "corrected")
+
+        let assignment = MutationAuditService(database: db)
+            .loadEntries()
+            .first { $0.itemID == itemID && $0.action == "reassign_folder" }
+        #expect(assignment?.metadata["classification"] == "routing_correction")
+        #expect(assignment?.metadata["routingSource"] == "routing.correct")
+        #expect(assignment?.metadata["targetRelativePath"] == "Research")
+    }
+
     private func makeTestDB() throws -> (CiderDatabase, URL) {
         let url = makeTempDBURL()
         let db = CiderDatabase()

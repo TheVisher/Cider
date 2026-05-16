@@ -557,8 +557,24 @@ enum MLXToolExecutor {
         for bookmark in VaultBookmarkService.shared.bookmarks.filter({
             $0.title.localizedStandardContains(query) || $0.urlString.localizedStandardContains(query)
         }) {
-            _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folder.id)
-            moved.append("Bookmark: \"\(bookmark.title)\"")
+            do {
+                _ = try CiderRoutingDecisionService().moveBookmarkManually(
+                    itemID: bookmark.id,
+                    target: CiderRoutingDecisionTarget(
+                        kind: "folder",
+                        name: folder.name,
+                        relativePath: folder.relativePath,
+                        folderID: folder.id
+                    ),
+                    reason: "Moved by agent tool.",
+                    actor: "agent",
+                    source: "agent.move_to_folder",
+                    bookmarkService: VaultBookmarkService.shared
+                )
+                moved.append("Bookmark: \"\(bookmark.title)\"")
+            } catch {
+                moved.append("Bookmark failed: \"\(bookmark.title)\" (\(error.localizedDescription))")
+            }
         }
         for note in NotesStorage.shared.notes.filter({ $0.title.localizedStandardContains(query) }) {
             _ = NotesStorage.shared.assignNote(note.id, toFolder: folder.id)
@@ -767,8 +783,24 @@ enum MLXToolExecutor {
         for bookmark in VaultBookmarkService.shared.bookmarks.filter({
             $0.title.localizedStandardContains(query) && $0.folderID != nil
         }) {
-            _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
-            unfiled.append("Bookmark: \"\(bookmark.title)\"")
+            do {
+                _ = try CiderRoutingDecisionService().moveBookmarkManually(
+                    itemID: bookmark.id,
+                    target: CiderRoutingDecisionTarget(
+                        kind: "inbox",
+                        name: "Inbox/Bookmarks",
+                        relativePath: "Inbox/Bookmarks",
+                        folderID: nil
+                    ),
+                    reason: "Unfiled by agent tool.",
+                    actor: "agent",
+                    source: "agent.unfile",
+                    bookmarkService: VaultBookmarkService.shared
+                )
+                unfiled.append("Bookmark: \"\(bookmark.title)\"")
+            } catch {
+                unfiled.append("Bookmark failed: \"\(bookmark.title)\" (\(error.localizedDescription))")
+            }
         }
         for note in NotesStorage.shared.notes.filter({
             $0.title.localizedStandardContains(query) && $0.folderID != nil
