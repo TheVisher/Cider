@@ -66,6 +66,27 @@ struct EventSQLiteTests {
         #expect(abs(loaded.startAt.timeIntervalSince(start)) < 0.001)
     }
 
+    @Test("Date card snoozedUntil round-trips through SQLite")
+    func dateCardSnoozedUntilRoundTrip() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+        let snoozedUntil = Date(timeIntervalSince1970: 1_745_170_800)
+        let card = DateCard(
+            title: "DMV appointment",
+            startAt: Date(timeIntervalSince1970: 1_745_084_400),
+            snoozedUntil: snoozedUntil
+        )
+
+        service.persistEventToDatabase(db, dateCard: card)
+
+        let service2 = makeService(db)
+        service2.loadEventsFromDatabase(db)
+
+        #expect(service2.dateCards.first?.snoozedUntil == snoozedUntil)
+    }
+
     // MARK: - All Fields
 
     @Test("Date card with all fields round-trips correctly")

@@ -118,6 +118,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
     var notes: String
     var linkedEntities: [LibraryEntityRef]
     var actionURLString: String?
+    var snoozedUntil: Date?
     var folderID: UUID?
     var rules: [SurfacingRule]
     var createdAt: Date
@@ -136,6 +137,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
         notes: String = "",
         linkedEntities: [LibraryEntityRef] = [],
         actionURLString: String? = nil,
+        snoozedUntil: Date? = nil,
         folderID: UUID? = nil,
         rules: [SurfacingRule] = [],
         createdAt: Date = Date(),
@@ -153,6 +155,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
         self.notes = notes
         self.linkedEntities = linkedEntities
         self.actionURLString = TodoCard.normalizedActionURLString(actionURLString)
+        self.snoozedUntil = snoozedUntil
         self.folderID = folderID
         self.rules = rules
         self.createdAt = createdAt
@@ -173,6 +176,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
         notes = (try c.decodeIfPresent(String.self, forKey: .notes)) ?? ""
         linkedEntities = (try c.decodeIfPresent([LibraryEntityRef].self, forKey: .linkedEntities)) ?? []
         actionURLString = TodoCard.normalizedActionURLString(try c.decodeIfPresent(String.self, forKey: .actionURLString))
+        snoozedUntil = try c.decodeIfPresent(Date.self, forKey: .snoozedUntil)
         folderID = try c.decodeIfPresent(UUID.self, forKey: .folderID)
         rules = (try c.decodeIfPresent([SurfacingRule].self, forKey: .rules)) ?? []
         createdAt = try c.decode(Date.self, forKey: .createdAt)

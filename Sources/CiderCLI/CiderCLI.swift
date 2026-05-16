@@ -141,6 +141,8 @@ struct CiderCLI {
             handleMedia(subcommand: subcommand, args: remaining, bookmarks: bookmarkService.bookmarks)
         case "agenda", "brief":
             handleAgenda(args: Array(args.dropFirst()))
+        case "reminder", "reminders":
+            handleReminder(subcommand: subcommand, args: remaining)
         case "embeddings":
             if subcommand == "backfill" {
                 let store = EmbeddingStore.shared
@@ -159,6 +161,82 @@ struct CiderCLI {
             printUsage()
         default:
             print("Unknown command: \(command). Run 'cider-cli help' for usage.")
+        }
+    }
+
+    // MARK: - Reminder Action Commands
+
+    static func handleReminder(subcommand: String?, args: [String]) {
+        let service = CiderReminderActionService()
+        do {
+            let result: CiderReminderActionResult
+            switch subcommand {
+            case "complete", "done":
+                guard let itemType = parseReminderItemType(args.first),
+                      let id = resolveReminderID(type: itemType, prefix: args.dropFirst().first) else {
+                    print("Error: Usage: cider-cli reminder complete <todo|dateCard> <id-prefix> [--json]")
+                    return
+                }
+                result = try service.complete(itemType, id: id)
+
+            case "snooze", "defer":
+                guard let itemType = parseReminderItemType(args.first),
+                      let id = resolveReminderID(type: itemType, prefix: args.dropFirst().first) else {
+                    print("Error: Usage: cider-cli reminder snooze <todo|dateCard> <id-prefix> --until yyyy-MM-dd [--time \"h:mm a\"] [--json]")
+                    return
+                }
+                guard let untilString = parseFlag("--until", from: args) ?? parseFlag("--date", from: args),
+                      let until = resolveEventStartAt(dateString: untilString, timeString: parseFlag("--time", from: args)) else {
+                    print("Error: --until yyyy-MM-dd required for reminder snooze")
+                    return
+                }
+                result = try service.snooze(itemType, id: id, until: until)
+
+            default:
+                print("Unknown reminder command: \(subcommand ?? "nil")")
+                print("Commands: complete, snooze")
+                return
+            }
+
+            if jsonOutput {
+                outputJSON(reminderActionResultToDict(result))
+            } else {
+                switch result.action {
+                case .complete:
+                    print("Completed \(result.itemType.rawValue): \(result.title)")
+                case .snooze:
+                    let until = result.snoozedUntil.map { ISO8601DateFormatter().string(from: $0) } ?? "unknown"
+                    print("Snoozed \(result.itemType.rawValue): \(result.title) until \(until)")
+                }
+            }
+        } catch {
+            print("Error: \(error.localizedDescription)")
+        }
+    }
+
+    private static func parseReminderItemType(_ raw: String?) -> CiderReminderActionItemType? {
+        switch raw?.lowercased() {
+        case "todo", "todos", "task", "tasks":
+            return .todo
+        case "datecard", "date-card", "event", "events":
+            return .dateCard
+        default:
+            return nil
+        }
+    }
+
+    private static func resolveReminderID(type: CiderReminderActionItemType, prefix: String?) -> UUID? {
+        guard let prefix else { return nil }
+        let normalized = prefix.lowercased()
+        switch type {
+        case .todo:
+            return TodoCardStorage.shared.todoCards
+                .first { $0.id.uuidString.lowercased().hasPrefix(normalized) }?
+                .id
+        case .dateCard:
+            return DateCardStorage.shared.dateCards
+                .first { $0.id.uuidString.lowercased().hasPrefix(normalized) }?
+                .id
         }
     }
 
@@ -7538,6 +7616,10 @@ struct CiderCLI {
           cider-cli review approve <item-id> [--actor user|agent] [--json]
           cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
+
+        REMINDERS
+          cider-cli reminder complete <todo|dateCard> <id-prefix> [--json]
+          cider-cli reminder snooze <todo|dateCard> <id-prefix> --until yyyy-MM-dd [--time "h:mm a"] [--json]
 
         SPACES
           cider-cli space list [--json]

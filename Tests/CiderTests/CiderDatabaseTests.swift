@@ -448,6 +448,62 @@ struct CiderDatabaseTests {
         #expect(legacyBackup.int(at: 0) == 1)
     }
 
+    @Test("v11 migration adds snoozedUntil columns to todo and event tables")
+    func v11AddsReminderSnoozeColumns() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        do {
+            let db = CiderDatabase()
+            try db.open(at: url)
+            try db.runSQL("DROP TABLE todos;")
+            try db.runSQL("""
+                CREATE TABLE todos (
+                    item_id      TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+                    details      TEXT NOT NULL DEFAULT '',
+                    due_date     REAL,
+                    priority     TEXT,
+                    is_completed INTEGER NOT NULL DEFAULT 0,
+                    completed_at REAL,
+                    notes        TEXT NOT NULL DEFAULT '',
+                    checklist    TEXT,
+                    surfacing_rules TEXT,
+                    action_url   TEXT
+                );
+                """)
+            try db.runSQL("DROP TABLE events;")
+            try db.runSQL("""
+                CREATE TABLE events (
+                    item_id         TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+                    details         TEXT NOT NULL DEFAULT '',
+                    start_at        REAL NOT NULL,
+                    end_at          REAL,
+                    all_day         INTEGER NOT NULL DEFAULT 0,
+                    location        TEXT NOT NULL DEFAULT '',
+                    amount          REAL,
+                    recurrence_rule TEXT,
+                    is_completed    INTEGER NOT NULL DEFAULT 0,
+                    completed_at    REAL,
+                    surfacing_rules TEXT,
+                    action_url      TEXT
+                );
+                """)
+            try db.runSQL("DELETE FROM schema_version;")
+            try db.runSQL("INSERT INTO schema_version (version) VALUES (10);")
+            db.close()
+        }
+
+        let migrated = CiderDatabase()
+        try migrated.open(at: url)
+        defer { migrated.close() }
+
+        let versionStmt = try migrated.prepare("SELECT MAX(version) FROM schema_version;")
+        #expect(try versionStmt.step())
+        #expect(versionStmt.int(at: 0) == DatabaseMigrations.latestVersion)
+        #expect(try columnExists("snoozed_until", in: "todos", db: migrated))
+        #expect(try columnExists("snoozed_until", in: "events", db: migrated))
+    }
+
     // MARK: - Transactions
 
     @Test("Transaction commits on success")
@@ -677,5 +733,15 @@ struct CiderDatabaseTests {
         stmt.bind(itemID, at: 1)
         try stmt.step()
         #expect(stmt.int(at: 0) == 0)
+    }
+
+    private func columnExists(_ column: String, in table: String, db: CiderDatabase) throws -> Bool {
+        let stmt = try db.prepare("PRAGMA table_info(\(table));")
+        while try stmt.step() {
+            if stmt.string(at: 1) == column {
+                return true
+            }
+        }
+        return false
     }
 }

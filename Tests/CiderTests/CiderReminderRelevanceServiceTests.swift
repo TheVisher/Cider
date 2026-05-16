@@ -78,4 +78,39 @@ final class CiderReminderRelevanceServiceTests: XCTestCase {
         XCTAssertEqual(items[3].surfacing.reviewState, "ok")
         XCTAssertFalse(items[3].surfaceToday)
     }
+
+    func testSnoozedReminderUsesSharedQuietSurfacingUntilExpiry() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(timeZone: calendar.timeZone, year: 2026, month: 5, day: 7, hour: 9))!
+        let snoozedUntil = calendar.date(from: DateComponents(timeZone: calendar.timeZone, year: 2026, month: 5, day: 8, hour: 9))!
+        let todo = TodoCard(
+            title: "Pay rent",
+            dueDate: now,
+            snoozedUntil: snoozedUntil
+        )
+
+        let snoozed = CiderReminderRelevanceService.relevance(
+            todos: [todo],
+            dateCards: [],
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(snoozed.count, 1)
+        XCTAssertFalse(snoozed[0].surfaceToday)
+        XCTAssertEqual(snoozed[0].surfacing.reason, "snoozed until 2026-05-08")
+        XCTAssertEqual(snoozed[0].surfacing.urgency, "normal")
+
+        let resumed = CiderReminderRelevanceService.relevance(
+            todos: [todo],
+            dateCards: [],
+            now: snoozedUntil,
+            calendar: calendar
+        )
+
+        XCTAssertTrue(resumed[0].surfaceToday)
+        XCTAssertEqual(resumed[0].surfacing.reason, "overdue")
+        XCTAssertEqual(resumed[0].surfacing.urgency, "overdue")
+    }
 }

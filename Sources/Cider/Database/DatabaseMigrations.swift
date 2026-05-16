@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 10
+    static let latestVersion: Int = 11
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -67,7 +67,30 @@ enum DatabaseMigrations {
         }
         if currentVersion < 10 {
             try migrateToV10(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 11 {
+            try migrateToV11(db)
+        }
+    }
+
+    // MARK: - V10 -> V11: Reminder snooze state
+
+    private static func migrateToV11(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 11...")
+
+        try withTransaction(db) {
+            if !(try columnExists(db, table: "todos", column: "snoozed_until")) {
+                try runOnDB(db, "ALTER TABLE todos ADD COLUMN snoozed_until REAL;")
+            }
+            if !(try columnExists(db, table: "events", column: "snoozed_until")) {
+                try runOnDB(db, "ALTER TABLE events ADD COLUMN snoozed_until REAL;")
+            }
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (11);")
+        }
+
+        logger.info("Migration to v11 complete")
     }
 
     // MARK: - V9 -> V10: Repair legacy routing_decisions table shape

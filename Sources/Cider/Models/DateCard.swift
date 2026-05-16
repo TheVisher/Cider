@@ -44,6 +44,7 @@ struct DateCard: Identifiable, Codable, Hashable {
     var labelIDs: [UUID]
     var linkedEntities: [LibraryEntityRef]
     var actionURLString: String?
+    var snoozedUntil: Date?
     var folderID: UUID?
     var rules: [SurfacingRule]
     var createdAt: Date
@@ -64,6 +65,7 @@ struct DateCard: Identifiable, Codable, Hashable {
         labelIDs: [UUID] = [],
         linkedEntities: [LibraryEntityRef] = [],
         actionURLString: String? = nil,
+        snoozedUntil: Date? = nil,
         folderID: UUID? = nil,
         rules: [SurfacingRule] = [],
         createdAt: Date = Date(),
@@ -83,6 +85,7 @@ struct DateCard: Identifiable, Codable, Hashable {
         self.labelIDs = labelIDs
         self.linkedEntities = linkedEntities
         self.actionURLString = DateCard.normalizedActionURLString(actionURLString)
+        self.snoozedUntil = snoozedUntil
         self.folderID = folderID
         self.rules = rules
         self.createdAt = createdAt
@@ -105,6 +108,7 @@ struct DateCard: Identifiable, Codable, Hashable {
         labelIDs = (try c.decodeIfPresent([UUID].self, forKey: .labelIDs)) ?? []
         linkedEntities = (try c.decodeIfPresent([LibraryEntityRef].self, forKey: .linkedEntities)) ?? []
         actionURLString = DateCard.normalizedActionURLString(try c.decodeIfPresent(String.self, forKey: .actionURLString))
+        snoozedUntil = try c.decodeIfPresent(Date.self, forKey: .snoozedUntil)
         folderID = try c.decodeIfPresent(UUID.self, forKey: .folderID)
         rules = (try c.decodeIfPresent([SurfacingRule].self, forKey: .rules)) ?? []
         createdAt = try c.decode(Date.self, forKey: .createdAt)

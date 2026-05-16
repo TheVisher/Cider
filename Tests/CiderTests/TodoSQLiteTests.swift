@@ -63,6 +63,27 @@ struct TodoSQLiteTests {
         #expect(loaded.details == "Weekly shop")
     }
 
+    @Test("Todo snoozedUntil round-trips through SQLite")
+    func todoSnoozedUntilRoundTrip() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+        let snoozedUntil = Date(timeIntervalSince1970: 1_745_170_800)
+        let todo = TodoCard(
+            title: "Pay rent",
+            dueDate: Date(timeIntervalSince1970: 1_745_084_400),
+            snoozedUntil: snoozedUntil
+        )
+
+        service.persistTodoToDatabase(db, todo: todo)
+
+        let service2 = makeService(db)
+        service2.loadTodosFromDatabase(db)
+
+        #expect(service2.todoCards.first?.snoozedUntil == snoozedUntil)
+    }
+
     // MARK: - All Fields
 
     @Test("Todo with all fields round-trips correctly")

@@ -18,6 +18,7 @@ struct AgendaBriefingItem: Identifiable, Equatable {
         case today
         case upcoming
         case suppressed
+        case snoozed
         case later
     }
 
@@ -62,7 +63,7 @@ extension AgendaBriefingItem {
         case .today: return "today"
         case .upcoming: return "upcoming"
         case .active: return "action"
-        case .completed, .suppressed, .later: return "normal"
+        case .completed, .suppressed, .snoozed, .later: return "normal"
         }
     }
 
@@ -135,6 +136,20 @@ enum AgendaBriefingService {
     ) -> AgendaBriefingItem? {
         if todo.isCompleted { return nil }
         guard let dueAt = todo.earliestApproachingDate else { return nil }
+        if let snoozedItem = snoozedBriefingItem(
+            id: todo.id,
+            itemType: .todo,
+            title: todo.title,
+            dueAt: dueAt,
+            snoozedUntil: todo.snoozedUntil,
+            now: now,
+            calendar: calendar,
+            priority: todo.priority?.rawValue,
+            actionURLString: todo.actionURLString,
+            reminderPolicy: "todo lead window: \(options.todoLeadDays) day\(options.todoLeadDays == 1 ? "" : "s")"
+        ) {
+            return snoozedItem
+        }
 
         let days = daysBetween(now, dueAt, calendar: calendar)
         let status: AgendaBriefingItem.Status
@@ -198,6 +213,22 @@ enum AgendaBriefingService {
         if card.isCompleted { return nil }
 
         let effectiveDate = card.effectiveDate(now: now)
+        let leadDays = leadDays(for: card, options: options)
+        let reminderPolicy = reminderPolicy(for: card, leadDays: leadDays, options: options)
+        if let snoozedItem = snoozedBriefingItem(
+            id: card.id,
+            itemType: .dateCard,
+            title: card.title,
+            dueAt: effectiveDate,
+            snoozedUntil: card.snoozedUntil,
+            now: now,
+            calendar: calendar,
+            priority: nil,
+            actionURLString: card.actionURLString,
+            reminderPolicy: reminderPolicy
+        ) {
+            return snoozedItem
+        }
         let normalized = normalizedTitle(card.title)
         if hasCompletedMatchingTodo(
             normalizedTitle: normalized,
@@ -222,8 +253,6 @@ enum AgendaBriefingService {
             )
         }
 
-        let leadDays = leadDays(for: card, options: options)
-        let reminderPolicy = reminderPolicy(for: card, leadDays: leadDays, options: options)
         let days = daysBetween(now, effectiveDate, calendar: calendar)
         let status: AgendaBriefingItem.Status
         let bucket: AgendaBriefingItem.Bucket
@@ -286,6 +315,45 @@ enum AgendaBriefingService {
             return options.monthlyBillLeadDays
         }
         return options.dateCardLeadDays
+    }
+
+    private static func snoozedBriefingItem(
+        id: UUID,
+        itemType: AgendaBriefingItem.ItemType,
+        title: String,
+        dueAt: Date?,
+        snoozedUntil: Date?,
+        now: Date,
+        calendar: Calendar,
+        priority: String?,
+        actionURLString: String?,
+        reminderPolicy: String
+    ) -> AgendaBriefingItem? {
+        guard let snoozedUntil, snoozedUntil > now else { return nil }
+        return AgendaBriefingItem(
+            id: id,
+            itemType: itemType,
+            title: title,
+            status: .snoozed,
+            bucket: .suppressed,
+            surfaceToday: false,
+            reason: "snoozed until \(dateLabel(snoozedUntil, calendar: calendar))",
+            dueAt: dueAt,
+            nextSurfaceDate: snoozedUntil,
+            priority: priority,
+            actionURLString: actionURLString,
+            reminderPolicy: reminderPolicy,
+            suggestedAction: nil
+        )
+    }
+
+    private static func dateLabel(_ date: Date, calendar: Calendar) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     private static func reminderPolicy(for card: DateCard, leadDays: Int, options: AgendaBriefingOptions) -> String {

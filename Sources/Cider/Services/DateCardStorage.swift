@@ -328,6 +328,7 @@ final class DateCardStorage: ObservableObject {
         guard let idx = dateCards.firstIndex(where: { $0.id == id }) else { return false }
         dateCards[idx].isCompleted = completed
         dateCards[idx].completedAt = completed ? Date() : nil
+        if completed { dateCards[idx].snoozedUntil = nil }
         dateCards[idx].updatedAt = Date()
         writeAndUpdateIndex(for: dateCards[idx])
         return true
@@ -750,7 +751,7 @@ final class DateCardStorage: ObservableObject {
             let stmt = try db.prepare("""
                 SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
                        e.details, e.start_at, e.end_at, e.all_day, e.location, e.amount,
-                       e.recurrence_rule, e.is_completed, e.completed_at, e.surfacing_rules, e.action_url
+                       e.recurrence_rule, e.is_completed, e.completed_at, e.surfacing_rules, e.action_url, e.snoozed_until
                 FROM items i
                 JOIN events e ON e.item_id = i.id
                 WHERE i.type = 'event';
@@ -775,6 +776,7 @@ final class DateCardStorage: ObservableObject {
                 let completedAt = stmt.optionalDouble(at: 14).map(DatabaseHelpers.decodeDate)
                 let surfacingRulesJSON = stmt.optionalString(at: 15)
                 let actionURLString = DateCard.normalizedActionURLString(stmt.optionalString(at: 16))
+                let snoozedUntil = stmt.optionalDouble(at: 17).map(DatabaseHelpers.decodeDate)
 
                 let recurrenceRule: DateCardRecurrenceRule? =
                     DatabaseHelpers.decodeJSON(DateCardRecurrenceRule.self, from: recurrenceJSON)
@@ -799,6 +801,7 @@ final class DateCardStorage: ObservableObject {
                     labelIDs: labelIDs,
                     linkedEntities: linkedEntities,
                     actionURLString: actionURLString,
+                    snoozedUntil: snoozedUntil,
                     folderID: folderID,
                     rules: rules,
                     createdAt: createdAt,
@@ -948,9 +951,9 @@ final class DateCardStorage: ObservableObject {
         let eventStmt = try db.prepare("""
             INSERT INTO events (
                 item_id, details, start_at, end_at, all_day, location, amount,
-                recurrence_rule, is_completed, completed_at, surfacing_rules, action_url
+                recurrence_rule, is_completed, completed_at, surfacing_rules, action_url, snoozed_until
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(item_id) DO UPDATE SET
                 details = excluded.details,
                 start_at = excluded.start_at,
@@ -962,7 +965,8 @@ final class DateCardStorage: ObservableObject {
                 is_completed = excluded.is_completed,
                 completed_at = excluded.completed_at,
                 surfacing_rules = excluded.surfacing_rules,
-                action_url = excluded.action_url;
+                action_url = excluded.action_url,
+                snoozed_until = excluded.snoozed_until;
             """)
         let recurrenceJSON: String? = dateCard.recurrenceRule.flatMap { DatabaseHelpers.encodeJSON($0) }
         let surfacingRulesJSON: String? = dateCard.rules.isEmpty
@@ -980,6 +984,7 @@ final class DateCardStorage: ObservableObject {
             .bind(dateCard.completedAt.map(DatabaseHelpers.encode), at: 10)
             .bind(surfacingRulesJSON, at: 11)
             .bind(dateCard.actionURLString, at: 12)
+            .bind(dateCard.snoozedUntil.map(DatabaseHelpers.encode), at: 13)
         try eventStmt.step()
 
         // 3. Sync item_labels: delete all, re-insert current.

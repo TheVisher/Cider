@@ -73,6 +73,7 @@ func outputJSON(_ value: Any) {
     if let due = todo.dueDate { d["dueDate"] = ISO8601DateFormatter().string(from: due) }
     if let priority = todo.priority { d["priority"] = priority.rawValue }
     if let actionURLString = todo.actionURLString { d["actionURL"] = actionURLString }
+    if let snoozedUntil = todo.snoozedUntil { d["snoozedUntil"] = ISO8601DateFormatter().string(from: snoozedUntil) }
     if let completedAt = todo.completedAt { d["completedAt"] = ISO8601DateFormatter().string(from: completedAt) }
     d["checklist"] = todo.checklist.map { item -> [String: Any] in
         var cd: [String: Any] = [
@@ -107,6 +108,7 @@ func outputJSON(_ value: Any) {
     if !card.location.isEmpty { d["location"] = card.location }
     if let amount = card.amount { d["amount"] = amount }
     if let actionURLString = card.actionURLString { d["actionURL"] = actionURLString }
+    if let snoozedUntil = card.snoozedUntil { d["snoozedUntil"] = ISO8601DateFormatter().string(from: snoozedUntil) }
     return d
 }
 
@@ -148,6 +150,34 @@ func surfacingExplanationToDict(_ explanation: CiderSurfacingExplanation) -> [St
     ]
     if let actionURLString = explanation.actionURLString {
         dict["actionURLString"] = actionURLString
+    }
+    return dict
+}
+
+func reminderActionResultToDict(_ result: CiderReminderActionResult) -> [String: Any] {
+    let formatter = ISO8601DateFormatter()
+    var dict: [String: Any] = [
+        "itemType": result.itemType.rawValue,
+        "id": result.id.uuidString,
+        "title": result.title,
+        "action": result.action.rawValue,
+        "completed": result.completed,
+    ]
+    if let snoozedUntil = result.snoozedUntil {
+        dict["snoozedUntil"] = formatter.string(from: snoozedUntil)
+    }
+    if let surfacing = result.surfacing {
+        var surfacingDict: [String: Any] = [
+            "id": surfacing.id.uuidString,
+            "itemType": surfacing.itemType.rawValue,
+            "title": surfacing.title,
+            "surfaceToday": surfacing.surfaceToday,
+            "explanation": surfacingExplanationToDict(surfacing.surfacing),
+        ]
+        if let dueAt = surfacing.dueAt {
+            surfacingDict["dueAt"] = formatter.string(from: dueAt)
+        }
+        dict["surfacing"] = surfacingDict
     }
     return dict
 }

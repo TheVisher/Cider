@@ -142,6 +142,40 @@ final class AgendaBriefingServiceTests: XCTestCase {
         XCTAssertEqual(surfacing.actionURLString, "https://rent.example.com")
     }
 
+    func testSnoozedTodoStaysQuietUntilSnoozeExpires() {
+        let now = date(2026, 5, 7)
+        let snoozedTodo = TodoCard(
+            title: "Pay rent",
+            dueDate: date(2026, 5, 7),
+            snoozedUntil: date(2026, 5, 8)
+        )
+
+        let snoozedBrief = AgendaBriefingService.build(
+            todos: [snoozedTodo],
+            dateCards: [],
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(snoozedBrief.items[0].status, .snoozed)
+        XCTAssertEqual(snoozedBrief.items[0].bucket, .suppressed)
+        XCTAssertFalse(snoozedBrief.items[0].surfaceToday)
+        XCTAssertEqual(snoozedBrief.items[0].reason, "snoozed until 2026-05-08")
+        XCTAssertEqual(snoozedBrief.items[0].surfacingExplanation.urgency, "normal")
+        XCTAssertEqual(snoozedBrief.items[0].surfacingExplanation.suggestedAction, "Wait")
+
+        let resumedBrief = AgendaBriefingService.build(
+            todos: [snoozedTodo],
+            dateCards: [],
+            now: date(2026, 5, 8),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(resumedBrief.items[0].status, .overdue)
+        XCTAssertTrue(resumedBrief.items[0].surfaceToday)
+        XCTAssertEqual(resumedBrief.items[0].reason, "overdue")
+    }
+
     func testDateCardReminderPolicyIsIncluded() {
         let now = date(2026, 5, 7)
         let birthday = DateCard(

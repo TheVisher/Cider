@@ -51,4 +51,33 @@ final class TemporalActionURLTests: XCTestCase {
         XCTAssertNil(TodoCard(title: "Todo", actionURLString: "  ").actionURLString)
         XCTAssertNil(DateCard(title: "Event", startAt: Date(), actionURLString: "\n").actionURLString)
     }
+
+    func testSnoozedUntilCodableAndICalendarRoundTrip() throws {
+        let snoozedUntil = Date(timeIntervalSince1970: 1_745_170_800)
+        let todo = TodoCard(
+            title: "Pay rent",
+            dueDate: Date(timeIntervalSince1970: 1_745_084_400),
+            snoozedUntil: snoozedUntil
+        )
+        let event = DateCard(
+            title: "DMV appointment",
+            startAt: Date(timeIntervalSince1970: 1_745_084_400),
+            snoozedUntil: snoozedUntil
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let decodedTodo = try decoder.decode(TodoCard.self, from: encoder.encode(todo))
+        XCTAssertEqual(decodedTodo.snoozedUntil, snoozedUntil)
+        let parsedTodo = try XCTUnwrap(ICalendarSerializer.parseTodo(ICalendarSerializer.serializeTodo(todo)))
+        XCTAssertEqual(parsedTodo.snoozedUntil, snoozedUntil)
+
+        let decodedEvent = try decoder.decode(DateCard.self, from: encoder.encode(event))
+        XCTAssertEqual(decodedEvent.snoozedUntil, snoozedUntil)
+        let parsedEvent = try XCTUnwrap(ICalendarSerializer.parseDateCard(ICalendarSerializer.serializeDateCard(event)))
+        XCTAssertEqual(parsedEvent.snoozedUntil, snoozedUntil)
+    }
 }

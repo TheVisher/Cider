@@ -55,6 +55,9 @@ enum ICalendarSerializer {
         if let actionURLString = todo.actionURLString {
             lines.append("X-CIDER-ACTION-URL:\(escapeICalText(actionURLString))")
         }
+        if let snoozedUntil = todo.snoozedUntil {
+            lines.append("X-CIDER-SNOOZED-UNTIL:\(dateTimeFormatter.string(from: snoozedUntil))")
+        }
         if !todo.rules.isEmpty,
            let jsonData = try? rulesEncoder.encode(todo.rules),
            let jsonString = String(data: jsonData, encoding: .utf8) {
@@ -93,6 +96,7 @@ enum ICalendarSerializer {
         var linkedEntities: [LibraryEntityRef] = []
         var notes = ""
         var actionURLString: String?
+        var snoozedUntil: Date?
         var rules: [SurfacingRule] = []
         var checklist: [TodoChecklistItem] = []
         var createdAt: Date?
@@ -135,6 +139,8 @@ enum ICalendarSerializer {
                 notes = unescapeICalText(value)
             case "X-CIDER-ACTION-URL":
                 actionURLString = unescapeICalText(value)
+            case "X-CIDER-SNOOZED-UNTIL":
+                snoozedUntil = parseDateTime(value)
             case "X-CIDER-RULES":
                 let jsonString = unescapeICalText(value)
                 if let jsonData = jsonString.data(using: .utf8) {
@@ -165,6 +171,7 @@ enum ICalendarSerializer {
             notes: notes,
             linkedEntities: linkedEntities,
             actionURLString: actionURLString,
+            snoozedUntil: snoozedUntil,
             rules: rules,
             createdAt: createdAt ?? Date(),
             updatedAt: updatedAt ?? Date()
@@ -240,6 +247,9 @@ enum ICalendarSerializer {
         if let actionURLString = dc.actionURLString {
             lines.append("X-CIDER-ACTION-URL:\(escapeICalText(actionURLString))")
         }
+        if let snoozedUntil = dc.snoozedUntil {
+            lines.append("X-CIDER-SNOOZED-UNTIL:\(dateTimeFormatter.string(from: snoozedUntil))")
+        }
         if !dc.rules.isEmpty {
             if let jsonData = try? rulesEncoder.encode(dc.rules),
                let jsonString = String(data: jsonData, encoding: .utf8) {
@@ -275,6 +285,7 @@ enum ICalendarSerializer {
         var labelIDs: [UUID] = []
         var linkedEntities: [LibraryEntityRef] = []
         var actionURLString: String?
+        var snoozedUntil: Date?
         var rules: [SurfacingRule] = []
         var createdAt: Date?
         var updatedAt: Date?
@@ -329,6 +340,8 @@ enum ICalendarSerializer {
                 linkedEntities = parseLinkedEntities(value)
             case "X-CIDER-ACTION-URL":
                 actionURLString = unescapeICalText(value)
+            case "X-CIDER-SNOOZED-UNTIL":
+                snoozedUntil = parseDateTime(value)
             case "X-CIDER-RULES":
                 let jsonString = unescapeICalText(value)
                 if let jsonData = jsonString.data(using: .utf8) {
@@ -356,6 +369,7 @@ enum ICalendarSerializer {
             labelIDs: labelIDs,
             linkedEntities: linkedEntities,
             actionURLString: actionURLString,
+            snoozedUntil: snoozedUntil,
             rules: rules,
             createdAt: createdAt ?? Date(),
             updatedAt: updatedAt ?? Date()

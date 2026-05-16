@@ -95,7 +95,8 @@ enum CiderSchema {
             notes        TEXT NOT NULL DEFAULT '',
             checklist    TEXT,
             surfacing_rules TEXT,
-            action_url   TEXT
+            action_url   TEXT,
+            snoozed_until REAL
         );
         """
 
@@ -112,7 +113,8 @@ enum CiderSchema {
             is_completed    INTEGER NOT NULL DEFAULT 0,
             completed_at    REAL,
             surfacing_rules TEXT,
-            action_url   TEXT
+            action_url   TEXT,
+            snoozed_until REAL
         );
         """
 
