@@ -2505,6 +2505,7 @@ struct CiderCLI {
             Item graph commands:
               cider-cli item search <query> [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
+              cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
               cider-cli item related <type> <id-or-ref> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
               cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
@@ -2607,6 +2608,44 @@ struct CiderCLI {
                     }
                     if !actions.isEmpty {
                         print("  Agent actions: \(actions.count)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "context", "agent-context":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item context <type> <id-or-ref> [--json]")
+                return
+            }
+            do {
+                let type = try ItemLinkService.entityType(from: positional[0])
+                let ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+                let packet = try contextService.agentContext(for: ref, limits: itemAgentContextLimits(from: args))
+                if jsonOutput {
+                    var dict = itemAgentContextPacketToDict(packet)
+                    dict["ok"] = true
+                    dict["sourceRef"] = [
+                        "type": positional[0],
+                        "ref": positional[1],
+                    ]
+                    outputJSON(dict)
+                } else {
+                    print("\(packet.item.type.rawValue):\(packet.item.id.uuidString)")
+                    print("  Title: \(packet.item.title)")
+                    print("  Summary: \(packet.summary)")
+                    if let review = packet.review {
+                        print("  Review: \(review.status) - \(review.reason)")
+                    }
+                    print("  Context blocks: \(packet.contentBlocks.count)")
+                    print("  Related: \(packet.related.count)")
+                    if !packet.safeCommands.isEmpty {
+                        print("  Safe commands:")
+                        for command in packet.safeCommands {
+                            print("    \(command)")
+                        }
                     }
                 }
             } catch {
@@ -6638,6 +6677,74 @@ struct CiderCLI {
             "related": bundle.related.map(itemLinkSummaryToDict),
             "routingDecisions": bundle.routingDecisions.map(routingDecisionToDict),
             "agentActions": bundle.agentActions.map(agentActionToDict),
+        ]
+    }
+
+    static func itemAgentContextLimits(from args: [String]) -> CiderItemAgentContextLimits {
+        CiderItemAgentContextLimits(
+            maxSections: Int(parseFlag("--max-sections", from: args) ?? "") ?? CiderItemAgentContextLimits.default.maxSections,
+            maxChunks: Int(parseFlag("--max-chunks", from: args) ?? "") ?? CiderItemAgentContextLimits.default.maxChunks,
+            maxRelated: Int(parseFlag("--max-related", from: args) ?? "") ?? CiderItemAgentContextLimits.default.maxRelated,
+            maxHistory: Int(parseFlag("--max-history", from: args) ?? "") ?? CiderItemAgentContextLimits.default.maxHistory,
+            maxBodyCharacters: Int(parseFlag("--max-body", from: args) ?? "") ?? CiderItemAgentContextLimits.default.maxBodyCharacters
+        )
+    }
+
+    static func itemAgentContextPacketToDict(_ packet: CiderItemAgentContextPacket) -> [String: Any] {
+        var dict: [String: Any] = [
+            "item": itemSummaryToDict(packet.item),
+            "owner": ownerToDict(packet.owner),
+            "summary": packet.summary,
+            "provenance": packet.provenance,
+            "contentBlocks": packet.contentBlocks.map(itemAgentContextBlockToDict),
+            "related": packet.related.map(itemLinkSummaryToDict),
+            "recentHistory": packet.recentHistory.map(itemAgentContextHistoryToDict),
+            "safeCommands": packet.safeCommands,
+            "limits": [
+                "maxSections": packet.limits.maxSections,
+                "maxChunks": packet.limits.maxChunks,
+                "maxRelated": packet.limits.maxRelated,
+                "maxHistory": packet.limits.maxHistory,
+                "maxBodyCharacters": packet.limits.maxBodyCharacters,
+            ],
+        ]
+        if let review = packet.review {
+            dict["review"] = itemAgentReviewStateToDict(review)
+        }
+        return dict
+    }
+
+    static func itemAgentContextBlockToDict(_ block: CiderItemAgentContextBlock) -> [String: Any] {
+        [
+            "id": block.id,
+            "kind": block.kind,
+            "title": block.title,
+            "body": block.body,
+            "source": block.source,
+        ]
+    }
+
+    static func itemAgentReviewStateToDict(_ review: CiderItemAgentReviewState) -> [String: Any] {
+        var dict: [String: Any] = [
+            "status": review.status,
+            "reason": review.reason,
+            "targetType": review.targetType,
+            "source": review.source,
+            "createdAt": ISO8601DateFormatter().string(from: review.createdAt),
+        ]
+        if let confidence = review.confidence { dict["confidence"] = confidence }
+        if let targetPath = review.targetPath { dict["targetPath"] = targetPath }
+        return dict
+    }
+
+    static func itemAgentContextHistoryToDict(_ entry: CiderItemAgentContextHistoryEntry) -> [String: Any] {
+        [
+            "id": entry.id,
+            "kind": entry.kind,
+            "summary": entry.summary,
+            "source": entry.source,
+            "status": entry.status,
+            "createdAt": ISO8601DateFormatter().string(from: entry.createdAt),
         ]
     }
 

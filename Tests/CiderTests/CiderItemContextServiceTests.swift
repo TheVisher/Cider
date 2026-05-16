@@ -126,4 +126,114 @@ struct CiderItemContextServiceTests {
             $0.kind == .chunk && $0.item?.id == renewal.entityID && $0.owner.ownerType == "todo"
         })
     }
+
+    @Test("agent context bundle is bounded and includes provenance review history and safe commands")
+    func agentContextBundleIsBoundedAndActionable() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        let bookmark = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        try insertItem(note, title: "Dentist follow-up", relativePath: "Inbox/Notes/Dentist follow-up.md", into: db)
+        try insertItem(bookmark, title: "Dental insurance portal", relativePath: "Inbox/Bookmarks/Dental insurance portal.url", into: db)
+
+        let store = SecondBrainStore(database: db)
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: note.entityID.uuidString)
+        try store.upsertSection(
+            SecondBrainSection(
+                owner: owner,
+                itemID: note.entityID.uuidString,
+                sectionKey: "summary",
+                title: "Summary",
+                body: "Call the dentist and confirm insurance before booking the follow-up appointment.",
+                source: "projection",
+                sortOrder: 0
+            )
+        )
+        try store.upsertSection(
+            SecondBrainSection(
+                owner: owner,
+                itemID: note.entityID.uuidString,
+                sectionKey: "details",
+                title: "Details",
+                body: "This longer section should not be included when the section limit is one.",
+                source: "projection",
+                sortOrder: 1
+            )
+        )
+        try store.replaceChunks(owner: owner, chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: note.entityID.uuidString,
+                source: "note-body",
+                title: "Dentist follow-up chunk",
+                body: "Call the dentist, verify the insurance portal, and ask whether the claim requires prior authorization.",
+                chunkIndex: 0
+            ),
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: note.entityID.uuidString,
+                source: "note-body",
+                title: "Extra chunk",
+                body: "This chunk should be omitted by the max chunk limit.",
+                chunkIndex: 1
+            ),
+        ])
+        try store.recordRoutingDecision(
+            SecondBrainRoutingDecision(
+                owner: owner,
+                itemID: note.entityID.uuidString,
+                targetType: "folder",
+                targetPath: "Health/Dental",
+                confidence: 0.64,
+                reason: "Health admin item, but target needs review.",
+                status: "needs_review",
+                actor: "agent",
+                source: "routing.test"
+            )
+        )
+        try store.recordAgentAction(
+            SecondBrainAgentAction(
+                owner: owner,
+                itemID: note.entityID.uuidString,
+                toolName: "cider-cli",
+                actionType: "route",
+                source: "agent.test",
+                status: "suggested",
+                summary: "Suggested routing to Health/Dental.",
+                argumentsJSON: nil,
+                resultJSON: nil
+            )
+        )
+
+        let linkService = ItemLinkService(database: db)
+        try linkService.addDirectLink(from: note, to: bookmark)
+        let service = CiderItemContextService(database: db, linkService: linkService, secondBrainStore: store)
+
+        let packet = try service.agentContext(
+            for: note,
+            limits: CiderItemAgentContextLimits(
+                maxSections: 1,
+                maxChunks: 1,
+                maxRelated: 1,
+                maxHistory: 2,
+                maxBodyCharacters: 48
+            )
+        )
+
+        #expect(packet.item.id == note.entityID)
+        #expect(packet.summary == "Call the dentist and confirm insurance before bo")
+        #expect(packet.summary.count <= 48)
+        #expect(packet.provenance.contains("item:note"))
+        #expect(packet.provenance.contains("path:Inbox/Notes/Dentist follow-up.md"))
+        #expect(packet.contentBlocks.map(\.title) == ["Summary", "Dentist follow-up chunk"])
+        #expect(packet.contentBlocks.allSatisfy { $0.body.count <= 48 })
+        #expect(packet.related.map(\.title) == ["Dental insurance portal"])
+        #expect(packet.review?.status == "needs_review")
+        #expect(packet.review?.targetPath == "Health/Dental")
+        #expect(packet.recentHistory.map(\.summary).contains("Suggested routing to Health/Dental."))
+        #expect(packet.safeCommands.contains("cider-cli item get note \(note.entityID.uuidString) --json"))
+        #expect(packet.safeCommands.contains("cider-cli item related note \(note.entityID.uuidString) --json"))
+        #expect(packet.safeCommands.contains("cider-cli routing explain \(note.entityID.uuidString) --json"))
+    }
 }

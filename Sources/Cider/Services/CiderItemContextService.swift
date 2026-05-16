@@ -33,6 +33,56 @@ struct CiderItemContextBundle: Equatable {
     var agentActions: [SecondBrainAgentAction]
 }
 
+struct CiderItemAgentContextLimits: Equatable {
+    var maxSections: Int = 3
+    var maxChunks: Int = 3
+    var maxRelated: Int = 5
+    var maxHistory: Int = 5
+    var maxBodyCharacters: Int = 600
+
+    static let `default` = CiderItemAgentContextLimits()
+}
+
+struct CiderItemAgentContextBlock: Identifiable, Equatable {
+    var id: String
+    var kind: String
+    var title: String
+    var body: String
+    var source: String
+}
+
+struct CiderItemAgentReviewState: Equatable {
+    var status: String
+    var reason: String
+    var confidence: Double?
+    var targetType: String
+    var targetPath: String?
+    var source: String
+    var createdAt: Date
+}
+
+struct CiderItemAgentContextHistoryEntry: Identifiable, Equatable {
+    var id: String
+    var kind: String
+    var summary: String
+    var source: String
+    var status: String
+    var createdAt: Date
+}
+
+struct CiderItemAgentContextPacket: Equatable {
+    var item: CiderItemSummary
+    var owner: SecondBrainOwnerRef
+    var summary: String
+    var provenance: [String]
+    var contentBlocks: [CiderItemAgentContextBlock]
+    var related: [ItemLinkSummary]
+    var review: CiderItemAgentReviewState?
+    var recentHistory: [CiderItemAgentContextHistoryEntry]
+    var safeCommands: [String]
+    var limits: CiderItemAgentContextLimits
+}
+
 enum CiderItemSearchResultKind: String, Codable {
     case item
     case chunk
@@ -89,6 +139,26 @@ final class CiderItemContextService {
             related: linkService.summaries(for: try linkService.relatedRefs(for: ref)),
             routingDecisions: try secondBrainStore.routingDecisions(for: owner),
             agentActions: try secondBrainStore.agentActions(for: owner)
+        )
+    }
+
+    func agentContext(
+        for ref: LibraryEntityRef,
+        limits: CiderItemAgentContextLimits = .default
+    ) throws -> CiderItemAgentContextPacket {
+        let bundle = try context(for: ref)
+        let normalizedLimits = normalize(limits)
+        return CiderItemAgentContextPacket(
+            item: bundle.item,
+            owner: bundle.owner,
+            summary: clipped(summary(for: bundle), limit: normalizedLimits.maxBodyCharacters),
+            provenance: provenance(for: bundle),
+            contentBlocks: contentBlocks(for: bundle, limits: normalizedLimits),
+            related: Array(bundle.related.prefix(normalizedLimits.maxRelated)),
+            review: reviewState(for: bundle),
+            recentHistory: recentHistory(for: bundle, limit: normalizedLimits.maxHistory),
+            safeCommands: safeCommands(for: bundle),
+            limits: normalizedLimits
         )
     }
 
@@ -187,6 +257,158 @@ final class CiderItemContextService {
             )
         }
         return chunks
+    }
+
+    private func summary(for bundle: CiderItemContextBundle) -> String {
+        if let section = bundle.sections.first(where: { ["summary", "overview", "current_state"].contains($0.sectionKey) }),
+           !section.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return section.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let section = bundle.sections.first(where: { !$0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return section.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let chunk = bundle.chunks.first(where: { !$0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return chunk.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return bundle.item.title
+    }
+
+    private func provenance(for bundle: CiderItemContextBundle) -> [String] {
+        var values: [String] = ["item:\(bundle.item.type.rawValue)"]
+        if let relativePath = bundle.item.relativePath {
+            values.append("path:\(relativePath)")
+        }
+        values += bundle.sections.map { "section:\($0.source)" }
+        values += bundle.chunks.map { "chunk:\($0.source)" }
+        values += bundle.routingDecisions.map { "routing:\($0.source)" }
+        values += bundle.agentActions.map { "agent:\($0.source)" }
+        if !bundle.related.isEmpty {
+            values.append("related:\(bundle.related.count)")
+        }
+        return orderedUnique(values)
+    }
+
+    private func contentBlocks(
+        for bundle: CiderItemContextBundle,
+        limits: CiderItemAgentContextLimits
+    ) -> [CiderItemAgentContextBlock] {
+        let sectionBlocks = bundle.sections
+            .prefix(limits.maxSections)
+            .map { section in
+                CiderItemAgentContextBlock(
+                    id: "section-\(section.id)",
+                    kind: "section",
+                    title: section.title,
+                    body: clipped(section.body, limit: limits.maxBodyCharacters),
+                    source: section.source
+                )
+            }
+        let chunkBlocks = bundle.chunks
+            .prefix(limits.maxChunks)
+            .map { chunk in
+                CiderItemAgentContextBlock(
+                    id: "chunk-\(chunk.id)",
+                    kind: "chunk",
+                    title: chunk.title,
+                    body: clipped(chunk.body, limit: limits.maxBodyCharacters),
+                    source: chunk.source
+                )
+            }
+        return sectionBlocks + chunkBlocks
+    }
+
+    private func reviewState(for bundle: CiderItemContextBundle) -> CiderItemAgentReviewState? {
+        guard let decision = bundle.routingDecisions.sorted(by: { lhs, rhs in
+            lhs.createdAt > rhs.createdAt
+        }).first else {
+            return nil
+        }
+        return CiderItemAgentReviewState(
+            status: decision.status,
+            reason: decision.reason,
+            confidence: decision.confidence,
+            targetType: decision.targetType,
+            targetPath: decision.targetPath,
+            source: decision.source,
+            createdAt: decision.createdAt
+        )
+    }
+
+    private func recentHistory(
+        for bundle: CiderItemContextBundle,
+        limit: Int
+    ) -> [CiderItemAgentContextHistoryEntry] {
+        let routing = bundle.routingDecisions.map { decision in
+            CiderItemAgentContextHistoryEntry(
+                id: "routing-\(decision.id)",
+                kind: "routing",
+                summary: decision.reason,
+                source: decision.source,
+                status: decision.status,
+                createdAt: decision.createdAt
+            )
+        }
+        let actions = bundle.agentActions.map { action in
+            CiderItemAgentContextHistoryEntry(
+                id: "agent-\(action.id)",
+                kind: "agent_action",
+                summary: action.summary,
+                source: action.source,
+                status: action.status,
+                createdAt: action.createdAt
+            )
+        }
+        return Array((routing + actions)
+            .sorted { lhs, rhs in
+                if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+                return lhs.id < rhs.id
+            }
+            .prefix(limit))
+    }
+
+    private func safeCommands(for bundle: CiderItemContextBundle) -> [String] {
+        let type = bundle.item.type.rawValue
+        let id = bundle.item.id.uuidString
+        var commands = [
+            "cider-cli item get \(type) \(id) --json",
+            "cider-cli item related \(type) \(id) --json",
+            "cider-cli item search \"\(escapedCommandArgument(bundle.item.title))\" --limit 5 --json",
+        ]
+        if !bundle.routingDecisions.isEmpty {
+            commands.append("cider-cli routing explain \(id) --json")
+        }
+        return commands
+    }
+
+    private func normalize(_ limits: CiderItemAgentContextLimits) -> CiderItemAgentContextLimits {
+        CiderItemAgentContextLimits(
+            maxSections: max(0, limits.maxSections),
+            maxChunks: max(0, limits.maxChunks),
+            maxRelated: max(0, limits.maxRelated),
+            maxHistory: max(0, limits.maxHistory),
+            maxBodyCharacters: max(40, limits.maxBodyCharacters)
+        )
+    }
+
+    private func clipped(_ value: String, limit: Int) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > limit else { return trimmed }
+        let end = trimmed.index(trimmed.startIndex, offsetBy: limit)
+        return String(trimmed[..<end])
+    }
+
+    private func orderedUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for value in values where !value.isEmpty && !seen.contains(value) {
+            seen.insert(value)
+            output.append(value)
+        }
+        return output
+    }
+
+    private func escapedCommandArgument(_ value: String) -> String {
+        value.replacingOccurrences(of: "\"", with: "\\\"")
     }
 
     private func itemSummary(owner: SecondBrainOwnerRef) throws -> CiderItemSummary {
