@@ -16,7 +16,17 @@ struct CiderStorageAuditReport: Equatable {
     var duplicateFindingGroups: [String: Int]
     var totalDoctorFindings: Int
     var fixableDoctorFindings: Int
+    var schemaFindings: [CiderStorageAuditSchemaFinding]
     var mismatches: [CiderStorageAuditMismatch]
+}
+
+struct CiderStorageAuditSchemaFinding: Codable, Equatable {
+    var id: String
+    var severity: String
+    var affectedTable: String
+    var summary: String
+    var detail: String
+    var nextSafeAction: String
 }
 
 @MainActor
@@ -70,6 +80,7 @@ final class CiderStorageAuditService {
             duplicateFindingGroups: groupedDuplicateFindings(duplicateFindings),
             totalDoctorFindings: doctorReport.findings.count,
             fixableDoctorFindings: doctorReport.fixableCount,
+            schemaFindings: try schemaFindings(),
             mismatches: mismatches(modelCounts: modelCounts, sqliteCounts: sqliteCounts)
         )
     }
@@ -108,6 +119,50 @@ final class CiderStorageAuditService {
         let safeTable = table.replacingOccurrences(of: "\"", with: "\"\"")
         let stmt = try database.prepare("SELECT COUNT(*) FROM \"\(safeTable)\";")
         return try stmt.step() ? Int(stmt.int64(at: 0)) : 0
+    }
+
+    private func schemaFindings() throws -> [CiderStorageAuditSchemaFinding] {
+        var findings: [CiderStorageAuditSchemaFinding] = []
+        for table in expectedSecondBrainTables {
+            if try !tableExists(table.name) {
+                findings.append(
+                    CiderStorageAuditSchemaFinding(
+                        id: "missing_expected_table:\(table.name)",
+                        severity: "error",
+                        affectedTable: table.name,
+                        summary: "Missing expected second-brain table \(table.name).",
+                        detail: table.purpose,
+                        nextSafeAction: migrationSafeAction
+                    )
+                )
+                continue
+            }
+
+            let columns = try columnNames(for: table.name)
+            for column in table.requiredColumns where !columns.contains(column) {
+                findings.append(
+                    CiderStorageAuditSchemaFinding(
+                        id: "missing_expected_column:\(table.name):\(column)",
+                        severity: "error",
+                        affectedTable: table.name,
+                        summary: "Missing expected column \(table.name).\(column).",
+                        detail: table.purpose,
+                        nextSafeAction: migrationSafeAction
+                    )
+                )
+            }
+        }
+        return findings
+    }
+
+    private func columnNames(for tableName: String) throws -> Set<String> {
+        let safeTable = tableName.replacingOccurrences(of: "'", with: "''")
+        let stmt = try database.prepare("PRAGMA table_info('\(safeTable)');")
+        var columns = Set<String>()
+        while try stmt.step() {
+            columns.insert(stmt.string(at: 1))
+        }
+        return columns
     }
 
     private func fileArtifactCountsByKind() -> [String: Int] {
@@ -187,5 +242,39 @@ final class CiderStorageAuditService {
 
     private func normalizedEntityKey(_ raw: String) -> String {
         raw == "event" ? "dateCard" : raw
+    }
+
+    private var migrationSafeAction: String {
+        "Run the current Cider app or CLI against this vault to apply database migrations, then rerun storage audit."
+    }
+
+    private var expectedSecondBrainTables: [(name: String, requiredColumns: [String], purpose: String)] {
+        [
+            (
+                "routing_decisions",
+                ["id", "item_id", "item_type", "target_kind", "review_state", "supersedes_decision_id"],
+                "The routing_decisions table is required for explainable capture routing and review queues."
+            ),
+            (
+                "second_brain_routing_decisions",
+                ["id", "owner_type", "owner_id", "target_type", "status"],
+                "The second_brain_routing_decisions table preserves legacy second-brain routing provenance."
+            ),
+            (
+                "item_sections",
+                ["id", "owner_type", "owner_id", "section_key", "body"],
+                "The item_sections table stores structured context sections for agent-readable item packets."
+            ),
+            (
+                "content_chunks",
+                ["id", "owner_type", "owner_id", "body", "chunk_index"],
+                "The content_chunks table stores searchable recall/context chunks."
+            ),
+            (
+                "agent_actions",
+                ["id", "owner_type", "owner_id", "tool_name", "status"],
+                "The agent_actions table stores auditable agent actions against Cider entities."
+            ),
+        ]
     }
 }

@@ -186,6 +186,7 @@ struct CiderCLI {
                 } else {
                     print("Storage audit")
                     print("  Doctor findings: \(report.totalDoctorFindings) (\(report.fixableDoctorFindings) fixable)")
+                    print("  Schema findings: \(report.schemaFindings.count)")
                     print("  Mismatches: \(report.mismatches.count)")
                     print("  Model counts:")
                     for key in report.modelCounts.keys.sorted() {
@@ -199,6 +200,13 @@ struct CiderCLI {
                         print("  Count mismatches:")
                         for mismatch in report.mismatches {
                             print("    \(mismatch.detail)")
+                        }
+                    }
+                    if !report.schemaFindings.isEmpty {
+                        print("  Schema findings:")
+                        for finding in report.schemaFindings {
+                            print("    [\(finding.severity)] \(finding.summary)")
+                            print("      \(finding.nextSafeAction)")
                         }
                     }
                     if !report.doctorFindingGroups.isEmpty {

@@ -276,7 +276,19 @@ func storageAuditReportToDict(_ report: CiderStorageAuditReport) -> [String: Any
         "duplicateFindingGroups": report.duplicateFindingGroups,
         "totalDoctorFindings": report.totalDoctorFindings,
         "fixableDoctorFindings": report.fixableDoctorFindings,
+        "schemaFindings": report.schemaFindings.map(storageAuditSchemaFindingToDict),
         "mismatches": report.mismatches.map(storageAuditMismatchToDict),
+    ]
+}
+
+func storageAuditSchemaFindingToDict(_ finding: CiderStorageAuditSchemaFinding) -> [String: Any] {
+    [
+        "id": finding.id,
+        "severity": finding.severity,
+        "affectedTable": finding.affectedTable,
+        "summary": finding.summary,
+        "detail": finding.detail,
+        "nextSafeAction": finding.nextSafeAction,
     ]
 }
 

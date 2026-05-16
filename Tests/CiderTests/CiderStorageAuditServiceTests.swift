@@ -123,6 +123,16 @@ struct CiderStorageAuditServiceTests {
             duplicateFindingGroups: ["note:exactContent": 1],
             totalDoctorFindings: 1,
             fixableDoctorFindings: 0,
+            schemaFindings: [
+                CiderStorageAuditSchemaFinding(
+                    id: "missing_expected_table:routing_decisions",
+                    severity: "error",
+                    affectedTable: "routing_decisions",
+                    summary: "Missing expected second-brain table routing_decisions.",
+                    detail: "The routing_decisions table is required for explainable capture routing and review queues.",
+                    nextSafeAction: "Run the current Cider app or CLI against this vault to apply database migrations, then rerun storage audit."
+                )
+            ],
             mismatches: [
                 CiderStorageAuditMismatch(
                     key: "note",
@@ -142,7 +152,87 @@ struct CiderStorageAuditServiceTests {
             $0["modelCount"] as? Int == 2 &&
             $0["sqliteCount"] as? Int == 1
         })
+        let schemaFindings = try #require(dict["schemaFindings"] as? [[String: Any]])
+        #expect(schemaFindings.contains {
+            $0["id"] as? String == "missing_expected_table:routing_decisions" &&
+            $0["severity"] as? String == "error" &&
+            $0["affectedTable"] as? String == "routing_decisions" &&
+            $0["nextSafeAction"] as? String != nil
+        })
         let doctorGroups = try #require(dict["doctorFindingGroups"] as? [String: Int])
         #expect(doctorGroups["warning:duplicateNoteContent"] == 1)
+    }
+
+    @Test("storage audit flags missing second brain routing table")
+    func storageAuditFlagsMissingSecondBrainRoutingTable() throws {
+        let (db, dbURL) = try makeTestDB()
+        defer { db.close(); cleanup(dbURL) }
+
+        try db.runSQL("DROP TABLE routing_decisions;")
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: FileManager.default.temporaryDirectory,
+            modelCountsProvider: { [:] },
+            doctorReportProvider: {
+                VaultDoctor.Report(
+                    startedAt: Date(timeIntervalSince1970: 10),
+                    finishedAt: Date(timeIntervalSince1970: 11),
+                    findings: []
+                )
+            },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.audit()
+
+        #expect(report.schemaFindings.contains {
+            $0.id == "missing_expected_table:routing_decisions" &&
+            $0.severity == "error" &&
+            $0.affectedTable == "routing_decisions" &&
+            $0.nextSafeAction.contains("migrations")
+        })
+    }
+
+    @Test("storage audit flags legacy routing table columns")
+    func storageAuditFlagsLegacyRoutingTableColumns() throws {
+        let (db, dbURL) = try makeTestDB()
+        defer { db.close(); cleanup(dbURL) }
+
+        try db.runSQL("DROP TABLE routing_decisions;")
+        try db.runSQL("""
+            CREATE TABLE routing_decisions (
+                id TEXT PRIMARY KEY,
+                owner_type TEXT NOT NULL,
+                owner_id TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT,
+                target_path TEXT,
+                status TEXT NOT NULL,
+                reviewed_at REAL
+            );
+            """)
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: FileManager.default.temporaryDirectory,
+            modelCountsProvider: { [:] },
+            doctorReportProvider: {
+                VaultDoctor.Report(
+                    startedAt: Date(timeIntervalSince1970: 10),
+                    finishedAt: Date(timeIntervalSince1970: 11),
+                    findings: []
+                )
+            },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.audit()
+
+        #expect(report.schemaFindings.contains {
+            $0.id == "missing_expected_column:routing_decisions:item_type" &&
+            $0.severity == "error" &&
+            $0.affectedTable == "routing_decisions"
+        })
     }
 }
