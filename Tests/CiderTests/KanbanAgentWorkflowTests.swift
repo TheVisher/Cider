@@ -134,6 +134,64 @@ struct KanbanAgentWorkflowTests {
         #expect(rollup.nextActionLine == "All child cards are done.")
     }
 
+    @Test("roadmap next up projection exposes ordered sequence and insertion guidance")
+    func roadmapNextUpProjectionExposesOrderedSequenceAndInsertionGuidance() throws {
+        let board = KanbanBoard(
+            id: "roadmap-board",
+            name: "Roadmap Board",
+            columns: [
+                KanbanColumn(
+                    id: "backlog",
+                    name: "Backlog",
+                    cards: [
+                        KanbanCard(id: "later-child", title: "Later child", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "queued",
+                    name: "Queued",
+                    cards: [
+                        KanbanCard(id: "parent", title: "Parent roadmap"),
+                        KanbanCard(id: "next-child", title: "Next child", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "in_progress",
+                    name: "In Progress",
+                    cards: [
+                        KanbanCard(id: "active-child", title: "Active child", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "done",
+                    name: "Done",
+                    isDoneColumn: true,
+                    cards: [
+                        KanbanCard(
+                            id: "done-child",
+                            title: "Done child",
+                            parentCardID: "parent",
+                            completed: Date(timeIntervalSince1970: 0)
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        let nextUp = try #require(KanbanRoadmapNextUpProjection(board: board, parentID: "parent"))
+
+        #expect(nextUp.parentID == "parent")
+        #expect(nextUp.sequence.map(\.id) == ["later-child", "next-child", "active-child", "done-child"])
+        #expect(nextUp.sequence.map(\.stepNumber) == [1, 2, 3, 4])
+        #expect(nextUp.currentGate?.id == "active-child")
+        #expect(nextUp.nextActionableChild?.id == "active-child")
+        #expect(nextUp.sequence[2].isCurrentGate)
+        #expect(nextUp.sequence[2].isNextActionable)
+        #expect(nextUp.suggestedInsertion.columnName == "Queued")
+        #expect(nextUp.suggestedInsertion.parentID == "parent")
+        #expect(nextUp.suggestedInsertion.command == "cider-cli board add-card \"Roadmap Board\" --column \"Queued\" --title \"<title>\" --parent parent")
+    }
+
     @Test("agent workflow summary groups implementation testing and fix loops")
     func agentWorkflowSummaryGroupsImplementationTestingAndFixLoops() {
         let board = KanbanBoard(

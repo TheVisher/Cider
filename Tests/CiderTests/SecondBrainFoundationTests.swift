@@ -961,6 +961,55 @@ struct SecondBrainFoundationTests {
         #expect(rollup["nextActionLine"] as? String == "Fix failed QA on Failed QA child.")
     }
 
+    @Test("process CLI exposes roadmap next up on parent card inspect")
+    func processCLIExposesRoadmapNextUpOnParentCardInspect() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-next-up-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Next Up Smoke"], vaultURL: vaultURL)
+        _ = try runCLI(["board", "add-column", "Next Up Smoke", "--name", "Queued"], vaultURL: vaultURL)
+
+        let parentOutput = try runCLI([
+            "board", "add-card", "Next Up Smoke",
+            "--column", "Backlog",
+            "--title", "Parent roadmap",
+        ], vaultURL: vaultURL)
+        let parentID = String(try #require(parentOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        _ = try runCLI([
+            "board", "add-card", "Next Up Smoke",
+            "--column", "Backlog",
+            "--title", "Backlog child",
+            "--parent", parentID,
+        ], vaultURL: vaultURL)
+        _ = try runCLI([
+            "board", "add-card", "Next Up Smoke",
+            "--column", "Queued",
+            "--title", "Queued child",
+            "--parent", parentID,
+        ], vaultURL: vaultURL)
+
+        let inspected = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Next Up Smoke",
+            "--card", parentID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let nextUp = try #require(inspected["roadmapNextUp"] as? [String: Any])
+        let sequence = try #require(nextUp["sequence"] as? [[String: Any]])
+        let currentGate = try #require(nextUp["currentGate"] as? [String: Any])
+        let suggestedInsertion = try #require(nextUp["suggestedInsertion"] as? [String: Any])
+
+        #expect(nextUp["nextActionLine"] as? String == "Start Queued child.")
+        #expect(sequence.map { $0["stepNumber"] as? Int } == [1, 2])
+        #expect(sequence.map { $0["title"] as? String } == ["Backlog child", "Queued child"])
+        #expect(sequence[1]["isCurrentGate"] as? Bool == true)
+        #expect(sequence[1]["isNextActionable"] as? Bool == true)
+        #expect(currentGate["title"] as? String == "Queued child")
+        #expect(suggestedInsertion["columnName"] as? String == "Queued")
+        #expect(suggestedInsertion["command"] as? String == "cider-cli board add-card \"Next Up Smoke\" --column \"Queued\" --title \"<title>\" --parent \(parentID)")
+    }
+
     @Test("process CLI lists recent Kanban cards with agent context")
     func processCLIListsRecentKanbanCardsWithAgentContext() throws {
         let vaultURL = FileManager.default.temporaryDirectory

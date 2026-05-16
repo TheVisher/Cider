@@ -344,6 +344,105 @@ struct KanbanParentChildRollup: Equatable, Sendable {
     }
 }
 
+struct KanbanRoadmapNextUpProjection: Equatable, Sendable {
+    struct SequenceItem: Equatable, Identifiable, Sendable {
+        var id: String
+        var title: String
+        var columnID: String
+        var columnName: String
+        var role: KanbanParentChildRole
+        var stepNumber: Int
+        var stepCount: Int
+        var isCurrentGate: Bool
+        var isNextActionable: Bool
+        var hasFailedQA: Bool
+        var failedQASteps: [String]
+    }
+
+    struct SuggestedInsertion: Equatable, Sendable {
+        var parentID: String
+        var columnID: String
+        var columnName: String
+        var afterChildID: String?
+        var command: String
+        var reason: String
+    }
+
+    var parentID: String
+    var sequence: [SequenceItem]
+    var currentGate: SequenceItem?
+    var nextActionableChild: SequenceItem?
+    var nextActionLine: String
+    var suggestedInsertion: SuggestedInsertion
+
+    init?(board: KanbanBoard, parentID: String) {
+        guard let rollup = KanbanParentChildRollup(board: board, parentID: parentID) else { return nil }
+
+        self.parentID = parentID
+        nextActionLine = rollup.nextActionLine
+        let currentGateID = rollup.currentGate?.id
+        let nextActionableID = rollup.nextActionableChild?.id
+        let stepCount = rollup.children.count
+        sequence = rollup.children.enumerated().map { index, child in
+            SequenceItem(
+                id: child.id,
+                title: child.title,
+                columnID: child.columnID,
+                columnName: child.columnName,
+                role: child.role,
+                stepNumber: index + 1,
+                stepCount: stepCount,
+                isCurrentGate: child.id == currentGateID,
+                isNextActionable: child.id == nextActionableID,
+                hasFailedQA: child.hasFailedQA,
+                failedQASteps: child.failedQASteps
+            )
+        }
+        currentGate = sequence.first { $0.isCurrentGate }
+        nextActionableChild = sequence.first { $0.isNextActionable }
+        suggestedInsertion = Self.suggestedInsertion(
+            board: board,
+            parentID: parentID,
+            rollup: rollup,
+            sequence: sequence
+        )
+    }
+
+    private static func suggestedInsertion(
+        board: KanbanBoard,
+        parentID: String,
+        rollup: KanbanParentChildRollup,
+        sequence: [SequenceItem]
+    ) -> SuggestedInsertion {
+        let targetChild = rollup.nextActionableChild ?? rollup.nextQueuedChild ?? rollup.backlogChild ?? rollup.children.first
+        let queuedColumn = board.columns.first { KanbanParentChildRole(column: $0) == .queued }
+        let fallbackColumn = board.columns.first(where: { !$0.isDoneColumn }) ?? board.columns.first
+        let columnID = queuedColumn?.id ?? targetChild?.columnID ?? fallbackColumn?.id ?? "backlog"
+        let columnName = queuedColumn?.name ?? targetChild?.columnName ?? fallbackColumn?.name ?? "Backlog"
+        let afterChildID = sequence.last?.id
+        let command = "cider-cli board add-card \(quoted(board.name)) --column \(quoted(columnName)) --title \"<title>\" --parent \(parentID)"
+        let reason = targetChild.map {
+            "Adds a child under the same parent near the current roadmap gate: \($0.title)."
+        } ?? "Adds the first child under this roadmap parent."
+
+        return SuggestedInsertion(
+            parentID: parentID,
+            columnID: columnID,
+            columnName: columnName,
+            afterChildID: afterChildID,
+            command: command,
+            reason: reason
+        )
+    }
+
+    private static func quoted(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+}
+
 enum KanbanParentChildRole: String, Codable, CaseIterable, Sendable {
     case backlog
     case queued

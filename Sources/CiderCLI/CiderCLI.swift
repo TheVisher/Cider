@@ -4236,6 +4236,10 @@ struct CiderCLI {
                 print("Sections: \(model.sections.count)")
                 if let problem = model.problem { print("Problem: \(problem)") }
                 if let goal = model.goal { print("Goal: \(goal)") }
+                if let nextUp = KanbanRoadmapNextUpProjection(board: board, parentID: card.id) {
+                    print("Next Up: \(nextUp.nextActionLine)")
+                    print("Add child: \(nextUp.suggestedInsertion.command)")
+                }
             }
 
         case "children":
@@ -6881,6 +6885,9 @@ struct CiderCLI {
         if let rollup = KanbanParentChildRollup(board: board, parentID: card.id) {
             dict["childRollup"] = parentChildRollupToDict(rollup)
         }
+        if let nextUp = KanbanRoadmapNextUpProjection(board: board, parentID: card.id) {
+            dict["roadmapNextUp"] = roadmapNextUpToDict(nextUp)
+        }
         return dict
     }
 
@@ -7054,6 +7061,56 @@ struct CiderCLI {
         ]
         if child.failedQASteps.isEmpty {
             dict.removeValue(forKey: "failedQASteps")
+        }
+        return dict
+    }
+
+    static func roadmapNextUpToDict(_ nextUp: KanbanRoadmapNextUpProjection) -> [String: Any] {
+        var dict: [String: Any] = [
+            "parentID": nextUp.parentID,
+            "nextActionLine": nextUp.nextActionLine,
+            "sequence": nextUp.sequence.map(roadmapNextUpSequenceItemToDict),
+            "suggestedInsertion": roadmapNextUpSuggestedInsertionToDict(nextUp.suggestedInsertion),
+        ]
+        if let currentGate = nextUp.currentGate {
+            dict["currentGate"] = roadmapNextUpSequenceItemToDict(currentGate)
+        }
+        if let nextActionableChild = nextUp.nextActionableChild {
+            dict["nextActionableChild"] = roadmapNextUpSequenceItemToDict(nextActionableChild)
+        }
+        return dict
+    }
+
+    static func roadmapNextUpSequenceItemToDict(_ item: KanbanRoadmapNextUpProjection.SequenceItem) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": item.id,
+            "title": item.title,
+            "columnID": item.columnID,
+            "columnName": item.columnName,
+            "role": item.role.rawValue,
+            "stepNumber": item.stepNumber,
+            "stepCount": item.stepCount,
+            "isCurrentGate": item.isCurrentGate,
+            "isNextActionable": item.isNextActionable,
+            "hasFailedQA": item.hasFailedQA,
+            "failedQASteps": item.failedQASteps,
+        ]
+        if item.failedQASteps.isEmpty {
+            dict.removeValue(forKey: "failedQASteps")
+        }
+        return dict
+    }
+
+    static func roadmapNextUpSuggestedInsertionToDict(_ insertion: KanbanRoadmapNextUpProjection.SuggestedInsertion) -> [String: Any] {
+        var dict: [String: Any] = [
+            "parentID": insertion.parentID,
+            "columnID": insertion.columnID,
+            "columnName": insertion.columnName,
+            "command": insertion.command,
+            "reason": insertion.reason,
+        ]
+        if let afterChildID = insertion.afterChildID {
+            dict["afterChildID"] = afterChildID
         }
         return dict
     }
