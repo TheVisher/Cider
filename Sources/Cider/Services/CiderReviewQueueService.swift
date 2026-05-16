@@ -169,6 +169,43 @@ struct CiderReviewQueueActionResult: Equatable {
     }
 }
 
+struct CiderReviewRoutingActionResult: Equatable {
+    var action: String
+    var itemID: UUID
+    var itemType: String
+    var title: String
+    var status: String
+    var message: String
+    var actor: String
+    var reviewState: String
+    var routingDecisionID: UUID
+    var supersedesDecisionID: UUID?
+    var target: CiderRoutingDecisionTarget
+    var remainingActiveRoutingReviewCount: Int
+    var safeActions: [String]
+
+    func toDictionary() -> [String: Any] {
+        var dictionary: [String: Any] = [
+            "action": action,
+            "itemID": itemID.uuidString,
+            "itemType": itemType,
+            "title": title,
+            "status": status,
+            "message": message,
+            "actor": actor,
+            "reviewState": reviewState,
+            "routingDecisionID": routingDecisionID.uuidString,
+            "target": target.toDictionary(),
+            "remainingActiveRoutingReviewCount": remainingActiveRoutingReviewCount,
+            "safeActions": safeActions,
+        ]
+        if let supersedesDecisionID {
+            dictionary["supersedesDecisionID"] = supersedesDecisionID.uuidString
+        }
+        return dictionary
+    }
+}
+
 struct CiderReviewQueueBatchEnrichmentFailure: Equatable {
     var itemID: UUID
     var itemType: String
@@ -425,8 +462,17 @@ final class CiderReviewQueueService {
     }
 
     @discardableResult
-    func approve(itemID: UUID, actor: String = "user") throws -> CiderRoutingExplanation {
-        try routingDecisionService.approve(itemID: itemID, actor: actor)
+    func approve(itemID: UUID, actor: String = "user") throws -> CiderReviewRoutingActionResult {
+        let before = try routingDecisionService.explain(itemID: itemID)
+        let after = try routingDecisionService.approve(itemID: itemID, actor: actor)
+        return try routingActionResult(
+            action: "review.routing.approve",
+            status: "accepted",
+            message: "Approved the proposed routing decision.",
+            actor: actor,
+            before: before,
+            after: after
+        )
     }
 
     @discardableResult
@@ -436,18 +482,27 @@ final class CiderReviewQueueService {
         reason: String,
         actor: String = "user",
         bookmarkService: VaultBookmarkService
-    ) throws -> CiderRoutingExplanation {
-        try routingDecisionService.correctBookmark(
+    ) throws -> CiderReviewRoutingActionResult {
+        let before = try routingDecisionService.explain(itemID: itemID)
+        let after = try routingDecisionService.correctBookmark(
             itemID: itemID,
             target: target,
             reason: reason,
             actor: actor,
             bookmarkService: bookmarkService
         )
+        return try routingActionResult(
+            action: "review.routing.correct",
+            status: "corrected",
+            message: "Applied a corrected routing destination.",
+            actor: actor,
+            before: before,
+            after: after
+        )
     }
 
     @discardableResult
-    func deferReview(itemID: UUID, reason: String, actor: String = "user") throws -> CiderRoutingExplanation {
+    func deferReview(itemID: UUID, reason: String, actor: String = "user") throws -> CiderReviewRoutingActionResult {
         let explanation = try routingDecisionService.explain(itemID: itemID)
         guard let latest = explanation.latestDecision else {
             throw CiderRoutingDecisionError.decisionNotFound(itemID)
@@ -463,7 +518,15 @@ final class CiderReviewQueueService {
             reviewState: "deferred",
             supersedesDecisionID: latest.id
         )
-        return try routingDecisionService.explain(itemID: itemID)
+        let after = try routingDecisionService.explain(itemID: itemID)
+        return try routingActionResult(
+            action: "review.routing.defer",
+            status: "deferred",
+            message: "Deferred the routing review item.",
+            actor: actor,
+            before: explanation,
+            after: after
+        )
     }
 
     @discardableResult
@@ -959,6 +1022,69 @@ final class CiderReviewQueueService {
         }
         .prefix(cappedLimit)
         .map { $0 }
+    }
+
+    private func routingActionResult(
+        action: String,
+        status: String,
+        message: String,
+        actor: String,
+        before: CiderRoutingExplanation,
+        after: CiderRoutingExplanation
+    ) throws -> CiderReviewRoutingActionResult {
+        guard let latest = after.latestDecision else {
+            throw CiderRoutingDecisionError.decisionNotFound(after.item.id)
+        }
+        let remaining = try list(
+            limit: Int.max,
+            kind: "low_confidence_routing",
+            reviewState: "needs_review"
+        ).items.count
+        let result = CiderReviewRoutingActionResult(
+            action: action,
+            itemID: after.item.id,
+            itemType: after.item.type,
+            title: after.item.title,
+            status: status,
+            message: message,
+            actor: actor,
+            reviewState: latest.reviewState,
+            routingDecisionID: latest.id,
+            supersedesDecisionID: latest.supersedesDecisionID,
+            target: latest.target,
+            remainingActiveRoutingReviewCount: remaining,
+            safeActions: ["review summary", "review list", "routing explain"]
+        )
+
+        MutationAuditService(database: resolvedDatabase).record(
+            action: action,
+            itemType: after.item.type,
+            itemID: after.item.id,
+            before: before.latestDecision.map(routingDecisionAuditState) ?? [:],
+            after: routingDecisionAuditState(latest),
+            metadata: [
+                "actor": actor,
+                "routingDecisionID": latest.id.uuidString,
+                "supersedesDecisionID": latest.supersedesDecisionID?.uuidString ?? "",
+                "targetRelativePath": latest.target.relativePath,
+                "remainingActiveRoutingReviewCount": String(remaining),
+            ].filter { !$0.value.isEmpty },
+            source: actor == "agent" ? .agent : nil
+        )
+
+        return result
+    }
+
+    private func routingDecisionAuditState(_ decision: CiderRoutingDecision) -> [String: String] {
+        [
+            "decisionID": decision.id.uuidString,
+            "reviewState": decision.reviewState,
+            "targetRelativePath": decision.target.relativePath,
+            "confidence": String(decision.confidence),
+            "reason": decision.reason,
+            "actor": decision.actor,
+            "source": decision.source,
+        ]
     }
 
     private func groupedCounts(_ values: [String]) -> [String: Int] {

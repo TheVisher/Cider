@@ -157,11 +157,20 @@ struct SecondBrainFoundationTests {
         let idString = try #require(bookmark["id"] as? String)
         let itemID = try #require(UUID(uuidString: idString))
 
-        _ = try runCLI([
+        let correctionOutput = try runCLI([
             "review", "correct", idString,
             "--folder", "Research",
             "--reason", "Corrected during review.",
+            "--actor", "agent",
+            "--json",
         ], vaultURL: vault)
+        let correction = try jsonObject(from: correctionOutput)
+        #expect(correction["action"] as? String == "review.routing.correct")
+        #expect(correction["itemID"] as? String == idString)
+        #expect(correction["status"] as? String == "corrected")
+        #expect(correction["reviewState"] as? String == "corrected")
+        #expect(correction["actor"] as? String == "agent")
+        #expect(correction["remainingActiveRoutingReviewCount"] as? Int == 0)
 
         let dbURL = vault.appendingPathComponent(".cider/cider.db")
         let db = CiderDatabase()
@@ -178,6 +187,13 @@ struct SecondBrainFoundationTests {
         #expect(assignment?.metadata["classification"] == "routing_correction")
         #expect(assignment?.metadata["routingSource"] == "routing.correct")
         #expect(assignment?.metadata["targetRelativePath"] == "Research")
+
+        let reviewCorrection = MutationAuditService(database: db)
+            .loadEntries()
+            .first { $0.itemID == itemID && $0.action == "review.routing.correct" }
+        #expect(reviewCorrection?.source == .agent)
+        #expect(reviewCorrection?.afterState["reviewState"] == "corrected")
+        #expect(reviewCorrection?.metadata["targetRelativePath"] == "Research")
     }
 
     private func makeTestDB() throws -> (CiderDatabase, URL) {

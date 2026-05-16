@@ -118,6 +118,94 @@ struct CiderReviewQueueServiceTests {
         #expect(try queue.list(includeDeferred: true).items.isEmpty)
     }
 
+    @Test("review routing actions return durable result payloads and audit provenance")
+    func reviewRoutingActionsReturnDurableResultPayloadsAndAuditProvenance() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let itemID = try insertBookmark(db, title: "Route Review", enrichmentStatus: "complete", lastEnrichedAt: Date())
+        let routing = CiderRoutingDecisionService(database: db)
+        let original = try routing.recordDecision(
+            itemID: itemID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0.2,
+            reason: "Low confidence route.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        let queue = CiderReviewQueueService(database: db, routingDecisionService: routing)
+
+        let result = try queue.approve(itemID: itemID, actor: "agent")
+
+        #expect(result.action == "review.routing.approve")
+        #expect(result.itemID == itemID)
+        #expect(result.itemType == "bookmark")
+        #expect(result.title == "Route Review")
+        #expect(result.status == "accepted")
+        #expect(result.actor == "agent")
+        #expect(result.reviewState == "accepted")
+        #expect(result.target.relativePath == "Inbox/Bookmarks")
+        #expect(result.supersedesDecisionID == original.id)
+        #expect(result.routingDecisionID != original.id)
+        #expect(result.remainingActiveRoutingReviewCount == 0)
+        #expect(result.safeActions.contains("review summary"))
+        #expect(try queue.summary().countsByKind["low_confidence_routing"] == nil)
+
+        let audit = MutationAuditService(database: db).loadEntries().first {
+            $0.itemID == itemID && $0.action == "review.routing.approve"
+        }
+        #expect(audit?.source == .agent)
+        #expect(audit?.beforeState["reviewState"] == "needs_review")
+        #expect(audit?.afterState["reviewState"] == "accepted")
+        #expect(audit?.metadata["supersedesDecisionID"] == original.id.uuidString)
+        #expect(audit?.metadata["routingDecisionID"] == result.routingDecisionID.uuidString)
+
+        let dictionary = result.toDictionary()
+        #expect(dictionary["action"] as? String == "review.routing.approve")
+        #expect(dictionary["status"] as? String == "accepted")
+        #expect(dictionary["remainingActiveRoutingReviewCount"] as? Int == 0)
+    }
+
+    @Test("review routing defer returns durable result payload and preserves deferred history")
+    func reviewRoutingDeferReturnsDurableResultPayloadAndPreservesDeferredHistory() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let itemID = try insertBookmark(db, title: "Later Route", enrichmentStatus: "complete", lastEnrichedAt: Date())
+        let routing = CiderRoutingDecisionService(database: db)
+        let original = try routing.recordDecision(
+            itemID: itemID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0.1,
+            reason: "Needs manual destination.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        let queue = CiderReviewQueueService(database: db, routingDecisionService: routing)
+
+        let result = try queue.deferReview(itemID: itemID, reason: "Waiting for better context.", actor: "agent")
+
+        #expect(result.action == "review.routing.defer")
+        #expect(result.status == "deferred")
+        #expect(result.reviewState == "deferred")
+        #expect(result.supersedesDecisionID == original.id)
+        #expect(result.remainingActiveRoutingReviewCount == 0)
+        #expect(try queue.list().items.isEmpty)
+        let deferred = try queue.list(includeDeferred: true).items
+        #expect(deferred.map(\.itemID) == [itemID])
+        #expect(deferred[0].reason == "Waiting for better context.")
+
+        let audit = MutationAuditService(database: db).loadEntries().first {
+            $0.itemID == itemID && $0.action == "review.routing.defer"
+        }
+        #expect(audit?.source == .agent)
+        #expect(audit?.beforeState["reviewState"] == "needs_review")
+        #expect(audit?.afterState["reviewState"] == "deferred")
+        #expect(audit?.metadata["routingDecisionID"] == result.routingDecisionID.uuidString)
+    }
+
     @Test("deferred routing keeps pending enrichment from re-surfacing the same item")
     func deferredRoutingSuppressesDerivedItemsForSameBookmark() throws {
         let (db, url) = try makeTempDB()

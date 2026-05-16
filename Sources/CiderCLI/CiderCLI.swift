@@ -798,11 +798,11 @@ struct CiderCLI {
             }
             do {
                 let itemID = try service.resolveItemID(ref: itemRef)
-                let explanation = try service.approve(
+                let result = try service.approve(
                     itemID: itemID,
                     actor: parseFlag("--actor", from: args) ?? "user"
                 )
-                printRoutingExplanation(explanation)
+                printReviewRoutingActionResult(result)
             } catch {
                 print("Error: \(error.localizedDescription)")
             }
@@ -840,14 +840,14 @@ struct CiderCLI {
 
             do {
                 let itemID = try service.resolveItemID(ref: itemRef)
-                let explanation = try service.correctBookmark(
+                let result = try service.correctBookmark(
                     itemID: itemID,
                     target: target,
                     reason: parseFlag("--reason", from: args) ?? "Corrected from review queue.",
                     actor: parseFlag("--actor", from: args) ?? "user",
                     bookmarkService: bookmarkService
                 )
-                printRoutingExplanation(explanation)
+                printReviewRoutingActionResult(result)
             } catch {
                 print("Error: \(error.localizedDescription)")
             }
@@ -859,12 +859,12 @@ struct CiderCLI {
             }
             do {
                 let itemID = try service.resolveItemID(ref: itemRef)
-                let explanation = try service.deferReview(
+                let result = try service.deferReview(
                     itemID: itemID,
                     reason: parseFlag("--reason", from: args) ?? "Deferred from review queue.",
                     actor: parseFlag("--actor", from: args) ?? "user"
                 )
-                printRoutingExplanation(explanation)
+                printReviewRoutingActionResult(result)
             } catch {
                 print("Error: \(error.localizedDescription)")
             }
@@ -6558,6 +6558,27 @@ struct CiderCLI {
         print("  Action: \(result.action)")
         print("  Type: \(result.itemType)")
         print("  Actor: \(result.actor)")
+        print("  Message: \(result.message)")
+        print("  Safe actions: \(result.safeActions.joined(separator: ", "))")
+    }
+
+    static func printReviewRoutingActionResult(_ result: CiderReviewRoutingActionResult) {
+        if jsonOutput {
+            outputJSON(result.toDictionary())
+            return
+        }
+
+        print("\(result.status.capitalized): \(result.title) (\(result.itemID.uuidString.prefix(8)))")
+        print("  Action: \(result.action)")
+        print("  Type: \(result.itemType)")
+        print("  Actor: \(result.actor)")
+        print("  Review state: \(result.reviewState)")
+        print("  Target: \(result.target.relativePath)")
+        print("  Decision: \(result.routingDecisionID.uuidString)")
+        if let supersedes = result.supersedesDecisionID {
+            print("  Supersedes: \(supersedes.uuidString)")
+        }
+        print("  Remaining routing reviews: \(result.remainingActiveRoutingReviewCount)")
         print("  Message: \(result.message)")
         print("  Safe actions: \(result.safeActions.joined(separator: ", "))")
     }
