@@ -382,6 +382,7 @@ final class VaultFolderService: ObservableObject {
             metadata: [
                 "origin": "applyFolderWrite",
                 "requestedName": request.name,
+                "requestedPath": requestedRelativePath,
                 "resolvedName": resolvedName,
                 "parentPath": parentPath ?? "",
                 "source": request.source.rawValue,
@@ -1089,11 +1090,44 @@ final class VaultFolderService: ObservableObject {
             return
         }
 
-        // Re-add to index with updated timestamp so sync picks it up
-        var restoredFolder = folder
-        restoredFolder.updatedAt = Date()
-        index[folder.id] = restoredFolder
-        persistFolderToDatabase(restoredFolder)
+        // Re-add through the canonical write gate so restore is an explicit
+        // filesystem source, not another direct folder-row writer.
+        let restoredAt = Date()
+        let restoreDecision = applyFolderWrite(.init(
+            name: folder.name,
+            parentID: folder.parentRelativePath.flatMap { folderID(for: $0) },
+            source: .restore,
+            requestedID: folder.id,
+            createdAt: folder.createdAt,
+            updatedAt: restoredAt,
+            icon: folder.icon,
+            duplicatePolicy: .aliasExisting,
+            allowsCreate: true
+        ))
+        let restoredFolder: VaultFolder
+        switch restoreDecision {
+        case .created(let created):
+            restoredFolder = created
+        case .aliased(_, let localID, _):
+            guard let aliased = index[localID] else {
+                logger.error("restoreFolder: write gate aliased to missing local folder \(localID.uuidString, privacy: .public)")
+                return
+            }
+            restoredFolder = aliased
+        case .quarantined(let reason, _), .rejected(let reason), .ignored(let reason):
+            logger.error("restoreFolder: write gate did not accept restored folder '\(folder.relativePath, privacy: .public)' reason=\(reason, privacy: .public)")
+            return
+        }
+        if folder.coverImagePath != nil || folder.coverImageOffsetY != nil {
+            guard var restoredWithMetadata = index[restoredFolder.id] else {
+                logger.error("restoreFolder: restored folder missing from index after write gate")
+                return
+            }
+            restoredWithMetadata.coverImagePath = folder.coverImagePath
+            restoredWithMetadata.coverImageOffsetY = folder.coverImageOffsetY
+            index[restoredWithMetadata.id] = restoredWithMetadata
+            persistFolderToDatabase(restoredWithMetadata)
+        }
 
         // Re-scan for any subdirectories that were inside the restored folder
         scanSubdirectories(of: folder.relativePath)
@@ -1799,50 +1833,75 @@ final class VaultFolderService: ObservableObject {
         let fm = FileManager.default
         let parentURL = vaultRoot.appendingPathComponent(parentPath)
 
-        guard let enumerator = fm.enumerator(
-            at: parentURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return }
+        var discoveredPaths: [String] = []
+        guard let subpaths = try? fm.subpathsOfDirectory(atPath: parentURL.path) else { return }
+        for subpath in subpaths {
+            let components = subpath.split(separator: "/")
+            guard !components.contains(where: { $0.hasPrefix(".") }) else { continue }
 
-        let indexedPaths = Set(index.values.map(\.relativePath))
+            let url = parentURL.appendingPathComponent(subpath)
+            var isDirectory: ObjCBool = false
+            let fileExistsAsDirectory = fm.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+            guard fileExistsAsDirectory else { continue }
 
-        for case let url as URL in enumerator {
-            guard let isDir = try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory,
-                  isDir else { continue }
+            let relativePath = "\(parentPath)/\(subpath)"
+            discoveredPaths.append(relativePath)
+        }
 
-            let relativePath = url.path.replacingOccurrences(
-                of: vaultRoot.path + "/",
-                with: ""
-            )
+        for relativePath in discoveredPaths.sorted(by: folderPathSort) {
+            guard folderID(for: relativePath) == nil else { continue }
+            let parentRelativePath = VaultFolder(relativePath: relativePath).parentRelativePath
+            let parentID = parentRelativePath.flatMap { folderID(for: $0) }
+            if parentRelativePath != nil && parentID == nil {
+                logger.warning("scanSubdirectories: skipping restored subdirectory \(relativePath, privacy: .public) because parent is not indexed")
+                continue
+            }
 
-            if !indexedPaths.contains(relativePath) {
-                let folder = VaultFolder(relativePath: relativePath)
-                index[folder.id] = folder
-                persistFolderToDatabase(folder)
+            let decision = applyFolderWrite(.init(
+                name: URL(fileURLWithPath: relativePath).lastPathComponent,
+                parentID: parentID,
+                source: .restore,
+                duplicatePolicy: .aliasExisting,
+                allowsCreate: true
+            ))
+            switch decision {
+            case .created(let restored):
                 logFolderMutationDiagnostics(
                     origin: "scanSubdirectories",
-                    action: "discover",
-                    folder: folder,
+                    action: "restore_via_write_gate",
+                    folder: restored,
                     metadata: [
                         "parentPath": parentPath,
                         "diskPath": relativePath,
                     ]
                 )
-                MutationAuditService.shared.record(
-                    action: "filesystem.folder.discover_restored_subdirectory",
-                    itemType: "vaultFolder",
-                    itemID: folder.id,
-                    after: MutationAuditSnapshots.folder(folder),
-                    metadata: [
-                        "origin": "scanSubdirectories",
-                        "parentPath": parentPath,
-                        "diskPath": relativePath,
-                    ],
-                    source: .filesystem
-                )
+            case .aliased(_, let localID, _):
+                if let restored = index[localID] {
+                    logFolderMutationDiagnostics(
+                        origin: "scanSubdirectories",
+                        action: "restore_alias_via_write_gate",
+                        folder: restored,
+                        metadata: [
+                            "parentPath": parentPath,
+                            "diskPath": relativePath,
+                        ]
+                    )
+                } else {
+                    logger.warning("scanSubdirectories: write gate aliased \(relativePath, privacy: .public) to missing local folder \(localID.uuidString, privacy: .public)")
+                }
+            case .quarantined(let reason, _), .rejected(let reason), .ignored(let reason):
+                logger.warning("scanSubdirectories: write gate skipped restored subdirectory \(relativePath, privacy: .public) reason=\(reason, privacy: .public)")
             }
         }
+    }
+
+    private func folderPathSort(_ lhs: String, _ rhs: String) -> Bool {
+        let lhsDepth = lhs.split(separator: "/").count
+        let rhsDepth = rhs.split(separator: "/").count
+        if lhsDepth != rhsDepth {
+            return lhsDepth < rhsDepth
+        }
+        return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
     }
 
     /// Directories that are Cider internals or reserved, not user-created folders.

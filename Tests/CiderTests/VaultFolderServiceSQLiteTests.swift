@@ -491,6 +491,68 @@ struct VaultFolderServiceSQLiteTests {
         #expect(countStmt.int(at: 0) == 1)
     }
 
+    @Test("Folder restore recreates rows through canonical write gate")
+    func folderRestoreRecreatesRowsThroughCanonicalWriteGate() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-folder-restore-gate-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(at: vault, withIntermediateDirectories: true)
+
+        let service = VaultFolderService(database: db)
+        let folder = VaultFolder(
+            id: UUID(),
+            relativePath: "Restored",
+            createdAt: Date(timeIntervalSince1970: 10),
+            updatedAt: Date(timeIntervalSince1970: 20),
+            icon: "folder"
+        )
+        let trashSourceURL = vault
+            .appendingPathComponent(".cider/folders/.trash", isDirectory: true)
+            .appendingPathComponent(folder.id.uuidString, isDirectory: true)
+        try fm.createDirectory(
+            at: trashSourceURL.appendingPathComponent("Nested", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let trashItem = TrashItem(
+            itemID: folder.id,
+            itemType: .vaultFolder,
+            title: folder.name,
+            originalFolderID: nil,
+            vaultFolderPayload: VaultFolderTrashPayload(folder: folder)
+        )
+
+        service.restoreFolder(trashItem)
+
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Restored").path))
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Restored/Nested").path))
+        #expect(service.folders.map(\.relativePath) == ["Restored", "Restored/Nested"])
+
+        let reloaded = VaultFolderService(database: db)
+        #expect(reloaded.folders.map(\.relativePath) == ["Restored", "Restored/Nested"])
+        #expect(reloaded.folders.first { $0.relativePath == "Restored" }?.id == folder.id)
+
+        let audit = MutationAuditService(database: db).loadEntries()
+        let rootCreate = try #require(audit.first { $0.itemID == folder.id && $0.action == "folder.write.create" })
+        #expect(rootCreate.source == .filesystem)
+        #expect(rootCreate.metadata["source"] == "restore")
+        #expect(rootCreate.metadata["requestedPath"] == "Restored")
+
+        let nested = try #require(reloaded.folders.first { $0.relativePath == "Restored/Nested" })
+        let nestedCreate = try #require(audit.first { $0.itemID == nested.id && $0.action == "folder.write.create" })
+        #expect(nestedCreate.source == .filesystem)
+        #expect(nestedCreate.metadata["source"] == "restore")
+        #expect(nestedCreate.metadata["requestedPath"] == "Restored/Nested")
+    }
+
     @Test("Multiple folders with parent-child paths load correctly")
     func parentChildPathsLoad() throws {
         let (db, url) = try makeTestDB()
