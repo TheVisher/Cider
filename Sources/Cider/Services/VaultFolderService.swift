@@ -739,6 +739,7 @@ final class VaultFolderService: ObservableObject {
     @discardableResult
     func setIcon(_ icon: String?, for folderID: UUID) -> Bool {
         guard var folder = index[folderID] else { return false }
+        let before = MutationAuditSnapshots.folder(folder)
         folder.icon = icon
         folder.updatedAt = Date()
         index[folderID] = folder
@@ -746,12 +747,20 @@ final class VaultFolderService: ObservableObject {
         saveIndex()
         rebuildFolders()
         NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "set_icon",
+            itemType: "vaultFolder",
+            itemID: folderID,
+            before: before,
+            after: MutationAuditSnapshots.folder(folder)
+        )
         return true
     }
 
     @discardableResult
     func setCoverImage(_ imageData: Data, for folderID: UUID) -> Bool {
         guard var folder = index[folderID] else { return false }
+        let before = MutationAuditSnapshots.folder(folder)
 
         let fm = FileManager.default
         try? fm.createDirectory(at: coversDir, withIntermediateDirectories: true)
@@ -780,24 +789,40 @@ final class VaultFolderService: ObservableObject {
         saveIndex()
         rebuildFolders()
         NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "set_cover_image",
+            itemType: "vaultFolder",
+            itemID: folderID,
+            before: before,
+            after: MutationAuditSnapshots.folder(folder)
+        )
         return true
     }
 
     @discardableResult
     func setCoverImageOffsetY(_ offsetY: Double, for folderID: UUID) -> Bool {
         guard var folder = index[folderID] else { return false }
+        let before = MutationAuditSnapshots.folder(folder)
         folder.coverImageOffsetY = offsetY
         folder.updatedAt = Date()
         index[folderID] = folder
         persistFolderToDatabase(folder)
         saveIndex()
         rebuildFolders()
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "set_cover_offset",
+            itemType: "vaultFolder",
+            itemID: folderID,
+            before: before,
+            after: MutationAuditSnapshots.folder(folder)
+        )
         return true
     }
 
     @discardableResult
     func removeCoverImage(for folderID: UUID) -> Bool {
         guard var folder = index[folderID] else { return false }
+        let before = MutationAuditSnapshots.folder(folder)
         if let existing = folder.coverImagePath {
             let existingURL = vaultRoot.appendingPathComponent(existing)
             try? FileManager.default.removeItem(at: existingURL)
@@ -810,6 +835,13 @@ final class VaultFolderService: ObservableObject {
         saveIndex()
         rebuildFolders()
         NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "remove_cover_image",
+            itemType: "vaultFolder",
+            itemID: folderID,
+            before: before,
+            after: MutationAuditSnapshots.folder(folder)
+        )
         return true
     }
 

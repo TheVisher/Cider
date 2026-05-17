@@ -189,6 +189,8 @@ enum MutationAuditSnapshots {
             ("relativePath", folder.relativePath),
             ("parentRelativePath", folder.parentRelativePath),
             ("icon", folder.icon),
+            ("coverImagePath", folder.coverImagePath),
+            ("coverImageOffsetY", folder.coverImageOffsetY.map { String($0) }),
         ])
     }
 

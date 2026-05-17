@@ -103,6 +103,43 @@ struct VaultFolderServiceSQLiteTests {
         #expect(loaded?.coverImageOffsetY == nil)
     }
 
+    @Test("Folder metadata mutations record audit entries")
+    func folderMetadataMutationsRecordAuditEntries() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-folder-audit-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(at: vault, withIntermediateDirectories: true)
+
+        let folder = VaultFolder(relativePath: "Audited")
+        let service = VaultFolderService(database: db)
+        service.persistToDatabase(db, folder: folder)
+        let loadedService = VaultFolderService(database: db)
+
+        #expect(loadedService.setIcon("sparkles", for: folder.id) == true)
+        #expect(loadedService.setCoverImageOffsetY(0.25, for: folder.id) == true)
+
+        let entries = MutationAuditService(database: db).loadEntries()
+        let icon = entries.first { $0.itemID == folder.id && $0.action == "set_icon" }
+        let coverOffset = entries.first { $0.itemID == folder.id && $0.action == "set_cover_offset" }
+
+        #expect(icon?.itemType == "vaultFolder")
+        #expect(icon?.beforeState["icon"] == nil)
+        #expect(icon?.afterState["icon"] == "sparkles")
+
+        #expect(coverOffset?.itemType == "vaultFolder")
+        #expect(coverOffset?.beforeState["coverImageOffsetY"] == nil)
+        #expect(coverOffset?.afterState["coverImageOffsetY"] == "0.25")
+    }
+
     @Test("Delete folder removes from SQLite")
     func deleteFolderRemoves() throws {
         let (db, url) = try makeTestDB()
