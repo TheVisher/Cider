@@ -259,6 +259,30 @@ final class CiderRoutingDecisionService {
     }
 
     @discardableResult
+    func recordManualMove(
+        itemID: UUID,
+        target: CiderRoutingDecisionTarget,
+        reason: String,
+        actor: String = "user",
+        source: String
+    ) throws -> CiderRoutingExplanation {
+        let item = try itemSummary(for: itemID)
+        let previous = try? latestDecision(for: itemID)
+        _ = try recordDecision(
+            itemID: itemID,
+            itemType: item.type,
+            target: target,
+            confidence: 1,
+            reason: reason,
+            actor: actor,
+            source: source,
+            reviewState: "manual_move",
+            supersedesDecisionID: previous?.id
+        )
+        return try explain(itemID: itemID)
+    }
+
+    @discardableResult
     func correctBookmark(
         itemID: UUID,
         target: CiderRoutingDecisionTarget,

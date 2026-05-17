@@ -1895,6 +1895,13 @@ struct CiderCLI {
                     continue
                 }
                 _ = storage.assignNote(note.id, toFolder: targetFolder?.id)
+                _ = try? CiderRoutingDecisionService().recordManualMove(
+                    itemID: note.id,
+                    target: routingTarget(for: targetFolder, inboxPath: "Inbox/Notes"),
+                    reason: "Moved with note move.",
+                    actor: "user",
+                    source: "note.move"
+                )
                 print("Moved '\(note.title)' → \(targetName)")
                 moved += 1
             }
@@ -3631,6 +3638,13 @@ struct CiderCLI {
                     continue
                 }
                 service.assignFile(file.id, toFolder: targetFolder?.id)
+                _ = try? CiderRoutingDecisionService().recordManualMove(
+                    itemID: file.id,
+                    target: routingTarget(for: targetFolder, inboxPath: "Inbox/Files"),
+                    reason: "Moved with file move.",
+                    actor: "user",
+                    source: "file.move"
+                )
                 print("Moved '\(file.displayTitle)' → \(targetName)")
                 moved += 1
             }
@@ -8367,6 +8381,23 @@ struct CiderCLI {
             return .failed
         }
         return .unspecified
+    }
+
+    static func routingTarget(for folder: VaultFolder?, inboxPath: String) -> CiderRoutingDecisionTarget {
+        if let folder {
+            return CiderRoutingDecisionTarget(
+                kind: "folder",
+                name: folder.name,
+                relativePath: folder.relativePath,
+                folderID: folder.id
+            )
+        }
+        return CiderRoutingDecisionTarget(
+            kind: "inbox",
+            name: inboxPath,
+            relativePath: inboxPath,
+            folderID: nil
+        )
     }
 
     /// Resolves a vault-relative path (e.g. "People/Baine") to a registered VaultFolder.
