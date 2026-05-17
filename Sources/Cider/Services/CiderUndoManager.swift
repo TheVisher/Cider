@@ -85,46 +85,23 @@ final class CiderUndoManager {
                 TrashStorage.shared.restore(item)
             }
 
-        case .movedToFolder(let itemType, let itemID, _, let fromFolderID, _, _):
-            switch itemType {
-            case .bookmark:
-                VaultBookmarkService.shared.assignBookmark(itemID, toFolder: fromFolderID)
-            case .note:
-                NotesStorage.shared.assignNote(itemID, toFolder: fromFolderID)
-            case .dateCard:
-                DateCardStorage.shared.assignDateCard(itemID, toFolder: fromFolderID)
-            case .contact:
-                ContactStorage.shared.assignContact(itemID, toFolder: fromFolderID)
-            case .todo:
-                TodoCardStorage.shared.assignTodoCard(itemID, toFolder: fromFolderID)
-            case .session:
-                break // Sessions feature removed
-            case .vaultFile:
-                VaultFileService.shared.assignFile(itemID, toFolder: fromFolderID)
-            case .folder, .vaultFolder, .kanbanBoard:
-                break
+        case .movedToFolder(let itemType, let itemID, let title, let fromFolderID, _, _):
+            if !restoreMovedItem(itemType: itemType, itemID: itemID, toFolder: fromFolderID) {
+                postUndoResultToast(message: "Undo failed for '\(title)'")
             }
 
         case .bulkMoved(let items, _, _):
+            var restoredCount = 0
+            var failedCount = 0
             for item in items {
-                switch item.itemType {
-                case .bookmark:
-                    VaultBookmarkService.shared.assignBookmark(item.itemID, toFolder: item.fromFolderID)
-                case .note:
-                    NotesStorage.shared.assignNote(item.itemID, toFolder: item.fromFolderID)
-                case .dateCard:
-                    DateCardStorage.shared.assignDateCard(item.itemID, toFolder: item.fromFolderID)
-                case .contact:
-                    ContactStorage.shared.assignContact(item.itemID, toFolder: item.fromFolderID)
-                case .todo:
-                    TodoCardStorage.shared.assignTodoCard(item.itemID, toFolder: item.fromFolderID)
-                case .session:
-                    break // Sessions feature removed
-                case .vaultFile:
-                    VaultFileService.shared.assignFile(item.itemID, toFolder: item.fromFolderID)
-                case .folder, .vaultFolder, .kanbanBoard:
-                    break
+                if restoreMovedItem(itemType: item.itemType, itemID: item.itemID, toFolder: item.fromFolderID) {
+                    restoredCount += 1
+                } else {
+                    failedCount += 1
                 }
+            }
+            if failedCount > 0 {
+                postUndoResultToast(message: "Undo restored \(restoredCount) of \(items.count) moved items; \(failedCount) failed")
             }
 
         case .renamed(let itemType, let itemID, let oldTitle, _):
@@ -176,5 +153,32 @@ final class CiderUndoManager {
 
     func discard() {
         pendingAction = nil
+    }
+
+    private func restoreMovedItem(itemType: TrashItemType, itemID: UUID, toFolder folderID: UUID?) -> Bool {
+        switch itemType {
+        case .bookmark:
+            VaultBookmarkService.shared.assignBookmark(itemID, toFolder: folderID)
+        case .note:
+            NotesStorage.shared.assignNote(itemID, toFolder: folderID)
+        case .dateCard:
+            DateCardStorage.shared.assignDateCard(itemID, toFolder: folderID)
+        case .contact:
+            ContactStorage.shared.assignContact(itemID, toFolder: folderID)
+        case .todo:
+            TodoCardStorage.shared.assignTodoCard(itemID, toFolder: folderID)
+        case .vaultFile:
+            VaultFileService.shared.assignFile(itemID, toFolder: folderID)
+        case .session, .folder, .vaultFolder, .kanbanBoard:
+            true
+        }
+    }
+
+    private func postUndoResultToast(message: String) {
+        NotificationCenter.default.post(
+            name: .showUndoToast,
+            object: nil,
+            userInfo: ["message": message, "showViewTrash": false]
+        )
     }
 }
