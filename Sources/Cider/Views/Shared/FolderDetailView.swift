@@ -1041,7 +1041,7 @@ struct FolderDetailView: View {
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
                     let oldFolderID = file.folderID
-                    VaultFileService.shared.assignFile(file.id, toFolder: folderID)
+                    guard VaultFileService.shared.assignFile(file.id, toFolder: folderID) else { return }
                     let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
                     CiderUndoManager.shared.record(.movedToFolder(
                         itemType: .vaultFile, itemID: file.id, title: file.displayTitle,

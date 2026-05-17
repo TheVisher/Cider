@@ -687,7 +687,7 @@ extension CiderPanelView {
         guard let file = selectedVaultFile else { return }
         let oldFolderID = file.folderID
         guard oldFolderID != folderID else { return }
-        VaultFileService.shared.assignFile(file.id, toFolder: folderID)
+        guard VaultFileService.shared.assignFile(file.id, toFolder: folderID) else { return }
         let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
         CiderUndoManager.shared.record(.movedToFolder(
             itemType: .vaultFile,

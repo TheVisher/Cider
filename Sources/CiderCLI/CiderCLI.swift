@@ -4027,9 +4027,12 @@ struct CiderCLI {
                     if file.folderID != nil {
                         skippedRefiled.append(item); continue
                     }
-                    VaultFileService.shared.assignFile(file.id, toFolder: targetFolder.id)
-                    print("  ↺ file: \(item.title) → \(item.previousFolderPath)")
-                    restored += 1
+                    if VaultFileService.shared.assignFile(file.id, toFolder: targetFolder.id) {
+                        print("  ↺ file: \(item.title) → \(item.previousFolderPath)")
+                        restored += 1
+                    } else {
+                        misses.append(item)
+                    }
                 case "todo":
                     guard let todo = TodoCardStorage.shared.todoCards.first(where: { $0.id == item.itemID }) else {
                         misses.append(item); continue
