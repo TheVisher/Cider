@@ -37,6 +37,11 @@ struct ContactSQLiteTests {
         ContactStorage(database: db)
     }
 
+    private func makeTempVaultURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-contact-vault-\(UUID().uuidString)", isDirectory: true)
+    }
+
     // MARK: - Basic Round-Trip
 
     @Test("Contact round-trips through SQLite: displayName stored in items.title")
@@ -150,6 +155,57 @@ struct ContactSQLiteTests {
         #expect(loaded.displayName == "New Name")
         #expect(loaded.email == "new@example.com")
         #expect(loaded.phone == "555-9999")
+    }
+
+    @Test("Contact update and avatar deletion mutations record audit entries")
+    func contactMetadataMutationsRecordAuditEntries() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(
+            at: StoragePaths.cachedInboxSubdirectoryURL(for: .contacts),
+            withIntermediateDirectories: true
+        )
+
+        let contact = ContactCard(
+            displayName: "Audit Contact",
+            email: "old@example.com",
+            phone: "555-1000",
+            hasAvatar: true
+        )
+        let seed = makeService(db)
+        seed.persistContactToDatabase(db, contact: contact)
+
+        let service = makeService(db)
+        service.loadContactsFromDatabase(db)
+
+        var updated = try #require(service.contacts.first { $0.id == contact.id })
+        updated.email = "new@example.com"
+        updated.phone = "555-2000"
+        #expect(service.updateContact(updated) == true)
+        service.deleteAvatar(for: contact.id)
+
+        let entries = MutationAuditService(database: db).loadEntries()
+        let update = entries.first { $0.itemID == contact.id && $0.action == "update" }
+        let avatar = entries.first { $0.itemID == contact.id && $0.action == "delete_avatar" }
+
+        #expect(update?.itemType == "contact")
+        #expect(update?.beforeState["email"] == "old@example.com")
+        #expect(update?.afterState["email"] == "new@example.com")
+        #expect(update?.afterState["phone"] == "555-2000")
+
+        #expect(avatar?.itemType == "contact")
+        #expect(avatar?.beforeState["hasAvatar"] == "true")
+        #expect(avatar?.afterState["hasAvatar"] == "false")
     }
 
     // MARK: - Delete

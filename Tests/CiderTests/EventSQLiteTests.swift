@@ -37,6 +37,11 @@ struct EventSQLiteTests {
         DateCardStorage(database: db)
     }
 
+    private func makeTempVaultURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-event-vault-\(UUID().uuidString)", isDirectory: true)
+    }
+
     // MARK: - Basic Round-Trip
 
     @Test("Date card round-trips through SQLite: persist and load")
@@ -264,6 +269,52 @@ struct EventSQLiteTests {
         #expect(loaded.details == "New details")
         #expect(loaded.location == "Zoom")
         #expect(loaded.isCompleted == true)
+    }
+
+    @Test("Date card update and completion mutations record audit entries")
+    func dateCardMetadataMutationsRecordAuditEntries() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(
+            at: StoragePaths.cachedInboxSubdirectoryURL(for: .dateCards),
+            withIntermediateDirectories: true
+        )
+
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let card = DateCard(title: "Audit Event", startAt: start, allDay: false)
+        let seed = makeService(db)
+        seed.persistEventToDatabase(db, dateCard: card)
+
+        let service = makeService(db)
+        service.loadEventsFromDatabase(db)
+
+        var updated = try #require(service.dateCards.first { $0.id == card.id })
+        updated.startAt = start.addingTimeInterval(3_600)
+        updated.allDay = true
+        #expect(service.updateDateCard(updated) == true)
+        #expect(service.markCompleted(card.id, completed: true) == true)
+
+        let entries = MutationAuditService(database: db).loadEntries()
+        let update = entries.first { $0.itemID == card.id && $0.action == "update" }
+        let completed = entries.first { $0.itemID == card.id && $0.action == "set_completed" }
+
+        #expect(update?.itemType == "dateCard")
+        #expect(update?.beforeState["allDay"] == "false")
+        #expect(update?.afterState["allDay"] == "true")
+
+        #expect(completed?.itemType == "dateCard")
+        #expect(completed?.beforeState["isCompleted"] == "false")
+        #expect(completed?.afterState["isCompleted"] == "true")
     }
 
     // MARK: - Delete

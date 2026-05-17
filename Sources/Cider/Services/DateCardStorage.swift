@@ -217,7 +217,7 @@ final class DateCardStorage: ObservableObject {
         dateCards.append(dateCard)
         sortCards()
         persistEventToDatabase(dateCard)
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "create",
             itemType: "dateCard",
             itemID: dateCard.id,
@@ -266,19 +266,17 @@ final class DateCardStorage: ObservableObject {
         saveIndex()
         sortCards()
         persistEventToDatabase(copy)
-        if beforeCard.title != copy.title {
-            MutationAuditService.shared.record(
-                action: "rename",
-                itemType: "dateCard",
-                itemID: copy.id,
-                before: before,
-                after: MutationAuditSnapshots.dateCard(copy)
-            )
-        }
+        MutationAuditService(database: resolvedDatabase).record(
+            action: beforeCard.title != copy.title ? "rename" : "update",
+            itemType: "dateCard",
+            itemID: copy.id,
+            before: before,
+            after: MutationAuditSnapshots.dateCard(copy)
+        )
         let beforeHasReminder = beforeCard.rules.contains { $0.type == .remindBeforeMinutes && $0.isEnabled }
         let afterHasReminder = copy.rules.contains { $0.type == .remindBeforeMinutes && $0.isEnabled }
         if !beforeHasReminder && afterHasReminder {
-            MutationAuditService.shared.record(
+            MutationAuditService(database: resolvedDatabase).record(
                 action: "create_reminder",
                 itemType: "dateCard",
                 itemID: copy.id,
@@ -286,7 +284,7 @@ final class DateCardStorage: ObservableObject {
                 after: MutationAuditSnapshots.dateCard(copy)
             )
         } else if beforeHasReminder && !afterHasReminder {
-            MutationAuditService.shared.record(
+            MutationAuditService(database: resolvedDatabase).record(
                 action: "cancel_reminder",
                 itemType: "dateCard",
                 itemID: copy.id,
@@ -313,7 +311,7 @@ final class DateCardStorage: ObservableObject {
         index.removeValue(forKey: id)
         saveIndex()
         deleteEventFromDatabase(id)
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "delete",
             itemType: "dateCard",
             itemID: id,
@@ -326,11 +324,20 @@ final class DateCardStorage: ObservableObject {
     @discardableResult
     func markCompleted(_ id: UUID, completed: Bool) -> Bool {
         guard let idx = dateCards.firstIndex(where: { $0.id == id }) else { return false }
+        let before = MutationAuditSnapshots.dateCard(dateCards[idx])
         dateCards[idx].isCompleted = completed
         dateCards[idx].completedAt = completed ? Date() : nil
         if completed { dateCards[idx].snoozedUntil = nil }
         dateCards[idx].updatedAt = Date()
         writeAndUpdateIndex(for: dateCards[idx])
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "set_completed",
+            itemType: "dateCard",
+            itemID: id,
+            before: before,
+            after: MutationAuditSnapshots.dateCard(dateCards[idx]),
+            metadata: ["completed": completed ? "true" : "false"]
+        )
         return true
     }
 
@@ -369,7 +376,7 @@ final class DateCardStorage: ObservableObject {
         index[id] = updatedEntry
         saveIndex()
         persistEventToDatabase(dateCards[idx])
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "reassign_folder",
             itemType: "dateCard",
             itemID: id,
@@ -473,7 +480,7 @@ final class DateCardStorage: ObservableObject {
         dateCards.append(dateCard)
         sortCards()
         persistEventToDatabase(dateCard)
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "restore",
             itemType: "dateCard",
             itemID: dateCard.id,

@@ -213,7 +213,7 @@ final class ContactStorage: ObservableObject {
         contacts.append(contact)
         sortContacts()
         persistContactToDatabase(contact)
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "create",
             itemType: "contact",
             itemID: contact.id,
@@ -264,15 +264,13 @@ final class ContactStorage: ObservableObject {
         saveIndex()
         sortContacts()
         persistContactToDatabase(copy)
-        if beforeContact.displayName != copy.displayName {
-            MutationAuditService.shared.record(
-                action: "rename",
-                itemType: "contact",
-                itemID: copy.id,
-                before: before,
-                after: MutationAuditSnapshots.contact(copy)
-            )
-        }
+        MutationAuditService(database: resolvedDatabase).record(
+            action: beforeContact.displayName != copy.displayName ? "rename" : "update",
+            itemType: "contact",
+            itemID: copy.id,
+            before: before,
+            after: MutationAuditSnapshots.contact(copy)
+        )
         return true
     }
 
@@ -293,7 +291,7 @@ final class ContactStorage: ObservableObject {
         index.removeValue(forKey: id)
         saveIndex()
         deleteContactFromDatabase(id)
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "delete",
             itemType: "contact",
             itemID: id,
@@ -341,7 +339,7 @@ final class ContactStorage: ObservableObject {
         index[id] = updatedEntry
         saveIndex()
         persistContactToDatabase(contacts[idx])
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "reassign_folder",
             itemType: "contact",
             itemID: id,
@@ -438,7 +436,7 @@ final class ContactStorage: ObservableObject {
         contacts.append(contact)
         sortContacts()
         persistContactToDatabase(contact)
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "restore",
             itemType: "contact",
             itemID: contact.id,
@@ -498,9 +496,17 @@ final class ContactStorage: ObservableObject {
         } catch { return false }
 
         if let idx = contacts.firstIndex(where: { $0.id == id }) {
+            let before = MutationAuditSnapshots.contact(contacts[idx])
             contacts[idx].hasAvatar = true
             contacts[idx].updatedAt = Date()
             writeAndUpdateIndex(for: contacts[idx])
+            MutationAuditService(database: resolvedDatabase).record(
+                action: "save_avatar",
+                itemType: "contact",
+                itemID: id,
+                before: before,
+                after: MutationAuditSnapshots.contact(contacts[idx])
+            )
         }
         return true
     }
@@ -508,9 +514,17 @@ final class ContactStorage: ObservableObject {
     func deleteAvatar(for id: UUID) {
         try? FileManager.default.removeItem(at: avatarURL(for: id))
         if let idx = contacts.firstIndex(where: { $0.id == id }) {
+            let before = MutationAuditSnapshots.contact(contacts[idx])
             contacts[idx].hasAvatar = false
             contacts[idx].updatedAt = Date()
             writeAndUpdateIndex(for: contacts[idx])
+            MutationAuditService(database: resolvedDatabase).record(
+                action: "delete_avatar",
+                itemType: "contact",
+                itemID: id,
+                before: before,
+                after: MutationAuditSnapshots.contact(contacts[idx])
+            )
         }
     }
 
