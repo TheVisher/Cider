@@ -361,64 +361,6 @@ final class BookmarksStorage: ObservableObject {
         persist()
     }
 
-    // MARK: - Folder sync helpers (called by SyncService)
-
-    /// Add a folder received from the web, using the provided UUID so it stays in sync.
-    func addFolderFromSync(
-        id: UUID,
-        name: String,
-        icon: String?,
-        parentID: UUID?,
-        createdAt: Date,
-        updatedAt: Date
-    ) {
-        guard !folders.contains(where: { $0.id == id }) else { return }
-
-        let folder = Folder(
-            id: id,
-            name: name,
-            parentID: parentID,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            icon: icon
-        )
-        folders.append(folder)
-        folders.sort(by: folderSortOrder)
-        persist()
-    }
-
-    /// Update an existing local folder with data from the web.
-    func updateFolderFromSync(
-        folderID: UUID,
-        name: String,
-        icon: String?,
-        parentID: UUID?,
-        remoteUpdatedAt: Date
-    ) {
-        guard let index = folders.firstIndex(where: { $0.id == folderID }) else { return }
-        folders[index].name = name
-        folders[index].icon = icon
-        folders[index].parentID = parentID
-        folders[index].updatedAt = remoteUpdatedAt
-        folders.sort(by: folderSortOrder)
-        persist()
-    }
-
-    /// Delete a folder received from the web (soft delete — unassigns bookmarks, removes subtree).
-    func deleteFolderFromSync(_ folderID: UUID) {
-        guard folders.contains(where: { $0.id == folderID }) else { return }
-        let subtree = folderSubtreeIDs(rootID: folderID)
-        folders.removeAll { subtree.contains($0.id) }
-        for index in bookmarks.indices {
-            guard let assignedFolderID = bookmarks[index].folderID,
-                  subtree.contains(assignedFolderID) else {
-                continue
-            }
-            bookmarks[index].folderID = nil
-        }
-        persist()
-    }
-
     func addFromPasteboard() -> Bookmark? {
         let pasteboard = NSPasteboard.general
 
@@ -498,81 +440,6 @@ final class BookmarksStorage: ObservableObject {
 
     func previewNormalizedURLString(from rawValue: String) -> String? {
         normalizedURL(from: rawValue)?.absoluteString
-    }
-
-    @discardableResult
-    func createFolder(name rawName: String, parentID: UUID?) -> Folder? {
-        let trimmedName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return nil }
-
-        if let parentID, folders.first(where: { $0.id == parentID }) == nil {
-            return nil
-        }
-
-        let resolvedName = uniqueFolderName(baseName: trimmedName, parentID: parentID)
-        let folder = Folder(name: resolvedName, parentID: parentID)
-        folders.append(folder)
-        folders.sort(by: folderSortOrder)
-        persist()
-        return folder
-    }
-
-    @discardableResult
-    func renameFolder(_ folderID: UUID, to rawName: String) -> Bool {
-        guard let index = folders.firstIndex(where: { $0.id == folderID }) else {
-            return false
-        }
-
-        let trimmedName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return false }
-
-        let parentID = folders[index].parentID
-        let resolvedName = uniqueFolderName(
-            baseName: trimmedName,
-            parentID: parentID,
-            excluding: folderID
-        )
-        guard folders[index].name != resolvedName else { return true }
-
-        folders[index].name = resolvedName
-        folders[index].updatedAt = Date()
-        folders.sort(by: folderSortOrder)
-        persist()
-        return true
-    }
-
-    @discardableResult
-    func setFolderIcon(_ folderID: UUID, icon: String?) -> Bool {
-        guard let index = folders.firstIndex(where: { $0.id == folderID }) else { return false }
-        folders[index].icon = icon
-        folders[index].updatedAt = Date()
-        persist()
-        return true
-    }
-
-    @discardableResult
-    func deleteFolder(_ folderID: UUID) -> Bool {
-        guard folders.contains(where: { $0.id == folderID }) else { return false }
-
-        let subtree = folderSubtreeIDs(rootID: folderID)
-        guard !subtree.isEmpty else { return false }
-
-        // Track deletions for sync (all folders in subtree)
-        for id in subtree {
-            SyncService.shared.trackFolderDeletion(of: id)
-        }
-
-        folders.removeAll { subtree.contains($0.id) }
-        for index in bookmarks.indices {
-            guard let assignedFolderID = bookmarks[index].folderID,
-                  subtree.contains(assignedFolderID) else {
-                continue
-            }
-            bookmarks[index].folderID = nil
-            bookmarks[index].updatedAt = Date()
-        }
-        persist()
-        return true
     }
 
     @discardableResult
@@ -2314,46 +2181,6 @@ final class BookmarksStorage: ObservableObject {
         }
 
         return url.absoluteString
-    }
-
-    private func uniqueFolderName(baseName: String, parentID: UUID?, excluding excludedFolderID: UUID? = nil) -> String {
-        let trimmedBase = baseName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedBase.isEmpty else { return baseName }
-
-        let siblingNames = Set(
-            folders
-                .filter { folder in
-                    folder.parentID == parentID && folder.id != excludedFolderID
-                }
-                .map { $0.name.lowercased() }
-        )
-
-        if !siblingNames.contains(trimmedBase.lowercased()) {
-            return trimmedBase
-        }
-
-        var suffix = 2
-        while siblingNames.contains("\(trimmedBase) \(suffix)".lowercased()) {
-            suffix += 1
-        }
-        return "\(trimmedBase) \(suffix)"
-    }
-
-    private func folderSubtreeIDs(rootID: UUID) -> Set<UUID> {
-        let childrenByParent = Dictionary(grouping: folders, by: \.parentID)
-        var queue: [UUID] = [rootID]
-        var visited: Set<UUID> = [rootID]
-
-        while !queue.isEmpty {
-            let currentID = queue.removeFirst()
-            let children = childrenByParent[currentID] ?? []
-            for child in children where !visited.contains(child.id) {
-                visited.insert(child.id)
-                queue.append(child.id)
-            }
-        }
-
-        return visited
     }
 
     private func folderSortOrder(_ lhs: Folder, _ rhs: Folder) -> Bool {

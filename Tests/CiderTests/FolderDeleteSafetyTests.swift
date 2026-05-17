@@ -29,4 +29,22 @@ struct FolderDeleteSafetyTests {
         #expect(!body.contains("assignContact("))
         #expect(!body.contains("assignFile("))
     }
+
+    @Test("BookmarksStorage no longer exposes legacy folder writers")
+    func bookmarksStorageNoLongerExposesLegacyFolderWriters() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/Cider/Services/BookmarksStorage.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        #expect(!source.contains("func addFolderFromSync("))
+        #expect(!source.contains("func updateFolderFromSync("))
+        #expect(!source.contains("func deleteFolderFromSync("))
+        #expect(!source.contains("func createFolder(name rawName:"))
+        #expect(!source.contains("func renameFolder("))
+        #expect(!source.contains("func setFolderIcon("))
+        #expect(!source.contains("func deleteFolder(_ folderID:"))
+    }
 }
