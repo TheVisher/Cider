@@ -400,12 +400,12 @@ final class VaultFolderService: ObservableObject {
                         failures.append(.init(itemType: "bookmark", itemID: bookmark.id, title: bookmark.title))
                     }
                 }
-                // Vault files — assignFile is Void AND moves the file on disk; verify via post-check.
+                // Vault files — assignFile returns Bool AND moves the file on disk.
                 for file in VaultFileService.shared.files where file.folderID == id {
                     relocatedItemCount += 1
-                    VaultFileService.shared.assignFile(file.id, toFolder: nil)
+                    let ok = VaultFileService.shared.assignFile(file.id, toFolder: nil)
                     let nowUnfiled = VaultFileService.shared.files.first(where: { $0.id == file.id })?.folderID == nil
-                    if !nowUnfiled {
+                    if !ok || !nowUnfiled {
                         failures.append(.init(itemType: "vaultFile", itemID: file.id, title: file.displayTitle))
                     }
                 }

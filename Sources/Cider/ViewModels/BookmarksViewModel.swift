@@ -156,41 +156,6 @@ final class BookmarksViewModel: ObservableObject {
 
     @discardableResult
     func deleteFolder(_ folderID: UUID) -> Bool {
-        // Collect all folder IDs being deleted (this folder + descendants)
-        let deletedIDs: Set<UUID> = {
-            var ids: Set<UUID> = [folderID]
-            for folder in VaultFolderService.shared.folders {
-                if let vf = VaultFolderService.shared.folder(for: folderID),
-                   folder.relativePath.hasPrefix(vf.relativePath + "/") {
-                    ids.insert(folder.id)
-                }
-            }
-            return ids
-        }()
-
-        // Unassign items BEFORE deleting the folder — notes need to move
-        // their files out of the folder directory before it gets trashed.
-        for id in deletedIDs {
-            for note in NotesStorage.shared.notes where note.folderID == id {
-                NotesStorage.shared.assignNote(note.id, toFolder: nil)
-            }
-            for bookmark in bookmarks where bookmark.folderID == id {
-                VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
-            }
-            for todo in TodoCardStorage.shared.todoCards where todo.folderID == id {
-                TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: nil)
-            }
-            for dc in DateCardStorage.shared.dateCards where dc.folderID == id {
-                DateCardStorage.shared.assignDateCard(dc.id, toFolder: nil)
-            }
-            for contact in ContactStorage.shared.contacts where contact.folderID == id {
-                ContactStorage.shared.assignContact(contact.id, toFolder: nil)
-            }
-            for file in VaultFileService.shared.files where file.folderID == id {
-                VaultFileService.shared.assignFile(file.id, toFolder: nil)
-            }
-        }
-
         guard let trashItem = VaultFolderService.shared.deleteFolder(folderID) else {
             return false
         }
