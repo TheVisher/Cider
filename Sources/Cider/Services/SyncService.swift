@@ -148,6 +148,12 @@ final class SyncService: ObservableObject {
         let unresolved: [SyncPulledFolder]
     }
 
+    struct FolderDuplicateQuarantineDecision {
+        let shouldQuarantine: Bool
+        let canonicalFolderID: UUID?
+        let reason: String?
+    }
+
     /// Split pulled folders into folders safe to apply now and folders that
     /// still need a parent folder row. Children must never be applied as roots
     /// simply because their parent is missing from the current local snapshot.
@@ -169,6 +175,95 @@ final class SyncService: ObservableObject {
             }
         }
         return FolderDependencyPartition(ready: ready, unresolved: unresolved)
+    }
+
+    nonisolated static func duplicateQuarantineDecisionForPulledFolder(
+        name: String,
+        parentID: UUID?,
+        folders: [VaultFolder]
+    ) -> FolderDuplicateQuarantineDecision {
+        let sanitized = sanitizePulledFolderName(name)
+        guard !sanitized.isEmpty else {
+            return FolderDuplicateQuarantineDecision(
+                shouldQuarantine: true,
+                canonicalFolderID: nil,
+                reason: "empty_sanitized_name"
+            )
+        }
+
+        let parentPath = parentID.flatMap { parentID in
+            folders.first(where: { $0.id == parentID })?.relativePath
+        }
+        let targetRelativePath = parentPath.map { "\($0)/\(sanitized)" } ?? sanitized
+
+        if let exact = folders.first(where: { $0.relativePath == targetRelativePath }) {
+            return FolderDuplicateQuarantineDecision(
+                shouldQuarantine: true,
+                canonicalFolderID: exact.id,
+                reason: "exact_path_exists"
+            )
+        }
+
+        let canonicalName = stripNumericSuffixes(from: sanitized)
+        if canonicalName != sanitized {
+            let canonicalPath = parentPath.map { "\($0)/\(canonicalName)" } ?? canonicalName
+            if let canonical = folders.first(where: { $0.relativePath == canonicalPath }) {
+                return FolderDuplicateQuarantineDecision(
+                    shouldQuarantine: true,
+                    canonicalFolderID: canonical.id,
+                    reason: "numeric_suffix_sibling"
+                )
+            }
+        }
+
+        if parentID == nil {
+            let normalizedName = normalizedFolderComponent(sanitized)
+            let nestedMatches = folders.filter { folder in
+                folder.relativePath.contains("/")
+                    && normalizedFolderComponent(URL(fileURLWithPath: folder.relativePath).lastPathComponent) == normalizedName
+            }
+
+            if nestedMatches.count == 1 {
+                return FolderDuplicateQuarantineDecision(
+                    shouldQuarantine: true,
+                    canonicalFolderID: nestedMatches[0].id,
+                    reason: "root_duplicate_of_nested_folder"
+                )
+            } else if nestedMatches.count > 1 {
+                return FolderDuplicateQuarantineDecision(
+                    shouldQuarantine: true,
+                    canonicalFolderID: nil,
+                    reason: "ambiguous_root_duplicate_of_nested_folder"
+                )
+            }
+        }
+
+        return FolderDuplicateQuarantineDecision(
+            shouldQuarantine: false,
+            canonicalFolderID: nil,
+            reason: nil
+        )
+    }
+
+    private nonisolated static func normalizedFolderComponent(_ value: String) -> String {
+        stripNumericSuffixes(from: value).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    private nonisolated static func sanitizePulledFolderName(_ raw: String) -> String {
+        var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        value = value.replacingOccurrences(of: "/", with: "-")
+        value = value.replacingOccurrences(of: ":", with: "-")
+        value = value.replacingOccurrences(of: "\0", with: "")
+        while value.hasPrefix(".") { value = String(value.dropFirst()) }
+        return value.isEmpty ? "Folder" : value
+    }
+
+    private nonisolated static func stripNumericSuffixes(from value: String) -> String {
+        var result = value
+        while let range = result.range(of: #" \d+$"#, options: .regularExpression) {
+            result.removeSubrange(range)
+        }
+        return result
     }
 
     // MARK: - Lifecycle
@@ -598,9 +693,11 @@ final class SyncService: ObservableObject {
         // promote a remote child to root just because its parent is not resolved
         // yet — defer within this pull, then skip until a later pull can resolve.
         let folderService = VaultFolderService.shared
+        var folderIDAliases: [String: UUID] = [:]
         var pendingFolders = result.folders.filter { $0.ciderSyncId != nil }
         while !pendingFolders.isEmpty {
             let availableFolderIDs = Set(folderService.legacyFolders.map { $0.id.uuidString.lowercased() })
+                .union(folderIDAliases.keys)
             let partition = Self.partitionPulledFoldersByResolvedParent(
                 pendingFolders,
                 availableFolderIDs: availableFolderIDs
@@ -622,7 +719,9 @@ final class SyncService: ObservableObject {
                 if isTombstone {
                     parentID = nil
                 } else if let parentSyncId {
-                    if let resolved = currentFolders.first(where: { $0.id.uuidString.lowercased() == parentSyncId })?.id {
+                    if let alias = folderIDAliases[parentSyncId] {
+                        parentID = alias
+                    } else if let resolved = currentFolders.first(where: { $0.id.uuidString.lowercased() == parentSyncId })?.id {
                         parentID = resolved
                     } else {
                         nextPass.append(folder)
@@ -645,12 +744,28 @@ final class SyncService: ObservableObject {
                     }
                     madeProgress = true
                 } else if !isDeleted, let uuid = UUID(uuidString: syncId) {
-                    folderService.addFolderFromSync(
+                    let quarantine = Self.duplicateQuarantineDecisionForPulledFolder(
+                        name: folder.name,
+                        parentID: parentID,
+                        folders: folderService.folders
+                    )
+                    if quarantine.shouldQuarantine {
+                        if let canonicalFolderID = quarantine.canonicalFolderID {
+                            folderIDAliases[syncIdLower] = canonicalFolderID
+                        }
+                        self.logger.warning("Sync: quarantined pulled duplicate folder \(syncId, privacy: .public) named '\(folder.name, privacy: .public)' reason=\(quarantine.reason ?? "unknown", privacy: .public) canonical=\(quarantine.canonicalFolderID?.uuidString ?? "none", privacy: .public)")
+                        madeProgress = true
+                        continue
+                    }
+
+                    if let added = folderService.addFolderFromSync(
                         id: uuid, name: folder.name, icon: folder.icon,
                         parentID: parentID,
                         createdAt: Date(timeIntervalSince1970: folder.createdAt / 1000),
                         updatedAt: remoteUpdatedAt
-                    )
+                    ) {
+                        folderIDAliases[syncIdLower] = added.id
+                    }
                     madeProgress = true
                 } else {
                     madeProgress = true
@@ -676,7 +791,8 @@ final class SyncService: ObservableObject {
 
             let remoteFolderSyncId = bookmark.folderSyncId?.lowercased()
             let resolvedFolderID: UUID? = if let remoteFolderSyncId {
-                folderService.legacyFolders.first(where: { $0.id.uuidString.lowercased() == remoteFolderSyncId })?.id
+                folderIDAliases[remoteFolderSyncId]
+                    ?? folderService.legacyFolders.first(where: { $0.id.uuidString.lowercased() == remoteFolderSyncId })?.id
             } else {
                 nil
             }
@@ -744,7 +860,8 @@ final class SyncService: ObservableObject {
 
             let remoteFolderSyncId = note.folderSyncId?.lowercased()
             let resolvedFolderID: UUID? = if let remoteFolderSyncId {
-                folderService.legacyFolders.first(where: { $0.id.uuidString.lowercased() == remoteFolderSyncId })?.id
+                folderIDAliases[remoteFolderSyncId]
+                    ?? folderService.legacyFolders.first(where: { $0.id.uuidString.lowercased() == remoteFolderSyncId })?.id
             } else {
                 nil
             }

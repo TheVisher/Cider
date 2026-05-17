@@ -221,6 +221,123 @@ struct VaultFolderServiceSQLiteTests {
         #expect(loaded!.createdAt.timeIntervalSince(after) <= 0.01)
     }
 
+    @Test("Folder write gate creates folder and records provenance")
+    func folderWriteGateCreatesFolderAndRecordsProvenance() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-folder-write-gate-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(at: vault, withIntermediateDirectories: true)
+
+        let service = VaultFolderService(database: db)
+        let decision = service.applyFolderWrite(.init(
+            name: "Projects",
+            source: .agent,
+            duplicatePolicy: .makeUniqueName
+        ))
+
+        guard case .created(let folder) = decision else {
+            Issue.record("Expected write gate to create folder, got \(decision)")
+            return
+        }
+
+        #expect(folder.relativePath == "Projects")
+        #expect(service.folders.map(\.relativePath) == ["Projects"])
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Projects").path))
+
+        let reloaded = VaultFolderService(database: db)
+        #expect(reloaded.folders.map(\.relativePath) == ["Projects"])
+
+        let audit = MutationAuditService(database: db).loadEntries()
+        let entry = try #require(audit.first { $0.itemID == folder.id && $0.action == "folder.write.create" })
+        #expect(entry.source == .agent)
+        #expect(entry.metadata["origin"] == "applyFolderWrite")
+        #expect(entry.metadata["source"] == "agent")
+        #expect(entry.metadata["duplicatePolicy"] == "makeUniqueName")
+    }
+
+    @Test("Folder write gate rejects duplicate path when policy rejects")
+    func folderWriteGateRejectsDuplicatePath() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-folder-write-reject-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(at: vault, withIntermediateDirectories: true)
+
+        let service = VaultFolderService(database: db)
+        let existing = try #require(service.createFolder(name: "Projects", parentID: nil))
+
+        let decision = service.applyFolderWrite(.init(
+            name: "Projects",
+            source: .sync,
+            requestedID: UUID(),
+            duplicatePolicy: .reject
+        ))
+
+        #expect(decision == .rejected(reason: "duplicate_path"))
+        #expect(service.folders.count == 1)
+        #expect(service.folders.first?.id == existing.id)
+        #expect(!fm.fileExists(atPath: vault.appendingPathComponent("Projects 2").path))
+
+        let count = try db.prepare("SELECT COUNT(*) FROM folders;")
+        #expect(try count.step())
+        #expect(count.int(at: 0) == 1)
+    }
+
+    @Test("Folder write gate quarantines duplicate path with provenance")
+    func folderWriteGateQuarantinesDuplicatePath() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-folder-write-quarantine-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(at: vault, withIntermediateDirectories: true)
+
+        let service = VaultFolderService(database: db)
+        _ = try #require(service.createFolder(name: "Projects", parentID: nil))
+        let remoteID = UUID()
+
+        let decision = service.applyFolderWrite(.init(
+            name: "Projects",
+            source: .sync,
+            requestedID: remoteID,
+            duplicatePolicy: .quarantine
+        ))
+
+        #expect(decision == .quarantined(reason: "duplicate_path", requestedPath: "Projects"))
+        #expect(service.folders.map(\.relativePath) == ["Projects"])
+
+        let audit = MutationAuditService(database: db).loadEntries()
+        let entry = try #require(audit.first { $0.itemID == remoteID && $0.action == "folder.write.quarantined" })
+        #expect(entry.itemType == "vaultFolderProposal")
+        #expect(entry.source == .sync)
+        #expect(entry.metadata["reason"] == "duplicate_path")
+        #expect(entry.metadata["requestedPath"] == "Projects")
+    }
+
     @Test("Sync add for existing folder path reuses folder instead of creating numeric suffix")
     func addFolderFromSyncReusesExistingRelativePath() throws {
         let (db, url) = try makeTestDB()
@@ -271,6 +388,49 @@ struct VaultFolderServiceSQLiteTests {
         #expect(service2.folders.first?.relativePath == "Media")
     }
 
+    @Test("Sync add quarantines unknown remote folder instead of creating local row")
+    func addFolderFromSyncQuarantinesUnknownRemoteFolder() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-sync-quarantine-folder-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(at: vault, withIntermediateDirectories: true)
+
+        let service = VaultFolderService(database: db)
+        let remoteID = UUID()
+        let returned = service.addFolderFromSync(
+            id: remoteID,
+            name: "Media",
+            icon: "🎬",
+            parentID: nil,
+            createdAt: Date(timeIntervalSince1970: 3_000),
+            updatedAt: Date(timeIntervalSince1970: 4_000)
+        )
+
+        #expect(returned == nil)
+        #expect(service.folders.isEmpty)
+        #expect(!fm.fileExists(atPath: vault.appendingPathComponent("Media").path))
+
+        let service2 = VaultFolderService(database: db)
+        #expect(service2.folders.isEmpty)
+
+        let audit = MutationAuditService(database: db).loadEntries()
+        let entry = try #require(audit.first { $0.itemID == remoteID && $0.action == "folder.write.quarantined" })
+        #expect(entry.itemType == "vaultFolderProposal")
+        #expect(entry.source == .sync)
+        #expect(entry.metadata["reason"] == "new_folder_requires_backend_approval")
+        #expect(entry.metadata["requestedPath"] == "Media")
+        #expect(entry.metadata["allowsCreate"] == "false")
+    }
+
     @Test("Empty database loads empty folders array")
     func emptyDatabaseLoadsEmpty() throws {
         let (db, url) = try makeTestDB()
@@ -278,6 +438,40 @@ struct VaultFolderServiceSQLiteTests {
 
         let service = VaultFolderService(database: db)
         #expect(service.folders.isEmpty)
+    }
+
+    @Test("Filesystem reconcile does not recreate unindexed folder rows")
+    func reconcileDoesNotAdoptUnindexedDirectories() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-folder-reconcile-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(at: vault.appendingPathComponent("Spaces"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: vault.appendingPathComponent("Applications"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: vault.appendingPathComponent("Development/Tools"), withIntermediateDirectories: true)
+        #expect(StoragePaths.cachedVaultDirectoryURL.path == vault.path)
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Spaces").path))
+
+        let service = VaultFolderService(database: db)
+        let spaces = VaultFolder(relativePath: "Spaces")
+        service.persistToDatabase(db, folder: spaces)
+
+        let loadedService = VaultFolderService(database: db)
+        loadedService.reconcileWithFilesystemForTesting()
+
+        #expect(loadedService.folders.map(\.relativePath) == ["Spaces"])
+
+        let countStmt = try db.prepare("SELECT COUNT(*) FROM folders;")
+        #expect(try countStmt.step())
+        #expect(countStmt.int(at: 0) == 1)
     }
 
     @Test("Multiple folders with parent-child paths load correctly")

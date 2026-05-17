@@ -32,6 +32,96 @@ final class VaultFolderService: ObservableObject {
     /// Explicit database instance (injected for testing).
     private let database: CiderDatabase?
 
+    enum FolderMutationSource: String, Equatable {
+        case user
+        case cli
+        case agent
+        case sync
+        case filesystemReconcile
+        case importTool
+        case storageDoctor
+        case restore
+        case migration
+        case test
+
+        var auditSource: MutationAuditSource {
+            switch self {
+            case .user:
+                .ui
+            case .cli:
+                .cli
+            case .agent:
+                .agent
+            case .sync:
+                .sync
+            case .filesystemReconcile, .restore:
+                .filesystem
+            case .importTool, .storageDoctor:
+                .cleanup
+            case .migration:
+                .migration
+            case .test:
+                .ui
+            }
+        }
+    }
+
+    enum FolderDuplicatePolicy: String, Equatable {
+        case makeUniqueName
+        case aliasExisting
+        case quarantine
+        case reject
+    }
+
+    enum FolderWriteOperation: String, Equatable {
+        case create
+    }
+
+    struct FolderWriteRequest: Equatable {
+        var operation: FolderWriteOperation
+        var name: String
+        var parentID: UUID?
+        var source: FolderMutationSource
+        var requestedID: UUID?
+        var createdAt: Date?
+        var updatedAt: Date?
+        var icon: String?
+        var duplicatePolicy: FolderDuplicatePolicy
+        var allowsCreate: Bool
+
+        init(
+            operation: FolderWriteOperation = .create,
+            name: String,
+            parentID: UUID? = nil,
+            source: FolderMutationSource,
+            requestedID: UUID? = nil,
+            createdAt: Date? = nil,
+            updatedAt: Date? = nil,
+            icon: String? = nil,
+            duplicatePolicy: FolderDuplicatePolicy = .makeUniqueName,
+            allowsCreate: Bool = true
+        ) {
+            self.operation = operation
+            self.name = name
+            self.parentID = parentID
+            self.source = source
+            self.requestedID = requestedID
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.icon = icon
+            self.duplicatePolicy = duplicatePolicy
+            self.allowsCreate = allowsCreate
+        }
+    }
+
+    enum FolderWriteDecision: Equatable {
+        case created(VaultFolder)
+        case aliased(requestedID: UUID?, localID: UUID, reason: String)
+        case quarantined(reason: String, requestedPath: String?)
+        case ignored(reason: String)
+        case rejected(reason: String)
+    }
+
     // MARK: - Paths
 
     private let metaDirName = ".cider/folders"
@@ -73,27 +163,139 @@ final class VaultFolderService: ObservableObject {
 
     // MARK: - CRUD
 
+    @discardableResult
+    func applyFolderWrite(_ request: FolderWriteRequest) -> FolderWriteDecision {
+        switch request.operation {
+        case .create:
+            applyCreateFolderWrite(request)
+        }
+    }
+
     /// Creates a new folder as a real directory on disk.
     @discardableResult
-    func createFolder(name: String, parentID: UUID?) -> VaultFolder? {
-        let sanitized = Self.sanitizeDirectoryName(name)
-        guard !sanitized.isEmpty else { return nil }
+    func createFolder(
+        name: String,
+        parentID: UUID?,
+        source: FolderMutationSource = .user
+    ) -> VaultFolder? {
+        let decision = applyFolderWrite(.init(
+            name: name,
+            parentID: parentID,
+            source: source,
+            duplicatePolicy: .makeUniqueName
+        ))
+        switch decision {
+        case .created(let folder):
+            return folder
+        case .aliased(_, let localID, _):
+            return index[localID]
+        case .quarantined, .ignored, .rejected:
+            return nil
+        }
+    }
+
+    private func applyCreateFolderWrite(_ request: FolderWriteRequest) -> FolderWriteDecision {
+        let sanitized = Self.sanitizeDirectoryName(request.name)
+        guard !sanitized.isEmpty else {
+            recordFolderWriteProposalDecision(
+                action: "folder.write.rejected",
+                request: request,
+                reason: "empty_name",
+                requestedPath: nil
+            )
+            return .rejected(reason: "empty_name")
+        }
 
         // Resolve parent path
         let parentPath: String?
-        if let parentID {
+        if let parentID = request.parentID {
             guard let parent = index[parentID] else {
                 logger.warning("createFolder: parent \(parentID) not found")
-                return nil
+                recordFolderWriteProposalDecision(
+                    action: "folder.write.rejected",
+                    request: request,
+                    reason: "missing_parent",
+                    requestedPath: nil
+                )
+                return .rejected(reason: "missing_parent")
             }
             parentPath = parent.relativePath
         } else {
             parentPath = nil
         }
 
+        let requestedRelativePath = parentPath.map { "\($0)/\(sanitized)" } ?? sanitized
+        if let existing = index.values.first(where: { $0.relativePath == requestedRelativePath }) {
+            switch request.duplicatePolicy {
+            case .aliasExisting:
+                var merged = existing
+                if merged.icon == nil {
+                    merged.icon = request.icon
+                }
+                if let updatedAt = request.updatedAt, updatedAt > merged.updatedAt {
+                    merged.updatedAt = updatedAt
+                }
+                if merged != existing {
+                    index[merged.id] = merged
+                    persistFolderToDatabase(merged)
+                    saveIndex()
+                    rebuildFolders()
+                }
+                MutationAuditService(database: resolvedDatabase).record(
+                    action: "folder.write.alias",
+                    itemType: "vaultFolder",
+                    itemID: merged.id,
+                    after: MutationAuditSnapshots.folder(merged),
+                    metadata: folderWriteMetadata(
+                        request: request,
+                        reason: "duplicate_path",
+                        requestedPath: requestedRelativePath
+                    ),
+                    source: request.source.auditSource
+                )
+                return .aliased(
+                    requestedID: request.requestedID,
+                    localID: merged.id,
+                    reason: "duplicate_path"
+                )
+            case .quarantine:
+                recordFolderWriteProposalDecision(
+                    action: "folder.write.quarantined",
+                    request: request,
+                    reason: "duplicate_path",
+                    requestedPath: requestedRelativePath
+                )
+                return .quarantined(reason: "duplicate_path", requestedPath: requestedRelativePath)
+            case .reject:
+                recordFolderWriteProposalDecision(
+                    action: "folder.write.rejected",
+                    request: request,
+                    reason: "duplicate_path",
+                    requestedPath: requestedRelativePath
+                )
+                return .rejected(reason: "duplicate_path")
+            case .makeUniqueName:
+                break
+            }
+        }
+
         let resolvedName = uniqueName(baseName: sanitized, parentPath: parentPath)
         let relativePath = parentPath.map { "\($0)/\(resolvedName)" } ?? resolvedName
         let directoryURL = vaultRoot.appendingPathComponent(relativePath)
+
+        guard request.allowsCreate else {
+            recordFolderWriteProposalDecision(
+                action: "folder.write.quarantined",
+                request: request,
+                reason: "new_folder_requires_backend_approval",
+                requestedPath: relativePath
+            )
+            logger.warning("Folder write gate quarantined new folder '\(relativePath, privacy: .public)' from source \(request.source.rawValue, privacy: .public)")
+            return .quarantined(
+                reason: "new_folder_requires_backend_approval",
+                requestedPath: relativePath
+            )
+        }
 
         isMutating = true
         defer { isMutating = false }
@@ -103,7 +305,11 @@ final class VaultFolderService: ObservableObject {
         if FileManager.default.fileExists(atPath: directoryURL.path) {
             if let existing = index.values.first(where: { $0.relativePath == relativePath }) {
                 logger.info("createFolder: directory already exists and indexed — returning existing")
-                return existing
+                return .aliased(
+                    requestedID: request.requestedID,
+                    localID: existing.id,
+                    reason: "existing_indexed_directory"
+                )
             }
         }
 
@@ -114,20 +320,36 @@ final class VaultFolderService: ObservableObject {
             )
         } catch {
             logger.error("createFolder: failed to create directory: \(error.localizedDescription)")
-            return nil
+            recordFolderWriteProposalDecision(
+                action: "folder.write.rejected",
+                request: request,
+                reason: "directory_create_failed",
+                requestedPath: relativePath
+            )
+            return .rejected(reason: "directory_create_failed")
         }
 
-        let folder = VaultFolder(relativePath: relativePath)
+        let createdAt = request.createdAt ?? Date()
+        let folder = VaultFolder(
+            id: request.requestedID ?? UUID(),
+            relativePath: relativePath,
+            createdAt: createdAt,
+            updatedAt: request.updatedAt ?? createdAt,
+            icon: request.icon
+        )
         index[folder.id] = folder
         persistFolderToDatabase(folder)
         logFolderMutationDiagnostics(
-            origin: "createFolder",
+            origin: "applyFolderWrite",
             action: "create",
             folder: folder,
             metadata: [
-                "requestedName": name,
+                "requestedName": request.name,
                 "resolvedName": resolvedName,
                 "parentPath": parentPath ?? "",
+                "source": request.source.rawValue,
+                "duplicatePolicy": request.duplicatePolicy.rawValue,
+                "allowsCreate": String(request.allowsCreate),
             ]
         )
         saveIndex()
@@ -135,19 +357,61 @@ final class VaultFolderService: ObservableObject {
 
         logger.info("Created folder '\(resolvedName)' at \(relativePath)")
         NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
-        MutationAuditService.shared.record(
-            action: "create",
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "folder.write.create",
             itemType: "vaultFolder",
             itemID: folder.id,
             after: MutationAuditSnapshots.folder(folder),
             metadata: [
-                "origin": "createFolder",
-                "requestedName": name,
+                "origin": "applyFolderWrite",
+                "requestedName": request.name,
                 "resolvedName": resolvedName,
                 "parentPath": parentPath ?? "",
-            ]
+                "source": request.source.rawValue,
+                "duplicatePolicy": request.duplicatePolicy.rawValue,
+                "allowsCreate": String(request.allowsCreate),
+            ],
+            source: request.source.auditSource
         )
-        return folder
+        return .created(folder)
+    }
+
+    private func recordFolderWriteProposalDecision(
+        action: String,
+        request: FolderWriteRequest,
+        reason: String,
+        requestedPath: String?
+    ) {
+        MutationAuditService(database: resolvedDatabase).record(
+            action: action,
+            itemType: "vaultFolderProposal",
+            itemID: request.requestedID ?? UUID(),
+            metadata: folderWriteMetadata(
+                request: request,
+                reason: reason,
+                requestedPath: requestedPath
+            ),
+            source: request.source.auditSource
+        )
+    }
+
+    private func folderWriteMetadata(
+        request: FolderWriteRequest,
+        reason: String,
+        requestedPath: String?
+    ) -> [String: String] {
+        [
+            "origin": "applyFolderWrite",
+            "operation": request.operation.rawValue,
+            "source": request.source.rawValue,
+            "requestedName": request.name,
+            "requestedID": request.requestedID?.uuidString ?? "",
+            "parentID": request.parentID?.uuidString ?? "",
+            "duplicatePolicy": request.duplicatePolicy.rawValue,
+            "allowsCreate": String(request.allowsCreate),
+            "reason": reason,
+            "requestedPath": requestedPath ?? "",
+        ]
     }
 
     /// Renames a folder by renaming its directory on disk.
@@ -995,63 +1259,63 @@ final class VaultFolderService: ObservableObject {
             return merged
         }
 
-        let resolvedName = uniqueName(baseName: sanitized, parentPath: parentPath)
-        let relativePath = parentPath.map { "\($0)/\(resolvedName)" } ?? resolvedName
-        let directoryURL = vaultRoot.appendingPathComponent(relativePath)
-
-        isMutating = true
-        defer { isMutating = false }
-
-        do {
-            try FileManager.default.createDirectory(
-                at: directoryURL,
-                withIntermediateDirectories: true
-            )
-        } catch {
-            logger.error("addFolderFromSync: failed to create directory: \(error.localizedDescription)")
-            return nil
-        }
-
-        let folder = VaultFolder(
-            id: id,
-            relativePath: relativePath,
+        let decision = applyFolderWrite(.init(
+            name: name,
+            parentID: parentID,
+            source: .sync,
+            requestedID: id,
             createdAt: createdAt,
             updatedAt: updatedAt,
-            icon: icon
-        )
-        index[folder.id] = folder
-        persistFolderToDatabase(folder)
-        logFolderMutationDiagnostics(
-            origin: "addFolderFromSync",
-            action: "create",
-            folder: folder,
-            metadata: [
-                "remoteID": id.uuidString,
-                "remoteName": name,
-                "resolvedName": resolvedName,
-                "parentPath": parentPath ?? "",
-            ]
-        )
-        MutationAuditService.shared.record(
-            action: "sync.folder.create",
-            itemType: "vaultFolder",
-            itemID: folder.id,
-            after: MutationAuditSnapshots.folder(folder),
-            metadata: [
-                "origin": "addFolderFromSync",
-                "remoteID": id.uuidString,
-                "remoteName": name,
-                "resolvedName": resolvedName,
-                "parentPath": parentPath ?? "",
-            ],
-            source: .sync
-        )
-        saveIndex()
-        rebuildFolders()
+            icon: icon,
+            duplicatePolicy: .aliasExisting,
+            allowsCreate: false
+        ))
 
-        logger.info("Sync: created folder '\(resolvedName)' at \(relativePath)")
-        NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
-        return folder
+        switch decision {
+        case .aliased(_, let localID, let reason):
+            guard let folder = index[localID] else { return nil }
+            logFolderMutationDiagnostics(
+                origin: "addFolderFromSync",
+                action: "alias",
+                folder: folder,
+                metadata: [
+                    "remoteID": id.uuidString,
+                    "remoteName": name,
+                    "reason": reason,
+                    "targetRelativePath": folder.relativePath,
+                ]
+            )
+            logger.warning("Sync: aliased remote folder \(id.uuidString, privacy: .public) named '\(name, privacy: .public)' to existing local folder \(folder.relativePath, privacy: .public)")
+            return folder
+        case .quarantined(let reason, let requestedPath):
+            logFolderMutationDiagnostics(
+                origin: "addFolderFromSync",
+                action: "quarantine_new_remote_folder",
+                folder: VaultFolder(
+                    id: id,
+                    relativePath: requestedPath ?? targetRelativePath,
+                    createdAt: createdAt,
+                    updatedAt: updatedAt,
+                    icon: icon
+                ),
+                metadata: [
+                    "remoteID": id.uuidString,
+                    "remoteName": name,
+                    "reason": reason,
+                    "targetRelativePath": requestedPath ?? targetRelativePath,
+                ]
+            )
+            logger.warning("Sync: quarantined new remote folder \(id.uuidString, privacy: .public) named '\(name, privacy: .public)' at \(requestedPath ?? targetRelativePath, privacy: .public); sync is not allowed to create local folder rows")
+            return nil
+        case .rejected(let reason):
+            logger.warning("Sync: rejected remote folder \(id.uuidString, privacy: .public) named '\(name, privacy: .public)' reason=\(reason, privacy: .public)")
+            return nil
+        case .created(let folder):
+            logger.error("Sync: unexpected folder creation through non-creating write request for \(folder.relativePath, privacy: .public)")
+            return folder
+        case .ignored:
+            return nil
+        }
     }
 
     /// Updates an existing folder from sync data. Renames directory if name changed.
@@ -1292,7 +1556,7 @@ final class VaultFolderService: ObservableObject {
     // MARK: - Private: Filesystem Reconciliation
 
     /// Scans the vault root for directories and reconciles with the index.
-    /// - Directories on disk but not in index → add with new UUID
+    /// - Directories on disk but not in index are left alone; DB state is authoritative.
     /// - Entries in index but directory missing from disk → remove from index
     private func reconcileWithFilesystem() {
         let fm = FileManager.default
@@ -1323,31 +1587,14 @@ final class VaultFolderService: ObservableObject {
 
         var changed = false
 
-        // Paths on disk not in index → new folders from Finder
+        // Paths on disk not in index used to be adopted as folders automatically.
+        // That made stale vault directories a second source of truth and could
+        // resurrect hundreds of deleted folder rows on startup. Folder creation
+        // now flows through createFolder/addFolderFromSync so SQLite remains the
+        // app-authoritative list.
         let indexedPaths = Set(index.values.map(\.relativePath))
         for diskPath in diskPaths where !indexedPaths.contains(diskPath) {
-            let folder = VaultFolder(relativePath: diskPath)
-            index[folder.id] = folder
-            persistFolderToDatabase(folder)
-            logFolderMutationDiagnostics(
-                origin: "reconcileWithFilesystem",
-                action: "discover",
-                folder: folder,
-                metadata: ["diskPath": diskPath]
-            )
-            MutationAuditService.shared.record(
-                action: "filesystem.folder.discover",
-                itemType: "vaultFolder",
-                itemID: folder.id,
-                after: MutationAuditSnapshots.folder(folder),
-                metadata: [
-                    "origin": "reconcileWithFilesystem",
-                    "diskPath": diskPath,
-                ],
-                source: .filesystem
-            )
-            logger.info("Discovered external folder: \(diskPath)")
-            changed = true
+            logger.info("Ignoring unindexed vault directory during folder reconcile: \(diskPath)")
         }
 
         // Paths in index not on disk → deleted from Finder.
@@ -1358,7 +1605,12 @@ final class VaultFolderService: ObservableObject {
         // folder (and trigger the items FK cascade) just because scan caught
         // a transient state. Empty folders remain safe to remove.
         for (id, entry) in index {
-            if !diskPaths.contains(entry.relativePath) {
+            var isDirectory: ObjCBool = false
+            let folderStillExists = fm.fileExists(
+                atPath: root.appendingPathComponent(entry.relativePath).path,
+                isDirectory: &isDirectory
+            ) && isDirectory.boolValue
+            if !folderStillExists {
                 if folderHasItemsInDatabase(id) {
                     logger.warning("Skipping removal of missing folder \(entry.relativePath) — still has items or sessions in database (transient FS state?)")
                     continue
@@ -1375,6 +1627,10 @@ final class VaultFolderService: ObservableObject {
             rebuildFolders()
             NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
         }
+    }
+
+    func reconcileWithFilesystemForTesting() {
+        reconcileWithFilesystem()
     }
 
     private func folderHasItemsInDatabase(_ folderID: UUID) -> Bool {

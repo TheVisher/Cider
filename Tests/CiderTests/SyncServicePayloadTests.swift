@@ -71,6 +71,62 @@ struct SyncServicePayloadTests {
         #expect(partition.unresolved.map(\.name) == ["Cider"])
     }
 
+    @Test("pulled numeric-suffix folder aliases to canonical sibling")
+    func pulledNumericSuffixFolderAliasesToCanonicalSibling() {
+        let canonicalID = UUID()
+        let folders = [
+            VaultFolder(id: canonicalID, relativePath: "Applications"),
+            VaultFolder(relativePath: "Food/Restaurants")
+        ]
+
+        let decision = SyncService.duplicateQuarantineDecisionForPulledFolder(
+            name: "Applications 2",
+            parentID: nil,
+            folders: folders
+        )
+
+        #expect(decision.shouldQuarantine)
+        #expect(decision.canonicalFolderID == canonicalID)
+        #expect(decision.reason == "numeric_suffix_sibling")
+    }
+
+    @Test("pulled root folder aliasing unique nested folder is quarantined")
+    func pulledRootFolderAliasesUniqueNestedFolder() {
+        let nestedID = UUID()
+        let folders = [
+            VaultFolder(relativePath: "Personal"),
+            VaultFolder(id: nestedID, relativePath: "Personal/Wallpapers")
+        ]
+
+        let decision = SyncService.duplicateQuarantineDecisionForPulledFolder(
+            name: "Wallpapers",
+            parentID: nil,
+            folders: folders
+        )
+
+        #expect(decision.shouldQuarantine)
+        #expect(decision.canonicalFolderID == nestedID)
+        #expect(decision.reason == "root_duplicate_of_nested_folder")
+    }
+
+    @Test("pulled ambiguous root duplicate is quarantined without alias")
+    func pulledAmbiguousRootDuplicateIsQuarantinedWithoutAlias() {
+        let folders = [
+            VaultFolder(relativePath: "Development/AI"),
+            VaultFolder(relativePath: "Tech/AI")
+        ]
+
+        let decision = SyncService.duplicateQuarantineDecisionForPulledFolder(
+            name: "AI",
+            parentID: nil,
+            folders: folders
+        )
+
+        #expect(decision.shouldQuarantine)
+        #expect(decision.canonicalFolderID == nil)
+        #expect(decision.reason == "ambiguous_root_duplicate_of_nested_folder")
+    }
+
     @Test("folder tombstones do not wait for unresolved parents")
     func pulledFolderTombstonesBypassMissingParent() {
         let deletedChild = pulledFolder(
