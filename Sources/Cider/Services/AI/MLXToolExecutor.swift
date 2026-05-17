@@ -478,6 +478,7 @@ enum MLXToolExecutor {
         }
 
         var moved: [String] = []
+        var movedCount = 0
 
         for bookmark in VaultBookmarkService.shared.bookmarks.filter({
             $0.title.localizedStandardContains(query) || $0.urlString.localizedStandardContains(query)
@@ -497,17 +498,22 @@ enum MLXToolExecutor {
                     bookmarkService: VaultBookmarkService.shared
                 )
                 moved.append("Bookmark: \"\(bookmark.title)\"")
+                movedCount += 1
             } catch {
                 moved.append("Bookmark failed: \"\(bookmark.title)\" (\(error.localizedDescription))")
             }
         }
         for note in NotesStorage.shared.notes.filter({ $0.title.localizedStandardContains(query) }) {
-            _ = NotesStorage.shared.assignNote(note.id, toFolder: folder.id)
-            moved.append("Note: \"\(note.title)\"")
+            if NotesStorage.shared.assignNote(note.id, toFolder: folder.id) {
+                moved.append("Note: \"\(note.title)\"")
+                movedCount += 1
+            } else {
+                moved.append("Note failed: \"\(note.title)\" (assignment failed)")
+            }
         }
 
         if moved.isEmpty { return "No items found matching \"\(query)\" to move." }
-        return "Moved \(moved.count) item(s) to \"\(folder.name)\":\n" + moved.joined(separator: "\n")
+        return "Moved \(movedCount) item(s) to \"\(folder.name)\":\n" + moved.joined(separator: "\n")
         }
     }
 
@@ -608,8 +614,10 @@ enum MLXToolExecutor {
             if let folder = VaultFolderService.shared.folders.first(where: {
                 $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
             }) {
-                _ = NotesStorage.shared.assignNote(note.id, toFolder: folder.id)
-                return "Created note \"\(note.title)\" in folder \"\(folder.name)\"."
+                if NotesStorage.shared.assignNote(note.id, toFolder: folder.id) {
+                    return "Created note \"\(note.title)\" in folder \"\(folder.name)\"."
+                }
+                return "Created note \"\(note.title)\" but failed to move it to folder \"\(folder.name)\"."
             }
             return "Created note \"\(note.title)\" (folder \"\(folderName)\" not found — saved to root)."
         }
@@ -704,6 +712,7 @@ enum MLXToolExecutor {
         MutationAuditContext.withSource(.agent) {
         let query = string("searchQuery", from: args)
         var unfiled: [String] = []
+        var unfiledCount = 0
 
         for bookmark in VaultBookmarkService.shared.bookmarks.filter({
             $0.title.localizedStandardContains(query) && $0.folderID != nil
@@ -723,6 +732,7 @@ enum MLXToolExecutor {
                     bookmarkService: VaultBookmarkService.shared
                 )
                 unfiled.append("Bookmark: \"\(bookmark.title)\"")
+                unfiledCount += 1
             } catch {
                 unfiled.append("Bookmark failed: \"\(bookmark.title)\" (\(error.localizedDescription))")
             }
@@ -730,12 +740,16 @@ enum MLXToolExecutor {
         for note in NotesStorage.shared.notes.filter({
             $0.title.localizedStandardContains(query) && $0.folderID != nil
         }) {
-            _ = NotesStorage.shared.assignNote(note.id, toFolder: nil)
-            unfiled.append("Note: \"\(note.title)\"")
+            if NotesStorage.shared.assignNote(note.id, toFolder: nil) {
+                unfiled.append("Note: \"\(note.title)\"")
+                unfiledCount += 1
+            } else {
+                unfiled.append("Note failed: \"\(note.title)\" (assignment failed)")
+            }
         }
 
         if unfiled.isEmpty { return "No filed items found matching \"\(query)\"." }
-        return "Unfiled \(unfiled.count) item(s) (moved to root):\n" + unfiled.joined(separator: "\n")
+        return "Unfiled \(unfiledCount) item(s) (moved to root):\n" + unfiled.joined(separator: "\n")
         }
     }
 

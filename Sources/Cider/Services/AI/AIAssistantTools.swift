@@ -544,6 +544,7 @@ struct MoveToFolderTool: Tool {
         }
 
         var moved: [String] = []
+        var movedCount = 0
 
         let matchingBookmarks = VaultBookmarkService.shared.bookmarks.filter {
             $0.title.localizedStandardContains(query) ||
@@ -565,6 +566,7 @@ struct MoveToFolderTool: Tool {
                     bookmarkService: VaultBookmarkService.shared
                 )
                 moved.append("Bookmark: \"\(bookmark.title)\"")
+                movedCount += 1
             } catch {
                 moved.append("Bookmark failed: \"\(bookmark.title)\" (\(error.localizedDescription))")
             }
@@ -574,14 +576,18 @@ struct MoveToFolderTool: Tool {
             $0.title.localizedStandardContains(query)
         }
         for note in matchingNotes {
-            _ = NotesStorage.shared.assignNote(note.id, toFolder: folder.id)
-            moved.append("Note: \"\(note.title)\"")
+            if NotesStorage.shared.assignNote(note.id, toFolder: folder.id) {
+                moved.append("Note: \"\(note.title)\"")
+                movedCount += 1
+            } else {
+                moved.append("Note failed: \"\(note.title)\" (assignment failed)")
+            }
         }
 
         if moved.isEmpty {
             return "No items found matching \"\(query)\" to move."
         }
-        return "Moved \(moved.count) item(s) to \"\(folder.name)\":\n" + moved.joined(separator: "\n")
+        return "Moved \(movedCount) item(s) to \"\(folder.name)\":\n" + moved.joined(separator: "\n")
     } }
 }
 
@@ -822,8 +828,10 @@ struct CreateNoteTool: Tool {
             if let folder = VaultFolderService.shared.folders.first(where: {
                 $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
             }) {
-                _ = NotesStorage.shared.assignNote(note.id, toFolder: folder.id)
-                return "Created note \"\(note.title)\" in folder \"\(folder.name)\"."
+                if NotesStorage.shared.assignNote(note.id, toFolder: folder.id) {
+                    return "Created note \"\(note.title)\" in folder \"\(folder.name)\"."
+                }
+                return "Created note \"\(note.title)\" but failed to move it to folder \"\(folder.name)\"."
             } else {
                 return "Created note \"\(note.title)\" (folder \"\(folderName)\" not found — saved to root)."
             }
@@ -879,8 +887,10 @@ struct SummarizeTextTool: Tool {
                    let folder = VaultFolderService.shared.folders.first(where: {
                        $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
                    }) {
-                    _ = NotesStorage.shared.assignNote(note.id, toFolder: folder.id)
-                    return "Summary saved as note \"\(title)\" in folder \"\(folder.name)\":\n\n\(summary)"
+                    if NotesStorage.shared.assignNote(note.id, toFolder: folder.id) {
+                        return "Summary saved as note \"\(title)\" in folder \"\(folder.name)\":\n\n\(summary)"
+                    }
+                    return "Summary saved as note \"\(title)\" but failed to move it to folder \"\(folder.name)\":\n\n\(summary)"
                 }
                 return "Summary saved as note \"\(title)\":\n\n\(summary)"
             } }
@@ -1140,6 +1150,7 @@ struct UnfileItemsTool: Tool {
     nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         var unfiled: [String] = []
+        var unfiledCount = 0
 
         let matchingBookmarks = VaultBookmarkService.shared.bookmarks.filter {
             $0.title.localizedStandardContains(query) && $0.folderID != nil
@@ -1160,6 +1171,7 @@ struct UnfileItemsTool: Tool {
                     bookmarkService: VaultBookmarkService.shared
                 )
                 unfiled.append("Bookmark: \"\(bookmark.title)\"")
+                unfiledCount += 1
             } catch {
                 unfiled.append("Bookmark failed: \"\(bookmark.title)\" (\(error.localizedDescription))")
             }
@@ -1169,14 +1181,18 @@ struct UnfileItemsTool: Tool {
             $0.title.localizedStandardContains(query) && $0.folderID != nil
         }
         for note in matchingNotes {
-            _ = NotesStorage.shared.assignNote(note.id, toFolder: nil)
-            unfiled.append("Note: \"\(note.title)\"")
+            if NotesStorage.shared.assignNote(note.id, toFolder: nil) {
+                unfiled.append("Note: \"\(note.title)\"")
+                unfiledCount += 1
+            } else {
+                unfiled.append("Note failed: \"\(note.title)\" (assignment failed)")
+            }
         }
 
         if unfiled.isEmpty {
             return "No filed items found matching \"\(query)\"."
         }
-        return "Unfiled \(unfiled.count) item(s) (moved to root):\n" + unfiled.joined(separator: "\n")
+        return "Unfiled \(unfiledCount) item(s) (moved to root):\n" + unfiled.joined(separator: "\n")
     } } }
 }
 

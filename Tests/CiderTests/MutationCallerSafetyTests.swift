@@ -118,4 +118,32 @@ struct MutationCallerSafetyTests {
 
         #expect(unchecked.isEmpty, "Unchecked folder restore assignment callers:\n\(unchecked.joined(separator: "\n"))")
     }
+
+    @Test("Agent note assignment callers check success before reporting move results")
+    func agentNoteAssignmentCallersCheckSuccessResult() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let files = [
+            repoRoot.appendingPathComponent("Sources/Cider/Services/AI/AIAssistantTools.swift"),
+            repoRoot.appendingPathComponent("Sources/Cider/Services/AI/MLXToolExecutor.swift"),
+        ]
+        var unchecked: [String] = []
+
+        for fileURL in files {
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            for (offset, line) in source.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+                guard line.contains("NotesStorage.shared.assignNote(") else { continue }
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                let checksResult = trimmed.hasPrefix("guard ")
+                    || trimmed.hasPrefix("if ")
+                    || trimmed.hasPrefix("let ")
+                    || trimmed.hasPrefix("return ")
+                if !checksResult {
+                    let relativePath = fileURL.path.replacingOccurrences(of: repoRoot.path + "/", with: "")
+                    unchecked.append("\(relativePath):\(offset + 1): \(trimmed)")
+                }
+            }
+        }
+
+        #expect(unchecked.isEmpty, "Unchecked agent note assignment callers:\n\(unchecked.joined(separator: "\n"))")
+    }
 }
