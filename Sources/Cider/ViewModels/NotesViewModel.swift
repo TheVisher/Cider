@@ -1164,7 +1164,7 @@ final class NotesViewModel: ObservableObject {
 
     func updateNoteFolder(_ folderID: UUID?) {
         guard let note = selectedNote else { return }
-        NotesStorage.shared.assignNote(note.id, toFolder: folderID)
+        guard NotesStorage.shared.assignNote(note.id, toFolder: folderID) else { return }
         if var updated = selectedNote {
             updated.folderID = folderID
             selectedNote = updated

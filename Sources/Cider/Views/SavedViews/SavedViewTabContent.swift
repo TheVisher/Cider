@@ -652,7 +652,7 @@ struct SavedViewTabContent: View {
                 folders: folders,
                 onMoveToFolder: { folderID in
                     let oldFolderID = dateCard.folderID
-                    DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
+                    guard DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID) else { return }
                     let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
                     CiderUndoManager.shared.record(.movedToFolder(
                         itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
@@ -676,7 +676,7 @@ struct SavedViewTabContent: View {
                     folders: folders,
                     onMoveToFolder: { folderID in
                         let oldFolderID = contact.folderID
-                        ContactStorage.shared.assignContact(contact.id, toFolder: folderID)
+                        guard ContactStorage.shared.assignContact(contact.id, toFolder: folderID) else { return }
                         let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
                         CiderUndoManager.shared.record(.movedToFolder(
                             itemType: .contact, itemID: contact.id, title: contact.displayName,
@@ -702,7 +702,7 @@ struct SavedViewTabContent: View {
                     folders: folders,
                     onMoveToFolder: { folderID in
                         let oldFolderID = todoCard.folderID
-                        TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID)
+                        guard TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID) else { return }
                         let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
                         CiderUndoManager.shared.record(.movedToFolder(
                             itemType: .todo, itemID: todoCard.id, title: todoCard.title,

@@ -383,7 +383,7 @@ private struct FloatingBookmarkDetailContent: View {
     }
 
     private func assignFolder(_ folderID: UUID?) {
-        _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folderID)
+        guard VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folderID) else { return }
     }
 
     private func floatLinkedRef(_ ref: LibraryEntityRef) {

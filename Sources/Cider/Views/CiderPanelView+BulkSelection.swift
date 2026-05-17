@@ -92,33 +92,43 @@ extension CiderPanelView {
     }
 
     func moveSelectedToFolder(_ folderID: UUID?) {
+        var movedItemIDs = Set<String>()
+
         for id in selectedItemIDs {
             if id.hasPrefix("bookmark-") {
                 let uuidString = String(id.dropFirst("bookmark-".count))
                 if let uuid = UUID(uuidString: uuidString),
                    let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == uuid }) {
-                    _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
+                    if bookmarksViewModel.assign(bookmark, toFolder: folderID) {
+                        movedItemIDs.insert(id)
+                    }
                 }
             } else if id.hasPrefix("note-") {
                 let uuidString = String(id.dropFirst("note-".count))
                 if let uuid = UUID(uuidString: uuidString),
                    let note = notesViewModel.notes.first(where: { $0.id == uuid }) {
-                    _ = notesViewModel.assignNote(note, toFolder: folderID)
+                    if notesViewModel.assignNote(note, toFolder: folderID) {
+                        movedItemIDs.insert(id)
+                    }
                 }
             } else if id.hasPrefix("datecard-") {
                 let uuidString = String(id.dropFirst("datecard-".count))
                 if let uuid = UUID(uuidString: uuidString) {
-                    DateCardStorage.shared.assignDateCard(uuid, toFolder: folderID)
+                    if DateCardStorage.shared.assignDateCard(uuid, toFolder: folderID) {
+                        movedItemIDs.insert(id)
+                    }
                 }
             } else if id.hasPrefix("contact-") {
                 let uuidString = String(id.dropFirst("contact-".count))
                 if let uuid = UUID(uuidString: uuidString) {
-                    ContactStorage.shared.assignContact(uuid, toFolder: folderID)
+                    if ContactStorage.shared.assignContact(uuid, toFolder: folderID) {
+                        movedItemIDs.insert(id)
+                    }
                 }
             }
         }
 
-        selectedItemIDs.removeAll()
+        selectedItemIDs.subtract(movedItemIDs)
     }
 
     // MARK: - Bulk Tag

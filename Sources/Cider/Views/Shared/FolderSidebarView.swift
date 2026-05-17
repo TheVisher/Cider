@@ -806,43 +806,43 @@ struct FolderSidebarView: View {
             switch item.type {
             case "bookmark":
                 if let bookmark = bookmarks.first(where: { $0.id == item.id }) {
+                    guard VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: targetFolderID) else { continue }
                     bulkMoveItems.append(BulkMoveItem(
                         itemID: bookmark.id,
                         itemType: .bookmark,
                         title: bookmark.title,
                         fromFolderID: bookmark.folderID
                     ))
-                    VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: targetFolderID)
                 }
             case "note":
                 if let note = notes.first(where: { $0.id == item.id }) {
+                    guard NotesStorage.shared.assignNote(note.id, toFolder: targetFolderID) else { continue }
                     bulkMoveItems.append(BulkMoveItem(
                         itemID: note.id,
                         itemType: .note,
                         title: note.title,
                         fromFolderID: note.folderID
                     ))
-                    NotesStorage.shared.assignNote(note.id, toFolder: targetFolderID)
                 }
             case "datecard":
                 if let dateCard = DateCardStorage.shared.dateCard(for: item.id) {
+                    guard DateCardStorage.shared.assignDateCard(item.id, toFolder: targetFolderID) else { continue }
                     bulkMoveItems.append(BulkMoveItem(
                         itemID: dateCard.id,
                         itemType: .dateCard,
                         title: dateCard.title,
                         fromFolderID: dateCard.folderID
                     ))
-                    DateCardStorage.shared.assignDateCard(item.id, toFolder: targetFolderID)
                 }
             case "contact":
                 if let contact = ContactStorage.shared.contact(for: item.id) {
+                    guard ContactStorage.shared.assignContact(item.id, toFolder: targetFolderID) else { continue }
                     bulkMoveItems.append(BulkMoveItem(
                         itemID: contact.id,
                         itemType: .contact,
                         title: contact.displayName,
                         fromFolderID: contact.folderID
                     ))
-                    ContactStorage.shared.assignContact(item.id, toFolder: targetFolderID)
                 }
             default:
                 break

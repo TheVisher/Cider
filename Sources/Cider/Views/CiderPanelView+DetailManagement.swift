@@ -680,7 +680,7 @@ extension CiderPanelView {
 
     func assignDetailBookmarkToFolder(_ folderID: UUID?) {
         guard let bookmark = selectedDetailsBookmark else { return }
-        _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
+        guard bookmarksViewModel.assign(bookmark, toFolder: folderID) else { return }
     }
 
     func assignDetailVaultFileToFolder(_ folderID: UUID?) {

@@ -274,7 +274,7 @@ struct HomeDashboardView: View {
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
                     let oldFolderID = dateCard.folderID
-                    DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
+                    guard DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID) else { return }
                     let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
                     CiderUndoManager.shared.record(.movedToFolder(
                         itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
@@ -296,7 +296,7 @@ struct HomeDashboardView: View {
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
                     let oldFolderID = todoCard.folderID
-                    TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID)
+                    guard TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID) else { return }
                     let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
                     CiderUndoManager.shared.record(.movedToFolder(
                         itemType: .todo, itemID: todoCard.id, title: todoCard.title,
@@ -336,7 +336,9 @@ struct HomeDashboardView: View {
                 onShowDetails: { handleNormalAction { onShowBookmarkDetails(bookmark) } },
                 onOpen: { handleNormalAction { bookmarksViewModel.open(bookmark) } },
                 onDelete: { handleContextMenuDelete(item: item) { bookmarksViewModel.deleteBookmarks([bookmark]) } },
-                onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
+                onMoveToFolder: { folderID in
+                    guard bookmarksViewModel.assign(bookmark, toFolder: folderID) else { return }
+                },
                 isSelected: isItemSelected(item),
                 isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
@@ -359,7 +361,7 @@ struct HomeDashboardView: View {
                     handleContextMenuDelete(item: item) { notesViewModel.deleteNotes([note]) }
                 },
                 onMoveToFolder: { folderID in
-                    _ = notesViewModel.assignNote(note, toFolder: folderID)
+                    guard notesViewModel.assignNote(note, toFolder: folderID) else { return }
                 },
                 dragProvider: noteDragProvider(for: note),
                 dragPreviewOverride: multiDragPreview(for: item),
@@ -378,7 +380,7 @@ struct HomeDashboardView: View {
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
                     let oldFolderID = dateCard.folderID
-                    DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
+                    guard DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID) else { return }
                     let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
                     CiderUndoManager.shared.record(.movedToFolder(
                         itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
@@ -405,7 +407,7 @@ struct HomeDashboardView: View {
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
                     let oldFolderID = contact.folderID
-                    ContactStorage.shared.assignContact(contact.id, toFolder: folderID)
+                    guard ContactStorage.shared.assignContact(contact.id, toFolder: folderID) else { return }
                     let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
                     CiderUndoManager.shared.record(.movedToFolder(
                         itemType: .contact, itemID: contact.id, title: contact.displayName,
@@ -434,7 +436,7 @@ struct HomeDashboardView: View {
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
                     let oldFolderID = todoCard.folderID
-                    TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID)
+                    guard TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID) else { return }
                     let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
                     CiderUndoManager.shared.record(.movedToFolder(
                         itemType: .todo, itemID: todoCard.id, title: todoCard.title,
