@@ -593,9 +593,9 @@ enum HomeOverviewDataProvider {
         bookmarkDateSuggestionResults: [CiderBookmarkDateSuggestionResult],
         libraryItems: [LibraryItemV2]
     ) -> [HomeReviewCockpitItem] {
-        let itemsByUUID = Dictionary(uniqueKeysWithValues: libraryItems.compactMap { item in
+        let itemsByUUID = Dictionary(libraryItems.compactMap { item in
             itemUUID(for: item).map { ($0, item) }
-        })
+        }, uniquingKeysWith: { first, _ in first })
 
         let queueItems = reviewItems.map { reviewItem in
             let linkedItem = itemsByUUID[reviewItem.itemID]

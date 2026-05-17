@@ -548,6 +548,57 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertFalse(snapshot.reviewCockpitItems[1].canDefer)
     }
 
+    func testReviewCockpitToleratesDuplicateLibraryItemUUIDs() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let bookmarkID = UUID()
+        let bookmark = Bookmark(
+            id: bookmarkID,
+            title: "Duplicate-safe capture",
+            urlString: "https://example.com/duplicate-safe",
+            createdAt: now,
+            updatedAt: now,
+            folderID: nil
+        )
+        let duplicateBookmark = Bookmark(
+            id: bookmarkID,
+            title: "Duplicate-safe capture copy",
+            urlString: "https://example.com/duplicate-safe",
+            createdAt: now,
+            updatedAt: now,
+            folderID: nil
+        )
+        let reviewItem = CiderReviewQueueItem(
+            id: "review-duplicate-\(UUID().uuidString)",
+            kind: "low_confidence_routing",
+            source: "routing_decision",
+            itemID: bookmarkID,
+            itemType: "bookmark",
+            title: "Duplicate-safe capture",
+            relativePath: "Inbox/Bookmarks/Duplicate-safe capture.webloc",
+            reason: "Needs routing review.",
+            suggestedAction: "Approve or correct route",
+            reviewState: "needs_review",
+            confidence: 0.71,
+            routingDecisionID: UUID(),
+            target: nil,
+            createdAt: now,
+            safeActions: ["approve", "correct"]
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.bookmark(bookmark), .bookmark(duplicateBookmark)],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: [reviewItem],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.reviewCockpitItems.count, 1)
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].item?.id, "bookmark-\(bookmarkID.uuidString)")
+        XCTAssertTrue(snapshot.reviewCockpitItems[0].canCorrect)
+    }
+
     func testReviewCockpitSummaryBuildsBadgesFromQueueSummary() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let bookmarkID = UUID()
