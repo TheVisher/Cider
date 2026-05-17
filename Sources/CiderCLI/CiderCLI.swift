@@ -1894,7 +1894,11 @@ struct CiderCLI {
                     misses.append(prefix)
                     continue
                 }
-                _ = storage.assignNote(note.id, toFolder: targetFolder?.id)
+                let didMove = storage.assignNote(note.id, toFolder: targetFolder?.id)
+                guard didMove else {
+                    print("Error: Failed to move note '\(note.title)'")
+                    continue
+                }
                 _ = try? CiderRoutingDecisionService().recordManualMove(
                     itemID: note.id,
                     target: routingTarget(for: targetFolder, inboxPath: "Inbox/Notes"),
@@ -3637,7 +3641,11 @@ struct CiderCLI {
                     misses.append(prefix)
                     continue
                 }
-                service.assignFile(file.id, toFolder: targetFolder?.id)
+                let didMove = service.assignFile(file.id, toFolder: targetFolder?.id)
+                guard didMove else {
+                    print("Error: Failed to move file '\(file.displayTitle)'")
+                    continue
+                }
                 _ = try? CiderRoutingDecisionService().recordManualMove(
                     itemID: file.id,
                     target: routingTarget(for: targetFolder, inboxPath: "Inbox/Files"),

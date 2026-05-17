@@ -89,6 +89,11 @@ final class VaultFileService: ObservableObject {
         idMapLoaded = false
     }
 
+    /// Testing-only: replace the scanned file cache without touching disk.
+    func _setFilesForTesting(_ files: [VaultFile]) {
+        self.files = files
+    }
+
     /// Testing-only: compute a legacy path-derived ID (used to seed pre-migration state).
     func _stableIDForTesting(path: String) -> UUID {
         stableID(for: path)
@@ -310,8 +315,9 @@ final class VaultFileService: ObservableObject {
     /// Moves a vault file to a different folder by physically moving the file.
     /// The file's UUID is preserved across the move via the id-map sidecar, so
     /// labels/links/trash references remain valid.
-    func assignFile(_ fileID: UUID, toFolder folderID: UUID?) {
-        guard let index = files.firstIndex(where: { $0.id == fileID }) else { return }
+    @discardableResult
+    func assignFile(_ fileID: UUID, toFolder folderID: UUID?) -> Bool {
+        guard let index = files.firstIndex(where: { $0.id == fileID }) else { return false }
         let file = files[index]
         let fm = FileManager.default
 
@@ -325,7 +331,9 @@ final class VaultFileService: ObservableObject {
         try? fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
 
         var destURL = targetDir.appendingPathComponent(file.filename)
-        guard destURL != file.absoluteURL else { return }
+        guard destURL != file.absoluteURL else {
+            return fm.fileExists(atPath: file.absoluteURL.path)
+        }
 
         // Handle filename collision at destination
         if fm.fileExists(atPath: destURL.path) {
@@ -356,8 +364,10 @@ final class VaultFileService: ObservableObject {
             saveIDMap()
 
             scan()
+            return true
         } catch {
             logger.error("Failed to move vault file: \(error.localizedDescription)")
+            return false
         }
     }
 

@@ -579,6 +579,61 @@ struct VaultFileSQLiteTests {
         #expect(service._idMapEntryForTesting(path: "Work/Pets/cat.jpg") == fileID)
     }
 
+    @Test("assignFile reports success for no-op and failure for stale missing source")
+    func assignFileReportsConfirmedMoveOutcome() throws {
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-vaultfile-assign-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: vault) }
+
+        let previousOverride = StoragePaths.vaultOverride
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        defer {
+            StoragePaths.vaultOverride = previousOverride
+            StoragePaths.invalidateCachedDirectory()
+        }
+
+        let service = VaultFileService.shared
+        service._resetIDMapForTesting()
+        service._setFilesForTesting([])
+        defer {
+            service._resetIDMapForTesting()
+            service._setFilesForTesting([])
+        }
+
+        let noOpFile = makeFile(
+            id: UUID(),
+            filename: "photo.jpg",
+            relativePath: "Inbox/Images/photo.jpg",
+            folderID: nil
+        )
+        try fm.createDirectory(at: vault.appendingPathComponent("Inbox/Images"), withIntermediateDirectories: true)
+        try Data([0xCA, 0xFE]).write(to: vault.appendingPathComponent(noOpFile.relativePath))
+        service._setFilesForTesting([noOpFile])
+        #expect(service.assignFile(noOpFile.id, toFolder: nil) == true)
+
+        let staleNoOpFile = makeFile(
+            id: UUID(),
+            filename: "stale.jpg",
+            relativePath: "Inbox/Images/stale.jpg",
+            folderID: nil
+        )
+        service._setFilesForTesting([staleNoOpFile])
+        #expect(service.assignFile(staleNoOpFile.id, toFolder: nil) == false)
+
+        let staleFile = makeFile(
+            id: UUID(),
+            filename: "missing.jpg",
+            relativePath: "Projects/Old/missing.jpg",
+            folderID: UUID()
+        )
+        service._setFilesForTesting([staleFile])
+        #expect(service.assignFile(staleFile.id, toFolder: nil) == false)
+
+        #expect(service.assignFile(UUID(), toFolder: nil) == false)
+    }
+
     // MARK: - 18. Migration from path-derived ID
 
     @Test("Migration carries metadata from legacy path-derived ID to fresh UUID")
