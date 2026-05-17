@@ -53,10 +53,63 @@ struct CiderStorageAuditServiceTests {
         try stmt.step()
     }
 
+    private func insertFolderSyncDecision(
+        _ db: CiderDatabase,
+        remoteFolderID: UUID,
+        localFolderID: UUID?,
+        decision: String,
+        requestedPath: String
+    ) throws {
+        let now = DatabaseHelpers.encode(Date(timeIntervalSince1970: 10))
+        let stmt = try db.prepare("""
+            INSERT INTO folder_sync_decisions (
+                remote_folder_id, local_folder_id, decision, reason, requested_path,
+                source, metadata, created_at, updated_at
+            )
+            VALUES (?, ?, ?, 'test', ?, 'sync', '{}', ?, ?);
+            """)
+        stmt.bind(DatabaseHelpers.encode(remoteFolderID), at: 1)
+        stmt.bind(localFolderID.map(DatabaseHelpers.encode), at: 2)
+        stmt.bind(decision, at: 3)
+            .bind(requestedPath, at: 4)
+            .bind(now, at: 5)
+            .bind(now, at: 6)
+        try stmt.step()
+    }
+
     private func folderExists(_ db: CiderDatabase, relativePath: String) throws -> Bool {
         let stmt = try db.prepare("SELECT 1 FROM folders WHERE relative_path = ? LIMIT 1;")
         stmt.bind(relativePath, at: 1)
         return try stmt.step()
+    }
+
+    @Test("VaultDoctor reports stale folder sync aliases")
+    func vaultDoctorReportsStaleFolderSyncAliases() throws {
+        let (db, url) = try makeTestDB()
+        defer { cleanup(url) }
+        let remoteFolderID = UUID()
+        let missingLocalFolderID = UUID()
+        try db.runSQL("PRAGMA foreign_keys=OFF;")
+        try insertFolderSyncDecision(
+            db,
+            remoteFolderID: remoteFolderID,
+            localFolderID: missingLocalFolderID,
+            decision: "alias",
+            requestedPath: "Applications 2"
+        )
+        try db.runSQL("PRAGMA foreign_keys=ON;")
+
+        let findings = VaultDoctor.shared.scanStaleFolderSyncAliasFindings(in: db)
+
+        let finding = try #require(findings.first)
+        #expect(findings.count == 1)
+        #expect(finding.kind == .staleFolderSyncAlias)
+        #expect(finding.severity == .error)
+        #expect(!finding.isFixable)
+        #expect(finding.payload.folderID == missingLocalFolderID)
+        #expect(finding.payload.relativePath == "Applications 2")
+        #expect(finding.summary.contains("Applications 2"))
+        #expect(finding.detail.contains(remoteFolderID.uuidString.prefix(8)))
     }
 
     private func flattenedFolderDoctorReport(folderID: UUID) -> VaultDoctor.Report {

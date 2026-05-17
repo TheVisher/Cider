@@ -63,6 +63,7 @@ final class VaultDoctor {
             case staleItemFolderRef    // items.folder_id points at nonexistent folder
             case staleSessionFolderRef // sessions.folder_id points at nonexistent folder
             case duplicateFolderPath   // multiple folders rows with same relative_path (schema invariant violation)
+            case staleFolderSyncAlias  // sync alias decision points at a nonexistent local folder
             case orphanBreadcrumb      // old .cider/folders/.trash/*-breadcrumbs.json > 30 days old
             case reservedPathInFolders // folders row for a reserved top dir (legacy drift)
             case suspiciousFlattenedFolderDuplicate // root folder duplicates an existing nested folder name, often with numeric suffix
@@ -156,6 +157,7 @@ final class VaultDoctor {
         findings.append(contentsOf: scanStaleItemFolderRefs())
         findings.append(contentsOf: scanStaleSessionFolderRefs())
         findings.append(contentsOf: scanDuplicateFolderPaths())
+        findings.append(contentsOf: scanStaleFolderSyncAliasFindings())
         findings.append(contentsOf: scanReservedPathsInFolders())
         findings.append(contentsOf: scanSuspiciousFlattenedFolderDuplicates())
         return findings
@@ -348,6 +350,55 @@ final class VaultDoctor {
                 fixLabel: nil,
                 payload: Finding.Payload(relativePath: path)
             ))
+        }
+        return out
+    }
+
+    private func scanStaleFolderSyncAliasFindings() -> [Finding] {
+        guard let db = database else { return [] }
+        return scanStaleFolderSyncAliasFindings(in: db)
+    }
+
+    func scanStaleFolderSyncAliasFindings(in db: CiderDatabase) -> [Finding] {
+        var out: [Finding] = []
+        do {
+            let stmt = try db.prepare("""
+                SELECT d.remote_folder_id, d.local_folder_id, d.requested_path
+                FROM folder_sync_decisions d
+                LEFT JOIN folders f ON f.id = d.local_folder_id
+                WHERE d.decision = 'alias'
+                  AND (d.local_folder_id IS NULL OR f.id IS NULL)
+                ORDER BY d.updated_at DESC;
+                """)
+            while try stmt.step() {
+                guard let remoteFolderID = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else {
+                    continue
+                }
+                let localFolderID = stmt.optionalString(at: 1).flatMap(DatabaseHelpers.decodeUUID)
+                let requestedPath = stmt.optionalString(at: 2) ?? "<unknown path>"
+                let remoteShort = remoteFolderID.uuidString.prefix(8)
+                let detail: String
+                if let localFolderID {
+                    detail = "Remote folder \(remoteShort) aliases to local folder \(localFolderID.uuidString.prefix(8)), but that folder row no longer exists. Future sync pulls should quarantine or re-evaluate this remote folder instead of recreating a duplicate."
+                } else {
+                    detail = "Remote folder \(remoteShort) has an alias decision without a local folder target. Future sync pulls should quarantine or re-evaluate this remote folder instead of recreating a duplicate."
+                }
+                out.append(Finding(
+                    id: "stale-folder-sync-alias-\(remoteFolderID.uuidString)",
+                    kind: .staleFolderSyncAlias,
+                    severity: .error,
+                    summary: "Stale sync folder alias: \(requestedPath)",
+                    detail: detail,
+                    isFixable: false,
+                    fixLabel: nil,
+                    payload: Finding.Payload(
+                        folderID: localFolderID,
+                        relativePath: requestedPath
+                    )
+                ))
+            }
+        } catch {
+            logger.error("scanStaleFolderSyncAliasFindings: \(error.localizedDescription)")
         }
         return out
     }
@@ -593,6 +644,7 @@ final class VaultDoctor {
             return fixReservedPathInFolders(finding)
         case .untrackedNonEmptyDir,
              .duplicateFolderPath,
+             .staleFolderSyncAlias,
              .suspiciousFlattenedFolderDuplicate,
              .duplicateNoteContent,
              .duplicateBookmarkURL,
