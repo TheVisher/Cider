@@ -335,6 +335,20 @@ enum CiderSchema {
         );
         """
 
+    static let createFolderSyncDecisions = """
+        CREATE TABLE IF NOT EXISTS folder_sync_decisions (
+            remote_folder_id TEXT PRIMARY KEY,
+            local_folder_id  TEXT REFERENCES folders(id) ON DELETE SET NULL,
+            decision         TEXT NOT NULL,
+            reason           TEXT NOT NULL,
+            requested_path   TEXT NOT NULL DEFAULT '',
+            source           TEXT NOT NULL,
+            metadata         TEXT,
+            created_at       REAL NOT NULL,
+            updated_at       REAL NOT NULL
+        );
+        """
+
     static let createRoutingDecisions = """
         CREATE TABLE IF NOT EXISTS routing_decisions (
             id                    TEXT PRIMARY KEY,
@@ -399,6 +413,8 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_events_start      ON events(start_at);",
         "CREATE INDEX IF NOT EXISTS idx_mutation_audit_time ON mutation_audit(occurred_at);",
         "CREATE INDEX IF NOT EXISTS idx_mutation_audit_item ON mutation_audit(item_type, item_id, occurred_at);",
+        "CREATE INDEX IF NOT EXISTS idx_folder_sync_decisions_local ON folder_sync_decisions(local_folder_id);",
+        "CREATE INDEX IF NOT EXISTS idx_folder_sync_decisions_decision ON folder_sync_decisions(decision, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_routing_decisions_item ON routing_decisions(item_id, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_routing_decisions_review ON routing_decisions(review_state);",
     ]
@@ -433,6 +449,7 @@ enum CiderSchema {
         createAgentActions,
         createTrash,
         createMutationAudit,
+        createFolderSyncDecisions,
         createSchemaMigrations,
     ]
 }

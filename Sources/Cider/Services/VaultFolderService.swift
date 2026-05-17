@@ -122,6 +122,23 @@ final class VaultFolderService: ObservableObject {
         case rejected(reason: String)
     }
 
+    enum FolderSyncDecisionKind: String, Equatable {
+        case alias
+        case quarantine
+    }
+
+    struct FolderSyncDecision: Equatable {
+        var remoteFolderID: UUID
+        var localFolderID: UUID?
+        var decision: FolderSyncDecisionKind
+        var reason: String
+        var requestedPath: String
+        var source: String
+        var metadata: [String: String]
+        var createdAt: Date
+        var updatedAt: Date
+    }
+
     // MARK: - Paths
 
     private let metaDirName = ".cider/folders"
@@ -412,6 +429,93 @@ final class VaultFolderService: ObservableObject {
             "reason": reason,
             "requestedPath": requestedPath ?? "",
         ]
+    }
+
+    func recordSyncFolderDecision(
+        remoteFolderID: UUID,
+        localFolderID: UUID?,
+        decision: FolderSyncDecisionKind,
+        reason: String,
+        requestedPath: String,
+        metadata: [String: String] = [:]
+    ) {
+        guard let db = resolvedDatabase else { return }
+
+        do {
+            let now = Date()
+            let stmt = try db.prepare("""
+                INSERT INTO folder_sync_decisions (
+                    remote_folder_id, local_folder_id, decision, reason, requested_path,
+                    source, metadata, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(remote_folder_id) DO UPDATE SET
+                    local_folder_id = excluded.local_folder_id,
+                    decision = excluded.decision,
+                    reason = excluded.reason,
+                    requested_path = excluded.requested_path,
+                    source = excluded.source,
+                    metadata = excluded.metadata,
+                    updated_at = excluded.updated_at;
+                """)
+            stmt.bind(DatabaseHelpers.encode(remoteFolderID), at: 1)
+                .bind(localFolderID.map { DatabaseHelpers.encode($0) }, at: 2)
+                .bind(decision.rawValue, at: 3)
+                .bind(reason, at: 4)
+                .bind(requestedPath, at: 5)
+                .bind("sync", at: 6)
+                .bind(DatabaseHelpers.encodeJSON(metadata), at: 7)
+                .bind(DatabaseHelpers.encode(now), at: 8)
+                .bind(DatabaseHelpers.encode(now), at: 9)
+            try stmt.step()
+        } catch {
+            logger.error("Failed to record sync folder decision for \(remoteFolderID.uuidString, privacy: .public): \(error.localizedDescription)")
+        }
+    }
+
+    func syncFolderDecision(forRemoteFolderID remoteFolderID: UUID) -> FolderSyncDecision? {
+        guard let db = resolvedDatabase else { return nil }
+
+        do {
+            let stmt = try db.prepare("""
+                SELECT remote_folder_id, local_folder_id, decision, reason, requested_path,
+                       source, metadata, created_at, updated_at
+                FROM folder_sync_decisions
+                WHERE remote_folder_id = ?
+                LIMIT 1;
+                """)
+            stmt.bind(DatabaseHelpers.encode(remoteFolderID), at: 1)
+            guard try stmt.step(),
+                  let remoteID = DatabaseHelpers.decodeUUID(stmt.string(at: 0)),
+                  let kind = FolderSyncDecisionKind(rawValue: stmt.string(at: 2)) else {
+                return nil
+            }
+
+            return FolderSyncDecision(
+                remoteFolderID: remoteID,
+                localFolderID: stmt.optionalString(at: 1).flatMap(DatabaseHelpers.decodeUUID),
+                decision: kind,
+                reason: stmt.string(at: 3),
+                requestedPath: stmt.string(at: 4),
+                source: stmt.string(at: 5),
+                metadata: DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 6)) ?? [:],
+                createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 7)),
+                updatedAt: DatabaseHelpers.decodeDate(stmt.double(at: 8))
+            )
+        } catch {
+            logger.error("Failed to load sync folder decision for \(remoteFolderID.uuidString, privacy: .public): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func localFolderAlias(forRemoteFolderID remoteFolderID: UUID) -> UUID? {
+        guard let decision = syncFolderDecision(forRemoteFolderID: remoteFolderID),
+              decision.decision == .alias,
+              let localFolderID = decision.localFolderID,
+              index[localFolderID] != nil else {
+            return nil
+        }
+        return localFolderID
     }
 
     /// Renames a folder by renaming its directory on disk.
@@ -1200,8 +1304,8 @@ final class VaultFolderService: ObservableObject {
 
     // MARK: - Sync Operations
 
-    /// Creates a folder from sync data, creating the directory on disk.
-    /// Uses the provided UUID so local and remote IDs match.
+    /// Resolves a remote sync folder without letting sync create local folder truth.
+    /// Existing canonical folders may be aliased; unknown remote folders are quarantined.
     @discardableResult
     func addFolderFromSync(
         id: UUID,
@@ -1253,6 +1357,18 @@ final class VaultFolderService: ObservableObject {
                 ],
                 source: .sync
             )
+            recordSyncFolderDecision(
+                remoteFolderID: id,
+                localFolderID: merged.id,
+                decision: .alias,
+                reason: "duplicate_path",
+                requestedPath: targetRelativePath,
+                metadata: [
+                    "origin": "addFolderFromSync",
+                    "remoteName": name,
+                    "targetRelativePath": targetRelativePath,
+                ]
+            )
             saveIndex()
             rebuildFolders()
             logger.warning("Sync: skipped duplicate folder '\(targetRelativePath, privacy: .public)' for remote id \(id.uuidString, privacy: .public); using existing local folder \(merged.id.uuidString, privacy: .public)")
@@ -1285,15 +1401,28 @@ final class VaultFolderService: ObservableObject {
                     "targetRelativePath": folder.relativePath,
                 ]
             )
+            recordSyncFolderDecision(
+                remoteFolderID: id,
+                localFolderID: folder.id,
+                decision: .alias,
+                reason: reason,
+                requestedPath: folder.relativePath,
+                metadata: [
+                    "origin": "addFolderFromSync",
+                    "remoteName": name,
+                    "targetRelativePath": folder.relativePath,
+                ]
+            )
             logger.warning("Sync: aliased remote folder \(id.uuidString, privacy: .public) named '\(name, privacy: .public)' to existing local folder \(folder.relativePath, privacy: .public)")
             return folder
         case .quarantined(let reason, let requestedPath):
+            let targetPath = requestedPath ?? targetRelativePath
             logFolderMutationDiagnostics(
                 origin: "addFolderFromSync",
                 action: "quarantine_new_remote_folder",
                 folder: VaultFolder(
                     id: id,
-                    relativePath: requestedPath ?? targetRelativePath,
+                    relativePath: targetPath,
                     createdAt: createdAt,
                     updatedAt: updatedAt,
                     icon: icon
@@ -1302,10 +1431,22 @@ final class VaultFolderService: ObservableObject {
                     "remoteID": id.uuidString,
                     "remoteName": name,
                     "reason": reason,
-                    "targetRelativePath": requestedPath ?? targetRelativePath,
+                    "targetRelativePath": targetPath,
                 ]
             )
-            logger.warning("Sync: quarantined new remote folder \(id.uuidString, privacy: .public) named '\(name, privacy: .public)' at \(requestedPath ?? targetRelativePath, privacy: .public); sync is not allowed to create local folder rows")
+            recordSyncFolderDecision(
+                remoteFolderID: id,
+                localFolderID: nil,
+                decision: .quarantine,
+                reason: reason,
+                requestedPath: targetPath,
+                metadata: [
+                    "origin": "addFolderFromSync",
+                    "remoteName": name,
+                    "targetRelativePath": targetPath,
+                ]
+            )
+            logger.warning("Sync: quarantined new remote folder \(id.uuidString, privacy: .public) named '\(name, privacy: .public)' at \(targetPath, privacy: .public); sync is not allowed to create local folder rows")
             return nil
         case .rejected(let reason):
             logger.warning("Sync: rejected remote folder \(id.uuidString, privacy: .public) named '\(name, privacy: .public)' reason=\(reason, privacy: .public)")

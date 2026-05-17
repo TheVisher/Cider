@@ -70,7 +70,8 @@ struct CiderDatabaseTests {
             "folders", "labels", "items", "bookmarks", "notes", "todos",
             "events", "contacts", "vault_files", "sessions",
             "item_labels", "dismissed_labels", "tags", "item_tags",
-            "item_links", "trash", "mutation_audit", "schema_version", "schema_migrations",
+            "item_links", "trash", "mutation_audit", "folder_sync_decisions",
+            "schema_version", "schema_migrations",
         ]
 
         for table in expectedTables {
@@ -502,6 +503,40 @@ struct CiderDatabaseTests {
         #expect(versionStmt.int(at: 0) == DatabaseMigrations.latestVersion)
         #expect(try columnExists("snoozed_until", in: "todos", db: migrated))
         #expect(try columnExists("snoozed_until", in: "events", db: migrated))
+    }
+
+    @Test("v12 migration adds durable folder sync decisions")
+    func v12AddsFolderSyncDecisions() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        do {
+            let db = CiderDatabase()
+            try db.open(at: url)
+            try db.runSQL("DROP TABLE IF EXISTS folder_sync_decisions;")
+            try db.runSQL("DELETE FROM schema_version;")
+            try db.runSQL("INSERT INTO schema_version (version) VALUES (11);")
+            db.close()
+        }
+
+        let migrated = CiderDatabase()
+        try migrated.open(at: url)
+        defer { migrated.close() }
+
+        let versionStmt = try migrated.prepare("SELECT MAX(version) FROM schema_version;")
+        #expect(try versionStmt.step())
+        #expect(versionStmt.int(at: 0) == DatabaseMigrations.latestVersion)
+
+        let tableStmt = try migrated.prepare(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='folder_sync_decisions';"
+        )
+        #expect(try tableStmt.step())
+        #expect(tableStmt.int(at: 0) == 1)
+
+        #expect(try columnExists("remote_folder_id", in: "folder_sync_decisions", db: migrated))
+        #expect(try columnExists("local_folder_id", in: "folder_sync_decisions", db: migrated))
+        #expect(try columnExists("decision", in: "folder_sync_decisions", db: migrated))
+        #expect(try columnExists("reason", in: "folder_sync_decisions", db: migrated))
     }
 
     // MARK: - Transactions

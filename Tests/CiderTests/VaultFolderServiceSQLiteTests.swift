@@ -365,9 +365,10 @@ struct VaultFolderServiceSQLiteTests {
         let service = VaultFolderService(database: db)
         service.persistToDatabase(db, folder: existing)
         let loadedService = VaultFolderService(database: db)
+        let remoteID = UUID()
 
         let returned = try #require(loadedService.addFolderFromSync(
-            id: UUID(),
+            id: remoteID,
             name: "Media",
             icon: "🎬",
             parentID: nil,
@@ -386,6 +387,14 @@ struct VaultFolderServiceSQLiteTests {
         #expect(service2.folders.count == 1)
         #expect(service2.folders.first?.id == existingID)
         #expect(service2.folders.first?.relativePath == "Media")
+
+        let decision = try #require(loadedService.syncFolderDecision(forRemoteFolderID: remoteID))
+        #expect(decision.decision == .alias)
+        #expect(decision.localFolderID == existingID)
+        #expect(decision.reason == "duplicate_path")
+        #expect(decision.requestedPath == "Media")
+        #expect(decision.metadata["origin"] == "addFolderFromSync")
+        #expect(loadedService.localFolderAlias(forRemoteFolderID: remoteID) == existingID)
     }
 
     @Test("Sync add quarantines unknown remote folder instead of creating local row")
@@ -429,6 +438,14 @@ struct VaultFolderServiceSQLiteTests {
         #expect(entry.metadata["reason"] == "new_folder_requires_backend_approval")
         #expect(entry.metadata["requestedPath"] == "Media")
         #expect(entry.metadata["allowsCreate"] == "false")
+
+        let decision = try #require(service.syncFolderDecision(forRemoteFolderID: remoteID))
+        #expect(decision.decision == .quarantine)
+        #expect(decision.localFolderID == nil)
+        #expect(decision.reason == "new_folder_requires_backend_approval")
+        #expect(decision.requestedPath == "Media")
+        #expect(decision.metadata["origin"] == "addFolderFromSync")
+        #expect(service.localFolderAlias(forRemoteFolderID: remoteID) == nil)
     }
 
     @Test("Empty database loads empty folders array")

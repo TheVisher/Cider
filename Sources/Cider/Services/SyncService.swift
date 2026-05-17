@@ -744,15 +744,49 @@ final class SyncService: ObservableObject {
                     }
                     madeProgress = true
                 } else if !isDeleted, let uuid = UUID(uuidString: syncId) {
+                    if let priorDecision = folderService.syncFolderDecision(forRemoteFolderID: uuid) {
+                        switch priorDecision.decision {
+                        case .alias:
+                            if let localFolderID = priorDecision.localFolderID,
+                               folderService.folder(for: localFolderID) != nil {
+                                folderIDAliases[syncIdLower] = localFolderID
+                                self.logger.info("Sync: reused durable folder alias \(syncId, privacy: .public) -> \(localFolderID.uuidString, privacy: .public)")
+                                madeProgress = true
+                                continue
+                            }
+                            self.logger.warning("Sync: durable folder alias \(syncId, privacy: .public) points to a missing local folder; recalculating decision")
+                        case .quarantine:
+                            self.logger.info("Sync: reused durable folder quarantine \(syncId, privacy: .public) reason=\(priorDecision.reason, privacy: .public)")
+                            madeProgress = true
+                            continue
+                        }
+                    }
+
                     let quarantine = Self.duplicateQuarantineDecisionForPulledFolder(
                         name: folder.name,
                         parentID: parentID,
                         folders: folderService.folders
                     )
                     if quarantine.shouldQuarantine {
+                        let sanitizedName = VaultFolderService.sanitizeDirectoryName(folder.name)
+                        let requestedPath = parentID
+                            .flatMap { folderService.folder(for: $0)?.relativePath }
+                            .map { "\($0)/\(sanitizedName)" } ?? sanitizedName
                         if let canonicalFolderID = quarantine.canonicalFolderID {
                             folderIDAliases[syncIdLower] = canonicalFolderID
                         }
+                        folderService.recordSyncFolderDecision(
+                            remoteFolderID: uuid,
+                            localFolderID: quarantine.canonicalFolderID,
+                            decision: quarantine.canonicalFolderID == nil ? .quarantine : .alias,
+                            reason: quarantine.reason ?? "duplicate_folder",
+                            requestedPath: requestedPath,
+                            metadata: [
+                                "origin": "SyncService.applyPullResult",
+                                "remoteName": folder.name,
+                                "parentSyncId": folder.parentSyncId ?? "",
+                            ]
+                        )
                         self.logger.warning("Sync: quarantined pulled duplicate folder \(syncId, privacy: .public) named '\(folder.name, privacy: .public)' reason=\(quarantine.reason ?? "unknown", privacy: .public) canonical=\(quarantine.canonicalFolderID?.uuidString ?? "none", privacy: .public)")
                         madeProgress = true
                         continue
