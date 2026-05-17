@@ -112,6 +112,25 @@ struct CiderStorageAuditServiceTests {
         #expect(finding.detail.contains(remoteFolderID.uuidString.prefix(8)))
     }
 
+    @Test("VaultDoctor reports folder rows that point outside the vault")
+    func vaultDoctorReportsFolderRowsOutsideVault() throws {
+        let (db, url) = try makeTestDB()
+        defer { cleanup(url) }
+        let folderID = UUID()
+        try insertFolder(db, id: folderID, relativePath: "../Secrets")
+
+        let findings = VaultDoctor.shared.scanFolderPathSafetyFindings(in: db)
+
+        let finding = try #require(findings.first)
+        #expect(findings.count == 1)
+        #expect(finding.kind == .folderPathOutsideVault)
+        #expect(finding.severity == .error)
+        #expect(!finding.isFixable)
+        #expect(finding.payload.folderID == folderID)
+        #expect(finding.payload.relativePath == "../Secrets")
+        #expect(finding.summary.contains("../Secrets"))
+    }
+
     private func flattenedFolderDoctorReport(folderID: UUID) -> VaultDoctor.Report {
         VaultDoctor.Report(
             startedAt: Date(timeIntervalSince1970: 11),

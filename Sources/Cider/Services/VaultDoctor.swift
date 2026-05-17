@@ -64,6 +64,7 @@ final class VaultDoctor {
             case staleSessionFolderRef // sessions.folder_id points at nonexistent folder
             case duplicateFolderPath   // multiple folders rows with same relative_path (schema invariant violation)
             case staleFolderSyncAlias  // sync alias decision points at a nonexistent local folder
+            case folderPathOutsideVault // folders.relative_path is not a safe relative vault path
             case orphanBreadcrumb      // old .cider/folders/.trash/*-breadcrumbs.json > 30 days old
             case reservedPathInFolders // folders row for a reserved top dir (legacy drift)
             case suspiciousFlattenedFolderDuplicate // root folder duplicates an existing nested folder name, often with numeric suffix
@@ -158,6 +159,7 @@ final class VaultDoctor {
         findings.append(contentsOf: scanStaleSessionFolderRefs())
         findings.append(contentsOf: scanDuplicateFolderPaths())
         findings.append(contentsOf: scanStaleFolderSyncAliasFindings())
+        findings.append(contentsOf: scanFolderPathSafetyFindings())
         findings.append(contentsOf: scanReservedPathsInFolders())
         findings.append(contentsOf: scanSuspiciousFlattenedFolderDuplicates())
         return findings
@@ -403,6 +405,45 @@ final class VaultDoctor {
         return out
     }
 
+    private func scanFolderPathSafetyFindings() -> [Finding] {
+        guard let db = database else { return [] }
+        return scanFolderPathSafetyFindings(in: db)
+    }
+
+    func scanFolderPathSafetyFindings(in db: CiderDatabase) -> [Finding] {
+        var out: [Finding] = []
+        do {
+            let stmt = try db.prepare("""
+                SELECT id, relative_path
+                FROM folders
+                ORDER BY relative_path COLLATE NOCASE;
+                """)
+            while try stmt.step() {
+                let relativePath = stmt.string(at: 1)
+                guard let reason = Self.folderPathSafetyReason(relativePath),
+                      let folderID = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else {
+                    continue
+                }
+                out.append(Finding(
+                    id: "folder-path-outside-vault-\(folderID.uuidString)",
+                    kind: .folderPathOutsideVault,
+                    severity: .error,
+                    summary: "Unsafe folder path: \(relativePath)",
+                    detail: "Folder row points outside the vault boundary because its relative_path \(reason). Manual review required before repairing this row.",
+                    isFixable: false,
+                    fixLabel: nil,
+                    payload: Finding.Payload(
+                        folderID: folderID,
+                        relativePath: relativePath
+                    )
+                ))
+            }
+        } catch {
+            logger.error("scanFolderPathSafetyFindings: \(error.localizedDescription)")
+        }
+        return out
+    }
+
     /// Check 6: breadcrumb files older than 30 days in
     /// `.cider/folders/.trash/`. Safe to clean as housekeeping.
     private func scanOrphanBreadcrumbs() -> [Finding] {
@@ -604,6 +645,26 @@ final class VaultDoctor {
         return strippedNumericSuffix.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
     }
 
+    private static func folderPathSafetyReason(_ relativePath: String) -> String? {
+        if relativePath.isEmpty {
+            return "is empty"
+        }
+        if relativePath.hasPrefix("/") {
+            return "is absolute"
+        }
+        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        if components.contains("..") {
+            return "contains '..'"
+        }
+        if components.contains(".") {
+            return "contains '.'"
+        }
+        if components.contains(where: \.isEmpty) {
+            return "contains an empty path component"
+        }
+        return nil
+    }
+
     private func countItemsReferencingFolder(_ folderID: UUID) -> Int {
         guard let db = database else { return 0 }
         do {
@@ -645,6 +706,7 @@ final class VaultDoctor {
         case .untrackedNonEmptyDir,
              .duplicateFolderPath,
              .staleFolderSyncAlias,
+             .folderPathOutsideVault,
              .suspiciousFlattenedFolderDuplicate,
              .duplicateNoteContent,
              .duplicateBookmarkURL,
