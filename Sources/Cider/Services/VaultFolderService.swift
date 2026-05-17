@@ -1517,6 +1517,39 @@ final class VaultFolderService: ObservableObject {
         // Check if name or parent changed — requires directory move.
         let sanitized = Self.sanitizeDirectoryName(name)
         if !sanitized.isEmpty && (sanitized != folder.name || targetParentPath != folder.parentRelativePath) {
+            let requestedRelativePath = targetParentPath.map { "\($0)/\(sanitized)" } ?? sanitized
+            if requestedRelativePath != folder.relativePath,
+               index.values.contains(where: { $0.id != folderID && $0.relativePath == requestedRelativePath }) {
+                logFolderMutationDiagnostics(
+                    origin: "updateFolderFromSync",
+                    action: "quarantine_rename_collision",
+                    folder: folder,
+                    metadata: [
+                        "remoteName": name,
+                        "parentID": parentID?.uuidString ?? "",
+                        "reason": "duplicate_path",
+                        "requestedPath": requestedRelativePath,
+                    ]
+                )
+                MutationAuditService(database: resolvedDatabase).record(
+                    action: "sync.folder.update_quarantined",
+                    itemType: "vaultFolder",
+                    itemID: folderID,
+                    before: before,
+                    after: MutationAuditSnapshots.folder(folder),
+                    metadata: [
+                        "origin": "updateFolderFromSync",
+                        "remoteName": name,
+                        "parentID": parentID?.uuidString ?? "",
+                        "reason": "duplicate_path",
+                        "requestedPath": requestedRelativePath,
+                    ],
+                    source: .sync
+                )
+                logger.warning("Sync: quarantined folder update for \(folder.relativePath, privacy: .public); requested path \(requestedRelativePath, privacy: .public) already exists")
+                return
+            }
+
             let resolvedName = uniqueName(baseName: sanitized, parentPath: targetParentPath, excludingID: folderID)
             let newRelativePath = targetParentPath.map { "\($0)/\(resolvedName)" } ?? resolvedName
             let oldURL = vaultRoot.appendingPathComponent(folder.relativePath)

@@ -448,6 +448,61 @@ struct VaultFolderServiceSQLiteTests {
         #expect(service.localFolderAlias(forRemoteFolderID: remoteID) == nil)
     }
 
+    @Test("Sync update rename collision is quarantined instead of creating numeric suffix")
+    func updateFolderFromSyncQuarantinesRenameCollision() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-sync-update-collision-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(at: vault, withIntermediateDirectories: true)
+        try fm.createDirectory(at: vault.appendingPathComponent("Alpha"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: vault.appendingPathComponent("Beta"), withIntermediateDirectories: true)
+
+        let alpha = VaultFolder(
+            id: UUID(),
+            relativePath: "Alpha",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let beta = VaultFolder(
+            id: UUID(),
+            relativePath: "Beta",
+            createdAt: Date(timeIntervalSince1970: 1_100),
+            updatedAt: Date(timeIntervalSince1970: 2_100)
+        )
+        let service = VaultFolderService(database: db)
+        service.persistToDatabase(db, folder: alpha)
+        service.persistToDatabase(db, folder: beta)
+        let loadedService = VaultFolderService(database: db)
+
+        loadedService.updateFolderFromSync(
+            folderID: alpha.id,
+            name: "Beta",
+            icon: "remote-icon",
+            parentID: nil,
+            remoteUpdatedAt: Date(timeIntervalSince1970: 3_000)
+        )
+
+        let paths = loadedService.folders.map(\.relativePath).sorted()
+        #expect(paths == ["Alpha", "Beta"])
+        #expect(loadedService.folder(for: alpha.id)?.relativePath == "Alpha")
+        #expect(loadedService.folder(for: alpha.id)?.icon == nil)
+        #expect(!fm.fileExists(atPath: vault.appendingPathComponent("Beta 2").path))
+
+        let audit = MutationAuditService(database: db).loadEntries()
+        let entry = try #require(audit.first { $0.itemID == alpha.id && $0.action == "sync.folder.update_quarantined" })
+        #expect(entry.metadata["reason"] == "duplicate_path")
+        #expect(entry.metadata["requestedPath"] == "Beta")
+    }
+
     @Test("Empty database loads empty folders array")
     func emptyDatabaseLoadsEmpty() throws {
         let (db, url) = try makeTestDB()
