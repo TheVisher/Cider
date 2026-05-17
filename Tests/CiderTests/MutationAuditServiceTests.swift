@@ -78,4 +78,31 @@ struct MutationAuditServiceTests {
         #expect(entries[0].source == .agent)
         #expect(entries[0].action == "delete")
     }
+
+    @Test("Mutation audit supports folder diagnostic sources")
+    func auditSupportsFolderDiagnosticSources() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = MutationAuditService(database: db)
+        let syncID = UUID()
+        let filesystemID = UUID()
+
+        service.record(
+            action: "sync.folder.create",
+            itemType: "vaultFolder",
+            itemID: syncID,
+            source: .sync
+        )
+        service.record(
+            action: "filesystem.folder.discover",
+            itemType: "vaultFolder",
+            itemID: filesystemID,
+            source: .filesystem
+        )
+
+        let entries = service.loadEntries()
+        #expect(entries.map(\.source).contains(.sync))
+        #expect(entries.map(\.source).contains(.filesystem))
+    }
 }

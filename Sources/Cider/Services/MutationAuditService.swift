@@ -7,6 +7,8 @@ enum MutationAuditSource: String, Codable, CaseIterable {
     case agent
     case migration
     case cleanup
+    case sync
+    case filesystem
 }
 
 @MainActor

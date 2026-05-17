@@ -120,6 +120,16 @@ final class VaultFolderService: ObservableObject {
         let folder = VaultFolder(relativePath: relativePath)
         index[folder.id] = folder
         persistFolderToDatabase(folder)
+        logFolderMutationDiagnostics(
+            origin: "createFolder",
+            action: "create",
+            folder: folder,
+            metadata: [
+                "requestedName": name,
+                "resolvedName": resolvedName,
+                "parentPath": parentPath ?? "",
+            ]
+        )
         saveIndex()
         rebuildFolders()
 
@@ -129,7 +139,13 @@ final class VaultFolderService: ObservableObject {
             action: "create",
             itemType: "vaultFolder",
             itemID: folder.id,
-            after: MutationAuditSnapshots.folder(folder)
+            after: MutationAuditSnapshots.folder(folder),
+            metadata: [
+                "origin": "createFolder",
+                "requestedName": name,
+                "resolvedName": resolvedName,
+                "parentPath": parentPath ?? "",
+            ]
         )
         return folder
     }
@@ -950,6 +966,29 @@ final class VaultFolderService: ObservableObject {
             if updatedAt > merged.updatedAt { merged.updatedAt = updatedAt }
             index[merged.id] = merged
             persistFolderToDatabase(merged)
+            logFolderMutationDiagnostics(
+                origin: "addFolderFromSync",
+                action: "merge_duplicate_path",
+                folder: merged,
+                metadata: [
+                    "remoteID": id.uuidString,
+                    "remoteName": name,
+                    "targetRelativePath": targetRelativePath,
+                ]
+            )
+            MutationAuditService.shared.record(
+                action: "sync.folder.merge_duplicate_path",
+                itemType: "vaultFolder",
+                itemID: merged.id,
+                after: MutationAuditSnapshots.folder(merged),
+                metadata: [
+                    "origin": "addFolderFromSync",
+                    "remoteID": id.uuidString,
+                    "remoteName": name,
+                    "targetRelativePath": targetRelativePath,
+                ],
+                source: .sync
+            )
             saveIndex()
             rebuildFolders()
             logger.warning("Sync: skipped duplicate folder '\(targetRelativePath, privacy: .public)' for remote id \(id.uuidString, privacy: .public); using existing local folder \(merged.id.uuidString, privacy: .public)")
@@ -982,6 +1021,31 @@ final class VaultFolderService: ObservableObject {
         )
         index[folder.id] = folder
         persistFolderToDatabase(folder)
+        logFolderMutationDiagnostics(
+            origin: "addFolderFromSync",
+            action: "create",
+            folder: folder,
+            metadata: [
+                "remoteID": id.uuidString,
+                "remoteName": name,
+                "resolvedName": resolvedName,
+                "parentPath": parentPath ?? "",
+            ]
+        )
+        MutationAuditService.shared.record(
+            action: "sync.folder.create",
+            itemType: "vaultFolder",
+            itemID: folder.id,
+            after: MutationAuditSnapshots.folder(folder),
+            metadata: [
+                "origin": "addFolderFromSync",
+                "remoteID": id.uuidString,
+                "remoteName": name,
+                "resolvedName": resolvedName,
+                "parentPath": parentPath ?? "",
+            ],
+            source: .sync
+        )
         saveIndex()
         rebuildFolders()
 
@@ -999,6 +1063,7 @@ final class VaultFolderService: ObservableObject {
         remoteUpdatedAt: Date
     ) {
         guard var folder = index[folderID] else { return }
+        let before = MutationAuditSnapshots.folder(folder)
 
         isMutating = true
         defer { isMutating = false }
@@ -1050,6 +1115,28 @@ final class VaultFolderService: ObservableObject {
         folder.updatedAt = remoteUpdatedAt
         index[folderID] = folder
         persistFolderToDatabase(folder)
+        logFolderMutationDiagnostics(
+            origin: "updateFolderFromSync",
+            action: "update",
+            folder: folder,
+            metadata: [
+                "remoteName": name,
+                "parentID": parentID?.uuidString ?? "",
+            ]
+        )
+        MutationAuditService.shared.record(
+            action: "sync.folder.update",
+            itemType: "vaultFolder",
+            itemID: folderID,
+            before: before,
+            after: MutationAuditSnapshots.folder(folder),
+            metadata: [
+                "origin": "updateFolderFromSync",
+                "remoteName": name,
+                "parentID": parentID?.uuidString ?? "",
+            ],
+            source: .sync
+        )
         saveIndex()
         rebuildFolders()
 
@@ -1242,6 +1329,23 @@ final class VaultFolderService: ObservableObject {
             let folder = VaultFolder(relativePath: diskPath)
             index[folder.id] = folder
             persistFolderToDatabase(folder)
+            logFolderMutationDiagnostics(
+                origin: "reconcileWithFilesystem",
+                action: "discover",
+                folder: folder,
+                metadata: ["diskPath": diskPath]
+            )
+            MutationAuditService.shared.record(
+                action: "filesystem.folder.discover",
+                itemType: "vaultFolder",
+                itemID: folder.id,
+                after: MutationAuditSnapshots.folder(folder),
+                metadata: [
+                    "origin": "reconcileWithFilesystem",
+                    "diskPath": diskPath,
+                ],
+                source: .filesystem
+            )
             logger.info("Discovered external folder: \(diskPath)")
             changed = true
         }
@@ -1319,6 +1423,27 @@ final class VaultFolderService: ObservableObject {
                 let folder = VaultFolder(relativePath: relativePath)
                 index[folder.id] = folder
                 persistFolderToDatabase(folder)
+                logFolderMutationDiagnostics(
+                    origin: "scanSubdirectories",
+                    action: "discover",
+                    folder: folder,
+                    metadata: [
+                        "parentPath": parentPath,
+                        "diskPath": relativePath,
+                    ]
+                )
+                MutationAuditService.shared.record(
+                    action: "filesystem.folder.discover_restored_subdirectory",
+                    itemType: "vaultFolder",
+                    itemID: folder.id,
+                    after: MutationAuditSnapshots.folder(folder),
+                    metadata: [
+                        "origin": "scanSubdirectories",
+                        "parentPath": parentPath,
+                        "diskPath": relativePath,
+                    ],
+                    source: .filesystem
+                )
             }
         }
     }
@@ -1389,6 +1514,7 @@ final class VaultFolderService: ObservableObject {
             index = loaded
             rebuildFolders()
             logger.info("Loaded \(loaded.count) folders from database")
+            logFolderInventoryDiagnostics(origin: "loadFromDatabase")
             return true
         } catch {
             logger.error("Failed to load folders from database — keeping stale in-memory state: \(error.localizedDescription)")
@@ -1535,5 +1661,129 @@ final class VaultFolderService: ObservableObject {
             if !siblingNames.contains(candidate) { return candidate }
             counter += 1
         }
+    }
+
+    private func logFolderMutationDiagnostics(
+        origin: String,
+        action: String,
+        folder: VaultFolder,
+        metadata: [String: String] = [:]
+    ) {
+        var details = folderDuplicateDiagnostics(for: folder)
+        if Self.hasNumericSuffix(folder.name) {
+            details.append("numericSuffixName")
+        }
+
+        let metadataSummary = metadata
+            .filter { !$0.value.isEmpty }
+            .map { "\($0.key)=\($0.value)" }
+            .sorted()
+            .joined(separator: " ")
+
+        if details.isEmpty {
+            logger.info("Folder mutation origin=\(origin, privacy: .public) action=\(action, privacy: .public) path='\(folder.relativePath, privacy: .public)' id=\(folder.id.uuidString, privacy: .public) totalFolders=\(self.index.count, privacy: .public) \(metadataSummary, privacy: .public)")
+        } else {
+            logger.warning("Folder duplicate diagnostic origin=\(origin, privacy: .public) action=\(action, privacy: .public) path='\(folder.relativePath, privacy: .public)' id=\(folder.id.uuidString, privacy: .public) reasons=\(details.joined(separator: ","), privacy: .public) totalFolders=\(self.index.count, privacy: .public) \(metadataSummary, privacy: .public)")
+        }
+    }
+
+    private func logFolderInventoryDiagnostics(origin: String) {
+        let folders = Array(index.values)
+        let numericSuffixCount = folders.filter { Self.hasNumericSuffix($0.name) }.count
+        let siblingDuplicateGroupCount = Dictionary(grouping: folders) { folder in
+            "\(folder.parentRelativePath ?? "")|\(Self.normalizedFolderDuplicateKey(folder.name))"
+        }
+        .values
+        .filter { group in
+            group.count > 1 && group.contains { Self.hasNumericSuffix($0.name) }
+        }
+        .count
+
+        let rootKeys = Set(
+            folders
+                .filter { $0.parentRelativePath == nil }
+                .map { Self.normalizedFolderDuplicateKey($0.name) }
+        )
+        let rootNestedCollisionCount = Set(
+            folders
+                .filter { $0.parentRelativePath != nil }
+                .map { Self.normalizedFolderDuplicateKey($0.name) }
+                .filter { rootKeys.contains($0) }
+        )
+        .count
+
+        guard numericSuffixCount > 0 || siblingDuplicateGroupCount > 0 || rootNestedCollisionCount > 0 else {
+            logger.info("Folder inventory origin=\(origin, privacy: .public) totalFolders=\(folders.count, privacy: .public) duplicateSignals=0")
+            return
+        }
+
+        let sample = folders
+            .filter { Self.hasNumericSuffix($0.name) }
+            .map(\.relativePath)
+            .sorted()
+            .prefix(8)
+            .joined(separator: ", ")
+        logger.warning("Folder inventory duplicate signals origin=\(origin, privacy: .public) totalFolders=\(folders.count, privacy: .public) numericSuffixFolders=\(numericSuffixCount, privacy: .public) siblingDuplicateGroups=\(siblingDuplicateGroupCount, privacy: .public) rootNestedCollisionKeys=\(rootNestedCollisionCount, privacy: .public) sample='\(sample, privacy: .public)'")
+    }
+
+    private func folderDuplicateDiagnostics(for folder: VaultFolder) -> [String] {
+        let key = Self.normalizedFolderDuplicateKey(folder.name)
+        var details: [String] = []
+
+        let siblingMatches = index.values
+            .filter { candidate in
+                candidate.id != folder.id &&
+                candidate.parentRelativePath == folder.parentRelativePath &&
+                Self.normalizedFolderDuplicateKey(candidate.name) == key
+            }
+            .map(\.relativePath)
+            .sorted()
+        if !siblingMatches.isEmpty {
+            details.append("sameParentNormalizedMatches=[\(siblingMatches.prefix(6).joined(separator: ","))]")
+        }
+
+        if folder.parentRelativePath == nil {
+            let nestedMatches = index.values
+                .filter { candidate in
+                    candidate.id != folder.id &&
+                    candidate.parentRelativePath != nil &&
+                    Self.normalizedFolderDuplicateKey(candidate.name) == key
+                }
+                .map(\.relativePath)
+                .sorted()
+            if !nestedMatches.isEmpty {
+                details.append("rootMatchesNested=[\(nestedMatches.prefix(6).joined(separator: ","))]")
+            }
+        } else {
+            let rootMatches = index.values
+                .filter { candidate in
+                    candidate.id != folder.id &&
+                    candidate.parentRelativePath == nil &&
+                    Self.normalizedFolderDuplicateKey(candidate.name) == key
+                }
+                .map(\.relativePath)
+                .sorted()
+            if !rootMatches.isEmpty {
+                details.append("nestedMatchesRoot=[\(rootMatches.prefix(6).joined(separator: ","))]")
+            }
+        }
+
+        return details
+    }
+
+    private static func normalizedFolderDuplicateKey(_ raw: String) -> String {
+        raw
+            .replacingOccurrences(
+                of: #"(?:\s+\d+)+$"#,
+                with: "",
+                options: .regularExpression
+            )
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func hasNumericSuffix(_ name: String) -> Bool {
+        name.range(of: #"\s+\d+$"#, options: .regularExpression) != nil
     }
 }
