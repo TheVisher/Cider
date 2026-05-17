@@ -46,5 +46,9 @@ struct FolderDeleteSafetyTests {
         #expect(!source.contains("func renameFolder("))
         #expect(!source.contains("func setFolderIcon("))
         #expect(!source.contains("func deleteFolder(_ folderID:"))
+        #expect(!source.contains("func setFolderCoverImage("))
+        #expect(!source.contains("func setFolderCoverOffset("))
+        #expect(!source.contains("func removeFolderCoverImage("))
+        #expect(!source.contains("func folderCoverImageURL(for folder: Folder)"))
     }
 }
