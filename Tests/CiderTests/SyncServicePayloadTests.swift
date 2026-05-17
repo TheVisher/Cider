@@ -151,6 +151,16 @@ struct SyncServicePayloadTests {
         #expect(partition.unresolved.isEmpty)
     }
 
+    @Test("pull apply runs folder integrity diagnostics after merge")
+    func pullApplyRunsFolderIntegrityDiagnosticsAfterMerge() throws {
+        let source = try String(
+            contentsOfFile: "Sources/Cider/Services/SyncService.swift",
+            encoding: .utf8
+        )
+
+        #expect(source.contains("VaultDoctor.shared.logStartupFolderIntegrity(origin: \"sync-pull\")"))
+    }
+
     @Test("note payload includes tags for web sync")
     @MainActor
     func notePayloadIncludesTags() {

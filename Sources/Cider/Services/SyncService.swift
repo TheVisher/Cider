@@ -943,6 +943,8 @@ final class SyncService: ObservableObject {
                 }
             }
         }
+
+        VaultDoctor.shared.logStartupFolderIntegrity(origin: "sync-pull")
     }
 
     // MARK: - Reconciliation
