@@ -51,4 +51,42 @@ struct FolderDeleteSafetyTests {
         #expect(!source.contains("func removeFolderCoverImage("))
         #expect(!source.contains("func folderCoverImageURL(for folder: Folder)"))
     }
+
+    @Test("Direct folder table writes remain behind approved backend and repair boundaries")
+    func directFolderTableWritesStayInApprovedFiles() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourcesRoot = projectRoot.appendingPathComponent("Sources/Cider")
+        let allowedFiles: Set<String> = [
+            "Sources/Cider/Services/VaultFolderService.swift",
+            "Sources/Cider/Services/VaultDoctor.swift",
+            "Sources/Cider/Services/CiderStorageAuditService.swift",
+            "Sources/Cider/Database/DatabaseMigrations.swift"
+        ]
+        let writePatterns = [
+            "INSERT INTO folders",
+            "REPLACE INTO folders",
+            "UPDATE folders",
+            "DELETE FROM folders"
+        ]
+
+        let files = FileManager.default.enumerator(
+            at: sourcesRoot,
+            includingPropertiesForKeys: nil
+        )?.compactMap { $0 as? URL } ?? []
+
+        for file in files where file.pathExtension == "swift" {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            guard writePatterns.contains(where: source.contains) else { continue }
+
+            let relativePath = file.path
+                .replacingOccurrences(of: projectRoot.path + "/", with: "")
+            #expect(
+                allowedFiles.contains(relativePath),
+                "Unexpected direct folder table write in \(relativePath)"
+            )
+        }
+    }
 }
