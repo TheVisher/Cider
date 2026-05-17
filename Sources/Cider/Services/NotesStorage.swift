@@ -871,6 +871,7 @@ final class NotesStorage: ObservableObject {
     @discardableResult
     func togglePin(_ noteID: UUID) -> Bool {
         guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
+        let before = MutationAuditSnapshots.note(notes[idx])
         notes[idx].isPinned.toggle()
         notes[idx].modifiedAt = Date()
         if var entry = index[noteID] {
@@ -885,6 +886,13 @@ final class NotesStorage: ObservableObject {
         saveIndex()
         if let pinnedNote = notes.first(where: { $0.id == noteID }) {
             persistNoteToDatabase(pinnedNote)
+            MutationAuditService(database: resolvedDatabase).record(
+                action: "toggle_pin",
+                itemType: "note",
+                itemID: noteID,
+                before: before,
+                after: MutationAuditSnapshots.note(pinnedNote)
+            )
         }
         SyncService.shared.pushAfterLocalChange()
         return true
@@ -1022,9 +1030,18 @@ final class NotesStorage: ObservableObject {
         if notes[idx].tags.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
             return true
         }
+        let before = MutationAuditSnapshots.note(notes[idx])
         notes[idx].tags.append(trimmed)
         notes[idx].modifiedAt = Date()
         persistNoteToDatabase(notes[idx])
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "add_tag",
+            itemType: "note",
+            itemID: noteID,
+            before: before,
+            after: MutationAuditSnapshots.note(notes[idx]),
+            metadata: ["tag": trimmed]
+        )
         return true
     }
 
@@ -1033,11 +1050,22 @@ final class NotesStorage: ObservableObject {
     @discardableResult
     func removeTag(_ noteID: UUID, tag: String) -> Bool {
         guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
+        let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
         let before = notes[idx].tags.count
-        notes[idx].tags.removeAll { $0.caseInsensitiveCompare(tag) == .orderedSame }
+        let beforeSnapshot = MutationAuditSnapshots.note(notes[idx])
+        notes[idx].tags.removeAll { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
         guard notes[idx].tags.count != before else { return false }
         notes[idx].modifiedAt = Date()
         persistNoteToDatabase(notes[idx])
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "remove_tag",
+            itemType: "note",
+            itemID: noteID,
+            before: beforeSnapshot,
+            after: MutationAuditSnapshots.note(notes[idx]),
+            metadata: ["tag": trimmed]
+        )
         return true
     }
 

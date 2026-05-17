@@ -78,6 +78,40 @@ struct NotesSQLiteTests {
         #expect(names == ["architecture", "cider"])
     }
 
+    @Test("addTag and removeTag record mutation audit entries")
+    func tagMutationsRecordAuditEntries() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+        let note = Note(
+            title: "Audited Tags",
+            content: "body",
+            relativePath: "Inbox/Notes/Audited Tags.md"
+        )
+        service.persistNoteToDatabase(db, note: note)
+
+        let service2 = makeService(db)
+        service2.loadNotesFromDatabase(db)
+
+        #expect(service2.addTag(note.id, tag: "architecture") == true)
+        #expect(service2.removeTag(note.id, tag: "architecture") == true)
+
+        let entries = MutationAuditService(database: db).loadEntries()
+        let add = entries.first { $0.itemID == note.id && $0.action == "add_tag" }
+        let remove = entries.first { $0.itemID == note.id && $0.action == "remove_tag" }
+
+        #expect(add?.itemType == "note")
+        #expect(add?.beforeState["tagCount"] == "0")
+        #expect(add?.afterState["tagCount"] == "1")
+        #expect(add?.metadata["tag"] == "architecture")
+
+        #expect(remove?.itemType == "note")
+        #expect(remove?.beforeState["tagCount"] == "1")
+        #expect(remove?.afterState["tagCount"] == "0")
+        #expect(remove?.metadata["tag"] == "architecture")
+    }
+
     @Test("Note tags round-trip through item_tags join table")
     func noteTagsRoundTrip() throws {
         let (db, url) = try makeTestDB()
@@ -620,6 +654,33 @@ struct NotesSQLiteTests {
         #expect(verify.notes.count == 1)
         #expect(verify.notes[0].isPinned == true)
         #expect(verify.indexEntryCount == 1)
+    }
+
+    @Test("togglePin records mutation audit entry")
+    func togglePinRecordsMutationAuditEntry() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let initial = makeService(db)
+        let note = Note(
+            title: "Audit Pin",
+            content: "Body",
+            relativePath: "Inbox/Notes/Audit Pin.md",
+            isPinned: false
+        )
+        initial.persistNoteToDatabase(db, note: note)
+
+        let service = makeService(db)
+        service.loadNotesFromDatabase(db)
+
+        let toggled = service.togglePin(note.id)
+        #expect(toggled == true)
+
+        let entries = MutationAuditService(database: db).loadEntries()
+        let entry = entries.first { $0.itemID == note.id && $0.action == "toggle_pin" }
+        #expect(entry?.itemType == "note")
+        #expect(entry?.beforeState["isPinned"] == "false")
+        #expect(entry?.afterState["isPinned"] == "true")
     }
 
     @Test("assignLabel through high-level API persists after DB-first load")
