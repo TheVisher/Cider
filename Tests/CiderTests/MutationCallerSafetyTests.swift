@@ -78,4 +78,44 @@ struct MutationCallerSafetyTests {
 
         #expect(unchecked.isEmpty, "Unchecked UI domain assignment callers:\n\(unchecked.joined(separator: "\n"))")
     }
+
+    @Test("Folder restore assignment callers check success before reporting restored")
+    func folderRestoreAssignmentCallersCheckSuccessResult() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let fileURL = repoRoot.appendingPathComponent("Sources/CiderCLI/CiderCLI.swift")
+        let source = try String(contentsOf: fileURL, encoding: .utf8)
+        guard let restoreStart = source.range(of: "case \"restore\":") else {
+            Issue.record("Could not find folder restore handler")
+            return
+        }
+        guard let fallbackStart = source[restoreStart.upperBound...].range(of: "default:") else {
+            Issue.record("Could not find folder restore handler end")
+            return
+        }
+        let restoreBody = source[restoreStart.lowerBound..<fallbackStart.lowerBound]
+        let restoreStartLine = source[..<restoreStart.lowerBound]
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .count
+        let assignmentCalls = [
+            "NotesStorage.shared.assignNote(",
+            "VaultBookmarkService.shared.assignBookmark(",
+            "TodoCardStorage.shared.assignTodoCard(",
+            "DateCardStorage.shared.assignDateCard(",
+            "ContactStorage.shared.assignContact(",
+        ]
+        var unchecked: [String] = []
+
+        for (offset, line) in restoreBody.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+            guard assignmentCalls.contains(where: { line.contains($0) }) else { continue }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let checksResult = trimmed.hasPrefix("guard ")
+                || trimmed.hasPrefix("if ")
+                || trimmed.hasPrefix("let ")
+            if !checksResult {
+                unchecked.append("Sources/CiderCLI/CiderCLI.swift:\(restoreStartLine + offset + 1): \(trimmed)")
+            }
+        }
+
+        #expect(unchecked.isEmpty, "Unchecked folder restore assignment callers:\n\(unchecked.joined(separator: "\n"))")
+    }
 }

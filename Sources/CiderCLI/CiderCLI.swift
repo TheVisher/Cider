@@ -4007,9 +4007,12 @@ struct CiderCLI {
                     if note.folderID != nil {
                         skippedRefiled.append(item); continue
                     }
-                    _ = NotesStorage.shared.assignNote(note.id, toFolder: targetFolder.id)
-                    print("  ↺ note: \(item.title) → \(item.previousFolderPath)")
-                    restored += 1
+                    if NotesStorage.shared.assignNote(note.id, toFolder: targetFolder.id) {
+                        print("  ↺ note: \(item.title) → \(item.previousFolderPath)")
+                        restored += 1
+                    } else {
+                        misses.append(item)
+                    }
                 case "bookmark":
                     guard let bm = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == item.itemID }) else {
                         misses.append(item); continue
@@ -4017,9 +4020,12 @@ struct CiderCLI {
                     if bm.folderID != nil {
                         skippedRefiled.append(item); continue
                     }
-                    _ = VaultBookmarkService.shared.assignBookmark(bm.id, toFolder: targetFolder.id)
-                    print("  ↺ bookmark: \(item.title) → \(item.previousFolderPath)")
-                    restored += 1
+                    if VaultBookmarkService.shared.assignBookmark(bm.id, toFolder: targetFolder.id) {
+                        print("  ↺ bookmark: \(item.title) → \(item.previousFolderPath)")
+                        restored += 1
+                    } else {
+                        misses.append(item)
+                    }
                 case "vaultFile":
                     guard let file = VaultFileService.shared.files.first(where: { $0.id == item.itemID }) else {
                         misses.append(item); continue
@@ -4040,9 +4046,12 @@ struct CiderCLI {
                     if todo.folderID != nil {
                         skippedRefiled.append(item); continue
                     }
-                    _ = TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: targetFolder.id)
-                    print("  ↺ todo: \(item.title) → \(item.previousFolderPath)")
-                    restored += 1
+                    if TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: targetFolder.id) {
+                        print("  ↺ todo: \(item.title) → \(item.previousFolderPath)")
+                        restored += 1
+                    } else {
+                        misses.append(item)
+                    }
                 case "event":
                     guard let dc = DateCardStorage.shared.dateCards.first(where: { $0.id == item.itemID }) else {
                         misses.append(item); continue
@@ -4050,9 +4059,12 @@ struct CiderCLI {
                     if dc.folderID != nil {
                         skippedRefiled.append(item); continue
                     }
-                    _ = DateCardStorage.shared.assignDateCard(dc.id, toFolder: targetFolder.id)
-                    print("  ↺ event: \(item.title) → \(item.previousFolderPath)")
-                    restored += 1
+                    if DateCardStorage.shared.assignDateCard(dc.id, toFolder: targetFolder.id) {
+                        print("  ↺ event: \(item.title) → \(item.previousFolderPath)")
+                        restored += 1
+                    } else {
+                        misses.append(item)
+                    }
                 case "contact":
                     guard let contact = ContactStorage.shared.contacts.first(where: { $0.id == item.itemID }) else {
                         misses.append(item); continue
@@ -4060,9 +4072,12 @@ struct CiderCLI {
                     if contact.folderID != nil {
                         skippedRefiled.append(item); continue
                     }
-                    _ = ContactStorage.shared.assignContact(contact.id, toFolder: targetFolder.id)
-                    print("  ↺ contact: \(item.title) → \(item.previousFolderPath)")
-                    restored += 1
+                    if ContactStorage.shared.assignContact(contact.id, toFolder: targetFolder.id) {
+                        print("  ↺ contact: \(item.title) → \(item.previousFolderPath)")
+                        restored += 1
+                    } else {
+                        misses.append(item)
+                    }
                 default:
                     misses.append(item)
                 }
