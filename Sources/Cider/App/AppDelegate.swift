@@ -133,6 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // with folder_id FKs to an empty folders table — every insert fails.
         _ = CardLabelStorage.shared   // no FK deps; referenced by item_labels
         _ = VaultFolderService.shared // no FK deps; referenced by items.folder_id
+        VaultDoctor.shared.logStartupFolderIntegrity()
 
         configureSettings()
         configureNotes()

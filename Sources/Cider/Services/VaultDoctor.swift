@@ -107,16 +107,8 @@ final class VaultDoctor {
     /// Runs every check and returns a structured Report. Read-only.
     func scan() -> Report {
         let started = Date()
-        var findings: [Finding] = []
-
-        findings.append(contentsOf: scanGhostFolderRows())
-        findings.append(contentsOf: scanUntrackedDirectories())
-        findings.append(contentsOf: scanStaleItemFolderRefs())
-        findings.append(contentsOf: scanStaleSessionFolderRefs())
-        findings.append(contentsOf: scanDuplicateFolderPaths())
+        var findings = scanFolderIntegrityFindings()
         findings.append(contentsOf: scanOrphanBreadcrumbs())
-        findings.append(contentsOf: scanReservedPathsInFolders())
-        findings.append(contentsOf: scanSuspiciousFlattenedFolderDuplicates())
         findings.append(contentsOf: scanDuplicateVaultEntities())
 
         return Report(
@@ -124,6 +116,49 @@ final class VaultDoctor {
             finishedAt: Date(),
             findings: findings
         )
+    }
+
+    /// Runs only folder-critical checks that are cheap and safe enough for startup.
+    /// This intentionally excludes duplicate entity scans and trash housekeeping.
+    func scanFolderIntegrity() -> Report {
+        let started = Date()
+        return Report(
+            startedAt: started,
+            finishedAt: Date(),
+            findings: scanFolderIntegrityFindings()
+        )
+    }
+
+    func logStartupFolderIntegrity(origin: String = "startup") {
+        let report = scanFolderIntegrity()
+        guard !report.findings.isEmpty else {
+            logger.info("Folder integrity \(origin, privacy: .public): no findings")
+            return
+        }
+
+        let grouped = Dictionary(grouping: report.findings, by: \.kind)
+            .map { "\($0.key.rawValue)=\($0.value.count)" }
+            .sorted()
+            .joined(separator: " ")
+        let errorCount = report.counts[.error, default: 0]
+        let warningCount = report.counts[.warning, default: 0]
+        logger.warning("Folder integrity \(origin, privacy: .public): findings=\(report.findings.count, privacy: .public) errors=\(errorCount, privacy: .public) warnings=\(warningCount, privacy: .public) \(grouped, privacy: .public)")
+
+        for finding in report.findings.prefix(10) {
+            logger.warning("Folder integrity finding \(origin, privacy: .public): kind=\(finding.kind.rawValue, privacy: .public) severity=\(finding.severity.rawValue, privacy: .public) summary='\(finding.summary, privacy: .public)' detail='\(finding.detail, privacy: .public)'")
+        }
+    }
+
+    private func scanFolderIntegrityFindings() -> [Finding] {
+        var findings: [Finding] = []
+        findings.append(contentsOf: scanGhostFolderRows())
+        findings.append(contentsOf: scanUntrackedDirectories())
+        findings.append(contentsOf: scanStaleItemFolderRefs())
+        findings.append(contentsOf: scanStaleSessionFolderRefs())
+        findings.append(contentsOf: scanDuplicateFolderPaths())
+        findings.append(contentsOf: scanReservedPathsInFolders())
+        findings.append(contentsOf: scanSuspiciousFlattenedFolderDuplicates())
+        return findings
     }
 
     // MARK: - Checks
