@@ -184,7 +184,7 @@ final class MutationAuditService {
 
 enum MutationAuditSnapshots {
     static func folder(_ folder: VaultFolder) -> [String: String] {
-        compact([
+        return compact([
             ("name", folder.name),
             ("relativePath", folder.relativePath),
             ("parentRelativePath", folder.parentRelativePath),
@@ -195,7 +195,7 @@ enum MutationAuditSnapshots {
     }
 
     static func bookmark(_ bookmark: Bookmark) -> [String: String] {
-        compact([
+        return compact([
             ("title", bookmark.title),
             ("url", bookmark.urlString),
             ("folderID", bookmark.folderID?.uuidString),
@@ -223,6 +223,7 @@ enum MutationAuditSnapshots {
             ("dueDate", dateString(todo.dueDate)),
             ("priority", todo.priority?.rawValue),
             ("isCompleted", boolString(todo.isCompleted)),
+            ("checklistCount", String(todo.checklist.count)),
         ])
     }
 
@@ -248,12 +249,24 @@ enum MutationAuditSnapshots {
     }
 
     static func vaultFile(_ file: VaultFile) -> [String: String] {
-        compact([
+        vaultFile(file, metadata: nil)
+    }
+
+    static func vaultFile(_ file: VaultFile, metadata: VaultFileMetadata?) -> [String: String] {
+        let title = metadata?.title ?? file.title
+        let notes = metadata?.notes ?? file.notes
+        let labelCount = metadata?.labelIDs.count ?? file.labelIDs.count
+        let tagCount = metadata?.tags.count ?? file.tags.count
+        return compact([
             ("filename", file.filename),
             ("displayTitle", file.displayTitle),
+            ("title", title),
+            ("notes", notes),
             ("folderID", file.folderID?.uuidString),
             ("relativePath", file.relativePath),
             ("fileType", file.fileType.rawValue),
+            ("tagCount", String(tagCount)),
+            ("labelCount", String(labelCount)),
         ])
     }
 

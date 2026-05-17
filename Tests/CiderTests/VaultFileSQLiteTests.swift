@@ -428,6 +428,61 @@ struct VaultFileSQLiteTests {
         #expect(loaded?.titleManuallySet == true)
     }
 
+    @Test("Vault file metadata mutations record audit entries")
+    func vaultFileMetadataMutationsRecordAuditEntries() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let labelStorage = CardLabelStorage(database: db)
+        let label = labelStorage.createLabel(name: "Evidence")
+        let service = makeService(db)
+        let file = makeFile(filename: "evidence.pdf", fileType: .pdf, title: nil, notes: "")
+        service.persistVaultFileToDatabase(db, file: file)
+
+        service.updateTitle(file, title: "Case Notes")
+        service.updateNotes(file, notes: "Reviewed")
+        service.addTag(file, tag: "research")
+        service.removeTag(file, tag: "Research")
+        service.assignLabel(file, labelID: label.id)
+        service.removeLabel(file, labelID: label.id)
+
+        let entries = MutationAuditService(database: db).loadEntries()
+        let title = entries.first { $0.itemID == file.id && $0.action == "update_title" }
+        let notes = entries.first { $0.itemID == file.id && $0.action == "update_notes" }
+        let addTag = entries.first { $0.itemID == file.id && $0.action == "add_tag" }
+        let removeTag = entries.first { $0.itemID == file.id && $0.action == "remove_tag" }
+        let assignLabel = entries.first { $0.itemID == file.id && $0.action == "assign_label" }
+        let removeLabel = entries.first { $0.itemID == file.id && $0.action == "remove_label" }
+
+        #expect(title?.itemType == "vaultFile")
+        #expect(title?.beforeState["title"] == nil)
+        #expect(title?.afterState["title"] == "Case Notes")
+
+        #expect(notes?.itemType == "vaultFile")
+        #expect(notes?.beforeState["notes"] == "")
+        #expect(notes?.afterState["notes"] == "Reviewed")
+
+        #expect(addTag?.itemType == "vaultFile")
+        #expect(addTag?.metadata["tag"] == "research")
+        #expect(addTag?.beforeState["tagCount"] == "0")
+        #expect(addTag?.afterState["tagCount"] == "1")
+
+        #expect(removeTag?.itemType == "vaultFile")
+        #expect(removeTag?.metadata["tag"] == "Research")
+        #expect(removeTag?.beforeState["tagCount"] == "1")
+        #expect(removeTag?.afterState["tagCount"] == "0")
+
+        #expect(assignLabel?.itemType == "vaultFile")
+        #expect(assignLabel?.metadata["labelID"] == label.id.uuidString)
+        #expect(assignLabel?.beforeState["labelCount"] == "0")
+        #expect(assignLabel?.afterState["labelCount"] == "1")
+
+        #expect(removeLabel?.itemType == "vaultFile")
+        #expect(removeLabel?.metadata["labelID"] == label.id.uuidString)
+        #expect(removeLabel?.beforeState["labelCount"] == "1")
+        #expect(removeLabel?.afterState["labelCount"] == "0")
+    }
+
     // MARK: - 13c. Enrichment-set title doesn't flag titleManuallySet
 
     @Test("Enrichment-suggested title does not flip titleManuallySet")

@@ -229,7 +229,7 @@ final class TodoCardStorage: ObservableObject {
         todoCards.append(todoCard)
         sortCards()
         persistTodoToDatabase(todoCard)
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "create",
             itemType: "todo",
             itemID: todoCard.id,
@@ -302,15 +302,13 @@ final class TodoCardStorage: ObservableObject {
         saveIndex()
         sortCards()
         persistTodoToDatabase(copy)
-        if beforeCard.title != copy.title {
-            MutationAuditService.shared.record(
-                action: "rename",
-                itemType: "todo",
-                itemID: copy.id,
-                before: before,
-                after: MutationAuditSnapshots.todo(copy)
-            )
-        }
+        MutationAuditService(database: resolvedDatabase).record(
+            action: beforeCard.title != copy.title ? "rename" : "update",
+            itemType: "todo",
+            itemID: copy.id,
+            before: before,
+            after: MutationAuditSnapshots.todo(copy)
+        )
         return true
     }
 
@@ -330,7 +328,7 @@ final class TodoCardStorage: ObservableObject {
         index.removeValue(forKey: id)
         saveIndex()
         deleteTodoFromDatabase(id)
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "delete",
             itemType: "todo",
             itemID: id,
@@ -343,11 +341,20 @@ final class TodoCardStorage: ObservableObject {
     @discardableResult
     func markCompleted(_ id: UUID, completed: Bool) -> Bool {
         guard let idx = todoCards.firstIndex(where: { $0.id == id }) else { return false }
+        let before = MutationAuditSnapshots.todo(todoCards[idx])
         todoCards[idx].isCompleted = completed
         todoCards[idx].completedAt = completed ? Date() : nil
         if completed { todoCards[idx].snoozedUntil = nil }
         todoCards[idx].updatedAt = Date()
         writeAndUpdateIndex(for: todoCards[idx])
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "set_completed",
+            itemType: "todo",
+            itemID: id,
+            before: before,
+            after: MutationAuditSnapshots.todo(todoCards[idx]),
+            metadata: ["completed": completed ? "true" : "false"]
+        )
         return true
     }
 
@@ -359,6 +366,7 @@ final class TodoCardStorage: ObservableObject {
         }
         let wasCompleted = todoCards[todoIdx].checklist[itemIdx].isCompleted
         let itemTitle = todoCards[todoIdx].checklist[itemIdx].title
+        let before = MutationAuditSnapshots.todo(todoCards[todoIdx])
         todoCards[todoIdx].checklist[itemIdx].isCompleted = !wasCompleted
         todoCards[todoIdx].checklist[itemIdx].completedAt = wasCompleted ? nil : Date()
         let dateStr = Date().formatted(.dateTime.month(.abbreviated).day())
@@ -366,6 +374,18 @@ final class TodoCardStorage: ObservableObject {
         appendToNotes(todoIdx: todoIdx, entry: logEntry)
         todoCards[todoIdx].updatedAt = Date()
         writeAndUpdateIndex(for: todoCards[todoIdx])
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "toggle_checklist_item",
+            itemType: "todo",
+            itemID: todoID,
+            before: before,
+            after: MutationAuditSnapshots.todo(todoCards[todoIdx]),
+            metadata: [
+                "checklistItemID": checklistItemID.uuidString,
+                "checklistItemTitle": itemTitle,
+                "completed": wasCompleted ? "false" : "true",
+            ]
+        )
         return true
     }
 
@@ -377,10 +397,25 @@ final class TodoCardStorage: ObservableObject {
             return false
         }
         let wasCompleted = todoCards[todoIdx].checklist[itemIdx].subtasks[subIdx].isCompleted
+        let subtaskTitle = todoCards[todoIdx].checklist[itemIdx].subtasks[subIdx].title
+        let before = MutationAuditSnapshots.todo(todoCards[todoIdx])
         todoCards[todoIdx].checklist[itemIdx].subtasks[subIdx].isCompleted = !wasCompleted
         todoCards[todoIdx].checklist[itemIdx].subtasks[subIdx].completedAt = wasCompleted ? nil : Date()
         todoCards[todoIdx].updatedAt = Date()
         writeAndUpdateIndex(for: todoCards[todoIdx])
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "toggle_subtask",
+            itemType: "todo",
+            itemID: todoID,
+            before: before,
+            after: MutationAuditSnapshots.todo(todoCards[todoIdx]),
+            metadata: [
+                "checklistItemID": checklistItemID.uuidString,
+                "subtaskID": subtaskID.uuidString,
+                "subtaskTitle": subtaskTitle,
+                "completed": wasCompleted ? "false" : "true",
+            ]
+        )
         return true
     }
 
@@ -427,7 +462,7 @@ final class TodoCardStorage: ObservableObject {
         index[id] = updatedEntry
         saveIndex()
         persistTodoToDatabase(todoCards[idx])
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "reassign_folder",
             itemType: "todo",
             itemID: id,
@@ -531,7 +566,7 @@ final class TodoCardStorage: ObservableObject {
         todoCards.append(todoCard)
         sortCards()
         persistTodoToDatabase(todoCard)
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "restore",
             itemType: "todo",
             itemID: todoCard.id,

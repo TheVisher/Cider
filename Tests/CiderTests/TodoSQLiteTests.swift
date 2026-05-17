@@ -37,6 +37,11 @@ struct TodoSQLiteTests {
         TodoCardStorage(database: db)
     }
 
+    private func makeTempVaultURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-todo-vault-\(UUID().uuidString)", isDirectory: true)
+    }
+
     // MARK: - Basic Round-Trip
 
     @Test("Todo round-trips through SQLite: persist and load")
@@ -231,6 +236,62 @@ struct TodoSQLiteTests {
         #expect(loaded.details == "New details")
         #expect(loaded.priority == .medium)
         #expect(loaded.isCompleted == true)
+    }
+
+    @Test("Todo update completion and checklist mutations record audit entries")
+    func todoMetadataMutationsRecordAuditEntries() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(
+            at: StoragePaths.cachedInboxSubdirectoryURL(for: .todos),
+            withIntermediateDirectories: true
+        )
+
+        let checklistItem = TodoChecklistItem(title: "Draft proof", sortOrder: 0)
+        let todo = TodoCard(
+            title: "Audited Todo",
+            details: "Before details",
+            checklist: [checklistItem]
+        )
+        let seed = makeService(db)
+        seed.persistTodoToDatabase(db, todo: todo)
+
+        let service = makeService(db)
+        service.loadTodosFromDatabase(db)
+
+        var updated = try #require(service.todoCard(for: todo.id))
+        updated.details = "After details"
+        updated.priority = .high
+        #expect(service.updateTodoCard(updated) == true)
+        #expect(service.markCompleted(todo.id, completed: true) == true)
+        #expect(service.toggleChecklistItem(todo.id, checklistItemID: checklistItem.id) == true)
+
+        let entries = MutationAuditService(database: db).loadEntries()
+        let update = entries.first { $0.itemID == todo.id && $0.action == "update" }
+        let completed = entries.first { $0.itemID == todo.id && $0.action == "set_completed" }
+        let checklist = entries.first { $0.itemID == todo.id && $0.action == "toggle_checklist_item" }
+
+        #expect(update?.itemType == "todo")
+        #expect(update?.beforeState["priority"] == nil)
+        #expect(update?.afterState["priority"] == "high")
+
+        #expect(completed?.itemType == "todo")
+        #expect(completed?.beforeState["isCompleted"] == "false")
+        #expect(completed?.afterState["isCompleted"] == "true")
+
+        #expect(checklist?.itemType == "todo")
+        #expect(checklist?.metadata["checklistItemID"] == checklistItem.id.uuidString)
+        #expect(checklist?.metadata["checklistItemTitle"] == "Draft proof")
     }
 
     // MARK: - Delete

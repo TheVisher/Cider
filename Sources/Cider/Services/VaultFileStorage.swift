@@ -83,6 +83,7 @@ final class VaultFileStorage: ObservableObject {
     // have a VaultFile in hand — pass it through.
 
     func updateTitle(_ file: VaultFile, title: String?) {
+        let before = snapshot(for: file)
         ensureEntry(file.id)
         metadata[file.id]?.title = title
         // Explicit title from the user: flag as manually set so load() restores
@@ -90,26 +91,61 @@ final class VaultFileStorage: ObservableObject {
         let hasTitle = (title?.isEmpty == false)
         metadata[file.id]?.titleManuallySet = hasTitle
         persistVaultFileToDatabase(file)
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "update_title",
+            itemType: "vaultFile",
+            itemID: file.id,
+            before: before,
+            after: snapshot(for: file)
+        )
     }
 
     func updateNotes(_ file: VaultFile, notes: String) {
+        let before = snapshot(for: file)
         ensureEntry(file.id)
         metadata[file.id]?.notes = notes
         persistVaultFileToDatabase(file)
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "update_notes",
+            itemType: "vaultFile",
+            itemID: file.id,
+            before: before,
+            after: snapshot(for: file)
+        )
     }
 
     func assignLabel(_ file: VaultFile, labelID: UUID) {
         ensureEntry(file.id)
         if metadata[file.id]?.labelIDs.contains(labelID) == false {
+            let before = snapshot(for: file)
             metadata[file.id]?.labelIDs.append(labelID)
             persistVaultFileToDatabase(file)
+            MutationAuditService(database: resolvedDatabase).record(
+                action: "assign_label",
+                itemType: "vaultFile",
+                itemID: file.id,
+                before: before,
+                after: snapshot(for: file),
+                metadata: ["labelID": labelID.uuidString]
+            )
         }
     }
 
     func removeLabel(_ file: VaultFile, labelID: UUID) {
         guard metadata[file.id] != nil else { return }
+        let before = snapshot(for: file)
+        let labelCount = metadata[file.id]?.labelIDs.count ?? 0
         metadata[file.id]?.labelIDs.removeAll { $0 == labelID }
+        guard metadata[file.id]?.labelIDs.count != labelCount else { return }
         persistVaultFileToDatabase(file)
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "remove_label",
+            itemType: "vaultFile",
+            itemID: file.id,
+            before: before,
+            after: snapshot(for: file),
+            metadata: ["labelID": labelID.uuidString]
+        )
     }
 
     /// Add a free-text tag to the file (case-insensitive dedup).
@@ -121,8 +157,17 @@ final class VaultFileStorage: ObservableObject {
         ensureEntry(file.id)
         let already = metadata[file.id]?.tags.contains { $0.caseInsensitiveCompare(trimmed) == .orderedSame } ?? false
         if !already {
+            let before = snapshot(for: file)
             metadata[file.id]?.tags.append(trimmed)
             persistVaultFileToDatabase(file)
+            MutationAuditService(database: resolvedDatabase).record(
+                action: "add_tag",
+                itemType: "vaultFile",
+                itemID: file.id,
+                before: before,
+                after: snapshot(for: file),
+                metadata: ["tag": trimmed]
+            )
         }
         return true
     }
@@ -131,11 +176,20 @@ final class VaultFileStorage: ObservableObject {
     @discardableResult
     func removeTag(_ file: VaultFile, tag: String) -> Bool {
         guard metadata[file.id] != nil else { return false }
+        let beforeSnapshot = snapshot(for: file)
         let before = metadata[file.id]?.tags.count ?? 0
         metadata[file.id]?.tags.removeAll { $0.caseInsensitiveCompare(tag) == .orderedSame }
         let after = metadata[file.id]?.tags.count ?? 0
         guard before != after else { return false }
         persistVaultFileToDatabase(file)
+        MutationAuditService(database: resolvedDatabase).record(
+            action: "remove_tag",
+            itemType: "vaultFile",
+            itemID: file.id,
+            before: beforeSnapshot,
+            after: snapshot(for: file),
+            metadata: ["tag": tag]
+        )
         return true
     }
 
@@ -208,6 +262,10 @@ final class VaultFileStorage: ObservableObject {
         if metadata[fileID] == nil {
             metadata[fileID] = VaultFileMetadata()
         }
+    }
+
+    private func snapshot(for file: VaultFile) -> [String: String] {
+        MutationAuditSnapshots.vaultFile(file, metadata: metadata[file.id])
     }
 
     // MARK: - Database Persistence
