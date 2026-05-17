@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Testing
 @testable import Cider
 
@@ -124,6 +125,28 @@ struct LazyMasonryViewTests {
         )
 
         #expect(updatedPlan == initialPlan)
+    }
+
+    @Test("lazy masonry body tolerates duplicate item ids")
+    @MainActor
+    func lazyMasonryBodyToleratesDuplicateItemIDs() {
+        let items = [
+            TestItem(id: "a", estimatedHeight: 200),
+            TestItem(id: "a", estimatedHeight: 120),
+            TestItem(id: "b", estimatedHeight: 180),
+        ]
+
+        let view = LazyMasonryView(
+            items: items,
+            minimumColumnWidth: 120,
+            itemSpacing: 8,
+            viewportWidth: 260,
+            estimatedHeight: { item, _ in item.estimatedHeight }
+        ) { item, _ in
+            Text(item.id)
+        }
+
+        _ = view.body
     }
 
     @Test("thumbnail cache stores aspect ratio for masonry sizing")

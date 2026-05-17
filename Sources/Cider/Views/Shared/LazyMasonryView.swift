@@ -22,7 +22,7 @@ struct LazyMasonryView<Item: Identifiable, Content: View>: View {
             itemSpacing: itemSpacing
         )
         let renderingColumnWidth = LazyMasonryColumnPlanner.renderingColumnWidth(for: layout)
-        let itemLookup = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        let itemLookup = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let resolvedPlan = LazyMasonryColumnPlanner.stablePlan(
             items: items,
             layout: layout,
