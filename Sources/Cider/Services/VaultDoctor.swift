@@ -72,6 +72,7 @@ final class VaultDoctor {
             case duplicateBookmarkURL // bookmarks with same canonical URL
             case duplicateContactEmail // contacts with same normalized email
             case duplicateContactPhone // contacts with same normalized phone
+            case untrackedDuplicateMarkdown // markdown file exists on disk but is an exact copy of a tracked note
         }
 
         /// Fix-action payload. Decoded opaquely — NOT user-facing.
@@ -112,6 +113,7 @@ final class VaultDoctor {
         var findings = scanFolderIntegrityFindings()
         findings.append(contentsOf: scanOrphanBreadcrumbs())
         findings.append(contentsOf: scanDuplicateVaultEntities())
+        findings.append(contentsOf: scanUntrackedDuplicateMarkdownArtifacts())
 
         return Report(
             startedAt: started,
@@ -611,6 +613,80 @@ final class VaultDoctor {
         }
     }
 
+    private func scanUntrackedDuplicateMarkdownArtifacts() -> [Finding] {
+        guard let db = database else { return [] }
+        return scanUntrackedDuplicateMarkdownArtifacts(vaultRoot: vaultRoot, database: db)
+    }
+
+    func scanUntrackedDuplicateMarkdownArtifacts(
+        vaultRoot: URL,
+        database db: CiderDatabase
+    ) -> [Finding] {
+        let fm = FileManager.default
+        var trackedPaths = Set<String>()
+        var trackedPathsByContent: [String: [String]] = [:]
+
+        do {
+            let stmt = try db.prepare("""
+                SELECT i.relative_path
+                FROM items i
+                WHERE i.type = 'note'
+                  AND i.relative_path IS NOT NULL
+                ORDER BY i.relative_path COLLATE NOCASE;
+                """)
+            while try stmt.step() {
+                guard let relativePath = stmt.optionalString(at: 0) else { continue }
+                trackedPaths.insert(relativePath)
+                let trackedURL = vaultRoot.appendingPathComponent(relativePath)
+                guard let content = try? String(contentsOf: trackedURL, encoding: .utf8) else {
+                    continue
+                }
+                guard !content.isEmpty else { continue }
+                trackedPathsByContent[content, default: []].append(relativePath)
+            }
+        } catch {
+            logger.error("scanUntrackedDuplicateMarkdownArtifacts: \(error.localizedDescription)")
+            return []
+        }
+
+        guard !trackedPathsByContent.isEmpty,
+              let enumerator = fm.enumerator(
+                at: vaultRoot,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+              ) else { return [] }
+
+        var out: [Finding] = []
+        for case let url as URL in enumerator {
+            guard url.pathExtension.lowercased() == "md",
+                  let isRegular = try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile,
+                  isRegular else { continue }
+            let relativePath = Self.relativePath(for: url, under: vaultRoot)
+            guard !trackedPaths.contains(relativePath),
+                  let content = try? String(contentsOf: url, encoding: .utf8),
+                  let canonicalPaths = trackedPathsByContent[content],
+                  !canonicalPaths.isEmpty else { continue }
+
+            out.append(Finding(
+                id: "untracked-duplicate-markdown-\(Self.findingIDPathComponent(relativePath))",
+                kind: .untrackedDuplicateMarkdown,
+                severity: .warning,
+                summary: "Untracked duplicate Markdown file: \(relativePath)",
+                detail: "Markdown file exists on disk without a note row and exactly matches tracked note path(s): \(canonicalPaths.joined(separator: ", ")). The fix removes only this untracked duplicate artifact.",
+                isFixable: true,
+                fixLabel: "Remove untracked duplicate Markdown file",
+                payload: Finding.Payload(
+                    relativePath: relativePath,
+                    relatedRelativePaths: canonicalPaths.sorted()
+                )
+            ))
+        }
+
+        return out.sorted {
+            ($0.payload.relativePath ?? "") < ($1.payload.relativePath ?? "")
+        }
+    }
+
     // MARK: - Helpers
 
     nonisolated static func isAllowedRootNestedFolderNameCollision(
@@ -643,6 +719,21 @@ final class VaultDoctor {
             options: .regularExpression
         )
         return strippedNumericSuffix.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    private static func relativePath(for url: URL, under root: URL) -> String {
+        let rootPath = root.standardizedFileURL.path
+        let filePath = url.standardizedFileURL.path
+        guard filePath.hasPrefix(rootPath + "/") else {
+            return url.lastPathComponent
+        }
+        return String(filePath.dropFirst(rootPath.count + 1))
+    }
+
+    private static func findingIDPathComponent(_ relativePath: String) -> String {
+        relativePath
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: " ", with: "-")
     }
 
     private static func folderPathSafetyReason(_ relativePath: String) -> String? {
@@ -703,6 +794,8 @@ final class VaultDoctor {
             return fixOrphanBreadcrumb(finding)
         case .reservedPathInFolders:
             return fixReservedPathInFolders(finding)
+        case .untrackedDuplicateMarkdown:
+            return fixUntrackedDuplicateMarkdown(finding)
         case .untrackedNonEmptyDir,
              .duplicateFolderPath,
              .staleFolderSyncAlias,
@@ -712,6 +805,28 @@ final class VaultDoctor {
              .duplicateBookmarkURL,
              .duplicateContactEmail,
              .duplicateContactPhone:
+            return false
+        }
+    }
+
+    private func fixUntrackedDuplicateMarkdown(_ finding: Finding) -> Bool {
+        guard let relPath = finding.payload.relativePath,
+              relPath.hasSuffix(".md") else { return false }
+        let url = vaultRoot.appendingPathComponent(relPath)
+        let standardizedVault = vaultRoot.standardizedFileURL.path
+        let standardizedFile = url.standardizedFileURL.path
+        guard standardizedFile.hasPrefix(standardizedVault + "/") else {
+            return false
+        }
+        do {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else { return false }
+            try FileManager.default.removeItem(at: url)
+            logger.info("Doctor fix: removed untracked duplicate Markdown file \(relPath)")
+            return true
+        } catch {
+            logger.error("fixUntrackedDuplicateMarkdown: \(error.localizedDescription)")
             return false
         }
     }

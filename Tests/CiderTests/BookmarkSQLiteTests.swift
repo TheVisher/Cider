@@ -877,6 +877,62 @@ struct BookmarkSQLiteTests {
         #expect(service2.bookmarks.first?.id == existingID)
     }
 
+    @Test("Orphan adoption skips .webloc whose URL canonicalizes to an existing bookmark")
+    func orphanAdoptionSkipsCanonicalDuplicateURL() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-orphan-duplicate-bookmark-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let existing = Bookmark(
+            title: "Stonewards on Steam",
+            urlString: "https://store.steampowered.com/app/4502710/Stonewards/",
+            tags: ["gaming"],
+            relativePath: "Inbox/Bookmarks/Stonewards on Steam.webloc"
+        )
+        let service = makeService(db)
+        service.persistBookmarkToDatabase(db, bookmark: existing)
+
+        _ = try BookmarkFileService.shared.write(
+            bookmark: existing,
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        _ = try BookmarkFileService.shared.write(
+            bookmark: Bookmark(
+                title: "Store.Steampowered.Com (2)",
+                urlString: "https://www.store.steampowered.com/app/4502710/Stonewards/?utm_source=cider#screenshots"
+            ),
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+
+        service.loadBookmarksFromDatabase(db)
+        service.adoptOrphanedVaultFiles()
+
+        #expect(service.bookmarks.count == 1)
+        #expect(service.bookmarks.first?.id == existing.id)
+        #expect(service.bookmarks.first?.relativePath == "Inbox/Bookmarks/Stonewards on Steam.webloc")
+
+        let itemStmt = try db.prepare("SELECT COUNT(*) FROM items WHERE type = 'bookmark';")
+        try itemStmt.step()
+        #expect(itemStmt.int(at: 0) == 1)
+
+        let bookmarkStmt = try db.prepare("SELECT COUNT(*) FROM bookmarks;")
+        try bookmarkStmt.step()
+        #expect(bookmarkStmt.int(at: 0) == 1)
+    }
+
     @Test("SQLite load collapses canonical duplicate URL rows into one displayed bookmark")
     func sqliteLoadCollapsesCanonicalDuplicateURLRows() throws {
         let (db, url) = try makeTestDB()

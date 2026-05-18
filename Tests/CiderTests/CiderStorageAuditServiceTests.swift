@@ -217,6 +217,66 @@ struct CiderStorageAuditServiceTests {
         return Int(stmt.int64(at: 0))
     }
 
+    @Test("VaultDoctor reports and fixes untracked duplicate Markdown artifacts")
+    func vaultDoctorReportsAndFixesUntrackedDuplicateMarkdownArtifacts() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = try makeTempVault()
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        try fm.createDirectory(at: vault.appendingPathComponent("Inbox/Notes"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: vault.appendingPathComponent("Projects/Cider"), withIntermediateDirectories: true)
+        let canonical = vault.appendingPathComponent("Inbox/Notes/Canonical.md")
+        let inboxCopy = vault.appendingPathComponent("Inbox/Notes/Canonical 2.md")
+        let folderCopy = vault.appendingPathComponent("Projects/Cider/Canonical 3.md")
+        try "same content".write(to: canonical, atomically: true, encoding: .utf8)
+        try "same content".write(to: inboxCopy, atomically: true, encoding: .utf8)
+        try "same content".write(to: folderCopy, atomically: true, encoding: .utf8)
+        try "different content".write(
+            to: vault.appendingPathComponent("Inbox/Notes/Untracked Unique.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let note = Note(
+            title: "Canonical",
+            content: "same content",
+            relativePath: "Inbox/Notes/Canonical.md"
+        )
+        NotesStorage(database: db).persistNoteToDatabase(db, note: note)
+
+        let findings = VaultDoctor.shared.scanUntrackedDuplicateMarkdownArtifacts(
+            vaultRoot: vault,
+            database: db
+        )
+
+        #expect(findings.compactMap(\.payload.relativePath).sorted() == [
+            "Inbox/Notes/Canonical 2.md",
+            "Projects/Cider/Canonical 3.md",
+        ])
+        #expect(findings.allSatisfy { $0.kind == .untrackedDuplicateMarkdown })
+        #expect(findings.allSatisfy { $0.isFixable })
+        #expect(findings.allSatisfy { $0.fixLabel == "Remove untracked duplicate Markdown file" })
+        #expect(findings.allSatisfy { $0.payload.relatedRelativePaths == ["Inbox/Notes/Canonical.md"] })
+
+        let fixed = VaultDoctor.shared.fix(try #require(findings.first {
+            $0.payload.relativePath == "Projects/Cider/Canonical 3.md"
+        }))
+
+        #expect(fixed)
+        #expect(fm.fileExists(atPath: canonical.path))
+        #expect(fm.fileExists(atPath: inboxCopy.path))
+        #expect(!fm.fileExists(atPath: folderCopy.path))
+    }
+
     @Test("storage audit compares model counts SQLite rows filesystem artifacts and finding groups")
     func storageAuditComparesCountsAndFindings() throws {
         let (db, dbURL) = try makeTestDB()
