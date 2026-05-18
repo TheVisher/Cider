@@ -42,14 +42,56 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("--confirm") == true)
     }
 
-    @Test("legacy bookmark batch enrichment requires explicit confirmation")
-    func legacyBookmarkBatchEnrichmentRequiresExplicitConfirmation() throws {
+    @Test("legacy bookmark batch enrichment is removed")
+    func legacyBookmarkBatchEnrichmentIsRemoved() throws {
         let result = try runCLI(args: ["bookmark", "enrich", "--all", "--json"])
 
         let dict = try parseJSONObject(result.stdout)
         #expect(dict["ok"] as? Bool == false)
-        #expect((dict["error"] as? String)?.contains("--confirm") == true)
-        #expect((dict["error"] as? String)?.contains("bookmark enrich --all") == true)
+        #expect(dict["legacyRemoved"] as? Bool == true)
+        #expect((dict["command"] as? String) == "bookmark enrich --all")
+        #expect((dict["replacement"] as? String)?.contains("review enrich-batch") == true)
+    }
+
+    @Test("legacy CLI commands are removed with replacements")
+    func legacyCLICommandsAreRemovedWithReplacements() throws {
+        let commands = [
+            ["memory", "show", "user", "--json"],
+            ["embeddings", "backfill", "--json"],
+            ["search", "anything", "--json"],
+            ["query", "anything", "--json"],
+            ["recent", "--json"],
+            ["snapshot", "--json"],
+            ["status", "--json"],
+            ["folder", "kanban", "Inbox", "--json"],
+        ]
+
+        for command in commands {
+            let result = try runCLI(args: command)
+            let dict = try parseJSONObject(result.stdout)
+            #expect(dict["ok"] as? Bool == false)
+            #expect(dict["legacyRemoved"] as? Bool == true)
+            #expect((dict["replacement"] as? String)?.isEmpty == false)
+        }
+    }
+
+    @Test("top level help hides removed legacy commands")
+    func topLevelHelpHidesRemovedLegacyCommands() throws {
+        let result = try runCLI(args: ["help"])
+        let output = result.stdout
+
+        #expect(output.contains("cider-cli capture add"))
+        #expect(output.contains("cider-cli item search"))
+        #expect(output.contains("cider-cli storage audit"))
+        #expect(output.contains("cider-cli db integrity"))
+        #expect(!output.contains("cider-cli memory"))
+        #expect(!output.contains("cider-cli embeddings"))
+        #expect(!output.contains("cider-cli query"))
+        #expect(!output.contains("cider-cli search <query>"))
+        #expect(!output.contains("cider-cli recent"))
+        #expect(!output.contains("cider-cli snapshot"))
+        #expect(!output.contains("cider-cli status"))
+        #expect(!output.contains("cider-cli folder kanban"))
     }
 
     @Test("reminder mutation ID resolution rejects ambiguous prefixes")

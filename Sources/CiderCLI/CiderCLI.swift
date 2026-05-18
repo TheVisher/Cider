@@ -8,6 +8,50 @@ import OSLog
 @main
 @MainActor
 struct CiderCLI {
+    static func handleRemovedLegacyTopLevelCommand(_ command: String, subcommand: String?) -> Bool {
+        let replacement: String
+        let reason: String
+        switch command {
+        case "memory":
+            replacement = "Use cider-cli item context/search plus Kanban resistance cards for missing durable-memory affordances."
+            reason = "memory was a parallel Markdown memory backend outside the second-brain item graph."
+        case "embeddings":
+            replacement = "Use cider-cli item search; semantic backfill will return only after the item graph/FTS contract is stable."
+            reason = "embeddings backfill was a bookmark-only sidecar path, not the current retrieval foundation."
+        case "search", "query":
+            replacement = "Use cider-cli item search <query> --json."
+            reason = "\(command) was a legacy broad search surface over per-domain stores."
+        case "recent":
+            replacement = "Use cider-cli item search/context, board recent for Kanban work, or dashboard/agenda surfaces."
+            reason = "recent was a legacy per-domain sweep rather than a second-brain item surface."
+        case "snapshot", "status":
+            replacement = "Use cider-cli storage audit --json and cider-cli db integrity."
+            reason = "\(command) was a legacy summary surface that competed with storage/db admin commands."
+        default:
+            return false
+        }
+
+        printRemovedLegacyCommand(command: command, replacement: replacement, reason: reason)
+        return true
+    }
+
+    static func printRemovedLegacyCommand(command: String, replacement: String, reason: String) {
+        let message = "Legacy command '\(command)' has been removed from the blessed second-brain CLI surface. \(replacement)"
+        if jsonOutput {
+            outputJSON([
+                "ok": false,
+                "error": message,
+                "command": command,
+                "legacyRemoved": true,
+                "reason": reason,
+                "replacement": replacement,
+            ] as [String: Any])
+        } else {
+            print("Error: \(message)")
+            print("Reason: \(reason)")
+        }
+    }
+
     static func main() async {
         var args = Array(CommandLine.arguments.dropFirst())
 
@@ -33,6 +77,10 @@ struct CiderCLI {
         }
         let subcommand = args.count > 1 ? args[1] : nil
         let remaining = Array(args.dropFirst(2))
+
+        if handleRemovedLegacyTopLevelCommand(command, subcommand: subcommand) {
+            return
+        }
 
         // Initialize storage services
         StoragePaths.ensureVaultStructure()
@@ -117,20 +165,10 @@ struct CiderCLI {
             handleLabel(subcommand: subcommand, args: remaining)
         case "view", "saved-view":
             handleSavedView(subcommand: subcommand, args: remaining)
-        case "search":
-            await handleSearch(args: Array(args.dropFirst()))
         case "trash":
             handleTrash(subcommand: subcommand, args: remaining)
-        case "status":
-            handleStatus()
-        case "recent":
-            handleRecent(args: Array(args.dropFirst()))
-        case "snapshot":
-            handleSnapshot()
         case "db":
             handleDatabase(subcommand: subcommand, args: remaining)
-        case "query":
-            await handleQuery(args: Array(args.dropFirst()))
         case "doctor":
             handleFolder(subcommand: "doctor", args: Array(args.dropFirst()))
         case "clipboard", "cb":
@@ -147,18 +185,6 @@ struct CiderCLI {
             handleRecall(subcommand: subcommand, args: remaining)
         case "storage":
             handleStorage(subcommand: subcommand, args: remaining)
-        case "embeddings":
-            if subcommand == "backfill" {
-                let store = EmbeddingStore.shared
-                store.load()
-                let bookmarks = VaultBookmarkService.shared.bookmarks
-                store.backfillMissing(bookmarks: bookmarks)
-                print("Backfilling embeddings for \(bookmarks.count) bookmarks...")
-            } else {
-                print("Usage: cider-cli embeddings backfill")
-            }
-        case "memory":
-            handleMemory(subcommand: subcommand, args: remaining)
         case "duplicate-check", "dupecheck":
             handleDuplicateCheck(args: Array(args.dropFirst()))
         case "help", "--help", "-h":
@@ -1494,29 +1520,11 @@ struct CiderCLI {
 
         case "enrich":
             if args.first == "--all" {
-                guard args.contains("--confirm") else {
-                    printCLIError("Usage: cider-cli bookmark enrich --all --confirm [--timeout <seconds>|--no-wait] [--json]. Legacy bookmark batch enrichment requires explicit confirmation; prefer 'cider-cli review enrich-batch --confirm' for review-backed batch work.")
-                    return
-                }
-                let count = service.bookmarks.count
-                if jsonOutput {
-                    outputJSON([
-                        "ok": true,
-                        "command": "bookmark.enrich.all",
-                        "deprecated": true,
-                        "preferredCommand": "review.enrich-batch --confirm",
-                        "scheduledCount": count,
-                        "message": "Legacy bookmark batch enrichment queued after explicit confirmation.",
-                    ] as [String: Any])
-                } else {
-                    print("Warning: bookmark enrich --all is a legacy batch path. Prefer 'cider-cli review enrich-batch --confirm' for review-backed batch work.")
-                    print("Scheduling AI re-enrichment for \(count) bookmark(s)...")
-                }
-                BookmarkAIEnrichment.shared.retagAll()
-                if jsonOutput {
-                    return
-                }
-                print("Batch enrichment queued (runs in background).")
+                printRemovedLegacyCommand(
+                    command: "bookmark enrich --all",
+                    replacement: "Use cider-cli review enrich-batch --confirm for review-backed enrichment.",
+                    reason: "bookmark enrich --all bypassed the review-backed batch surface."
+                )
                 return
             }
             guard let idPrefix = args.first else {
@@ -4461,129 +4469,16 @@ struct CiderCLI {
 
         // ── Folder Kanban ──────────────────────────────────────
 
-        case "kanban":
-            guard let folderArg = args.first else {
-                print("Error: Usage: cider-cli folder kanban <name|path>")
-                return
-            }
-            guard let folder = findFolderStrict(folderArg) else { return }
-            let storage = FolderKanbanStorage.shared
-            let cols = storage.columns(for: folder.id)
-            if jsonOutput {
-                let colDicts = cols.map { col -> [String: Any] in
-                    [
-                        "id": col.id,
-                        "name": col.name,
-                        "itemIDs": col.itemIDs,
-                        "itemCount": col.itemIDs.count,
-                    ]
-                }
-                outputJSON(["folderID": folder.id.uuidString, "folderName": folder.name, "columns": colDicts])
-            } else {
-                if cols.isEmpty {
-                    print("No kanban columns for folder '\(folder.name)'. Use 'folder kanban-add-column' to create one.")
-                } else {
-                    print("Kanban for '\(folder.name)' (\(cols.count) columns):")
-                    for col in cols {
-                        print("  [\(col.id.prefix(8))] \(col.name) (\(col.itemIDs.count) items)")
-                        for itemID in col.itemIDs {
-                            print("    - \(itemID.prefix(8))")
-                        }
-                    }
-                }
-            }
-
-        case "kanban-add-column":
-            guard let folderArg = args.first else {
-                print("Error: Usage: cider-cli folder kanban-add-column <name|path> --name <col-name>")
-                return
-            }
-            guard let folder = findFolderStrict(folderArg) else { return }
-            guard let colName = parseFlag("--name", from: args) else {
-                print("Error: --name required")
-                return
-            }
-            let col = FolderKanbanStorage.shared.addColumn(folderID: folder.id, name: colName)
-            print("Added kanban column '\(colName)' to '\(folder.name)' (\(col.id.prefix(8)))")
-
-        case "kanban-rename-column":
-            guard let folderArg = args.first else {
-                print("Error: Usage: cider-cli folder kanban-rename-column <name|path> --column <col-id> --to <new-name>")
-                return
-            }
-            guard let folder = findFolderStrict(folderArg) else { return }
-            guard let colID = parseFlag("--column", from: args) else {
-                print("Error: --column required")
-                return
-            }
-            guard let newName = parseFlag("--to", from: args) else {
-                print("Error: --to required")
-                return
-            }
-            let cols = FolderKanbanStorage.shared.columns(for: folder.id)
-            guard let col = cols.first(where: { $0.id.lowercased().hasPrefix(colID.lowercased()) || $0.name.lowercased() == colID.lowercased() }) else {
-                print("Error: No column found matching '\(colID)'")
-                return
-            }
-            FolderKanbanStorage.shared.renameColumn(folderID: folder.id, columnID: col.id, name: newName)
-            print("Renamed column '\(col.name)' → '\(newName)'")
-
-        case "kanban-delete-column":
-            guard let folderArg = args.first else {
-                print("Error: Usage: cider-cli folder kanban-delete-column <name|path> --column <col-id>")
-                return
-            }
-            guard let folder = findFolderStrict(folderArg) else { return }
-            guard let colID = parseFlag("--column", from: args) else {
-                print("Error: --column required")
-                return
-            }
-            let cols = FolderKanbanStorage.shared.columns(for: folder.id)
-            guard let col = cols.first(where: { $0.id.lowercased().hasPrefix(colID.lowercased()) || $0.name.lowercased() == colID.lowercased() }) else {
-                print("Error: No column found matching '\(colID)'")
-                return
-            }
-            FolderKanbanStorage.shared.deleteColumn(folderID: folder.id, columnID: col.id)
-            print("Deleted column '\(col.name)' from '\(folder.name)'")
-
-        case "kanban-assign":
-            guard let folderArg = args.first else {
-                print("Error: Usage: cider-cli folder kanban-assign <name|path> --item <item-id> --column <col-id>")
-                return
-            }
-            guard let folder = findFolderStrict(folderArg) else { return }
-            guard let itemID = parseFlag("--item", from: args) else {
-                print("Error: --item required")
-                return
-            }
-            guard let colID = parseFlag("--column", from: args) else {
-                print("Error: --column required")
-                return
-            }
-            let cols = FolderKanbanStorage.shared.columns(for: folder.id)
-            guard let col = cols.first(where: { $0.id.lowercased().hasPrefix(colID.lowercased()) || $0.name.lowercased() == colID.lowercased() }) else {
-                print("Error: No column found matching '\(colID)'")
-                return
-            }
-            FolderKanbanStorage.shared.assignItem(folderID: folder.id, itemID: itemID, toColumnID: col.id)
-            print("Assigned item \(itemID.prefix(8)) to column '\(col.name)'")
-
-        case "kanban-unassign":
-            guard let folderArg = args.first else {
-                print("Error: Usage: cider-cli folder kanban-unassign <name|path> --item <item-id>")
-                return
-            }
-            guard let folder = findFolderStrict(folderArg) else { return }
-            guard let itemID = parseFlag("--item", from: args) else {
-                print("Error: --item required")
-                return
-            }
-            FolderKanbanStorage.shared.unassignItem(folderID: folder.id, itemID: itemID)
-            print("Unassigned item \(itemID.prefix(8)) from kanban in '\(folder.name)'")
+        case "kanban", "kanban-add-column", "kanban-rename-column", "kanban-delete-column", "kanban-assign", "kanban-unassign":
+            printRemovedLegacyCommand(
+                command: "folder \(subcommand ?? "kanban")",
+                replacement: "Use board commands for development Kanban, or create a resistance card if folder-local work state is still needed.",
+                reason: "folder kanban was a parallel folder-local YAML workflow outside the second-brain item surface."
+            )
 
         default:
             print("Unknown folder command: \(subcommand ?? "nil")")
-            print("Commands: list, create, rename, move, delete, restore, doctor, get, children, ancestors, set-icon, remove-icon, set-cover, remove-cover, kanban, kanban-add-column, kanban-rename-column, kanban-delete-column, kanban-assign, kanban-unassign")
+            print("Commands: list, create, rename, move, delete, restore, doctor, get, children, ancestors, set-icon, remove-icon, set-cover, remove-cover")
         }
     }
 
@@ -9448,6 +9343,14 @@ struct CiderCLI {
           cider-cli space list [--json]
           cider-cli space captures <space-id|name> [--limit <n>] [--json]
 
+        ITEM
+          cider-cli item search <query> [--limit <n>] [--json]
+          cider-cli item get <type> <id-or-ref> [--json]
+          cider-cli item context <type> <id-or-ref> [--json]
+          cider-cli item related <type> <id-or-ref> [--json]
+          cider-cli item why-surfaced <type> <id-or-ref> [--json]
+          cider-cli item capability-map [--json]
+
         BOOKMARKS (alias: bm)
           cider-cli bookmark list [--folder <name|path>] [--limit <n>]
           cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--timeout <seconds>|--no-wait]
@@ -9457,7 +9360,7 @@ struct CiderCLI {
           cider-cli bookmark tag <id-prefix> <label-name>
           cider-cli bookmark untag <id-prefix> <label-name>
           cider-cli bookmark delete <id-prefix>
-          cider-cli bookmark enrich <id-prefix> [--timeout <seconds>|--no-wait] | --all --confirm
+          cider-cli bookmark enrich <id-prefix> [--timeout <seconds>|--no-wait]
           cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
                     [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]
           cider-cli bookmark date-suggestions <id-prefix> [--json]
@@ -9536,12 +9439,6 @@ struct CiderCLI {
           cider-cli folder set-cover <name|path> <image-path>
           cider-cli folder remove-cover <name|path>
           cider-cli folder doctor [--fix] [--yes]
-          cider-cli folder kanban <name|path>
-          cider-cli folder kanban-add-column <name|path> --name <col-name>
-          cider-cli folder kanban-rename-column <name|path> --column <col-id> --to <new-name>
-          cider-cli folder kanban-delete-column <name|path> --column <col-id>
-          cider-cli folder kanban-assign <name|path> --item <item-id> --column <col-id>
-          cider-cli folder kanban-unassign <name|path> --item <item-id>
 
         FOLDER ARGUMENT FORMS
           --folder accepts a leaf name OR a vault-relative path:
@@ -9614,24 +9511,11 @@ struct CiderCLI {
           cider-cli view pin <id|name>
           cider-cli view unpin <id|name>
 
-        SEARCH
-          cider-cli search <query>
-          Supports: @bookmarks @notes @todos @events @images @files @folder:<name> @tag:<name>
-
         TRASH
           cider-cli trash list [--type <bookmark|note|todo|event|contact|file|folder>]
           cider-cli trash restore <id-prefix>
           cider-cli trash empty
           cider-cli trash purge [--days <n>]
-
-        STATUS
-          cider-cli status
-
-        RECENT
-          cider-cli recent [--hours <n>] [--type bookmark|note|todo|event|contact|file|image] [--limit <n>]
-
-        SNAPSHOT
-          cider-cli snapshot
 
         SQLITE DATABASE
           cider-cli db backups
@@ -9640,30 +9524,12 @@ struct CiderCLI {
           cider-cli db audit [--limit <n>] [--type <item-type>] [--action <action>] [--source <ui|cli|agent|migration|cleanup>] [--item <id-prefix>]
           cider-cli db restore <index|filename|latest> --yes
 
-        QUERY (natural language search)
-          cider-cli query "restaurants I saved last week"
-          cider-cli query "notes from yesterday"
-          cider-cli query "bookmarks about AI this month"
-          Time: today, yesterday, recently, last week, last month, this year, N days ago, N weeks ago
-
-        MEMORY
-          cider-cli memory show user
-          cider-cli memory show agent
-          cider-cli memory show core                 (user + agent together)
-          cider-cli memory show daily [--date yyyy-MM-dd]
-          cider-cli memory show index
-          cider-cli memory add-daily <observation>
-          cider-cli memory list-daily [--limit <n>]
-
         CLIPBOARD (alias: cb)
           cider-cli clipboard list [--limit <n>]
           cider-cli clipboard get <id-prefix>
           cider-cli clipboard dismiss <id-prefix>
           cider-cli clipboard clear
           cider-cli clipboard stats
-
-        EMBEDDINGS
-          cider-cli embeddings backfill
 
         DUPLICATE CHECK
           cider-cli duplicate-check <url>
