@@ -94,6 +94,51 @@ struct CiderCLIAgentSafetyTests {
         #expect(!output.contains("cider-cli folder kanban"))
     }
 
+    @Test("read-only folder filters do not adopt untracked disk folders")
+    func readOnlyFolderFiltersDoNotAdoptUntrackedDiskFolders() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-read-filter-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["folder", "create", "Tracked"], vault: vault)
+        try FileManager.default.createDirectory(
+            at: vault.appendingPathComponent("LooseDiskFolder", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let listResult = try runCLI(args: ["bookmark", "list", "--folder", "LooseDiskFolder", "--json"], vault: vault)
+        #expect(listResult.status == 0)
+
+        let folders = try runCLI(args: ["folder", "list", "--json"], vault: vault)
+        let folderPayload = try parseJSONArray(folders.stdout)
+        #expect(folderPayload.compactMap { $0["relativePath"] as? String }.contains("LooseDiskFolder") == false)
+    }
+
+    @Test("item mutations fail closed when canonical database cannot open")
+    func itemMutationsFailClosedWhenCanonicalDatabaseCannotOpen() throws {
+        let fileVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-file-vault-\(UUID().uuidString)")
+        try "not a directory".write(to: fileVault, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: fileVault) }
+
+        let commands = [
+            ["bookmark", "add", "https://example.com/fail-closed", "--json"],
+            ["note", "create", "Fail closed note", "--json"],
+            ["todo", "create", "Fail closed todo", "--json"],
+            ["contact", "create", "Fail Closed", "--json"],
+            ["file", "add", "/tmp/missing.txt", "--json"],
+            ["folder", "create", "FailClosed", "--json"]
+        ]
+
+        for command in commands {
+            let result = try runCLI(args: command, vault: fileVault)
+            let payload = try parseJSONObject(result.stdout)
+            #expect(payload["ok"] as? Bool == false, "Expected \(command.joined(separator: " ")) to fail closed")
+            #expect((payload["error"] as? String)?.contains("canonical SQLite database") == true)
+        }
+    }
+
     @Test("reminder mutation ID resolution rejects ambiguous prefixes")
     func reminderMutationIDResolutionRejectsAmbiguousPrefixes() throws {
         let first = UUID(uuidString: "aaaaaaaa-1111-1111-1111-111111111111")!
@@ -120,13 +165,23 @@ struct CiderCLIAgentSafetyTests {
         return try #require(object as? [String: Any])
     }
 
+    private func parseJSONArray(_ output: String) throws -> [[String: Any]] {
+        let data = Data(output.utf8)
+        let object = try JSONSerialization.jsonObject(with: data)
+        return try #require(object as? [[String: Any]])
+    }
+
     private func runCLI(args: [String]) throws -> (stdout: String, stderr: String, status: Int32) {
-        let cli = try cliURL()
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-cli-agent-safety-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: vault) }
 
+        return try runCLI(args: args, vault: vault)
+    }
+
+    private func runCLI(args: [String], vault: URL) throws -> (stdout: String, stderr: String, status: Int32) {
+        let cli = try cliURL()
         let process = Process()
         process.executableURL = cli
         process.arguments = ["--vault", vault.path] + args

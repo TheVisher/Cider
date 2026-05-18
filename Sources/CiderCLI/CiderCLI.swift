@@ -100,8 +100,20 @@ struct CiderCLI {
             try CiderDatabase.shared.open(at: dbPath)
             DatabaseSafetyService.shared.performStartupSafetyPass(database: CiderDatabase.shared)
         } catch {
+            let databaseOpenError = error
             Logger(subsystem: "Cider", category: "CLI")
-                .error("Failed to open SQLite database: \(error.localizedDescription). Falling back to JSON.")
+                .error("Failed to open SQLite database: \(error.localizedDescription).")
+            if requiresCanonicalDatabase(command: command, subcommand: subcommand, args: remaining) {
+                printCLIError(
+                    "Cannot run \(commandDescription(command: command, subcommand: subcommand)) because the canonical SQLite database is unavailable. Cider no longer falls back to JSON or filesystem mutation paths.",
+                    details: [
+                        "command": command,
+                        "subcommand": subcommand ?? NSNull(),
+                        "underlyingError": databaseOpenError.localizedDescription
+                    ]
+                )
+                return
+            }
         }
 
         if command == "db" {
@@ -192,6 +204,74 @@ struct CiderCLI {
         default:
             print("Unknown command: \(command). Run 'cider-cli help' for usage.")
         }
+    }
+
+    static func requiresCanonicalDatabase(command rawCommand: String, subcommand rawSubcommand: String?, args: [String]) -> Bool {
+        let command = rawCommand.lowercased()
+        let subcommand = rawSubcommand?.lowercased()
+
+        switch command {
+        case "capture":
+            return subcommand == nil || subcommand == "add"
+        case "bookmark", "bm":
+            return isMutationSubcommand(
+                subcommand,
+                in: ["add", "create", "move", "delete", "rm", "update", "set", "tag", "untag", "assign-label", "date-suggestions"]
+            )
+        case "note":
+            return isMutationSubcommand(subcommand, in: ["create", "move", "delete", "rm", "update", "rename"])
+        case "todo", "todos", "task", "tasks":
+            return isMutationSubcommand(
+                subcommand,
+                in: ["create", "add", "complete", "done", "delete", "rm", "update", "set", "checklist"]
+            )
+        case "event", "datecard":
+            return isMutationSubcommand(subcommand, in: ["create", "delete", "rm", "update", "set"])
+        case "contact":
+            return isMutationSubcommand(subcommand, in: ["create", "delete", "rm", "update", "set", "profile", "field", "link"])
+        case "file":
+            return isMutationSubcommand(subcommand, in: ["add", "import", "move", "delete", "rm", "update", "set"])
+        case "folder":
+            if subcommand == "doctor" {
+                return args.contains("--fix") || args.contains("--apply") || args.contains("--execute")
+            }
+            return isMutationSubcommand(
+                subcommand,
+                in: ["create", "mkdir", "move", "mv", "delete", "rm", "restore", "rename", "set-icon", "remove-icon", "set-cover", "remove-cover"]
+            )
+        case "routing", "route":
+            return isMutationSubcommand(subcommand, in: ["approve", "correct", "rerun"])
+        case "review":
+            return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
+        case "item":
+            return isMutationSubcommand(subcommand, in: ["route", "link", "backfill-kanban"])
+        case "label", "tag":
+            return isMutationSubcommand(subcommand, in: ["create", "rename", "delete", "rm"])
+        case "view", "saved-view":
+            return isMutationSubcommand(subcommand, in: ["create", "create-kanban", "rename", "delete", "rm", "pin", "unpin"])
+        case "trash":
+            return isMutationSubcommand(subcommand, in: ["restore", "empty", "purge"])
+        case "reminder", "reminders":
+            return isMutationSubcommand(subcommand, in: ["complete", "done", "snooze"])
+        case "storage":
+            return subcommand == "doctor-apply" || subcommand == "repair-schema"
+        case "doctor":
+            return args.contains("--fix") || args.contains("--apply") || args.contains("--execute")
+        default:
+            return false
+        }
+    }
+
+    static func isMutationSubcommand(_ subcommand: String?, in mutationSubcommands: Set<String>) -> Bool {
+        guard let subcommand else { return false }
+        return mutationSubcommands.contains(subcommand)
+    }
+
+    static func commandDescription(command: String, subcommand: String?) -> String {
+        if let subcommand {
+            return "\(command) \(subcommand)"
+        }
+        return command
     }
 
     // MARK: - Storage Audit Commands
@@ -8728,37 +8808,9 @@ struct CiderCLI {
     }
 
     static func findFolder(named name: String) -> VaultFolder? {
-        // Check registered folders first
-        if let existing = VaultFolderService.shared.folders.first(where: {
+        VaultFolderService.shared.folders.first(where: {
             $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
-        }) {
-            return existing
-        }
-
-        // If not registered but directory exists on disk, scan to pick it up
-        let vaultURL = StoragePaths.cachedVaultDirectoryURL
-        let fm = FileManager.default
-        if let enumerator = fm.enumerator(at: vaultURL, includingPropertiesForKeys: [URLResourceKey.isDirectoryKey],
-                                           options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
-            while let url = enumerator.nextObject() as? URL {
-                guard let isDir = try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory, isDir else {
-                    enumerator.skipDescendants()
-                    continue
-                }
-                if url.lastPathComponent.localizedCaseInsensitiveCompare(name) == .orderedSame {
-                    // Found a matching directory — determine parent
-                    let parentName = url.deletingLastPathComponent().lastPathComponent
-                    let parentID = VaultFolderService.shared.folders.first(where: {
-                        $0.name.localizedCaseInsensitiveCompare(parentName) == .orderedSame
-                    })?.id
-                    // Register it
-                    if let folder = VaultFolderService.shared.createFolder(name: url.lastPathComponent, parentID: parentID) {
-                        return folder
-                    }
-                }
-            }
-        }
-        return nil
+        })
     }
 
     /// Strict folder lookup for destructive operations (delete/move/rename).
@@ -8829,9 +8881,9 @@ struct CiderCLI {
         case failed
     }
 
-    /// Path-aware resolution of `--folder` / `--path`. Prefers `--path`
-    /// (auto-creates missing components). For `--folder`, accepts either a
-    /// leaf name or a vault-relative path (any value containing `/`).
+    /// Path-aware resolution of `--folder` / `--path`. `--path` intentionally
+    /// creates missing components. `--folder` is read-only and only resolves
+    /// folders already registered in canonical storage.
     static func resolveFolderArg(from args: [String]) -> FolderArgResolution {
         if let path = parseFlag("--path", from: args) {
             if let folder = findOrCreateFolderByPath(path) {
