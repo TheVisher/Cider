@@ -687,6 +687,20 @@ final class ContactStorage: ObservableObject {
                         try self.persistContactToDatabaseInner(db, contact: contact)
                     }
                 }
+                for contact in adoptedContacts {
+                    MutationAuditService(database: resolvedDatabase).record(
+                        action: "scanner.contact.adopt",
+                        itemType: LibraryEntityType.contact.rawValue,
+                        itemID: contact.id,
+                        after: MutationAuditSnapshots.contact(contact),
+                        metadata: [
+                            "scanner": "scanAndLoad",
+                            "operation": "adopt_orphan",
+                            "source": "filesystem"
+                        ],
+                        source: .filesystem
+                    )
+                }
             } catch {
                 logger.error("Failed to persist adopted contacts: \(error.localizedDescription)")
             }
@@ -707,6 +721,20 @@ final class ContactStorage: ObservableObject {
                     stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
                     try stmt.step()
                 }
+            }
+            for removedID in removedIDs {
+                MutationAuditService(database: resolvedDatabase).record(
+                    action: "scanner.contact.prune_missing_file",
+                    itemType: LibraryEntityType.contact.rawValue,
+                    itemID: removedID,
+                    before: ["id": removedID.uuidString],
+                    metadata: [
+                        "scanner": "syncScanToDatabase",
+                        "operation": "prune_missing_file",
+                        "source": "filesystem"
+                    ],
+                    source: .filesystem
+                )
             }
             logger.info("Rescan synced \(self.contacts.count) contacts to SQLite (removed \(removedIDs.count))")
         } catch {

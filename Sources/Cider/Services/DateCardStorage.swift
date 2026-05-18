@@ -649,6 +649,20 @@ final class DateCardStorage: ObservableObject {
                         try self.persistEventToDatabaseInner(db, dateCard: dc)
                     }
                 }
+                for dc in adoptedCards {
+                    MutationAuditService(database: resolvedDatabase).record(
+                        action: "scanner.dateCard.adopt",
+                        itemType: LibraryEntityType.dateCard.rawValue,
+                        itemID: dc.id,
+                        after: MutationAuditSnapshots.dateCard(dc),
+                        metadata: [
+                            "scanner": "scanAndLoad",
+                            "operation": "adopt_orphan",
+                            "source": "filesystem"
+                        ],
+                        source: .filesystem
+                    )
+                }
             } catch {
                 logger.error("Failed to persist adopted date cards: \(error.localizedDescription)")
             }
@@ -669,6 +683,20 @@ final class DateCardStorage: ObservableObject {
                     stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
                     try stmt.step()
                 }
+            }
+            for removedID in removedIDs {
+                MutationAuditService(database: resolvedDatabase).record(
+                    action: "scanner.dateCard.prune_missing_file",
+                    itemType: LibraryEntityType.dateCard.rawValue,
+                    itemID: removedID,
+                    before: ["id": removedID.uuidString],
+                    metadata: [
+                        "scanner": "syncScanToDatabase",
+                        "operation": "prune_missing_file",
+                        "source": "filesystem"
+                    ],
+                    source: .filesystem
+                )
             }
             logger.info("Rescan synced \(self.dateCards.count) date cards to SQLite (removed \(removedIDs.count))")
         } catch {

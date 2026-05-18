@@ -737,6 +737,20 @@ final class TodoCardStorage: ObservableObject {
                         try self.persistTodoToDatabaseInner(db, todo: todo)
                     }
                 }
+                for todo in adoptedCards {
+                    MutationAuditService(database: resolvedDatabase).record(
+                        action: "scanner.todo.adopt",
+                        itemType: LibraryEntityType.todo.rawValue,
+                        itemID: todo.id,
+                        after: MutationAuditSnapshots.todo(todo),
+                        metadata: [
+                            "scanner": "scanAndLoad",
+                            "operation": "adopt_orphan",
+                            "source": "filesystem"
+                        ],
+                        source: .filesystem
+                    )
+                }
             } catch {
                 logger.error("Failed to persist adopted todos: \(error.localizedDescription)")
             }
@@ -757,6 +771,20 @@ final class TodoCardStorage: ObservableObject {
                     stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
                     try stmt.step()
                 }
+            }
+            for removedID in removedIDs {
+                MutationAuditService(database: resolvedDatabase).record(
+                    action: "scanner.todo.prune_missing_file",
+                    itemType: LibraryEntityType.todo.rawValue,
+                    itemID: removedID,
+                    before: ["id": removedID.uuidString],
+                    metadata: [
+                        "scanner": "syncScanToDatabase",
+                        "operation": "prune_missing_file",
+                        "source": "filesystem"
+                    ],
+                    source: .filesystem
+                )
             }
             logger.info("Rescan synced \(self.todoCards.count) todos to SQLite (removed \(removedIDs.count))")
         } catch {
