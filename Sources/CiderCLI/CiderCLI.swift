@@ -1449,8 +1449,11 @@ struct CiderCLI {
             let labelName = args.dropFirst().joined(separator: " ")
             if let bm = findBookmark(idPrefix, in: service) {
                 let label = CardLabelStorage.shared.findOrCreate(name: labelName, colorHex: nil)
-                _ = service.assignLabel(bm.id, labelID: label.id)
-                print("Tagged '\(bm.title)' with '\(label.name)'")
+                if service.assignLabel(bm.id, labelID: label.id) {
+                    print("Tagged '\(bm.title)' with '\(label.name)'")
+                } else {
+                    print("Error: Failed to tag '\(bm.title)' with '\(label.name)'")
+                }
             }
 
         case "untag":
@@ -1461,8 +1464,11 @@ struct CiderCLI {
             let labelName = args.dropFirst().joined(separator: " ")
             if let bm = findBookmark(idPrefix, in: service) {
                 if let label = CardLabelStorage.shared.labels.first(where: { $0.name.localizedCaseInsensitiveCompare(labelName) == .orderedSame }) {
-                    service.removeLabel(bm.id, labelID: label.id)
-                    print("Removed tag '\(label.name)' from '\(bm.title)'")
+                    if service.removeLabel(bm.id, labelID: label.id) {
+                        print("Removed tag '\(label.name)' from '\(bm.title)'")
+                    } else {
+                        print("Error: Failed to remove tag '\(label.name)' from '\(bm.title)'")
+                    }
                 } else {
                     print("Error: Label '\(labelName)' not found")
                 }
@@ -2178,8 +2184,11 @@ struct CiderCLI {
                 var updated = todo
                 updated.isCompleted = true
                 updated.completedAt = Date()
-                _ = storage.updateTodoCard(updated)
-                print("Completed: \(todo.title)")
+                if storage.updateTodoCard(updated) {
+                    print("Completed: \(todo.title)")
+                } else {
+                    print("Error: Failed to complete todo: \(todo.title)")
+                }
             } else {
                 print("Error: No todo found with ID prefix: \(idPrefix)")
             }
@@ -2244,8 +2253,11 @@ struct CiderCLI {
                 }
                 if changed {
                     todo.updatedAt = Date()
-                    _ = storage.updateTodoCard(todo)
-                    print("Updated: \(todo.title) (\(todo.id.uuidString.prefix(8)))")
+                    if storage.updateTodoCard(todo) {
+                        print("Updated: \(todo.title) (\(todo.id.uuidString.prefix(8)))")
+                    } else {
+                        print("Error: Failed to update todo: \(todo.title)")
+                    }
                 } else {
                     print("No changes specified.")
                 }
@@ -2348,8 +2360,11 @@ struct CiderCLI {
             )
             todo.checklist.append(newItem)
             todo.updatedAt = Date()
-            _ = storage.updateTodoCard(todo)
-            print("Added checklist item '\(title)' to '\(todo.title)' (\(newItem.id.uuidString.prefix(8)))")
+            if storage.updateTodoCard(todo) {
+                print("Added checklist item '\(title)' to '\(todo.title)' (\(newItem.id.uuidString.prefix(8)))")
+            } else {
+                print("Error: Failed to add checklist item to '\(todo.title)'")
+            }
 
         case "toggle":
             guard let idPrefix = args.first else {
@@ -2409,8 +2424,11 @@ struct CiderCLI {
             }
             let removed = todo.checklist.remove(at: idx)
             todo.updatedAt = Date()
-            _ = storage.updateTodoCard(todo)
-            print("Removed checklist item '\(removed.title)' from '\(todo.title)'")
+            if storage.updateTodoCard(todo) {
+                print("Removed checklist item '\(removed.title)' from '\(todo.title)'")
+            } else {
+                print("Error: Failed to remove checklist item from '\(todo.title)'")
+            }
 
         default:
             print("Unknown todo checklist command: \(subcommand ?? "nil")")

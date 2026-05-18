@@ -47,6 +47,13 @@ struct CiderCaptureResult {
         var reviewState: String
     }
 
+    struct PartialSuccess {
+        var status: String
+        var reason: String
+        var requestedFolderID: UUID?
+        var actualFolderID: UUID?
+    }
+
     var command: String
     var source: Source
     var item: Item
@@ -54,6 +61,7 @@ struct CiderCaptureResult {
     var duplicate: Duplicate
     var routing: Routing
     var nextSafeAction: String
+    var partialSuccess: PartialSuccess? = nil
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -108,7 +116,7 @@ struct CiderCaptureResult {
             routingDict["candidateTarget"] = targetDict
         }
 
-        return [
+        var dict: [String: Any] = [
             "command": command,
             "source": sourceDict,
             "item": itemDict,
@@ -117,6 +125,20 @@ struct CiderCaptureResult {
             "routing": routingDict,
             "nextSafeAction": nextSafeAction,
         ]
+        if let partialSuccess {
+            var partialDict: [String: Any] = [
+                "status": partialSuccess.status,
+                "reason": partialSuccess.reason,
+            ]
+            if let requestedFolderID = partialSuccess.requestedFolderID {
+                partialDict["requestedFolderID"] = requestedFolderID.uuidString
+            }
+            if let actualFolderID = partialSuccess.actualFolderID {
+                partialDict["actualFolderID"] = actualFolderID.uuidString
+            }
+            dict["partialSuccess"] = partialDict
+        }
+        return dict
     }
 
     @MainActor
@@ -202,6 +224,8 @@ final class CiderCaptureService {
     private let vaultFileStorage: VaultFileStorage
     private let routingDecisionService: CiderRoutingDecisionService?
     private let database: CiderDatabase?
+    private let noteAssignmentHandler: (UUID, UUID?) -> Bool
+    private let todoUpdateHandler: (TodoCard) -> Bool
 
     init(
         bookmarkService: VaultBookmarkService = .shared,
@@ -209,7 +233,9 @@ final class CiderCaptureService {
         todoStorage: TodoCardStorage = .shared,
         vaultFileStorage: VaultFileStorage = .shared,
         database: CiderDatabase? = nil,
-        routingDecisionService: CiderRoutingDecisionService? = CiderRoutingDecisionService()
+        routingDecisionService: CiderRoutingDecisionService? = CiderRoutingDecisionService(),
+        noteAssignmentHandler: ((UUID, UUID?) -> Bool)? = nil,
+        todoUpdateHandler: ((TodoCard) -> Bool)? = nil
     ) {
         self.bookmarkService = bookmarkService
         self.notesStorage = notesStorage
@@ -217,6 +243,12 @@ final class CiderCaptureService {
         self.vaultFileStorage = vaultFileStorage
         self.database = database
         self.routingDecisionService = routingDecisionService
+        self.noteAssignmentHandler = noteAssignmentHandler ?? { [notesStorage] noteID, folderID in
+            notesStorage.assignNote(noteID, toFolder: folderID)
+        }
+        self.todoUpdateHandler = todoUpdateHandler ?? { [todoStorage] todo in
+            todoStorage.updateTodoCard(todo)
+        }
     }
 
     func add(
@@ -335,12 +367,19 @@ final class CiderCaptureService {
         if let noteTitle = manualTitle ?? derivedTitle {
             notesStorage.rename(note: note, to: noteTitle)
         }
+        var assignmentSucceeded: Bool?
         if let folderID {
-            _ = notesStorage.assignNote(note.id, toFolder: folderID)
+            assignmentSucceeded = noteAssignmentHandler(note.id, folderID)
         }
         guard let stored = notesStorage.notes.first(where: { $0.id == note.id }) else {
             throw CiderCaptureError.storeFailed(content)
         }
+        let partialSuccess = assignmentPartialSuccess(
+            itemType: "note",
+            requestedFolderID: folderID,
+            actualFolderID: stored.folderID,
+            assignmentSucceeded: assignmentSucceeded
+        )
 
         let target = routingTarget(
             itemType: "note",
@@ -372,7 +411,8 @@ final class CiderCaptureService {
             titleState: manualTitle == nil ? "derived" : "manual",
             duplicateStatus: "not_checked",
             routing: routing,
-            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item"
+            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            partialSuccess: partialSuccess
         )
     }
 
@@ -400,13 +440,20 @@ final class CiderCaptureService {
         titleState: String = "manual"
     ) throws -> CiderCaptureResult {
         var todo = todoStorage.createTodoCard(title: title, dueDate: dueDate, priority: priority)
+        var assignmentSucceeded: Bool?
         if let folderID {
             todo.folderID = folderID
-            _ = todoStorage.updateTodoCard(todo)
+            assignmentSucceeded = todoUpdateHandler(todo)
         }
         guard let stored = todoStorage.todoCards.first(where: { $0.id == todo.id }) else {
             throw CiderCaptureError.storeFailed(title)
         }
+        let partialSuccess = assignmentPartialSuccess(
+            itemType: "todo",
+            requestedFolderID: folderID,
+            actualFolderID: stored.folderID,
+            assignmentSucceeded: assignmentSucceeded
+        )
 
         let relativePath = itemRelativePathFromDatabase(itemID: stored.id) ?? "Inbox/Todos"
         let target = routingTarget(
@@ -439,7 +486,8 @@ final class CiderCaptureService {
             titleState: titleState,
             duplicateStatus: "not_checked",
             routing: routing,
-            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item"
+            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            partialSuccess: partialSuccess
         )
     }
 
@@ -492,6 +540,7 @@ final class CiderCaptureService {
             title: normalizedTitle(title)
         )
         vaultFileStorage.persistVaultFileToDatabase(file)
+        recordVaultFileCreateAudit(file)
 
         let target = routingTarget(
             itemType: "vaultFile",
@@ -606,7 +655,8 @@ final class CiderCaptureService {
         titleState: String,
         duplicateStatus: String,
         routing: CiderCaptureResult.Routing,
-        nextSafeAction: String
+        nextSafeAction: String,
+        partialSuccess: CiderCaptureResult.PartialSuccess? = nil
     ) -> CiderCaptureResult {
         CiderCaptureResult(
             command: "capture.add",
@@ -637,7 +687,27 @@ final class CiderCaptureService {
                 existingItemID: nil
             ),
             routing: routing,
-            nextSafeAction: nextSafeAction
+            nextSafeAction: nextSafeAction,
+            partialSuccess: partialSuccess
+        )
+    }
+
+    private func assignmentPartialSuccess(
+        itemType: String,
+        requestedFolderID: UUID?,
+        actualFolderID: UUID?,
+        assignmentSucceeded: Bool?
+    ) -> CiderCaptureResult.PartialSuccess? {
+        guard let requestedFolderID,
+              assignmentSucceeded == false || actualFolderID != requestedFolderID
+        else {
+            return nil
+        }
+        return .init(
+            status: "assignment_failed",
+            reason: "\(itemType) folder assignment failed; Cider stored the source item and left it in review.",
+            requestedFolderID: requestedFolderID,
+            actualFolderID: actualFolderID
         )
     }
 
@@ -769,6 +839,23 @@ final class CiderCaptureService {
             StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(relativePath),
             relativePath,
             nil
+        )
+    }
+
+    private func recordVaultFileCreateAudit(_ file: VaultFile) {
+        MutationAuditService(database: database).record(
+            action: "create",
+            itemType: "vaultFile",
+            itemID: file.id,
+            after: [
+                "title": file.displayTitle,
+                "filename": file.filename,
+                "relativePath": file.relativePath,
+                "fileType": file.fileType.rawValue,
+                "fileSize": "\(file.fileSize)",
+            ],
+            metadata: ["source": "capture.add"],
+            source: .agent
         )
     }
 

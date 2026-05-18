@@ -146,4 +146,25 @@ struct MutationCallerSafetyTests {
 
         #expect(unchecked.isEmpty, "Unchecked agent note assignment callers:\n\(unchecked.joined(separator: "\n"))")
     }
+
+    @Test("CLI item mutation commands check returned success before printing success")
+    func cliItemMutationCommandsCheckReturnedSuccessBeforePrintingSuccess() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let fileURL = repoRoot.appendingPathComponent("Sources/CiderCLI/CiderCLI.swift")
+        let source = try String(contentsOf: fileURL, encoding: .utf8)
+        let uncheckedPatterns = [
+            "_ = service.assignLabel(",
+            "_ = service.removeLabel(",
+            "_ = storage.updateTodoCard(",
+        ]
+        var unchecked: [String] = []
+
+        for (offset, line) in source.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+            guard uncheckedPatterns.contains(where: { line.contains($0) }) else { continue }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            unchecked.append("Sources/CiderCLI/CiderCLI.swift:\(offset + 1): \(trimmed)")
+        }
+
+        #expect(unchecked.isEmpty, "Unchecked CLI item mutation callers:\n\(unchecked.joined(separator: "\n"))")
+    }
 }

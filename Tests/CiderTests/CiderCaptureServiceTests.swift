@@ -364,6 +364,38 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("note capture reports partial success when folder assignment fails")
+    func noteCaptureReportsPartialSuccessWhenFolderAssignmentFails() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let requestedFolderID = UUID()
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                noteAssignmentHandler: { _, _ in false }
+            )
+
+            let result = try service.addNoteCapture(
+                title: "Loose note",
+                content: "This should be saved even if assignment fails.",
+                folderID: requestedFolderID
+            )
+            let dict = result.toDictionary()
+            let partialSuccess = try #require(dict["partialSuccess"] as? [String: Any])
+
+            #expect(result.item.folderID == nil)
+            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.reviewState == "needs_review")
+            #expect(result.nextSafeAction == "review_route")
+            #expect(partialSuccess["status"] as? String == "assignment_failed")
+            #expect(partialSuccess["requestedFolderID"] as? String == requestedFolderID.uuidString)
+            #expect(partialSuccess["actualFolderID"] == nil)
+            #expect((partialSuccess["reason"] as? String)?.contains("note folder assignment failed") == true)
+        }
+    }
+
     @Test("capture add stores task-like text as a todo through the shared result shape")
     func captureAddStoresTaskTextAsTodo() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in
@@ -392,6 +424,40 @@ struct CiderCaptureServiceTests {
             let explanation = try routing.explain(itemID: result.item.id)
             #expect(explanation.item.type == "todo")
             #expect(explanation.latestDecision?.source == "capture.add")
+        }
+    }
+
+    @Test("todo capture reports partial success when folder update fails")
+    func todoCaptureReportsPartialSuccessWhenFolderUpdateFails() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let requestedFolderID = UUID()
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                todoUpdateHandler: { _ in false }
+            )
+
+            let result = try service.addTodoCapture(
+                title: "Call dentist",
+                sourceText: "todo: Call dentist",
+                dueDate: nil,
+                priority: nil,
+                folderID: requestedFolderID
+            )
+            let dict = result.toDictionary()
+            let partialSuccess = try #require(dict["partialSuccess"] as? [String: Any])
+
+            #expect(result.item.folderID == nil)
+            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.reviewState == "needs_review")
+            #expect(result.nextSafeAction == "review_route")
+            #expect(partialSuccess["status"] as? String == "assignment_failed")
+            #expect(partialSuccess["requestedFolderID"] as? String == requestedFolderID.uuidString)
+            #expect(partialSuccess["actualFolderID"] == nil)
+            #expect((partialSuccess["reason"] as? String)?.contains("todo folder assignment failed") == true)
         }
     }
 
@@ -433,6 +499,41 @@ struct CiderCaptureServiceTests {
             #expect(itemStatement.string(at: 0) == "vaultFile")
             #expect(itemStatement.string(at: 1) == "Receipt photo")
             #expect(itemStatement.string(at: 2).hasPrefix("Inbox/Images/"))
+        }
+    }
+
+    @Test("file capture records vault file create audit entry")
+    func fileCaptureRecordsVaultFileCreateAuditEntry() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let routing = CiderRoutingDecisionService(database: db)
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: routing
+            )
+            let sourceURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cider-capture-audit-\(UUID().uuidString).pdf")
+            try Data([0x25, 0x50, 0x44, 0x46]).write(to: sourceURL)
+            defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+            let result = try service.addFileCapture(
+                sourcePath: sourceURL.path,
+                title: "Audited receipt",
+                folderID: nil
+            )
+
+            let entries = MutationAuditService(database: db).loadEntries()
+            let audit = entries.first { $0.itemID == result.item.id && $0.action == "create" }
+
+            #expect(result.item.type == "vaultFile")
+            #expect(result.routing.decisionID != nil)
+            #expect(audit?.itemType == "vaultFile")
+            #expect(audit?.afterState["title"] == "Audited receipt")
+            #expect(audit?.afterState["relativePath"] == result.item.relativePath)
+            #expect(audit?.metadata["source"] == "capture.add")
         }
     }
 }
