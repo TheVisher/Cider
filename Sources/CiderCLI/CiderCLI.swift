@@ -3239,6 +3239,7 @@ struct CiderCLI {
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
+              cider-cli item capability-map [--json]
               cider-cli item related <type> <id-or-ref> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
               cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
@@ -3404,6 +3405,19 @@ struct CiderCLI {
                 }
             } catch {
                 printCLIError(error.localizedDescription)
+            }
+
+        case "capability-map", "capabilities":
+            let payload = secondBrainCapabilityMapPayload()
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("Second-brain agent capability map")
+                if let areas = payload["areas"] as? [[String: Any]] {
+                    for area in areas {
+                        print("  \(area["id"] ?? ""): \(area["status"] ?? "")")
+                    }
+                }
             }
 
         case "why-surfaced", "why":
@@ -8111,6 +8125,89 @@ struct CiderCLI {
             values.append("linked_items:\(card.linkedEntities.count)")
         }
         return orderedUniqueStrings(values)
+    }
+
+    static func secondBrainCapabilityMapPayload() -> [String: Any] {
+        let areas: [[String: Any]] = [
+            [
+                "id": "capture",
+                "title": "Capture accurately",
+                "status": "usable",
+                "affordanceTargets": ["capture add", "bookmark add", "note create", "todo create", "file capture"],
+                "agentGuidance": "Capture first, then verify stored identity, enrichment, route, and review state.",
+                "nextImplementationSlice": "Broaden typed capture coverage only when a concrete workflow is missing.",
+            ],
+            [
+                "id": "route_and_organize",
+                "title": "Route and organize safely",
+                "status": "usable",
+                "affordanceTargets": ["routing explain/approve/correct", "review list/approve/correct/defer", "folder doctor"],
+                "agentGuidance": "Treat unclear routing as review, not a guess.",
+                "nextImplementationSlice": "Improve correction UX and confidence explanations as dogfooding reveals gaps.",
+            ],
+            [
+                "id": "retrieve",
+                "title": "Retrieve reliably",
+                "status": "usable",
+                "affordanceTargets": ["item get/search/related/context/why-surfaced"],
+                "agentGuidance": "Use item APIs before reading files or scraping folders.",
+                "nextImplementationSlice": "Add richer related-item reasons as new item types join the graph.",
+            ],
+            [
+                "id": "resurface",
+                "title": "Resurface at the right time",
+                "status": "partial",
+                "affordanceTargets": ["dashboard/home relevance", "item why-surfaced", "reminder relevance"],
+                "agentGuidance": "Show why now and next action; avoid noisy lists.",
+                "nextImplementationSlice": "Unify dashboard, notification, and agent briefing projections.",
+            ],
+            [
+                "id": "track_ongoing_state",
+                "title": "Track ongoing life and project state",
+                "status": "partial",
+                "affordanceTargets": ["todos", "date cards", "Kanban parent rollups", "recent activity"],
+                "agentGuidance": "Prefer explicit commitments, waiting-on, deadlines, and review state over memory.",
+                "nextImplementationSlice": "Add waiting-on and stale commitment projections.",
+            ],
+            [
+                "id": "reduce_adhd_burden",
+                "title": "Reduce ADHD burden",
+                "status": "partial",
+                "affordanceTargets": ["review queues", "why-surfaced", "safe commands", "dashboard next actions"],
+                "agentGuidance": "Offer the smallest safe next action, keep prompts low-noise, and do not require perfect manual organization.",
+                "nextImplementationSlice": "Turn capability gaps into concrete one-step dashboard or CLI affordances.",
+            ],
+            [
+                "id": "explain_and_build_trust",
+                "title": "Explain and build trust",
+                "status": "usable",
+                "affordanceTargets": ["routing decisions", "mutation audit", "item why-surfaced", "card history"],
+                "agentGuidance": "State source, confidence, and side effects before acting.",
+                "nextImplementationSlice": "Expose mutation previews for higher-risk actions.",
+            ],
+            [
+                "id": "agent_context",
+                "title": "Agent context and handoff",
+                "status": "usable",
+                "affordanceTargets": ["item context", "board card inspect", "card history", "safe commands"],
+                "agentGuidance": "Start from compact bundles and recent failed attempts before changing state.",
+                "nextImplementationSlice": "Add per-action previews and richer handoff compression.",
+            ],
+        ]
+
+        return [
+            "ok": true,
+            "purpose": "second_brain_agent_capability_map",
+            "generatedBy": "cider-cli item capability-map",
+            "areas": areas,
+            "nextActions": [
+                "Use item search/get/context/why-surfaced before reading files or scraping folders.",
+                "Treat low-confidence routing or unclear side effects as review prompts.",
+                "Prefer one concrete next action over long task lists.",
+                "Update this map when dogfooding reveals a missing second-brain affordance.",
+            ],
+            "relatedRoadmapCards": ["64cca3", "e4f102", "a07189", "c5b6cb", "288e23"],
+        ]
     }
 
     static func clippedText(_ value: String, limit: Int) -> String {

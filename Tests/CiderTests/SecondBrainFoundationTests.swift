@@ -1378,6 +1378,34 @@ struct SecondBrainFoundationTests {
         #expect(rollup["nextActionLine"] as? String == "Fix failed QA on Failed QA child.")
     }
 
+    @Test("process CLI exposes second brain capability map for agents")
+    func processCLIExposesSecondBrainCapabilityMapForAgents() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-capability-map-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        let map = try jsonObject(from: runCLI([
+            "item", "capability-map",
+            "--json",
+        ], vaultURL: vaultURL))
+
+        #expect(map["ok"] as? Bool == true)
+        #expect(map["purpose"] as? String == "second_brain_agent_capability_map")
+        let areas = try #require(map["areas"] as? [[String: Any]])
+        #expect(areas.count >= 8)
+        #expect(areas.contains {
+            $0["id"] as? String == "retrieve"
+                && $0["status"] as? String == "usable"
+                && (($0["affordanceTargets"] as? [String]) ?? []).contains("item get/search/related/context/why-surfaced")
+        })
+        #expect(areas.contains {
+            $0["id"] as? String == "reduce_adhd_burden"
+                && (($0["agentGuidance"] as? String)?.contains("smallest safe next action") == true)
+        })
+        let nextActions = try #require(map["nextActions"] as? [String])
+        #expect(nextActions.contains("Use item search/get/context/why-surfaced before reading files or scraping folders."))
+    }
+
     @Test("process CLI exposes roadmap next up on parent card inspect")
     func processCLIExposesRoadmapNextUpOnParentCardInspect() throws {
         let vaultURL = FileManager.default.temporaryDirectory
