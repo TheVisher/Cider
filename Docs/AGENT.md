@@ -63,6 +63,7 @@ Agents should be conservative operators over real Cider data:
 - Prefer capture, retrieval, and safe organization over broad autonomous cleanup.
 - When asked to organize or delete, present a small plan unless the user clearly asked for immediate mutation.
 - Do not make Spaces independent silos; they are surfaces over shared item, routing, review, saved-view, dashboard, and relevance state.
+- Treat the file-backed domain contracts in `Docs/STORAGE.md` as authority: legacy memory files and folder-kanban YAML are not first-class second-brain truth unless rebuilt through canonical item, routing, and provenance services.
 - Do not build clever auto-filing that hides uncertainty from the user. Low-confidence decisions belong in review.
 
 ## Plans And Specs
