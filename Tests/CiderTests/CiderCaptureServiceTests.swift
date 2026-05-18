@@ -146,6 +146,44 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("capture result dictionary refreshes bookmark enrichment from final stored item")
+    func captureResultDictionaryRefreshesBookmarkEnrichment() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db
+            )
+
+            let result = try service.add("https://example.com/enriched")
+            let enrichedAt = Date(timeIntervalSince1970: 1_775_000_000)
+            let finalBookmark = Bookmark(
+                id: result.item.id,
+                title: "Enriched Capture Title",
+                urlString: "https://example.com/enriched",
+                createdAt: Date(timeIntervalSince1970: 1_774_999_000),
+                updatedAt: Date(timeIntervalSince1970: 1_774_999_500),
+                metadataUpdatedAt: enrichedAt,
+                relativePath: "Inbox/Bookmarks/Enriched Capture Title.webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: enrichedAt
+            )
+
+            let dict = result.toDictionary(finalBookmark: finalBookmark)
+            let item = try #require(dict["item"] as? [String: Any])
+            let enrichment = try #require(dict["enrichment"] as? [String: Any])
+
+            #expect(item["title"] as? String == "Enriched Capture Title")
+            #expect(item["relativePath"] as? String == "Inbox/Bookmarks/Enriched Capture Title.webloc")
+            #expect(enrichment["status"] as? String == "complete")
+            #expect(enrichment["isEnriching"] as? Bool == false)
+            #expect(enrichment["titleState"] as? String == "enriched")
+            #expect(enrichment["lastEnrichedAt"] as? String != nil)
+        }
+    }
+
     @Test("capture add duplicate preserves existing bookmark location when no folder is supplied")
     func captureAddDuplicatePreservesExistingLocation() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in

@@ -782,7 +782,7 @@ struct CiderCLI {
                 let finalBookmark = waitResult?.bookmark
                     ?? bookmarkService.bookmarks.first(where: { $0.id == result.item.id })
                 if jsonOutput {
-                    var dict = result.toDictionary()
+                    var dict = result.toDictionary(finalBookmark: finalBookmark)
                     if let waitResult {
                         dict["nativeCaptureStatus"] = waitResult.timedOut ? "timedOut" : "settled"
                         dict["nativeCaptureElapsedSeconds"] = waitResult.elapsedSeconds
@@ -792,18 +792,6 @@ struct CiderCLI {
                         dict["dateSuggestions"] = CiderBookmarkDateSuggestionService()
                             .suggestions(for: finalBookmark)
                             .map(bookmarkDateSuggestionToDict)
-                        var item = (dict["item"] as? [String: Any]) ?? [:]
-                        item["title"] = finalBookmark.title
-                        item["folderName"] = finalBookmark.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
-                        if let relativePath = finalBookmark.relativePath {
-                            item["relativePath"] = relativePath
-                        }
-                        if let folderID = finalBookmark.folderID {
-                            item["folderID"] = folderID.uuidString
-                        } else {
-                            item.removeValue(forKey: "folderID")
-                        }
-                        dict["item"] = item
                     }
                     outputJSON(dict)
                 } else {
@@ -1330,7 +1318,7 @@ struct CiderCLI {
                     var dict = bookmarkToDict(finalBookmark)
                     dict["command"] = "bookmark.add"
                     dict["backendCommand"] = result.captureResult.command
-                    dict["capture"] = result.captureResult.toDictionary()
+                    dict["capture"] = result.captureResult.toDictionary(finalBookmark: finalBookmark)
                     if let waitResult {
                         dict["nativeCaptureStatus"] = waitResult.timedOut ? "timedOut" : "settled"
                         dict["nativeCaptureElapsedSeconds"] = waitResult.elapsedSeconds

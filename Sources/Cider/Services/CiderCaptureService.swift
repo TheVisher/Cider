@@ -118,6 +118,57 @@ struct CiderCaptureResult {
             "nextSafeAction": nextSafeAction,
         ]
     }
+
+    @MainActor
+    func toDictionary(finalBookmark: Bookmark?) -> [String: Any] {
+        var dict = toDictionary()
+        guard item.type == "bookmark", let finalBookmark else { return dict }
+
+        var itemDict = (dict["item"] as? [String: Any]) ?? [:]
+        itemDict["title"] = finalBookmark.title
+        itemDict["folderName"] = finalBookmark.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+        if let relativePath = finalBookmark.relativePath {
+            itemDict["relativePath"] = relativePath
+        } else {
+            itemDict.removeValue(forKey: "relativePath")
+        }
+        if let folderID = finalBookmark.folderID {
+            itemDict["folderID"] = folderID.uuidString
+        } else {
+            itemDict.removeValue(forKey: "folderID")
+        }
+        dict["item"] = itemDict
+
+        var enrichmentDict = (dict["enrichment"] as? [String: Any]) ?? [:]
+        enrichmentDict["status"] = Self.enrichmentStatus(for: finalBookmark)
+        enrichmentDict["isEnriching"] = finalBookmark.isEnriching
+        enrichmentDict["titleState"] = Self.titleState(for: finalBookmark)
+        if let lastEnrichedAt = finalBookmark.lastEnrichedAt {
+            enrichmentDict["lastEnrichedAt"] = ISO8601DateFormatter().string(from: lastEnrichedAt)
+        } else {
+            enrichmentDict.removeValue(forKey: "lastEnrichedAt")
+        }
+        dict["enrichment"] = enrichmentDict
+
+        return dict
+    }
+
+    private static func enrichmentStatus(for bookmark: Bookmark) -> String {
+        if let status = bookmark.enrichmentStatus?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !status.isEmpty {
+            return status
+        }
+        if bookmark.metadataUpdatedAt != nil {
+            return "metadata_complete"
+        }
+        return "pending"
+    }
+
+    private static func titleState(for bookmark: Bookmark) -> String {
+        if bookmark.titleManuallySet { return "manual" }
+        if bookmark.metadataUpdatedAt != nil { return "enriched" }
+        return "host_derived"
+    }
 }
 
 enum CiderCaptureError: LocalizedError {
