@@ -12,16 +12,22 @@ enum KanbanPriority: String, Codable, CaseIterable, Sendable {
 
 enum KanbanCardHistoryEntryType: String, Codable, CaseIterable, Sendable {
     case note
+    case implementation
     case failedAttempt = "failed_attempt"
     case testEvidence = "test_evidence"
+    case decision
+    case handoff
     case finalSummary = "final_summary"
     case commit
 
     var displayName: String {
         switch self {
         case .note: "Note"
+        case .implementation: "Implementation"
         case .failedAttempt: "Failed Attempt"
         case .testEvidence: "Test Evidence"
+        case .decision: "Decision"
+        case .handoff: "Handoff"
         case .finalSummary: "Final Summary"
         case .commit: "Commit"
         }
@@ -30,8 +36,11 @@ enum KanbanCardHistoryEntryType: String, Codable, CaseIterable, Sendable {
     var symbolName: String {
         switch self {
         case .note: "note.text"
+        case .implementation: "hammer"
         case .failedAttempt: "xmark.octagon"
         case .testEvidence: "checkmark.seal"
+        case .decision: "checkmark.seal.fill"
+        case .handoff: "person.2.wave.2"
         case .finalSummary: "flag.checkered"
         case .commit: "point.3.connected.trianglepath.dotted"
         }

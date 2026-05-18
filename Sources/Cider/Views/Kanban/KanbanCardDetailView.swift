@@ -67,7 +67,16 @@ struct KanbanCardDetailView: View {
                 Group {
                     switch mode {
                     case .overview:
-                        KanbanCardDashboardView(boardID: boardID, boardName: boardName, cardID: cardID, title: draft.title, notes: draft.notes)
+                        KanbanCardDashboardView(
+                            boardID: boardID,
+                            boardName: boardName,
+                            cardID: cardID,
+                            title: draft.title,
+                            notes: draft.notes,
+                            historyEntries: $draft.historyEntries,
+                            newHistoryType: $newHistoryType,
+                            newHistoryBody: $newHistoryBody
+                        )
                     case .agentContext:
                         KanbanCardAgentContextView(
                             notes: $draft.notes,
@@ -207,6 +216,9 @@ private struct KanbanCardDashboardView: View {
     let cardID: String
     let title: String
     let notes: String
+    @Binding var historyEntries: [KanbanCardHistoryEntry]
+    @Binding var newHistoryType: KanbanCardHistoryEntryType
+    @Binding var newHistoryBody: String
 
     @ObservedObject private var storage = KanbanStorage.shared
 
@@ -254,6 +266,12 @@ private struct KanbanCardDashboardView: View {
                             entries: model.testingGuidanceEntries
                         )
                     }
+
+                    KanbanCardHistorySectionView(
+                        entries: $historyEntries,
+                        newEntryType: $newHistoryType,
+                        newEntryBody: $newHistoryBody
+                    )
 
                     KanbanDashboardTripleSection(model: model)
 

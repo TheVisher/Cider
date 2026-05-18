@@ -129,8 +129,22 @@ struct KanbanCardCodableTests {
             historyEntries: [
                 KanbanCardHistoryEntry(
                     id: "history-1",
-                    type: .failedAttempt,
-                    body: "Tried invalidating every layout pass; it made resize janky.",
+                    type: .implementation,
+                    body: "Added the visible dashboard history section.",
+                    author: "Codex",
+                    createdAt: createdAt
+                ),
+                KanbanCardHistoryEntry(
+                    id: "history-2",
+                    type: .decision,
+                    body: "Keep history below What To Test.",
+                    author: "Codex",
+                    createdAt: createdAt
+                ),
+                KanbanCardHistoryEntry(
+                    id: "history-3",
+                    type: .handoff,
+                    body: "Reopen the card and verify the entry persists.",
                     author: "Codex",
                     createdAt: createdAt
                 ),
@@ -140,9 +154,9 @@ struct KanbanCardCodableTests {
         let data = try JSONEncoder().encode(card)
         let decoded = try JSONDecoder().decode(KanbanCard.self, from: data)
 
-        #expect(decoded.historyEntries.count == 1)
-        #expect(decoded.historyEntries.first?.type == .failedAttempt)
-        #expect(decoded.historyEntries.first?.body == "Tried invalidating every layout pass; it made resize janky.")
+        #expect(decoded.historyEntries.count == 3)
+        #expect(decoded.historyEntries.map(\.type) == [.implementation, .decision, .handoff])
+        #expect(decoded.historyEntries.first?.body == "Added the visible dashboard history section.")
         #expect(decoded.historyEntries.first?.author == "Codex")
         #expect(decoded.historyEntries.first?.createdAt == createdAt)
     }
