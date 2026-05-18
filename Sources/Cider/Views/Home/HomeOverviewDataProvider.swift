@@ -773,6 +773,8 @@ enum HomeOverviewDataProvider {
             return "routing_requires_explicit_approval"
         case "inbox_backlog":
             return "manual_routing_required"
+        case "duplicate_candidate":
+            return "duplicate_review_required"
         default:
             return item.itemType == "bookmark" ? "not_enrichment_candidate" : "unsupported_item_type"
         }
@@ -917,6 +919,7 @@ enum HomeOverviewDataProvider {
         let normalized = kind.lowercased()
         if normalized.contains("routing") { return "Routing" }
         if normalized.contains("enrichment") { return "Enrichment" }
+        if normalized.contains("duplicate") { return "Duplicate" }
         if normalized.contains("inbox") { return "Inbox" }
         return "Review"
     }

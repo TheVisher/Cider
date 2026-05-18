@@ -370,6 +370,67 @@ struct CiderReviewQueueServiceTests {
         _ = inboxID
     }
 
+    @Test("review queue surfaces duplicate auditor candidates as manual review items")
+    func reviewQueueSurfacesDuplicateAuditorCandidates() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let firstID = try insertBookmark(
+            db,
+            title: "Duplicate A",
+            url: "https://example.com/a",
+            relativePath: "Saved/Duplicate A.webloc",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date()
+        )
+        let secondID = UUID()
+        let duplicateFinding = VaultDuplicateAuditor.Finding(
+            id: "duplicate-bookmark-url-example",
+            entityType: .bookmark,
+            kind: .canonicalURL,
+            confidence: .exact,
+            summary: "Duplicate bookmark URL: example.com/a",
+            detail: "Two bookmarks canonicalize to the same URL and need human merge review.",
+            items: [
+                .init(
+                    id: firstID.uuidString,
+                    title: "Duplicate A",
+                    path: "Saved/Duplicate A.webloc",
+                    value: "https://example.com/a"
+                ),
+                .init(
+                    id: secondID.uuidString,
+                    title: "Duplicate A Copy",
+                    path: "Inbox/Bookmarks/Duplicate A Copy.webloc",
+                    value: "https://example.com/a"
+                ),
+            ]
+        )
+        let queue = CiderReviewQueueService(
+            database: db,
+            duplicateFindingsProvider: { [duplicateFinding] }
+        )
+
+        let result = try queue.list(kind: "duplicate_candidate")
+
+        #expect(result.items.count == 1)
+        let item = try #require(result.items.first)
+        #expect(item.id == "review-duplicate-duplicate-bookmark-url-example")
+        #expect(item.kind == "duplicate_candidate")
+        #expect(item.source == "duplicate_auditor")
+        #expect(item.itemID == firstID)
+        #expect(item.itemType == "bookmark")
+        #expect(item.title == "Duplicate bookmark URL: example.com/a")
+        #expect(item.relativePath == "Saved/Duplicate A.webloc")
+        #expect(item.reviewState == "needs_review")
+        #expect(item.confidence == 1)
+        #expect(item.safeActions == ["inspect_duplicates", "manual_review"])
+
+        let summary = try queue.summary()
+        #expect(summary.countsByKind["duplicate_candidate"] == 1)
+        #expect(summary.countsBySafeAction["inspect_duplicates"] == 1)
+        #expect(summary.groups.first { $0.id == "duplicate_candidate:needs_review:inspect_duplicates:bookmark" }?.count == 1)
+    }
+
     @Test("review queue summary groups actionable work and previews batch enrichment")
     func reviewQueueSummaryGroupsActionableWorkAndPreviewsBatchEnrichment() throws {
         let (db, url) = try makeTempDB()

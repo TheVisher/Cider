@@ -751,6 +751,7 @@ struct HomeOverviewDashboardView: View {
         switch item.kindLabel {
         case "Routing": return "arrow.triangle.branch"
         case "Enrichment": return "sparkles"
+        case "Duplicate": return "doc.on.doc"
         case "Inbox": return "tray"
         case "Date Suggestion": return item.dateSuggestionApproval?.destination == .todo ? "checklist" : "calendar.badge.plus"
         default: return "exclamationmark.bubble"
@@ -761,6 +762,7 @@ struct HomeOverviewDashboardView: View {
         switch item.kindLabel {
         case "Routing": return CiderColors.controlAccent
         case "Enrichment": return CiderColors.warning
+        case "Duplicate": return CiderColors.warning
         case "Inbox": return CiderColors.tertiary
         case "Date Suggestion": return CiderColors.success
         default: return CiderColors.secondary

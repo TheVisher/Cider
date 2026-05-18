@@ -623,6 +623,7 @@ final class CiderReviewQueueService {
     private let database: CiderDatabase?
     private let routingDecisionService: CiderRoutingDecisionService
     private let enrichmentScheduler: (UUID) -> Void
+    private let duplicateFindingsProvider: () -> [VaultDuplicateAuditor.Finding]
 
     private var resolvedDatabase: CiderDatabase? {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
@@ -631,12 +632,16 @@ final class CiderReviewQueueService {
     init(
         database: CiderDatabase? = nil,
         routingDecisionService: CiderRoutingDecisionService? = nil,
-        enrichmentScheduler: ((UUID) -> Void)? = nil
+        enrichmentScheduler: ((UUID) -> Void)? = nil,
+        duplicateFindingsProvider: (() -> [VaultDuplicateAuditor.Finding])? = nil
     ) {
         self.database = database
         self.routingDecisionService = routingDecisionService ?? CiderRoutingDecisionService(database: database)
         self.enrichmentScheduler = enrichmentScheduler ?? { bookmarkID in
             VaultBookmarkService.shared.refetchMetadata(for: bookmarkID)
+        }
+        self.duplicateFindingsProvider = duplicateFindingsProvider ?? {
+            VaultDuplicateAuditor.scan()
         }
     }
 
@@ -689,6 +694,8 @@ final class CiderReviewQueueService {
                 seenItemIDs.insert(item.id)
             }
         }
+
+        reviewItems.append(contentsOf: duplicateReviewItems(now: now))
 
         let filtered = reviewItems.filter { item in
             if let kind, item.kind != kind { return false }
@@ -1702,18 +1709,57 @@ final class CiderReviewQueueService {
         )
     }
 
+    private func duplicateReviewItems(now: Date) -> [CiderReviewQueueItem] {
+        duplicateFindingsProvider().compactMap { finding in
+            guard let firstItem = finding.items.first,
+                  let itemID = UUID(uuidString: firstItem.id) else {
+                return nil
+            }
+            return CiderReviewQueueItem(
+                id: "review-duplicate-\(finding.id)",
+                kind: "duplicate_candidate",
+                source: "duplicate_auditor",
+                itemID: itemID,
+                itemType: finding.entityType.rawValue,
+                title: finding.summary,
+                relativePath: firstItem.path,
+                reason: finding.detail,
+                suggestedAction: "Review duplicate candidates",
+                reviewState: "needs_review",
+                confidence: duplicateConfidenceScore(finding.confidence),
+                routingDecisionID: nil,
+                target: nil,
+                createdAt: now,
+                safeActions: ["inspect_duplicates", "manual_review"]
+            )
+        }
+    }
+
+    private func duplicateConfidenceScore(_ confidence: VaultDuplicateAuditor.Confidence) -> Double {
+        switch confidence {
+        case .exact:
+            return 1
+        case .likely:
+            return 0.75
+        case .possible:
+            return 0.5
+        }
+    }
+
     private func sortRank(_ item: CiderReviewQueueItem) -> Int {
         switch item.kind {
         case "low_confidence_routing":
             return 0
         case "enrichment":
             return 1
-        case "inbox_backlog":
+        case "duplicate_candidate":
             return 2
-        case "deferred_routing":
+        case "inbox_backlog":
             return 3
-        default:
+        case "deferred_routing":
             return 4
+        default:
+            return 5
         }
     }
 
@@ -1805,6 +1851,8 @@ final class CiderReviewQueueService {
             return "routing_requires_explicit_approval"
         case "inbox_backlog":
             return "manual_routing_required"
+        case "duplicate_candidate":
+            return "duplicate_review_required"
         default:
             if item.itemType != "bookmark" {
                 return "unsupported_item_type"
@@ -1826,12 +1874,14 @@ final class CiderReviewQueueService {
             return 0
         case "enrichment":
             return group.reviewState == "needs_review" ? 1 : 2
-        case "inbox_backlog":
+        case "duplicate_candidate":
             return 3
-        case "deferred_routing":
+        case "inbox_backlog":
             return 4
-        default:
+        case "deferred_routing":
             return 5
+        default:
+            return 6
         }
     }
 
