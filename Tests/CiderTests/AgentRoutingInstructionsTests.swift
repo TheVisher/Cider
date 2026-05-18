@@ -7,14 +7,31 @@ struct AgentRoutingInstructionsTests {
     func includesCoreVaultRules() {
         let text = AgentRoutingInstructions.vaultSaveRoutingDoctrine
 
-        #expect(text.contains("Do not invent new top-level folders."))
-        #expect(text.contains("Food"))
-        #expect(text.contains("People"))
-        #expect(text.contains("Inbox"))
-        #expect(text.contains("For bookmarks, notes, and contacts, route before creating when the destination is reasonably clear."))
-        #expect(text.contains("prefer saving the raw URL"))
-        #expect(text.contains("native title and thumbnail capture"))
-        #expect(text.contains("If the destination is unclear, save to Inbox and explain why."))
+        #expect(text.contains("item/capture/review/storage APIs"))
+        #expect(text.contains("capture add"))
+        #expect(text.contains("item get"))
+        #expect(text.contains("item search"))
+        #expect(text.contains("item context"))
+        #expect(text.contains("item related"))
+        #expect(text.contains("item why-surfaced"))
+        #expect(text.contains("review/routing flows"))
+        #expect(text.contains("confirmed state and provenance"))
+        #expect(text.contains("Kanban card"))
+    }
+
+    @Test("routing doctrine avoids legacy-first agent surfaces")
+    func avoidsLegacyFirstAgentSurfaces() {
+        let text = AgentRoutingInstructions.vaultSaveRoutingDoctrine
+
+        #expect(text.contains("Avoid legacy-first surfaces"))
+        #expect(text.contains("memory"))
+        #expect(text.contains("embeddings"))
+        #expect(text.contains("folder kanban"))
+        #expect(text.contains("old search/query/recent/snapshot/status"))
+        #expect(text.contains("instead of working around the backend"))
+        #expect(!text.contains("Use the existing vault domains:"))
+        #expect(!text.contains("For bookmarks, notes, and contacts, route before creating"))
+        #expect(!text.contains("save to Inbox and explain why"))
     }
 
     @Test("remote channels cannot use process runtimes")
