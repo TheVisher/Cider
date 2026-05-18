@@ -3238,6 +3238,7 @@ struct CiderCLI {
               cider-cli item get <type> <id-or-ref> [--json]
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
+              cider-cli item why-surfaced <type> <id-or-ref> [--json]
               cider-cli item related <type> <id-or-ref> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
               cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
@@ -3400,6 +3401,62 @@ struct CiderCLI {
                             print("    \(command)")
                         }
                     }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "why-surfaced", "why":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item why-surfaced <type> <id-or-ref> [--json]")
+                return
+            }
+            if isKanbanCardItemType(positional[0]) {
+                do {
+                    let packet = try kanbanCardAgentContextPayload(ref: positional[1], args: args, store: store)
+                    var payload: [String: Any] = [
+                        "ok": true,
+                        "sourceRef": [
+                            "type": "card",
+                            "ref": positional[1],
+                        ],
+                        "item": packet["item"] ?? [:],
+                        "surfacing": packet["surfacing"] ?? [:],
+                        "safeCommands": packet["safeCommands"] ?? [],
+                    ]
+                    payload["summary"] = packet["summary"]
+                    if jsonOutput {
+                        outputJSON(payload)
+                    } else if let surfacing = payload["surfacing"] as? [String: Any] {
+                        print("Why: \(surfacing["reason"] ?? "")")
+                        print("Next: \(surfacing["suggestedAction"] ?? "")")
+                    }
+                } catch {
+                    printCLIError(error.localizedDescription)
+                }
+                return
+            }
+            do {
+                let type = try ItemLinkService.entityType(from: positional[0])
+                let ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+                let packet = try contextService.agentContext(for: ref, limits: itemAgentContextLimits(from: args))
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "sourceRef": [
+                        "type": positional[0],
+                        "ref": positional[1],
+                    ],
+                    "item": itemSummaryToDict(packet.item),
+                    "surfacing": surfacingExplanationToDict(packet.surfacing),
+                    "safeCommands": packet.safeCommands,
+                    "summary": packet.summary,
+                ]
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Why: \(packet.surfacing.reason)")
+                    print("Next: \(packet.surfacing.suggestedAction)")
                 }
             } catch {
                 printCLIError(error.localizedDescription)

@@ -1313,6 +1313,17 @@ struct SecondBrainFoundationTests {
         let safeCommands = try #require(cardContext["safeCommands"] as? [String])
         #expect(safeCommands.contains("cider-cli item get card \(cardRef) --json"))
         #expect(safeCommands.contains("cider-cli board card inspect Agent Workflow Smoke --card \(cardRef) --json"))
+
+        let whySurfaced = try jsonObject(from: runCLI([
+            "item", "why-surfaced", "card", cardRef,
+            "--json",
+        ], vaultURL: vaultURL))
+        #expect(whySurfaced["ok"] as? Bool == true)
+        let contextSurfacing = try #require(cardContext["surfacing"] as? [String: Any])
+        let whySurfacing = try #require(whySurfaced["surfacing"] as? [String: Any])
+        #expect(whySurfacing["reason"] as? String == contextSurfacing["reason"] as? String)
+        #expect(whySurfacing["sourceSignal"] as? String == "kanban_context")
+        #expect(whySurfacing["suggestedAction"] as? String == contextSurfacing["suggestedAction"] as? String)
     }
 
     @Test("process CLI exposes parent child rollup on card inspect")
