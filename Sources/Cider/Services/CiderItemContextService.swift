@@ -184,15 +184,29 @@ final class CiderItemContextService {
         linkService.summaries(for: try linkService.relatedRefs(for: ref))
     }
 
-    func search(_ query: String, limit: Int = 20) throws -> [CiderItemSearchResult] {
+    func items(inSpaceID spaceID: String) throws -> [CiderItemSummary] {
+        try spaceMembershipStore.itemRefs(inSpaceID: spaceID).compactMap { ref in
+            try? itemSummary(id: ref.entityID)
+        }
+    }
+
+    func search(_ query: String, limit: Int = 20, inSpaceID spaceID: String? = nil) throws -> [CiderItemSearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
-        var results = try searchItems(trimmed, limit: limit)
+        let spaceRefs = try spaceID.map { Set(try spaceMembershipStore.itemRefs(inSpaceID: $0)) }
+        var results = try searchItems(trimmed, limit: limit, spaceRefs: spaceRefs)
         let remainingLimit = max(1, limit - results.count)
-        let chunkMatches = try secondBrainStore.searchChunks(query: trimmed, limit: remainingLimit)
+        let chunkMatches = try secondBrainStore.searchChunks(
+            query: trimmed,
+            limit: spaceRefs == nil ? remainingLimit : max(remainingLimit, limit * 5)
+        )
         for match in chunkMatches {
             let item = try? itemSummary(owner: match.owner)
+            if let spaceRefs, let item {
+                let ref = LibraryEntityRef(type: item.type, entityID: item.id)
+                guard spaceRefs.contains(ref) else { continue }
+            }
             results.append(
                 CiderItemSearchResult(
                     id: "chunk-\(match.id)",
@@ -209,8 +223,14 @@ final class CiderItemContextService {
         return Array(results.prefix(max(1, limit)))
     }
 
-    private func searchItems(_ query: String, limit: Int) throws -> [CiderItemSearchResult] {
-        let stmt = try database.prepare("""
+    private func searchItems(
+        _ query: String,
+        limit: Int,
+        spaceRefs: Set<LibraryEntityRef>? = nil
+    ) throws -> [CiderItemSearchResult] {
+        let sql: String
+        if spaceRefs == nil {
+            sql = """
             SELECT id, type, title, created_at, updated_at, folder_id, relative_path
             FROM items
             WHERE title LIKE ? ESCAPE '\\'
@@ -220,17 +240,36 @@ final class CiderItemContextService {
                 updated_at DESC,
                 title COLLATE NOCASE ASC
             LIMIT ?;
-            """)
+            """
+        } else {
+            sql = """
+            SELECT id, type, title, created_at, updated_at, folder_id, relative_path
+            FROM items
+            WHERE (title LIKE ? ESCAPE '\\'
+               OR IFNULL(relative_path, '') LIKE ? ESCAPE '\\')
+            ORDER BY
+                CASE WHEN title LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END,
+                updated_at DESC,
+                title COLLATE NOCASE ASC;
+            """
+        }
+        let stmt = try database.prepare(sql)
         let containsPattern = "%\(escapedLikePattern(query))%"
         let prefixPattern = "\(escapedLikePattern(query))%"
         stmt.bind(containsPattern, at: 1)
             .bind(containsPattern, at: 2)
             .bind(prefixPattern, at: 3)
-            .bind(max(1, limit), at: 4)
+        if spaceRefs == nil {
+            stmt.bind(max(1, limit), at: 4)
+        }
 
         var results: [CiderItemSearchResult] = []
         while try stmt.step() {
             let item = try itemSummary(from: stmt)
+            if let spaceRefs {
+                let ref = LibraryEntityRef(type: item.type, entityID: item.id)
+                guard spaceRefs.contains(ref) else { continue }
+            }
             let owner = owner(for: item)
             results.append(
                 CiderItemSearchResult(
@@ -243,6 +282,7 @@ final class CiderItemContextService {
                     rank: 0
                 )
             )
+            if spaceRefs != nil, results.count >= max(1, limit) { break }
         }
         return results
     }

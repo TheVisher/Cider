@@ -169,6 +169,47 @@ struct CiderItemContextServiceTests {
         })
     }
 
+    @Test("space listing and search use native membership rather than folder paths")
+    func spaceListingAndSearchUseNativeMembership() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let inSpace = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let outside = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        try insertItem(
+            inSpace,
+            title: "Steam Deck review",
+            relativePath: "Inbox/Bookmarks/Steam Deck review.webloc",
+            into: db
+        )
+        try insertItem(
+            outside,
+            title: "Steam invoice",
+            relativePath: "Inbox/Bookmarks/Steam invoice.webloc",
+            into: db
+        )
+
+        let spaceStore = CiderSpaceMembershipStore(database: db)
+        try spaceStore.assign(
+            item: inSpace,
+            toSpaceID: "space-media",
+            spaceName: "Media",
+            reason: "Games and hardware belong in Media even while staged in Inbox.",
+            confidence: 0.9,
+            source: "space.test",
+            actor: "agent"
+        )
+        let service = CiderItemContextService(database: db, spaceMembershipStore: spaceStore)
+
+        let listed = try service.items(inSpaceID: "space-media")
+        #expect(listed.map(\.id) == [inSpace.entityID])
+        #expect(listed.first?.relativePath == "Inbox/Bookmarks/Steam Deck review.webloc")
+
+        let filtered = try service.search("Steam", limit: 10, inSpaceID: "space-media")
+        #expect(filtered.map(\.item?.id) == [inSpace.entityID])
+        #expect(!filtered.contains { $0.item?.id == outside.entityID })
+    }
+
     @Test("agent context bundle is bounded and includes provenance review history and safe commands")
     func agentContextBundleIsBoundedAndActionable() throws {
         let (db, url) = try makeTestDB()

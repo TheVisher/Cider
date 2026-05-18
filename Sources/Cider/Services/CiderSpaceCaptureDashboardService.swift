@@ -108,7 +108,7 @@ final class CiderSpaceCaptureDashboardService {
         guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
 
         let rows = try latestRows(in: db)
-            .filter { belongsToSpace($0, spaceRoot: space.rootRelativePath) }
+            .filter { belongsToSpace($0, space: space) }
 
         let recent = rows
             .filter { isAcceptedState($0.reviewState) }
@@ -150,7 +150,7 @@ final class CiderSpaceCaptureDashboardService {
     private func latestRows(in db: CiderDatabase) throws -> [DashboardRow] {
         let stmt = try db.prepare("""
             SELECT rd.id, rd.item_id, rd.item_type, rd.target_kind, rd.target_name,
-                   rd.target_relative_path, rd.target_folder_id, rd.confidence,
+                   rd.target_relative_path, rd.target_folder_id, rd.target_space_id, rd.confidence,
                    rd.reason, rd.review_state, rd.created_at,
                    i.title, i.relative_path, b.url
             FROM routing_decisions rd
@@ -176,23 +176,25 @@ final class CiderSpaceCaptureDashboardService {
                     kind: stmt.string(at: 3),
                     name: stmt.string(at: 4),
                     relativePath: stmt.string(at: 5),
-                    folderID: stmt.optionalString(at: 6).flatMap(UUID.init(uuidString:))
+                    folderID: stmt.optionalString(at: 6).flatMap(UUID.init(uuidString:)),
+                    spaceID: stmt.optionalString(at: 7)
                 ),
-                confidence: stmt.double(at: 7),
-                reason: stmt.string(at: 8),
-                reviewState: stmt.string(at: 9),
-                routedAt: DatabaseHelpers.decodeDate(stmt.double(at: 10)),
-                title: stmt.string(at: 11),
-                itemRelativePath: stmt.optionalString(at: 12),
-                sourceURL: stmt.optionalString(at: 13)
+                confidence: stmt.double(at: 8),
+                reason: stmt.string(at: 9),
+                reviewState: stmt.string(at: 10),
+                routedAt: DatabaseHelpers.decodeDate(stmt.double(at: 11)),
+                title: stmt.string(at: 12),
+                itemRelativePath: stmt.optionalString(at: 13),
+                sourceURL: stmt.optionalString(at: 14)
             ))
         }
         return rows
     }
 
-    private func belongsToSpace(_ row: DashboardRow, spaceRoot: String) -> Bool {
-        path(row.target.relativePath, isIn: spaceRoot)
-            || row.itemRelativePath.map { path($0, isIn: spaceRoot) } == true
+    private func belongsToSpace(_ row: DashboardRow, space: CiderSpace) -> Bool {
+        row.target.spaceID == space.id
+            || path(row.target.relativePath, isIn: space.rootRelativePath)
+            || row.itemRelativePath.map { path($0, isIn: space.rootRelativePath) } == true
     }
 
     private func path(_ path: String, isIn root: String) -> Bool {

@@ -1206,6 +1206,33 @@ struct CiderCLI {
                 print("Error: \(error.localizedDescription)")
             }
 
+        case "items":
+            guard let spaceRef = args.first else {
+                print("Error: Usage: cider-cli space items <space-id|name> [--json]")
+                return
+            }
+            guard let space = resolveSpace(spaceRef, storage: storage) else { return }
+            do {
+                let items = try CiderItemContextService(database: .shared).items(inSpaceID: space.id)
+                if jsonOutput {
+                    outputJSON([
+                        "ok": true,
+                        "space": spaceToDict(space),
+                        "items": items.map(itemSummaryToDict),
+                    ])
+                } else if items.isEmpty {
+                    print("No native membership items in Space \(space.name).")
+                } else {
+                    print("Space items: \(space.name) (\(items.count))")
+                    for item in items {
+                        let path = item.relativePath.map { " — \($0)" } ?? ""
+                        print("  [\(item.type.rawValue):\(item.id.uuidString.prefix(8))] \(item.title)\(path)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case "list", "ls":
             let spaces = storage.spaces.sorted {
                 $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
@@ -1251,6 +1278,7 @@ struct CiderCLI {
               cider-cli space list [--json]
               cider-cli space explain <name-or-id> [--json]
               cider-cli space captures <space-id|name> [--limit <n>] [--json]
+              cider-cli space items <space-id|name> [--json]
             """)
 
         default:
@@ -3322,7 +3350,7 @@ struct CiderCLI {
         case nil, "help", "--help", "-h":
             print("""
             Item graph commands:
-              cider-cli item search <query> [--limit <n>] [--json]
+              cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
@@ -3345,13 +3373,28 @@ struct CiderCLI {
             }
             let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 20
             do {
-                let results = try contextService.search(query, limit: limit)
+                let space = resolveOptionalSpaceFlag(from: args)
+                if parseFlag("--space", from: args) != nil, space == nil { return }
+                let results = try contextService.search(query, limit: limit, inSpaceID: space?.id)
                 if jsonOutput {
-                    outputJSON(results.map(itemSearchResultToDict))
+                    if let space {
+                        outputJSON([
+                            "ok": true,
+                            "space": spaceToDict(space),
+                            "results": results.map(itemSearchResultToDict),
+                        ])
+                    } else {
+                        outputJSON(results.map(itemSearchResultToDict))
+                    }
                 } else if results.isEmpty {
-                    print("No item graph results for '\(query)'.")
+                    if let space {
+                        print("No item graph results for '\(query)' in Space \(space.name).")
+                    } else {
+                        print("No item graph results for '\(query)'.")
+                    }
                 } else {
-                    print("Item graph search '\(query)' (\(results.count) results):")
+                    let scope = space.map { " in Space \($0.name)" } ?? ""
+                    print("Item graph search '\(query)'\(scope) (\(results.count) results):")
                     for result in results {
                         let label = result.kind == .item ? "item" : "chunk"
                         print("  [\(label) \(result.owner.ownerType):\(result.owner.ownerID)] \(result.title) — \(result.snippet)")
@@ -3766,6 +3809,72 @@ struct CiderCLI {
             do {
                 if let entityType = try? ItemLinkService.entityType(from: positional[0]) {
                     let ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
+                    if normalizedTargetType == "space" {
+                        guard targetID != nil || targetPath != nil else {
+                            printCLIError("Space routes require --target-id <space-id> or --target-path <space-name-or-path>.")
+                            return
+                        }
+                        let space = resolveSpaceTarget(targetID: targetID, targetPath: targetPath)
+                        let finalSpaceID = space?.id ?? targetID ?? targetPath!
+                        let finalSpaceName = space?.name ?? targetPath ?? targetID ?? finalSpaceID
+                        let routingService = CiderRoutingDecisionService()
+                        let explanation: CiderRoutingExplanation
+                        if status == "accepted" {
+                            explanation = try routingService.recordSpaceAssignment(
+                                itemID: ref.entityID,
+                                spaceID: finalSpaceID,
+                                spaceName: finalSpaceName,
+                                reason: reason,
+                                confidence: confidence,
+                                actor: actor,
+                                source: source
+                            )
+                        } else {
+                            _ = try routingService.recordDecision(
+                                itemID: ref.entityID,
+                                itemType: ref.type.rawValue,
+                                target: CiderRoutingDecisionTarget(
+                                    kind: "space",
+                                    name: finalSpaceName,
+                                    relativePath: targetPath ?? finalSpaceName,
+                                    folderID: nil,
+                                    spaceID: finalSpaceID
+                                ),
+                                confidence: confidence,
+                                reason: reason,
+                                actor: actor,
+                                source: source,
+                                reviewState: status
+                            )
+                            explanation = try routingService.explain(itemID: ref.entityID)
+                        }
+                        let owner = SecondBrainOwnerRef(ownerType: ref.type.rawValue, ownerID: ref.entityID.uuidString)
+                        try store.recordAgentAction(
+                            SecondBrainAgentAction(
+                                owner: owner,
+                                itemID: ref.entityID.uuidString,
+                                toolName: "item.route",
+                                actionType: "route.space",
+                                source: source,
+                                status: "succeeded",
+                                summary: reason
+                            )
+                        )
+                        if jsonOutput {
+                            outputJSON([
+                                "ok": true,
+                                "targetType": "space",
+                                "space": [
+                                    "id": finalSpaceID,
+                                    "name": finalSpaceName,
+                                ],
+                                "explanation": explanation.toDictionary(),
+                            ])
+                        } else {
+                            print("Recorded native Space route for \(owner.ownerType):\(owner.ownerID) -> \(finalSpaceName)")
+                        }
+                        return
+                    }
                     let target = CiderRoutingDecisionTarget(
                         kind: normalizedTargetType,
                         name: targetPath ?? targetID ?? normalizedTargetType,
@@ -7523,6 +7632,27 @@ struct CiderCLI {
         }
 
         print("Error: No Space found for '\(ref)'")
+        return nil
+    }
+
+    static func resolveOptionalSpaceFlag(from args: [String]) -> CiderSpace? {
+        guard let ref = parseFlag("--space", from: args) else { return nil }
+        return resolveSpace(ref, storage: CiderSpaceStorage.shared)
+    }
+
+    static func resolveSpaceTarget(targetID: String?, targetPath: String?) -> CiderSpace? {
+        let storage = CiderSpaceStorage.shared
+        for ref in [targetID, targetPath].compactMap({ $0 }) {
+            let normalized = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let match = storage.spaces.first(where: {
+                $0.id == normalized
+                    || $0.id.lowercased().hasPrefix(normalized.lowercased())
+                    || $0.name.localizedCaseInsensitiveCompare(normalized) == .orderedSame
+                    || $0.rootRelativePath.localizedCaseInsensitiveCompare(normalized) == .orderedSame
+            }) {
+                return match
+            }
+        }
         return nil
     }
 

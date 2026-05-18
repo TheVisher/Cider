@@ -216,4 +216,37 @@ struct CiderSpaceCaptureDashboardServiceTests {
         #expect(dashboard.recentRouted.isEmpty)
         #expect(dashboard.needsReview.isEmpty)
     }
+
+    @Test("space dashboard includes native space assignments without folder paths")
+    func dashboardIncludesNativeSpaceAssignments() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let space = makeSpace()
+        let itemID = try insertBookmark(
+            db,
+            title: "Steam Deck Notes",
+            url: "https://example.com/steam-deck",
+            folderID: nil,
+            relativePath: "Inbox/Bookmarks/Steam Deck Notes.webloc"
+        )
+
+        let explanation = try CiderRoutingDecisionService(database: db).recordSpaceAssignment(
+            itemID: itemID,
+            spaceID: space.id,
+            spaceName: space.name,
+            reason: "Games research belongs in Research as meaning, not because of a folder.",
+            confidence: 0.88,
+            actor: "agent",
+            source: "capture.route"
+        )
+
+        let dashboard = try CiderSpaceCaptureDashboardService(database: db).dashboard(for: space)
+
+        #expect(dashboard.recentRouted.map(\.itemID) == [itemID])
+        #expect(dashboard.needsReview.isEmpty)
+        #expect(dashboard.recentRouted.first?.routingDecisionID == explanation.latestDecision?.id)
+        #expect(dashboard.recentRouted.first?.target.kind == "space")
+        #expect(dashboard.recentRouted.first?.target.spaceID == space.id)
+        #expect(dashboard.recentRouted.first?.itemRelativePath == "Inbox/Bookmarks/Steam Deck Notes.webloc")
+    }
 }
