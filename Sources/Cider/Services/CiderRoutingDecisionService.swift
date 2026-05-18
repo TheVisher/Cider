@@ -194,6 +194,7 @@ final class CiderRoutingDecisionService {
             .bind(DatabaseHelpers.encode(decision.createdAt), at: 13)
             .bind(decision.supersedesDecisionID?.uuidString, at: 14)
         try stmt.step()
+        try mirrorToSecondBrainProvenance(decision, database: db)
         return decision
     }
 
@@ -444,6 +445,36 @@ final class CiderRoutingDecisionService {
             ))
         }
         return decisions
+    }
+
+    private func mirrorToSecondBrainProvenance(
+        _ decision: CiderRoutingDecision,
+        database db: CiderDatabase
+    ) throws {
+        let owner = SecondBrainOwnerRef(
+            ownerType: secondBrainOwnerType(for: decision.itemType),
+            ownerID: decision.itemID.uuidString
+        )
+        try SecondBrainStore(database: db).recordRoutingDecision(
+            SecondBrainRoutingDecision(
+                id: decision.id.uuidString,
+                owner: owner,
+                itemID: decision.itemID.uuidString,
+                targetType: decision.target.kind,
+                targetID: decision.target.folderID?.uuidString,
+                targetPath: decision.target.relativePath,
+                confidence: decision.confidence,
+                reason: decision.reason,
+                status: decision.reviewState,
+                actor: decision.actor,
+                source: decision.source,
+                reviewedAt: decision.reviewState == "needs_review" ? nil : decision.createdAt
+            )
+        )
+    }
+
+    private func secondBrainOwnerType(for itemType: String) -> String {
+        itemType == "event" ? "dateCard" : itemType
     }
 
     private func itemSummary(for itemID: UUID) throws -> CiderRoutingItemSummary {

@@ -3615,29 +3615,81 @@ struct CiderCLI {
                 printCLIError("--confidence must be between 0 and 1")
                 return
             }
-            let owner = normalizedOwner(type: positional[0], ref: positional[1])
-            let decision = SecondBrainRoutingDecision(
-                owner: owner,
-                targetType: normalizedTargetType,
-                targetID: parseFlag("--target-id", from: args),
-                targetPath: parseFlag("--target-path", from: args),
-                confidence: confidence,
-                reason: reason,
-                status: status,
-                actor: parseFlag("--actor", from: args) ?? "cider-cli",
-                source: parseFlag("--source", from: args) ?? "cli"
-            )
+            let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+            let source = parseFlag("--source", from: args) ?? "cli"
+            let targetID = parseFlag("--target-id", from: args)
+            let targetPath = parseFlag("--target-path", from: args)
             do {
-                try store.recordRoutingDecision(decision)
-                let action = SecondBrainAgentAction(
+                if let entityType = try? ItemLinkService.entityType(from: positional[0]) {
+                    let ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
+                    let target = CiderRoutingDecisionTarget(
+                        kind: normalizedTargetType,
+                        name: targetPath ?? targetID ?? normalizedTargetType,
+                        relativePath: targetPath ?? targetID ?? normalizedTargetType,
+                        folderID: normalizedTargetType == "folder" ? targetID.flatMap(UUID.init(uuidString:)) : nil
+                    )
+                    let routingDecision = try CiderRoutingDecisionService().recordDecision(
+                        itemID: ref.entityID,
+                        itemType: ref.type.rawValue,
+                        target: target,
+                        confidence: confidence,
+                        reason: reason,
+                        actor: actor,
+                        source: source,
+                        reviewState: status
+                    )
+                    let owner = SecondBrainOwnerRef(ownerType: ref.type.rawValue, ownerID: ref.entityID.uuidString)
+                    try store.recordAgentAction(
+                        SecondBrainAgentAction(
+                            owner: owner,
+                            itemID: ref.entityID.uuidString,
+                            toolName: "item.route",
+                            actionType: "route",
+                            source: source,
+                            status: "succeeded",
+                            summary: reason
+                        )
+                    )
+                    guard let decision = try store.routingDecisions(for: owner)
+                        .first(where: { $0.id == routingDecision.id.uuidString }) else {
+                        printCLIError("Recorded route but could not read back second-brain provenance.")
+                        return
+                    }
+                    if jsonOutput {
+                        outputJSON(routingDecisionToDict(decision))
+                    } else {
+                        print("Recorded route for \(owner.ownerType):\(owner.ownerID) -> \(targetType)")
+                    }
+                    return
+                }
+
+                let owner = normalizedOwner(type: positional[0], ref: positional[1])
+                guard ownerExists(type: positional[0], ref: positional[1], owner: owner) else {
+                    printCLIError("No resolved owner found for \(positional[0]):\(positional[1]); item route will not write phantom provenance.")
+                    return
+                }
+                let decision = SecondBrainRoutingDecision(
                     owner: owner,
-                    toolName: "item.route",
-                    actionType: "route",
-                    source: decision.source,
-                    status: "succeeded",
-                    summary: reason
+                    targetType: normalizedTargetType,
+                    targetID: targetID,
+                    targetPath: targetPath,
+                    confidence: confidence,
+                    reason: reason,
+                    status: status,
+                    actor: actor,
+                    source: source
                 )
-                try store.recordAgentAction(action)
+                try store.recordRoutingDecision(decision)
+                try store.recordAgentAction(
+                    SecondBrainAgentAction(
+                        owner: owner,
+                        toolName: "item.route",
+                        actionType: "route",
+                        source: decision.source,
+                        status: "succeeded",
+                        summary: reason
+                    )
+                )
                 if jsonOutput {
                     outputJSON(routingDecisionToDict(decision))
                 } else {

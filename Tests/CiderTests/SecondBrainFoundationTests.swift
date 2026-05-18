@@ -574,6 +574,104 @@ struct SecondBrainFoundationTests {
         #expect(try store.agentActions(for: owner).map(\.toolName) == ["item.route"])
     }
 
+    @Test("routing service decisions bridge into item context for active item types")
+    func routingServiceDecisionsBridgeIntoItemContextForActiveItemTypes() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let routing = CiderRoutingDecisionService(database: db)
+        let context = CiderItemContextService(database: db)
+        let types: [LibraryEntityType] = [.bookmark, .note, .todo, .dateCard, .contact, .vaultFile]
+
+        for type in types {
+            let itemID = UUID()
+            try db.runSQL("""
+                INSERT INTO items (id, type, title, created_at, updated_at, relative_path)
+                VALUES ('\(itemID.uuidString)', '\(type.rawValue)', '\(type.rawValue) route', 1, 1, 'Inbox/\(type.rawValue)');
+                """)
+
+            let decision = try routing.recordDecision(
+                itemID: itemID,
+                itemType: type.rawValue,
+                target: .init(kind: "inbox", name: "Inbox", relativePath: "Inbox", folderID: nil),
+                confidence: 0,
+                reason: "Needs second-brain review.",
+                actor: "agent",
+                source: "capture.add",
+                reviewState: "needs_review"
+            )
+
+            let bundle = try context.context(for: LibraryEntityRef(type: type, entityID: itemID))
+            #expect(bundle.routingDecisions.map(\.id) == [decision.id.uuidString])
+            #expect(bundle.routingDecisions.first?.status == "needs_review")
+            #expect(bundle.routingDecisions.first?.source == "capture.add")
+            #expect(bundle.routingDecisions.first?.targetPath == "Inbox")
+        }
+    }
+
+    @Test("review approvals append one provenance trail visible through item context")
+    func reviewApprovalsAppendOneProvenanceTrailVisibleThroughItemContext() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let itemID = UUID()
+        try db.runSQL("""
+            INSERT INTO items (id, type, title, created_at, updated_at, relative_path)
+            VALUES ('\(itemID.uuidString)', 'bookmark', 'Route me', 1, 1, 'Inbox/Bookmarks/Route me.webloc');
+            """)
+
+        let routing = CiderRoutingDecisionService(database: db)
+        let original = try routing.recordDecision(
+            itemID: itemID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0,
+            reason: "Needs a human route.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        let approved = try routing.approve(itemID: itemID, actor: "user").latestDecision
+
+        let bundle = try CiderItemContextService(database: db)
+            .context(for: LibraryEntityRef(type: .bookmark, entityID: itemID))
+        #expect(bundle.routingDecisions.map(\.id) == [original.id.uuidString, approved?.id.uuidString])
+        #expect(bundle.routingDecisions.map(\.status) == ["needs_review", "accepted"])
+        #expect(bundle.routingDecisions.last?.source == "routing.approve")
+    }
+
+    @Test("process CLI item route rejects unresolved owners without durable provenance")
+    func processCLIItemRouteRejectsUnresolvedOwnersWithoutDurableProvenance() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-item-route-phantom-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let output = try runCLI([
+            "item", "route", "bookmark", "missing-bookmark",
+            "--target-type", "space",
+            "--target-id", "projects",
+            "--reason", "Should not write for a phantom owner.",
+            "--json",
+        ], vaultURL: vault)
+        let payload = try jsonObject(from: output)
+        #expect(payload["ok"] as? Bool == false)
+        #expect((payload["error"] as? String)?.contains("No bookmark found") == true)
+
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        let db = CiderDatabase()
+        try db.open(at: dbURL)
+        defer { db.close() }
+
+        let secondBrain = try db.prepare("SELECT count(*) FROM second_brain_routing_decisions;")
+        try secondBrain.step()
+        #expect(secondBrain.int(at: 0) == 0)
+
+        let legacy = try db.prepare("SELECT count(*) FROM routing_decisions;")
+        try legacy.step()
+        #expect(legacy.int(at: 0) == 0)
+    }
+
     @Test("routing and agent provenance survive item deletion")
     func routingAndAgentProvenanceSurviveItemDeletion() throws {
         let (db, url) = try makeTestDB()
