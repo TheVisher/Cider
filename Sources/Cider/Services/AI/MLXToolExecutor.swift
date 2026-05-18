@@ -605,23 +605,32 @@ enum MLXToolExecutor {
         MutationAuditContext.withSource(.agent) {
         let title = string("title", from: args)
         let content = string("content", from: args)
-
-        var note = NotesStorage.shared.createNew(initialContent: content)
-        note.title = title.isEmpty ? "Untitled" : title
-        NotesStorage.shared.save(note: note)
-
-        if let folderName = optString("folderName", from: args) {
-            if let folder = VaultFolderService.shared.folders.first(where: {
+        let targetFolder = optString("folderName", from: args).flatMap { folderName in
+            VaultFolderService.shared.folders.first(where: {
                 $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
-            }) {
-                if NotesStorage.shared.assignNote(note.id, toFolder: folder.id) {
-                    return "Created note \"\(note.title)\" in folder \"\(folder.name)\"."
-                }
-                return "Created note \"\(note.title)\" but failed to move it to folder \"\(folder.name)\"."
-            }
-            return "Created note \"\(note.title)\" (folder \"\(folderName)\" not found — saved to root)."
+            })
         }
-        return "Created note \"\(note.title)\"."
+
+        do {
+            let result = try CiderCaptureService().addNoteCapture(
+                title: title,
+                content: content,
+                folderID: targetFolder?.id
+            )
+            let finalTitle = result.item.title
+            if let folderName = optString("folderName", from: args), targetFolder == nil {
+                return "Created note \"\(finalTitle)\" (folder \"\(folderName)\" not found, saved for review)."
+            }
+            if let targetFolder {
+                if result.partialSuccess?.status == "assignment_failed" {
+                    return "Created note \"\(finalTitle)\" but failed to move it to folder \"\(targetFolder.name)\"."
+                }
+                return "Created note \"\(finalTitle)\" in folder \"\(targetFolder.name)\"."
+            }
+            return "Created note \"\(finalTitle)\"."
+        } catch {
+            return "Failed to create note: \(error.localizedDescription)"
+        }
         }
     }
 

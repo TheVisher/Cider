@@ -359,10 +359,6 @@ final class CiderCaptureService {
     ) throws -> CiderCaptureResult {
         let manualTitle = normalizedTitle(title)
         let derivedTitle = derivedTextTitle(from: content)
-        guard manualTitle != nil || derivedTitle != nil || !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw CiderCaptureError.missingSource
-        }
-
         let note = notesStorage.createNew(initialContent: content)
         if let noteTitle = manualTitle ?? derivedTitle {
             notesStorage.rename(note: note, to: noteTitle)

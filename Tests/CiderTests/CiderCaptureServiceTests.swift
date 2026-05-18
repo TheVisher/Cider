@@ -364,6 +364,38 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("blank note quick capture still returns the shared result shape")
+    func blankNoteQuickCaptureReturnsSharedResultShape() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let routing = CiderRoutingDecisionService(database: db)
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: routing
+            )
+
+            let result = try service.addNoteCapture(title: "", content: "", folderID: nil)
+
+            #expect(result.command == "capture.add")
+            #expect(result.source.kind == "text")
+            #expect(result.source.itemType == "note")
+            #expect(result.item.type == "note")
+            #expect(result.item.title == "Untitled")
+            #expect(result.item.relativePath?.hasPrefix("Inbox/Notes/") == true)
+            #expect(result.enrichment.status == "not_applicable")
+            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.decisionID != nil)
+            #expect(result.nextSafeAction == "review_route")
+
+            let explanation = try routing.explain(itemID: result.item.id)
+            #expect(explanation.latestDecision?.id == result.routing.decisionID)
+            #expect(explanation.latestDecision?.source == "capture.add")
+        }
+    }
+
     @Test("note capture reports partial success when folder assignment fails")
     func noteCaptureReportsPartialSuccessWhenFolderAssignmentFails() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in

@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 extension CiderPanelView {
 
@@ -41,17 +42,19 @@ extension CiderPanelView {
     // MARK: - Note Creation
 
     func createNoteAndOpen(title: String, content: String) {
-        // Write content at creation time so it's on disk before any rename.
-        // Calling save(note:) after rename mis-routes Inbox paths to the vault directory.
-        var note = NotesStorage.shared.createNew(initialContent: content)
-
-        if !title.isEmpty {
-            NotesStorage.shared.rename(note: note, to: title)
-            // Refresh from storage so we have the updated filename/title
-            note = NotesStorage.shared.notes.first(where: { $0.id == note.id }) ?? note
+        do {
+            let result = try CiderCaptureService().addNoteCapture(
+                title: title,
+                content: content,
+                folderID: selectedFolderID
+            )
+            if let note = NotesStorage.shared.notes.first(where: { $0.id == result.item.id }) {
+                openNoteDetail(note)
+            }
+        } catch {
+            Logger(subsystem: "com.cider.app", category: "QuickActions")
+                .error("Failed to capture note from quick action: \(error.localizedDescription, privacy: .public)")
         }
-
-        openNoteDetail(note)
     }
 
     // MARK: - Note Detail
