@@ -3357,6 +3357,22 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli item context <type> <id-or-ref> [--json]")
                 return
             }
+            if isKanbanCardItemType(positional[0]) {
+                do {
+                    let packet = try kanbanCardAgentContextPayload(ref: positional[1], args: args, store: store)
+                    if jsonOutput {
+                        outputJSON(packet)
+                    } else {
+                        print("kanban_card:\(positional[1])")
+                        print("  Summary: \(packet["summary"] ?? "")")
+                        print("  Context blocks: \((packet["contentBlocks"] as? [[String: Any]])?.count ?? 0)")
+                        print("  Related: \((packet["related"] as? [[String: Any]])?.count ?? 0)")
+                    }
+                } catch {
+                    printCLIError(error.localizedDescription)
+                }
+                return
+            }
             do {
                 let type = try ItemLinkService.entityType(from: positional[0])
                 let ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
@@ -7892,6 +7908,169 @@ struct CiderCLI {
                 "cider-cli board card inspect \(detail.board.id) --card \(detail.card.id) --json",
             ],
         ]
+    }
+
+    static func kanbanCardAgentContextPayload(ref rawRef: String, args: [String], store: SecondBrainStore) throws -> [String: Any] {
+        let detail = try resolveKanbanCardDetail(ref: rawRef)
+        let owner = SecondBrainKanbanProjectionService.owner(boardID: detail.board.id, cardID: detail.card.id)
+        try SecondBrainKanbanProjectionService(store: store).refreshCard(boardID: detail.board.id, card: detail.card)
+
+        let limits = itemAgentContextLimits(from: args)
+        let sections = try store.sections(for: owner)
+        let related = try relatedKanbanCardItems(ref: "\(detail.board.id)/\(detail.card.id)")
+        let summary = kanbanCardSummary(card: detail.card, sections: sections, limit: limits.maxBodyCharacters)
+        let contentBlocks = sections
+            .prefix(max(0, limits.maxSections))
+            .map { section in
+                [
+                    "id": "section-\(section.id)",
+                    "kind": "section",
+                    "title": section.title,
+                    "body": clippedText(section.body, limit: limits.maxBodyCharacters),
+                    "source": section.source,
+                ]
+            }
+        let recentHistory = kanbanCardRecentHistory(
+            card: detail.card,
+            sections: sections,
+            limit: limits.maxHistory,
+            bodyLimit: limits.maxBodyCharacters
+        )
+        let safeCommands = [
+            "cider-cli item get card \(detail.card.id) --json",
+            "cider-cli item context card \(detail.card.id) --json",
+            "cider-cli item related card \(detail.card.id) --json",
+            "cider-cli board card inspect \(detail.board.name) --card \(detail.card.id) --json",
+        ]
+
+        return [
+            "ok": true,
+            "sourceRef": [
+                "type": "card",
+                "ref": rawRef,
+            ],
+            "item": kanbanCardItemToDict(board: detail.board, column: detail.column, card: detail.card),
+            "owner": ownerToDict(owner),
+            "summary": summary,
+            "provenance": kanbanCardProvenance(board: detail.board, card: detail.card, sections: sections),
+            "contentBlocks": contentBlocks,
+            "related": related,
+            "surfacing": [
+                "reason": summary,
+                "urgency": detail.column.isDoneColumn ? "done" : "normal",
+                "sourceSignal": "kanban_context",
+                "reviewState": detail.column.name.localizedCaseInsensitiveContains("testing") ? "needs_review" : "ok",
+                "suggestedAction": detail.column.isDoneColumn ? "Archive or reference" : "Open card",
+            ],
+            "recentHistory": recentHistory,
+            "safeCommands": safeCommands,
+            "limits": [
+                "maxSections": limits.maxSections,
+                "maxChunks": limits.maxChunks,
+                "maxRelated": limits.maxRelated,
+                "maxHistory": limits.maxHistory,
+                "maxBodyCharacters": limits.maxBodyCharacters,
+            ],
+        ]
+    }
+
+    static func kanbanCardSummary(card: KanbanCard, sections: [SecondBrainSection], limit: Int) -> String {
+        let preferredKeys = ["current_state", "summary", "overview", "next_step", "goal"]
+        for key in preferredKeys {
+            if let section = sections.first(where: { $0.sectionKey == key }),
+               !section.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return clippedText(section.body, limit: limit)
+            }
+        }
+        if let section = sections.first(where: { !$0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return clippedText(section.body, limit: limit)
+        }
+        if let aiSummary = card.aiSummary, !aiSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return clippedText(aiSummary, limit: limit)
+        }
+        return clippedText(card.title, limit: limit)
+    }
+
+    static func kanbanCardRecentHistory(
+        card: KanbanCard,
+        sections: [SecondBrainSection],
+        limit: Int,
+        bodyLimit: Int
+    ) -> [[String: Any]] {
+        let explicitEntries: [[String: Any]] = card.historyEntries
+            .sorted { lhs, rhs in
+                if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+                return lhs.id < rhs.id
+            }
+            .map { entry in
+                [
+                    "id": entry.id,
+                    "kind": entry.type.rawValue,
+                    "summary": clippedText(entry.body, limit: bodyLimit),
+                    "source": entry.author ?? "kanban",
+                    "status": "recorded",
+                    "createdAt": ISO8601DateFormatter().string(from: entry.createdAt),
+                ]
+            }
+
+        let sectionHistoryKeys: [String: String] = [
+            "failed_attempts": "failed_attempt",
+            "implementation_history": "implementation",
+            "test_evidence": "test_evidence",
+            "decisions": "decision",
+            "agent_handoff": "handoff",
+            "handoff": "handoff",
+            "final_summary": "final_summary",
+            "commits": "commit",
+        ]
+        let sectionEntries: [[String: Any]] = sections.compactMap { section in
+            guard let kind = sectionHistoryKeys[section.sectionKey],
+                  !section.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return nil
+            }
+            return [
+                "id": "section-\(section.id)",
+                "kind": kind,
+                "summary": clippedText(section.body, limit: bodyLimit),
+                "source": section.source,
+                "status": "recorded",
+                "createdAt": ISO8601DateFormatter().string(from: section.updatedAt),
+            ]
+        }
+        return Array((explicitEntries + sectionEntries).prefix(max(0, limit)))
+    }
+
+    static func kanbanCardProvenance(board: KanbanBoard, card: KanbanCard, sections: [SecondBrainSection]) -> [String] {
+        var values = [
+            "item:kanban_card",
+            "board:\(board.id)",
+            "card:\(card.id)",
+        ]
+        values += sections.map { "section:\($0.source)" }
+        if !card.historyEntries.isEmpty {
+            values.append("history:\(card.historyEntries.count)")
+        }
+        if !card.linkedEntities.isEmpty {
+            values.append("linked_items:\(card.linkedEntities.count)")
+        }
+        return orderedUniqueStrings(values)
+    }
+
+    static func clippedText(_ value: String, limit: Int) -> String {
+        let normalizedLimit = max(40, limit)
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > normalizedLimit else { return trimmed }
+        let end = trimmed.index(trimmed.startIndex, offsetBy: normalizedLimit)
+        return String(trimmed[..<end])
+    }
+
+    static func orderedUniqueStrings(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for value in values where !value.isEmpty && seen.insert(value).inserted {
+            output.append(value)
+        }
+        return output
     }
 
     static func kanbanCardItemToDict(board: KanbanBoard, column: KanbanColumn, card: KanbanCard) -> [String: Any] {

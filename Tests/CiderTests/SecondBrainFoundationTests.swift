@@ -1287,6 +1287,32 @@ struct SecondBrainFoundationTests {
                 && $0["type"] as? String == "kanban_card"
                 && $0["relationship"] as? String == "child"
         })
+
+        let cardContext = try jsonObject(from: runCLI([
+            "item", "context", "card", cardRef,
+            "--max-sections", "2",
+            "--max-history", "3",
+            "--json",
+        ], vaultURL: vaultURL))
+        #expect(cardContext["ok"] as? Bool == true)
+        let contextItem = try #require(cardContext["item"] as? [String: Any])
+        #expect(contextItem["id"] as? String == cardRef)
+        #expect(contextItem["type"] as? String == "kanban_card")
+        #expect(cardContext["summary"] as? String == "Updated through board section update.")
+        let contentBlocks = try #require(cardContext["contentBlocks"] as? [[String: Any]])
+        #expect(contentBlocks.contains {
+            $0["kind"] as? String == "section"
+                && $0["title"] as? String == "Current State"
+                && $0["body"] as? String == "Updated through board section update."
+        })
+        let contextHistory = try #require(cardContext["recentHistory"] as? [[String: Any]])
+        #expect(contextHistory.contains {
+            $0["kind"] as? String == "failed_attempt"
+                && ($0["summary"] as? String)?.contains("raw YAML scraping") == true
+        })
+        let safeCommands = try #require(cardContext["safeCommands"] as? [String])
+        #expect(safeCommands.contains("cider-cli item get card \(cardRef) --json"))
+        #expect(safeCommands.contains("cider-cli board card inspect Agent Workflow Smoke --card \(cardRef) --json"))
     }
 
     @Test("process CLI exposes parent child rollup on card inspect")
