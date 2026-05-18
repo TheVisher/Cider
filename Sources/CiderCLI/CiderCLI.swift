@@ -3293,6 +3293,23 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli item get <type> <id-or-ref> [--json]")
                 return
             }
+            if isKanbanCardItemType(positional[0]) {
+                do {
+                    let payload = try kanbanCardItemPayload(ref: positional[1], store: store)
+                    if jsonOutput {
+                        outputJSON(payload)
+                    } else if let item = payload["item"] as? [String: Any] {
+                        print("kanban_card:\(item["id"] ?? positional[1])")
+                        print("  Title: \(item["title"] ?? "")")
+                        print("  Board: \(item["boardName"] ?? "")")
+                        print("  Sections: \((payload["sections"] as? [[String: Any]])?.count ?? 0)")
+                        print("  Related: \((payload["related"] as? [[String: Any]])?.count ?? 0)")
+                    }
+                } catch {
+                    printCLIError(error.localizedDescription)
+                }
+                return
+            }
             if let entityType = try? ItemLinkService.entityType(from: positional[0]) {
                 do {
                     let ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
@@ -3376,6 +3393,23 @@ struct CiderCLI {
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
                 printCLIError("Usage: cider-cli item related <type> <id-or-ref> [--json]")
+                return
+            }
+            if isKanbanCardItemType(positional[0]) {
+                do {
+                    let related = try relatedKanbanCardItems(ref: positional[1])
+                    if jsonOutput {
+                        outputJSON(related)
+                    } else if related.isEmpty {
+                        print("No related items.")
+                    } else {
+                        for summary in related {
+                            print("  [\(summary["id"] ?? "")] \(summary["type"] ?? "item"): \(summary["title"] ?? "")")
+                        }
+                    }
+                } catch {
+                    printCLIError(error.localizedDescription)
+                }
                 return
             }
             do {
@@ -7791,6 +7825,137 @@ struct CiderCLI {
             return (try? ItemLinkService.shared.resolve(type: entityType, ref: rawRef)) != nil
         }
         return true
+    }
+
+    static func isKanbanCardItemType(_ rawType: String) -> Bool {
+        let normalizedType = rawType
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+        return normalizedType == "kanban"
+            || normalizedType == "kanban_card"
+            || normalizedType == "card"
+            || normalizedType == "cards"
+    }
+
+    static func resolveKanbanCardDetail(ref rawRef: String) throws -> (board: KanbanBoard, column: KanbanColumn, card: KanbanCard) {
+        let trimmed = rawRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.contains("/") {
+            let parts = trimmed.split(separator: "/", maxSplits: 1).map(String.init)
+            if parts.count == 2,
+               let board = KanbanStorage.shared.boards.first(where: { $0.id == parts[0] || $0.name.localizedCaseInsensitiveCompare(parts[0]) == .orderedSame }),
+               let column = board.columns.first(where: { column in column.cards.contains { $0.id == parts[1] } }),
+               let card = column.cards.first(where: { $0.id == parts[1] }) {
+                return (board, column, card)
+            }
+        }
+
+        if let detail = KanbanStorage.shared.findCard(id: trimmed) {
+            return detail
+        }
+
+        throw NSError(
+            domain: "CiderCLI",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "No kanban card found matching '\(rawRef)'."]
+        )
+    }
+
+    static func kanbanCardItemPayload(ref rawRef: String, store: SecondBrainStore) throws -> [String: Any] {
+        let detail = try resolveKanbanCardDetail(ref: rawRef)
+        let owner = SecondBrainKanbanProjectionService.owner(boardID: detail.board.id, cardID: detail.card.id)
+        try SecondBrainKanbanProjectionService(store: store).refreshCard(boardID: detail.board.id, card: detail.card)
+
+        let sections = try store.sections(for: owner)
+        let routes = try store.routingDecisions(for: owner)
+        let actions = try store.agentActions(for: owner)
+        let related = try relatedKanbanCardItems(ref: "\(detail.board.id)/\(detail.card.id)")
+
+        return [
+            "ok": true,
+            "exists": true,
+            "ownerResolved": true,
+            "sourceRef": [
+                "type": "card",
+                "ref": rawRef,
+            ],
+            "owner": ownerToDict(owner),
+            "item": kanbanCardItemToDict(board: detail.board, column: detail.column, card: detail.card),
+            "sections": sections.map(secondBrainSectionToDict),
+            "routingDecisions": routes.map(routingDecisionToDict),
+            "agentActions": actions.map(agentActionToDict),
+            "related": related,
+            "safeCommands": [
+                "cider-cli item get card \(detail.card.id) --json",
+                "cider-cli item context card \(detail.card.id) --json",
+                "cider-cli item related card \(detail.card.id) --json",
+                "cider-cli board card inspect \(detail.board.id) --card \(detail.card.id) --json",
+            ],
+        ]
+    }
+
+    static func kanbanCardItemToDict(board: KanbanBoard, column: KanbanColumn, card: KanbanCard) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": card.id,
+            "type": "kanban_card",
+            "title": card.title,
+            "boardID": board.id,
+            "boardName": board.name,
+            "columnID": column.id,
+            "columnName": column.name,
+            "relativePath": "\(board.name)/\(card.id)",
+            "createdAt": ISO8601DateFormatter().string(from: card.created),
+            "tags": card.tags,
+        ]
+        if let updatedAt = card.updatedAt {
+            dict["updatedAt"] = ISO8601DateFormatter().string(from: updatedAt)
+        } else {
+            dict["updatedAt"] = ISO8601DateFormatter().string(from: card.created)
+        }
+        if let priority = card.priority {
+            dict["priority"] = priority.rawValue
+        }
+        if let parentCardID = card.parentCardID {
+            dict["parentCardID"] = parentCardID
+        }
+        if !card.relatedCardIDs.isEmpty {
+            dict["relatedCardIDs"] = card.relatedCardIDs
+        }
+        return dict
+    }
+
+    static func relatedKanbanCardItems(ref rawRef: String) throws -> [[String: Any]] {
+        let detail = try resolveKanbanCardDetail(ref: rawRef)
+        let board = detail.board
+        let card = detail.card
+        var seen = Set<String>()
+        var output: [[String: Any]] = []
+
+        func append(_ relatedCard: KanbanCard, relationship: String) {
+            guard seen.insert("\(relationship):\(relatedCard.id)").inserted,
+                  let relatedColumn = board.columns.first(where: { column in column.cards.contains { $0.id == relatedCard.id } }) else {
+                return
+            }
+            var dict = kanbanCardItemToDict(board: board, column: relatedColumn, card: relatedCard)
+            dict["relationship"] = relationship
+            output.append(dict)
+        }
+
+        if let parent = board.parentCard(for: card.id) {
+            append(parent, relationship: "parent")
+        }
+        for child in board.childCards(of: card.id) {
+            append(child, relationship: "child")
+        }
+        for related in board.relatedCards(for: card.id) {
+            append(related, relationship: "related_card")
+        }
+        for linked in ItemLinkService.shared.summaries(for: card.linkedEntities) {
+            var dict = itemLinkSummaryToDict(linked)
+            dict["relationship"] = "linked_item"
+            output.append(dict)
+        }
+        return output
     }
 
     static func ownerToDict(_ owner: SecondBrainOwnerRef) -> [String: Any] {

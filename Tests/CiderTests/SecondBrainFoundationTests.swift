@@ -1159,6 +1159,13 @@ struct SecondBrainFoundationTests {
 
         let cardID = try #require(addOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1)
         let cardRef = String(cardID)
+        let childOutput = try runCLI([
+            "board", "add-card", "Agent Workflow Smoke",
+            "--column", "Backlog",
+            "--title", "Child context card",
+            "--parent", cardRef,
+        ], vaultURL: vaultURL)
+        let childCardID = String(try #require(childOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
 
         let inspected = try jsonObject(from: runCLI([
             "board", "card", "inspect", "Agent Workflow Smoke",
@@ -1252,13 +1259,34 @@ struct SecondBrainFoundationTests {
             return ownerID.hasSuffix("/\(cardRef)")
         })
 
-        let legacyFallback = try jsonObject(from: runCLI([
+        let unifiedCard = try jsonObject(from: runCLI([
             "item", "get", "card", cardRef,
             "--json",
         ], vaultURL: vaultURL))
-        #expect(legacyFallback["command"] as? String == "item.get.legacy-owner-fallback")
-        #expect(legacyFallback["deprecated"] as? Bool == true)
-        #expect((legacyFallback["deprecationMessage"] as? String)?.contains("item owner-get") == true)
+        #expect(unifiedCard["ok"] as? Bool == true)
+        #expect(unifiedCard["deprecated"] == nil)
+        let unifiedItem = try #require(unifiedCard["item"] as? [String: Any])
+        #expect(unifiedItem["id"] as? String == cardRef)
+        #expect(unifiedItem["type"] as? String == "kanban_card")
+        #expect(unifiedItem["title"] as? String == "Agent contract smoke")
+        #expect(unifiedItem["boardID"] as? String != nil)
+        #expect(unifiedItem["boardName"] as? String == "Agent Workflow Smoke")
+        #expect(unifiedItem["columnName"] as? String == "Backlog")
+        #expect(unifiedItem["relativePath"] as? String == "Agent Workflow Smoke/\(cardRef)")
+
+        let unifiedSections = try #require(unifiedCard["sections"] as? [[String: Any]])
+        #expect(unifiedSections.contains { $0["sectionKey"] as? String == "current_state" })
+        #expect(unifiedSections.contains { $0["sectionKey"] as? String == "implementation_history" })
+
+        let relatedCards = try jsonObjectArray(from: runCLI([
+            "item", "related", "card", cardRef,
+            "--json",
+        ], vaultURL: vaultURL))
+        #expect(relatedCards.contains {
+            $0["id"] as? String == childCardID
+                && $0["type"] as? String == "kanban_card"
+                && $0["relationship"] as? String == "child"
+        })
     }
 
     @Test("process CLI exposes parent child rollup on card inspect")
