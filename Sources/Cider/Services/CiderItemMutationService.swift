@@ -47,12 +47,15 @@ struct CiderItemMutationResult: Equatable {
 
 enum CiderItemMutationError: LocalizedError {
     case databaseUnavailable
+    case folderNotFound(UUID)
     case unsupportedItemType(LibraryEntityType)
 
     var errorDescription: String? {
         switch self {
         case .databaseUnavailable:
             return "Canonical SQLite database is not open."
+        case .folderNotFound(let id):
+            return "Folder not found for item mutation: \(id.uuidString)."
         case .unsupportedItemType(let type):
             return "Item mutations are not supported for \(type.rawValue)."
         }
@@ -101,6 +104,29 @@ final class CiderItemMutationService {
             actor: actor,
             source: source,
             reason: reason ?? "Moved with item move."
+        )
+    }
+
+    func move(
+        ref: LibraryEntityRef,
+        toFolder folderID: UUID?,
+        actor: String,
+        source: String,
+        reason: String? = nil
+    ) throws -> CiderItemMutationResult {
+        guard let folderID else {
+            return try unfile(ref: ref, actor: actor, source: source, reason: reason)
+        }
+        guard let folder = VaultFolderService.shared.folders.first(where: { $0.id == folderID }) else {
+            throw CiderItemMutationError.folderNotFound(folderID)
+        }
+        return try move(
+            ref: ref,
+            toFolder: folderID,
+            targetRelativePath: folder.relativePath,
+            actor: actor,
+            source: source,
+            reason: reason
         )
     }
 

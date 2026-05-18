@@ -126,8 +126,15 @@ final class BookmarksViewModel: ObservableObject {
     @discardableResult
     func assign(_ bookmark: Bookmark, toFolder folderID: UUID?) -> Bool {
         let oldFolderID = bookmark.folderID
-        let result = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folderID)
-        if result {
+        do {
+            let result = try CiderItemMutationService(database: .shared).move(
+                ref: LibraryEntityRef(type: .bookmark, entityID: bookmark.id),
+                toFolder: folderID,
+                actor: "ui",
+                source: "ui.bookmarks.assign",
+                reason: "Moved from bookmark UI."
+            )
+            guard result.ok else { return false }
             let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
             CiderUndoManager.shared.record(.movedToFolder(
                 itemType: .bookmark,
@@ -137,8 +144,10 @@ final class BookmarksViewModel: ObservableObject {
                 toFolderID: folderID,
                 folderName: folderName
             ))
+            return true
+        } catch {
+            return false
         }
-        return result
     }
 
     @discardableResult

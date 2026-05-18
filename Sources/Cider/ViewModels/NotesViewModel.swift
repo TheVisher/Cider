@@ -82,8 +82,15 @@ final class NotesViewModel: ObservableObject {
     @discardableResult
     func assignNote(_ note: Note, toFolder folderID: UUID?) -> Bool {
         let oldFolderID = note.folderID
-        let result = NotesStorage.shared.assignNote(note.id, toFolder: folderID)
-        if result {
+        do {
+            let result = try CiderItemMutationService(database: .shared).move(
+                ref: LibraryEntityRef(type: .note, entityID: note.id),
+                toFolder: folderID,
+                actor: "ui",
+                source: "ui.notes.assign",
+                reason: "Moved from note UI."
+            )
+            guard result.ok else { return false }
             let folderName = VaultFolderService.shared.folder(for: folderID ?? UUID())?.name ?? "Unfiled"
             CiderUndoManager.shared.record(.movedToFolder(
                 itemType: .note,
@@ -93,8 +100,10 @@ final class NotesViewModel: ObservableObject {
                 toFolderID: folderID,
                 folderName: folderName
             ))
+            return true
+        } catch {
+            return false
         }
-        return result
     }
 
     @discardableResult
@@ -1164,9 +1173,8 @@ final class NotesViewModel: ObservableObject {
 
     func updateNoteFolder(_ folderID: UUID?) {
         guard let note = selectedNote else { return }
-        guard NotesStorage.shared.assignNote(note.id, toFolder: folderID) else { return }
-        if var updated = selectedNote {
-            updated.folderID = folderID
+        guard assignNote(note, toFolder: folderID) else { return }
+        if let updated = NotesStorage.shared.notes.first(where: { $0.id == note.id }) {
             selectedNote = updated
         }
     }

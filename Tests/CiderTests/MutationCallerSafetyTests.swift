@@ -79,6 +79,35 @@ struct MutationCallerSafetyTests {
         #expect(unchecked.isEmpty, "Unchecked UI domain assignment callers:\n\(unchecked.joined(separator: "\n"))")
     }
 
+    @Test("bookmark and note view model folder moves use the second brain mutation door")
+    func bookmarkAndNoteViewModelMovesUseItemMutationService() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let files = [
+            repoRoot.appendingPathComponent("Sources/Cider/ViewModels/BookmarksViewModel.swift"),
+            repoRoot.appendingPathComponent("Sources/Cider/ViewModels/NotesViewModel.swift"),
+        ]
+        var violations: [String] = []
+
+        for fileURL in files {
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            guard source.contains("CiderItemMutationService(database: .shared)") else {
+                violations.append(fileURL.path.replacingOccurrences(of: repoRoot.path + "/", with: ""))
+                continue
+            }
+            let directCalls = [
+                "VaultBookmarkService.shared.assignBookmark(",
+                "NotesStorage.shared.assignNote(",
+            ]
+            for (offset, line) in source.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+                guard directCalls.contains(where: { line.contains($0) }) else { continue }
+                let relativePath = fileURL.path.replacingOccurrences(of: repoRoot.path + "/", with: "")
+                violations.append("\(relativePath):\(offset + 1): \(line.trimmingCharacters(in: .whitespaces))")
+            }
+        }
+
+        #expect(violations.isEmpty, "View model folder moves should use CiderItemMutationService:\n\(violations.joined(separator: "\n"))")
+    }
+
     @Test("Folder restore assignment callers check success before reporting restored")
     func folderRestoreAssignmentCallersCheckSuccessResult() throws {
         let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
