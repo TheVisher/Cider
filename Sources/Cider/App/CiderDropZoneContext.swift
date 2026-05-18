@@ -77,13 +77,23 @@ final class CiderDropZoneContext: ObservableObject {
     let title: String
     let subtitle: String
     private var suppressTargetingUntil: Date?
+    private let noteCaptureHandler: (String) throws -> CiderCaptureResult
+    private let fileCaptureHandler: (URL) throws -> CiderCaptureResult
 
     init(
         title: String = "Drop Zone",
-        subtitle: String = "Quickly toss things into Cider."
+        subtitle: String = "Quickly toss things into Cider.",
+        noteCaptureHandler: @escaping (String) throws -> CiderCaptureResult = {
+            try CiderCaptureService().addNoteCapture(title: nil, content: $0, folderID: nil)
+        },
+        fileCaptureHandler: @escaping (URL) throws -> CiderCaptureResult = {
+            try CiderCaptureService().addFileCapture(sourcePath: $0.path, title: nil, folderID: nil)
+        }
     ) {
         self.title = title
         self.subtitle = subtitle
+        self.noteCaptureHandler = noteCaptureHandler
+        self.fileCaptureHandler = fileCaptureHandler
     }
 
     static func manualTesting() -> CiderDropZoneContext {
@@ -181,11 +191,27 @@ final class CiderDropZoneContext: ObservableObject {
             return
         }
 
-        recordFallback(
-            kind: .text,
-            title: String(trimmed.prefix(60)),
-            detail: trimmed
-        )
+        resetDismissProgress()
+        status = .processing("Saving text as a note...")
+        do {
+            let result = try noteCaptureHandler(trimmed)
+            droppedItems.insert(
+                DroppedItem(
+                    kind: .text,
+                    title: result.item.title,
+                    detail: result.item.relativePath ?? trimmed,
+                    didPersist: true
+                ),
+                at: 0
+            )
+            status = .success("Saved text as note.")
+        } catch {
+            recordFallback(
+                kind: .text,
+                title: String(trimmed.prefix(60)),
+                detail: "Could not save note: \(error.localizedDescription)"
+            )
+        }
     }
 
     func saveDroppedURL(_ url: URL) {
@@ -222,23 +248,22 @@ final class CiderDropZoneContext: ObservableObject {
         }
 
         do {
-            let destination = try copyFileToVaultInbox(url)
-            VaultFileService.shared.scan()
+            let result = try fileCaptureHandler(url)
             droppedItems.insert(
                 DroppedItem(
                     kind: VaultFileType.from(extension: url.pathExtension) == .image ? .image : .file,
-                    title: destination.lastPathComponent,
-                    detail: destination.path,
+                    title: result.item.title,
+                    detail: result.item.relativePath ?? url.lastPathComponent,
                     didPersist: true
                 ),
                 at: 0
             )
-            status = .success("Saved \(destination.lastPathComponent) to Inbox.")
+            status = .success("Saved \(result.item.title) to Inbox.")
         } catch {
             recordFallback(
                 kind: .file,
                 title: url.lastPathComponent,
-                detail: "Could not copy file: \(error.localizedDescription)"
+                detail: "Could not save file: \(error.localizedDescription)"
             )
         }
     }
@@ -372,43 +397,4 @@ final class CiderDropZoneContext: ObservableObject {
         return false
     }
 
-    private func copyFileToVaultInbox(_ sourceURL: URL) throws -> URL {
-        let fileType = VaultFileType.from(extension: sourceURL.pathExtension)
-        let inboxRoot = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("Inbox")
-        let subdirectory: String
-        switch fileType {
-        case .image:
-            subdirectory = VaultFileService.inboxImagesDirName
-        case .video:
-            subdirectory = VaultFileService.inboxVideosDirName
-        default:
-            subdirectory = VaultFileService.inboxFilesDirName
-        }
-
-        let destinationDirectory = inboxRoot.appendingPathComponent(subdirectory)
-        try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
-
-        let destination = uniqueDestinationURL(
-            in: destinationDirectory,
-            filename: sourceURL.lastPathComponent
-        )
-        try FileManager.default.copyItem(at: sourceURL, to: destination)
-        return destination
-    }
-
-    private func uniqueDestinationURL(in directory: URL, filename: String) -> URL {
-        let fallbackName = filename.isEmpty ? "Dropped File" : filename
-        let base = (fallbackName as NSString).deletingPathExtension
-        let ext = (fallbackName as NSString).pathExtension
-
-        var candidate = directory.appendingPathComponent(fallbackName)
-        var counter = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            let suffix = " (\(counter))"
-            let nextName = ext.isEmpty ? "\(base)\(suffix)" : "\(base)\(suffix).\(ext)"
-            candidate = directory.appendingPathComponent(nextName)
-            counter += 1
-        }
-        return candidate
-    }
 }

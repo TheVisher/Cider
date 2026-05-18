@@ -95,11 +95,12 @@ extension AppDelegate {
             },
             onCreateNote: { [weak self] in
                 self?.dismissScreenCaptureToast()
-                NotesStorage.shared.createFromCapture(
+                _ = try? CiderCaptureService().addScreenCaptureNoteCapture(
                     title: route.suggestedTitle.isEmpty ? "Screen Capture" : route.suggestedTitle,
                     ocrText: ocrText ?? "",
                     screenshot: image,
-                    sourceURL: nil
+                    sourceURL: nil,
+                    folderID: nil
                 )
                 self?.transitionToCiderMainWindow()
             },

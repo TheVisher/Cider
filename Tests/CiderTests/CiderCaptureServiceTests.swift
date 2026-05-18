@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Cider
@@ -443,6 +444,107 @@ struct CiderCaptureServiceTests {
             #expect(partialSuccess["requestedFolderID"] as? String == requestedFolderID.uuidString)
             #expect(partialSuccess["actualFolderID"] == nil)
             #expect((partialSuccess["reason"] as? String)?.contains("note folder assignment failed") == true)
+        }
+    }
+
+    @Test("screen capture note capture preserves attachment markdown and returns shared result shape")
+    func screenCaptureNoteCaptureReturnsSharedResultShape() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let routing = CiderRoutingDecisionService(database: db)
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: routing
+            )
+            let image = NSImage(size: NSSize(width: 4, height: 4))
+            image.lockFocus()
+            NSColor.red.setFill()
+            NSRect(x: 0, y: 0, width: 4, height: 4).fill()
+            image.unlockFocus()
+
+            let result = try service.addScreenCaptureNoteCapture(
+                title: "Receipt OCR",
+                ocrText: "Total $42.00",
+                screenshot: image,
+                sourceURL: nil,
+                folderID: nil
+            )
+
+            #expect(result.command == "capture.add")
+            #expect(result.source.kind == "screen_capture")
+            #expect(result.source.itemType == "note")
+            #expect(result.item.type == "note")
+            #expect(result.item.title == "Receipt OCR")
+            #expect(result.item.relativePath?.hasPrefix("Inbox/Notes/") == true)
+            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.candidateTarget?.relativePath == "Inbox/Notes")
+            #expect(result.nextSafeAction == "review_route")
+
+            let stored = try #require(notes.notes.first(where: { $0.id == result.item.id }))
+            let content = notes.loadContent(for: stored)
+            #expect(content.contains("<img src=\".attachments/"))
+            #expect(content.contains("Total $42.00"))
+            let explanation = try routing.explain(itemID: result.item.id)
+            #expect(explanation.latestDecision?.source == "capture.add")
+        }
+    }
+
+    @Test("screen capture note capture works when OCR and screenshot are unavailable")
+    func screenCaptureNoteCaptureWorksWithoutOCRAndScreenshot() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db
+            )
+
+            let result = try service.addScreenCaptureNoteCapture(
+                title: "",
+                ocrText: "",
+                screenshot: nil,
+                sourceURL: nil,
+                folderID: nil
+            )
+
+            #expect(result.source.kind == "screen_capture")
+            #expect(result.item.title == "Screen Capture")
+            #expect(result.routing.reviewNeeded == true)
+            let stored = try #require(notes.notes.first(where: { $0.id == result.item.id }))
+            #expect(notes.loadContent(for: stored).isEmpty)
+        }
+    }
+
+    @Test("screen capture note capture reports partial success when folder assignment fails")
+    func screenCaptureNoteCaptureReportsPartialSuccessWhenFolderAssignmentFails() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let requestedFolderID = UUID()
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                noteAssignmentHandler: { _, _ in false }
+            )
+
+            let result = try service.addScreenCaptureNoteCapture(
+                title: "Captured thing",
+                ocrText: "body",
+                screenshot: nil,
+                sourceURL: nil,
+                folderID: requestedFolderID
+            )
+            let partialSuccess = try #require(result.toDictionary()["partialSuccess"] as? [String: Any])
+
+            #expect(result.item.folderID == nil)
+            #expect(result.routing.reviewNeeded == true)
+            #expect(partialSuccess["status"] as? String == "assignment_failed")
+            #expect(partialSuccess["requestedFolderID"] as? String == requestedFolderID.uuidString)
         }
     }
 

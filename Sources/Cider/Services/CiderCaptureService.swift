@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct CiderCaptureResult {
@@ -413,6 +414,70 @@ final class CiderCaptureService {
             sourceURL: nil,
             sourceFile: nil,
             sourceText: content,
+            itemID: stored.id,
+            itemType: "note",
+            title: stored.title,
+            relativePath: stored.relativePath,
+            folderID: stored.folderID,
+            folderName: target.name,
+            enrichmentStatus: "not_applicable",
+            titleState: manualTitle == nil ? "derived" : "manual",
+            duplicateStatus: "not_checked",
+            routing: routing,
+            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            partialSuccess: partialSuccess
+        )
+    }
+
+    func addScreenCaptureNoteCapture(
+        title: String,
+        ocrText: String,
+        screenshot: NSImage?,
+        sourceURL: String?,
+        folderID: UUID?
+    ) throws -> CiderCaptureResult {
+        let manualTitle = normalizedTitle(title)
+        let finalTitle = manualTitle ?? "Screen Capture"
+        let note = notesStorage.createFromCapture(
+            title: finalTitle,
+            ocrText: ocrText,
+            screenshot: screenshot,
+            sourceURL: sourceURL
+        )
+        var assignmentSucceeded: Bool?
+        if let folderID {
+            assignmentSucceeded = noteAssignmentHandler(note.id, folderID)
+        }
+        guard let stored = notesStorage.notes.first(where: { $0.id == note.id }) else {
+            throw CiderCaptureError.storeFailed(finalTitle)
+        }
+        let partialSuccess = assignmentPartialSuccess(
+            itemType: "note",
+            requestedFolderID: folderID,
+            actualFolderID: stored.folderID,
+            assignmentSucceeded: assignmentSucceeded
+        )
+
+        let target = routingTarget(
+            itemType: "note",
+            relativePath: stored.relativePath,
+            folderID: stored.folderID,
+            fallbackInboxPath: "Inbox/Notes"
+        )
+        let routing = try recordRouting(
+            itemID: stored.id,
+            itemType: "note",
+            target: target,
+            reviewNeeded: stored.folderID == nil,
+            acceptedReason: "Capture used the supplied deterministic target.",
+            reviewReason: "Cider captured a screen capture as a note and kept it in Inbox/Notes for review."
+        )
+
+        return sharedResult(
+            sourceKind: "screen_capture",
+            sourceURL: sourceURL,
+            sourceFile: nil,
+            sourceText: ocrText,
             itemID: stored.id,
             itemType: "note",
             title: stored.title,

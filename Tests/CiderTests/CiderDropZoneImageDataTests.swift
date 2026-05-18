@@ -4,10 +4,55 @@ import UniformTypeIdentifiers
 @testable import Cider
 
 struct CiderDropZoneImageDataTests {
+    @MainActor
+    private func makeContext() -> CiderDropZoneContext {
+        CiderDropZoneContext(
+            title: "Drop Zone",
+            subtitle: "Manual test surface for floatable intake.",
+            noteCaptureHandler: { text in
+                captureResult(
+                    itemType: "note",
+                    title: String(text.prefix(60)),
+                    relativePath: "Inbox/Notes/Test.md"
+                )
+            },
+            fileCaptureHandler: { url in
+                captureResult(
+                    itemType: "vaultFile",
+                    title: url.lastPathComponent,
+                    relativePath: "Inbox/Files/\(url.lastPathComponent)"
+                )
+            }
+        )
+    }
+
+    private func captureResult(
+        itemType: String,
+        title: String,
+        relativePath: String
+    ) -> CiderCaptureResult {
+        let id = UUID()
+        let target = CiderCaptureResult.Target(
+            kind: "inbox",
+            name: "Inbox",
+            relativePath: (relativePath as NSString).deletingLastPathComponent,
+            folderID: nil
+        )
+        return CiderCaptureResult(
+            command: "capture.add",
+            source: .init(kind: "text", url: nil, file: nil, text: title, itemID: id, itemType: itemType),
+            item: .init(id: id, type: itemType, title: title, relativePath: relativePath, folderID: nil, folderName: target.name),
+            enrichment: .init(status: "not_applicable", isEnriching: false, titleState: "manual", lastEnrichedAt: nil),
+            duplicate: .init(status: "not_checked", existingItemID: nil),
+            routing: .init(decisionID: UUID(), candidateTarget: target, reviewNeeded: true, confidence: 0, reason: "test", reviewState: "needs_review"),
+            nextSafeAction: "review_route"
+        )
+    }
+
     @Test("drop zone context can be pinned open")
     @MainActor
     func dropZoneContextCanBePinnedOpen() {
-        let context = CiderDropZoneContext.manualTesting()
+        let context = makeContext()
 
         #expect(context.isPinned == false)
         #expect(context.dismissProgress == 1)
@@ -21,7 +66,7 @@ struct CiderDropZoneImageDataTests {
     @Test("drop zone dismiss progress counts down only when not paused")
     @MainActor
     func dropZoneDismissProgressCountsDownOnlyWhenNotPaused() {
-        let context = CiderDropZoneContext.manualTesting()
+        let context = makeContext()
 
         context.advanceDismissProgress(by: 0.25, isPaused: false)
         #expect(context.dismissProgress == 0.75)
@@ -36,7 +81,7 @@ struct CiderDropZoneImageDataTests {
     @Test("drop zone auto dismiss uses the live panel hover state instead of stale hover flags")
     @MainActor
     func dropZoneAutoDismissIgnoresStaleHoverWhenMouseIsOutside() {
-        let context = CiderDropZoneContext.manualTesting()
+        let context = makeContext()
 
         context.setHoverPaused(true)
         #expect(context.isHoverPaused == true)
@@ -51,7 +96,7 @@ struct CiderDropZoneImageDataTests {
     @Test("drop zone auto dismiss pauses while the mouse is inside the panel")
     @MainActor
     func dropZoneAutoDismissPausesWhileMouseIsInsidePanel() {
-        let context = CiderDropZoneContext.manualTesting()
+        let context = makeContext()
 
         let shouldClose = context.tickAutoDismiss(by: 0.25, isMouseInsideWindow: true)
 
@@ -63,7 +108,7 @@ struct CiderDropZoneImageDataTests {
     @Test("drop zone hover pause can resume dismiss progress after exit")
     @MainActor
     func dropZoneHoverPauseCanResumeDismissProgressAfterExit() {
-        let context = CiderDropZoneContext.manualTesting()
+        let context = makeContext()
 
         context.setHoverPaused(true)
         #expect(context.isHoverPaused == true)
@@ -79,7 +124,7 @@ struct CiderDropZoneImageDataTests {
     @Test("drop zone leaving a drag target restores idle without erasing saved statuses")
     @MainActor
     func dropZoneLeavingDragTargetRestoresOnlyTargetedStatus() {
-        let context = CiderDropZoneContext.manualTesting()
+        let context = makeContext()
 
         context.setTargeted(true)
         #expect(context.status == .targeted)
@@ -97,7 +142,7 @@ struct CiderDropZoneImageDataTests {
     @Test("saving a dropped item clears targeted state so auto dismiss can resume")
     @MainActor
     func savingDroppedItemClearsTargetedState() {
-        let context = CiderDropZoneContext.manualTesting()
+        let context = makeContext()
 
         context.setTargeted(true)
         context.setHoverPaused(true)
@@ -111,7 +156,7 @@ struct CiderDropZoneImageDataTests {
     @Test("saving a dropped item restarts the visible auto dismiss countdown")
     @MainActor
     func savingDroppedItemRestartsVisibleAutoDismissCountdown() {
-        let context = CiderDropZoneContext.manualTesting()
+        let context = makeContext()
 
         context.advanceDismissProgress(by: 0.5, isPaused: false)
         #expect(context.dismissProgress == 0.5)
@@ -124,7 +169,7 @@ struct CiderDropZoneImageDataTests {
     @Test("completed drops ignore stale targeted updates from the drop delegate")
     @MainActor
     func completedDropsIgnoreStaleTargetedUpdates() {
-        let context = CiderDropZoneContext.manualTesting()
+        let context = makeContext()
         let now = Date(timeIntervalSince1970: 1_000)
 
         context.setTargeted(true, now: now)

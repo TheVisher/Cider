@@ -60,6 +60,37 @@ struct CaptureParitySafetyTests {
         #expect(violations.isEmpty, "Quick-create paths must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("screen capture notes and visual intake text file saves use canonical capture service")
+    func visualIntakeUsesCanonicalCaptureService() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let files = [
+            repoRoot.appendingPathComponent("Sources/Cider/App/AppDelegate+ScreenCapture.swift"),
+            repoRoot.appendingPathComponent("Sources/Cider/Views/Shared/ClipboardViewerView.swift"),
+            repoRoot.appendingPathComponent("Sources/Cider/App/CiderDropZoneContext.swift"),
+        ]
+        var violations: [String] = []
+
+        for fileURL in files {
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            let relativePath = fileURL.path.replacingOccurrences(of: repoRoot.path + "/", with: "")
+
+            if source.contains("NotesStorage.shared.createFromCapture("),
+               !source.contains("CiderCaptureService().addScreenCaptureNoteCapture(") {
+                violations.append("\(relativePath): screen capture notes still use NotesStorage.createFromCapture directly")
+            }
+            if source.contains("storage.createNew()") || source.contains("NotesStorage.shared.createNew("),
+               !source.contains("CiderCaptureService().addNoteCapture(") {
+                violations.append("\(relativePath): visual intake note saves still create notes directly")
+            }
+            if source.contains("copyFileToVaultInbox("),
+               !source.contains("CiderCaptureService().addFileCapture(") {
+                violations.append("\(relativePath): drop-zone files still copy into the vault without capture service provenance")
+            }
+        }
+
+        #expect(violations.isEmpty, "Visual intake paths must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
+    }
+
     private func block(named marker: String, in source: String) -> String? {
         guard let markerRange = source.range(of: marker) else { return nil }
         let tail = source[markerRange.lowerBound...]

@@ -471,7 +471,8 @@ struct ClipboardViewerView: View {
             return  // async path handles markSaved + flash itself
         case .text, .richText:
             if let text = item.textContent {
-                resultID = saveAsNote(text: text)
+                guard let savedNoteID = saveAsNote(text: text) else { return }
+                resultID = savedNoteID
             }
         }
 
@@ -479,18 +480,25 @@ struct ClipboardViewerView: View {
         flashSaved(item.id)
     }
 
-    @discardableResult
-    private func saveAsNote(text: String) -> UUID {
-        let storage = NotesStorage.shared
-        var note = storage.createNew()
-        note.content = text
-        storage.save(note: note, createSnapshot: false)
+    private func saveAsNote(text: String) -> UUID? {
+        guard let result = try? CiderCaptureService().addNoteCapture(
+            title: nil,
+            content: text,
+            folderID: nil
+        ) else {
+            NotificationCenter.default.post(
+                name: .showBookmarkCaptureToast,
+                object: nil,
+                userInfo: ["message": "Could not save note", "isSuccess": false]
+            )
+            return nil
+        }
         NotificationCenter.default.post(
             name: .showBookmarkCaptureToast,
             object: nil,
             userInfo: ["message": "Saved as note", "isSuccess": true]
         )
-        return note.id
+        return result.item.id
     }
 }
 
