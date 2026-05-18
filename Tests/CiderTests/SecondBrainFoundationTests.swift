@@ -98,6 +98,52 @@ struct SecondBrainFoundationTests {
         #expect(explanation.latestDecision?.target.relativePath == "Inbox/Bookmarks")
     }
 
+    @Test("process CLI explains and approves routing decisions as JSON")
+    func processCLIExplainsAndApprovesRoutingDecisionsAsJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-routing-cli-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let captureOutput = try runCLI([
+            "bookmark", "add", "https://example.com/routing-json",
+            "--no-wait",
+            "--json",
+        ], vaultURL: vault)
+        let bookmark = try jsonObject(from: captureOutput)
+        let bookmarkID = try #require(bookmark["id"] as? String)
+
+        let explainOutput = try runCLI([
+            "routing", "explain", bookmarkID,
+            "--json",
+        ], vaultURL: vault)
+        let explanation = try jsonObject(from: explainOutput)
+        #expect(explanation["command"] as? String == "routing.explain")
+        #expect(explanation["reviewNeeded"] as? Bool == true)
+        #expect(explanation["nextSafeAction"] as? String == "approve_or_correct_route")
+        let routing = try #require(explanation["routing"] as? [String: Any])
+        #expect(routing["reviewState"] as? String == "needs_review")
+        #expect(routing["actor"] as? String == "agent")
+        #expect(routing["source"] as? String == "capture.add")
+
+        let approvalOutput = try runCLI([
+            "routing", "approve", bookmarkID,
+            "--actor", "agent",
+            "--json",
+        ], vaultURL: vault)
+        let approval = try jsonObject(from: approvalOutput)
+        #expect(approval["command"] as? String == "routing.explain")
+        #expect(approval["reviewNeeded"] as? Bool == false)
+        #expect(approval["nextSafeAction"] as? String == "inspect_item")
+        let approvedRouting = try #require(approval["routing"] as? [String: Any])
+        #expect(approvedRouting["reviewState"] as? String == "accepted")
+        #expect(approvedRouting["actor"] as? String == "agent")
+        #expect(approvedRouting["source"] as? String == "routing.approve")
+        #expect(approvedRouting["supersedesDecisionID"] as? String != nil)
+        let history = try #require(approval["history"] as? [[String: Any]])
+        #expect(history.count == 2)
+    }
+
     @Test("bookmark add JSON reports capture backend shim metadata")
     func bookmarkAddJSONReportsCaptureBackendShimMetadata() throws {
         let vault = FileManager.default.temporaryDirectory
