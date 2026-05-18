@@ -19,6 +19,7 @@ enum MutationAuditContext {
         sourceStack.last ?? .ui
     }
 
+    @discardableResult
     static func withSource<T>(
         _ source: MutationAuditSource,
         _ body: () throws -> T
@@ -28,6 +29,7 @@ enum MutationAuditContext {
         return try body()
     }
 
+    @discardableResult
     static func withSource<T>(
         _ source: MutationAuditSource,
         operation: () async throws -> T
@@ -65,6 +67,7 @@ final class MutationAuditService {
         self.database = database
     }
 
+    @discardableResult
     func record(
         action: String,
         itemType: String,
@@ -73,8 +76,8 @@ final class MutationAuditService {
         after: [String: String]? = nil,
         metadata: [String: String]? = nil,
         source: MutationAuditSource? = nil
-    ) {
-        guard let db = resolvedDatabase else { return }
+    ) -> MutationAuditEntry? {
+        guard let db = resolvedDatabase else { return nil }
 
         let entry = MutationAuditEntry(
             id: UUID(),
@@ -92,8 +95,10 @@ final class MutationAuditService {
             try db.withTransaction {
                 try self.persist(entry, in: db)
             }
+            return entry
         } catch {
             logger.error("Failed to record mutation audit entry: \(error.localizedDescription)")
+            return nil
         }
     }
 

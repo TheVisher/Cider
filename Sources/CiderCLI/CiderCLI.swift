@@ -244,7 +244,7 @@ struct CiderCLI {
         case "review":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
         case "item":
-            return isMutationSubcommand(subcommand, in: ["route", "link", "backfill-kanban"])
+            return isMutationSubcommand(subcommand, in: ["move", "unfile", "route", "link", "backfill-kanban"])
         case "label", "tag":
             return isMutationSubcommand(subcommand, in: ["create", "rename", "delete", "rm"])
         case "view", "saved-view":
@@ -3330,6 +3330,8 @@ struct CiderCLI {
               cider-cli item capability-map [--json]
               cider-cli item related <type> <id-or-ref> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
+              cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <vault-path>) [--actor <name>] [--source <source>] [--json]
+              cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
               cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
               cider-cli item backfill-kanban [--board <name-or-id>] [--json]
               cider-cli item doctor [--json]
@@ -3671,6 +3673,68 @@ struct CiderCLI {
 
         case "link":
             handleLink(subcommand: "add", args: args)
+
+        case "move":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <vault-path>) [--actor <name>] [--source <source>] [--json]")
+                return
+            }
+            let folder: VaultFolder
+            switch resolveFolderArg(from: args) {
+            case .resolved(let resolved):
+                folder = resolved
+            case .unspecified:
+                printCLIError("item move requires --folder or --path.")
+                return
+            case .failed:
+                return
+            }
+            do {
+                let entityType = try ItemLinkService.entityType(from: positional[0])
+                let ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
+                let result = try CiderItemMutationService(database: .shared).move(
+                    ref: ref,
+                    toFolder: folder.id,
+                    targetRelativePath: folder.relativePath,
+                    actor: parseFlag("--actor", from: args) ?? "cider-cli",
+                    source: parseFlag("--source", from: args) ?? "cli.item.move"
+                )
+                if jsonOutput {
+                    outputJSON(result.toDictionary())
+                } else if result.ok {
+                    print("Moved \(ref.type.rawValue):\(ref.entityID.uuidString.prefix(8)) to \(folder.relativePath)")
+                } else {
+                    printCLIError("Item move was not confirmed.", details: result.toDictionary())
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "unfile":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]")
+                return
+            }
+            do {
+                let entityType = try ItemLinkService.entityType(from: positional[0])
+                let ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
+                let result = try CiderItemMutationService(database: .shared).unfile(
+                    ref: ref,
+                    actor: parseFlag("--actor", from: args) ?? "cider-cli",
+                    source: parseFlag("--source", from: args) ?? "cli.item.unfile"
+                )
+                if jsonOutput {
+                    outputJSON(result.toDictionary())
+                } else if result.ok {
+                    print("Unfiled \(ref.type.rawValue):\(ref.entityID.uuidString.prefix(8))")
+                } else {
+                    printCLIError("Item unfile was not confirmed.", details: result.toDictionary())
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
 
         case "route":
             let positional = leadingPositionalArgs(from: args)

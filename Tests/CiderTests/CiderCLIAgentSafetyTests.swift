@@ -139,6 +139,39 @@ struct CiderCLIAgentSafetyTests {
         }
     }
 
+    @Test("item move and unfile use confirmed second-brain mutation result shape")
+    func itemMoveAndUnfileUseConfirmedMutationResultShape() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-item-mutation-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["folder", "create", "Projects"], vault: vault)
+        let noteResult = try runCLI(args: ["note", "create", "Move via item door", "--json"], vault: vault)
+        let note = try parseJSONObject(noteResult.stdout)
+        let noteID = try #require(note["id"] as? String)
+
+        let moveResult = try runCLI(args: ["item", "move", "note", noteID, "--folder", "Projects", "--json"], vault: vault)
+        let move = try parseJSONObject(moveResult.stdout)
+        #expect(move["ok"] as? Bool == true)
+        #expect(move["command"] as? String == "item.move")
+        #expect(move["mutationAuditEntryID"] as? String != nil)
+        #expect(move["routingDecisionID"] as? String != nil)
+        #expect(move["agentActionID"] as? String != nil)
+        let movedAfter = try #require(move["after"] as? [String: Any])
+        #expect(movedAfter["folderID"] as? String != nil)
+
+        let unfileResult = try runCLI(args: ["item", "unfile", "note", noteID, "--json"], vault: vault)
+        let unfile = try parseJSONObject(unfileResult.stdout)
+        #expect(unfile["ok"] as? Bool == true)
+        #expect(unfile["command"] as? String == "item.unfile")
+        #expect(unfile["mutationAuditEntryID"] as? String != nil)
+        #expect(unfile["routingDecisionID"] as? String != nil)
+        #expect(unfile["agentActionID"] as? String != nil)
+        let unfiledAfter = try #require(unfile["after"] as? [String: Any])
+        #expect(unfiledAfter["folderID"] == nil)
+    }
+
     @Test("reminder mutation ID resolution rejects ambiguous prefixes")
     func reminderMutationIDResolutionRejectsAmbiguousPrefixes() throws {
         let first = UUID(uuidString: "aaaaaaaa-1111-1111-1111-111111111111")!
