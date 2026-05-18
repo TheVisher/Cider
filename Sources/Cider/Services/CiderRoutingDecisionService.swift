@@ -5,6 +5,7 @@ struct CiderRoutingDecisionTarget: Equatable {
     var name: String
     var relativePath: String
     var folderID: UUID?
+    var spaceID: String? = nil
 
     func toDictionary() -> [String: Any] {
         var dictionary: [String: Any] = [
@@ -14,6 +15,9 @@ struct CiderRoutingDecisionTarget: Equatable {
         ]
         if let folderID {
             dictionary["folderID"] = folderID.uuidString
+        }
+        if let spaceID {
+            dictionary["spaceID"] = spaceID
         }
         return dictionary
     }
@@ -175,9 +179,9 @@ final class CiderRoutingDecisionService {
         let stmt = try db.prepare("""
             INSERT INTO routing_decisions (
                 id, item_id, item_type, target_kind, target_name, target_relative_path,
-                target_folder_id, confidence, reason, actor, source, review_state,
+                target_folder_id, target_space_id, confidence, reason, actor, source, review_state,
                 created_at, supersedes_decision_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """)
         stmt.bind(decision.id.uuidString, at: 1)
             .bind(decision.itemID.uuidString, at: 2)
@@ -186,13 +190,14 @@ final class CiderRoutingDecisionService {
             .bind(decision.target.name, at: 5)
             .bind(decision.target.relativePath, at: 6)
             .bind(decision.target.folderID?.uuidString, at: 7)
-            .bind(decision.confidence, at: 8)
-            .bind(decision.reason, at: 9)
-            .bind(decision.actor, at: 10)
-            .bind(decision.source, at: 11)
-            .bind(decision.reviewState, at: 12)
-            .bind(DatabaseHelpers.encode(decision.createdAt), at: 13)
-            .bind(decision.supersedesDecisionID?.uuidString, at: 14)
+            .bind(decision.target.spaceID, at: 8)
+            .bind(decision.confidence, at: 9)
+            .bind(decision.reason, at: 10)
+            .bind(decision.actor, at: 11)
+            .bind(decision.source, at: 12)
+            .bind(decision.reviewState, at: 13)
+            .bind(DatabaseHelpers.encode(decision.createdAt), at: 14)
+            .bind(decision.supersedesDecisionID?.uuidString, at: 15)
         try stmt.step()
         try mirrorToSecondBrainProvenance(decision, database: db)
         return decision
@@ -255,6 +260,48 @@ final class CiderRoutingDecisionService {
             source: "routing.approve",
             reviewState: "accepted",
             supersedesDecisionID: latest.id
+        )
+        return try explain(itemID: itemID)
+    }
+
+    @discardableResult
+    func recordSpaceAssignment(
+        itemID: UUID,
+        spaceID: String,
+        spaceName: String,
+        reason: String,
+        confidence: Double,
+        actor: String = "agent",
+        source: String
+    ) throws -> CiderRoutingExplanation {
+        let item = try itemSummary(for: itemID)
+        let previous = try? latestDecision(for: itemID)
+        let target = CiderRoutingDecisionTarget(
+            kind: "space",
+            name: spaceName,
+            relativePath: spaceName,
+            folderID: nil,
+            spaceID: spaceID
+        )
+        _ = try recordDecision(
+            itemID: itemID,
+            itemType: item.type,
+            target: target,
+            confidence: confidence,
+            reason: reason,
+            actor: actor,
+            source: source,
+            reviewState: "accepted",
+            supersedesDecisionID: previous?.id
+        )
+        try CiderSpaceMembershipStore(database: resolvedDatabase ?? .shared).assign(
+            item: LibraryEntityRef(type: libraryEntityType(for: item.type), entityID: itemID),
+            toSpaceID: spaceID,
+            spaceName: spaceName,
+            reason: reason,
+            confidence: confidence,
+            source: source,
+            actor: actor
         )
         return try explain(itemID: itemID)
     }
@@ -413,7 +460,7 @@ final class CiderRoutingDecisionService {
         guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
         let stmt = try db.prepare("""
             SELECT id, item_id, item_type, target_kind, target_name, target_relative_path,
-                   target_folder_id, confidence, reason, actor, source, review_state,
+                   target_folder_id, target_space_id, confidence, reason, actor, source, review_state,
                    created_at, supersedes_decision_id
             FROM routing_decisions
             WHERE item_id = ?
@@ -433,15 +480,16 @@ final class CiderRoutingDecisionService {
                     kind: stmt.string(at: 3),
                     name: stmt.string(at: 4),
                     relativePath: stmt.string(at: 5),
-                    folderID: stmt.optionalString(at: 6).flatMap(UUID.init(uuidString:))
+                    folderID: stmt.optionalString(at: 6).flatMap(UUID.init(uuidString:)),
+                    spaceID: stmt.optionalString(at: 7)
                 ),
-                confidence: stmt.double(at: 7),
-                reason: stmt.string(at: 8),
-                actor: stmt.string(at: 9),
-                source: stmt.string(at: 10),
-                reviewState: stmt.string(at: 11),
-                createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 12)),
-                supersedesDecisionID: stmt.optionalString(at: 13).flatMap(UUID.init(uuidString:))
+                confidence: stmt.double(at: 8),
+                reason: stmt.string(at: 9),
+                actor: stmt.string(at: 10),
+                source: stmt.string(at: 11),
+                reviewState: stmt.string(at: 12),
+                createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 13)),
+                supersedesDecisionID: stmt.optionalString(at: 14).flatMap(UUID.init(uuidString:))
             ))
         }
         return decisions
@@ -461,7 +509,9 @@ final class CiderRoutingDecisionService {
                 owner: owner,
                 itemID: decision.itemID.uuidString,
                 targetType: decision.target.kind,
-                targetID: decision.target.folderID?.uuidString,
+                targetID: decision.target.kind == "space"
+                    ? decision.target.spaceID
+                    : decision.target.folderID?.uuidString,
                 targetPath: decision.target.relativePath,
                 confidence: decision.confidence,
                 reason: decision.reason,
@@ -475,6 +525,14 @@ final class CiderRoutingDecisionService {
 
     private func secondBrainOwnerType(for itemType: String) -> String {
         itemType == "event" ? "dateCard" : itemType
+    }
+
+    private func libraryEntityType(for itemType: String) throws -> LibraryEntityType {
+        if itemType == "event" { return .dateCard }
+        guard let type = LibraryEntityType(rawValue: itemType) else {
+            throw CiderRoutingDecisionError.unsupportedItemType(itemType)
+        }
+        return type
     }
 
     private func itemSummary(for itemID: UUID) throws -> CiderRoutingItemSummary {

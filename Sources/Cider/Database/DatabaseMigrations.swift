@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 13
+    static let latestVersion: Int = 14
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -79,7 +79,27 @@ enum DatabaseMigrations {
         }
         if currentVersion < 13 {
             try migrateToV13(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 14 {
+            try migrateToV14(db)
+        }
+    }
+
+    // MARK: - V13 -> V14: Routing decisions can name native Space targets
+
+    private static func migrateToV14(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 14...")
+
+        try withTransaction(db) {
+            if !(try columnExists(db, table: "routing_decisions", column: "target_space_id")) {
+                try runOnDB(db, "ALTER TABLE routing_decisions ADD COLUMN target_space_id TEXT;")
+            }
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (14);")
+        }
+
+        logger.info("Migration to v14 complete")
     }
 
     // MARK: - V12 -> V13: Native second-brain Space memberships

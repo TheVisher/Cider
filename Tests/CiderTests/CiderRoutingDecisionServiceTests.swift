@@ -159,4 +159,54 @@ struct CiderRoutingDecisionServiceTests {
         #expect(explanation.history.count == 2)
         #expect(explanation.reviewNeeded == false)
     }
+
+    @Test("space assignment records routing provenance and native membership without moving files")
+    func spaceAssignmentRecordsRoutingProvenanceAndNativeMembership() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let itemID = try insertGenericItem(
+            db,
+            type: "bookmark",
+            title: "Steam game page",
+            relativePath: "Inbox/Bookmarks/Steam game page.webloc"
+        )
+        let service = CiderRoutingDecisionService(database: db)
+
+        let explanation = try service.recordSpaceAssignment(
+            itemID: itemID,
+            spaceID: "space-media",
+            spaceName: "Media",
+            reason: "Steam game page belongs in Media without requiring a Media/Games folder.",
+            confidence: 0.91,
+            actor: "agent",
+            source: "capture.route"
+        )
+
+        #expect(explanation.latestDecision?.target.kind == "space")
+        #expect(explanation.latestDecision?.target.spaceID == "space-media")
+        #expect(explanation.latestDecision?.target.name == "Media")
+        #expect(explanation.latestDecision?.reviewState == "accepted")
+        #expect(explanation.reviewNeeded == false)
+
+        let ref = LibraryEntityRef(type: .bookmark, entityID: itemID)
+        let memberships = try CiderSpaceMembershipStore(database: db).memberships(for: ref)
+        #expect(memberships.map(\.spaceID) == ["space-media"])
+        #expect(memberships.first?.reason == "Steam game page belongs in Media without requiring a Media/Games folder.")
+
+        let context = try CiderItemContextService(database: db).agentContext(for: ref)
+        #expect(context.provenance.contains("space:Media"))
+        #expect(context.provenance.contains("routing:capture.route"))
+        #expect(context.spaceMemberships.map(\.spaceName) == ["Media"])
+
+        let itemStmt = try db.prepare("SELECT folder_id, relative_path FROM items WHERE id = ?;")
+        itemStmt.bind(itemID.uuidString, at: 1)
+        #expect(try itemStmt.step())
+        #expect(itemStmt.optionalString(at: 0) == nil)
+        #expect(itemStmt.string(at: 1) == "Inbox/Bookmarks/Steam game page.webloc")
+
+        let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: itemID.uuidString)
+        let routing = try SecondBrainStore(database: db).routingDecisions(for: owner)
+        #expect(routing.first?.targetType == "space")
+        #expect(routing.first?.targetID == "space-media")
+    }
 }

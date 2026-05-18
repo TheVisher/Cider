@@ -374,6 +374,7 @@ enum CiderSchema {
             target_name           TEXT NOT NULL,
             target_relative_path  TEXT NOT NULL,
             target_folder_id      TEXT REFERENCES folders(id),
+            target_space_id       TEXT,
             confidence            REAL NOT NULL,
             reason                TEXT NOT NULL,
             actor                 TEXT NOT NULL,
