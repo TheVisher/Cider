@@ -68,6 +68,24 @@ struct CiderCaptureServiceTests {
         return try await body(db, bookmarks, notes, todos, files)
     }
 
+    private func withIsolatedVaultDomains<T>(
+        _ body: (
+            CiderDatabase,
+            VaultBookmarkService,
+            NotesStorage,
+            TodoCardStorage,
+            DateCardStorage,
+            ContactStorage,
+            VaultFileStorage
+        ) throws -> T
+    ) throws -> T {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let dateCards = DateCardStorage(database: db)
+            let contacts = ContactStorage(database: db)
+            return try body(db, bookmarks, notes, todos, dateCards, contacts, files)
+        }
+    }
+
     @Test("capture add stores a URL in Inbox immediately and returns agent state")
     func captureAddStoresURLImmediately() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in
@@ -490,6 +508,161 @@ struct CiderCaptureServiceTests {
             #expect(partialSuccess["requestedFolderID"] as? String == requestedFolderID.uuidString)
             #expect(partialSuccess["actualFolderID"] == nil)
             #expect((partialSuccess["reason"] as? String)?.contains("todo folder assignment failed") == true)
+        }
+    }
+
+    @Test("event quick capture returns the shared result shape")
+    func eventQuickCaptureReturnsSharedResultShape() throws {
+        try withIsolatedVaultDomains { db, bookmarks, notes, todos, dateCards, contacts, files in
+            let routing = CiderRoutingDecisionService(database: db)
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                dateCardStorage: dateCards,
+                contactStorage: contacts,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: routing
+            )
+            let startAt = Date(timeIntervalSince1970: 1_779_000_000)
+
+            let result = try service.addDateCardCapture(
+                title: "Design review",
+                sourceText: nil,
+                startAt: startAt,
+                endAt: nil,
+                allDay: false,
+                location: "Studio",
+                folderID: nil
+            )
+
+            #expect(result.command == "capture.add")
+            #expect(result.source.kind == "text")
+            #expect(result.source.itemType == "event")
+            #expect(result.item.type == "event")
+            #expect(result.item.title == "Design review")
+            #expect(result.item.relativePath?.hasPrefix("Inbox/Date Cards/") == true)
+            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.candidateTarget?.relativePath == "Inbox/Date Cards")
+            #expect(result.nextSafeAction == "review_route")
+
+            let stored = dateCards.dateCards.first(where: { $0.id == result.item.id })
+            #expect(stored?.location == "Studio")
+            let explanation = try routing.explain(itemID: result.item.id)
+            #expect(explanation.item.type == "event")
+            #expect(explanation.latestDecision?.source == "capture.add")
+        }
+    }
+
+    @Test("contact quick capture returns the shared result shape")
+    func contactQuickCaptureReturnsSharedResultShape() throws {
+        try withIsolatedVaultDomains { db, bookmarks, notes, todos, dateCards, contacts, files in
+            let routing = CiderRoutingDecisionService(database: db)
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                dateCardStorage: dateCards,
+                contactStorage: contacts,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: routing
+            )
+
+            let result = try service.addContactCapture(
+                displayName: "Avery Stone",
+                sourceText: nil,
+                relationshipLabel: "Designer",
+                email: "avery@example.com",
+                phone: "555-0100",
+                folderID: nil
+            )
+
+            #expect(result.command == "capture.add")
+            #expect(result.source.kind == "text")
+            #expect(result.source.itemType == "contact")
+            #expect(result.item.type == "contact")
+            #expect(result.item.title == "Avery Stone")
+            #expect(result.item.relativePath?.hasPrefix("Inbox/Contacts/") == true)
+            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.candidateTarget?.relativePath == "Inbox/Contacts")
+            #expect(result.nextSafeAction == "review_route")
+
+            let stored = contacts.contacts.first(where: { $0.id == result.item.id })
+            #expect(stored?.relationshipLabel == "Designer")
+            #expect(stored?.email == "avery@example.com")
+            #expect(stored?.phone == "555-0100")
+            let explanation = try routing.explain(itemID: result.item.id)
+            #expect(explanation.item.type == "contact")
+            #expect(explanation.latestDecision?.source == "capture.add")
+        }
+    }
+
+    @Test("event capture reports partial success when folder update fails")
+    func eventCaptureReportsPartialSuccessWhenFolderUpdateFails() throws {
+        try withIsolatedVaultDomains { db, bookmarks, notes, todos, dateCards, contacts, files in
+            let requestedFolderID = UUID()
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                dateCardStorage: dateCards,
+                contactStorage: contacts,
+                vaultFileStorage: files,
+                database: db,
+                dateCardUpdateHandler: { _ in false }
+            )
+
+            let result = try service.addDateCardCapture(
+                title: "Calendar thing",
+                sourceText: nil,
+                startAt: Date(timeIntervalSince1970: 1_779_100_000),
+                endAt: nil,
+                allDay: true,
+                location: nil,
+                folderID: requestedFolderID
+            )
+            let partialSuccess = try #require(result.toDictionary()["partialSuccess"] as? [String: Any])
+
+            #expect(result.item.folderID == nil)
+            #expect(result.routing.reviewNeeded == true)
+            #expect(partialSuccess["status"] as? String == "assignment_failed")
+            #expect(partialSuccess["requestedFolderID"] as? String == requestedFolderID.uuidString)
+            #expect((partialSuccess["reason"] as? String)?.contains("event folder assignment failed") == true)
+        }
+    }
+
+    @Test("contact capture reports partial success when folder update fails")
+    func contactCaptureReportsPartialSuccessWhenFolderUpdateFails() throws {
+        try withIsolatedVaultDomains { db, bookmarks, notes, todos, dateCards, contacts, files in
+            let requestedFolderID = UUID()
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                dateCardStorage: dateCards,
+                contactStorage: contacts,
+                vaultFileStorage: files,
+                database: db,
+                contactUpdateHandler: { _ in false }
+            )
+
+            let result = try service.addContactCapture(
+                displayName: "Morgan",
+                sourceText: nil,
+                relationshipLabel: nil,
+                email: nil,
+                phone: nil,
+                folderID: requestedFolderID
+            )
+            let partialSuccess = try #require(result.toDictionary()["partialSuccess"] as? [String: Any])
+
+            #expect(result.item.folderID == nil)
+            #expect(result.routing.reviewNeeded == true)
+            #expect(partialSuccess["status"] as? String == "assignment_failed")
+            #expect(partialSuccess["requestedFolderID"] as? String == requestedFolderID.uuidString)
+            #expect((partialSuccess["reason"] as? String)?.contains("contact folder assignment failed") == true)
         }
     }
 

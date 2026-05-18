@@ -170,11 +170,17 @@ extension CiderPanelView {
                 createNoteAndOpen(title: title, content: content)
             },
             onCreateEvent: { [self] title, date, allDay in
-                let card = DateCardStorage.shared.createDateCard(
+                guard let result = try? CiderCaptureService().addDateCardCapture(
                     title: title,
+                    sourceText: nil,
                     startAt: date,
-                    allDay: allDay
-                )
+                    endAt: nil,
+                    allDay: allDay,
+                    location: nil,
+                    folderID: nil
+                ),
+                let card = DateCardStorage.shared.dateCards.first(where: { $0.id == result.item.id })
+                else { return }
                 DispatchQueue.main.async {
                     self.newEventEditorContext = DateCardEditorContext(
                         existingCard: card,
@@ -183,17 +189,28 @@ extension CiderPanelView {
                 }
             },
             onCreateContact: { [self] name, relationship in
-                var contact = ContactStorage.shared.createContact(displayName: name)
-                if !relationship.isEmpty {
-                    contact.relationshipLabel = relationship
-                    ContactStorage.shared.updateContact(contact)
-                }
+                guard let result = try? CiderCaptureService().addContactCapture(
+                    displayName: name,
+                    sourceText: nil,
+                    relationshipLabel: relationship,
+                    email: nil,
+                    phone: nil,
+                    folderID: nil
+                ),
+                let contact = ContactStorage.shared.contacts.first(where: { $0.id == result.item.id })
+                else { return }
                 DispatchQueue.main.async {
                     self.newContactEditorContext = ContactEditorContext(existingContact: contact)
                 }
             },
             onCreateTodo: { card in
-                TodoCardStorage.shared.addTodoCard(card)
+                _ = try? CiderCaptureService().addTodoCapture(
+                    title: card.title,
+                    sourceText: card.title,
+                    dueDate: card.dueDate,
+                    priority: card.priority,
+                    folderID: nil
+                )
             },
             onOpenTodoEditor: {
                 newTodoEditorContext = TodoEditorContext(existingCard: nil)

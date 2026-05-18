@@ -317,10 +317,17 @@ struct CiderPanelView: View {
                 let date = (ui?["detectedDates"] as? [Date])?.first ?? Date()
                 let ocrText = ui?["ocrText"] as? String ?? ""
                 let location = ui?["suggestedLocation"] as? String ?? ""
-                var card = DateCardStorage.shared.createDateCard(title: title, startAt: date, allDay: false)
-                if !ocrText.isEmpty { card.details = ocrText }
-                if !location.isEmpty { card.location = location }
-                _ = DateCardStorage.shared.updateDateCard(card)
+                guard let result = try? CiderCaptureService().addDateCardCapture(
+                    title: title,
+                    sourceText: ocrText,
+                    startAt: date,
+                    endAt: nil,
+                    allDay: false,
+                    location: location,
+                    folderID: nil
+                ),
+                let card = DateCardStorage.shared.dateCards.first(where: { $0.id == result.item.id })
+                else { return }
                 newEventEditorContext = DateCardEditorContext(existingCard: card, defaultDate: date)
                 return
             }
@@ -328,10 +335,16 @@ struct CiderPanelView: View {
                 let name = ui?["suggestedTitle"] as? String ?? ""
                 let email = (ui?["detectedEmails"] as? [String])?.first ?? ""
                 let phone = (ui?["detectedPhones"] as? [String])?.first ?? ""
-                var contact = ContactStorage.shared.createContact(displayName: name)
-                if !email.isEmpty { contact.email = email }
-                if !phone.isEmpty { contact.phone = phone }
-                _ = ContactStorage.shared.updateContact(contact)
+                guard let result = try? CiderCaptureService().addContactCapture(
+                    displayName: name,
+                    sourceText: ui?["ocrText"] as? String,
+                    relationshipLabel: nil,
+                    email: email,
+                    phone: phone,
+                    folderID: nil
+                ),
+                let contact = ContactStorage.shared.contacts.first(where: { $0.id == result.item.id })
+                else { return }
                 newContactEditorContext = ContactEditorContext(existingContact: contact)
                 return
             }
@@ -406,11 +419,15 @@ struct CiderPanelView: View {
                 if context.existingCard != nil {
                     _ = TodoCardStorage.shared.updateTodoCard(card)
                 } else {
-                    var created = TodoCardStorage.shared.createTodoCard(
+                    guard let result = try? CiderCaptureService().addTodoCapture(
                         title: card.title,
+                        sourceText: card.title,
                         dueDate: card.dueDate,
-                        priority: card.priority
-                    )
+                        priority: card.priority,
+                        folderID: nil
+                    ),
+                    var created = TodoCardStorage.shared.todoCards.first(where: { $0.id == result.item.id })
+                    else { return }
                     created.details = card.details
                     created.checklist = card.checklist
                     created.labelIDs = card.labelIDs

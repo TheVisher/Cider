@@ -221,25 +221,35 @@ final class CiderCaptureService {
     private let bookmarkService: VaultBookmarkService
     private let notesStorage: NotesStorage
     private let todoStorage: TodoCardStorage
+    private let dateCardStorage: DateCardStorage
+    private let contactStorage: ContactStorage
     private let vaultFileStorage: VaultFileStorage
     private let routingDecisionService: CiderRoutingDecisionService?
     private let database: CiderDatabase?
     private let noteAssignmentHandler: (UUID, UUID?) -> Bool
     private let todoUpdateHandler: (TodoCard) -> Bool
+    private let dateCardUpdateHandler: (DateCard) -> Bool
+    private let contactUpdateHandler: (ContactCard) -> Bool
 
     init(
         bookmarkService: VaultBookmarkService = .shared,
         notesStorage: NotesStorage = .shared,
         todoStorage: TodoCardStorage = .shared,
+        dateCardStorage: DateCardStorage = .shared,
+        contactStorage: ContactStorage = .shared,
         vaultFileStorage: VaultFileStorage = .shared,
         database: CiderDatabase? = nil,
         routingDecisionService: CiderRoutingDecisionService? = CiderRoutingDecisionService(),
         noteAssignmentHandler: ((UUID, UUID?) -> Bool)? = nil,
-        todoUpdateHandler: ((TodoCard) -> Bool)? = nil
+        todoUpdateHandler: ((TodoCard) -> Bool)? = nil,
+        dateCardUpdateHandler: ((DateCard) -> Bool)? = nil,
+        contactUpdateHandler: ((ContactCard) -> Bool)? = nil
     ) {
         self.bookmarkService = bookmarkService
         self.notesStorage = notesStorage
         self.todoStorage = todoStorage
+        self.dateCardStorage = dateCardStorage
+        self.contactStorage = contactStorage
         self.vaultFileStorage = vaultFileStorage
         self.database = database
         self.routingDecisionService = routingDecisionService
@@ -248,6 +258,12 @@ final class CiderCaptureService {
         }
         self.todoUpdateHandler = todoUpdateHandler ?? { [todoStorage] todo in
             todoStorage.updateTodoCard(todo)
+        }
+        self.dateCardUpdateHandler = dateCardUpdateHandler ?? { [dateCardStorage] dateCard in
+            dateCardStorage.updateDateCard(dateCard)
+        }
+        self.contactUpdateHandler = contactUpdateHandler ?? { [contactStorage] contact in
+            contactStorage.updateContact(contact)
         }
     }
 
@@ -475,6 +491,175 @@ final class CiderCaptureService {
             itemID: stored.id,
             itemType: "todo",
             title: stored.title,
+            relativePath: relativePath,
+            folderID: stored.folderID,
+            folderName: target.name,
+            enrichmentStatus: "not_applicable",
+            titleState: titleState,
+            duplicateStatus: "not_checked",
+            routing: routing,
+            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            partialSuccess: partialSuccess
+        )
+    }
+
+    func addDateCardCapture(
+        title: String,
+        sourceText: String?,
+        startAt: Date,
+        endAt: Date?,
+        allDay: Bool,
+        location: String?,
+        folderID: UUID?,
+        titleState: String = "manual"
+    ) throws -> CiderCaptureResult {
+        var card = dateCardStorage.createDateCard(
+            title: title,
+            startAt: startAt,
+            endAt: endAt,
+            allDay: allDay
+        )
+        var needsUpdate = false
+        let details = sourceText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let details, !details.isEmpty {
+            card.details = details
+            needsUpdate = true
+        }
+        let trimmedLocation = location?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedLocation, !trimmedLocation.isEmpty {
+            card.location = trimmedLocation
+            needsUpdate = true
+        }
+        if let folderID {
+            card.folderID = folderID
+            needsUpdate = true
+        }
+
+        var assignmentSucceeded: Bool?
+        if needsUpdate {
+            let updated = dateCardUpdateHandler(card)
+            if folderID != nil {
+                assignmentSucceeded = updated
+            }
+        }
+        guard let stored = dateCardStorage.dateCards.first(where: { $0.id == card.id }) else {
+            throw CiderCaptureError.storeFailed(title)
+        }
+        let partialSuccess = assignmentPartialSuccess(
+            itemType: "event",
+            requestedFolderID: folderID,
+            actualFolderID: stored.folderID,
+            assignmentSucceeded: assignmentSucceeded
+        )
+
+        let relativePath = itemRelativePathFromDatabase(itemID: stored.id) ?? "Inbox/Date Cards"
+        let target = routingTarget(
+            itemType: "dateCard",
+            relativePath: relativePath,
+            folderID: stored.folderID,
+            fallbackInboxPath: "Inbox/Date Cards"
+        )
+        let routing = try recordRouting(
+            itemID: stored.id,
+            itemType: "event",
+            target: target,
+            reviewNeeded: stored.folderID == nil,
+            acceptedReason: "Capture used the supplied deterministic target.",
+            reviewReason: "Cider captured event-like text as a date card and kept it in Inbox/Date Cards for review."
+        )
+
+        return sharedResult(
+            sourceKind: "text",
+            sourceURL: nil,
+            sourceFile: nil,
+            sourceText: sourceText ?? title,
+            itemID: stored.id,
+            itemType: "event",
+            title: stored.title,
+            relativePath: relativePath,
+            folderID: stored.folderID,
+            folderName: target.name,
+            enrichmentStatus: "not_applicable",
+            titleState: titleState,
+            duplicateStatus: "not_checked",
+            routing: routing,
+            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            partialSuccess: partialSuccess
+        )
+    }
+
+    func addContactCapture(
+        displayName: String,
+        sourceText: String?,
+        relationshipLabel: String?,
+        email: String?,
+        phone: String?,
+        folderID: UUID?,
+        titleState: String = "manual"
+    ) throws -> CiderCaptureResult {
+        var contact = contactStorage.createContact(displayName: displayName)
+        var needsUpdate = false
+        let relationship = relationshipLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let relationship, !relationship.isEmpty {
+            contact.relationshipLabel = relationship
+            needsUpdate = true
+        }
+        let trimmedEmail = email?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedEmail, !trimmedEmail.isEmpty {
+            contact.email = trimmedEmail
+            needsUpdate = true
+        }
+        let trimmedPhone = phone?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedPhone, !trimmedPhone.isEmpty {
+            contact.phone = trimmedPhone
+            needsUpdate = true
+        }
+        if let folderID {
+            contact.folderID = folderID
+            needsUpdate = true
+        }
+
+        var assignmentSucceeded: Bool?
+        if needsUpdate {
+            let updated = contactUpdateHandler(contact)
+            if folderID != nil {
+                assignmentSucceeded = updated
+            }
+        }
+        guard let stored = contactStorage.contacts.first(where: { $0.id == contact.id }) else {
+            throw CiderCaptureError.storeFailed(displayName)
+        }
+        let partialSuccess = assignmentPartialSuccess(
+            itemType: "contact",
+            requestedFolderID: folderID,
+            actualFolderID: stored.folderID,
+            assignmentSucceeded: assignmentSucceeded
+        )
+
+        let relativePath = itemRelativePathFromDatabase(itemID: stored.id) ?? "Inbox/Contacts"
+        let target = routingTarget(
+            itemType: "contact",
+            relativePath: relativePath,
+            folderID: stored.folderID,
+            fallbackInboxPath: "Inbox/Contacts"
+        )
+        let routing = try recordRouting(
+            itemID: stored.id,
+            itemType: "contact",
+            target: target,
+            reviewNeeded: stored.folderID == nil,
+            acceptedReason: "Capture used the supplied deterministic target.",
+            reviewReason: "Cider captured contact-like text as a contact and kept it in Inbox/Contacts for review."
+        )
+
+        return sharedResult(
+            sourceKind: "text",
+            sourceURL: nil,
+            sourceFile: nil,
+            sourceText: sourceText ?? displayName,
+            itemID: stored.id,
+            itemType: "contact",
+            title: stored.displayName,
             relativePath: relativePath,
             folderID: stored.folderID,
             folderName: target.name,

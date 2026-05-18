@@ -30,6 +30,36 @@ struct CaptureParitySafetyTests {
         #expect(violations.isEmpty, "Note capture paths must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("quick-create event contact and todo creation use the canonical capture service")
+    func quickCreateDomainItemsUseCanonicalCaptureService() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let files = [
+            repoRoot.appendingPathComponent("Sources/Cider/Views/CiderPanelView+SidebarFooter.swift"),
+            repoRoot.appendingPathComponent("Sources/Cider/Views/CiderPanelView.swift"),
+        ]
+        var violations: [String] = []
+
+        for fileURL in files {
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            let relativePath = fileURL.path.replacingOccurrences(of: repoRoot.path + "/", with: "")
+
+            if source.contains("DateCardStorage.shared.createDateCard("),
+               !source.contains("CiderCaptureService().addDateCardCapture(") {
+                violations.append("\(relativePath): quick-create events still create date cards through DateCardStorage directly")
+            }
+            if source.contains("ContactStorage.shared.createContact("),
+               !source.contains("CiderCaptureService().addContactCapture(") {
+                violations.append("\(relativePath): quick-create contacts still create contacts through ContactStorage directly")
+            }
+            if source.contains("TodoCardStorage.shared.addTodoCard(") || source.contains("TodoCardStorage.shared.createTodoCard("),
+               !source.contains("CiderCaptureService().addTodoCapture(") {
+                violations.append("\(relativePath): quick-create todos still create todos through TodoCardStorage directly")
+            }
+        }
+
+        #expect(violations.isEmpty, "Quick-create paths must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
+    }
+
     private func block(named marker: String, in source: String) -> String? {
         guard let markerRange = source.range(of: marker) else { return nil }
         let tail = source[markerRange.lowerBound...]
