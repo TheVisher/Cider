@@ -228,6 +228,7 @@ final class CiderCaptureService {
     private let routingDecisionService: CiderRoutingDecisionService?
     private let database: CiderDatabase?
     private let noteAssignmentHandler: (UUID, UUID?) -> Bool
+    private let thumbnailAssignmentHandler: (UUID, Data, String?) -> Bool
     private let todoUpdateHandler: (TodoCard) -> Bool
     private let dateCardUpdateHandler: (DateCard) -> Bool
     private let contactUpdateHandler: (ContactCard) -> Bool
@@ -242,6 +243,7 @@ final class CiderCaptureService {
         database: CiderDatabase? = nil,
         routingDecisionService: CiderRoutingDecisionService? = CiderRoutingDecisionService(),
         noteAssignmentHandler: ((UUID, UUID?) -> Bool)? = nil,
+        thumbnailAssignmentHandler: ((UUID, Data, String?) -> Bool)? = nil,
         todoUpdateHandler: ((TodoCard) -> Bool)? = nil,
         dateCardUpdateHandler: ((DateCard) -> Bool)? = nil,
         contactUpdateHandler: ((ContactCard) -> Bool)? = nil
@@ -256,6 +258,13 @@ final class CiderCaptureService {
         self.routingDecisionService = routingDecisionService
         self.noteAssignmentHandler = noteAssignmentHandler ?? { [notesStorage] noteID, folderID in
             notesStorage.assignNote(noteID, toFolder: folderID)
+        }
+        self.thumbnailAssignmentHandler = thumbnailAssignmentHandler ?? { [bookmarkService] bookmarkID, imageData, preferredFileExtension in
+            bookmarkService.assignThumbnail(
+                for: bookmarkID,
+                imageData: imageData,
+                preferredFileExtension: preferredFileExtension
+            )
         }
         self.todoUpdateHandler = todoUpdateHandler ?? { [todoStorage] todo in
             todoStorage.updateTodoCard(todo)
@@ -490,6 +499,50 @@ final class CiderCaptureService {
             routing: routing,
             nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
             partialSuccess: partialSuccess
+        )
+    }
+
+    func addImageBookmarkCapture(
+        title: String,
+        imageData: Data,
+        preferredFileExtension: String?,
+        sourceFile: String?
+    ) throws -> CiderCaptureResult {
+        let finalTitle = normalizedTitle(title) ?? "Dropped Image"
+        let created = bookmarkService.addImageBookmark(title: finalTitle)
+        let didAssignThumbnail = thumbnailAssignmentHandler(
+            created.id,
+            imageData,
+            preferredFileExtension
+        )
+        let bookmark = bookmarkService.bookmarks.first(where: { $0.id == created.id }) ?? created
+        let target = routingTarget(for: bookmark)
+        let routing = try recordRouting(
+            itemID: bookmark.id,
+            itemType: "bookmark",
+            target: target,
+            reviewNeeded: bookmark.folderID == nil,
+            acceptedReason: "Capture used the supplied deterministic target.",
+            reviewReason: "Cider captured an image bookmark and kept it in Inbox/Bookmarks for review."
+        )
+
+        return sharedResult(
+            sourceKind: "image",
+            sourceURL: nil,
+            sourceFile: sourceFile,
+            sourceText: nil,
+            itemID: bookmark.id,
+            itemType: "bookmark",
+            title: bookmark.title,
+            relativePath: bookmark.relativePath,
+            folderID: bookmark.folderID,
+            folderName: target.name,
+            enrichmentStatus: "not_applicable",
+            titleState: "manual",
+            duplicateStatus: "not_checked",
+            routing: routing,
+            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            partialSuccess: thumbnailPartialSuccess(didAssignThumbnail: didAssignThumbnail)
         )
     }
 
@@ -954,6 +1007,16 @@ final class CiderCaptureService {
             reason: "\(itemType) folder assignment failed; Cider stored the source item and left it in review.",
             requestedFolderID: requestedFolderID,
             actualFolderID: actualFolderID
+        )
+    }
+
+    private func thumbnailPartialSuccess(didAssignThumbnail: Bool) -> CiderCaptureResult.PartialSuccess? {
+        guard !didAssignThumbnail else { return nil }
+        return .init(
+            status: "thumbnail_assignment_failed",
+            reason: "Image bookmark thumbnail assignment failed; Cider stored the bookmark and left it in review.",
+            requestedFolderID: nil,
+            actualFolderID: nil
         )
     }
 

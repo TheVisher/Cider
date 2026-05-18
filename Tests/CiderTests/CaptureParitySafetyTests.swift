@@ -91,6 +91,28 @@ struct CaptureParitySafetyTests {
         #expect(violations.isEmpty, "Visual intake paths must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("clipboard and drop-zone image bookmarks use canonical capture service")
+    func imageBookmarkIntakeUsesCanonicalCaptureService() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let files = [
+            repoRoot.appendingPathComponent("Sources/Cider/Views/Shared/ClipboardViewerView.swift"),
+            repoRoot.appendingPathComponent("Sources/Cider/App/CiderDropZoneContext.swift"),
+        ]
+        var violations: [String] = []
+
+        for fileURL in files {
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            let relativePath = fileURL.path.replacingOccurrences(of: repoRoot.path + "/", with: "")
+
+            if source.contains("VaultBookmarkService.shared.addImageBookmark("),
+               !source.contains("CiderCaptureService().addImageBookmarkCapture(") {
+                violations.append("\(relativePath): image bookmark intake still creates bookmarks outside the capture service")
+            }
+        }
+
+        #expect(violations.isEmpty, "Image bookmark intake paths must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
+    }
+
     private func block(named marker: String, in source: String) -> String? {
         guard let markerRange = source.range(of: marker) else { return nil }
         let tail = source[markerRange.lowerBound...]

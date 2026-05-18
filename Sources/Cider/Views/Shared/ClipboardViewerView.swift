@@ -454,18 +454,22 @@ struct ClipboardViewerView: View {
                     try? Data(contentsOf: url)
                 }.value
                 guard let data else { return }
-                let bookmark = VaultBookmarkService.shared.addImageBookmark(title: "Clipboard Image")
-                _ = VaultBookmarkService.shared.assignThumbnail(
-                    for: bookmark.id,
+                guard let result = try? CiderCaptureService().addImageBookmarkCapture(
+                    title: "Clipboard Image",
                     imageData: data,
-                    preferredFileExtension: ext
-                )
-                clipboardStorage.markSaved(itemID, savedItemID: bookmark.id)
+                    preferredFileExtension: ext,
+                    sourceFile: url.path
+                ) else { return }
+                let didAssignThumbnail = result.partialSuccess?.status != "thumbnail_assignment_failed"
+                clipboardStorage.markSaved(itemID, savedItemID: result.item.id)
                 flashSaved(itemID)
                 NotificationCenter.default.post(
                     name: .showBookmarkCaptureToast,
                     object: nil,
-                    userInfo: ["message": "Saved as image bookmark", "isSuccess": true]
+                    userInfo: [
+                        "message": didAssignThumbnail ? "Saved as image bookmark" : "Saved image placeholder",
+                        "isSuccess": didAssignThumbnail
+                    ]
                 )
             }
             return  // async path handles markSaved + flash itself

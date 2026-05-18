@@ -548,6 +548,80 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("image bookmark capture assigns thumbnail and returns shared result shape")
+    func imageBookmarkCaptureReturnsSharedResultShape() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let routing = CiderRoutingDecisionService(database: db)
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: routing
+            )
+            let image = NSImage(size: NSSize(width: 4, height: 4))
+            image.lockFocus()
+            NSColor.green.setFill()
+            NSRect(x: 0, y: 0, width: 4, height: 4).fill()
+            image.unlockFocus()
+            let data = try #require(image.tiffRepresentation)
+
+            let result = try service.addImageBookmarkCapture(
+                title: "Clipboard Image",
+                imageData: data,
+                preferredFileExtension: "png",
+                sourceFile: nil
+            )
+
+            #expect(result.command == "capture.add")
+            #expect(result.source.kind == "image")
+            #expect(result.source.itemType == "bookmark")
+            #expect(result.item.type == "bookmark")
+            #expect(result.item.title == "Clipboard Image")
+            #expect(result.item.relativePath?.hasPrefix("Inbox/Bookmarks/") == true)
+            #expect(result.enrichment.status == "not_applicable")
+            #expect(result.duplicate.status == "not_checked")
+            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.candidateTarget?.relativePath == "Inbox/Bookmarks")
+            #expect(result.nextSafeAction == "review_route")
+            #expect(result.partialSuccess == nil)
+
+            let stored = try #require(bookmarks.bookmarks.first(where: { $0.id == result.item.id }))
+            #expect(stored.thumbnailRelativePath != nil)
+            let explanation = try routing.explain(itemID: result.item.id)
+            #expect(explanation.latestDecision?.source == "capture.add")
+        }
+    }
+
+    @Test("image bookmark capture reports partial success when thumbnail assignment fails")
+    func imageBookmarkCaptureReportsPartialSuccessWhenThumbnailAssignmentFails() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                thumbnailAssignmentHandler: { _, _, _ in false }
+            )
+
+            let result = try service.addImageBookmarkCapture(
+                title: "Dropped Image",
+                imageData: Data("not image data".utf8),
+                preferredFileExtension: "png",
+                sourceFile: "/tmp/Dropped.png"
+            )
+            let partialSuccess = try #require(result.toDictionary()["partialSuccess"] as? [String: Any])
+
+            #expect(result.source.kind == "image")
+            #expect(result.source.file == "/tmp/Dropped.png")
+            #expect(result.item.title == "Dropped Image")
+            #expect(partialSuccess["status"] as? String == "thumbnail_assignment_failed")
+            #expect((partialSuccess["reason"] as? String)?.contains("thumbnail") == true)
+        }
+    }
+
     @Test("capture add stores task-like text as a todo through the shared result shape")
     func captureAddStoresTaskTextAsTodo() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in

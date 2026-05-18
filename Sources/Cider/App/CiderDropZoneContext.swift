@@ -79,6 +79,7 @@ final class CiderDropZoneContext: ObservableObject {
     private var suppressTargetingUntil: Date?
     private let noteCaptureHandler: (String) throws -> CiderCaptureResult
     private let fileCaptureHandler: (URL) throws -> CiderCaptureResult
+    private let imageBookmarkCaptureHandler: (String, Data, String?, String?) throws -> CiderCaptureResult
 
     init(
         title: String = "Drop Zone",
@@ -88,12 +89,21 @@ final class CiderDropZoneContext: ObservableObject {
         },
         fileCaptureHandler: @escaping (URL) throws -> CiderCaptureResult = {
             try CiderCaptureService().addFileCapture(sourcePath: $0.path, title: nil, folderID: nil)
+        },
+        imageBookmarkCaptureHandler: @escaping (String, Data, String?, String?) throws -> CiderCaptureResult = {
+            try CiderCaptureService().addImageBookmarkCapture(
+                title: $0,
+                imageData: $1,
+                preferredFileExtension: $2,
+                sourceFile: $3
+            )
         }
     ) {
         self.title = title
         self.subtitle = subtitle
         self.noteCaptureHandler = noteCaptureHandler
         self.fileCaptureHandler = fileCaptureHandler
+        self.imageBookmarkCaptureHandler = imageBookmarkCaptureHandler
     }
 
     static func manualTesting() -> CiderDropZoneContext {
@@ -271,25 +281,32 @@ final class CiderDropZoneContext: ObservableObject {
     func saveDroppedImageData(
         _ data: Data,
         preferredFileExtension: String? = nil,
-        title: String = "Dropped Image"
+        title: String = "Dropped Image",
+        sourceFile: String? = nil
     ) {
         finishDropInteraction()
         resetDismissProgress()
         status = .processing("Saving dropped image...")
-        let bookmark = VaultBookmarkService.shared.addImageBookmark(title: title)
-        let didAssignThumbnail = VaultBookmarkService.shared.assignThumbnail(
-            for: bookmark.id,
-            imageData: data,
-            preferredFileExtension: preferredFileExtension
-        )
+        let result: CiderCaptureResult
+        do {
+            result = try imageBookmarkCaptureHandler(title, data, preferredFileExtension, sourceFile)
+        } catch {
+            recordFallback(
+                kind: .image,
+                title: title,
+                detail: "Could not save image bookmark: \(error.localizedDescription)"
+            )
+            return
+        }
+        let didAssignThumbnail = result.partialSuccess?.status != "thumbnail_assignment_failed"
 
         droppedItems.insert(
             DroppedItem(
                 kind: .image,
-                title: bookmark.title,
+                title: result.item.title,
                 detail: didAssignThumbnail ? "Saved as an image bookmark." : "Created image bookmark, but thumbnail save failed.",
                 didPersist: true,
-                bookmarkID: bookmark.id
+                bookmarkID: result.item.id
             ),
             at: 0
         )
@@ -335,7 +352,8 @@ final class CiderDropZoneContext: ObservableObject {
             saveDroppedImageData(
                 payload.data,
                 preferredFileExtension: payload.preferredFileExtension,
-                title: CiderDropZoneImageTitle.title(fromFileURL: url)
+                title: CiderDropZoneImageTitle.title(fromFileURL: url),
+                sourceFile: url.path
             )
         } catch {
             saveDroppedFile(url)
