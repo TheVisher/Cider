@@ -127,6 +127,48 @@ struct CiderItemContextServiceTests {
         })
     }
 
+    @Test("search handles common Kanban acceptance terms alongside item matches")
+    func searchHandlesCommonKanbanAcceptanceTermsAlongsideItemMatches() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(
+            note,
+            title: "Cutover acceptance text",
+            relativePath: "Inbox/Notes/Cutover acceptance text.md",
+            into: db
+        )
+
+        let store = SecondBrainStore(database: db)
+        let cardOwner = SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "board/card")
+        try store.replaceChunks(owner: cardOwner, chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: nil,
+                source: "kanban_notes",
+                title: "Acceptance Criteria",
+                body: "Focused CLI acceptance checks pass or produce scoped follow-up cards.",
+                chunkIndex: 0
+            )
+        ])
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+
+        let singleTermMatches = try service.search("acceptance", limit: 10)
+        #expect(singleTermMatches.contains {
+            $0.kind == .item && $0.item?.id == note.entityID
+        })
+        #expect(singleTermMatches.contains {
+            $0.kind == .chunk && $0.owner == cardOwner
+        })
+
+        let phraseMatches = try service.search("Cutover acceptance", limit: 10)
+        #expect(phraseMatches.contains {
+            $0.kind == .item && $0.item?.id == note.entityID
+        })
+    }
+
     @Test("agent context bundle is bounded and includes provenance review history and safe commands")
     func agentContextBundleIsBoundedAndActionable() throws {
         let (db, url) = try makeTestDB()
