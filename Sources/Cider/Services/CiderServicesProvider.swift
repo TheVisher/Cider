@@ -5,6 +5,40 @@ import AppKit
 /// Requires a proper .app bundle to appear in the Services menu.
 @MainActor
 final class CiderServicesProvider: NSObject {
+    private let urlCaptureHandler: (String) throws -> CiderCaptureResult
+    private let noteCaptureHandler: (String) throws -> CiderCaptureResult
+    private let imageCaptureHandler: (Data, String?, String?) throws -> CiderCaptureResult
+    private let toastHandler: (String, Bool) -> Void
+
+    init(
+        urlCaptureHandler: @escaping (String) throws -> CiderCaptureResult = {
+            try CiderCaptureService().add($0)
+        },
+        noteCaptureHandler: @escaping (String) throws -> CiderCaptureResult = {
+            try CiderCaptureService().addNoteCapture(title: nil, content: $0, folderID: nil)
+        },
+        imageCaptureHandler: @escaping (Data, String?, String?) throws -> CiderCaptureResult = {
+            try CiderCaptureService().addImageBookmarkCapture(
+                title: "Image from Services",
+                imageData: $0,
+                preferredFileExtension: $1,
+                sourceFile: $2
+            )
+        },
+        toastHandler: @escaping (String, Bool) -> Void = { message, isSuccess in
+            NotificationCenter.default.post(
+                name: .showBookmarkCaptureToast,
+                object: nil,
+                userInfo: ["message": message, "isSuccess": isSuccess]
+            )
+        }
+    ) {
+        self.urlCaptureHandler = urlCaptureHandler
+        self.noteCaptureHandler = noteCaptureHandler
+        self.imageCaptureHandler = imageCaptureHandler
+        self.toastHandler = toastHandler
+        super.init()
+    }
 
     // MARK: - Text Service (public.utf8-plain-text)
 
@@ -19,24 +53,28 @@ final class CiderServicesProvider: NSObject {
         }
     }
 
-    private func handleText(_ text: String?) {
-        guard let text, !text.isEmpty else { return }
+    func handleText(_ text: String?) {
+        guard let text else { return }
 
         // Check if it looks like a URL
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
         if let url = URL(string: trimmed),
            let scheme = url.scheme?.lowercased(),
            scheme == "http" || scheme == "https" {
-            let saved = (try? CiderBookmarkCaptureAdapter().addURLBookmark(urlString: url.absoluteString)) != nil
+            let saved = (try? urlCaptureHandler(url.absoluteString)) != nil
             postToast(message: saved ? "Saved from Services" : "Could not save URL", isSuccess: saved)
             return
         }
 
         // Plain text → new note
-        var note = NotesStorage.shared.createNew()
-        note.content = text
-        NotesStorage.shared.save(note: note)
-        postToast(message: "Created note from Services", isSuccess: true)
+        do {
+            _ = try noteCaptureHandler(trimmed)
+            postToast(message: "Created note from Services", isSuccess: true)
+        } catch {
+            postToast(message: "Could not create note from Services", isSuccess: false)
+        }
     }
 
     // MARK: - Image Service (public.png / public.jpeg / public.tiff)
@@ -55,20 +93,23 @@ final class CiderServicesProvider: NSObject {
         }
     }
 
-    private func handleImage(_ data: Data?) {
+    func handleImage(_ data: Data?) {
         guard let data else { return }
-        let bookmark = VaultBookmarkService.shared.addImageBookmark(title: "Image from Services")
-        VaultBookmarkService.shared.assignThumbnail(for: bookmark.id, imageData: data)
-        postToast(message: "Saved image from Services", isSuccess: true)
+        do {
+            let result = try imageCaptureHandler(data, nil, nil)
+            let didAssignThumbnail = result.partialSuccess?.status != "thumbnail_assignment_failed"
+            postToast(
+                message: didAssignThumbnail ? "Saved image from Services" : "Saved image placeholder from Services",
+                isSuccess: didAssignThumbnail
+            )
+        } catch {
+            postToast(message: "Could not save image from Services", isSuccess: false)
+        }
     }
 
     // MARK: - Toast
 
     private func postToast(message: String, isSuccess: Bool) {
-        NotificationCenter.default.post(
-            name: .showBookmarkCaptureToast,
-            object: nil,
-            userInfo: ["message": message, "isSuccess": isSuccess]
-        )
+        toastHandler(message, isSuccess)
     }
 }

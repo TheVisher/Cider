@@ -113,6 +113,25 @@ struct CaptureParitySafetyTests {
         #expect(violations.isEmpty, "Image bookmark intake paths must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("macOS Services intake uses canonical capture service")
+    func macOSServicesIntakeUsesCanonicalCaptureService() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let fileURL = repoRoot.appendingPathComponent("Sources/Cider/Services/CiderServicesProvider.swift")
+        let source = try String(contentsOf: fileURL, encoding: .utf8)
+        var violations: [String] = []
+
+        if source.contains("NotesStorage.shared.createNew()"),
+           !source.contains("CiderCaptureService().addNoteCapture(") {
+            violations.append("CiderServicesProvider.swift: text Services intake still creates notes directly")
+        }
+        if source.contains("VaultBookmarkService.shared.addImageBookmark("),
+           !source.contains("CiderCaptureService().addImageBookmarkCapture(") {
+            violations.append("CiderServicesProvider.swift: image Services intake still creates image bookmarks directly")
+        }
+
+        #expect(violations.isEmpty, "macOS Services intake must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
+    }
+
     private func block(named marker: String, in source: String) -> String? {
         guard let markerRange = source.range(of: marker) else { return nil }
         let tail = source[markerRange.lowerBound...]
