@@ -8654,6 +8654,7 @@ struct CiderCLI {
             "owner": ownerToDict(packet.owner),
             "summary": packet.summary,
             "provenance": packet.provenance,
+            "spaceMemberships": packet.spaceMemberships.map(itemSpaceMembershipToDict),
             "contentBlocks": packet.contentBlocks.map(itemAgentContextBlockToDict),
             "related": packet.related.map(itemLinkSummaryToDict),
             "surfacing": surfacingExplanationToDict(packet.surfacing),
@@ -8669,6 +8670,27 @@ struct CiderCLI {
         ]
         if let review = packet.review {
             dict["review"] = itemAgentReviewStateToDict(review)
+        }
+        return dict
+    }
+
+    static func itemSpaceMembershipToDict(_ membership: CiderSpaceMembership) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": membership.id,
+            "spaceID": membership.spaceID,
+            "spaceName": membership.spaceName,
+            "item": [
+                "type": membership.item.type.rawValue,
+                "id": membership.item.entityID.uuidString,
+            ],
+            "reason": membership.reason,
+            "source": membership.source,
+            "actor": membership.actor,
+            "createdAt": ISO8601DateFormatter().string(from: membership.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: membership.updatedAt),
+        ]
+        if let confidence = membership.confidence {
+            dict["confidence"] = confidence
         }
         return dict
     }

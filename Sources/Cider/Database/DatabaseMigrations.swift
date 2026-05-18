@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 12
+    static let latestVersion: Int = 13
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -75,7 +75,27 @@ enum DatabaseMigrations {
         }
         if currentVersion < 12 {
             try migrateToV12(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 13 {
+            try migrateToV13(db)
+        }
+    }
+
+    // MARK: - V12 -> V13: Native second-brain Space memberships
+
+    private static func migrateToV13(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 13...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createSpaceMemberships)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_space_memberships_item ON space_memberships(item_id, item_type);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_space_memberships_space ON space_memberships(space_id, updated_at);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (13);")
+        }
+
+        logger.info("Migration to v13 complete")
     }
 
     // MARK: - V11 -> V12: Durable sync folder alias/quarantine decisions

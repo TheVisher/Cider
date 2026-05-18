@@ -247,10 +247,25 @@ struct CiderItemContextServiceTests {
                 resultJSON: nil
             )
         )
+        let spaceStore = CiderSpaceMembershipStore(database: db)
+        try spaceStore.assign(
+            item: note,
+            toSpaceID: "space-health",
+            spaceName: "Health",
+            reason: "Dental follow-up belongs in the Health meaning layer.",
+            confidence: 0.88,
+            source: "space.test",
+            actor: "agent"
+        )
 
         let linkService = ItemLinkService(database: db)
         try linkService.addDirectLink(from: note, to: bookmark)
-        let service = CiderItemContextService(database: db, linkService: linkService, secondBrainStore: store)
+        let service = CiderItemContextService(
+            database: db,
+            linkService: linkService,
+            secondBrainStore: store,
+            spaceMembershipStore: spaceStore
+        )
 
         let packet = try service.agentContext(
             for: note,
@@ -268,6 +283,9 @@ struct CiderItemContextServiceTests {
         #expect(packet.summary.count <= 48)
         #expect(packet.provenance.contains("item:note"))
         #expect(packet.provenance.contains("path:Inbox/Notes/Dentist follow-up.md"))
+        #expect(packet.provenance.contains("space:Health"))
+        #expect(packet.spaceMemberships.map(\.spaceName) == ["Health"])
+        #expect(packet.spaceMemberships.first?.reason == "Dental follow-up belongs in the Health meaning layer.")
         #expect(packet.contentBlocks.map(\.title) == ["Summary", "Dentist follow-up chunk"])
         #expect(packet.contentBlocks.allSatisfy { $0.body.count <= 48 })
         #expect(packet.related.map(\.title) == ["Dental insurance portal"])

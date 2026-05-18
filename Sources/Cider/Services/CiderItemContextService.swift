@@ -29,6 +29,7 @@ struct CiderItemContextBundle: Equatable {
     var sections: [SecondBrainSection]
     var chunks: [CiderItemChunk]
     var related: [ItemLinkSummary]
+    var spaceMemberships: [CiderSpaceMembership]
     var routingDecisions: [SecondBrainRoutingDecision]
     var agentActions: [SecondBrainAgentAction]
 }
@@ -75,6 +76,7 @@ struct CiderItemAgentContextPacket: Equatable {
     var owner: SecondBrainOwnerRef
     var summary: String
     var provenance: [String]
+    var spaceMemberships: [CiderSpaceMembership]
     var contentBlocks: [CiderItemAgentContextBlock]
     var related: [ItemLinkSummary]
     var review: CiderItemAgentReviewState?
@@ -118,6 +120,7 @@ final class CiderItemContextService {
     private let database: CiderDatabase
     private let linkService: ItemLinkService
     private let secondBrainStore: SecondBrainStore
+    private let spaceMembershipStore: CiderSpaceMembershipStore
     private let todoProvider: () -> [TodoCard]
     private let dateCardProvider: () -> [DateCard]
     private let nowProvider: () -> Date
@@ -126,6 +129,7 @@ final class CiderItemContextService {
         database: CiderDatabase = .shared,
         linkService: ItemLinkService? = nil,
         secondBrainStore: SecondBrainStore? = nil,
+        spaceMembershipStore: CiderSpaceMembershipStore? = nil,
         todoProvider: @escaping () -> [TodoCard] = { TodoCardStorage.shared.todoCards },
         dateCardProvider: @escaping () -> [DateCard] = { DateCardStorage.shared.dateCards },
         nowProvider: @escaping () -> Date = { Date() }
@@ -133,6 +137,7 @@ final class CiderItemContextService {
         self.database = database
         self.linkService = linkService ?? ItemLinkService(database: database)
         self.secondBrainStore = secondBrainStore ?? SecondBrainStore(database: database)
+        self.spaceMembershipStore = spaceMembershipStore ?? CiderSpaceMembershipStore(database: database)
         self.todoProvider = todoProvider
         self.dateCardProvider = dateCardProvider
         self.nowProvider = nowProvider
@@ -147,6 +152,7 @@ final class CiderItemContextService {
             sections: try secondBrainStore.sections(for: owner),
             chunks: try chunks(for: owner),
             related: linkService.summaries(for: try linkService.relatedRefs(for: ref)),
+            spaceMemberships: try spaceMembershipStore.memberships(for: ref),
             routingDecisions: try secondBrainStore.routingDecisions(for: owner),
             agentActions: try secondBrainStore.agentActions(for: owner)
         )
@@ -163,6 +169,7 @@ final class CiderItemContextService {
             owner: bundle.owner,
             summary: clipped(summary(for: bundle), limit: normalizedLimits.maxBodyCharacters),
             provenance: provenance(for: bundle),
+            spaceMemberships: bundle.spaceMemberships,
             contentBlocks: contentBlocks(for: bundle, limits: normalizedLimits),
             related: Array(bundle.related.prefix(normalizedLimits.maxRelated)),
             review: reviewState(for: bundle),
@@ -291,6 +298,7 @@ final class CiderItemContextService {
         }
         values += bundle.sections.map { "section:\($0.source)" }
         values += bundle.chunks.map { "chunk:\($0.source)" }
+        values += bundle.spaceMemberships.map { "space:\($0.spaceName)" }
         values += bundle.routingDecisions.map { "routing:\($0.source)" }
         values += bundle.agentActions.map { "agent:\($0.source)" }
         if !bundle.related.isEmpty {

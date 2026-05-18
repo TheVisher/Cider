@@ -160,6 +160,12 @@ extension CiderItemAgentContextPacket {
         if !provenance.isEmpty {
             parts.append("Provenance: \(provenance.joined(separator: "; "))")
         }
+        if !spaceMemberships.isEmpty {
+            let spaces = spaceMemberships
+                .map { "\($0.spaceName): \($0.reason)" }
+                .joined(separator: "; ")
+            parts.append("Spaces: \(spaces)")
+        }
         if let review {
             var reviewLine = "Review: \(review.status) - \(review.reason)"
             if let targetPath = review.targetPath {

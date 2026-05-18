@@ -213,6 +213,22 @@ enum CiderSchema {
         );
         """
 
+    static let createSpaceMemberships = """
+        CREATE TABLE IF NOT EXISTS space_memberships (
+            space_id   TEXT NOT NULL,
+            item_id    TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+            item_type  TEXT NOT NULL,
+            space_name TEXT NOT NULL,
+            reason     TEXT NOT NULL DEFAULT '',
+            confidence REAL,
+            source     TEXT NOT NULL,
+            actor      TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (space_id, item_id, item_type)
+        );
+        """
+
     // MARK: - Second Brain Foundation
 
     static let createItemSections = """
@@ -399,6 +415,8 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_item_labels_label ON item_labels(label_id);",
         "CREATE INDEX IF NOT EXISTS idx_item_tags_tag     ON item_tags(tag_id);",
         "CREATE INDEX IF NOT EXISTS idx_item_links_target ON item_links(target_id);",
+        "CREATE INDEX IF NOT EXISTS idx_space_memberships_item ON space_memberships(item_id, item_type);",
+        "CREATE INDEX IF NOT EXISTS idx_space_memberships_space ON space_memberships(space_id, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_item_sections_owner ON item_sections(owner_type, owner_id, sort_order);",
         "CREATE INDEX IF NOT EXISTS idx_item_sections_item ON item_sections(item_id) WHERE item_id IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_content_chunks_owner ON content_chunks(owner_type, owner_id, chunk_index);",
@@ -438,6 +456,7 @@ enum CiderSchema {
         createTags,
         createItemTags,
         createItemLinks,
+        createSpaceMemberships,
         createItemSections,
         createContentChunks,
         createContentChunksFTS,
