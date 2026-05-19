@@ -131,4 +131,34 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(projectModel.boardCreationActionTitle, "New Board")
         XCTAssertNil(homeModel.boardCreationActionTitle)
     }
+
+    func testProjectOverviewCanSurfaceBackendArtifactRelations() {
+        let board = KanbanBoard(id: "2afee0", name: "Cider")
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [board])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+        let noteOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: "CF06DD4E")
+        let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cider")
+        let relation = SecondBrainRelation(
+            sourceOwner: noteOwner,
+            targetOwner: projectOwner,
+            relationType: "artifact_of",
+            evidence: "Agent-native capture contract audit belongs to Cider.",
+            source: "test",
+            actor: "agent",
+            confidence: 1,
+            metadata: ["title": "Agent-native capture contract v1 audit"]
+        )
+
+        let model = ProjectWorkspaceOverviewProvider.model(
+            for: ciderWorkspace,
+            catalog: catalog,
+            boards: [board],
+            artifactRelations: [relation]
+        )
+
+        XCTAssertEqual(model.artifacts.map(\.owner), [noteOwner])
+        XCTAssertEqual(model.artifacts.map(\.title), ["Agent-native capture contract v1 audit"])
+        XCTAssertEqual(model.artifacts.map(\.relationType), ["artifact_of"])
+        XCTAssertEqual(model.artifacts.map(\.safeCommand), ["cider-cli item context note CF06DD4E --json"])
+    }
 }

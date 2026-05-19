@@ -427,6 +427,12 @@ struct SecondBrainFoundationTests {
             "content_chunks_fts",
             "routing_decisions",
             "agent_actions",
+            "owner_relations",
+            "projects",
+            "capture_events",
+            "capture_attachments",
+            "enrichment_outputs",
+            "similarity_candidates",
         ]
 
         for table in expectedTables {
@@ -881,6 +887,27 @@ struct SecondBrainFoundationTests {
         #expect(updated?.contains("- 2026-05-13 19:20 - Added the agent-readable history command. (source: swift test)") == true)
     }
 
+    @Test("Kanban commit history appends to the card history lane")
+    func kanbanCommitHistoryAppendsToCardHistoryLane() {
+        let date = Date(timeIntervalSince1970: 1_778_700_000)
+        let updated = KanbanCardSectionParser.appendingHistory(
+            to: "## Problem\nNeeds repo traceability.",
+            type: "commit",
+            text: "abc1234 touched Sources/CiderCLI/CiderCLI.swift.",
+            source: "git",
+            at: date
+        )
+
+        #expect(updated?.contains("## Commits") == true)
+
+        let model = KanbanCardDashboardModel(title: "Repo traceability", notes: updated)
+        #expect(model.historyEntries.contains {
+            $0.title == "Commits"
+                && $0.body.contains("abc1234")
+                && $0.source == "git"
+        })
+    }
+
     @Test("Kanban card projection populates sections and searchable chunks")
     func kanbanCardProjectionPopulatesSectionsAndSearchableChunks() throws {
         let (db, url) = try makeTestDB()
@@ -1017,6 +1044,28 @@ struct SecondBrainFoundationTests {
             "Confirm a readable sections preview appears above the raw editor.",
             "Edit raw notes and confirm the preview updates.",
         ])
+    }
+
+    @Test("Kanban dashboard model promotes QA findings as agent-visible failed QA")
+    func kanbanDashboardModelPromotesQAFindingsAsAgentVisibleFailedQA() {
+        let model = KanbanCardDashboardModel(
+            title: "QA companion failed notes",
+            notes: """
+            ## QA Findings
+            Failed steps:
+            - Step 2 failed: Confirm failed steps show notes. Note: The note did not sync.
+
+            Overall QA notes:
+            The companion lost the summary after relaunch.
+            """
+        )
+
+        #expect(model.hasFailedQA)
+        #expect(model.qaFindingsEntries.map(\.body) == [
+            "Step 2 failed: Confirm failed steps show notes. Note: The note did not sync.",
+            "The companion lost the summary after relaunch.",
+        ])
+        #expect(model.agentContext.updateTargets.contains("QA Findings"))
     }
 
     @Test("Kanban dashboard model falls back to acceptance criteria for testing guidance")
@@ -1324,6 +1373,20 @@ struct SecondBrainFoundationTests {
                 && ($0["body"] as? String)?.contains("Tried raw YAML scraping and rejected it.") == true
         })
 
+        let commit = try jsonObject(from: runCLI([
+            "board", "history", "add", "Agent Workflow Smoke",
+            "--card", cardRef,
+            "--type", "commit",
+            "--text", "abc1234 touched Sources/CiderCLI/CiderCLI.swift and Tests/CiderTests/SecondBrainFoundationTests.swift.",
+            "--source", "git",
+            "--json",
+        ], vaultURL: vaultURL))
+        let commitSections = try #require(commit["sections"] as? [[String: Any]])
+        #expect(commitSections.contains {
+            $0["key"] as? String == "commits"
+                && ($0["body"] as? String)?.contains("abc1234 touched Sources/CiderCLI/CiderCLI.swift") == true
+        })
+
         _ = try runCLI([
             "item", "backfill-kanban",
             "--board", "Agent Workflow Smoke",
@@ -1343,6 +1406,7 @@ struct SecondBrainFoundationTests {
         })
         #expect(sections.contains { $0["sectionKey"] as? String == "implementation_history" })
         #expect(sections.contains { $0["sectionKey"] as? String == "failed_attempts" })
+        #expect(sections.contains { $0["sectionKey"] as? String == "commits" })
 
         let searchResults = try jsonObjectArray(from: runCLI([
             "item", "search", "raw YAML scraping rejected",
@@ -1389,7 +1453,7 @@ struct SecondBrainFoundationTests {
         let cardContext = try jsonObject(from: runCLI([
             "item", "context", "card", cardRef,
             "--max-sections", "2",
-            "--max-history", "3",
+            "--max-history", "5",
             "--json",
         ], vaultURL: vaultURL))
         #expect(cardContext["ok"] as? Bool == true)
@@ -1404,6 +1468,10 @@ struct SecondBrainFoundationTests {
                 && $0["body"] as? String == "Updated through board section update."
         })
         let contextHistory = try #require(cardContext["recentHistory"] as? [[String: Any]])
+        #expect(contextHistory.contains {
+            $0["kind"] as? String == "commit"
+                && ($0["summary"] as? String)?.contains("abc1234") == true
+        })
         #expect(contextHistory.contains {
             $0["kind"] as? String == "failed_attempt"
                 && ($0["summary"] as? String)?.contains("raw YAML scraping") == true
@@ -1550,7 +1618,129 @@ struct SecondBrainFoundationTests {
         #expect(sequence[1]["isNextActionable"] as? Bool == true)
         #expect(currentGate["title"] as? String == "Queued child")
         #expect(suggestedInsertion["columnName"] as? String == "Queued")
-        #expect(suggestedInsertion["command"] as? String == "cider-cli board add-card \"Next Up Smoke\" --column \"Queued\" --title \"<title>\" --parent \(parentID)")
+        #expect(suggestedInsertion["command"] as? String == "cider-cli board add-card \"Next Up Smoke\" --column \"Queued\" --title \"<title>\" --parent \(parentID) --after \(sequence[1]["id"] as? String ?? "")")
+    }
+
+    @Test("process CLI inserts roadmap child after sibling")
+    func processCLIInsertsRoadmapChildAfterSibling() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-insert-child-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Insert Child Smoke"], vaultURL: vaultURL)
+        let parentOutput = try runCLI([
+            "board", "add-card", "Insert Child Smoke",
+            "--column", "Backlog",
+            "--title", "Parent roadmap",
+        ], vaultURL: vaultURL)
+        let parentID = String(try #require(parentOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let firstOutput = try runCLI([
+            "board", "add-card", "Insert Child Smoke",
+            "--column", "Backlog",
+            "--title", "First child",
+            "--parent", parentID,
+        ], vaultURL: vaultURL)
+        let firstID = String(try #require(firstOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        _ = try runCLI([
+            "board", "add-card", "Insert Child Smoke",
+            "--column", "Backlog",
+            "--title", "Third child",
+            "--parent", parentID,
+        ], vaultURL: vaultURL)
+
+        _ = try runCLI([
+            "board", "add-card", "Insert Child Smoke",
+            "--column", "Backlog",
+            "--title", "Second child",
+            "--parent", parentID,
+            "--after", firstID,
+        ], vaultURL: vaultURL)
+
+        let inspected = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Insert Child Smoke",
+            "--card", parentID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let nextUp = try #require(inspected["roadmapNextUp"] as? [String: Any])
+        let sequence = try #require(nextUp["sequence"] as? [[String: Any]])
+
+        #expect(sequence.map { $0["title"] as? String } == ["First child", "Second child", "Third child"])
+    }
+
+    @Test("process CLI summarizes parent rollup and refreshes stale parent sections")
+    func processCLISummarizesParentRollupAndRefreshesStaleParentSections() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-parent-summary-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Parent Summary Smoke"], vaultURL: vaultURL)
+        _ = try runCLI(["board", "add-column", "Parent Summary Smoke", "--name", "Queued"], vaultURL: vaultURL)
+        _ = try runCLI(["board", "add-column", "Parent Summary Smoke", "--name", "Done", "--done"], vaultURL: vaultURL)
+
+        let parentOutput = try runCLI([
+            "board", "add-card", "Parent Summary Smoke",
+            "--column", "Backlog",
+            "--title", "Parent roadmap",
+            "--notes", """
+            ## Current State
+            Waiting on Done child.
+
+            ## Next Step
+            Finish Done child.
+            """,
+        ], vaultURL: vaultURL)
+        let parentID = String(try #require(parentOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        _ = try runCLI([
+            "board", "add-card", "Parent Summary Smoke",
+            "--column", "Backlog",
+            "--title", "Open child",
+            "--parent", parentID,
+        ], vaultURL: vaultURL)
+        _ = try runCLI([
+            "board", "add-card", "Parent Summary Smoke",
+            "--column", "Done",
+            "--title", "Done child",
+            "--parent", parentID,
+        ], vaultURL: vaultURL)
+
+        let dryRun = try jsonObject(from: runCLI([
+            "board", "parent-summary", "Parent Summary Smoke",
+            "--card", parentID,
+            "--refresh",
+            "--dry-run",
+            "--json",
+        ], vaultURL: vaultURL))
+
+        #expect(dryRun["applied"] as? Bool == false)
+        let stale = try #require(dryRun["staleParentText"] as? [String: Any])
+        let findings = try #require(stale["findings"] as? [[String: Any]])
+        #expect(findings.contains {
+            $0["section"] as? String == "Next Step"
+                && ($0["referencedDoneChildID"] as? String) != nil
+        })
+        let proposed = try #require(dryRun["proposedSections"] as? [String: String])
+        #expect(proposed["Next Step"] == "Queue Open child.")
+
+        let applied = try jsonObject(from: runCLI([
+            "board", "parent-summary", "Parent Summary Smoke",
+            "--card", parentID,
+            "--refresh",
+            "--confirm",
+            "--json",
+        ], vaultURL: vaultURL))
+        #expect(applied["applied"] as? Bool == true)
+
+        let inspected = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Parent Summary Smoke",
+            "--card", parentID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let dashboard = try #require(inspected["dashboard"] as? [String: Any])
+        #expect(dashboard["nextStep"] as? String == "Queue Open child.")
+        #expect((dashboard["currentState"] as? String)?.contains("2 children: 1 backlog, 1 done.") == true)
     }
 
     @Test("process CLI lists recent Kanban cards with agent context")
@@ -1736,6 +1926,52 @@ struct SecondBrainFoundationTests {
         #expect((passedQA["failedQASteps"] as? [String])?.isEmpty == true)
     }
 
+    @Test("process CLI exposes QA findings on card inspect")
+    func processCLIExposesQAFindingsOnCardInspect() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-qa-findings-inspect-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vaultURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "QA Findings Inspect Smoke"], vaultURL: vaultURL)
+        _ = try runCLI([
+            "board", "add-column", "QA Findings Inspect Smoke",
+            "--name", "Testing",
+        ], vaultURL: vaultURL)
+        let addOutput = try runCLI([
+            "board", "add-card", "QA Findings Inspect Smoke",
+            "--column", "Testing",
+            "--title", "Failed QA finding",
+            "--notes", """
+            ## QA Findings
+            Failed steps:
+            - Step 2 failed: Confirm failed steps show notes. Note: The note did not sync.
+
+            Overall QA notes:
+            The companion lost the summary after relaunch.
+            """,
+        ], vaultURL: vaultURL)
+        let cardID = String(try #require(addOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let inspected = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "QA Findings Inspect Smoke",
+            "--card", cardID,
+            "--json",
+        ], vaultURL: vaultURL))
+
+        #expect(inspected["hasFailedQA"] as? Bool == true)
+        #expect((inspected["failedQASteps"] as? [String]) == [
+            "Step 2 failed: Confirm failed steps show notes. Note: The note did not sync.",
+        ])
+        let dashboard = try #require(inspected["dashboard"] as? [String: Any])
+        #expect(dashboard["hasFailedQA"] as? Bool == true)
+        let findings = try #require(dashboard["qaFindingsEntries"] as? [[String: Any]])
+        #expect(findings.compactMap { $0["body"] as? String } == [
+            "Step 2 failed: Confirm failed steps show notes. Note: The note did not sync.",
+            "The companion lost the summary after relaunch.",
+        ])
+    }
+
     @Test("Kanban testing guide panel payload keeps QA steps portable")
     func kanbanTestingGuidePanelPayloadKeepsQAStepsPortable() {
         let dashboard = KanbanCardDashboardModel(
@@ -1805,6 +2041,25 @@ struct SecondBrainFoundationTests {
         #expect(restoredStore.failedCount(guideID: "2afee0:abc123", steps: [step]) == 1)
     }
 
+    @MainActor
+    @Test("Kanban testing guide persists overall QA notes per guide")
+    func kanbanTestingGuidePersistsOverallQANotesPerGuide() throws {
+        let suiteName = "KanbanTestingGuideOverallNotesTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = KanbanTestingGuideProgressStore(defaults: defaults)
+        store.setOverallNote("  Retest after relaunch; summary disappeared.  ", guideID: "2afee0:abc123")
+
+        let restoredStore = KanbanTestingGuideProgressStore(defaults: defaults)
+        #expect(restoredStore.overallNote(guideID: "2afee0:abc123") == "Retest after relaunch; summary disappeared.")
+
+        restoredStore.setOverallNote("   ", guideID: "2afee0:abc123")
+        #expect(restoredStore.overallNote(guideID: "2afee0:abc123") == nil)
+    }
+
     @Test("Kanban testing guide sync applies the clicked step result")
     func kanbanTestingGuideSyncAppliesClickedStepResult() {
         let firstStep = KanbanTestingGuideStep(id: "manual_qa_guidance-0", text: "Open the QA companion.")
@@ -1836,5 +2091,38 @@ struct SecondBrainFoundationTests {
             note: nil
         )
         #expect(KanbanTestingGuideCardResultSync.qaResultsBody(steps: steps, results: clearedResults) == "- Step 1 passed: Open the QA companion.")
+    }
+
+    @Test("Kanban testing guide sync builds structured QA findings")
+    func kanbanTestingGuideSyncBuildsStructuredQAFindings() {
+        let firstStep = KanbanTestingGuideStep(id: "manual_qa_guidance-0", text: "Open the QA companion.")
+        let secondStep = KanbanTestingGuideStep(id: "manual_qa_guidance-1", text: "Confirm failed steps show notes.")
+        let steps = [firstStep, secondStep]
+        let results = KanbanTestingGuideCardResultSync.resultsByApplying(
+            [
+                firstStep.id: KanbanTestingGuideStepResult(status: .passed, note: nil, updatedAt: Date()),
+            ],
+            step: secondStep,
+            status: .failed,
+            note: "The note did not sync."
+        )
+
+        #expect(KanbanTestingGuideCardResultSync.qaFindingsBody(
+            steps: steps,
+            results: results,
+            overallNote: "The companion lost the summary after relaunch."
+        ) == """
+        Failed steps:
+        - Step 2 failed: Confirm failed steps show notes. Note: The note did not sync.
+
+        Overall QA notes:
+        The companion lost the summary after relaunch.
+        """)
+
+        #expect(KanbanTestingGuideCardResultSync.qaFindingsBody(
+            steps: steps,
+            results: [firstStep.id: KanbanTestingGuideStepResult(status: .passed, note: nil, updatedAt: Date())],
+            overallNote: "   "
+        ) == "")
     }
 }

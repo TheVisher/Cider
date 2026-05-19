@@ -47,6 +47,60 @@ struct CiderCaptureServiceTests {
         return try body(db, bookmarks, notes, todos, files)
     }
 
+    @Test("capture source context records capture event and graph relation")
+    func captureSourceContextRecordsEventAndRelation() throws {
+        try withIsolatedVault { db, _, notes, _, _ in
+            let service = CiderCaptureService(notesStorage: notes, database: db)
+            let result = try service.addNoteCapture(
+                title: "Telegram idea",
+                content: "Ship provenance",
+                folderID: nil,
+                sourceContext: CaptureSourceContext(
+                    surface: "telegram",
+                    channel: "telegram",
+                    channelID: "chat-1",
+                    threadID: nil,
+                    messageID: "msg-9",
+                    senderID: "user-7",
+                    senderName: "Erik",
+                    originalText: "Ship provenance",
+                    attachments: [],
+                    metadata: ["bot": "hermes"]
+                )
+            )
+
+            let eventID = try #require(result.captureEventID)
+            #expect(result.captureEventOwner == SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString))
+            let dict = result.toDictionary()
+            #expect(dict["captureEventID"] as? String == eventID.uuidString)
+            let sourceContext = try #require(dict["sourceContext"] as? [String: Any])
+            #expect(sourceContext["surface"] as? String == "telegram")
+            #expect(sourceContext["messageID"] as? String == "msg-9")
+
+            let stmt = try db.prepare("""
+                SELECT surface, channel, channel_id, message_id, sender_id, sender_name, source_text, metadata
+                FROM capture_events
+                WHERE id = ?;
+                """)
+            stmt.bind(eventID.uuidString, at: 1)
+            #expect(try stmt.step())
+            #expect(stmt.string(at: 0) == "telegram")
+            #expect(stmt.string(at: 1) == "telegram")
+            #expect(stmt.string(at: 2) == "chat-1")
+            #expect(stmt.string(at: 3) == "msg-9")
+            #expect(stmt.string(at: 4) == "user-7")
+            #expect(stmt.string(at: 5) == "Erik")
+            #expect(stmt.string(at: 6) == "Ship provenance")
+
+            let relations = try SecondBrainStore(database: db).outgoingRelations(
+                for: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString)
+            )
+            #expect(relations.count == 1)
+            #expect(relations[0].relationType == "produced_item")
+            #expect(relations[0].targetOwner == SecondBrainOwnerRef(ownerType: "note", ownerID: result.item.id.uuidString))
+        }
+    }
+
     private func withIsolatedVault<T>(
         _ body: (CiderDatabase, VaultBookmarkService, NotesStorage, TodoCardStorage, VaultFileStorage) async throws -> T
     ) async throws -> T {

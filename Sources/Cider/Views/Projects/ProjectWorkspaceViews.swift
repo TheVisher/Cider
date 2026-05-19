@@ -11,6 +11,9 @@ struct ProjectWorkspaceOverviewView: View {
             VStack(alignment: .leading, spacing: Spacing.lg) {
                 header
                 totalsGrid
+                if !model.artifacts.isEmpty {
+                    artifactSection
+                }
                 if !model.projectRows.isEmpty {
                     projectSection
                 }
@@ -30,6 +33,39 @@ struct ProjectWorkspaceOverviewView: View {
             Text(model.workspace.subtitle)
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.secondary)
+        }
+    }
+
+    private var artifactSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            sectionTitle("Project Docs & Artifacts")
+            LazyVStack(spacing: Spacing.xs) {
+                ForEach(model.artifacts) { artifact in
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: symbol(forArtifactOwner: artifact.owner))
+                            .foregroundColor(CiderColors.tertiary)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(artifact.title)
+                                .font(CiderFont.bodySemibold)
+                                .foregroundColor(CiderColors.primary)
+                                .lineLimit(1)
+                            Text(artifact.evidence.isEmpty ? artifact.relationType : artifact.evidence)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.secondary)
+                                .lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
+                        Text(artifact.owner.canonicalRef)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                            .lineLimit(1)
+                    }
+                    .padding(Spacing.md)
+                    .sectionContainer(cornerRadius: Radius.sm)
+                    .help(artifact.safeCommand)
+                }
+            }
         }
     }
 
@@ -155,6 +191,19 @@ struct ProjectWorkspaceOverviewView: View {
         Text(title.uppercased())
             .font(CiderFont.captionSemibold)
             .foregroundColor(CiderColors.tertiary)
+    }
+
+    private func symbol(forArtifactOwner owner: SecondBrainOwnerRef) -> String {
+        switch owner.ownerType {
+        case "note":
+            return "note.text"
+        case "kanban_card":
+            return "rectangle.and.pencil.and.ellipsis"
+        case "vaultFile":
+            return "doc"
+        default:
+            return "link"
+        }
     }
 }
 

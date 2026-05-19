@@ -81,18 +81,20 @@ Legacy bookmark creation is a compatibility surface over the unified capture bac
 
 Legacy bookmark batch enrichment remains available as `bookmark enrich --all --confirm`, but agents should prefer `review enrich-batch --confirm` so enrichment work is review-backed and records batch history.
 
-Kanban card details can be discovered with `board recent <board> --limit <count> --json`, which lists newest card activity with board, column, parent, priority, timestamps, recent edit/move/completion activity kind, and compact current-state/next-step context. Testing gates can be triaged with `board testing-summary <board> --json`, which groups cards in Testing/Ready to Test columns into `needsErik` and `agentCanVerify` queues. Exact cards can be inspected through `board card inspect <board> --card <id> --json`, which returns parsed dashboard lanes, sections, card metadata, hierarchy, links, routing decisions, and agent actions. Card details can be edited through `board section update <board> --card <id> --section <name> --value <text>`, `board evidence add <board> --card <id> --text <text>`, and `board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text>`. These update the YAML card and refresh its SQLite projection.
+Kanban card details can be discovered with `board recent <board> --limit <count> --json`, which lists newest card activity with board, column, parent, priority, timestamps, recent edit/move/completion activity kind, and compact current-state/next-step context. `board workflow <board> --json` groups workflow lanes and exposes approval-aware `automationActions` with safe inspection, history, move, and review-routing commands; these actions are guidance, not an agent scheduler. Testing gates can be triaged with `board testing-summary <board> --json`, which groups cards in Testing/Ready to Test columns into `needsErik` and `agentCanVerify` queues. Parent plan status can be inspected with `board parent-summary <board> --card <id> --json`; `--refresh --dry-run` returns proposed Current State / Next Step text and stale-parent findings, while `--refresh --confirm` applies those sections explicitly. Exact cards can be inspected through `board card inspect <board> --card <id> --json`, which returns parsed dashboard lanes, sections, card metadata, hierarchy, roadmap `roadmapNextUp` sequence/groups, links, routing decisions, and agent actions. Card details can be edited through `board section update <board> --card <id> --section <name> --value <text>`, `board evidence add <board> --card <id> --text <text>`, and `board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff|commit> --text <text>`. `board add-card <board> --column <col> --title <title> --parent <card-id> --after <sibling-id>` inserts a roadmap child immediately after an existing sibling in the same column. These update the YAML card and refresh its SQLite projection.
 
 Normal agent workflow for a Cider card:
 
 1. If the active card ID is unknown, run `board recent <board> --limit 20 --json` before broad search or raw YAML inspection.
-2. `board card inspect <board> --card <id> --json` to understand state without scraping YAML.
-3. `board section update ... --section "Current State" --value "..." --json` before and after implementation when state changes.
-4. `board history add ... --type implementation --text "..." --source "..." --json` for concise implementation or fix summaries.
-5. `board history add ... --type failed-attempt --text "..." --source "..." --json` when an attempted path matters for future agents.
-6. `board evidence add ... --text "..." --source "..." --json` after verification. `board history add ... --type test` writes the same durable test-evidence lane.
-7. `board history add ... --type decision --text "..." --source "..." --json` when a durable product, architecture, storage, CLI, QA, or agent-behavior choice is made.
-8. `board history add ... --type handoff --text "..." --source "..." --json` before stopping, or use `board section update ... --section "Agent Handoff" --value "..." --json` for a full replacement handoff.
+2. Run `board workflow <board> --json` when choosing the next agent-safe action or review route for Queued/In Progress/Testing/Needs Fix cards.
+3. `board card inspect <board> --card <id> --json` to understand state without scraping YAML.
+4. `board section update ... --section "Current State" --value "..." --json` before and after implementation when state changes.
+5. `board history add ... --type implementation --text "..." --source "..." --json` for concise implementation or fix summaries.
+6. `board history add ... --type failed-attempt --text "..." --source "..." --json` when an attempted path matters for future agents.
+7. `board evidence add ... --text "..." --source "..." --json` after verification. `board history add ... --type test` writes the same durable test-evidence lane.
+8. `board history add ... --type decision --text "..." --source "..." --json` when a durable product, architecture, storage, CLI, QA, or agent-behavior choice is made.
+9. `board history add ... --type commit --text "<sha> <branch/files/tests summary>" --source "git" --json` when repo changes are available for regression traceability.
+10. `board history add ... --type handoff --text "..." --source "..." --json` before stopping, or use `board section update ... --section "Agent Handoff" --value "..." --json` for a full replacement handoff.
 
 Kanban projection lifecycle:
 

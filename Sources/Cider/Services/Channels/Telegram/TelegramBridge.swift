@@ -335,6 +335,30 @@ actor TelegramBridge: ChannelBridge {
             return
         }
 
+        do {
+            if let captureResult = try await MainActor.run(body: {
+                try ChatRuntimeCaptureAdapter.captureIfNeeded(fromTelegram: update)
+            }) {
+                switch captureResult.status {
+                case .captured:
+                    logger.info("Captured Telegram message through canonical chat intake")
+                    try await sendMessage("Saved to Cider.", to: update.chatID)
+                case .needsReview:
+                    logger.info("Telegram capture intent needs review: \(captureResult.reason, privacy: .public)")
+                    try await sendMessage("I couldn't save that directly: \(captureResult.reason)", to: update.chatID)
+                }
+                return
+            }
+        } catch {
+            logger.error("Failed Telegram canonical chat capture: \(error.localizedDescription, privacy: .public)")
+            do {
+                try await sendMessage("I couldn't save that directly: \(error.localizedDescription)", to: update.chatID)
+            } catch {
+                logger.error("Failed to send Telegram capture error: \(error.localizedDescription, privacy: .public)")
+            }
+            return
+        }
+
         let envelope = makeEnvelope(from: update)
         let responseTask = Task {
             try await AgentOrchestrator.shared.handleMessage(envelope)

@@ -790,6 +790,49 @@ final class CiderStorageAuditService {
                     "CREATE INDEX IF NOT EXISTS idx_agent_actions_tool ON agent_actions(tool_name, created_at);",
                 ]
             ),
+            "owner_relations": MissingTableRepair(
+                createTableSQL: CiderSchema.createOwnerRelations,
+                additionalSQL: [
+                    "CREATE INDEX IF NOT EXISTS idx_owner_relations_source ON owner_relations(source_owner_type, source_owner_id, relation_type, updated_at);",
+                    "CREATE INDEX IF NOT EXISTS idx_owner_relations_target ON owner_relations(target_owner_type, target_owner_id, relation_type, updated_at);",
+                    "CREATE INDEX IF NOT EXISTS idx_owner_relations_type ON owner_relations(relation_type, updated_at);",
+                ]
+            ),
+            "projects": MissingTableRepair(
+                createTableSQL: CiderSchema.createProjects,
+                additionalSQL: [
+                    "CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status, updated_at);",
+                ]
+            ),
+            "capture_events": MissingTableRepair(
+                createTableSQL: CiderSchema.createCaptureEvents,
+                additionalSQL: [
+                    "CREATE INDEX IF NOT EXISTS idx_capture_events_source ON capture_events(source_kind, created_at);",
+                    "CREATE INDEX IF NOT EXISTS idx_capture_events_channel ON capture_events(channel, channel_id, message_id);",
+                ]
+            ),
+            "capture_attachments": MissingTableRepair(
+                createTableSQL: CiderSchema.createCaptureAttachments,
+                additionalSQL: [
+                    "CREATE INDEX IF NOT EXISTS idx_capture_attachments_event ON capture_attachments(capture_event_id, attachment_index);",
+                    "CREATE INDEX IF NOT EXISTS idx_capture_attachments_source ON capture_attachments(source_attachment_id) WHERE source_attachment_id IS NOT NULL;",
+                ]
+            ),
+            "enrichment_outputs": MissingTableRepair(
+                createTableSQL: CiderSchema.createEnrichmentOutputs,
+                additionalSQL: [
+                    "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_owner ON enrichment_outputs(owner_type, owner_id, kind, review_state);",
+                    "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_kind ON enrichment_outputs(kind, normalized_value);",
+                ]
+            ),
+            "similarity_candidates": MissingTableRepair(
+                createTableSQL: CiderSchema.createSimilarityCandidates,
+                additionalSQL: [
+                    "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_source ON similarity_candidates(source_owner_type, source_owner_id, review_state, score);",
+                    "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_target ON similarity_candidates(target_owner_type, target_owner_id, review_state, score);",
+                    "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_review ON similarity_candidates(review_state, updated_at);",
+                ]
+            ),
         ]
     }
 
@@ -827,6 +870,36 @@ final class CiderStorageAuditService {
                 "agent_actions",
                 ["id", "owner_type", "owner_id", "tool_name", "status"],
                 "The agent_actions table stores auditable agent actions against Cider entities."
+            ),
+            (
+                "owner_relations",
+                ["id", "source_owner_type", "source_owner_id", "target_owner_type", "target_owner_id", "relation_type"],
+                "The owner_relations table stores typed graph edges between second-brain owners."
+            ),
+            (
+                "projects",
+                ["id", "title", "status", "metadata"],
+                "The projects table gives project workspaces stable backend identity and project context."
+            ),
+            (
+                "capture_events",
+                ["id", "source_kind", "source_url", "source_file", "source_text", "metadata"],
+                "The capture_events table preserves structured source provenance for captured items."
+            ),
+            (
+                "capture_attachments",
+                ["id", "capture_event_id", "attachment_index", "filename", "mime_type", "byte_size"],
+                "The capture_attachments table stores durable per-attachment provenance for capture events."
+            ),
+            (
+                "enrichment_outputs",
+                ["id", "owner_type", "owner_id", "kind", "value", "normalized_value", "review_state"],
+                "The enrichment_outputs table stores reviewable extracted entities, topics, dates, and links."
+            ),
+            (
+                "similarity_candidates",
+                ["id", "source_owner_type", "source_owner_id", "target_owner_type", "target_owner_id", "candidate_type", "signal", "score", "review_state"],
+                "The similarity_candidates table stores reviewable duplicate, similar, and grouping candidates before they become graph relations."
             ),
         ]
     }

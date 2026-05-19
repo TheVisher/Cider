@@ -1,6 +1,12 @@
 import Foundation
 import FoundationModels
 
+private func normalizedOptional(_ value: String?) -> String? {
+    guard let value else { return nil }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+}
+
 // MARK: - Count Items Tool
 
 /// Counts items across all Cider entity types.
@@ -816,28 +822,51 @@ struct CreateNoteTool: Tool {
     nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let title = arguments.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let content = arguments.content.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        var note = NotesStorage.shared.createNew(initialContent: content)
-        // Update the title (createNew uses a default title)
-        note.title = title.isEmpty ? "Untitled" : title
-        NotesStorage.shared.save(note: note)
-
-        // Move to folder if specified
-        if let folderName = arguments.folderName?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !folderName.isEmpty {
-            if let folder = VaultFolderService.shared.folders.first(where: {
+        let requestedFolderName = normalizedOptional(arguments.folderName)
+        let targetFolder = requestedFolderName.flatMap { folderName in
+            VaultFolderService.shared.folders.first(where: {
                 $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
-            }) {
-                if NotesStorage.shared.assignNote(note.id, toFolder: folder.id) {
-                    return "Created note \"\(note.title)\" in folder \"\(folder.name)\"."
-                }
-                return "Created note \"\(note.title)\" but failed to move it to folder \"\(folder.name)\"."
-            } else {
-                return "Created note \"\(note.title)\" (folder \"\(folderName)\" not found — saved to root)."
-            }
+            })
         }
 
-        return "Created note \"\(note.title)\"."
+        do {
+            let result = try CiderCaptureService().addNoteCapture(
+                title: title,
+                content: content,
+                folderID: targetFolder?.id
+            )
+            let finalTitle = result.item.title
+            if let folderName = requestedFolderName, targetFolder == nil {
+                return AgentCaptureToolResultFormatter.jsonString(
+                    message: "Created note \"\(finalTitle)\" (folder \"\(folderName)\" not found, saved for review).",
+                    captureResult: result,
+                    additionalPartialFailures: [
+                        AgentCaptureToolResultFormatter.partialFailure(
+                            status: "requested_folder_not_found",
+                            reason: "Folder \"\(folderName)\" was not found, so the note stayed in its capture destination."
+                        )
+                    ]
+                )
+            }
+            if let targetFolder {
+                if result.partialSuccess?.status == "assignment_failed" {
+                    return AgentCaptureToolResultFormatter.jsonString(
+                        message: "Created note \"\(finalTitle)\" but failed to move it to folder \"\(targetFolder.name)\".",
+                        captureResult: result
+                    )
+                }
+                return AgentCaptureToolResultFormatter.jsonString(
+                    message: "Created note \"\(finalTitle)\" in folder \"\(targetFolder.name)\".",
+                    captureResult: result
+                )
+            }
+            return AgentCaptureToolResultFormatter.jsonString(
+                message: "Created note \"\(finalTitle)\".",
+                captureResult: result
+            )
+        } catch {
+            return "Failed to create note: \(error.localizedDescription)"
+        }
     } } }
 }
 
@@ -928,38 +957,60 @@ struct AddBookmarkTool: Tool {
         let urlString = arguments.url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !urlString.isEmpty else { return "URL cannot be empty." }
 
-        let title = arguments.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = normalizedOptional(arguments.title)
+        let requestedFolderName = normalizedOptional(arguments.folderName)
         let targetFolder: VaultFolder?
-        if let folderName = arguments.folderName?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !folderName.isEmpty {
+        if let folderName = requestedFolderName {
             targetFolder = VaultFolderService.shared.folders.first {
                 $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
             }
         } else {
             targetFolder = nil
         }
-        guard let bookmark = try? CiderBookmarkCaptureAdapter()
-            .addURLBookmark(urlString: urlString, title: title, folderID: targetFolder?.id)
-            .bookmark else {
+        guard let adapterResult = try? CiderBookmarkCaptureAdapter()
+            .addURLBookmark(urlString: urlString, title: title, folderID: targetFolder?.id) else {
             return "Failed to create bookmark for \"\(urlString)\"."
         }
+        let bookmark = adapterResult.bookmark
 
         var actions: [String] = ["Saved bookmark \"\(bookmark.title)\""]
+        var partialFailures: [[String: Any]] = []
 
         // Move to folder
         if let targetFolder {
             actions.append("moved to folder \"\(targetFolder.name)\"")
+        } else if let requestedFolderName {
+            actions.append("folder \"\(requestedFolderName)\" not found")
+            partialFailures.append(
+                AgentCaptureToolResultFormatter.partialFailure(
+                    status: "requested_folder_not_found",
+                    reason: "Folder \"\(requestedFolderName)\" was not found, so the bookmark stayed in its capture destination."
+                )
+            )
         }
 
         // Apply tag
         if let tagName = arguments.tagName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !tagName.isEmpty {
             let label = CardLabelStorage.shared.findOrCreate(name: tagName)
-            _ = VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: label.id)
-            actions.append("tagged \"\(label.name)\"")
+            if VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: label.id) {
+                actions.append("tagged \"\(label.name)\"")
+            } else {
+                partialFailures.append(
+                    AgentCaptureToolResultFormatter.partialFailure(
+                        status: "tag_assignment_failed",
+                        reason: "Tag \"\(label.name)\" could not be assigned to the bookmark."
+                    )
+                )
+            }
         }
 
-        return actions.joined(separator: ", ") + "."
+        return AgentCaptureToolResultFormatter.jsonString(
+            message: actions.joined(separator: ", ") + ".",
+            captureResult: adapterResult.captureResult,
+            finalBookmark: bookmark,
+            additionalPartialFailures: partialFailures
+        )
     } } }
 }
 

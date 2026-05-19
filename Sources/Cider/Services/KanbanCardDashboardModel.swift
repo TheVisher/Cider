@@ -38,6 +38,8 @@ struct KanbanCardDashboardModel: Equatable {
     var decisions: [KanbanCardDashboardEntry]
     var historyEntries: [KanbanCardDashboardEntry]
     var evidenceEntries: [KanbanCardDashboardEntry]
+    var qaFindingsEntries: [KanbanCardDashboardEntry]
+    var hasFailedQA: Bool
     var relatedItems: [KanbanCardDashboardEntry]
     var agentContext: KanbanCardAgentContext
     var missingCoreSections: [String]
@@ -65,6 +67,8 @@ struct KanbanCardDashboardModel: Equatable {
         decisions = Self.entries(from: parsedSections, matching: Self.decisionKeys, fallbackTitle: "Decision")
         historyEntries = Self.evidenceEntries(from: parsedSections.filter { Self.historyKeys.contains($0.key) })
         evidenceEntries = Self.evidenceEntries(from: parsedSections)
+        qaFindingsEntries = Self.qaFindingsEntries(from: parsedSections)
+        hasFailedQA = Self.hasFailedQA(in: parsedSections, qaFindingsEntries: qaFindingsEntries)
         relatedItems = Self.entries(from: parsedSections, matching: Self.relatedKeys, fallbackTitle: "Related")
         openLoops = Self.openLoopEntries(from: parsedSections)
         agentContext = Self.agentContext(from: parsedSections)
@@ -137,6 +141,46 @@ struct KanbanCardDashboardModel: Equatable {
                     )
                 }
             }
+    }
+
+    private static func qaFindingsEntries(from sections: [KanbanCardSection]) -> [KanbanCardDashboardEntry] {
+        sections
+            .filter { qaFindingKeys.contains($0.key) }
+            .flatMap { section in
+                section.body.components(separatedBy: .newlines).enumerated().compactMap { index, rawLine -> KanbanCardDashboardEntry? in
+                    var line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !line.isEmpty else { return nil }
+                    let normalized = line
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "-•* "))
+                        .lowercased()
+                    guard normalized != "failed steps:" && normalized != "overall qa notes:" else {
+                        return nil
+                    }
+                    if line.hasPrefix("- ") || line.hasPrefix("* ") {
+                        line = String(line.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    return KanbanCardDashboardEntry(
+                        id: "\(section.key)-\(index)",
+                        title: section.title,
+                        body: line,
+                        dateLabel: nil,
+                        source: nil
+                    )
+                }
+            }
+    }
+
+    private static func hasFailedQA(
+        in sections: [KanbanCardSection],
+        qaFindingsEntries: [KanbanCardDashboardEntry]
+    ) -> Bool {
+        if qaFindingsEntries.contains(where: { isFailedQAResultLine($0.body) }) {
+            return true
+        }
+        return sections
+            .filter { qaResultKeys.contains($0.key) }
+            .flatMap { actionLines(from: $0.body) }
+            .contains(where: isFailedQAResultLine)
     }
 
     private static func openLoopEntries(from sections: [KanbanCardSection]) -> [KanbanCardDashboardEntry] {
@@ -241,12 +285,22 @@ struct KanbanCardDashboardModel: Equatable {
         return (dateLabel, body.trimmingCharacters(in: .whitespacesAndNewlines), source?.nilIfEmpty)
     }
 
+    private static func isFailedQAResultLine(_ line: String) -> Bool {
+        let normalized = line
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-•* "))
+            .lowercased()
+        if normalized.range(of: #"^step\s+\d+\s+failed:"#, options: .regularExpression) != nil {
+            return true
+        }
+        return normalized.hasPrefix("failed:") || normalized.hasPrefix("failed ")
+    }
+
     private static func agentContext(from sections: [KanbanCardSection]) -> KanbanCardAgentContext {
         let notes = firstBody(in: sections, matching: agentContextKeys)
-            ?? "Future agents should update this card through Cider CLI commands. Put implementation summaries in Implementation History, failed attempts in Failed Attempts, verification in Test Evidence, durable decisions in Decisions, and current status in Current State."
+            ?? "Future agents should update this card through Cider CLI commands. Put implementation summaries in Implementation History, failed attempts in Failed Attempts, verification in Test Evidence, commit traceability in Commits, durable decisions in Decisions, and current status in Current State."
         return KanbanCardAgentContext(
             notes: notes,
-            updateTargets: ["Current State", "Implementation History", "Failed Attempts", "Decisions", "Test Evidence", "Agent Handoff"]
+            updateTargets: ["Current State", "Implementation History", "Failed Attempts", "Commits", "Decisions", "Test Evidence", "QA Findings", "Agent Handoff"]
         )
     }
 
@@ -299,14 +353,26 @@ struct KanbanCardDashboardModel: Equatable {
         "implementation_history",
         "verification",
         "qa_results",
+        "qa_findings",
         "testing_results",
         "manual_qa_results",
         "latest_verification_snapshot",
         "failed_attempts",
+        "commits",
+    ]
+    private static let qaFindingKeys: Set<String> = [
+        "qa_findings",
+    ]
+    private static let qaResultKeys: Set<String> = [
+        "qa_results",
+        "qa_findings",
+        "testing_results",
+        "manual_qa_results",
     ]
     private static let historyKeys: Set<String> = [
         "implementation_history",
         "failed_attempts",
+        "commits",
     ]
     private static let openLoopKeys: Set<String> = [
         "open_loop",

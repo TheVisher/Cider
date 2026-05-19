@@ -1815,7 +1815,7 @@ final class NotesStorage: ObservableObject {
 
     private func noteDedupKey(_ note: Note) -> String {
         let relativePath = note.relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        let content = note.resolvedContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let content = note.content.trimmingCharacters(in: .whitespacesAndNewlines)
         let nameKey = VaultDuplicateAuditor.normalizedDuplicateName(note.title.isEmpty ? note.relativePath : note.title)
         if !nameKey.isEmpty {
             return "exact:\(nameKey)|\(content)"

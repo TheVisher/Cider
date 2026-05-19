@@ -94,6 +94,27 @@ struct CiderCLIAgentSafetyTests {
         #expect(!output.contains("cider-cli folder kanban"))
     }
 
+    @Test("item graph health is a read-only JSON readiness report")
+    func itemGraphHealthIsReadOnlyJSONReadinessReport() throws {
+        let result = try runCLI(args: ["item", "graph-health", "--json"])
+
+        let dict = try parseJSONObject(result.stdout)
+        #expect(dict["command"] as? String == "item.graph-health")
+        #expect(dict["readOnly"] as? Bool == true)
+        #expect(dict["ok"] as? Bool == true)
+        let components = try #require(dict["components"] as? [[String: Any]])
+        #expect(components.contains { component in
+            component["id"] as? String == "owner_relations"
+                && component["state"] as? String == "implemented_empty"
+        })
+        #expect(components.contains { component in
+            component["id"] as? String == "content_chunks"
+                && component["state"] as? String == "implemented_empty"
+        })
+        let commands = try #require(dict["suggestedCommands"] as? [String])
+        #expect(commands.contains("cider-cli item rebuild-chunks all --json"))
+    }
+
     @Test("read-only folder filters do not adopt untracked disk folders")
     func readOnlyFolderFiltersDoNotAdoptUntrackedDiskFolders() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -170,6 +191,26 @@ struct CiderCLIAgentSafetyTests {
         #expect(unfile["agentActionID"] as? String != nil)
         let unfiledAfter = try #require(unfile["after"] as? [String: Any])
         #expect(unfiledAfter["folderID"] == nil)
+    }
+
+    @Test("project context seeds known Cider workspace in a fresh vault")
+    func projectContextSeedsKnownCiderWorkspaceInFreshVault() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-project-context-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let boardCreate = try runCLI(args: ["board", "create", "Cider", "--json"], vault: vault)
+        #expect(boardCreate.status == 0)
+
+        let result = try runCLI(args: ["item", "project-context", "cider", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(payload["ok"] as? Bool == true)
+        let project = try #require(payload["project"] as? [String: Any])
+        #expect(project["id"] as? String == "cider")
+        let boardOwners = try #require(payload["boardOwners"] as? [[String: Any]])
+        #expect(boardOwners.contains { $0["ownerType"] as? String == "kanban_board" })
     }
 
     @Test("reminder mutation ID resolution rejects ambiguous prefixes")

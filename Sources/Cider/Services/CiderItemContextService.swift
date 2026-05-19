@@ -29,9 +29,12 @@ struct CiderItemContextBundle: Equatable {
     var sections: [SecondBrainSection]
     var chunks: [CiderItemChunk]
     var related: [ItemLinkSummary]
+    var ownerRelations: [SecondBrainRelation]
+    var backlinks: [SecondBrainRelation]
     var spaceMemberships: [CiderSpaceMembership]
     var routingDecisions: [SecondBrainRoutingDecision]
     var agentActions: [SecondBrainAgentAction]
+    var enrichmentOutputs: [SecondBrainEnrichmentOutput]
 }
 
 struct CiderItemAgentContextLimits: Equatable {
@@ -79,6 +82,8 @@ struct CiderItemAgentContextPacket: Equatable {
     var spaceMemberships: [CiderSpaceMembership]
     var contentBlocks: [CiderItemAgentContextBlock]
     var related: [ItemLinkSummary]
+    var ownerRelations: [SecondBrainRelation]
+    var backlinks: [SecondBrainRelation]
     var review: CiderItemAgentReviewState?
     var surfacing: CiderSurfacingExplanation
     var recentHistory: [CiderItemAgentContextHistoryEntry]
@@ -152,9 +157,12 @@ final class CiderItemContextService {
             sections: try secondBrainStore.sections(for: owner),
             chunks: try chunks(for: owner),
             related: linkService.summaries(for: try linkService.relatedRefs(for: ref)),
+            ownerRelations: try secondBrainStore.outgoingRelations(for: owner),
+            backlinks: try secondBrainStore.backlinks(for: owner),
             spaceMemberships: try spaceMembershipStore.memberships(for: ref),
             routingDecisions: try secondBrainStore.routingDecisions(for: owner),
-            agentActions: try secondBrainStore.agentActions(for: owner)
+            agentActions: try secondBrainStore.agentActions(for: owner),
+            enrichmentOutputs: try SecondBrainEnrichmentOutputService(database: database).outputs(for: owner)
         )
     }
 
@@ -172,6 +180,8 @@ final class CiderItemContextService {
             spaceMemberships: bundle.spaceMemberships,
             contentBlocks: contentBlocks(for: bundle, limits: normalizedLimits),
             related: Array(bundle.related.prefix(normalizedLimits.maxRelated)),
+            ownerRelations: Array(bundle.ownerRelations.prefix(normalizedLimits.maxRelated)),
+            backlinks: Array(bundle.backlinks.prefix(normalizedLimits.maxRelated)),
             review: reviewState(for: bundle),
             surfacing: surfacingExplanation(for: bundle),
             recentHistory: recentHistory(for: bundle, limit: normalizedLimits.maxHistory),
@@ -341,8 +351,17 @@ final class CiderItemContextService {
         values += bundle.spaceMemberships.map { "space:\($0.spaceName)" }
         values += bundle.routingDecisions.map { "routing:\($0.source)" }
         values += bundle.agentActions.map { "agent:\($0.source)" }
+        if !bundle.enrichmentOutputs.isEmpty {
+            values.append("enrichment_outputs:\(bundle.enrichmentOutputs.count)")
+        }
         if !bundle.related.isEmpty {
             values.append("related:\(bundle.related.count)")
+        }
+        if !bundle.ownerRelations.isEmpty {
+            values.append("owner_relations:\(bundle.ownerRelations.count)")
+        }
+        if !bundle.backlinks.isEmpty {
+            values.append("backlinks:\(bundle.backlinks.count)")
         }
         return orderedUnique(values)
     }
@@ -476,6 +495,8 @@ final class CiderItemContextService {
             "cider-cli item get \(type) \(id) --json",
             "cider-cli item context \(type) \(id) --json",
             "cider-cli item related \(type) \(id) --json",
+            "cider-cli item relations \(type) \(id) --json",
+            "cider-cli item backlinks \(type) \(id) --json",
             "cider-cli item search \"\(escapedCommandArgument(bundle.item.title))\" --limit 5 --json",
         ]
         if !bundle.routingDecisions.isEmpty {
