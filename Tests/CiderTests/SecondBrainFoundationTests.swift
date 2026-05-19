@@ -914,14 +914,15 @@ struct SecondBrainFoundationTests {
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: vault) }
 
-        let output = try runCLI([
+        let result = try runCLIResult([
             "item", "route", "bookmark", "missing-bookmark",
             "--target-type", "space",
             "--target-id", "projects",
             "--reason", "Should not write for a phantom owner.",
             "--json",
         ], vaultURL: vault)
-        let payload = try jsonObject(from: output)
+        let payload = try jsonObject(from: result.stdout)
+        #expect(result.status != 0)
         #expect(payload["ok"] as? Bool == false)
         #expect((payload["error"] as? String)?.contains("No bookmark found") == true)
 

@@ -877,8 +877,8 @@ struct BookmarkSQLiteTests {
         #expect(service2.bookmarks.first?.id == existingID)
     }
 
-    @Test("Orphan adoption skips .webloc whose URL canonicalizes to an existing bookmark")
-    func orphanAdoptionSkipsCanonicalDuplicateURL() throws {
+    @Test("Orphan adoption preserves .webloc whose URL canonicalizes to an existing bookmark")
+    func orphanAdoptionPreservesCanonicalDuplicateURLArtifact() throws {
         let (db, url) = try makeTestDB()
         let fm = FileManager.default
         let vault = fm.temporaryDirectory.appendingPathComponent("cider-orphan-duplicate-bookmark-\(UUID().uuidString)", isDirectory: true)
@@ -920,17 +920,23 @@ struct BookmarkSQLiteTests {
         service.loadBookmarksFromDatabase(db)
         service.adoptOrphanedVaultFiles()
 
-        #expect(service.bookmarks.count == 1)
-        #expect(service.bookmarks.first?.id == existing.id)
-        #expect(service.bookmarks.first?.relativePath == "Inbox/Bookmarks/Stonewards on Steam.webloc")
+        #expect(service.bookmarks.count == 2)
+        #expect(service.bookmarks.contains { bookmark in
+            bookmark.id == existing.id &&
+                bookmark.relativePath == "Inbox/Bookmarks/Stonewards on Steam.webloc"
+        })
+        #expect(service.bookmarks.contains { bookmark in
+            bookmark.id != existing.id &&
+                bookmark.relativePath == "Inbox/Bookmarks/Store.Steampowered.Com (2).webloc"
+        })
 
         let itemStmt = try db.prepare("SELECT COUNT(*) FROM items WHERE type = 'bookmark';")
         try itemStmt.step()
-        #expect(itemStmt.int(at: 0) == 1)
+        #expect(itemStmt.int(at: 0) == 2)
 
         let bookmarkStmt = try db.prepare("SELECT COUNT(*) FROM bookmarks;")
         try bookmarkStmt.step()
-        #expect(bookmarkStmt.int(at: 0) == 1)
+        #expect(bookmarkStmt.int(at: 0) == 2)
     }
 
     @Test("SQLite load collapses canonical duplicate URL rows into one displayed bookmark")
