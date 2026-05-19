@@ -82,6 +82,36 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("Unknown command") == true)
     }
 
+    @Test("remaining command families fail closed with json errors")
+    func remainingCommandFamiliesFailClosedWithJSONErrors() throws {
+        let cases: [(args: [String], expectedError: String)] = [
+            (["storage", "definitely-not-storage", "--json"], "Unknown storage command"),
+            (["recall", "definitely-not-recall", "--json"], "Unknown recall command"),
+            (["dashboard", "definitely-not-dashboard", "--json"], "Unknown dashboard command"),
+            (["review", "definitely-not-review", "--json"], "Unknown review command"),
+            (["space", "captures", "--json"], "Usage: cider-cli space captures"),
+            (["routing", "explain", "--json"], "Usage: cider-cli routing explain"),
+            (["bookmark", "tag", "--json"], "Usage: cider-cli bookmark tag"),
+            (["note", "tag", "--json"], "Usage: cider-cli note tag"),
+            (["todo", "checklist", "add", "--json"], "Usage: cider-cli todo checklist add"),
+            (["event", "definitely-not-event", "--json"], "Unknown event command"),
+            (["contact", "definitely-not-contact", "--json"], "Unknown contact command"),
+            (["file", "definitely-not-file", "--json"], "Unknown file command"),
+            (["folder", "definitely-not-folder", "--json"], "Unknown folder command"),
+            (["board", "definitely-not-board", "--json"], "Unknown board command"),
+        ]
+
+        for testCase in cases {
+            let result = try runCLI(args: testCase.args)
+            let dict = try parseJSONObject(result.stdout)
+            #expect(result.status != 0, "Expected \(testCase.args.joined(separator: " ")) to exit non-zero")
+            #expect(dict["ok"] as? Bool == false, "Expected \(testCase.args.joined(separator: " ")) to report ok:false")
+            #expect((dict["error"] as? String)?.contains(testCase.expectedError) == true)
+            #expect(!result.stdout.hasPrefix("Error:"), "Expected JSON-only stdout for \(testCase.args.joined(separator: " "))")
+            #expect(!result.stdout.hasPrefix("Unknown"), "Expected JSON-only stdout for \(testCase.args.joined(separator: " "))")
+        }
+    }
+
     @Test("review correct json rejects missing target")
     func reviewCorrectJSONRejectsMissingTarget() throws {
         let result = try runCLI(args: ["review", "correct", "missing-item", "--json"])

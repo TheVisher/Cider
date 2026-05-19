@@ -442,8 +442,7 @@ struct CiderCLI {
             }
 
         default:
-            print("Unknown storage command: \(subcommand ?? "nil")")
-            print("Commands: audit, doctor-plan, doctor-apply, repair-schema")
+            printCLIError("Unknown storage command: \(subcommand ?? "nil"). Commands: audit, doctor-plan, doctor-apply, repair-schema")
         }
     }
 
@@ -503,8 +502,7 @@ struct CiderCLI {
             }
 
         default:
-            print("Unknown recall command: \(subcommand ?? "nil")")
-            print("Commands: scorecard, probes")
+            printCLIError("Unknown recall command: \(subcommand ?? "nil"). Commands: scorecard, probes")
         }
     }
 
@@ -681,8 +679,7 @@ struct CiderCLI {
         case "card", "cards":
             handleDashboardCard(subcommand: args.first, args: Array(args.dropFirst()))
         default:
-            print("Unknown dashboard command: \(subcommand ?? "nil")")
-            print("Commands: topic list, topic upsert, topic move, topic archive, card list, card upsert, card move, card seen, card dismiss, card archive, card delete, card feedback")
+            printCLIError("Unknown dashboard command: \(subcommand ?? "nil"). Commands: topic list, topic upsert, topic move, topic archive, card list, card upsert, card move, card seen, card dismiss, card archive, card delete, card feedback")
         }
     }
 
@@ -1192,8 +1189,7 @@ struct CiderCLI {
             """)
 
         default:
-            print("Unknown review command: \(subcommand ?? "nil")")
-            print("Commands: list, summary, enrichment-diagnosis, enrichment-reconcile-plan, enrichment-reconcile-samples, enrichment-reconcile-apply, drilldown, approve, correct, defer, enrich, enrich-batch, jobs")
+            printCLIError("Unknown review command: \(subcommand ?? "nil"). Commands: list, summary, enrichment-diagnosis, enrichment-reconcile-plan, enrichment-reconcile-samples, enrichment-reconcile-apply, drilldown, approve, correct, defer, enrich, enrich-batch, jobs")
         }
     }
 
@@ -1202,8 +1198,8 @@ struct CiderCLI {
 
         switch subcommand {
         case "captures", "capture-dashboard":
-            guard let spaceRef = args.first else {
-                print("Error: Usage: cider-cli space captures <space-id|name> [--limit <n>] [--json]")
+            guard let spaceRef = firstPositionalArgument(from: args, valueFlags: ["--limit"]) else {
+                printCLIError("Usage: cider-cli space captures <space-id|name> [--limit <n>] [--json]")
                 return
             }
             guard let space = resolveSpace(spaceRef, storage: storage) else { return }
@@ -1216,12 +1212,12 @@ struct CiderCLI {
                 )
                 printSpaceCaptureDashboard(dashboard)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printCLIError(error.localizedDescription)
             }
 
         case "items":
-            guard let spaceRef = args.first else {
-                print("Error: Usage: cider-cli space items <space-id|name> [--json]")
+            guard let spaceRef = firstPositionalArgument(from: args) else {
+                printCLIError("Usage: cider-cli space items <space-id|name> [--json]")
                 return
             }
             guard let space = resolveSpace(spaceRef, storage: storage) else { return }
@@ -1295,8 +1291,7 @@ struct CiderCLI {
             """)
 
         default:
-            print("Unknown space command: \(subcommand ?? "nil")")
-            print("Commands: list, explain, captures")
+            printCLIError("Unknown space command: \(subcommand ?? "nil"). Commands: list, explain, captures")
         }
     }
 
@@ -1305,15 +1300,15 @@ struct CiderCLI {
 
         switch subcommand {
         case "explain":
-            guard let itemRef = args.first else {
-                print("Error: Usage: cider-cli routing explain <item-id> [--json]")
+            guard let itemRef = firstPositionalArgument(from: args) else {
+                printCLIError("Usage: cider-cli routing explain <item-id> [--json]")
                 return
             }
             do {
                 let explanation = try service.explain(itemRef: itemRef)
                 printRoutingExplanation(explanation)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printCLIError(error.localizedDescription)
             }
 
         case "approve":
@@ -1400,8 +1395,7 @@ struct CiderCLI {
             """)
 
         default:
-            print("Unknown routing command: \(subcommand ?? "nil")")
-            print("Commands: explain, approve, correct, rerun")
+            printCLIError("Unknown routing command: \(subcommand ?? "nil"). Commands: explain, approve, correct, rerun")
         }
     }
 
@@ -1593,7 +1587,7 @@ struct CiderCLI {
 
         case "tag":
             guard let idPrefix = args.first, args.count > 1 else {
-                print("Error: Usage: cider-cli bookmark tag <id> <label-name>")
+                printCLIError("Usage: cider-cli bookmark tag <id> <label-name>")
                 return
             }
             let labelName = args.dropFirst().joined(separator: " ")
@@ -1882,8 +1876,7 @@ struct CiderCLI {
             }
 
         default:
-            print("Unknown bookmark command: \(subcommand ?? "nil")")
-            print("Commands: list, add, get, search, move, tag, untag, delete, enrich, update, date-suggestions, similar, carousel-add, carousel-remove, carousel-reorder")
+            printCLIError("Unknown bookmark command: \(subcommand ?? "nil"). Commands: list, add, get, search, move, tag, untag, delete, enrich, update, date-suggestions, similar, carousel-add, carousel-remove, carousel-reorder")
         }
     }
 
@@ -2088,14 +2081,14 @@ struct CiderCLI {
             }
 
         case "tag":
-            guard let idPrefix = args.first else {
-                print("Error: Usage: cider-cli note tag <id> --tag <name> [--tag <name> ...]")
+            guard let idPrefix = firstPositionalArgument(from: args, valueFlags: ["--tag"]) else {
+                printCLIError("Usage: cider-cli note tag <id> --tag <name> [--tag <name> ...]")
                 return
             }
             guard let note = findNote(idPrefix, in: storage) else { return }
             let tagNames = parseFlagAll("--tag", from: args)
             if tagNames.isEmpty {
-                print("Error: At least one --tag <name> is required")
+                printCLIError("At least one --tag <name> is required")
                 return
             }
             var added = 0
@@ -2199,8 +2192,7 @@ struct CiderCLI {
             print("Attached '\(filename)' to '\(note.title)' → \(savedURL.path)")
 
         default:
-            print("Unknown note command: \(subcommand ?? "nil")")
-            print("Commands: list, create, get, pin, move, delete, update, tag, untag, snapshots, restore-snapshot, attach-image")
+            printCLIError("Unknown note command: \(subcommand ?? "nil"). Commands: list, create, get, pin, move, delete, update, tag, untag, snapshots, restore-snapshot, attach-image")
         }
     }
 
@@ -2423,8 +2415,7 @@ struct CiderCLI {
             await handleTodoChecklist(subcommand: checklistCmd, args: checklistArgs, storage: storage)
 
         default:
-            print("Unknown todo command: \(subcommand ?? "nil")")
-            print("Commands: list, get, create, complete, delete, update, export, checklist")
+            printCLIError("Unknown todo command: \(subcommand ?? "nil"). Commands: list, get, create, complete, delete, update, export, checklist")
         }
     }
 
@@ -2474,8 +2465,8 @@ struct CiderCLI {
             }
 
         case "add":
-            guard let idPrefix = args.first else {
-                print("Error: Usage: cider-cli todo checklist add <todo-id> --title <title>")
+            guard let idPrefix = firstPositionalArgument(from: args, valueFlags: ["--title"]) else {
+                printCLIError("Usage: cider-cli todo checklist add <todo-id> --title <title>")
                 return
             }
             guard var todo = storage.todoCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
@@ -2563,8 +2554,7 @@ struct CiderCLI {
             }
 
         default:
-            print("Unknown todo checklist command: \(subcommand ?? "nil")")
-            print("Commands: list, add, toggle, remove")
+            printCLIError("Unknown todo checklist command: \(subcommand ?? "nil"). Commands: list, add, toggle, remove")
         }
     }
 
@@ -2800,8 +2790,7 @@ struct CiderCLI {
             }
 
         default:
-            print("Unknown event command: \(subcommand ?? "nil")")
-            print("Commands: list, create, delete, update, export")
+            printCLIError("Unknown event command: \(subcommand ?? "nil"). Commands: list, create, delete, update, export")
         }
     }
 
@@ -3008,8 +2997,7 @@ struct CiderCLI {
             print("Removed avatar for '\(contact.displayName)'")
 
         default:
-            print("Unknown contact command: \(subcommand ?? "nil")")
-            print(ContactCLIHelpText.contact)
+            printCLIError("Unknown contact command: \(subcommand ?? "nil"). \(ContactCLIHelpText.contact)")
         }
     }
 
@@ -4494,8 +4482,7 @@ struct CiderCLI {
             }
 
         default:
-            print("Unknown file command: \(subcommand ?? "nil")")
-            print("Commands: import, add, list, get, move, delete, update, tag, untag, enrich")
+            printCLIError("Unknown file command: \(subcommand ?? "nil"). Commands: import, add, list, get, move, delete, update, tag, untag, enrich")
         }
     }
 
@@ -5072,8 +5059,7 @@ struct CiderCLI {
             )
 
         default:
-            print("Unknown folder command: \(subcommand ?? "nil")")
-            print("Commands: list, create, rename, move, delete, restore, doctor, get, children, ancestors, set-icon, remove-icon, set-cover, remove-cover")
+            printCLIError("Unknown folder command: \(subcommand ?? "nil"). Commands: list, create, rename, move, delete, restore, doctor, get, children, ancestors, set-icon, remove-icon, set-cover, remove-cover")
         }
     }
 
@@ -5722,8 +5708,7 @@ struct CiderCLI {
             print("Deleted column: \(col.name)")
 
         default:
-            print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, tags, workflow, recent, testing-summary, parent-summary, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
+            printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, show, tags, workflow, recent, testing-summary, parent-summary, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -8006,7 +7991,7 @@ struct CiderCLI {
         }
         if idMatches.count == 1 { return idMatches[0] }
         if idMatches.count > 1 {
-            print("Error: Space ID prefix '\(ref)' is ambiguous.")
+            printCLIError("Space ID prefix '\(ref)' is ambiguous.")
             return nil
         }
 
@@ -8015,11 +8000,11 @@ struct CiderCLI {
         }
         if nameMatches.count == 1 { return nameMatches[0] }
         if nameMatches.count > 1 {
-            print("Error: Space name '\(ref)' is ambiguous. Use an ID prefix.")
+            printCLIError("Space name '\(ref)' is ambiguous. Use an ID prefix.")
             return nil
         }
 
-        print("Error: No Space found for '\(ref)'")
+        printCLIError("No Space found for '\(ref)'")
         return nil
     }
 
@@ -10297,7 +10282,7 @@ struct CiderCLI {
 
     static func findNote(_ idPrefix: String, in storage: NotesStorage) -> Note? {
         let note = storage.notes.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) })
-        if note == nil { print("Error: No note found with ID prefix: \(idPrefix)") }
+        if note == nil { printCLIError("No note found with ID prefix: \(idPrefix)") }
         return note
     }
 
