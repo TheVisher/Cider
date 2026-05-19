@@ -86,6 +86,8 @@ Graph-heavy commands should expose counts and safe follow-up commands. Prefer bo
 
 The second-brain command surface should support the product loop: capture -> enrich -> route -> review -> resurface/act. JSON output should make uncertainty, provenance, and next safe action visible.
 
+Review queue JSON includes `reasonCodes` for trust-boundary states such as `routing_low_confidence`, `enrichment_failed`, `inbox_unrouted`, and duplicate-specific codes so agents do not need to parse prose reasons.
+
 Legacy bookmark creation is a compatibility surface over the unified capture backend. `bookmark add --json` preserves bookmark fields and includes `command: bookmark.add`, `backendCommand: capture.add`, and a nested `capture` result so agents can see the capture/routing/review contract without switching commands mid-workflow.
 
 Structured create commands may use domain-specific provenance instead of creating a generic capture event. `event create --json` and `contact create --json` should return `command: event.create` / `command: contact.create` and record routing provenance with sources such as `event.create`, `contact.create`, and `contact.birthday_date_card` for generated birthday date cards.

@@ -50,7 +50,7 @@ Key code: `Sources/Cider/Services/SearchService.swift`, `Sources/Cider/Services/
 
 ## Routing And Review
 
-Routing records where Cider thinks an item belongs, why, with what confidence, and whether it needs review. Review Queue is the trust boundary for uncertain routing, enrichment gaps, duplicate candidates, stale Inbox items, reminders, and agent suggestions. Approve/correct/defer actions should preserve provenance and improve future routing behavior.
+Routing records where Cider thinks an item belongs, why, with what confidence, and whether it needs review. Review Queue is the trust boundary for uncertain routing, enrichment gaps, duplicate candidates, stale Inbox items, reminders, and agent suggestions. Review Queue JSON exposes structured `reasonCodes` alongside prose reasons so agents can distinguish low-confidence routing, enrichment failures, stale Inbox backlog, and duplicate risk without parsing text. Approve/correct/defer actions should preserve provenance and improve future routing behavior.
 
 Key code: `Sources/Cider/Services/CiderRoutingDecisionService.swift`, `Sources/Cider/Services/CiderReviewQueueService.swift`, `Sources/Cider/Services/CiderSpaceCaptureDashboardService.swift`.
 

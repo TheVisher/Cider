@@ -376,6 +376,7 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var title: String
     var relativePath: String?
     var reason: String
+    var reasonCodes: [String] = []
     var suggestedAction: String
     var reviewState: String
     var confidence: Double?
@@ -394,6 +395,7 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
             "itemType": itemType,
             "title": title,
             "reason": reason,
+            "reasonCodes": reasonCodes,
             "suggestedAction": suggestedAction,
             "reviewState": reviewState,
             "createdAt": formatter.string(from: createdAt),
@@ -1514,6 +1516,7 @@ final class CiderReviewQueueService {
             title: item.title,
             relativePath: item.relativePath,
             reason: decision.reason,
+            reasonCodes: routingReasonCodes(for: decision),
             suggestedAction: decision.reviewState == "deferred" ? "Revisit route" : "Approve or correct route",
             reviewState: decision.reviewState,
             confidence: decision.confidence,
@@ -1534,6 +1537,16 @@ final class CiderReviewQueueService {
         return actions
     }
 
+    private func routingReasonCodes(for decision: CiderRoutingDecision) -> [String] {
+        if decision.reviewState == "deferred" {
+            return ["routing_deferred"]
+        }
+        if decision.confidence < 0.5 {
+            return ["routing_low_confidence"]
+        }
+        return ["routing_requires_review"]
+    }
+
     private func enrichmentReviewItem(
         item: CiderRoutingItemSummary,
         details: BookmarkReviewDetails,
@@ -1551,6 +1564,7 @@ final class CiderReviewQueueService {
             title: item.title,
             relativePath: item.relativePath,
             reason: failed ? "Bookmark enrichment failed." : "Bookmark enrichment is incomplete.",
+            reasonCodes: enrichmentReasonCodes(status: status, lastEnrichedAt: details.lastEnrichedAt),
             suggestedAction: failed ? "Enrichment failed" : "Needs enrichment",
             reviewState: failed ? "needs_review" : "pending",
             confidence: nil,
@@ -1559,6 +1573,19 @@ final class CiderReviewQueueService {
             createdAt: now,
             safeActions: ["enrich", "correct", "defer"]
         )
+    }
+
+    private func enrichmentReasonCodes(status: String?, lastEnrichedAt: Date?) -> [String] {
+        if status == "failed" || status == "error" {
+            return ["enrichment_failed"]
+        }
+        if status == "complete", lastEnrichedAt == nil {
+            return ["enrichment_complete_missing_timestamp"]
+        }
+        if lastEnrichedAt != nil {
+            return ["enrichment_attempted_incomplete"]
+        }
+        return ["enrichment_missing_metadata"]
     }
 
     private func enrichmentDiagnosisReason(
@@ -1710,6 +1737,7 @@ final class CiderReviewQueueService {
             title: item.title,
             relativePath: item.relativePath,
             reason: "Item is still in Inbox without a routing decision.",
+            reasonCodes: ["inbox_unrouted"],
             suggestedAction: "Route to folder",
             reviewState: "needs_review",
             confidence: nil,
@@ -1735,6 +1763,7 @@ final class CiderReviewQueueService {
                 title: finding.summary,
                 relativePath: firstItem.path,
                 reason: finding.detail,
+                reasonCodes: ["duplicate_\(reasonCodeSuffix(for: finding.kind.rawValue))"],
                 suggestedAction: "Review duplicate candidates",
                 reviewState: "needs_review",
                 confidence: duplicateConfidenceScore(finding.confidence),
@@ -1744,6 +1773,24 @@ final class CiderReviewQueueService {
                 safeActions: ["inspect_duplicates", "manual_review"]
             )
         }
+    }
+
+    private func reasonCodeSuffix(for rawValue: String) -> String {
+        var result = ""
+        var previousWasLowercaseOrDigit = false
+        for character in rawValue {
+            if character.isUppercase {
+                if previousWasLowercaseOrDigit {
+                    result.append("_")
+                }
+                result.append(character.lowercased())
+                previousWasLowercaseOrDigit = false
+            } else {
+                result.append(character)
+                previousWasLowercaseOrDigit = character.isLowercase || character.isNumber
+            }
+        }
+        return result
     }
 
     private func duplicateConfidenceScore(_ confidence: VaultDuplicateAuditor.Confidence) -> Double {

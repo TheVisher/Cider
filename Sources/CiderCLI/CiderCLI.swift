@@ -7646,6 +7646,9 @@ struct CiderCLI {
                 print("    Confidence: \(confidence)")
             }
             print("    Reason: \(item.reason)")
+            if !item.reasonCodes.isEmpty {
+                print("    Reason codes: \(item.reasonCodes.joined(separator: ", "))")
+            }
             print("    Suggested action: \(item.suggestedAction)")
             print("    Safe actions: \(item.safeActions.joined(separator: ", "))")
         }

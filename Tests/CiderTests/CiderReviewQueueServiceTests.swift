@@ -486,6 +486,69 @@ struct CiderReviewQueueServiceTests {
         #expect(summary.groups.first { $0.id == "duplicate_candidate:needs_review:inspect_duplicates:bookmark" }?.count == 1)
     }
 
+    @Test("review queue exposes structured trust boundary reason codes")
+    func reviewQueueExposesStructuredTrustBoundaryReasonCodes() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let routingID = try insertBookmark(db, title: "Route Me", enrichmentStatus: "complete", lastEnrichedAt: Date())
+        let enrichmentID = try insertBookmark(
+            db,
+            title: "Needs Metadata",
+            relativePath: "Inbox/Bookmarks/Needs Metadata.webloc",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        let inboxID = try insertBookmark(
+            db,
+            title: "Needs Filing",
+            url: "https://example.com/file-me",
+            relativePath: "Inbox/Bookmarks/Needs Filing.webloc",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date()
+        )
+        let duplicateFinding = VaultDuplicateAuditor.Finding(
+            id: "duplicate-bookmark-url-example",
+            entityType: .bookmark,
+            kind: .canonicalURL,
+            confidence: .exact,
+            summary: "Duplicate bookmark URL: example.com/a",
+            detail: "Two bookmarks canonicalize to the same URL and need human merge review.",
+            items: [
+                .init(
+                    id: UUID().uuidString,
+                    title: "Duplicate A",
+                    path: "Saved/Duplicate A.webloc",
+                    value: "https://example.com/a"
+                ),
+            ]
+        )
+        let routing = CiderRoutingDecisionService(database: db)
+        _ = try routing.recordDecision(
+            itemID: routingID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0.1,
+            reason: "Needs a human route.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        let queue = CiderReviewQueueService(
+            database: db,
+            routingDecisionService: routing,
+            duplicateFindingsProvider: { [duplicateFinding] }
+        )
+
+        let items = try queue.list().items
+
+        #expect(items.first { $0.itemID == routingID }?.reasonCodes == ["routing_low_confidence"])
+        #expect(items.first { $0.itemID == enrichmentID }?.reasonCodes == ["enrichment_failed"])
+        #expect(items.first { $0.itemID == inboxID }?.reasonCodes == ["inbox_unrouted"])
+        #expect(items.first { $0.kind == "duplicate_candidate" }?.reasonCodes == ["duplicate_canonical_url"])
+        let dictionary = try #require(items.first { $0.itemID == routingID }?.toDictionary())
+        #expect(dictionary["reasonCodes"] as? [String] == ["routing_low_confidence"])
+    }
+
     @Test("review queue summary groups actionable work and previews batch enrichment")
     func reviewQueueSummaryGroupsActionableWorkAndPreviewsBatchEnrichment() throws {
         let (db, url) = try makeTempDB()
