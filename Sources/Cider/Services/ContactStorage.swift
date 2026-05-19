@@ -135,6 +135,24 @@ final class ContactStorage: ObservableObject {
         index[contactID]?.filename
     }
 
+    /// Testing-only: parse an orphan .vcf file, add it to the in-memory index
+    /// and `contacts`, and persist it to SQLite without depending on the real vault.
+    @discardableResult
+    func _adoptOrphanForTesting(at url: URL, folderID: UUID? = nil) -> ContactCard? {
+        guard let contact = adoptOrphanVCard(at: url, folderID: folderID) else { return nil }
+        contacts.append(contact)
+        if let db = resolvedDatabase {
+            do {
+                try db.withTransaction {
+                    try self.persistContactToDatabaseInner(db, contact: contact)
+                }
+            } catch {
+                logger.error("Failed to persist adopted contact (test): \(error.localizedDescription)")
+            }
+        }
+        return contact
+    }
+
     func startWatching() {
         inboxWatcher?.stop()
         inboxWatcher = FSEventsWatcher(path: inboxDirectoryURL.path, latency: 1.0) { [weak self] _ in
@@ -606,17 +624,11 @@ final class ContactStorage: ObservableObject {
         var needsSave = false
         var adoptedContacts: [ContactCard] = []
 
-        // Build reverse map: filename → UUID from existing index
-        var filenameToUUID: [String: UUID] = [:]
-        for (uuid, entry) in index {
-            filenameToUUID[entry.filename] = uuid
-        }
-
         // Scan Inbox/Contacts/ for unfiled .vcf files
         if let files = try? fm.contentsOfDirectory(at: inboxDirectoryURL, includingPropertiesForKeys: nil) {
             for file in files where file.pathExtension == fileExtension {
                 let filename = file.lastPathComponent
-                if let uuid = filenameToUUID[filename], let entry = index[uuid] {
+                if let (uuid, entry) = indexedInboxEntry(for: filename) {
                     // Known file — parse it
                     if let contact = parseVCardFile(at: file, expectedID: uuid, entry: entry) {
                         loadedContacts.append(contact)
@@ -652,7 +664,7 @@ final class ContactStorage: ObservableObject {
         }
 
         // Adopt orphan .vcf files in vault folders (user-dropped files)
-        let allLoadedIDs = Set(loadedContacts.map(\.id))
+        var seenIDs = Set(loadedContacts.map(\.id))
         // Build O(1) lookup for known folder+filename pairs
         let knownFolderFiles: Set<String> = Set(index.values.compactMap { entry in
             guard let fid = entry.folderID else { return nil }
@@ -666,7 +678,7 @@ final class ContactStorage: ObservableObject {
                 if knownFolderFiles.contains("\(folder.id.uuidString):\(filename)") { continue }
 
                 if let contact = adoptOrphanVCard(at: file, folderID: folder.id),
-                   !allLoadedIDs.contains(contact.id) {
+                   seenIDs.insert(contact.id).inserted {
                     loadedContacts.append(contact)
                     adoptedContacts.append(contact)
                     needsSave = true
@@ -753,6 +765,12 @@ final class ContactStorage: ObservableObject {
         return contact
     }
 
+    private func indexedInboxEntry(for filename: String) -> (UUID, IndexEntry)? {
+        index.first { _, entry in
+            entry.folderID == nil && entry.filename == filename
+        }
+    }
+
     /// Adopts a .vcf file that exists on disk but isn't in the index.
     private func adoptOrphanVCard(at url: URL, folderID: UUID?) -> ContactCard? {
         guard let content = try? String(contentsOf: url, encoding: .utf8),
@@ -760,6 +778,10 @@ final class ContactStorage: ObservableObject {
 
         contact.folderID = folderID
         let filename = url.lastPathComponent
+        guard index[contact.id] == nil else {
+            logger.warning("Skipped duplicate orphan .vcf UUID \(contact.id.uuidString) at \(filename)")
+            return nil
+        }
 
         index[contact.id] = IndexEntry(
             filename: filename,

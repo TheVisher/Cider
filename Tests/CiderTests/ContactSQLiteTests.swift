@@ -612,6 +612,34 @@ struct ContactSQLiteTests {
         #expect(FileManager.default.fileExists(atPath: realURL.path) == true)
     }
 
+    @Test("Duplicate orphan contact UUID is skipped during adoption")
+    func duplicateOrphanContactUUIDIsSkipped() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-contact-duplicate-orphan-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let contact = ContactCard(displayName: "Duplicate embedded UUID", email: "duplicate@example.com")
+        let writer = makeService(db)
+        let firstURL = tmpDir.appendingPathComponent("first.vcf")
+        let secondURL = tmpDir.appendingPathComponent("second.vcf")
+        #expect(writer.writeVCardFile(for: contact, to: firstURL) == true)
+        try FileManager.default.copyItem(at: firstURL, to: secondURL)
+
+        let adopter = makeService(db)
+        #expect(adopter._adoptOrphanForTesting(at: firstURL)?.id == contact.id)
+        #expect(adopter._adoptOrphanForTesting(at: secondURL) == nil)
+        #expect(adopter.contacts.map(\.id) == [contact.id])
+
+        let stmt = try db.prepare("SELECT COUNT(*) FROM items WHERE id = ?;")
+        stmt.bind(DatabaseHelpers.encode(contact.id), at: 1)
+        try stmt.step()
+        #expect(stmt.int(at: 0) == 1)
+    }
+
     @Test("hasAvatar flag round-trips through SQLite when mutated via persist path")
     func hasAvatarFlagPersists() throws {
         // Validates that a direct persist call (as saveAvatar/deleteAvatar would do

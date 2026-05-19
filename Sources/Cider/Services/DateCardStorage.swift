@@ -133,6 +133,24 @@ final class DateCardStorage: ObservableObject {
         index[dateCardID]?.filename
     }
 
+    /// Testing-only: parse an orphan .ics file, add it to the in-memory index
+    /// and `dateCards`, and persist it to SQLite without depending on the real vault.
+    @discardableResult
+    func _adoptOrphanForTesting(at url: URL, folderID: UUID? = nil) -> DateCard? {
+        guard let dateCard = adoptOrphanICS(at: url, folderID: folderID) else { return nil }
+        dateCards.append(dateCard)
+        if let db = resolvedDatabase {
+            do {
+                try db.withTransaction {
+                    try self.persistEventToDatabaseInner(db, dateCard: dateCard)
+                }
+            } catch {
+                logger.error("Failed to persist adopted date card (test): \(error.localizedDescription)")
+            }
+        }
+        return dateCard
+    }
+
     func startWatching() {
         inboxWatcher?.stop()
         inboxWatcher = FSEventsWatcher(path: inboxDirectoryURL.path, latency: 1.0) { [weak self] _ in
@@ -573,16 +591,11 @@ final class DateCardStorage: ObservableObject {
         var needsSave = false
         var adoptedCards: [DateCard] = []
 
-        var filenameToUUID: [String: UUID] = [:]
-        for (uuid, entry) in index {
-            filenameToUUID[entry.filename] = uuid
-        }
-
         // Scan Inbox/Date Cards/ for unfiled .ics files
         if let files = try? fm.contentsOfDirectory(at: inboxDirectoryURL, includingPropertiesForKeys: nil) {
             for file in files where file.pathExtension == fileExtension {
                 let filename = file.lastPathComponent
-                if let uuid = filenameToUUID[filename], let entry = index[uuid] {
+                if let (uuid, entry) = indexedInboxEntry(for: filename) {
                     if let dc = parseICSFile(at: file, expectedID: uuid, entry: entry) {
                         loadedCards.append(dc)
                     }
@@ -613,7 +626,7 @@ final class DateCardStorage: ObservableObject {
         }
 
         // Adopt orphan .ics VEVENT files in vault folders
-        let allLoadedIDs = Set(loadedCards.map(\.id))
+        var seenIDs = Set(loadedCards.map(\.id))
         // Build O(1) lookup for known folder+filename pairs
         let knownFolderFiles: Set<String> = Set(index.values.compactMap { entry in
             guard let fid = entry.folderID else { return nil }
@@ -628,7 +641,7 @@ final class DateCardStorage: ObservableObject {
 
                 // Only adopt VEVENT files, not VTODO (todos share .ics extension)
                 if let dc = adoptOrphanICS(at: file, folderID: folder.id),
-                   !allLoadedIDs.contains(dc.id) {
+                   seenIDs.insert(dc.id).inserted {
                     loadedCards.append(dc)
                     adoptedCards.append(dc)
                     needsSave = true
@@ -712,12 +725,22 @@ final class DateCardStorage: ObservableObject {
         return dc
     }
 
+    private func indexedInboxEntry(for filename: String) -> (UUID, IndexEntry)? {
+        index.first { _, entry in
+            entry.folderID == nil && entry.filename == filename
+        }
+    }
+
     private func adoptOrphanICS(at url: URL, folderID: UUID?) -> DateCard? {
         guard let content = try? String(contentsOf: url, encoding: .utf8),
               var dc = ICalendarSerializer.parseDateCard(content) else { return nil }
 
         dc.folderID = folderID
         let filename = url.lastPathComponent
+        guard index[dc.id] == nil else {
+            logger.warning("Skipped duplicate orphan .ics VEVENT UUID \(dc.id.uuidString) at \(filename)")
+            return nil
+        }
 
         index[dc.id] = IndexEntry(
             filename: filename, folderID: folderID,

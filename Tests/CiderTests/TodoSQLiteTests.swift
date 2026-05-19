@@ -711,4 +711,32 @@ struct TodoSQLiteTests {
         #expect(reader.todoCards.first?.id == seed.id)
         #expect(reader.todoCards.first?.title == "Orphan from external drop")
     }
+
+    @Test("Duplicate orphan todo UUID is skipped during adoption")
+    func duplicateOrphanTodoUUIDIsSkipped() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-todo-duplicate-orphan-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let todo = TodoCard(title: "Duplicate embedded UUID", details: "Only one row should win")
+        let writer = makeService(db)
+        let firstURL = tmpDir.appendingPathComponent("first.ics")
+        let secondURL = tmpDir.appendingPathComponent("second.ics")
+        #expect(writer.writeICSFile(for: todo, to: firstURL) == true)
+        try FileManager.default.copyItem(at: firstURL, to: secondURL)
+
+        let adopter = makeService(db)
+        #expect(adopter._adoptOrphanForTesting(at: firstURL)?.id == todo.id)
+        #expect(adopter._adoptOrphanForTesting(at: secondURL) == nil)
+        #expect(adopter.todoCards.map(\.id) == [todo.id])
+
+        let stmt = try db.prepare("SELECT COUNT(*) FROM items WHERE id = ?;")
+        stmt.bind(DatabaseHelpers.encode(todo.id), at: 1)
+        try stmt.step()
+        #expect(stmt.int(at: 0) == 1)
+    }
 }

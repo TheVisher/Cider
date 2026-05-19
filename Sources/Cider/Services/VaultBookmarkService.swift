@@ -214,11 +214,6 @@ final class VaultBookmarkService: ObservableObject {
     private func scanAllVaultFolders() -> [Bookmark] {
         let fileService = BookmarkFileService.shared
         var result: [Bookmark] = []
-        var seenURLs = Set<String>()
-
-        // TODO: URL-based dedup can flip-flop when the same URL exists in different folders,
-        // keeping whichever folder is scanned first. Known issue — matches BookmarksStorage behavior,
-        // not a regression. Fix properly with UUID-based dedup in a future pass.
 
         // Helper to process a single directory
         func processDirectory(dirURL: URL, dirRelativePath: String, folderID: UUID?) {
@@ -228,9 +223,6 @@ final class VaultBookmarkService: ObservableObject {
                 includeLegacySidecarMetadata: false
             )
             for var bookmark in found {
-                let urlKey = bookmark.urlString.lowercased()
-                // Skip duplicates by URL
-                guard urlKey.isEmpty || seenURLs.insert(urlKey).inserted else { continue }
                 bookmark.folderID = folderID
 
                 result.append(bookmark)
@@ -1256,11 +1248,6 @@ final class VaultBookmarkService: ObservableObject {
         var adopted: [Bookmark] = []
         var reassigned = 0
         var externalURLUpdates = 0
-        // URLs already claimed by a folder — first folder wins, later copies are kept as-is.
-        // We intentionally do NOT delete duplicate .webloc files here: enrichment and file
-        // moves can briefly leave two files with the same URL on disk, and a previous version
-        // of this function hard-deleted the "loser" with no trash, causing silent data loss.
-        var claimedURLs = Set<String>()
 
         func processDirectory(dirURL: URL, dirRelativePath: String, folderID: UUID?) {
             guard fm.fileExists(atPath: dirURL.path) else { return }
@@ -1318,30 +1305,40 @@ final class VaultBookmarkService: ObservableObject {
                         bookmarks[idx].folderID = folderID
                         reassigned += 1
                     }
-                    claimedURLs.insert(url)
                     continue
                 }
-
-                // Duplicate URL detected: skip adopting this copy so it doesn't overwrite
-                // the already-claimed bookmark's folder assignment, but leave the file on
-                // disk. Hard-deleting duplicates here previously caused silent data loss.
-                if claimedURLs.contains(url) {
-                    logger.warning("Duplicate URL at \(bookmark.relativePath ?? "?"); leaving file in place")
-                    continue
-                }
-                claimedURLs.insert(url)
 
                 if let existingID = existingIDByURL[url] {
-                    if let idx = bookmarks.firstIndex(where: { $0.id == existingID }),
-                       bookmarks[idx].folderID != folderID {
-                        bookmarks[idx].folderID = folderID
-                        bookmarks[idx].relativePath = bookmark.relativePath
-                        reassigned += 1
+                    if let idx = bookmarks.firstIndex(where: { $0.id == existingID }) {
+                        let existingPath = bookmarks[idx].relativePath
+                        let existingFileExists = existingPath
+                            .map { fm.fileExists(atPath: vaultRoot.appendingPathComponent($0).path) }
+                            ?? false
+                        if existingFileExists {
+                            logger.warning("Duplicate URL at \(bookmark.relativePath ?? "?"); adopting as separate duplicate candidate")
+                            bookmark.folderID = folderID
+                            adopted.append(bookmark)
+                            existingIDs.insert(bookmark.id)
+                            if let relativePath = bookmark.relativePath {
+                                existingIDByRelativePath[relativePath] = bookmark.id
+                            }
+                        } else if bookmarks[idx].folderID != folderID || bookmarks[idx].relativePath != bookmark.relativePath {
+                            bookmarks[idx].folderID = folderID
+                            bookmarks[idx].relativePath = bookmark.relativePath
+                            if let relativePath = bookmark.relativePath {
+                                existingIDByRelativePath[relativePath] = existingID
+                            }
+                            reassigned += 1
+                        }
                     }
                 } else {
                     bookmark.folderID = folderID
                     adopted.append(bookmark)
                     existingIDByURL[url] = bookmark.id
+                    if let relativePath = bookmark.relativePath {
+                        existingIDByRelativePath[relativePath] = bookmark.id
+                    }
+                    existingIDs.insert(bookmark.id)
                 }
             }
         }

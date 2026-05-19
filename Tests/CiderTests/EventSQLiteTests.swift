@@ -745,4 +745,35 @@ struct EventSQLiteTests {
         #expect(service.writeICSFile(for: card, to: realURL) == true)
         #expect(FileManager.default.fileExists(atPath: realURL.path) == true)
     }
+
+    @Test("Duplicate orphan event UUID is skipped during adoption")
+    func duplicateOrphanEventUUIDIsSkipped() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-event-duplicate-orphan-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let event = DateCard(
+            title: "Duplicate embedded UUID",
+            startAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+        let writer = makeService(db)
+        let firstURL = tmpDir.appendingPathComponent("first.ics")
+        let secondURL = tmpDir.appendingPathComponent("second.ics")
+        #expect(writer.writeICSFile(for: event, to: firstURL) == true)
+        try FileManager.default.copyItem(at: firstURL, to: secondURL)
+
+        let adopter = makeService(db)
+        #expect(adopter._adoptOrphanForTesting(at: firstURL)?.id == event.id)
+        #expect(adopter._adoptOrphanForTesting(at: secondURL) == nil)
+        #expect(adopter.dateCards.map(\.id) == [event.id])
+
+        let stmt = try db.prepare("SELECT COUNT(*) FROM items WHERE id = ?;")
+        stmt.bind(DatabaseHelpers.encode(event.id), at: 1)
+        try stmt.step()
+        #expect(stmt.int(at: 0) == 1)
+    }
 }
