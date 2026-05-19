@@ -10,7 +10,7 @@ This doc tells agents how to work on Cider without growing a second project-mana
 
 The pre-second-brain app is preserved on `legacy/pre-second-brain-cider` for reference only. Do not use legacy docs or old branch behavior as active instruction unless the durable fact has been promoted into the current core docs or a current Kanban card.
 
-The active roadmap source is the Second-Brain Roadmap v1 board, `~/CiderVault/.cider/boards/3d45ca.yaml`. For the docs reset, use card `f76ad1`.
+The active roadmap source is the Second-Brain Roadmap v1 board, `~/CiderVault/.cider/boards/3d45ca.yaml`.
 
 ## The Model
 
