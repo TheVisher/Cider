@@ -3293,6 +3293,9 @@ final class VaultBookmarkService: ObservableObject {
     /// DELETE a bookmark from the given database by ID.
     func deleteBookmarkFromDatabase(_ db: CiderDatabase, bookmarkID: UUID) {
         do {
+            try SecondBrainStore(database: db).deleteOwnerFootprint(
+                for: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmarkID.uuidString)
+            )
             let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
             stmt.bind(DatabaseHelpers.encode(bookmarkID), at: 1)
             try stmt.step()

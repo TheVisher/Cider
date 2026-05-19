@@ -528,6 +528,9 @@ final class VaultFileStorage: ObservableObject {
     /// DELETE a vault file from the given database by ID.
     func deleteVaultFileFromDatabase(_ db: CiderDatabase, fileID: UUID) {
         do {
+            try SecondBrainStore(database: db).deleteOwnerFootprint(
+                for: SecondBrainOwnerRef(ownerType: "vaultFile", ownerID: fileID.uuidString)
+            )
             let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
             stmt.bind(DatabaseHelpers.encode(fileID), at: 1)
             try stmt.step()

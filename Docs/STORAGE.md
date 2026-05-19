@@ -57,6 +57,7 @@ The accepted backend graph foundation is operational enough for documentation, d
 - `capture_events` and `capture_attachments` are the canonical provenance path for capture surfaces. Source context should preserve surface/channel/message/sender/original text and attachment metadata where available, and item context should expose producing capture events through `captureProvenance`.
 - `projects` and project graph services provide project context through backend relations, not folder-path inference. `item project-context <project> --json` is the preferred agent entry point for project graph context.
 - `content_chunks` and `content_chunks_fts` are rebuildable retrieval projections for notes, cards, captures, imported content, docs/artifacts, and other item content.
+- Typed item deletion cleans the deleted owner's second-brain footprint: owner projections, owner relations in either direction, routing decisions, agent actions, enrichment outputs, and similarity candidates. This keeps graph provenance from pointing at missing item owners after trash/delete flows.
 - `enrichment_outputs` stores structured, reviewable enrichment data. Generated enrichment must not overwrite user-owned fields without explicit review/approval.
 - `similarity_candidates` stores explainable suggestions. Accepting a candidate may create typed owner relations, but candidate generation itself must not silently reorganize user knowledge.
 - `item graph-health --json` is the preferred readiness command before raw SQLite inspection. Empty/rebuild-needed components are findings for sync/rebuild/dogfood, not automatic acceptance failures.
@@ -70,7 +71,7 @@ Kanban YAML remains canonical for boards and card notes in this bridge phase. SQ
 
 - Card projection is created or refreshed when Cider writes card notes through `board add-card`, `board update-card`, `board section update`, or `board evidence add`.
 - `item backfill-kanban [--board <name-or-id>]` rebuilds projections from canonical board YAML. Use it after branch changes, restores, manual YAML repair, or when an agent needs current search results before the app has naturally refreshed the board.
-- Card or board deletion removes matching `item_sections` and `content_chunks` projections so old card text does not remain searchable.
+- Card or board deletion removes matching `item_sections` and `content_chunks` projections plus owner-scoped graph sidecars so old card text and stale Kanban owner provenance do not remain searchable/queryable.
 - Board reload/restore should re-project cards when loaded by Cider services; agents can force the same result with `item backfill-kanban`.
 - `item doctor` currently verifies schema/table health and SQLite integrity. Stale projection drift is not yet a first-class doctor finding; until that follow-up lands, repair suspected drift with backfill and verify with `item get card <id>` and `item search`.
 

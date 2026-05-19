@@ -123,4 +123,89 @@ struct SecondBrainOwnerRelationTests {
         #expect(context.ownerRelations[0].targetOwner.ownerType == "note")
         #expect(context.backlinks.isEmpty)
     }
+
+    @Test("Deleting an item cleans second-brain owner provenance")
+    func deletingItemCleansSecondBrainOwnerProvenance() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let bookmark = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(bookmark, title: "Delete me", into: db)
+        try insertItem(note, title: "Related note", into: db)
+
+        let store = SecondBrainStore(database: db)
+        let bookmarkOwner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmark.entityID.uuidString)
+        let noteOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: note.entityID.uuidString)
+        try store.replaceProjection(
+            owner: bookmarkOwner,
+            sections: [
+                SecondBrainSection(
+                    owner: bookmarkOwner,
+                    sectionKey: "summary",
+                    title: "Summary",
+                    body: "Owner-only projected context.",
+                    source: "test",
+                    sortOrder: 0
+                ),
+            ],
+            keeping: ["summary"],
+            chunks: [
+                SecondBrainChunkDraft(
+                    sectionID: nil,
+                    itemID: nil,
+                    source: "test",
+                    title: "Delete me",
+                    body: "Searchable stale chunk.",
+                    chunkIndex: 0
+                ),
+            ]
+        )
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: bookmarkOwner,
+            targetOwner: noteOwner,
+            relationType: "references",
+            evidence: "Bookmark references note.",
+            source: "test",
+            actor: "agent"
+        ))
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: noteOwner,
+            targetOwner: bookmarkOwner,
+            relationType: "mentioned_by",
+            evidence: "Note mentions bookmark.",
+            source: "test",
+            actor: "agent"
+        ))
+        try store.recordRoutingDecision(SecondBrainRoutingDecision(
+            owner: bookmarkOwner,
+            itemID: bookmark.entityID.uuidString,
+            targetType: "folder",
+            targetID: nil,
+            targetPath: "Projects/Delete",
+            confidence: 0.9,
+            reason: "Route before delete.",
+            status: "accepted",
+            actor: "agent",
+            source: "test"
+        ))
+        try store.recordAgentAction(SecondBrainAgentAction(
+            owner: bookmarkOwner,
+            itemID: bookmark.entityID.uuidString,
+            toolName: "cider-cli",
+            actionType: "route",
+            source: "test",
+            status: "succeeded",
+            summary: "Routed before delete."
+        ))
+
+        VaultBookmarkService(database: db, schedulesEnrichment: false).deleteBookmarkFromDatabase(db, bookmarkID: bookmark.entityID)
+
+        #expect(try store.sections(for: bookmarkOwner).isEmpty)
+        #expect(try store.searchChunks(query: "stale chunk", limit: 5).isEmpty)
+        #expect(try store.outgoingRelations(for: bookmarkOwner).isEmpty)
+        #expect(try store.backlinks(for: bookmarkOwner).isEmpty)
+        #expect(try store.routingDecisions(for: bookmarkOwner).isEmpty)
+        #expect(try store.agentActions(for: bookmarkOwner).isEmpty)
+    }
 }

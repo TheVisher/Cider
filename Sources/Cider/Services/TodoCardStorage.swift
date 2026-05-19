@@ -1181,6 +1181,9 @@ final class TodoCardStorage: ObservableObject {
     /// DELETE a todo from the given database by ID.
     func deleteTodoFromDatabase(_ db: CiderDatabase, todoID: UUID) {
         do {
+            try SecondBrainStore(database: db).deleteOwnerFootprint(
+                for: SecondBrainOwnerRef(ownerType: "todo", ownerID: todoID.uuidString)
+            )
             let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
             stmt.bind(DatabaseHelpers.encode(todoID), at: 1)
             try stmt.step()

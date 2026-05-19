@@ -235,22 +235,13 @@ final class SecondBrainStore {
     }
 
     func deleteProjection(for owner: SecondBrainOwnerRef) throws {
-        try database.withTransaction {
-            let deleteChunks = try database.prepare("""
-                DELETE FROM content_chunks
-                WHERE owner_type = ? AND owner_id = ?;
-                """)
-            deleteChunks.bind(owner.ownerType, at: 1)
-                .bind(owner.ownerID, at: 2)
-            try deleteChunks.step()
+        try deleteOwnerFootprint(for: owner)
+    }
 
-            let deleteSections = try database.prepare("""
-                DELETE FROM item_sections
-                WHERE owner_type = ? AND owner_id = ?;
-                """)
-            deleteSections.bind(owner.ownerType, at: 1)
-                .bind(owner.ownerID, at: 2)
-            try deleteSections.step()
+    func deleteOwnerFootprint(for owner: SecondBrainOwnerRef) throws {
+        try database.withTransaction {
+            try deleteProjectionRows(for: owner)
+            try deleteOwnerSidecars(for: owner)
         }
     }
 
@@ -273,6 +264,112 @@ final class SecondBrainStore {
             deleteSections.bind(ownerType, at: 1)
                 .bind(likePrefix, at: 2)
             try deleteSections.step()
+
+            try deleteOwnerSidecars(ownerType: ownerType, ownerIDLike: likePrefix)
+        }
+    }
+
+    private func deleteProjectionRows(for owner: SecondBrainOwnerRef) throws {
+        let deleteChunks = try database.prepare("""
+            DELETE FROM content_chunks
+            WHERE owner_type = ? AND owner_id = ?;
+            """)
+        deleteChunks.bind(owner.ownerType, at: 1)
+            .bind(owner.ownerID, at: 2)
+        try deleteChunks.step()
+
+        let deleteSections = try database.prepare("""
+            DELETE FROM item_sections
+            WHERE owner_type = ? AND owner_id = ?;
+            """)
+        deleteSections.bind(owner.ownerType, at: 1)
+            .bind(owner.ownerID, at: 2)
+        try deleteSections.step()
+    }
+
+    private func deleteOwnerSidecars(for owner: SecondBrainOwnerRef) throws {
+        try deleteOwnerSidecars(ownerType: owner.ownerType, ownerID: owner.ownerID)
+    }
+
+    private func deleteOwnerSidecars(ownerType: String, ownerID: String) throws {
+        let deleteRelations = try database.prepare("""
+            DELETE FROM owner_relations
+            WHERE (source_owner_type = ? AND source_owner_id = ?)
+               OR (target_owner_type = ? AND target_owner_id = ?);
+            """)
+        deleteRelations.bind(ownerType, at: 1)
+            .bind(ownerID, at: 2)
+            .bind(ownerType, at: 3)
+            .bind(ownerID, at: 4)
+        try deleteRelations.step()
+
+        let ownerTables = [
+            "second_brain_routing_decisions",
+            "agent_actions",
+            "enrichment_outputs",
+        ]
+        for table in ownerTables where try tableExists(table) {
+            let stmt = try database.prepare("""
+                DELETE FROM \(table)
+                WHERE owner_type = ? AND owner_id = ?;
+                """)
+            stmt.bind(ownerType, at: 1)
+                .bind(ownerID, at: 2)
+            try stmt.step()
+        }
+
+        if try tableExists("similarity_candidates") {
+            let deleteSimilarity = try database.prepare("""
+                DELETE FROM similarity_candidates
+                WHERE (source_owner_type = ? AND source_owner_id = ?)
+                   OR (target_owner_type = ? AND target_owner_id = ?);
+                """)
+            deleteSimilarity.bind(ownerType, at: 1)
+                .bind(ownerID, at: 2)
+                .bind(ownerType, at: 3)
+                .bind(ownerID, at: 4)
+            try deleteSimilarity.step()
+        }
+    }
+
+    private func deleteOwnerSidecars(ownerType: String, ownerIDLike: String) throws {
+        let deleteRelations = try database.prepare("""
+            DELETE FROM owner_relations
+            WHERE (source_owner_type = ? AND source_owner_id LIKE ? ESCAPE '\\')
+               OR (target_owner_type = ? AND target_owner_id LIKE ? ESCAPE '\\');
+            """)
+        deleteRelations.bind(ownerType, at: 1)
+            .bind(ownerIDLike, at: 2)
+            .bind(ownerType, at: 3)
+            .bind(ownerIDLike, at: 4)
+        try deleteRelations.step()
+
+        let ownerTables = [
+            "second_brain_routing_decisions",
+            "agent_actions",
+            "enrichment_outputs",
+        ]
+        for table in ownerTables where try tableExists(table) {
+            let stmt = try database.prepare("""
+                DELETE FROM \(table)
+                WHERE owner_type = ? AND owner_id LIKE ? ESCAPE '\\';
+                """)
+            stmt.bind(ownerType, at: 1)
+                .bind(ownerIDLike, at: 2)
+            try stmt.step()
+        }
+
+        if try tableExists("similarity_candidates") {
+            let deleteSimilarity = try database.prepare("""
+                DELETE FROM similarity_candidates
+                WHERE (source_owner_type = ? AND source_owner_id LIKE ? ESCAPE '\\')
+                   OR (target_owner_type = ? AND target_owner_id LIKE ? ESCAPE '\\');
+                """)
+            deleteSimilarity.bind(ownerType, at: 1)
+                .bind(ownerIDLike, at: 2)
+                .bind(ownerType, at: 3)
+                .bind(ownerIDLike, at: 4)
+            try deleteSimilarity.step()
         }
     }
 

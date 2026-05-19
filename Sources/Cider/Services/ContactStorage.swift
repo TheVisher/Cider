@@ -1128,6 +1128,9 @@ final class ContactStorage: ObservableObject {
     /// DELETE a contact from the given database by ID.
     func deleteContactFromDatabase(_ db: CiderDatabase, contactID: UUID) {
         do {
+            try SecondBrainStore(database: db).deleteOwnerFootprint(
+                for: SecondBrainOwnerRef(ownerType: "contact", ownerID: contactID.uuidString)
+            )
             let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
             stmt.bind(DatabaseHelpers.encode(contactID), at: 1)
             try stmt.step()

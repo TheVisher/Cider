@@ -2111,6 +2111,9 @@ final class NotesStorage: ObservableObject {
     /// DELETE a note from the given database by ID.
     func deleteNoteFromDatabase(_ db: CiderDatabase, noteID: UUID) {
         do {
+            try SecondBrainStore(database: db).deleteOwnerFootprint(
+                for: SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+            )
             let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
             stmt.bind(DatabaseHelpers.encode(noteID), at: 1)
             try stmt.step()

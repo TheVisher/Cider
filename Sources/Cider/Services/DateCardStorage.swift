@@ -1110,6 +1110,9 @@ final class DateCardStorage: ObservableObject {
     /// DELETE a date card from the given database by ID.
     func deleteEventFromDatabase(_ db: CiderDatabase, dateCardID: UUID) {
         do {
+            try SecondBrainStore(database: db).deleteOwnerFootprint(
+                for: SecondBrainOwnerRef(ownerType: "dateCard", ownerID: dateCardID.uuidString)
+            )
             let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
             stmt.bind(DatabaseHelpers.encode(dateCardID), at: 1)
             try stmt.step()
