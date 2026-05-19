@@ -233,6 +233,28 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("url capture immediately indexes searchable chunks")
+    func urlCaptureImmediatelyIndexesSearchableChunks() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
+            )
+
+            let result = try service.add("https://example.com/immediate-bookmark-index-token")
+
+            let matches = try SecondBrainStore(database: db).searchChunks(
+                query: "immediate-bookmark-index-token",
+                limit: 5
+            )
+            #expect(matches.first?.owner == SecondBrainOwnerRef(ownerType: "bookmark", ownerID: result.item.id.uuidString))
+        }
+    }
+
     @Test("capture add returns duplicate state for an existing URL")
     func captureAddReportsDuplicate() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in

@@ -433,7 +433,7 @@ final class CiderCaptureService {
             ),
             nextSafeAction: isDuplicate ? "inspect_existing_item" : "enrich"
         )
-        return attachCaptureEvent(to: result, sourceContext: sourceContext)
+        return indexCapturedItem(attachCaptureEvent(to: result, sourceContext: sourceContext))
     }
 
     private func addNote(
