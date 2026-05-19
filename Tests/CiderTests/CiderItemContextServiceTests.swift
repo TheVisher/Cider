@@ -165,6 +165,50 @@ struct CiderItemContextServiceTests {
         #expect(packet.captureProvenance.map(\.eventID) == [eventID.uuidString])
     }
 
+    @Test("item context and home overview share recent capture surfacing for unfiled bookmarks")
+    func itemContextAndHomeOverviewShareRecentCaptureSurfacingForUnfiledBookmarks() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let bookmarkID = UUID()
+        let ref = LibraryEntityRef(type: .bookmark, entityID: bookmarkID)
+        try insertItem(
+            ref,
+            title: "Saved Article",
+            relativePath: "Inbox/Bookmarks/Saved Article.webloc",
+            into: db
+        )
+
+        let bookmark = Bookmark(
+            id: bookmarkID,
+            title: "Saved Article",
+            urlString: "https://example.com/article",
+            createdAt: now.addingTimeInterval(-120),
+            updatedAt: now.addingTimeInterval(-60),
+            notes: "",
+            tags: [],
+            labelIDs: [],
+            dismissedLabelIDs: [],
+            folderID: nil,
+            enrichmentStatus: "complete",
+            lastEnrichedAt: now
+        )
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.bookmark(bookmark)],
+            recentItems: [.bookmark(bookmark)],
+            folders: [],
+            surfacingDays: 7,
+            now: now
+        )
+
+        let packet = try CiderItemContextService(database: db).agentContext(for: ref)
+        let homeSurfacing = try #require(snapshot.recentCaptureItems.first?.surfacingExplanation)
+
+        #expect(packet.surfacing.reason == homeSurfacing.reason)
+        #expect(packet.surfacing.reviewState == homeSurfacing.reviewState)
+        #expect(packet.surfacing.suggestedAction == homeSurfacing.suggestedAction)
+    }
+
     @Test("search returns item title matches and chunk text matches through one surface")
     func searchReturnsItemTitleMatchesAndChunkTextMatchesThroughOneSurface() throws {
         let (db, url) = try makeTestDB()

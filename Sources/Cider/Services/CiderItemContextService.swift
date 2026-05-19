@@ -461,6 +461,9 @@ final class CiderItemContextService {
         if let reminderSurfacing = reminderSurfacingExplanation(for: bundle.item) {
             return reminderSurfacing
         }
+        if let itemSurfacing = CiderSurfacingExplanationService.itemContextExplanation(for: bundle.item) {
+            return itemSurfacing
+        }
         return CiderSurfacingExplanation(
             reason: summary(for: bundle),
             urgency: "normal",

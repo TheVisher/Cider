@@ -400,30 +400,6 @@ enum HomeOverviewDataProvider {
         }
     }
 
-    private static func recentCaptureSuggestedAction(for item: LibraryItemV2) -> String {
-        switch item {
-        case .bookmark(let bookmark):
-            if bookmarkGenericTitleReason(bookmark) != nil { return "Clean up title" }
-            if bookmarkNeedsEnrichment(bookmark) { return "Needs enrichment" }
-            if bookmark.folderID == nil { return "Route to folder" }
-            return "Open"
-        case .note(let note):
-            if isUntitled(note.title) { return "Ask Erik" }
-            if note.folderID == nil || isInboxPath(note.relativePath) { return "Route to folder" }
-            return "Open"
-        case .vaultFile(let file):
-            if file.folderID == nil || isInboxPath(file.relativePath) { return "Route to folder" }
-            return "Open"
-        case .todo(let todo):
-            if todo.isCompleted { return "Review" }
-            return todo.earliestApproachingDate == nil ? "Add reminder" : "Do next"
-        case .dateCard(let dateCard):
-            return dateCard.actionURL == nil ? "Add action URL" : "Review"
-        case .contact:
-            return "Open"
-        }
-    }
-
     private static func safeFollowUpActions(for item: LibraryItemV2, explanation: CiderSurfacingExplanation) -> [String] {
         switch explanation.reviewState {
         case "needs_review":
@@ -445,74 +421,7 @@ enum HomeOverviewDataProvider {
     }
 
     private static func recentCaptureSurfacingExplanation(for item: LibraryItemV2) -> CiderSurfacingExplanation {
-        let suggestedAction = recentCaptureSuggestedAction(for: item)
-        return CiderSurfacingExplanation(
-            reason: recentCaptureReason(for: item),
-            urgency: surfacingUrgency(for: suggestedAction),
-            sourceSignal: "recent_capture",
-            reviewState: surfacingReviewState(for: suggestedAction),
-            suggestedAction: suggestedAction,
-            actionURLString: actionURLString(for: item)
-        )
-    }
-
-    private static func recentCaptureReason(for item: LibraryItemV2) -> String {
-        switch item {
-        case .bookmark(let bookmark):
-            if let reason = bookmarkGenericTitleReason(bookmark) { return reason }
-            if bookmarkNeedsEnrichment(bookmark) { return "Bookmark needs enrichment" }
-            if bookmark.folderID == nil { return "Still in Inbox / unfiled" }
-            return "Recently captured bookmark"
-        case .note(let note):
-            if isUntitled(note.title) { return "Untitled inbox note" }
-            if note.folderID == nil || isInboxPath(note.relativePath) { return "Inbox note needs routing" }
-            return "Recently captured note"
-        case .vaultFile(let file):
-            if file.folderID == nil || isInboxPath(file.relativePath) { return "Unfiled vault file" }
-            return "Recently captured file"
-        case .todo(let todo):
-            if todo.isCompleted { return "Completed todo surfaced recently" }
-            return todo.earliestApproachingDate == nil ? "Todo is missing a reminder" : "Todo has a reminder"
-        case .dateCard(let dateCard):
-            return dateCard.actionURL == nil ? "Date is missing an action URL" : "Recent date item"
-        case .contact:
-            return "Recently updated contact"
-        }
-    }
-
-    private static func surfacingUrgency(for suggestedAction: String) -> String {
-        switch suggestedAction {
-        case "Clean up title", "Needs enrichment", "Route to folder", "Ask Erik":
-            return "review"
-        case "Add reminder", "Add action URL", "Do next":
-            return "action"
-        default:
-            return "normal"
-        }
-    }
-
-    private static func surfacingReviewState(for suggestedAction: String) -> String {
-        switch suggestedAction {
-        case "Clean up title", "Needs enrichment", "Route to folder", "Ask Erik":
-            return "needs_review"
-        case "Add reminder", "Add action URL":
-            return "pending"
-        default:
-            return "ok"
-        }
-    }
-
-    private static func actionURLString(for item: LibraryItemV2) -> String? {
-        switch item {
-        case .bookmark(let bookmark):
-            return bookmark.urlString
-        case .todo(let todo):
-            return todo.actionURLString
-        case .dateCard(let dateCard):
-            return dateCard.actionURLString
-        case .note, .contact, .vaultFile:
-            return nil
-        }
+        CiderSurfacingExplanationService.recentCaptureExplanation(for: item)
     }
 
     private static func kanbanPulseItems(from boards: [KanbanBoard]) -> [HomeKanbanPulseItem] {
