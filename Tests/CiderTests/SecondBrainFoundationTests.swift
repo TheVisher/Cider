@@ -32,6 +32,12 @@ struct SecondBrainFoundationTests {
     }
 
     private func runCLI(_ args: [String], vaultURL: URL, stdin: String? = nil) throws -> String {
+        let result = try runCLIResult(args, vaultURL: vaultURL, stdin: stdin)
+        #expect(result.status == 0, "CLI failed: \(args.joined(separator: " "))\nstdout:\n\(result.stdout)\nstderr:\n\(result.stderr)")
+        return result.stdout
+    }
+
+    private func runCLIResult(_ args: [String], vaultURL: URL, stdin: String? = nil) throws -> (stdout: String, stderr: String, status: Int32) {
         let process = Process()
         process.executableURL = ciderCLIURL
         process.currentDirectoryURL = packageRootURL
@@ -62,8 +68,7 @@ struct SecondBrainFoundationTests {
             encoding: .utf8
         ) ?? ""
 
-        #expect(process.terminationStatus == 0, "CLI failed: \(args.joined(separator: " "))\nstdout:\n\(stdout)\nstderr:\n\(stderr)")
-        return stdout
+        return (stdout, stderr, process.terminationStatus)
     }
 
     private func jsonObject(from output: String) throws -> [String: Any] {
@@ -544,71 +549,48 @@ struct SecondBrainFoundationTests {
         #expect(FileManager.default.fileExists(atPath: trashPath))
     }
 
-    @Test("process CLI event and contact creates record provenance")
-    func processCLIEventAndContactCreatesRecordProvenance() throws {
+    @Test("process CLI event and contact legacy creates are removed")
+    func processCLIEventAndContactLegacyCreatesAreRemoved() throws {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-event-contact-provenance-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: vault) }
 
-        let eventOutput = try runCLI([
+        let eventResult = try runCLIResult([
             "event", "create", "Passport appointment",
             "--date", "2026-05-20",
             "--time", "10:30 AM",
             "--location", "City Hall",
             "--json",
         ], vaultURL: vault)
-        let eventPayload = try jsonObject(from: eventOutput)
-        #expect(eventPayload["command"] as? String == "event.create")
-        let eventRouting = try #require(eventPayload["routing"] as? [String: Any])
-        let eventLatest = try #require(eventRouting["routing"] as? [String: Any])
-        #expect(eventLatest["source"] as? String == "event.create")
-        #expect(eventLatest["reviewState"] as? String == "needs_review")
+        let eventPayload = try jsonObject(from: eventResult.stdout)
+        #expect(eventResult.status != 0)
+        #expect(eventPayload["ok"] as? Bool == false)
+        #expect(eventPayload["legacyRemoved"] as? Bool == true)
+        #expect(eventPayload["command"] as? String == "event create")
+        #expect(eventPayload["replacement"] as? String == "cider-cli capture add --kind event --title \"<title>\" --date yyyy-MM-dd --stdin --json")
 
-        let contactOutput = try runCLI([
+        let contactResult = try runCLIResult([
             "contact", "create", "Avery Example",
             "--email", "avery@example.com",
             "--birthday", "2016-06-15",
             "--json",
         ], vaultURL: vault)
-        let contactPayload = try jsonObject(from: contactOutput)
-        #expect(contactPayload["command"] as? String == "contact.create")
-        let contactRouting = try #require(contactPayload["routing"] as? [String: Any])
-        let contactLatest = try #require(contactRouting["routing"] as? [String: Any])
-        #expect(contactLatest["source"] as? String == "contact.create")
-        #expect(contactLatest["reviewState"] as? String == "needs_review")
-
-        let birthdayDateCard = try #require(contactPayload["birthdayDateCard"] as? [String: Any])
-        let birthdayRouting = try #require(birthdayDateCard["routing"] as? [String: Any])
-        let birthdayLatest = try #require(birthdayRouting["routing"] as? [String: Any])
-        #expect(birthdayLatest["source"] as? String == "contact.birthday_date_card")
-        #expect(birthdayLatest["reviewState"] as? String == "needs_review")
-
-        let dbURL = vault.appendingPathComponent(".cider/cider.db")
-        let db = CiderDatabase()
-        try db.open(at: dbURL)
-        defer { db.close() }
-
-        let routing = CiderRoutingDecisionService(database: db)
-        let eventIDString = try #require(eventPayload["id"] as? String)
-        let contactIDString = try #require(contactPayload["id"] as? String)
-        let birthdayIDString = try #require(birthdayDateCard["id"] as? String)
-        let eventID = try #require(UUID(uuidString: eventIDString))
-        let contactID = try #require(UUID(uuidString: contactIDString))
-        let birthdayID = try #require(UUID(uuidString: birthdayIDString))
-        #expect(try routing.explain(itemID: eventID).latestDecision?.source == "event.create")
-        #expect(try routing.explain(itemID: contactID).latestDecision?.source == "contact.create")
-        #expect(try routing.explain(itemID: birthdayID).latestDecision?.source == "contact.birthday_date_card")
+        let contactPayload = try jsonObject(from: contactResult.stdout)
+        #expect(contactResult.status != 0)
+        #expect(contactPayload["ok"] as? Bool == false)
+        #expect(contactPayload["legacyRemoved"] as? Bool == true)
+        #expect(contactPayload["command"] as? String == "contact create")
+        #expect(contactPayload["replacement"] as? String == "cider-cli capture add --kind contact --name \"<name>\" --stdin --json")
     }
 
-    @Test("bookmark move records manual routing provenance")
-    func bookmarkMoveRecordsManualRoutingProvenance() throws {
+    @Test("legacy bookmark move is removed with item move replacement")
+    func legacyBookmarkMoveIsRemovedWithItemMoveReplacement() throws {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-bookmark-move-provenance-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: vault) }
 
-        _ = try runCLI(["folder", "create", "Research"], vaultURL: vault)
         let output = try runCLI([
             "bookmark", "add", "https://example.com/manual-move",
             "--no-wait",
@@ -618,29 +600,18 @@ struct SecondBrainFoundationTests {
         let idString = try #require(bookmark["id"] as? String)
         let itemID = try #require(UUID(uuidString: idString))
 
-        _ = try runCLI([
+        let moveResult = try runCLIResult([
             "bookmark", "move", String(idString.prefix(8)),
             "--folder", "Research",
+            "--json",
         ], vaultURL: vault)
-
-        let dbURL = vault.appendingPathComponent(".cider/cider.db")
-        let db = CiderDatabase()
-        try db.open(at: dbURL)
-        defer { db.close() }
-
-        let explanation = try CiderRoutingDecisionService(database: db).explain(itemID: itemID)
-        #expect(explanation.latestDecision?.source == "bookmark.move")
-        #expect(explanation.latestDecision?.reviewState == "manual_move")
-        #expect(explanation.latestDecision?.actor == "user")
-        #expect(explanation.latestDecision?.target.relativePath == "Research")
-        #expect(explanation.reviewNeeded == false)
-
-        let assignment = MutationAuditService(database: db)
-            .loadEntries()
-            .first { $0.itemID == itemID && $0.action == "reassign_folder" }
-        #expect(assignment?.metadata["classification"] == "manual_routing_move")
-        #expect(assignment?.metadata["routingSource"] == "bookmark.move")
-        #expect(assignment?.metadata["targetRelativePath"] == "Research")
+        let move = try jsonObject(from: moveResult.stdout)
+        #expect(moveResult.status != 0)
+        #expect(move["ok"] as? Bool == false)
+        #expect(move["legacyRemoved"] as? Bool == true)
+        #expect(move["command"] as? String == "bookmark move")
+        #expect(move["replacement"] as? String == "cider-cli item move bookmark <id> --folder <name|path> --json")
+        _ = itemID
     }
 
     @Test("review correct labels folder assignment as routing correction")
@@ -650,7 +621,6 @@ struct SecondBrainFoundationTests {
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: vault) }
 
-        _ = try runCLI(["folder", "create", "Research"], vaultURL: vault)
         let output = try runCLI([
             "bookmark", "add", "https://example.com/review-correct",
             "--no-wait",
@@ -662,7 +632,7 @@ struct SecondBrainFoundationTests {
 
         let correctionOutput = try runCLI([
             "review", "correct", idString,
-            "--folder", "Research",
+            "--path", "Research",
             "--reason", "Corrected during review.",
             "--actor", "agent",
             "--json",

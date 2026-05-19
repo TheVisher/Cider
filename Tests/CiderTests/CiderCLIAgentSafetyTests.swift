@@ -21,7 +21,8 @@ struct CiderCLIAgentSafetyTests {
 
         let dict = try parseJSONObject(result.stdout)
         #expect(dict["ok"] as? Bool == false)
-        #expect((dict["error"] as? String)?.contains("Usage: cider-cli bookmark date-suggestions") == true)
+        #expect(dict["legacyRemoved"] as? Bool == true)
+        #expect(dict["replacement"] as? String == "cider-cli review list --kind date-suggestion --json")
     }
 
     @Test("bookmark date suggestion approval validation errors honor json output")
@@ -30,7 +31,8 @@ struct CiderCLIAgentSafetyTests {
 
         let dict = try parseJSONObject(result.stdout)
         #expect(dict["ok"] as? Bool == false)
-        #expect((dict["error"] as? String)?.contains("Usage: cider-cli bookmark date-suggestions approve") == true)
+        #expect(dict["legacyRemoved"] as? Bool == true)
+        #expect(dict["replacement"] as? String == "cider-cli review list --kind date-suggestion --json")
     }
 
     @Test("review batch enrichment requires explicit confirmation")
@@ -110,18 +112,9 @@ struct CiderCLIAgentSafetyTests {
     func remainingCommandFamiliesFailClosedWithJSONErrors() throws {
         let cases: [(args: [String], expectedError: String)] = [
             (["storage", "definitely-not-storage", "--json"], "Unknown storage command"),
-            (["recall", "definitely-not-recall", "--json"], "Unknown recall command"),
-            (["dashboard", "definitely-not-dashboard", "--json"], "Unknown dashboard command"),
             (["review", "definitely-not-review", "--json"], "Unknown review command"),
             (["space", "captures", "--json"], "Usage: cider-cli space captures"),
             (["routing", "explain", "--json"], "Usage: cider-cli routing explain"),
-            (["bookmark", "tag", "--json"], "Usage: cider-cli bookmark tag"),
-            (["note", "tag", "--json"], "Usage: cider-cli note tag"),
-            (["todo", "checklist", "add", "--json"], "Usage: cider-cli todo checklist add"),
-            (["event", "definitely-not-event", "--json"], "Unknown event command"),
-            (["contact", "definitely-not-contact", "--json"], "Unknown contact command"),
-            (["file", "definitely-not-file", "--json"], "Unknown file command"),
-            (["folder", "definitely-not-folder", "--json"], "Unknown folder command"),
             (["board", "definitely-not-board", "--json"], "Unknown board command"),
         ]
 
@@ -186,6 +179,73 @@ struct CiderCLIAgentSafetyTests {
             #expect(dict["ok"] as? Bool == false)
             #expect(dict["legacyRemoved"] as? Bool == true)
             #expect((dict["replacement"] as? String)?.isEmpty == false)
+        }
+    }
+
+    @Test("hidden legacy type specific commands return structured replacement guidance")
+    func hiddenLegacyTypeSpecificCommandsReturnStructuredReplacementGuidance() throws {
+        let cases: [(args: [String], command: String, replacement: String)] = [
+            (["bookmark", "list", "--json"], "bookmark list", "cider-cli item search <query> --json"),
+            (["note", "list", "--json"], "note list", "cider-cli item search <query> --json"),
+            (["todo", "list", "--json"], "todo list", "cider-cli item search <query> --json"),
+            (["event", "list", "--json"], "event list", "cider-cli item search <query> --json"),
+            (["contact", "list", "--json"], "contact list", "cider-cli item search <query> --json"),
+            (["file", "list", "--json"], "file list", "cider-cli item search <query> --json"),
+            (["folder", "list", "--json"], "folder list", "cider-cli item search <query> --json"),
+            (["folder", "create", "Projects", "--json"], "folder create", "cider-cli item search <query> --json"),
+            (["label", "list", "--json"], "label list", "cider-cli item search <query> --json"),
+            (["tag", "list", "--json"], "tag list", "cider-cli item search <query> --json"),
+            (["dashboard", "topic", "list", "--json"], "dashboard topic", "cider-cli item graph-health --json"),
+            (["link", "add", "note", "a", "note", "b", "--json"], "link add", "cider-cli item link"),
+        ]
+
+        for testCase in cases {
+            let result = try runCLI(args: testCase.args)
+            let dict = try parseJSONObject(result.stdout)
+            #expect(result.status != 0, "Expected \(testCase.args.joined(separator: " ")) to exit non-zero")
+            #expect(dict["ok"] as? Bool == false)
+            #expect(dict["legacyRemoved"] as? Bool == true)
+            #expect(dict["command"] as? String == testCase.command)
+            #expect(dict["replacement"] as? String == testCase.replacement)
+            #expect(dict["reason"] as? String == "Use the Second Brain v1 agent API.")
+        }
+    }
+
+    @Test("hidden legacy commands print concise text replacement guidance")
+    func hiddenLegacyCommandsPrintConciseTextReplacementGuidance() throws {
+        let result = try runCLI(args: ["note", "list"])
+
+        #expect(result.status != 0)
+        #expect(result.stdout.contains("Legacy command 'note list' has been removed"))
+        #expect(result.stdout.contains("Replacement: cider-cli item search <query> --json"))
+        #expect(result.stdout.contains("Use the Second Brain v1 agent API."))
+    }
+
+    @Test("legacy create import wrappers identify compatibility backend")
+    func legacyCreateImportWrappersIdentifyCompatibilityBackend() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-compat-wrappers-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceFile = vault.appendingPathComponent("wrapper source.txt")
+        try "Wrapper file content".write(to: sourceFile, atomically: true, encoding: .utf8)
+
+        let cases: [[String]] = [
+            ["bookmark", "add", "https://example.com/wrapper", "--json"],
+            ["note", "create", "Wrapper note", "--content", "Wrapper note body", "--json"],
+            ["todo", "create", "Wrapper todo", "--json"],
+            ["file", "import", sourceFile.path, "--json"],
+        ]
+
+        for args in cases {
+            let result = try runCLI(args: args, vault: vault)
+            let dict = try parseJSONObject(result.stdout)
+            #expect(result.status == 0, "Expected \(args.joined(separator: " ")) to remain a compatibility wrapper")
+            #expect(dict["compatibilityWrapper"] as? Bool == true)
+            #expect(dict["backendCommand"] as? String == "capture.add")
+            let capture = try #require(dict["capture"] as? [String: Any])
+            #expect(capture["command"] as? String == "capture.add")
         }
     }
 
@@ -371,18 +431,16 @@ struct CiderCLIAgentSafetyTests {
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: vault) }
 
-        _ = try runCLI(args: ["folder", "create", "Tracked"], vault: vault)
         try FileManager.default.createDirectory(
             at: vault.appendingPathComponent("LooseDiskFolder", isDirectory: true),
             withIntermediateDirectories: true
         )
 
         let listResult = try runCLI(args: ["bookmark", "list", "--folder", "LooseDiskFolder", "--json"], vault: vault)
-        #expect(listResult.status == 0)
-
-        let folders = try runCLI(args: ["folder", "list", "--json"], vault: vault)
-        let folderPayload = try parseJSONArray(folders.stdout)
-        #expect(folderPayload.compactMap { $0["relativePath"] as? String }.contains("LooseDiskFolder") == false)
+        let payload = try parseJSONObject(listResult.stdout)
+        #expect(listResult.status != 0)
+        #expect(payload["legacyRemoved"] as? Bool == true)
+        #expect(payload["replacement"] as? String == "cider-cli item search <query> --json")
     }
 
     @Test("item mutations fail closed when canonical database cannot open")
@@ -396,9 +454,7 @@ struct CiderCLIAgentSafetyTests {
             ["bookmark", "add", "https://example.com/fail-closed", "--json"],
             ["note", "create", "Fail closed note", "--json"],
             ["todo", "create", "Fail closed todo", "--json"],
-            ["contact", "create", "Fail Closed", "--json"],
-            ["file", "add", "/tmp/missing.txt", "--json"],
-            ["folder", "create", "FailClosed", "--json"]
+            ["file", "add", "/tmp/missing.txt", "--json"]
         ]
 
         for command in commands {
@@ -416,12 +472,11 @@ struct CiderCLIAgentSafetyTests {
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: vault) }
 
-        _ = try runCLI(args: ["folder", "create", "Projects"], vault: vault)
         let noteResult = try runCLI(args: ["note", "create", "Move via item door", "--json"], vault: vault)
         let note = try parseJSONObject(noteResult.stdout)
         let noteID = try #require(note["id"] as? String)
 
-        let moveResult = try runCLI(args: ["item", "move", "note", noteID, "--folder", "Projects", "--json"], vault: vault)
+        let moveResult = try runCLI(args: ["item", "move", "note", noteID, "--path", "Projects", "--json"], vault: vault)
         let move = try parseJSONObject(moveResult.stdout)
         #expect(move["ok"] as? Bool == true)
         #expect(move["command"] as? String == "item.move")

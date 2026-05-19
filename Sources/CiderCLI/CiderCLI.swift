@@ -38,8 +38,105 @@ struct CiderCLI {
         return true
     }
 
+    struct LegacyRemovedCommand {
+        var command: String
+        var replacement: String
+        var reason: String = "Use the Second Brain v1 agent API."
+    }
+
+    static func hiddenLegacyCommandResponse(command rawCommand: String, subcommand rawSubcommand: String?, args: [String]) -> LegacyRemovedCommand? {
+        let command = rawCommand.lowercased()
+        let subcommand = rawSubcommand?.lowercased()
+        let label = legacyCommandLabel(command: command, subcommand: subcommand)
+
+        switch command {
+        case "bookmark", "bm":
+            if subcommand == "add" || subcommand == "create" { return nil }
+            if subcommand == "move" {
+                return LegacyRemovedCommand(command: label, replacement: "cider-cli item move bookmark <id> --folder <name|path> --json")
+            }
+            if subcommand == "enrich", args.contains("--all") {
+                return LegacyRemovedCommand(
+                    command: "bookmark enrich --all",
+                    replacement: "cider-cli review enrich-batch --confirm --json"
+                )
+            }
+            if subcommand == "date-suggestions" || subcommand == "dates" {
+                return LegacyRemovedCommand(command: label, replacement: "cider-cli review list --kind date-suggestion --json")
+            }
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
+        case "note":
+            if subcommand == "create" { return nil }
+            if subcommand == "move" {
+                return LegacyRemovedCommand(command: label, replacement: "cider-cli item move note <id> --folder <name|path> --json")
+            }
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
+        case "todo", "todos", "task", "tasks":
+            if subcommand == "create" || subcommand == "add" { return nil }
+            if subcommand == "move" {
+                return LegacyRemovedCommand(command: label, replacement: "cider-cli item move todo <id> --folder <name|path> --json")
+            }
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
+        case "event", "datecard":
+            if subcommand != "create" {
+                return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
+            }
+            return LegacyRemovedCommand(
+                command: label,
+                replacement: "cider-cli capture add --kind event --title \"<title>\" --date yyyy-MM-dd --stdin --json"
+            )
+        case "contact":
+            if subcommand != "create" {
+                return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
+            }
+            return LegacyRemovedCommand(
+                command: label,
+                replacement: "cider-cli capture add --kind contact --name \"<name>\" --stdin --json"
+            )
+        case "file":
+            if subcommand == "import" || subcommand == "add" { return nil }
+            if subcommand == "move" {
+                return LegacyRemovedCommand(command: label, replacement: "cider-cli item move file <id> --folder <name|path> --json")
+            }
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
+        case "folder":
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
+        case "label", "tag":
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
+        case "link":
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item link")
+        case "dashboard", "dash":
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item graph-health --json")
+        case "view", "saved-view":
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item project-context <project-id-or-name> --json")
+        case "trash":
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli storage audit --json")
+        case "clipboard", "cb":
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli capture add --kind note --stdin --json")
+        case "media":
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
+        case "recall":
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
+        case "duplicate-check", "dupecheck":
+            return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <url-or-query> --json")
+        default:
+            return nil
+        }
+    }
+
+    static func legacyCommandLabel(command: String, subcommand: String?) -> String {
+        if command == "dashboard" || command == "dash", subcommand == "topic" {
+            return "dashboard topic"
+        }
+        if let subcommand {
+            return "\(command) \(subcommand)"
+        }
+        return command
+    }
+
     static func printRemovedLegacyCommand(command: String, replacement: String, reason: String) {
-        let message = "Legacy command '\(command)' has been removed from the blessed second-brain CLI surface. \(replacement)"
+        let message = "Legacy command '\(command)' has been removed from the blessed second-brain CLI surface."
+        processExitCode = 1
         if jsonOutput {
             outputJSON([
                 "ok": false,
@@ -51,6 +148,7 @@ struct CiderCLI {
             ] as [String: Any])
         } else {
             print("Error: \(message)")
+            print("Replacement: \(replacement)")
             print("Reason: \(reason)")
         }
     }
@@ -88,6 +186,14 @@ struct CiderCLI {
         let remaining = Array(args.dropFirst(2))
 
         if handleRemovedLegacyTopLevelCommand(command, subcommand: subcommand) {
+            return
+        }
+        if let removed = hiddenLegacyCommandResponse(command: command, subcommand: subcommand, args: remaining) {
+            printRemovedLegacyCommand(
+                command: removed.command,
+                replacement: removed.replacement,
+                reason: removed.reason
+            )
             return
         }
 
@@ -1541,6 +1647,7 @@ struct CiderCLI {
                 if jsonOutput {
                     var dict = bookmarkToDict(finalBookmark)
                     dict["command"] = "bookmark.add"
+                    dict["compatibilityWrapper"] = true
                     dict["backendCommand"] = result.captureResult.command
                     dict["capture"] = result.captureResult.toDictionary(finalBookmark: finalBookmark)
                     if let waitResult {
@@ -2026,6 +2133,7 @@ struct CiderCLI {
                     var dict = noteToDict(note)
                     dict["content"] = storage.loadContent(for: note)
                     dict["command"] = "note.create"
+                    dict["compatibilityWrapper"] = true
                     dict["backendCommand"] = result.command
                     dict["capture"] = result.toDictionary()
                     outputJSON(dict)
@@ -2366,6 +2474,7 @@ struct CiderCLI {
                     if jsonOutput {
                         var dict = todoToDict(todo)
                         dict["command"] = "todo.create"
+                        dict["compatibilityWrapper"] = true
                         dict["backendCommand"] = result.command
                         dict["capture"] = result.toDictionary()
                         outputJSON(dict)
@@ -4349,6 +4458,7 @@ struct CiderCLI {
                     if let file = service.files.first(where: { $0.id == result.item.id }) {
                         var dict = vaultFileToDict(file)
                         dict["command"] = "file.import"
+                        dict["compatibilityWrapper"] = true
                         dict["backendCommand"] = result.command
                         dict["capture"] = result.toDictionary()
                         outputJSON(dict)
@@ -4358,6 +4468,7 @@ struct CiderCLI {
                             "displayTitle": result.item.title,
                             "folder": result.item.folderName,
                             "command": "file.import",
+                            "compatibilityWrapper": true,
                             "backendCommand": result.command,
                             "capture": result.toDictionary(),
                         ]
