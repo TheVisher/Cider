@@ -68,7 +68,7 @@ Core commands:
 - `item search <query> --json`: FTS-backed search over projected chunks.
 - `item get <type> <id-or-ref> --json`: unified item context for library item refs such as bookmark, note, todo, dateCard/event, contact, and vaultFile, including `captureProvenance` when a capture event produced the item.
 - `item owner-get <owner-type> <owner-id-or-ref> --json`: legacy owner-section inspection for projected owners such as Kanban cards; returns structured sections, routing decisions, agent actions, and owner resolution metadata.
-- `item graph-health --json`: read-only graph readiness across owner relations, projects, capture events/attachments, content chunks, enrichment outputs, similarity candidates, schema state, counts, findings, and safe next commands.
+- `item graph-health --json`: read-only graph readiness across owner relations, projects, capture events/attachments, content chunks, enrichment outputs, similarity candidates, schema state, counts, findings, string `suggestedCommands`, and structured `suggestedActions` / per-component `safeNextActions` with `readOnly`, `requiresApproval`, and `mutationReason` metadata.
 - `item project-context <project> --json`: project graph context with project owner, board/card/doc/artifact relations, backend project metadata, and safe follow-up commands. This is read-only; JSON reports `readOnly: true` and `changed: false`.
 - `item sync-project <project> --json`: explicit project workspace sync/seed path for backend project metadata and Kanban owner relations. This can mutate state; JSON reports `readOnly: false`, `changed`, and `mutationReason`.
 - `item route <type> <id-or-ref> --target-type <space|folder|board> --reason <text> --json`: records a routing decision without silently moving files.

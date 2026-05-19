@@ -9918,9 +9918,11 @@ struct CiderCLI {
         ).activeProjects.count
 
         var suggestedCommands: [String] = []
+        var suggestedActions: [[String: Any]] = []
         func addSuggestedCommand(_ command: String) {
             guard !suggestedCommands.contains(command) else { return }
             suggestedCommands.append(command)
+            suggestedActions.append(graphHealthSuggestedAction(for: command))
         }
         func component(
             id: String,
@@ -9936,7 +9938,8 @@ struct CiderCLI {
             needsWorkState: String = "needs_rebuild"
         ) throws -> [String: Any] {
             guard try tableExists(table) else {
-                addSuggestedCommand("cider-cli storage repair-schema --json")
+                let command = "cider-cli storage repair-schema --json"
+                addSuggestedCommand(command)
                 return [
                     "id": id,
                     "label": label,
@@ -9944,7 +9947,8 @@ struct CiderCLI {
                     "exists": false,
                     "state": "not_implemented",
                     "detail": "Required graph table \(table) is missing.",
-                    "safeNextCommands": ["cider-cli storage repair-schema --json"],
+                    "safeNextCommands": [command],
+                    "safeNextActions": [graphHealthSuggestedAction(for: command)],
                 ]
             }
 
@@ -9959,6 +9963,7 @@ struct CiderCLI {
                     "state": "healthy",
                     "detail": healthyDetail,
                     "safeNextCommands": [],
+                    "safeNextActions": [],
                 ]
             }
 
@@ -9976,6 +9981,7 @@ struct CiderCLI {
                 "state": state,
                 "detail": emptyDetail,
                 "safeNextCommands": commandList,
+                "safeNextActions": commandList.map(graphHealthSuggestedAction),
             ]
             if let emptyReason {
                 payload["emptyReason"] = emptyReason
@@ -10101,7 +10107,37 @@ struct CiderCLI {
             ],
             "components": components,
             "suggestedCommands": suggestedCommands,
+            "suggestedActions": suggestedActions,
         ]
+    }
+
+    private static func graphHealthSuggestedAction(for command: String) -> [String: Any] {
+        var action: [String: Any] = [
+            "command": command,
+            "readOnly": false,
+            "requiresApproval": true,
+        ]
+
+        if command.contains(" backfill-kanban ") {
+            action["mutationReason"] = "rebuild_kanban_projection"
+        } else if command.contains(" rebuild-references ") {
+            action["mutationReason"] = "rebuild_owner_relations"
+        } else if command.contains(" sync-project ") {
+            action["mutationReason"] = "sync_project_graph"
+        } else if command.contains(" rebuild-chunks ") {
+            action["mutationReason"] = "rebuild_content_chunks"
+        } else if command.contains(" dogfood-intelligence ") {
+            action["mutationReason"] = "seed_reviewable_intelligence"
+        } else if command.contains(" repair-schema ") {
+            action["mutationReason"] = "repair_schema"
+        } else if command.contains(" backlinks ") {
+            action["readOnly"] = true
+            action["requiresApproval"] = false
+            action["mutationReason"] = "inspect_capture_backlinks"
+        } else {
+            action["mutationReason"] = "follow_up"
+        }
+        return action
     }
 
     static func secondBrainDoctorStatus() throws -> [String: Any] {

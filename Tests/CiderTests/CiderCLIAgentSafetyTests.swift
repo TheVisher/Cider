@@ -278,6 +278,13 @@ struct CiderCLIAgentSafetyTests {
         })
         let commands = try #require(dict["suggestedCommands"] as? [String])
         #expect(commands.contains("cider-cli item rebuild-chunks all --json"))
+        let actions = try #require(dict["suggestedActions"] as? [[String: Any]])
+        #expect(actions.contains { action in
+            action["command"] as? String == "cider-cli item rebuild-chunks all --json"
+                && action["readOnly"] as? Bool == false
+                && action["requiresApproval"] as? Bool == true
+                && action["mutationReason"] as? String == "rebuild_content_chunks"
+        })
     }
 
     @Test("item graph health distinguishes unseeded intelligence stores")
@@ -311,6 +318,13 @@ struct CiderCLIAgentSafetyTests {
         })
         let commands = try #require(dict["suggestedCommands"] as? [String])
         #expect(commands.contains("cider-cli item dogfood-intelligence --limit 5 --json"))
+        let actions = try #require(dict["suggestedActions"] as? [[String: Any]])
+        #expect(actions.contains { action in
+            action["command"] as? String == "cider-cli item dogfood-intelligence --limit 5 --json"
+                && action["readOnly"] as? Bool == false
+                && action["requiresApproval"] as? Bool == true
+                && action["mutationReason"] as? String == "seed_reviewable_intelligence"
+        })
     }
 
     @Test("item dogfood intelligence reports bounded reviewable JSON output")
