@@ -410,6 +410,80 @@ struct SecondBrainFoundationTests {
         #expect(fileItem["relativePath"] as? String == "Inbox/Files/path with spaces.txt")
     }
 
+    @Test("capture add event supports structured flags and stdin source text")
+    func captureAddEventSupportsStructuredFlagsAndStdinSourceText() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-event-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let raw = """
+        Meet Avery about Cider v1.
+        Bring $500 budget notes and `demo.sh`.
+        """
+
+        let payload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "event",
+            "--title", "Cider v1 review",
+            "--date", "2026-05-22",
+            "--time", "10:30 AM",
+            "--location", "Studio",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: raw))
+        let capture = try requireCaptureAddContract(payload)
+        let source = try #require(capture["source"] as? [String: Any])
+        let item = try #require(capture["item"] as? [String: Any])
+        let routing = try #require(capture["routing"] as? [String: Any])
+
+        #expect(source["text"] as? String == raw)
+        #expect(source["itemType"] as? String == "event")
+        #expect(item["type"] as? String == "event")
+        #expect(item["title"] as? String == "Cider v1 review")
+        #expect(routing["reviewState"] as? String == "needs_review")
+        #expect(capture["nextSafeAction"] as? String == "review_route")
+        #expect(capture["safeNextCommands"] as? [String] != nil)
+    }
+
+    @Test("capture add contact supports structured flags and text file source text")
+    func captureAddContactSupportsStructuredFlagsAndTextFileSourceText() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-contact-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let raw = """
+        Avery's notes include "design systems"; owes follow-up on $500 quote.
+        URL: https://example.com/contact?ref=cider
+        """
+        let textFile = vault.appendingPathComponent("contact source.txt")
+        try raw.write(to: textFile, atomically: true, encoding: .utf8)
+
+        let payload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "contact",
+            "--name", "Avery Stone",
+            "--relationship", "Designer",
+            "--email", "avery@example.com",
+            "--phone", "555-0100",
+            "--text-file", textFile.path,
+            "--json",
+        ], vaultURL: vault))
+        let capture = try requireCaptureAddContract(payload)
+        let source = try #require(capture["source"] as? [String: Any])
+        let item = try #require(capture["item"] as? [String: Any])
+        let routing = try #require(capture["routing"] as? [String: Any])
+
+        #expect(source["text"] as? String == raw)
+        #expect(source["itemType"] as? String == "contact")
+        #expect(item["type"] as? String == "contact")
+        #expect(item["title"] as? String == "Avery Stone")
+        #expect(routing["reviewState"] as? String == "needs_review")
+        #expect(capture["nextSafeAction"] as? String == "review_route")
+        #expect(capture["safeNextCommands"] as? [String] != nil)
+    }
+
     @Test("capture archive artifacts summarizes generated audit directory and trashes only after capture")
     func captureArchiveArtifactsSummarizesGeneratedAuditDirectoryAndTrashesOnlyAfterCapture() throws {
         let vault = FileManager.default.temporaryDirectory

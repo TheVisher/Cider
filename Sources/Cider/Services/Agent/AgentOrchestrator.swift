@@ -684,7 +684,7 @@ actor AgentOrchestrator {
             } else {
                 route = "event-create"
                 detail = "appointment or date-card capture"
-                hints.append("- For appointments and calendar occurrences, use `cider-cli capture add \"<event text>\" --json` with all known date, time, location, and detail fields in the captured text.")
+                hints.append("- For appointments and calendar occurrences, send exact raw details on stdin to `cider-cli capture add --kind event --title \"<title>\" --date yyyy-MM-dd --time \"<time>\" --location \"<place>\" --stdin --json`.")
                 hints.append("- After creating the item, verify with `cider-cli item get <type> <id> --json` and inspect review/routing state.")
                 hints.append("- If the destination is clear, use backend item routing commands after capture rather than legacy type-specific create-then-edit commands.")
             }

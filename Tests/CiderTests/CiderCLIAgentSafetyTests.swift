@@ -52,6 +52,30 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("Usage: cider-cli capture add") == true)
     }
 
+    @Test("capture add event and contact reject missing required fields")
+    func captureAddEventAndContactRejectMissingRequiredFields() throws {
+        let eventResult = try runCLI(args: [
+            "capture", "add",
+            "--kind", "event",
+            "--title", "No Date",
+            "--json",
+        ])
+        let eventDict = try parseJSONObject(eventResult.stdout)
+        #expect(eventResult.status != 0)
+        #expect(eventDict["ok"] as? Bool == false)
+        #expect((eventDict["error"] as? String)?.contains("--date") == true)
+
+        let contactResult = try runCLI(args: [
+            "capture", "add",
+            "--kind", "contact",
+            "--json",
+        ])
+        let contactDict = try parseJSONObject(contactResult.stdout)
+        #expect(contactResult.status != 0)
+        #expect(contactDict["ok"] as? Bool == false)
+        #expect((contactDict["error"] as? String)?.contains("--name") == true)
+    }
+
     @Test("bookmark add json rejects missing url")
     func bookmarkAddJSONRejectsMissingURL() throws {
         let result = try runCLI(args: ["bookmark", "add", "--json"])

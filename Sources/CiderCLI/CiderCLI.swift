@@ -922,6 +922,27 @@ struct CiderCLI {
                         folderID: targetFolder?.id,
                         sourceContext: sourceContext
                     )
+                case .event(let event):
+                    result = try service.addDateCardCapture(
+                        title: event.title,
+                        sourceText: event.sourceText,
+                        startAt: event.startAt,
+                        endAt: nil,
+                        allDay: event.allDay,
+                        location: event.location,
+                        folderID: targetFolder?.id,
+                        sourceContext: sourceContext
+                    )
+                case .contact(let contact):
+                    result = try service.addContactCapture(
+                        displayName: contact.displayName,
+                        sourceText: contact.sourceText,
+                        relationshipLabel: contact.relationship,
+                        email: contact.email,
+                        phone: contact.phone,
+                        folderID: targetFolder?.id,
+                        sourceContext: sourceContext
+                    )
                 }
                 let waitResult: BookmarkNativeCaptureWaitResult?
                 if result.item.type == "bookmark", let timeout = bookmarkNativeCaptureWaitTimeout(from: args) {
@@ -989,7 +1010,7 @@ struct CiderCLI {
             }
 
         case nil, "help", "--help", "-h":
-            print("Usage: cider-cli capture add [--kind note|todo|bookmark|file] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+            print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
             print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
 
         default:
@@ -7059,13 +7080,35 @@ struct CiderCLI {
         case todo(String)
         case bookmark(String)
         case file(String)
+        case event(CaptureAddEventInput)
+        case contact(CaptureAddContactInput)
 
         var originalText: String {
             switch self {
             case .inferred(let raw), .note(let raw), .todo(let raw), .bookmark(let raw), .file(let raw):
                 raw
+            case .event(let event):
+                event.sourceText
+            case .contact(let contact):
+                contact.sourceText
             }
         }
+    }
+
+    struct CaptureAddEventInput {
+        var title: String
+        var sourceText: String
+        var startAt: Date
+        var allDay: Bool
+        var location: String?
+    }
+
+    struct CaptureAddContactInput {
+        var displayName: String
+        var sourceText: String
+        var relationship: String?
+        var email: String?
+        var phone: String?
     }
 
     enum CaptureAddArgumentError: LocalizedError {
@@ -7342,11 +7385,58 @@ struct CiderCLI {
         case "file":
             if let path { return .file(path) }
             if let positional { return .file(positional) }
+        case "event":
+            return try .event(resolveCaptureAddEventInput(from: args, rawText: rawText))
+        case "contact":
+            return try .contact(resolveCaptureAddContactInput(from: args, rawText: rawText))
         case let unsupported?:
-            throw CaptureAddArgumentError.message("Unsupported --kind '\(unsupported)'. Use note, todo, bookmark, or file.")
+            throw CaptureAddArgumentError.message("Unsupported --kind '\(unsupported)'. Use note, todo, bookmark, file, event, or contact.")
         }
 
-        throw CaptureAddArgumentError.message("Source required. Usage: cider-cli capture add [--kind note|todo|bookmark|file] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+        throw CaptureAddArgumentError.message("Source required. Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+    }
+
+    static func resolveCaptureAddEventInput(from args: [String], rawText: String?) throws -> CaptureAddEventInput {
+        guard let title = normalizedRequiredCaptureFlag("--title", from: args) else {
+            throw CaptureAddArgumentError.message("--kind event requires --title.")
+        }
+        guard let dateString = normalizedRequiredCaptureFlag("--date", from: args) else {
+            throw CaptureAddArgumentError.message("--kind event requires --date yyyy-MM-dd.")
+        }
+        let timeString = parseFlag("--time", from: args)
+        guard let startAt = resolveEventStartAt(dateString: dateString, timeString: timeString) else {
+            throw CaptureAddArgumentError.message("Invalid event date/time. Use --date yyyy-MM-dd and optional --time \"h:mm a\" or \"HH:mm\".")
+        }
+        let details = parseFlag("--details", from: args)
+        let sourceText = rawText ?? details ?? title
+        let allDay = args.contains("--all-day") || (timeString == nil)
+        return CaptureAddEventInput(
+            title: title,
+            sourceText: sourceText,
+            startAt: allDay ? Calendar.autoupdatingCurrent.startOfDay(for: startAt) : startAt,
+            allDay: allDay,
+            location: parseFlag("--location", from: args)
+        )
+    }
+
+    static func resolveCaptureAddContactInput(from args: [String], rawText: String?) throws -> CaptureAddContactInput {
+        guard let displayName = normalizedRequiredCaptureFlag("--name", from: args)
+            ?? normalizedRequiredCaptureFlag("--title", from: args) else {
+            throw CaptureAddArgumentError.message("--kind contact requires --name or --title.")
+        }
+        return CaptureAddContactInput(
+            displayName: displayName,
+            sourceText: rawText ?? displayName,
+            relationship: parseFlag("--relationship", from: args),
+            email: parseFlag("--email", from: args),
+            phone: parseFlag("--phone", from: args)
+        )
+    }
+
+    static func normalizedRequiredCaptureFlag(_ flag: String, from args: [String]) -> String? {
+        guard let value = parseFlag(flag, from: args)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        return value
     }
 
     static func rawCaptureText(from args: [String]) throws -> String? {
@@ -11262,7 +11352,7 @@ struct CiderCLI {
         CiderCLI — Second Brain v1 agent API
 
         CAPTURE
-          cider-cli capture add [--kind note|todo|bookmark|file] (--stdin|--text-file <path>|--url <url>|--path <path>) [--title <title>] [--folder <name|path>] [--timeout <seconds>|--no-wait] [--json]
+          cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <path>|--url <url>|--path <path>) [--title <title>] [--date yyyy-MM-dd] [--details <text>] [--name <name>] [--folder <name|path>] [--timeout <seconds>|--no-wait] [--json]
 
         ITEM
           cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]

@@ -92,6 +92,16 @@ struct AgentRoutingInstructionsTests {
         #expect(!capturePrompt.contains("cider-cli bookmark add"))
         #expect(!capturePrompt.contains("cider-cli bookmark get"))
         #expect(!capturePrompt.contains("cider-cli duplicate-check"))
+
+        _ = try await orchestrator.handleMessage(.uiPanel(
+            text: "schedule a meeting with Avery next Friday at 10:30",
+            threadID: UUID(),
+            context: .empty
+        ))
+        let eventPrompt = try #require(runtime.lastSystemPrompt)
+        #expect(eventPrompt.contains("cider-cli capture add --kind event --title \"<title>\" --date yyyy-MM-dd --time \"<time>\" --location \"<place>\" --stdin --json"))
+        #expect(!eventPrompt.contains("cider-cli capture add \"<event text>\" --json"))
+        #expect(!eventPrompt.contains("cider-cli event create"))
     }
 }
 
