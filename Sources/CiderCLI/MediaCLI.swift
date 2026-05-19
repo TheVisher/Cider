@@ -70,9 +70,18 @@ extension CiderCLI {
         }
     }
 
-    private static func mediaBackfillReportToDict(_ report: MediaBackfillReport, mode: MediaBackfillMode) -> [String: Any] {
-        [
+    static func mediaBackfillReportToDict(_ report: MediaBackfillReport, mode: MediaBackfillMode) -> [String: Any] {
+        let isApply = mode == .apply
+        let changed = isApply && (
+            report.createdCount > 0
+                || report.updatedCount > 0
+                || !report.actionRecords.isEmpty
+        )
+        var dict: [String: Any] = [
+            "command": "media.identify",
             "mode": mode == .apply ? "apply" : "dry-run",
+            "readOnly": !isApply,
+            "changed": changed,
             "proposedCount": report.proposedItems.count,
             "reviewCount": report.reviewItems.count,
             "skippedCount": report.skippedCount,
@@ -83,6 +92,10 @@ extension CiderCLI {
             "reviewLane": mediaReviewLaneToDict(report.reviewItems),
             "actionRecords": report.actionRecords.map(mediaBackfillActionRecordToDict),
         ]
+        if isApply {
+            dict["mutationReason"] = mediaApplyMutationReason
+        }
+        return dict
     }
 
     private static func mediaReviewLaneToDict(_ reviewItems: [MediaIdentificationResult]) -> [String: Any] {
@@ -93,7 +106,27 @@ extension CiderCLI {
             "items": reviewItems.map(mediaIdentificationResultToDict),
             "safeActions": [
                 "media identify --dry-run --json",
-                "media identify --apply --json",
+            ],
+            "actions": mediaIdentifyActionsToDict(),
+        ]
+    }
+
+    private static var mediaApplyMutationReason: String {
+        "Writes MediaItem YAML and records media_item action provenance when a second-brain store is available."
+    }
+
+    private static func mediaIdentifyActionsToDict() -> [[String: Any]] {
+        [
+            [
+                "command": "media identify --dry-run --json",
+                "readOnly": true,
+                "requiresApproval": false,
+            ],
+            [
+                "command": "media identify --apply --json",
+                "readOnly": false,
+                "requiresApproval": true,
+                "mutationReason": mediaApplyMutationReason,
             ],
         ]
     }

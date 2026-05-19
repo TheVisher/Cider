@@ -328,6 +328,55 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeCommands.contains("cider-cli item sync-project cider --json"))
     }
 
+    @Test("media identify json separates read-only review from mutating apply")
+    func mediaIdentifyJSONSeparatesReadOnlyReviewFromMutatingApply() throws {
+        let dryRunReport = MediaBackfillReport(
+            proposedItems: [],
+            reviewItems: [],
+            skippedCount: 0,
+            createdCount: 0,
+            updatedCount: 0
+        )
+        let dryRun = CiderCLI.mediaBackfillReportToDict(dryRunReport, mode: .dryRun)
+
+        #expect(dryRun["command"] as? String == "media.identify")
+        #expect(dryRun["readOnly"] as? Bool == true)
+        #expect(dryRun["changed"] as? Bool == false)
+        #expect(dryRun["mutationReason"] == nil)
+        let reviewLane = try #require(dryRun["reviewLane"] as? [String: Any])
+        let safeActions = try #require(reviewLane["safeActions"] as? [String])
+        #expect(safeActions == ["media identify --dry-run --json"])
+
+        let actions = try #require(reviewLane["actions"] as? [[String: Any]])
+        #expect(actions.contains { action in
+            action["command"] as? String == "media identify --apply --json"
+                && action["readOnly"] as? Bool == false
+                && action["requiresApproval"] as? Bool == true
+        })
+
+        let applyReport = MediaBackfillReport(
+            proposedItems: [],
+            reviewItems: [],
+            skippedCount: 0,
+            createdCount: 1,
+            updatedCount: 0,
+            actionRecords: [
+                MediaBackfillActionRecord(
+                    mediaItemID: "steam-1145350",
+                    action: "media.backfill.create",
+                    status: "succeeded",
+                    summary: "Created media item"
+                )
+            ]
+        )
+        let apply = CiderCLI.mediaBackfillReportToDict(applyReport, mode: .apply)
+
+        #expect(apply["command"] as? String == "media.identify")
+        #expect(apply["readOnly"] as? Bool == false)
+        #expect(apply["changed"] as? Bool == true)
+        #expect((apply["mutationReason"] as? String)?.contains("MediaItem YAML") == true)
+    }
+
     @Test("project context summary bounds relation-heavy output")
     func projectContextSummaryBoundsRelationHeavyOutput() throws {
         let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cider")

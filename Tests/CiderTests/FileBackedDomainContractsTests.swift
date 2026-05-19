@@ -67,8 +67,36 @@ struct FileBackedDomainContractsTests {
             "`item graph-health --json`: read-only graph readiness",
             "`item project-context <project> --json`: project graph context",
             "Graph-heavy commands should expose counts and safe follow-up commands",
+            "`media identify --dry-run --json`: read-only media identification preview",
+            "`media identify --apply --json`: mutating media identification apply path",
         ] {
             #expect(cliSource.contains(snippet), "Docs/CLI.md missing graph CLI contract snippet: \(snippet)")
+        }
+    }
+
+    @Test("core docs declare sync and media bridge boundaries")
+    func coreDocsDeclareSyncAndMediaBridgeBoundaries() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let storageDoc = repoRoot.appendingPathComponent("Docs/STORAGE.md")
+        let cliDoc = repoRoot.appendingPathComponent("Docs/CLI.md")
+        let storageSource = try String(contentsOf: storageDoc, encoding: .utf8)
+        let cliSource = try String(contentsOf: cliDoc, encoding: .utf8)
+
+        for snippet in [
+            "Cider Web sync currently covers bookmarks, folders, and notes.",
+            "It does not sync second-brain graph tables",
+            "MediaItem metadata remains YAML-backed",
+            "`media identify --apply` writes MediaItem YAML and records `media_item` action provenance",
+        ] {
+            #expect(storageSource.contains(snippet), "Docs/STORAGE.md missing sync/media bridge snippet: \(snippet)")
+        }
+
+        for snippet in [
+            "`media identify --dry-run --json` reports `readOnly: true` and `changed: false`",
+            "`media identify --apply --json` reports `readOnly: false`",
+            "`reviewLane.safeActions` must include only read-only commands",
+        ] {
+            #expect(cliSource.contains(snippet), "Docs/CLI.md missing media CLI bridge snippet: \(snippet)")
         }
     }
 }

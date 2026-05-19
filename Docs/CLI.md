@@ -75,6 +75,8 @@ Core commands:
 - `item backfill-kanban [--board <name-or-id>] --json`: rebuilds Kanban card projections from YAML into SQLite sections/chunks.
 - `item doctor --json`: checks second-brain tables and SQLite integrity.
 - `space explain <name-or-id> --json`: returns purpose, routing hints, default views, and agent instructions for a Space.
+- `media identify --dry-run --json`: read-only media identification preview. JSON reports `command: media.identify`, `readOnly: true`, `changed: false`, candidate counts, review items, and safe review actions.
+- `media identify --apply --json`: mutating media identification apply path. JSON reports `command: media.identify`, `readOnly: false`, `changed`, `mutationReason`, write counts, and `actionRecords` for recorded media provenance.
 
 Graph-heavy commands should expose counts and safe follow-up commands. Prefer bounded summaries or explicit full-detail flags when relation-heavy responses, such as project card lists, would otherwise flood agent context.
 
@@ -85,6 +87,8 @@ The second-brain command surface should support the product loop: capture -> enr
 Legacy bookmark creation is a compatibility surface over the unified capture backend. `bookmark add --json` preserves bookmark fields and includes `command: bookmark.add`, `backendCommand: capture.add`, and a nested `capture` result so agents can see the capture/routing/review contract without switching commands mid-workflow.
 
 Structured create commands may use domain-specific provenance instead of creating a generic capture event. `event create --json` and `contact create --json` should return `command: event.create` / `command: contact.create` and record routing provenance with sources such as `event.create`, `contact.create`, and `contact.birthday_date_card` for generated birthday date cards.
+
+Media identification is a bridge command over file-backed MediaItem metadata. `media identify --dry-run --json` reports `readOnly: true` and `changed: false`; `media identify --apply --json` reports `readOnly: false` and must include a mutation reason when applying proposed YAML writes. `reviewLane.safeActions` must include only read-only commands; mutating follow-ups belong in `reviewLane.actions` with `readOnly: false` and `requiresApproval: true`.
 
 Legacy bookmark batch enrichment remains available as `bookmark enrich --all --confirm`, but agents should prefer `review enrich-batch --confirm` so enrichment work is review-backed and records batch history.
 
