@@ -100,4 +100,31 @@ struct ItemLinkServiceTests {
         #expect(try service.outgoingRefs(for: bookmark).isEmpty)
         #expect(try service.backlinkRefs(for: contact).isEmpty)
     }
+
+    @Test("Link mutations record audit entries")
+    func linkMutationsRecordAuditEntries() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = ItemLinkService(database: db)
+        let bookmark = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let contact = LibraryEntityRef(type: .contact, entityID: UUID())
+        try insertItem(bookmark, title: "Gift idea", into: db)
+        try insertItem(contact, title: "Baine", into: db)
+
+        try service.addDirectLink(from: bookmark, to: contact)
+        try service.removeDirectLink(from: bookmark, to: contact)
+
+        let entries = MutationAuditService(database: db).loadEntries()
+        let added = entries.first { $0.itemID == bookmark.entityID && $0.action == "add_link" }
+        let removed = entries.first { $0.itemID == bookmark.entityID && $0.action == "remove_link" }
+
+        #expect(added?.itemType == "bookmark")
+        #expect(added?.metadata["targetType"] == "contact")
+        #expect(added?.metadata["targetID"] == contact.entityID.uuidString)
+
+        #expect(removed?.itemType == "bookmark")
+        #expect(removed?.metadata["targetType"] == "contact")
+        #expect(removed?.metadata["targetID"] == contact.entityID.uuidString)
+    }
 }

@@ -465,7 +465,18 @@ struct ClipboardViewerView: View {
                     title: "Clipboard Image",
                     imageData: data,
                     preferredFileExtension: ext,
-                    sourceFile: url.path
+                    sourceFile: url.path,
+                    sourceContext: CaptureSourceContext(
+                        surface: "clipboard_viewer",
+                        channel: "pasteboard",
+                        attachments: [
+                            CaptureSourceContext.Attachment(
+                                filename: url.lastPathComponent,
+                                mimeType: item.imageFileExtension.map { "image/\($0)" },
+                                localPath: url.path
+                            )
+                        ]
+                    )
                 ) else { return }
                 let didAssignThumbnail = result.partialSuccess?.status != "thumbnail_assignment_failed"
                 clipboardStorage.markSaved(itemID, savedItemID: result.item.id)
@@ -495,7 +506,12 @@ struct ClipboardViewerView: View {
         guard let result = try? CiderCaptureService().addNoteCapture(
             title: nil,
             content: text,
-            folderID: nil
+            folderID: nil,
+            sourceContext: CaptureSourceContext(
+                surface: "clipboard_viewer",
+                channel: "pasteboard",
+                originalText: text
+            )
         ) else {
             NotificationCenter.default.post(
                 name: .showBookmarkCaptureToast,

@@ -590,6 +590,22 @@ final class VaultBookmarkService: ObservableObject {
             existing = renameBookmarkArtifactAfterTitleUpgrade(previous: previous, updated: existing)
             bookmarks.insert(existing, at: 0)
             persist()
+            MutationAuditService(database: resolvedDatabase).record(
+                action: "deduplicate_url_capture",
+                itemType: "bookmark",
+                itemID: existing.id,
+                before: MutationAuditSnapshots.bookmark(previous),
+                after: MutationAuditSnapshots.bookmark(existing),
+                metadata: [
+                    "incomingURL": urlString,
+                    "canonicalURL": canonical,
+                ]
+            )
+            SecondBrainItemMutationIndexer.rebuildAfterMutation(
+                database: resolvedDatabase,
+                ownerType: "bookmark",
+                ownerID: existing.id
+            )
             if let folderID, existing.folderID != folderID {
                 _ = assignBookmark(existing.id, toFolder: folderID)
             }
@@ -671,6 +687,11 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         persist()
+        SecondBrainItemMutationIndexer.rebuildAfterMutation(
+            database: resolvedDatabase,
+            ownerType: "bookmark",
+            ownerID: bookmarkID
+        )
     }
 
     @discardableResult
@@ -844,6 +865,11 @@ final class VaultBookmarkService: ObservableObject {
             bookmark.updatedAt = Date()
             bookmarks[index] = bookmark
             persist()
+            SecondBrainItemMutationIndexer.rebuildAfterMutation(
+                database: resolvedDatabase,
+                ownerType: "bookmark",
+                ownerID: bookmarkID
+            )
             if oldTitle != bookmark.title {
                 MutationAuditService.shared.record(
                     action: "rename",
@@ -880,6 +906,11 @@ final class VaultBookmarkService: ObservableObject {
             bookmarks[index].lastEnrichedAt = Date()
             bookmarks[index].updatedAt = Date()
             persist()
+            SecondBrainItemMutationIndexer.rebuildAfterMutation(
+                database: resolvedDatabase,
+                ownerType: "bookmark",
+                ownerID: bookmarkID
+            )
         }
         return changed
     }

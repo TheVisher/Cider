@@ -98,6 +98,11 @@ final class VaultFileStorage: ObservableObject {
             before: before,
             after: snapshot(for: file)
         )
+        SecondBrainItemMutationIndexer.rebuildAfterMutation(
+            database: resolvedDatabase,
+            ownerType: "vaultFile",
+            ownerID: file.id
+        )
     }
 
     func updateNotes(_ file: VaultFile, notes: String) {
@@ -111,6 +116,11 @@ final class VaultFileStorage: ObservableObject {
             itemID: file.id,
             before: before,
             after: snapshot(for: file)
+        )
+        SecondBrainItemMutationIndexer.rebuildAfterMutation(
+            database: resolvedDatabase,
+            ownerType: "vaultFile",
+            ownerID: file.id
         )
     }
 

@@ -112,6 +112,36 @@ struct SecondBrainItemContentIndexingTests {
         }
     }
 
+    @Test("bookmark detail mutations rebuild searchable chunks")
+    func bookmarkDetailMutationsRebuildSearchableChunks() throws {
+        try withIsolatedVault { db, _ in
+            let bookmark = Bookmark(
+                title: "Mutable Bookmark",
+                urlString: "https://example.com/original",
+                notes: "obsolete-bookmark-token"
+            )
+            let seed = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            seed.persistBookmarkToDatabase(db, bookmark: bookmark)
+
+            let service = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            service.loadBookmarksFromDatabase(db)
+
+            let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmark.id.uuidString)
+            _ = try SecondBrainItemContentIndexingService(database: db).rebuild(owner: owner)
+
+            #expect(service.updateDetails(
+                for: bookmark.id,
+                title: "Mutable Bookmark",
+                notes: "fresh-bookmark-token",
+                tags: []
+            ) == true)
+
+            let store = SecondBrainStore(database: db)
+            #expect(try store.searchChunks(query: "obsolete-bookmark-token", limit: 5).isEmpty)
+            #expect(try store.searchChunks(query: "fresh-bookmark-token", limit: 5).first?.owner == owner)
+        }
+    }
+
     private func insertItem(id: String, type: String, title: String, into db: CiderDatabase) throws {
         let stmt = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)

@@ -289,6 +289,11 @@ final class ContactStorage: ObservableObject {
             before: before,
             after: MutationAuditSnapshots.contact(copy)
         )
+        SecondBrainItemMutationIndexer.rebuildAfterMutation(
+            database: resolvedDatabase,
+            ownerType: "contact",
+            ownerID: copy.id
+        )
         return true
     }
 

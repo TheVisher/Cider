@@ -242,6 +242,65 @@ struct CaptureParitySafetyTests {
         #expect(violations.isEmpty, "Capture intake surfaces must pass source context:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("clipboard viewer image and text saves pass source context")
+    func clipboardViewerImageAndTextSavesPassSourceContext() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let file = "Sources/Cider/Views/Shared/ClipboardViewerView.swift"
+        let source = try String(contentsOf: repoRoot.appendingPathComponent(file), encoding: .utf8)
+        let imageBranch = try #require(
+            snippet(from: "case .image:", to: "case .text, .richText:", in: source),
+            "Could not find ClipboardViewer image save branch"
+        )
+        let saveAsNote = try #require(
+            block(named: "private func saveAsNote", in: source),
+            "Could not find ClipboardViewer saveAsNote"
+        )
+        var violations: [String] = []
+
+        for (name, body) in [("image save", imageBranch), ("text save", saveAsNote)] {
+            if !body.contains("sourceContext: CaptureSourceContext(") {
+                violations.append("\(file): \(name) missing sourceContext")
+            }
+            if !body.contains("surface: \"clipboard_viewer\"") {
+                violations.append("\(file): \(name) missing clipboard_viewer surface")
+            }
+            if !body.contains("channel: \"pasteboard\"") {
+                violations.append("\(file): \(name) missing pasteboard channel")
+            }
+        }
+
+        #expect(violations.isEmpty, "ClipboardViewer image/text saves must preserve source context:\n\(violations.joined(separator: "\n"))")
+    }
+
+    @Test("AI note creation passes AI source context")
+    func aiNoteCreationPassesAISourceContext() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let expectations: [(file: String, marker: String, surface: String)] = [
+            ("Sources/Cider/Services/AI/AIAssistantTools.swift", "struct CreateNoteTool: Tool", "ai_assistant"),
+            ("Sources/Cider/Services/AI/MLXToolExecutor.swift", "private static func createNote", "mlx_tool"),
+        ]
+        var violations: [String] = []
+
+        for expectation in expectations {
+            let source = try String(contentsOf: repoRoot.appendingPathComponent(expectation.file), encoding: .utf8)
+            let body = try #require(
+                block(named: expectation.marker, in: source),
+                "Could not find \(expectation.marker) in \(expectation.file)"
+            )
+            if !body.contains("CiderCaptureService().addNoteCapture(") {
+                violations.append("\(expectation.file): missing canonical note capture call")
+            }
+            if !body.contains("sourceContext: CaptureSourceContext(") {
+                violations.append("\(expectation.file): missing sourceContext on AI note creation")
+            }
+            if !body.contains("surface: \"\(expectation.surface)\"") {
+                violations.append("\(expectation.file): missing \(expectation.surface) surface")
+            }
+        }
+
+        #expect(violations.isEmpty, "AI note creation must preserve tool source context:\n\(violations.joined(separator: "\n"))")
+    }
+
     @Test("bookmark adapter and URL intake preserve source context")
     func bookmarkAdapterAndURLIntakePreserveSourceContext() throws {
         let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
@@ -317,7 +376,7 @@ struct CaptureParitySafetyTests {
             (
                 "Sources/Cider/Services/LibraryItemEditor.swift",
                 [
-                    "recordCreateProvenance(",
+                    "recordCreateProvenanceOrLog(",
                     "\"library.editor.event.create\"",
                     "\"library.editor.contact.create\"",
                 ]
@@ -325,7 +384,7 @@ struct CaptureParitySafetyTests {
             (
                 "Sources/Cider/Services/CiderBookmarkDateSuggestionApprovalService.swift",
                 [
-                    "recordCreateProvenance(",
+                    "recordCreateProvenanceOrLog(",
                     "\"bookmark.date_suggestion.date_card.create\"",
                     "\"bookmark.date_suggestion.todo.create\"",
                 ]
@@ -342,6 +401,65 @@ struct CaptureParitySafetyTests {
         }
 
         #expect(violations.isEmpty, "Derived create wrappers must preserve routing provenance:\n\(violations.joined(separator: "\n"))")
+    }
+
+    @Test("derived create wrappers do not silently swallow create provenance failures")
+    func derivedCreateWrappersDoNotSilentlySwallowCreateProvenanceFailures() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let files = [
+            "Sources/Cider/Services/LibraryItemEditor.swift",
+            "Sources/Cider/Services/CiderBookmarkDateSuggestionApprovalService.swift",
+        ]
+        var violations: [String] = []
+
+        for file in files {
+            let source = try String(contentsOf: repoRoot.appendingPathComponent(file), encoding: .utf8)
+            if source.contains("try? CiderRoutingDecisionService().recordCreateProvenance(") {
+                violations.append("\(file): create provenance failures are silently swallowed with try?")
+            }
+        }
+
+        #expect(violations.isEmpty, "Create provenance failures must be logged or surfaced, not silently swallowed:\n\(violations.joined(separator: "\n"))")
+    }
+
+    @Test("indexed item mutation services refresh content chunks after SQLite writes")
+    func indexedItemMutationServicesRefreshContentChunksAfterSQLiteWrites() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let expectations: [(file: String, marker: String, ownerType: String)] = [
+            ("Sources/Cider/Services/VaultBookmarkService.swift", "func updateURL", "bookmark"),
+            ("Sources/Cider/Services/VaultBookmarkService.swift", "func updateDetails", "bookmark"),
+            ("Sources/Cider/Services/VaultBookmarkService.swift", "func updateEnrichment", "bookmark"),
+            ("Sources/Cider/Services/DateCardStorage.swift", "func updateDateCard", "dateCard"),
+            ("Sources/Cider/Services/TodoCardStorage.swift", "func updateTodoCard", "todo"),
+            ("Sources/Cider/Services/ContactStorage.swift", "func updateContact", "contact"),
+            ("Sources/Cider/Services/VaultFileStorage.swift", "func updateTitle", "vaultFile"),
+            ("Sources/Cider/Services/VaultFileStorage.swift", "func updateNotes", "vaultFile"),
+        ]
+        var violations: [String] = []
+
+        for expectation in expectations {
+            let source = try String(contentsOf: repoRoot.appendingPathComponent(expectation.file), encoding: .utf8)
+            let body = try #require(
+                block(named: expectation.marker, in: source),
+                "Could not find \(expectation.marker) in \(expectation.file)"
+            )
+            if !body.contains("SecondBrainItemMutationIndexer.rebuildAfterMutation(") {
+                violations.append("\(expectation.file): \(expectation.marker) does not rebuild content chunks")
+            }
+            if !body.contains("ownerType: \"\(expectation.ownerType)\"") {
+                violations.append("\(expectation.file): \(expectation.marker) does not rebuild \(expectation.ownerType) chunks")
+            }
+        }
+
+        #expect(violations.isEmpty, "Indexed item mutations must refresh content chunks after SQLite writes:\n\(violations.joined(separator: "\n"))")
+    }
+
+    private func snippet(from startMarker: String, to endMarker: String, in source: String) -> String? {
+        guard let startRange = source.range(of: startMarker),
+              let endRange = source[startRange.upperBound...].range(of: endMarker) else {
+            return nil
+        }
+        return String(source[startRange.lowerBound..<endRange.lowerBound])
     }
 
     private func block(named marker: String, in source: String) -> String? {

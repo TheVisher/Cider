@@ -275,6 +275,14 @@ struct CiderCaptureServiceTests {
             #expect(second.duplicate.existingItemID == first.item.id)
             #expect(second.routing.reviewNeeded == true)
             #expect(second.nextSafeAction == "inspect_existing_item")
+
+            let auditEntries = MutationAuditService(database: db).loadEntries()
+            let duplicateAudit = auditEntries.first {
+                $0.itemID == first.item.id && $0.action == "deduplicate_url_capture"
+            }
+            #expect(duplicateAudit?.itemType == "bookmark")
+            #expect(duplicateAudit?.metadata["incomingURL"] == "https://example.com/duplicate")
+            #expect(duplicateAudit?.metadata["canonicalURL"] == "https://example.com/duplicate")
         }
     }
 

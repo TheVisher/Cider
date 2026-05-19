@@ -102,6 +102,8 @@ final class ItemLinkService {
             .bind(sourceID, at: 4)
             .bind(targetID, at: 5)
         try stmt.step()
+        recordLinkMutation(action: "add_link", source: source, target: target)
+        rebuildLinkedItemContext(for: source)
     }
 
     func addLink(from source: LibraryEntityRef, to target: LibraryEntityRef) throws {
@@ -115,10 +117,12 @@ final class ItemLinkService {
         let stmt = try database.prepare("""
             DELETE FROM item_links
             WHERE source_id = ? AND target_id = ? AND link_type = 'linked';
-            """)
+        """)
         stmt.bind(DatabaseHelpers.encode(source.entityID), at: 1)
             .bind(DatabaseHelpers.encode(target.entityID), at: 2)
         try stmt.step()
+        recordLinkMutation(action: "remove_link", source: source, target: target)
+        rebuildLinkedItemContext(for: source)
     }
 
     func removeLink(from source: LibraryEntityRef, to target: LibraryEntityRef) throws {
@@ -202,6 +206,31 @@ final class ItemLinkService {
             todo.linkedEntities = refs
             _ = todos.updateTodoCard(todo)
         case .bookmark, .note, .vaultFile, .externalFile, .session:
+            return
+        }
+    }
+
+    private func recordLinkMutation(action: String, source: LibraryEntityRef, target: LibraryEntityRef) {
+        MutationAuditService(database: database).record(
+            action: action,
+            itemType: source.type.rawValue,
+            itemID: source.entityID,
+            metadata: [
+                "targetType": target.type.rawValue,
+                "targetID": target.entityID.uuidString,
+            ]
+        )
+    }
+
+    private func rebuildLinkedItemContext(for source: LibraryEntityRef) {
+        switch source.type {
+        case .bookmark, .note, .todo, .dateCard, .contact, .vaultFile:
+            SecondBrainItemMutationIndexer.rebuildAfterMutation(
+                database: database,
+                ownerType: source.type.rawValue,
+                ownerID: source.entityID
+            )
+        case .externalFile, .session:
             return
         }
     }

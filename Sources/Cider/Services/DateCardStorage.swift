@@ -291,6 +291,11 @@ final class DateCardStorage: ObservableObject {
             before: before,
             after: MutationAuditSnapshots.dateCard(copy)
         )
+        SecondBrainItemMutationIndexer.rebuildAfterMutation(
+            database: resolvedDatabase,
+            ownerType: "dateCard",
+            ownerID: copy.id
+        )
         let beforeHasReminder = beforeCard.rules.contains { $0.type == .remindBeforeMinutes && $0.isEnabled }
         let afterHasReminder = copy.rules.contains { $0.type == .remindBeforeMinutes && $0.isEnabled }
         if !beforeHasReminder && afterHasReminder {

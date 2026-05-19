@@ -309,6 +309,11 @@ final class TodoCardStorage: ObservableObject {
             before: before,
             after: MutationAuditSnapshots.todo(copy)
         )
+        SecondBrainItemMutationIndexer.rebuildAfterMutation(
+            database: resolvedDatabase,
+            ownerType: "todo",
+            ownerID: copy.id
+        )
         return true
     }
 

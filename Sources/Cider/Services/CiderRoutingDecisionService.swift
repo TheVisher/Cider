@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct CiderRoutingDecisionTarget: Equatable {
     var kind: String
@@ -137,6 +138,11 @@ enum CiderRoutingDecisionError: LocalizedError {
 
 @MainActor
 final class CiderRoutingDecisionService {
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "Cider",
+        category: "CiderRoutingDecisionService"
+    )
+
     private let database: CiderDatabase?
 
     private var resolvedDatabase: CiderDatabase? {
@@ -252,6 +258,26 @@ final class CiderRoutingDecisionService {
             )
         )
         return try explain(itemID: itemID)
+    }
+
+    func recordCreateProvenanceOrLog(
+        itemID: UUID,
+        source: String,
+        actor: String = "user",
+        reviewReason: String,
+        acceptedReason: String
+    ) {
+        do {
+            _ = try recordCreateProvenance(
+                itemID: itemID,
+                source: source,
+                actor: actor,
+                reviewReason: reviewReason,
+                acceptedReason: acceptedReason
+            )
+        } catch {
+            Self.logger.error("Failed to record create provenance for \(itemID.uuidString) from \(source): \(error.localizedDescription)")
+        }
     }
 
     @discardableResult

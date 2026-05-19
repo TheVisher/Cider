@@ -833,7 +833,15 @@ struct CreateNoteTool: Tool {
             let result = try CiderCaptureService().addNoteCapture(
                 title: title,
                 content: content,
-                folderID: targetFolder?.id
+                folderID: targetFolder?.id,
+                sourceContext: CaptureSourceContext(
+                    surface: "ai_assistant",
+                    originalText: content,
+                    metadata: [
+                        "tool": "createNote",
+                        "requested_title": title,
+                    ]
+                )
             )
             let finalTitle = result.item.title
             if let folderName = requestedFolderName, targetFolder == nil {
