@@ -84,7 +84,9 @@ Key code: `Sources/Cider/Views/Dashboard/`, `Sources/Cider/Views/Home/`, `Source
 
 Spaces are domain surfaces over shared second-brain state, such as Media, Food, Projects, Finance, People, and Recipes. They can provide dashboards, routing hints, saved views, and domain-specific workflows, but they must not become independent storage silos.
 
-Key code: `Sources/Cider/Views/Spaces/`, `Sources/Cider/Services/CiderSpaceStorage.swift`, `Sources/Cider/Services/CiderSpaceCaptureDashboardService.swift`.
+The target backend shape is a native SQLite `spaces` table for Space identity and instructions, with `space_memberships` and owner relations carrying semantic membership. Folder paths and `.cider-space.yaml` metadata remain compatibility/export surfaces until the cutover is proven.
+
+Key code: `Sources/Cider/Views/Spaces/`, `Sources/Cider/Services/CiderSpaceStorage.swift`, `Sources/Cider/Services/CiderSpaceMembershipStore.swift`, `Sources/Cider/Services/CiderSpaceCaptureDashboardService.swift`.
 
 ## Main Brain Chat
 

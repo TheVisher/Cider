@@ -99,4 +99,32 @@ struct FileBackedDomainContractsTests {
             #expect(cliSource.contains(snippet), "Docs/CLI.md missing media CLI bridge snippet: \(snippet)")
         }
     }
+
+    @Test("core docs declare native spaces cutover plan")
+    func coreDocsDeclareNativeSpacesCutoverPlan() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let storageDoc = repoRoot.appendingPathComponent("Docs/STORAGE.md")
+        let cliDoc = repoRoot.appendingPathComponent("Docs/CLI.md")
+        let featuresDoc = repoRoot.appendingPathComponent("Docs/FEATURES.md")
+        let storageSource = try String(contentsOf: storageDoc, encoding: .utf8)
+        let cliSource = try String(contentsOf: cliDoc, encoding: .utf8)
+        let featuresSource = try String(contentsOf: featuresDoc, encoding: .utf8)
+
+        for snippet in [
+            "The native cutover target is a SQLite `spaces` table",
+            "Path containment is storage topology, not semantic membership.",
+            "`.cider-space.yaml` should become an export/projection compatibility surface",
+        ] {
+            #expect(storageSource.contains(snippet), "Docs/STORAGE.md missing native Spaces cutover snippet: \(snippet)")
+        }
+
+        for snippet in [
+            "`space list --json` and `space explain <name-or-id> --json` expose an `authority` object",
+            "`authority.pathContainmentIsSemantic: false`",
+        ] {
+            #expect(cliSource.contains(snippet), "Docs/CLI.md missing native Spaces CLI snippet: \(snippet)")
+        }
+
+        #expect(featuresSource.contains("The target backend shape is a native SQLite `spaces` table"))
+    }
 }

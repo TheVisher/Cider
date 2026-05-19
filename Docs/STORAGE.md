@@ -19,7 +19,7 @@ These contracts tell agents which file/YAML domains are intentional authorities,
 | --- | --- | --- | --- |
 | Kanban board YAML | Canonical file store | Board YAML in `~/CiderVault/.cider/boards/` owns project workflow, card notes, status, parent/child links, QA evidence, implementation history, and handoff context. | Keep YAML canonical; use supported board commands or structured YAML writes; refresh SQLite projection after edits when search/agent inspection needs it. |
 | Kanban SQLite projection | Projection | `SecondBrainKanbanProjectionService` projects board/card sections into `item_sections` and `content_chunks` for search and agent inspection. | Treat as rebuildable read-model data; repair drift with `item backfill-kanban --board <board>`. |
-| Spaces | Hybrid | Space metadata currently lives in `Spaces/<name>/.cider-space.yaml`, while Spaces should behave as product surfaces over shared SQLite/vault state rather than separate memory silos. | Keep metadata files until Spaces are rebuilt; do not treat Space folders as second-brain truth beyond routing hints and UI surface identity. |
+| Spaces | Hybrid | Space metadata currently lives in `Spaces/<name>/.cider-space.yaml`, while native membership lives in `space_memberships`. Spaces should behave as product surfaces over shared SQLite/vault state rather than separate memory silos. | Cut over toward a SQLite `spaces` table; keep metadata files as export/projection compatibility and do not treat Space folders as semantic membership truth. |
 | Media | Hybrid | MediaItem metadata remains YAML-backed under `Spaces/Media/.cider/media-items`, backed by bookmark/item links, `media_item` action provenance, and provider payload artifacts. | Keep file-backed media metadata for now; migrate only when media routing, provenance, or item graph explanation needs a SQLite-native contract. |
 | Agent memory | Legacy | Durable memory Markdown/review files are review artifacts and compatibility memory, not canonical second-brain item truth. | Do not let legacy memory files override SQLite item graph, capture, or routing state; future chat/memory intake should feed canonical capture/provenance services. |
 | Folder Kanban | Legacy | `.cider/folder-kanban/*.yaml` stores per-folder item columns tied to legacy folder organization. | Do not expand as second-brain truth; hide or retire when Spaces/item routing replaces folder-centered workflows. |
@@ -141,6 +141,12 @@ Durable sync invariants:
 MediaItem metadata remains YAML-backed during the bridge phase. `media identify --apply` writes MediaItem YAML and records `media_item` action provenance through `agent_actions` when the second-brain store is available, but it does not yet project MediaItem content into `item_sections`/`content_chunks` or create full SQLite-native media owner relations.
 
 Agents should inspect media through the media CLI, Media Space dashboard, and the YAML-backed storage contract rather than assuming full item graph parity.
+
+## Native Spaces Cutover
+
+The native cutover target is a SQLite `spaces` table with stable ID, name, preset/purpose, agent instructions, routing hints, default views, root storage path, pinned state, and timestamps. `space_memberships` already carries item-to-space meaning; follow-up graph work should mirror that membership into owner relations instead of inferring meaning from folders.
+
+Path containment is storage topology, not semantic membership. `.cider-space.yaml` should become an export/projection compatibility surface for Finder visibility, sync/export, and rollback while SQLite owns Space identity and meaning.
 
 ## Dashboard Data
 

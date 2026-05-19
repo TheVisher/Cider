@@ -75,6 +75,7 @@ Core commands:
 - `item backfill-kanban [--board <name-or-id>] --json`: rebuilds Kanban card projections from YAML into SQLite sections/chunks.
 - `item doctor --json`: checks second-brain tables and SQLite integrity.
 - `space explain <name-or-id> --json`: returns purpose, routing hints, default views, and agent instructions for a Space.
+- `space list --json` and `space explain <name-or-id> --json` expose an `authority` object so agents can distinguish Space metadata, semantic membership, and storage fallback. `authority.pathContainmentIsSemantic: false` means root paths are not proof of membership.
 - `media identify --dry-run --json`: read-only media identification preview. JSON reports `command: media.identify`, `readOnly: true`, `changed: false`, candidate counts, review items, and safe review actions.
 - `media identify --apply --json`: mutating media identification apply path. JSON reports `command: media.identify`, `readOnly: false`, `changed`, `mutationReason`, write counts, and `actionRecords` for recorded media provenance.
 

@@ -9797,8 +9797,28 @@ struct CiderCLI {
             "routingHints": space.routingHints,
             "defaultViews": space.defaultViews.map(\.rawValue),
             "rootRelativePath": space.rootRelativePath,
+            "authority": spaceAuthorityToDict(),
+            "nativeCutover": spaceNativeCutoverToDict(),
             "createdAt": ISO8601DateFormatter().string(from: space.createdAt),
             "updatedAt": ISO8601DateFormatter().string(from: space.updatedAt),
+        ]
+    }
+
+    private static func spaceAuthorityToDict() -> [String: Any] {
+        [
+            "status": "hybrid_yaml_bridge",
+            "metadataSource": ".cider-space.yaml",
+            "semanticMembershipSource": "space_memberships",
+            "rootPathRole": "storage_projection",
+            "pathContainmentIsSemantic": false,
+        ]
+    }
+
+    private static func spaceNativeCutoverToDict() -> [String: Any] {
+        [
+            "plannedTable": "spaces",
+            "compatibilityProjection": ".cider-space.yaml",
+            "nextGate": "39a15a",
         ]
     }
 
