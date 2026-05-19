@@ -666,7 +666,16 @@ enum MLXToolExecutor {
             }
         }
         guard let adapterResult = try? CiderBookmarkCaptureAdapter()
-            .addURLBookmark(urlString: urlString, title: title, folderID: targetFolder?.id) else {
+            .addURLBookmark(
+                urlString: urlString,
+                title: title,
+                folderID: targetFolder?.id,
+                sourceContext: CaptureSourceContext(
+                    surface: "mlx_tool",
+                    originalText: urlString,
+                    metadata: ["tool": "createBookmark"]
+                )
+            ) else {
             return "Failed to create bookmark for \"\(urlString)\"."
         }
         let bookmark = adapterResult.bookmark
@@ -824,18 +833,26 @@ enum MLXToolExecutor {
             return "Invalid date format. Use yyyy-MM-dd (e.g. '2026-05-01')."
         }
 
-        let storage = DateCardStorage.shared
-        var card = storage.createDateCard(title: title, startAt: date)
-        guard storage.dateCards.contains(where: { $0.id == card.id }) else {
+        let loc = string("location", from: args)
+        let det = string("details", from: args)
+        guard let result = try? CiderCaptureService().addDateCardCapture(
+            title: title,
+            sourceText: det.isEmpty ? title : det,
+            startAt: date,
+            endAt: nil,
+            allDay: true,
+            location: loc.isEmpty ? nil : loc,
+            folderID: nil,
+            sourceContext: CaptureSourceContext(
+                surface: "mlx_tool",
+                originalText: det.isEmpty ? nil : det,
+                metadata: ["tool": "createReminder"]
+            )
+        ),
+              var card = DateCardStorage.shared.dateCard(for: result.item.id)
+        else {
             return "Failed to create reminder (disk write failed)."
         }
-
-        card.allDay = true
-
-        let loc = string("location", from: args)
-        if !loc.isEmpty { card.location = loc }
-        let det = string("details", from: args)
-        if !det.isEmpty { card.details = det }
 
         // Recurrence
         let freqStr = string("frequency", from: args).lowercased()
@@ -858,7 +875,7 @@ enum MLXToolExecutor {
             card.rules.append(SurfacingRule(type: .remindBeforeMinutes, integerValue: second))
         }
 
-        _ = storage.updateDateCard(card)
+        _ = DateCardStorage.shared.updateDateCard(card)
         ReminderReconciler.shared.reconcile()
 
         let recurring = card.recurrenceRule != nil ? " (recurring \(card.recurrenceRule!.frequency.rawValue))" : ""

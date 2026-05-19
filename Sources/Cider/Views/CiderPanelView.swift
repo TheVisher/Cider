@@ -283,7 +283,13 @@ struct CiderPanelView: View {
             } else if let note = notification.object as? Note {
                 openNoteDetail(note)
             } else {
-                let note = NotesStorage.shared.createNew()
+                guard let result = try? CiderCaptureService().addNoteCapture(
+                    title: nil,
+                    content: "",
+                    folderID: selectedFolderID
+                ),
+                      let note = NotesStorage.shared.notes.first(where: { $0.id == result.item.id })
+                else { return }
                 openNoteDetail(note)
             }
         }

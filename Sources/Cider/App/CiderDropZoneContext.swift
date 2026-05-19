@@ -406,7 +406,13 @@ final class CiderDropZoneContext: ObservableObject {
         resetDismissProgress()
         status = .processing("Saving bookmark...")
         guard let bookmark = try? CiderBookmarkCaptureAdapter()
-            .addURLBookmark(urlString: rawValue)
+            .addURLBookmark(
+                urlString: rawValue,
+                sourceContext: CaptureSourceContext(
+                    surface: "drop_zone",
+                    originalText: rawValue
+                )
+            )
             .bookmark else {
             resetDismissProgress()
             status = .failure("That URL could not be saved.")

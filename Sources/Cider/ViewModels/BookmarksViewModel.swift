@@ -78,11 +78,17 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     @discardableResult
-    func addBookmark(urlString: String, title: String?, folderID: UUID? = nil) -> Bool {
+    func addBookmark(
+        urlString: String,
+        title: String?,
+        folderID: UUID? = nil,
+        sourceContext: CaptureSourceContext? = nil
+    ) -> Bool {
         (try? CiderBookmarkCaptureAdapter().addURLBookmark(
             urlString: urlString,
             title: title,
-            folderID: folderID
+            folderID: folderID,
+            sourceContext: sourceContext
         )) != nil
     }
 
@@ -90,11 +96,27 @@ final class BookmarksViewModel: ObservableObject {
     func addBookmarkFromPasteboard() -> Bool {
         let pasteboard = NSPasteboard.general
         if let string = pasteboard.string(forType: .string) {
-            return addBookmark(urlString: string, title: nil)
+            return addBookmark(
+                urlString: string,
+                title: nil,
+                sourceContext: CaptureSourceContext(
+                    surface: "pasteboard",
+                    channel: "pasteboard",
+                    originalText: string
+                )
+            )
         }
         if let values = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
            let first = values.first {
-            return addBookmark(urlString: first.absoluteString, title: nil)
+            return addBookmark(
+                urlString: first.absoluteString,
+                title: nil,
+                sourceContext: CaptureSourceContext(
+                    surface: "pasteboard",
+                    channel: "pasteboard",
+                    originalText: first.absoluteString
+                )
+            )
         }
         return false
     }
@@ -102,7 +124,16 @@ final class BookmarksViewModel: ObservableObject {
     @discardableResult
     func captureBookmarkFromActiveBrowserOrClipboard() -> Bool {
         if let capture = ActiveBrowserCaptureService.captureFromFrontmostBrowser() {
-            let saved = addBookmark(urlString: capture.urlString, title: capture.title)
+            let saved = addBookmark(
+                urlString: capture.urlString,
+                title: capture.title,
+                sourceContext: CaptureSourceContext(
+                    surface: "active_browser",
+                    originalText: capture.urlString,
+                    metadata: ["browser_title": capture.title]
+                        .compactMapValues { $0 }
+                )
+            )
             postCaptureToast(
                 message: saved ? "Saved from active browser" : "Unable to save active browser tab",
                 isSuccess: saved

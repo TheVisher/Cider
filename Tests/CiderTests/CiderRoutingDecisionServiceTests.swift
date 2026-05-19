@@ -160,6 +160,30 @@ struct CiderRoutingDecisionServiceTests {
         #expect(explanation.reviewNeeded == false)
     }
 
+    @Test("create provenance rebuilds content chunks for derived mutation wrappers")
+    func createProvenanceRebuildsContentChunks() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let itemID = try insertBookmarkItem(db)
+        let service = CiderRoutingDecisionService(database: db)
+
+        _ = try service.recordCreateProvenance(
+            itemID: itemID,
+            source: "library.editor.bookmark.create",
+            reviewReason: "Created bookmark needs review.",
+            acceptedReason: "Created bookmark in selected folder."
+        )
+
+        let stmt = try db.prepare("""
+            SELECT COUNT(*)
+            FROM content_chunks
+            WHERE owner_type = 'bookmark' AND owner_id = ?;
+            """)
+        stmt.bind(itemID.uuidString, at: 1)
+        #expect(try stmt.step())
+        #expect(stmt.int(at: 0) > 0)
+    }
+
     @Test("space assignment records routing provenance and native membership without moving files")
     func spaceAssignmentRecordsRoutingProvenanceAndNativeMembership() throws {
         let (db, url) = try makeTempDB()

@@ -434,7 +434,15 @@ final class NotesViewModel: ObservableObject {
 
     func createNewNote() {
         flushSave()
-        let note = NotesStorage.shared.createNew()
+        guard let result = try? CiderCaptureService().addNoteCapture(
+            title: nil,
+            content: "",
+            folderID: nil
+        ),
+              let note = NotesStorage.shared.notes.first(where: { $0.id == result.item.id })
+        else {
+            return
+        }
         selectedNote = note
         editingContent = ""
         editingTitle = note.title

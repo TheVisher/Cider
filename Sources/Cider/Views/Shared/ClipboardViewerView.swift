@@ -435,7 +435,14 @@ struct ClipboardViewerView: View {
         case .url:
             if let urlString = item.textContent {
                 if let bookmark = try? CiderBookmarkCaptureAdapter()
-                    .addURLBookmark(urlString: urlString)
+                    .addURLBookmark(
+                        urlString: urlString,
+                        sourceContext: CaptureSourceContext(
+                            surface: "clipboard_viewer",
+                            channel: "pasteboard",
+                            originalText: urlString
+                        )
+                    )
                     .bookmark {
                     resultID = bookmark.id
                     NotificationCenter.default.post(

@@ -229,6 +229,7 @@ final class CiderRoutingDecisionService {
         reviewReason: String,
         acceptedReason: String
     ) throws -> CiderRoutingExplanation {
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
         let item = try itemSummary(for: itemID)
         let previous = try? latestDecision(for: itemID)
         let target = targetFromCurrentItem(item)
@@ -243,6 +244,12 @@ final class CiderRoutingDecisionService {
             source: source,
             reviewState: isInbox ? "needs_review" : "accepted",
             supersedesDecisionID: previous?.id
+        )
+        _ = try SecondBrainItemContentIndexingService(database: db).rebuild(
+            owner: SecondBrainOwnerRef(
+                ownerType: secondBrainOwnerType(for: item.type),
+                ownerID: itemID.uuidString
+            )
         )
         return try explain(itemID: itemID)
     }

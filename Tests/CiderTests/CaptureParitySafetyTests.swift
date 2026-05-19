@@ -30,6 +30,73 @@ struct CaptureParitySafetyTests {
         #expect(violations.isEmpty, "Note capture paths must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("empty-note editor entrypoints use the canonical capture service")
+    func emptyNoteEditorEntrypointsUseCanonicalCaptureService() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let expectations: [(file: String, marker: String)] = [
+            (
+                "Sources/Cider/ViewModels/NotesViewModel.swift",
+                "func createNewNote"
+            ),
+            (
+                "Sources/Cider/Views/CiderPanelView.swift",
+                ".onReceive(NotificationCenter.default.publisher(for: .toggleNoteEditor))"
+            ),
+        ]
+        var violations: [String] = []
+
+        for expectation in expectations {
+            let fileURL = repoRoot.appendingPathComponent(expectation.file)
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            let body = try #require(
+                block(named: expectation.marker, in: source),
+                "Could not find \(expectation.marker) in \(expectation.file)"
+            )
+
+            if !body.contains("CiderCaptureService().addNoteCapture(") {
+                violations.append("\(expectation.file): \(expectation.marker) does not create empty notes through CiderCaptureService")
+            }
+            if body.contains("NotesStorage.shared.createNew(") {
+                violations.append("\(expectation.file): \(expectation.marker) still creates empty notes through NotesStorage directly")
+            }
+        }
+
+        #expect(violations.isEmpty, "Empty-note editor entrypoints must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
+    }
+
+    @Test("AI-created notes and reminders use the canonical capture service")
+    func aiCreatedNotesAndRemindersUseCanonicalCaptureService() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let files = [
+            "Sources/Cider/Services/AI/AIAssistantTools.swift",
+            "Sources/Cider/Services/AI/MLXToolExecutor.swift",
+        ]
+        var violations: [String] = []
+
+        for file in files {
+            let fileURL = repoRoot.appendingPathComponent(file)
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+
+            if source.contains("NotesStorage.shared.createNew(") {
+                violations.append("\(file): AI note creation still uses NotesStorage directly")
+            }
+            if source.contains("createDateCard(title:") {
+                violations.append("\(file): AI reminder creation still uses DateCardStorage directly")
+            }
+            if file.hasSuffix("AIAssistantTools.swift"),
+               !source.contains("CiderCaptureService().addNoteCapture(")
+                || !source.contains("CiderCaptureService().addDateCardCapture(") {
+                violations.append("\(file): AI tools missing canonical note/date capture calls")
+            }
+            if file.hasSuffix("MLXToolExecutor.swift"),
+               !source.contains("CiderCaptureService().addDateCardCapture(") {
+                violations.append("\(file): MLX reminder tool missing canonical date capture call")
+            }
+        }
+
+        #expect(violations.isEmpty, "AI-created notes and reminders must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
+    }
+
     @Test("quick-create event contact and todo creation use the canonical capture service")
     func quickCreateDomainItemsUseCanonicalCaptureService() throws {
         let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
@@ -97,6 +164,7 @@ struct CaptureParitySafetyTests {
         let files = [
             repoRoot.appendingPathComponent("Sources/Cider/Views/Shared/ClipboardViewerView.swift"),
             repoRoot.appendingPathComponent("Sources/Cider/App/CiderDropZoneContext.swift"),
+            repoRoot.appendingPathComponent("Sources/Cider/App/AppDelegate+Toasts.swift"),
         ]
         var violations: [String] = []
 
@@ -172,6 +240,108 @@ struct CaptureParitySafetyTests {
         }
 
         #expect(violations.isEmpty, "Capture intake surfaces must pass source context:\n\(violations.joined(separator: "\n"))")
+    }
+
+    @Test("bookmark adapter and URL intake preserve source context")
+    func bookmarkAdapterAndURLIntakePreserveSourceContext() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let expectations: [(file: String, requiredSnippets: [String])] = [
+            (
+                "Sources/Cider/Services/CiderCaptureService.swift",
+                [
+                    "sourceContext: CaptureSourceContext? = nil",
+                    "sourceContext: sourceContext",
+                ]
+            ),
+            (
+                "Sources/Cider/ViewModels/BookmarksViewModel.swift",
+                [
+                    "sourceContext: CaptureSourceContext(",
+                    "surface: \"active_browser\"",
+                    "surface: \"pasteboard\"",
+                ]
+            ),
+            (
+                "Sources/Cider/Services/BookmarksClipboardMonitor.swift",
+                [
+                    "sourceContext: CaptureSourceContext(",
+                    "surface: \"clipboard_monitor\"",
+                ]
+            ),
+            (
+                "Sources/Cider/App/CiderDropZoneContext.swift",
+                [
+                    "sourceContext: CaptureSourceContext(",
+                    "surface: \"drop_zone\"",
+                ]
+            ),
+            (
+                "Sources/Cider/Views/CiderPanelView+URLDrop.swift",
+                [
+                    "sourceContext: CaptureSourceContext(",
+                    "surface: \"url_drop\"",
+                ]
+            ),
+            (
+                "Sources/Cider/Views/Shared/ClipboardViewerView.swift",
+                [
+                    "sourceContext: CaptureSourceContext(",
+                    "surface: \"clipboard_viewer\"",
+                ]
+            ),
+            (
+                "Sources/Cider/App/AppDelegate+Toasts.swift",
+                [
+                    "sourceContext: CaptureSourceContext(",
+                    "surface: \"clipboard_review_toast\"",
+                ]
+            ),
+        ]
+        var violations: [String] = []
+
+        for expectation in expectations {
+            let fileURL = repoRoot.appendingPathComponent(expectation.file)
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            for snippet in expectation.requiredSnippets where !source.contains(snippet) {
+                violations.append("\(expectation.file): missing \(snippet)")
+            }
+        }
+
+        #expect(violations.isEmpty, "Bookmark URL intake must preserve source context:\n\(violations.joined(separator: "\n"))")
+    }
+
+    @Test("derived create wrappers record create provenance")
+    func derivedCreateWrappersRecordCreateProvenance() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let expectations: [(file: String, requiredSnippets: [String])] = [
+            (
+                "Sources/Cider/Services/LibraryItemEditor.swift",
+                [
+                    "recordCreateProvenance(",
+                    "\"library.editor.event.create\"",
+                    "\"library.editor.contact.create\"",
+                ]
+            ),
+            (
+                "Sources/Cider/Services/CiderBookmarkDateSuggestionApprovalService.swift",
+                [
+                    "recordCreateProvenance(",
+                    "\"bookmark.date_suggestion.date_card.create\"",
+                    "\"bookmark.date_suggestion.todo.create\"",
+                ]
+            ),
+        ]
+        var violations: [String] = []
+
+        for expectation in expectations {
+            let fileURL = repoRoot.appendingPathComponent(expectation.file)
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            for snippet in expectation.requiredSnippets where !source.contains(snippet) {
+                violations.append("\(expectation.file): missing \(snippet)")
+            }
+        }
+
+        #expect(violations.isEmpty, "Derived create wrappers must preserve routing provenance:\n\(violations.joined(separator: "\n"))")
     }
 
     private func block(named marker: String, in source: String) -> String? {

@@ -64,7 +64,14 @@ extension CiderPanelView {
     @MainActor
     func saveDroppedURL(_ rawValue: String, folderID: UUID?) {
         let bookmark = try? CiderBookmarkCaptureAdapter()
-            .addURLBookmark(urlString: rawValue, folderID: folderID)
+            .addURLBookmark(
+                urlString: rawValue,
+                folderID: folderID,
+                sourceContext: CaptureSourceContext(
+                    surface: "url_drop",
+                    originalText: rawValue
+                )
+            )
             .bookmark
         NotificationCenter.default.post(
             name: .showBookmarkCaptureToast,

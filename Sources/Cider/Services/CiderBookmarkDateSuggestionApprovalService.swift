@@ -101,6 +101,12 @@ final class CiderBookmarkDateSuggestionApprovalService {
             card.details = draft.details
             card.actionURLString = draft.actionURLString
             _ = dateCardStorage.updateDateCard(card)
+            _ = try? CiderRoutingDecisionService().recordCreateProvenance(
+                itemID: card.id,
+                source: "bookmark.date_suggestion.date_card.create",
+                reviewReason: "Cider created a date card from a bookmark date suggestion and kept it in Inbox for review.",
+                acceptedReason: "Cider created a date card from an approved bookmark date suggestion."
+            )
             return dateCardStorage.dateCard(for: card.id) ?? card
         }
         self.createTodo = { draft in
@@ -112,6 +118,12 @@ final class CiderBookmarkDateSuggestionApprovalService {
             todo.details = draft.details
             todo.actionURLString = draft.actionURLString
             _ = TodoCardStorage.shared.updateTodoCard(todo)
+            _ = try? CiderRoutingDecisionService().recordCreateProvenance(
+                itemID: todo.id,
+                source: "bookmark.date_suggestion.todo.create",
+                reviewReason: "Cider created a todo from a bookmark date suggestion and kept it in Inbox for review.",
+                acceptedReason: "Cider created a todo from an approved bookmark date suggestion."
+            )
             return TodoCardStorage.shared.todoCards.first(where: { $0.id == todo.id }) ?? todo
         }
         self.linkItems = { source, target in

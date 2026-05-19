@@ -1632,7 +1632,8 @@ final class CiderBookmarkCaptureAdapter {
     func addURLBookmark(
         urlString: String,
         title: String? = nil,
-        folderID: UUID? = nil
+        folderID: UUID? = nil,
+        sourceContext: CaptureSourceContext? = nil
     ) throws -> CiderBookmarkCaptureAdapterResult {
         let captureResult = try CiderCaptureService(
             bookmarkService: bookmarkService,
@@ -1640,7 +1641,8 @@ final class CiderBookmarkCaptureAdapter {
         ).add(
             urlString,
             title: title,
-            folderID: folderID
+            folderID: folderID,
+            sourceContext: sourceContext
         )
         guard captureResult.item.type == "bookmark",
               let bookmark = bookmarkService.bookmarks.first(where: { $0.id == captureResult.item.id })

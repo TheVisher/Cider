@@ -907,16 +907,28 @@ struct SummarizeTextTool: Tool {
         if arguments.saveAsNote == true {
             return await MainActor.run { MutationAuditContext.withSource(.agent) {
                 let title = arguments.noteTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Summary"
-                var note = NotesStorage.shared.createNew(initialContent: summary)
-                note.title = title
-                NotesStorage.shared.save(note: note)
-
-                if let folderName = arguments.folderName?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !folderName.isEmpty,
-                   let folder = VaultFolderService.shared.folders.first(where: {
+                let folderName = arguments.folderName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let folder = folderName.flatMap { folderName in
+                    VaultFolderService.shared.folders.first(where: {
                        $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
-                   }) {
-                    if NotesStorage.shared.assignNote(note.id, toFolder: folder.id) {
+                    })
+                }
+                let result = try? CiderCaptureService().addNoteCapture(
+                    title: title,
+                    content: summary,
+                    folderID: folder?.id,
+                    sourceContext: CaptureSourceContext(
+                        surface: "ai_assistant",
+                        originalText: text,
+                        metadata: ["tool": "summarize", "save_as": "note"]
+                    )
+                )
+                guard let result else {
+                    return "Could not save summary as a note:\n\n\(summary)"
+                }
+
+                if let folder {
+                    if result.partialSuccess == nil {
                         return "Summary saved as note \"\(title)\" in folder \"\(folder.name)\":\n\n\(summary)"
                     }
                     return "Summary saved as note \"\(title)\" but failed to move it to folder \"\(folder.name)\":\n\n\(summary)"
@@ -968,7 +980,16 @@ struct AddBookmarkTool: Tool {
             targetFolder = nil
         }
         guard let adapterResult = try? CiderBookmarkCaptureAdapter()
-            .addURLBookmark(urlString: urlString, title: title, folderID: targetFolder?.id) else {
+            .addURLBookmark(
+                urlString: urlString,
+                title: title,
+                folderID: targetFolder?.id,
+                sourceContext: CaptureSourceContext(
+                    surface: "ai_assistant",
+                    originalText: urlString,
+                    metadata: ["tool": "addBookmark"]
+                )
+            ) else {
             return "Failed to create bookmark for \"\(urlString)\"."
         }
         let bookmark = adapterResult.bookmark
@@ -1297,19 +1318,25 @@ struct CreateReminderTool: Tool {
             return "Invalid date format. Use yyyy-MM-dd (e.g. '2026-05-01')."
         }
 
-        let storage = DateCardStorage.shared
-        var card = storage.createDateCard(title: title, startAt: date)
-        guard storage.dateCards.contains(where: { $0.id == card.id }) else {
+        let details = arguments.details?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let location = arguments.location?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let result = try? CiderCaptureService().addDateCardCapture(
+            title: title,
+            sourceText: details?.isEmpty == false ? details : title,
+            startAt: date,
+            endAt: nil,
+            allDay: arguments.allDay ?? true,
+            location: location?.isEmpty == false ? location : nil,
+            folderID: nil,
+            sourceContext: CaptureSourceContext(
+                surface: "ai_assistant",
+                originalText: details,
+                metadata: ["tool": "createReminder"]
+            )
+        ),
+              var card = DateCardStorage.shared.dateCard(for: result.item.id)
+        else {
             return "Failed to create reminder (disk write failed)."
-        }
-
-        card.allDay = arguments.allDay ?? true
-
-        if let loc = arguments.location?.trimmingCharacters(in: .whitespacesAndNewlines), !loc.isEmpty {
-            card.location = loc
-        }
-        if let det = arguments.details?.trimmingCharacters(in: .whitespacesAndNewlines), !det.isEmpty {
-            card.details = det
         }
 
         // Recurrence
@@ -1333,7 +1360,7 @@ struct CreateReminderTool: Tool {
             card.rules.append(SurfacingRule(type: .remindBeforeMinutes, integerValue: second))
         }
 
-        _ = storage.updateDateCard(card)
+        _ = DateCardStorage.shared.updateDateCard(card)
 
         // Trigger reconciliation so notifications are scheduled immediately
         ReminderReconciler.shared.reconcile()

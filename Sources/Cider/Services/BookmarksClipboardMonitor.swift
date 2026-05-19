@@ -109,7 +109,14 @@ final class BookmarksClipboardMonitor {
                     )
                     return
                 }
-            } else if (try? CiderBookmarkCaptureAdapter().addURLBookmark(urlString: value)) != nil {
+            } else if (try? CiderBookmarkCaptureAdapter().addURLBookmark(
+                urlString: value,
+                sourceContext: CaptureSourceContext(
+                    surface: "clipboard_monitor",
+                    channel: "pasteboard",
+                    originalText: value
+                )
+            )) != nil {
                 NotificationCenter.default.post(
                     name: .showBookmarkCaptureToast,
                     object: nil,

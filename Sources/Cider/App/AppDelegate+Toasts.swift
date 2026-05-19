@@ -208,12 +208,37 @@ extension AppDelegate {
                 // Try to get context from the frontmost browser (page title + URL)
                 let browserCapture = ActiveBrowserCaptureService.captureFromFrontmostBrowser()
                 let title = browserCapture?.title ?? "Saved Image"
-                let bookmark = VaultBookmarkService.shared.addImageBookmark(title: title)
-                if let urlString = browserCapture?.urlString {
-                    VaultBookmarkService.shared.updateURL(for: bookmark.id, urlString: urlString)
+                let sourceContext = CaptureSourceContext(
+                    surface: "clipboard_image_review",
+                    channel: "pasteboard",
+                    attachments: [
+                        CaptureSourceContext.Attachment(
+                            mimeType: "image/*"
+                        )
+                    ],
+                    metadata: [
+                        "browser_title": browserCapture?.title ?? "",
+                        "browser_url": browserCapture?.urlString ?? "",
+                    ].filter { !$0.value.isEmpty }
+                )
+                guard let result = try? CiderCaptureService().addImageBookmarkCapture(
+                    title: title,
+                    imageData: imageData,
+                    preferredFileExtension: nil,
+                    sourceFile: nil,
+                    sourceContext: sourceContext
+                ) else {
+                    self.showBookmarkCaptureToast(message: "Could not save copied image", isSuccess: false)
+                    return
                 }
-                VaultBookmarkService.shared.assignThumbnail(for: bookmark.id, imageData: imageData)
-                self.showBookmarkCaptureToast(message: "Saved copied image", isSuccess: true)
+                if let urlString = browserCapture?.urlString {
+                    VaultBookmarkService.shared.updateURL(for: result.item.id, urlString: urlString)
+                }
+                let didAssignThumbnail = result.partialSuccess?.status != "thumbnail_assignment_failed"
+                self.showBookmarkCaptureToast(
+                    message: didAssignThumbnail ? "Saved copied image" : "Saved image placeholder",
+                    isSuccess: didAssignThumbnail
+                )
             },
             onDiscard: { [weak self] in
                 BookmarksClipboardMonitor.shared.suspendFor(seconds: 3)
@@ -250,7 +275,14 @@ extension AppDelegate {
             },
             onSave: { [weak self] in
                 guard let self else { return }
-                let saved = (try? CiderBookmarkCaptureAdapter().addURLBookmark(urlString: normalized)) != nil
+                let saved = (try? CiderBookmarkCaptureAdapter().addURLBookmark(
+                    urlString: normalized,
+                    sourceContext: CaptureSourceContext(
+                        surface: "clipboard_review_toast",
+                        channel: "pasteboard",
+                        originalText: normalized
+                    )
+                )) != nil
                 self.showBookmarkCaptureToast(
                     message: saved ? "Saved copied URL" : "Could not save copied URL",
                     isSuccess: saved
