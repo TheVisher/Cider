@@ -181,7 +181,8 @@ extension CiderPanelView {
                         model: ProjectWorkspaceOverviewProvider.model(
                             for: project,
                             catalog: projectWorkspaceCatalog,
-                            boards: kanbanStorage.boards
+                            boards: kanbanStorage.boards,
+                            artifactRelations: projectArtifactRelations(for: project)
                         ),
                         onOpenProject: { _ in },
                         onOpenBoard: { boardID in
@@ -712,6 +713,15 @@ extension CiderPanelView {
         selectedProjectWorkspaceID = project.id
         selectedFolderID = nil
         selectedTab = .savedView(id: savedView.id, name: savedView.name)
+    }
+
+    func projectArtifactRelations(for project: ProjectWorkspace) -> [SecondBrainRelation] {
+        do {
+            let context = try SecondBrainProjectGraphService(database: .shared).context(for: project.id)
+            return context.artifactRelations
+        } catch {
+            return []
+        }
     }
 
     func linkProjectReference(_ ref: LibraryEntityRef, toCardID cardID: String, boardID: String) {

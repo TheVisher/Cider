@@ -641,7 +641,30 @@ private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
         "testingCards": summary.testingCards.map(\.id),
         "needsFixCards": summary.needsFixCards.map(\.id),
         "completedCards": summary.completedCards.map(\.id),
+        "automationActions": summary.automationActions.map(kanbanAgentWorkflowActionToDict),
     ]
+}
+
+@MainActor private func kanbanAgentWorkflowActionToDict(_ action: KanbanAgentWorkflowAction) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": action.id,
+        "cardID": action.cardID,
+        "cardTitle": action.cardTitle,
+        "sourceColumnID": action.sourceColumnID,
+        "sourceColumnName": action.sourceColumnName,
+        "action": action.action.rawValue,
+        "label": action.label,
+        "reason": action.reason,
+        "requiresApproval": action.requiresApproval,
+        "safeCommands": action.safeCommands,
+    ]
+    if let destinationColumnID = action.destinationColumnID {
+        dict["destinationColumnID"] = destinationColumnID
+    }
+    if let destinationColumnName = action.destinationColumnName {
+        dict["destinationColumnName"] = destinationColumnName
+    }
+    return dict
 }
 
 @MainActor func kanbanTestingTriageSummaryToDict(_ summary: KanbanTestingTriageSummary) -> [String: Any] {

@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 14
+    static let latestVersion: Int = 20
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -83,7 +83,128 @@ enum DatabaseMigrations {
         }
         if currentVersion < 14 {
             try migrateToV14(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 15 {
+            try migrateToV15(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 16 {
+            try migrateToV16(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 17 {
+            try migrateToV17(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 18 {
+            try migrateToV18(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 19 {
+            try migrateToV19(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 20 {
+            try migrateToV20(db)
+        }
+    }
+
+    // MARK: - V19 -> V20: Capture attachment provenance
+
+    private static func migrateToV20(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 20...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createCaptureAttachments)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_capture_attachments_event ON capture_attachments(capture_event_id, attachment_index);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_capture_attachments_source ON capture_attachments(source_attachment_id) WHERE source_attachment_id IS NOT NULL;")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (20);")
+        }
+
+        logger.info("Migration to v20 complete")
+    }
+
+    // MARK: - V18 -> V19: Similarity and grouping candidates
+
+    private static func migrateToV19(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 19...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createSimilarityCandidates)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_source ON similarity_candidates(source_owner_type, source_owner_id, review_state, score);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_target ON similarity_candidates(target_owner_type, target_owner_id, review_state, score);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_review ON similarity_candidates(review_state, updated_at);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (19);")
+        }
+
+        logger.info("Migration to v19 complete")
+    }
+
+    // MARK: - V17 -> V18: General enrichment outputs
+
+    private static func migrateToV18(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 18...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createEnrichmentOutputs)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_owner ON enrichment_outputs(owner_type, owner_id, kind, review_state);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_kind ON enrichment_outputs(kind, normalized_value);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (18);")
+        }
+
+        logger.info("Migration to v18 complete")
+    }
+
+    // MARK: - V16 -> V17: Capture event provenance
+
+    private static func migrateToV17(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 17...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createCaptureEvents)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_capture_events_source ON capture_events(source_kind, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_capture_events_channel ON capture_events(channel, channel_id, message_id);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (17);")
+        }
+
+        logger.info("Migration to v17 complete")
+    }
+
+    // MARK: - V15 -> V16: Project graph primitives
+
+    private static func migrateToV16(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 16...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createProjects)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status, updated_at);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (16);")
+        }
+
+        logger.info("Migration to v16 complete")
+    }
+
+    // MARK: - V14 -> V15: Universal owner relation graph
+
+    private static func migrateToV15(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 15...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createOwnerRelations)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_owner_relations_source ON owner_relations(source_owner_type, source_owner_id, relation_type, updated_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_owner_relations_target ON owner_relations(target_owner_type, target_owner_id, relation_type, updated_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_owner_relations_type ON owner_relations(relation_type, updated_at);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (15);")
+        }
+
+        logger.info("Migration to v15 complete")
     }
 
     // MARK: - V13 -> V14: Routing decisions can name native Space targets

@@ -233,6 +233,13 @@ private struct KanbanCardDashboardView: View {
         return KanbanParentChildRollup(board: board, parentID: cardID)
     }
 
+    private var roadmapNextUp: KanbanRoadmapNextUpProjection? {
+        guard let board = storage.boards.first(where: { $0.id == boardID || $0.name == boardName }) else {
+            return nil
+        }
+        return KanbanRoadmapNextUpProjection(board: board, parentID: cardID)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(spacing: Spacing.sm) {
@@ -254,7 +261,10 @@ private struct KanbanCardDashboardView: View {
                     KanbanDashboardCurrentStateView(model: model)
 
                     if let childRollup {
-                        KanbanDashboardChildRollupView(rollup: childRollup)
+                        KanbanDashboardChildRollupView(
+                            rollup: childRollup,
+                            roadmapNextUp: roadmapNextUp
+                        )
                     }
 
                     if !model.testingGuidanceEntries.isEmpty {
@@ -274,6 +284,15 @@ private struct KanbanCardDashboardView: View {
                     )
 
                     KanbanDashboardTripleSection(model: model)
+
+                    if !model.qaFindingsEntries.isEmpty {
+                        KanbanDashboardEntryGroup(
+                            icon: "exclamationmark.triangle",
+                            title: "QA Findings",
+                            entries: model.qaFindingsEntries,
+                            emptyText: "No failed QA findings recorded."
+                        )
+                    }
 
                     KanbanDashboardEntryGroup(
                         icon: "checklist",
@@ -318,6 +337,7 @@ private struct KanbanCardDashboardView: View {
 
 private struct KanbanDashboardChildRollupView: View {
     let rollup: KanbanParentChildRollup
+    let roadmapNextUp: KanbanRoadmapNextUpProjection?
 
     private var visibleChildren: ArraySlice<KanbanParentChildRollup.Child> {
         rollup.children.prefix(5)
@@ -369,11 +389,13 @@ private struct KanbanDashboardChildRollupView: View {
                 }
             }
 
-            if let currentGate = rollup.currentGate {
+            if roadmapNextUp == nil, let currentGate = rollup.currentGate {
                 KanbanDashboardChildRollupRow(label: "Current Gate", child: currentGate)
             }
 
-            if !visibleChildren.isEmpty {
+            if let roadmapNextUp {
+                KanbanDashboardRoadmapGroupsView(nextUp: roadmapNextUp)
+            } else if !visibleChildren.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(Array(visibleChildren)) { child in
                         KanbanDashboardChildRollupRow(label: nil, child: child)
@@ -391,6 +413,80 @@ private struct KanbanDashboardChildRollupView: View {
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .stroke(CiderColors.controlAccent.opacity(0.28), lineWidth: 1)
         )
+    }
+}
+
+private struct KanbanDashboardRoadmapGroupsView: View {
+    let nextUp: KanbanRoadmapNextUpProjection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            ForEach(nextUp.groups) { group in
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text(group.label)
+                        .font(CiderFont.microMedium)
+                        .foregroundColor(CiderColors.tertiary)
+
+                    ForEach(group.items) { item in
+                        KanbanDashboardRoadmapStepRow(item: item)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct KanbanDashboardRoadmapStepRow: View {
+    let item: KanbanRoadmapNextUpProjection.SequenceItem
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+            Image(systemName: iconName)
+                .font(CiderFont.microMedium)
+                .foregroundColor(item.hasFailedQA ? CiderColors.warning : CiderColors.tertiary)
+                .frame(width: 14)
+
+            Text("Step \(item.stepNumber)/\(item.stepCount)")
+                .font(CiderFont.microMedium)
+                .foregroundColor(item.isCurrentGate ? CiderColors.controlAccent : CiderColors.tertiary)
+
+            Text(item.title)
+                .font(item.isNextActionable ? CiderFont.captionSemibold : CiderFont.caption)
+                .foregroundColor(item.isNextActionable ? CiderColors.primary : CiderColors.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: Spacing.xs)
+
+            Text(item.columnName)
+                .font(CiderFont.microMedium)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    private var iconName: String {
+        if item.hasFailedQA {
+            return "exclamationmark.triangle.fill"
+        }
+
+        switch item.role {
+        case .backlog:
+            return "tray"
+        case .queued:
+            return "line.3.horizontal.decrease.circle"
+        case .inProgress:
+            return "play.circle"
+        case .testing:
+            return "checkmark.seal"
+        case .needsFix:
+            return "wrench.adjustable"
+        case .done:
+            return "checkmark.circle"
+        case .other:
+            return "circle"
+        }
     }
 }
 

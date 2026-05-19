@@ -213,6 +213,118 @@ enum CiderSchema {
         );
         """
 
+    static let createOwnerRelations = """
+        CREATE TABLE IF NOT EXISTS owner_relations (
+            id                TEXT PRIMARY KEY,
+            source_owner_type TEXT NOT NULL,
+            source_owner_id   TEXT NOT NULL,
+            target_owner_type TEXT NOT NULL,
+            target_owner_id   TEXT NOT NULL,
+            relation_type     TEXT NOT NULL,
+            evidence          TEXT NOT NULL DEFAULT '',
+            source            TEXT NOT NULL,
+            actor             TEXT NOT NULL,
+            confidence        REAL,
+            metadata          TEXT NOT NULL DEFAULT '{}',
+            created_at        REAL NOT NULL,
+            updated_at        REAL NOT NULL,
+            UNIQUE(source_owner_type, source_owner_id, target_owner_type, target_owner_id, relation_type, source)
+        );
+        """
+
+    static let createProjects = """
+        CREATE TABLE IF NOT EXISTS projects (
+            id         TEXT PRIMARY KEY,
+            title      TEXT NOT NULL,
+            subtitle   TEXT NOT NULL DEFAULT '',
+            status     TEXT NOT NULL DEFAULT 'active',
+            metadata   TEXT NOT NULL DEFAULT '{}',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        """
+
+    static let createCaptureEvents = """
+        CREATE TABLE IF NOT EXISTS capture_events (
+            id               TEXT PRIMARY KEY,
+            source_kind      TEXT NOT NULL,
+            surface          TEXT,
+            channel          TEXT,
+            channel_id       TEXT,
+            thread_id        TEXT,
+            message_id       TEXT,
+            sender_id        TEXT,
+            sender_name      TEXT,
+            source_url       TEXT,
+            source_file      TEXT,
+            source_text      TEXT,
+            attachment_count INTEGER NOT NULL DEFAULT 0,
+            metadata         TEXT NOT NULL DEFAULT '{}',
+            created_at       REAL NOT NULL
+        );
+        """
+
+    static let createCaptureAttachments = """
+        CREATE TABLE IF NOT EXISTS capture_attachments (
+            id                   TEXT PRIMARY KEY,
+            capture_event_id     TEXT NOT NULL,
+            attachment_index     INTEGER NOT NULL,
+            source_attachment_id TEXT,
+            filename             TEXT,
+            mime_type            TEXT,
+            local_path           TEXT,
+            remote_url           TEXT,
+            byte_size            INTEGER,
+            metadata             TEXT NOT NULL DEFAULT '{}',
+            created_at           REAL NOT NULL,
+            UNIQUE(capture_event_id, attachment_index),
+            FOREIGN KEY(capture_event_id) REFERENCES capture_events(id) ON DELETE CASCADE
+        );
+        """
+
+    static let createEnrichmentOutputs = """
+        CREATE TABLE IF NOT EXISTS enrichment_outputs (
+            id               TEXT PRIMARY KEY,
+            owner_type       TEXT NOT NULL,
+            owner_id         TEXT NOT NULL,
+            chunk_id         TEXT,
+            kind             TEXT NOT NULL,
+            value            TEXT NOT NULL,
+            normalized_value TEXT NOT NULL,
+            label            TEXT NOT NULL DEFAULT '',
+            evidence         TEXT NOT NULL DEFAULT '',
+            source           TEXT NOT NULL,
+            confidence       REAL,
+            review_state     TEXT NOT NULL DEFAULT 'suggested',
+            metadata         TEXT NOT NULL DEFAULT '{}',
+            created_at       REAL NOT NULL,
+            updated_at       REAL NOT NULL,
+            UNIQUE(owner_type, owner_id, kind, normalized_value, source)
+        );
+        """
+
+    static let createSimilarityCandidates = """
+        CREATE TABLE IF NOT EXISTS similarity_candidates (
+            id                 TEXT PRIMARY KEY,
+            source_owner_type  TEXT NOT NULL,
+            source_owner_id    TEXT NOT NULL,
+            target_owner_type  TEXT NOT NULL,
+            target_owner_id    TEXT NOT NULL,
+            candidate_type     TEXT NOT NULL,
+            signal             TEXT NOT NULL,
+            score              REAL NOT NULL,
+            reason             TEXT NOT NULL DEFAULT '',
+            evidence           TEXT NOT NULL DEFAULT '',
+            source             TEXT NOT NULL,
+            review_state       TEXT NOT NULL DEFAULT 'suggested',
+            metadata           TEXT NOT NULL DEFAULT '{}',
+            created_at         REAL NOT NULL,
+            updated_at         REAL NOT NULL,
+            reviewed_at        REAL,
+            UNIQUE(source_owner_type, source_owner_id, target_owner_type, target_owner_id, candidate_type, signal, source)
+        );
+        """
+
     static let createSpaceMemberships = """
         CREATE TABLE IF NOT EXISTS space_memberships (
             space_id   TEXT NOT NULL,
@@ -416,6 +528,19 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_item_labels_label ON item_labels(label_id);",
         "CREATE INDEX IF NOT EXISTS idx_item_tags_tag     ON item_tags(tag_id);",
         "CREATE INDEX IF NOT EXISTS idx_item_links_target ON item_links(target_id);",
+        "CREATE INDEX IF NOT EXISTS idx_owner_relations_source ON owner_relations(source_owner_type, source_owner_id, relation_type, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_owner_relations_target ON owner_relations(target_owner_type, target_owner_id, relation_type, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_owner_relations_type ON owner_relations(relation_type, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_capture_events_source ON capture_events(source_kind, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_capture_events_channel ON capture_events(channel, channel_id, message_id);",
+        "CREATE INDEX IF NOT EXISTS idx_capture_attachments_event ON capture_attachments(capture_event_id, attachment_index);",
+        "CREATE INDEX IF NOT EXISTS idx_capture_attachments_source ON capture_attachments(source_attachment_id) WHERE source_attachment_id IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_owner ON enrichment_outputs(owner_type, owner_id, kind, review_state);",
+        "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_kind ON enrichment_outputs(kind, normalized_value);",
+        "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_source ON similarity_candidates(source_owner_type, source_owner_id, review_state, score);",
+        "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_target ON similarity_candidates(target_owner_type, target_owner_id, review_state, score);",
+        "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_review ON similarity_candidates(review_state, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_space_memberships_item ON space_memberships(item_id, item_type);",
         "CREATE INDEX IF NOT EXISTS idx_space_memberships_space ON space_memberships(space_id, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_item_sections_owner ON item_sections(owner_type, owner_id, sort_order);",
@@ -457,6 +582,12 @@ enum CiderSchema {
         createTags,
         createItemTags,
         createItemLinks,
+        createOwnerRelations,
+        createProjects,
+        createCaptureEvents,
+        createCaptureAttachments,
+        createEnrichmentOutputs,
+        createSimilarityCandidates,
         createSpaceMemberships,
         createItemSections,
         createContentChunks,

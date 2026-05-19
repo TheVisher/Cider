@@ -94,6 +94,27 @@ struct CiderCLIAgentSafetyTests {
         #expect(!output.contains("cider-cli folder kanban"))
     }
 
+    @Test("item graph health is a read-only JSON readiness report")
+    func itemGraphHealthIsReadOnlyJSONReadinessReport() throws {
+        let result = try runCLI(args: ["item", "graph-health", "--json"])
+
+        let dict = try parseJSONObject(result.stdout)
+        #expect(dict["command"] as? String == "item.graph-health")
+        #expect(dict["readOnly"] as? Bool == true)
+        #expect(dict["ok"] as? Bool == true)
+        let components = try #require(dict["components"] as? [[String: Any]])
+        #expect(components.contains { component in
+            component["id"] as? String == "owner_relations"
+                && component["state"] as? String == "implemented_empty"
+        })
+        #expect(components.contains { component in
+            component["id"] as? String == "content_chunks"
+                && component["state"] as? String == "implemented_empty"
+        })
+        let commands = try #require(dict["suggestedCommands"] as? [String])
+        #expect(commands.contains("cider-cli item rebuild-chunks all --json"))
+    }
+
     @Test("read-only folder filters do not adopt untracked disk folders")
     func readOnlyFolderFiltersDoNotAdoptUntrackedDiskFolders() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -170,6 +191,76 @@ struct CiderCLIAgentSafetyTests {
         #expect(unfile["agentActionID"] as? String != nil)
         let unfiledAfter = try #require(unfile["after"] as? [String: Any])
         #expect(unfiledAfter["folderID"] == nil)
+    }
+
+    @Test("project context seeds known Cider workspace in a fresh vault")
+    func projectContextSeedsKnownCiderWorkspaceInFreshVault() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-project-context-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let boardCreate = try runCLI(args: ["board", "create", "Cider", "--json"], vault: vault)
+        #expect(boardCreate.status == 0)
+
+        let result = try runCLI(args: ["item", "project-context", "cider", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(payload["ok"] as? Bool == true)
+        let project = try #require(payload["project"] as? [String: Any])
+        #expect(project["id"] as? String == "cider")
+        let boardOwners = try #require(payload["boardOwners"] as? [[String: Any]])
+        #expect(boardOwners.contains { $0["ownerType"] as? String == "kanban_board" })
+    }
+
+    @Test("project context summary bounds relation-heavy output")
+    func projectContextSummaryBoundsRelationHeavyOutput() throws {
+        let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cider")
+        let cardOwners = (0..<5).map {
+            SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "2afee0/card-\($0)")
+        }
+        let relations = cardOwners.map {
+            SecondBrainRelation(
+                sourceOwner: projectOwner,
+                targetOwner: $0,
+                relationType: "has_card",
+                evidence: "Project includes \($0.ownerID).",
+                source: "test",
+                actor: "codex",
+                confidence: 1
+            )
+        }
+        let context = SecondBrainProjectContext(
+            project: SecondBrainProject(id: "cider", title: "Cider", subtitle: "", status: "active"),
+            owner: projectOwner,
+            sections: [],
+            outgoingRelations: relations,
+            backlinks: [],
+            artifactRelations: [],
+            artifactOwners: [],
+            boardOwners: [SecondBrainOwnerRef(ownerType: "kanban_board", ownerID: "2afee0")],
+            cardOwners: cardOwners,
+            safeCommands: ["cider-cli item project-context cider --json"]
+        )
+
+        let full = CiderCLI.projectContextToDict(context, command: "item.project-context", sourceRef: "cider")
+        #expect((full["cardOwners"] as? [[String: Any]])?.count == 5)
+
+        let summary = CiderCLI.projectContextToDict(
+            context,
+            command: "item.project-context",
+            sourceRef: "cider",
+            limits: .summary(maxSamples: 2)
+        )
+        let counts = try #require(summary["counts"] as? [String: Any])
+        let truncation = try #require(summary["truncation"] as? [String: Any])
+        let safeCommands = try #require(summary["safeCommands"] as? [String])
+
+        #expect(summary["mode"] as? String == "summary")
+        #expect(counts["cardOwners"] as? Int == 5)
+        #expect((summary["cardOwners"] as? [[String: Any]])?.count == 2)
+        #expect(truncation["cardOwners"] as? Bool == true)
+        #expect(safeCommands.contains("cider-cli item project-context cider --full --json"))
     }
 
     @Test("reminder mutation ID resolution rejects ambiguous prefixes")

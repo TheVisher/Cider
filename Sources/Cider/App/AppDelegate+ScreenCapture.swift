@@ -100,7 +100,14 @@ extension AppDelegate {
                     ocrText: ocrText ?? "",
                     screenshot: image,
                     sourceURL: nil,
-                    folderID: nil
+                    folderID: nil,
+                    sourceContext: CaptureSourceContext(
+                        surface: "screen_capture",
+                        originalText: ocrText,
+                        metadata: [
+                            "routeTitle": route.suggestedTitle
+                        ]
+                    )
                 )
                 self?.transitionToCiderMainWindow()
             },

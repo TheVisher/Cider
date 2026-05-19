@@ -248,7 +248,8 @@ final class KanbanStorage: ObservableObject {
         priority: KanbanPriority? = nil,
         color: KanbanCardColor? = nil,
         tags: [String] = [],
-        parentCardID: String? = nil
+        parentCardID: String? = nil,
+        afterCardID: String? = nil
     ) -> KanbanCard? {
         let trimmedNotes = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
         let card = KanbanCard(
@@ -263,7 +264,16 @@ final class KanbanStorage: ObservableObject {
         mutate(boardID: boardID) { board in
             guard parentCardID == nil || board.card(id: parentCardID ?? "") != nil else { return }
             guard let colIdx = board.columns.firstIndex(where: { $0.id == columnID }) else { return }
-            board.columns[colIdx].cards.append(card)
+            if let afterCardID {
+                guard let afterIndex = board.columns[colIdx].cards.firstIndex(where: { $0.id == afterCardID }) else { return }
+                if let parentCardID,
+                   board.columns[colIdx].cards[afterIndex].parentCardID != parentCardID {
+                    return
+                }
+                board.columns[colIdx].cards.insert(card, at: afterIndex + 1)
+            } else {
+                board.columns[colIdx].cards.append(card)
+            }
             didAdd = true
         }
         if didAdd {

@@ -46,9 +46,10 @@ struct AIAssistantPromptTests {
         let provider = FoundationModelsProvider()
         let prompt = provider._buildInstructionsForTesting(context: AIAssistantContext())
 
-        #expect(prompt.contains("Vault save routing rules:"))
-        #expect(prompt.contains("For bookmarks, notes, and contacts, route before creating when the destination is reasonably clear."))
-        #expect(prompt.contains("If the destination is unclear, save to Inbox and explain why."))
+        #expect(prompt.contains("Second-brain tool rules:"))
+        #expect(prompt.contains("Treat Cider's item/capture/review/storage APIs as the source of truth."))
+        #expect(prompt.contains("For new user material, use the capture door first: capture add."))
+        #expect(prompt.contains("For uncertain placement, use review/routing flows and leave a reviewable reason."))
     }
 
     @Test("MLX prompt includes vault routing doctrine")
@@ -56,9 +57,10 @@ struct AIAssistantPromptTests {
         let provider = MLXProvider()
         let prompt = provider._buildSystemPromptForTesting(context: AIAssistantContext())
 
-        #expect(prompt.contains("Vault save routing rules:"))
-        #expect(prompt.contains("For bookmarks, notes, and contacts, route before creating when the destination is reasonably clear."))
-        #expect(prompt.contains("If the destination is unclear, save to Inbox and explain why."))
+        #expect(prompt.contains("Second-brain tool rules:"))
+        #expect(prompt.contains("Treat Cider's item/capture/review/storage APIs as the source of truth."))
+        #expect(prompt.contains("For new user material, use the capture door first: capture add."))
+        #expect(prompt.contains("For uncertain placement, use review/routing flows and leave a reviewable reason."))
     }
 
     @Test("assistant prompt includes unified current item context for bookmark and note")

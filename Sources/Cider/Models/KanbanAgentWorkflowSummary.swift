@@ -18,6 +18,7 @@ struct KanbanAgentWorkflowSummary: Equatable, Sendable {
     var boardID: String
     var boardName: String
     var laneSummaries: [LaneSummary]
+    var automationActions: [KanbanAgentWorkflowAction]
 
     init(board: KanbanBoard) {
         boardID = board.id
@@ -31,6 +32,7 @@ struct KanbanAgentWorkflowSummary: Equatable, Sendable {
                 cards: column.cards
             )
         }
+        automationActions = Self.actions(for: board)
     }
 
     var nextImplementationCards: [KanbanCard] {
@@ -69,6 +71,170 @@ struct KanbanAgentWorkflowSummary: Equatable, Sendable {
         laneSummaries
             .filter { $0.role == role }
             .flatMap(\.cards)
+    }
+
+    private static func actions(for board: KanbanBoard) -> [KanbanAgentWorkflowAction] {
+        let destinationByRole = board.columns.reduce(into: [KanbanAgentWorkflowRole: KanbanColumn]()) { partial, column in
+            guard let role = KanbanAgentWorkflowRole(column: column), partial[role] == nil else { return }
+            partial[role] = column
+        }
+
+        return board.columns.flatMap { column -> [KanbanAgentWorkflowAction] in
+            guard let role = KanbanAgentWorkflowRole(column: column) else { return [] }
+            return column.cards.compactMap { card in
+                action(
+                    for: card,
+                    in: column,
+                    role: role,
+                    board: board,
+                    destinationByRole: destinationByRole
+                )
+            }
+        }
+    }
+
+    private static func action(
+        for card: KanbanCard,
+        in column: KanbanColumn,
+        role: KanbanAgentWorkflowRole,
+        board: KanbanBoard,
+        destinationByRole: [KanbanAgentWorkflowRole: KanbanColumn]
+    ) -> KanbanAgentWorkflowAction? {
+        let boardRef = quoted(board.name)
+        let inspect = "cider-cli board card inspect \(boardRef) --card \(card.id) --json"
+        let itemContext = "cider-cli item context card \(card.id) --json"
+
+        switch role {
+        case .implementationQueue:
+            let destination = destinationByRole[.inProgress]
+            return KanbanAgentWorkflowAction(
+                cardID: card.id,
+                cardTitle: card.title,
+                sourceColumnID: column.id,
+                sourceColumnName: column.name,
+                action: .startAgent,
+                label: "Start implementation",
+                reason: "Card is queued; start only after the user-approved queue is ready.",
+                requiresApproval: true,
+                destinationColumnID: destination?.id,
+                destinationColumnName: destination?.name,
+                safeCommands: [
+                    inspect,
+                    itemContext,
+                    "cider-cli board move-card \(boardRef) --card \(card.id) --to \(quoted(destination?.name ?? "In Progress"))",
+                    "cider-cli board update-card \(boardRef) --card \(card.id) --agent <agent>",
+                ]
+            )
+        case .inProgress:
+            let destination = destinationByRole[.testing]
+            return KanbanAgentWorkflowAction(
+                cardID: card.id,
+                cardTitle: card.title,
+                sourceColumnID: column.id,
+                sourceColumnName: column.name,
+                action: .continueAgent,
+                label: "Continue implementation",
+                reason: "Card is actively owned; continue from card context and record evidence before routing forward.",
+                requiresApproval: false,
+                destinationColumnID: destination?.id,
+                destinationColumnName: destination?.name,
+                safeCommands: [
+                    inspect,
+                    itemContext,
+                    "cider-cli board history add \(boardRef) --card \(card.id) --type implementation --text \"<summary>\" --source <agent>",
+                    "cider-cli board evidence add \(boardRef) --card \(card.id) --text \"<verification>\" --source <agent>",
+                    "cider-cli board move-card \(boardRef) --card \(card.id) --to \(quoted(destination?.name ?? "Testing"))",
+                ]
+            )
+        case .testing:
+            let failedQASteps = KanbanTestingTriageSummary.failedQASteps(in: card.notes ?? "")
+            if let firstFailure = failedQASteps.first {
+                let destination = destinationByRole[.needsFix]
+                return KanbanAgentWorkflowAction(
+                    cardID: card.id,
+                    cardTitle: card.title,
+                    sourceColumnID: column.id,
+                    sourceColumnName: column.name,
+                    action: .routeBackForFix,
+                    label: "Route back for fix",
+                    reason: "Manual QA failed; route back with an explicit failed-attempt note before more implementation.",
+                    requiresApproval: true,
+                    destinationColumnID: destination?.id,
+                    destinationColumnName: destination?.name,
+                    safeCommands: [
+                        inspect,
+                        "cider-cli board history add \(boardRef) --card \(card.id) --type failed-attempt --text \(quoted(firstFailure)) --source reviewer",
+                        "cider-cli board move-card \(boardRef) --card \(card.id) --to \(quoted(destination?.name ?? "Needs Fix"))",
+                    ]
+                )
+            }
+            return KanbanAgentWorkflowAction(
+                cardID: card.id,
+                cardTitle: card.title,
+                sourceColumnID: column.id,
+                sourceColumnName: column.name,
+                action: .reviewTesting,
+                label: "Review testing evidence",
+                reason: "Card is in Testing; inspect evidence and classify whether Erik or an agent should verify next.",
+                requiresApproval: false,
+                safeCommands: [
+                    inspect,
+                    "cider-cli board testing-summary \(boardRef) --json",
+                    "cider-cli board evidence add \(boardRef) --card \(card.id) --text \"<review result>\" --source reviewer",
+                ]
+            )
+        case .needsFix:
+            let destination = destinationByRole[.inProgress]
+            return KanbanAgentWorkflowAction(
+                cardID: card.id,
+                cardTitle: card.title,
+                sourceColumnID: column.id,
+                sourceColumnName: column.name,
+                action: .resumeFix,
+                label: "Resume fix",
+                reason: "Card needs another implementation pass; read failed-attempt notes before changing code.",
+                requiresApproval: true,
+                destinationColumnID: destination?.id,
+                destinationColumnName: destination?.name,
+                safeCommands: [
+                    inspect,
+                    itemContext,
+                    "cider-cli board move-card \(boardRef) --card \(card.id) --to \(quoted(destination?.name ?? "In Progress"))",
+                ]
+            )
+        case .backlog, .done:
+            return nil
+        }
+    }
+
+    private static func quoted(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+}
+
+struct KanbanAgentWorkflowAction: Equatable, Identifiable, Sendable {
+    var id: String { "\(action.rawValue):\(cardID)" }
+    var cardID: String
+    var cardTitle: String
+    var sourceColumnID: String
+    var sourceColumnName: String
+    var action: Kind
+    var label: String
+    var reason: String
+    var requiresApproval: Bool
+    var destinationColumnID: String?
+    var destinationColumnName: String?
+    var safeCommands: [String]
+
+    enum Kind: String, Codable, CaseIterable, Sendable {
+        case startAgent = "start_agent"
+        case continueAgent = "continue_agent"
+        case reviewTesting = "review_testing"
+        case routeBackForFix = "route_back_for_fix"
+        case resumeFix = "resume_fix"
     }
 }
 
@@ -188,7 +354,7 @@ struct KanbanTestingTriageSummary: Equatable, Sendable {
     }
 
     static func failedQASteps(in notes: String) -> [String] {
-        extractListEntries(from: notes, headings: ["qa results", "testing results", "manual qa results"])
+        extractListEntries(from: notes, headings: ["qa results", "qa findings", "testing results", "manual qa results"])
             .filter(isFailedQAResultLine)
     }
 
@@ -196,6 +362,9 @@ struct KanbanTestingTriageSummary: Equatable, Sendable {
         let normalized = line
             .trimmingCharacters(in: CharacterSet(charactersIn: "-•* "))
             .lowercased()
+        if normalized == "failed steps:" || normalized == "failed steps" {
+            return false
+        }
         if normalized.range(of: #"^step\s+\d+\s+failed:"#, options: .regularExpression) != nil {
             return true
         }
@@ -359,6 +528,21 @@ struct KanbanRoadmapNextUpProjection: Equatable, Sendable {
         var failedQASteps: [String]
     }
 
+    struct Group: Equatable, Identifiable, Sendable {
+        var id: String { kind.rawValue }
+        var kind: Kind
+        var label: String
+        var items: [SequenceItem]
+
+        enum Kind: String, Codable, CaseIterable, Sendable {
+            case currentGate = "current_gate"
+            case nextUp = "next_up"
+            case later
+            case testingNeedsReview = "testing_needs_review"
+            case done
+        }
+    }
+
     struct SuggestedInsertion: Equatable, Sendable {
         var parentID: String
         var columnID: String
@@ -372,6 +556,7 @@ struct KanbanRoadmapNextUpProjection: Equatable, Sendable {
     var sequence: [SequenceItem]
     var currentGate: SequenceItem?
     var nextActionableChild: SequenceItem?
+    var groups: [Group]
     var nextActionLine: String
     var suggestedInsertion: SuggestedInsertion
 
@@ -400,12 +585,29 @@ struct KanbanRoadmapNextUpProjection: Equatable, Sendable {
         }
         currentGate = sequence.first { $0.isCurrentGate }
         nextActionableChild = sequence.first { $0.isNextActionable }
+        groups = Self.groups(for: sequence, currentGateID: currentGateID)
         suggestedInsertion = Self.suggestedInsertion(
             board: board,
             parentID: parentID,
             rollup: rollup,
             sequence: sequence
         )
+    }
+
+    private static func groups(for sequence: [SequenceItem], currentGateID: String?) -> [Group] {
+        let currentGateItems = sequence.filter { $0.id == currentGateID }
+        let nextUpItems = sequence.filter { $0.role == .queued || $0.role == .inProgress }
+        let laterItems = sequence.filter { $0.role == .backlog || $0.role == .other }
+        let testingItems = sequence.filter { $0.role == .testing || $0.role == .needsFix || $0.hasFailedQA }
+        let doneItems = sequence.filter { $0.role == .done }
+
+        return [
+            Group(kind: .currentGate, label: "Current Gate", items: currentGateItems),
+            Group(kind: .nextUp, label: "Next Up", items: nextUpItems),
+            Group(kind: .later, label: "Later", items: laterItems),
+            Group(kind: .testingNeedsReview, label: "Testing / Needs Review", items: testingItems),
+            Group(kind: .done, label: "Done", items: doneItems),
+        ].filter { !$0.items.isEmpty }
     }
 
     private static func suggestedInsertion(
@@ -419,8 +621,11 @@ struct KanbanRoadmapNextUpProjection: Equatable, Sendable {
         let fallbackColumn = board.columns.first(where: { !$0.isDoneColumn }) ?? board.columns.first
         let columnID = queuedColumn?.id ?? targetChild?.columnID ?? fallbackColumn?.id ?? "backlog"
         let columnName = queuedColumn?.name ?? targetChild?.columnName ?? fallbackColumn?.name ?? "Backlog"
-        let afterChildID = sequence.last?.id
-        let command = "cider-cli board add-card \(quoted(board.name)) --column \(quoted(columnName)) --title \"<title>\" --parent \(parentID)"
+        let afterChildID = sequence.last { $0.columnID == columnID }?.id
+        var command = "cider-cli board add-card \(quoted(board.name)) --column \(quoted(columnName)) --title \"<title>\" --parent \(parentID)"
+        if let afterChildID {
+            command += " --after \(afterChildID)"
+        }
         let reason = targetChild.map {
             "Adds a child under the same parent near the current roadmap gate: \($0.title)."
         } ?? "Adds the first child under this roadmap parent."

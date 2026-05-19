@@ -162,6 +162,7 @@ enum KanbanCardSectionParser {
         "test",
         "decision",
         "handoff",
+        "commit",
     ]
 
     static func normalizedKey(for title: String) -> String {
@@ -282,6 +283,13 @@ enum KanbanCardSectionParser {
         case "handoff",
              "agent_handoff":
             return ("agent_handoff", "Agent Handoff")
+        case "commit",
+             "commits",
+             "git",
+             "git_commit",
+             "repo_change",
+             "repo_changes":
+            return ("commits", "Commits")
         default:
             return nil
         }

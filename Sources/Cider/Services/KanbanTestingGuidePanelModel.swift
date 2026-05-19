@@ -74,6 +74,12 @@ final class KanbanTestingGuideProgressStore: ObservableObject {
         }
     }
 
+    @Published private var overallNotesByGuide: [String: String] = [:] {
+        didSet {
+            persistOverallNotes()
+        }
+    }
+
     @Published private var completedStepIDsByGuide: [String: Set<String>] = [:] {
         didSet {
             persistCompletedStepIDs()
@@ -82,12 +88,14 @@ final class KanbanTestingGuideProgressStore: ObservableObject {
 
     private let defaultsKey = "kanbanTestingGuide.completedStepIDsByGuide"
     private let resultsDefaultsKey = "kanbanTestingGuide.stepResultsByGuide"
+    private let overallNotesDefaultsKey = "kanbanTestingGuide.overallNotesByGuide"
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         completedStepIDsByGuide = Self.loadCompletedStepIDs(from: defaults, key: defaultsKey)
         stepResultsByGuide = Self.loadStepResults(from: defaults, key: resultsDefaultsKey)
+        overallNotesByGuide = Self.loadOverallNotes(from: defaults, key: overallNotesDefaultsKey)
         migrateCompletedStepsIntoResults()
     }
 
@@ -98,6 +106,19 @@ final class KanbanTestingGuideProgressStore: ObservableObject {
 
     func result(guideID: String, stepID: String) -> KanbanTestingGuideStepResult? {
         stepResultsByGuide[guideID]?[stepID]
+    }
+
+    func overallNote(guideID: String) -> String? {
+        overallNotesByGuide[guideID]
+    }
+
+    func setOverallNote(_ note: String?, guideID: String) {
+        let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedNote, !trimmedNote.isEmpty {
+            overallNotesByGuide[guideID] = trimmedNote
+        } else {
+            overallNotesByGuide.removeValue(forKey: guideID)
+        }
     }
 
     func toggle(guideID: String, stepID: String) {
@@ -177,6 +198,10 @@ final class KanbanTestingGuideProgressStore: ObservableObject {
         defaults.set(data, forKey: resultsDefaultsKey)
     }
 
+    private func persistOverallNotes() {
+        defaults.set(overallNotesByGuide, forKey: overallNotesDefaultsKey)
+    }
+
     private func migrateCompletedStepsIntoResults() {
         var migrated = stepResultsByGuide
         var didMigrate = false
@@ -207,6 +232,10 @@ final class KanbanTestingGuideProgressStore: ObservableObject {
         }
         return payload
     }
+
+    private static func loadOverallNotes(from defaults: UserDefaults, key: String) -> [String: String] {
+        defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+    }
 }
 
 enum KanbanTestingGuideCardResultSync {
@@ -233,7 +262,28 @@ enum KanbanTestingGuideCardResultSync {
             note: note
         )
         let body = qaResultsBody(steps: payload.steps, results: results)
+        let findingsBody = qaFindingsBody(
+            steps: payload.steps,
+            results: results,
+            overallNote: KanbanTestingGuideProgressStore.sharedOverallNote(guideID: payload.id)
+        )
         card.notes = KanbanCardSectionParser.updatingSection(in: card.notes, title: "QA Results", body: body)
+        card.notes = KanbanCardSectionParser.updatingSection(in: card.notes, title: "QA Findings", body: findingsBody)
+        KanbanStorage.shared.updateCard(boardID: payload.boardID, card: card)
+    }
+
+    @MainActor
+    static func recordOverallNote(payload: KanbanTestingGuidePanelPayload, note: String?) {
+        guard let detail = KanbanStorage.shared.findCard(id: payload.cardID),
+              detail.board.id == payload.boardID else { return }
+
+        var card = detail.card
+        let currentResults = KanbanTestingGuideProgressStore.sharedResults(
+            guideID: payload.id,
+            steps: payload.steps
+        )
+        let findingsBody = qaFindingsBody(steps: payload.steps, results: currentResults, overallNote: note)
+        card.notes = KanbanCardSectionParser.updatingSection(in: card.notes, title: "QA Findings", body: findingsBody)
         KanbanStorage.shared.updateCard(boardID: payload.boardID, card: card)
     }
 
@@ -274,6 +324,33 @@ enum KanbanTestingGuideCardResultSync {
         }
         .joined(separator: "\n")
     }
+
+    static func qaFindingsBody(
+        steps: [KanbanTestingGuideStep],
+        results: [String: KanbanTestingGuideStepResult],
+        overallNote: String?
+    ) -> String {
+        var sections: [String] = []
+        let failedLines = steps.enumerated().compactMap { index, step -> String? in
+            guard let result = results[step.id], result.status == .failed else { return nil }
+            var line = "- Step \(index + 1) failed: \(step.text)"
+            let trimmedNote = result.note?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let note = trimmedNote, !note.isEmpty {
+                line += " Note: \(note)"
+            }
+            return line
+        }
+        if !failedLines.isEmpty {
+            sections.append((["Failed steps:"] + failedLines).joined(separator: "\n"))
+        }
+
+        let trimmedOverallNote = overallNote?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedOverallNote, !trimmedOverallNote.isEmpty {
+            sections.append("Overall QA notes:\n\(trimmedOverallNote)")
+        }
+
+        return sections.joined(separator: "\n\n")
+    }
 }
 
 private extension KanbanTestingGuideProgressStore {
@@ -285,5 +362,9 @@ private extension KanbanTestingGuideProgressStore {
             guard let result = shared.result(guideID: guideID, stepID: step.id) else { return nil }
             return (step.id, result)
         })
+    }
+
+    static func sharedOverallNote(guideID: String) -> String? {
+        shared.overallNote(guideID: guideID)
     }
 }

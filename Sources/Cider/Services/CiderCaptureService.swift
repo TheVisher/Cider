@@ -1,6 +1,52 @@
 import AppKit
 import Foundation
 
+struct CaptureSourceContext: Equatable {
+    var surface: String?
+    var channel: String?
+    var channelID: String?
+    var threadID: String?
+    var messageID: String?
+    var senderID: String?
+    var senderName: String?
+    var originalText: String?
+    var attachments: [Attachment] = []
+    var metadata: [String: String] = [:]
+
+    struct Attachment: Equatable {
+        var id: String?
+        var filename: String?
+        var mimeType: String?
+        var localPath: String?
+        var remoteURL: String?
+    }
+
+    func toDictionary() -> [String: Any] {
+        var dict: [String: Any] = [:]
+        if let surface { dict["surface"] = surface }
+        if let channel { dict["channel"] = channel }
+        if let channelID { dict["channelID"] = channelID }
+        if let threadID { dict["threadID"] = threadID }
+        if let messageID { dict["messageID"] = messageID }
+        if let senderID { dict["senderID"] = senderID }
+        if let senderName { dict["senderName"] = senderName }
+        if let originalText { dict["originalText"] = originalText }
+        if !metadata.isEmpty { dict["metadata"] = metadata }
+        if !attachments.isEmpty {
+            dict["attachments"] = attachments.map { attachment in
+                var item: [String: Any] = [:]
+                if let id = attachment.id { item["id"] = id }
+                if let filename = attachment.filename { item["filename"] = filename }
+                if let mimeType = attachment.mimeType { item["mimeType"] = mimeType }
+                if let localPath = attachment.localPath { item["localPath"] = localPath }
+                if let remoteURL = attachment.remoteURL { item["remoteURL"] = remoteURL }
+                return item
+            }
+        }
+        return dict
+    }
+}
+
 struct CiderCaptureResult {
     struct Source {
         var kind: String
@@ -63,6 +109,12 @@ struct CiderCaptureResult {
     var routing: Routing
     var nextSafeAction: String
     var partialSuccess: PartialSuccess? = nil
+    var captureEventID: UUID? = nil
+    var sourceContext: CaptureSourceContext? = nil
+
+    var captureEventOwner: SecondBrainOwnerRef? {
+        captureEventID.map { SecondBrainOwnerRef(ownerType: "capture_event", ownerID: $0.uuidString) }
+    }
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -138,6 +190,17 @@ struct CiderCaptureResult {
                 partialDict["actualFolderID"] = actualFolderID.uuidString
             }
             dict["partialSuccess"] = partialDict
+        }
+        if let captureEventID {
+            dict["captureEventID"] = captureEventID.uuidString
+            dict["captureEventOwner"] = [
+                "ownerType": "capture_event",
+                "ownerID": captureEventID.uuidString,
+                "ref": "capture_event:\(captureEventID.uuidString)",
+            ]
+        }
+        if let sourceContext {
+            dict["sourceContext"] = sourceContext.toDictionary()
         }
         return dict
     }
@@ -280,27 +343,29 @@ final class CiderCaptureService {
     func add(
         _ rawSource: String,
         title: String? = nil,
-        folderID: UUID? = nil
+        folderID: UUID? = nil,
+        sourceContext: CaptureSourceContext? = nil
     ) throws -> CiderCaptureResult {
         let source = rawSource.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !source.isEmpty else { throw CiderCaptureError.missingSource }
 
         switch inferredKind(for: source) {
         case .url:
-            return try addURL(source, title: title, folderID: folderID)
+            return try addURL(source, title: title, folderID: folderID, sourceContext: sourceContext)
         case .file:
-            return try addFile(source, title: title, folderID: folderID)
+            return try addFile(source, title: title, folderID: folderID, sourceContext: sourceContext)
         case .todo:
-            return try addTodo(source, title: title, folderID: folderID)
+            return try addTodo(source, title: title, folderID: folderID, sourceContext: sourceContext)
         case .note:
-            return try addNote(source, title: title, folderID: folderID)
+            return try addNote(source, title: title, folderID: folderID, sourceContext: sourceContext)
         }
     }
 
     private func addURL(
         _ source: String,
         title: String?,
-        folderID: UUID?
+        folderID: UUID?,
+        sourceContext: CaptureSourceContext?
     ) throws -> CiderCaptureResult {
         guard bookmarkService.previewNormalizedURLString(from: source) != nil else {
             throw CiderCaptureError.unsupportedSource(source)
@@ -330,7 +395,7 @@ final class CiderCaptureService {
             reviewState: reviewState
         )
 
-        return CiderCaptureResult(
+        let result = CiderCaptureResult(
             command: "capture.add",
             source: .init(
                 kind: "url",
@@ -368,20 +433,23 @@ final class CiderCaptureService {
             ),
             nextSafeAction: isDuplicate ? "inspect_existing_item" : "enrich"
         )
+        return attachCaptureEvent(to: result, sourceContext: sourceContext)
     }
 
     private func addNote(
         _ source: String,
         title: String?,
-        folderID: UUID?
+        folderID: UUID?,
+        sourceContext: CaptureSourceContext?
     ) throws -> CiderCaptureResult {
-        try addNoteCapture(title: title, content: source, folderID: folderID)
+        try addNoteCapture(title: title, content: source, folderID: folderID, sourceContext: sourceContext)
     }
 
     func addNoteCapture(
         title: String?,
         content: String,
-        folderID: UUID?
+        folderID: UUID?,
+        sourceContext: CaptureSourceContext? = nil
     ) throws -> CiderCaptureResult {
         let manualTitle = normalizedTitle(title)
         let derivedTitle = derivedTextTitle(from: content)
@@ -434,7 +502,8 @@ final class CiderCaptureService {
             duplicateStatus: "not_checked",
             routing: routing,
             nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
-            partialSuccess: partialSuccess
+            partialSuccess: partialSuccess,
+            sourceContext: sourceContext
         )
     }
 
@@ -443,7 +512,8 @@ final class CiderCaptureService {
         ocrText: String,
         screenshot: NSImage?,
         sourceURL: String?,
-        folderID: UUID?
+        folderID: UUID?,
+        sourceContext: CaptureSourceContext? = nil
     ) throws -> CiderCaptureResult {
         let manualTitle = normalizedTitle(title)
         let finalTitle = manualTitle ?? "Screen Capture"
@@ -498,7 +568,8 @@ final class CiderCaptureService {
             duplicateStatus: "not_checked",
             routing: routing,
             nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
-            partialSuccess: partialSuccess
+            partialSuccess: partialSuccess,
+            sourceContext: sourceContext
         )
     }
 
@@ -506,7 +577,8 @@ final class CiderCaptureService {
         title: String,
         imageData: Data,
         preferredFileExtension: String?,
-        sourceFile: String?
+        sourceFile: String?,
+        sourceContext: CaptureSourceContext? = nil
     ) throws -> CiderCaptureResult {
         let finalTitle = normalizedTitle(title) ?? "Dropped Image"
         let created = bookmarkService.addImageBookmark(title: finalTitle)
@@ -542,14 +614,16 @@ final class CiderCaptureService {
             duplicateStatus: "not_checked",
             routing: routing,
             nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
-            partialSuccess: thumbnailPartialSuccess(didAssignThumbnail: didAssignThumbnail)
+            partialSuccess: thumbnailPartialSuccess(didAssignThumbnail: didAssignThumbnail),
+            sourceContext: sourceContext
         )
     }
 
     private func addTodo(
         _ source: String,
         title: String?,
-        folderID: UUID?
+        folderID: UUID?,
+        sourceContext: CaptureSourceContext?
     ) throws -> CiderCaptureResult {
         try addTodoCapture(
             title: normalizedTitle(title) ?? derivedTodoTitle(from: source),
@@ -557,7 +631,8 @@ final class CiderCaptureService {
             dueDate: nil,
             priority: nil,
             folderID: folderID,
-            titleState: normalizedTitle(title) == nil ? "derived" : "manual"
+            titleState: normalizedTitle(title) == nil ? "derived" : "manual",
+            sourceContext: sourceContext
         )
     }
 
@@ -567,7 +642,8 @@ final class CiderCaptureService {
         dueDate: Date?,
         priority: TodoPriority?,
         folderID: UUID?,
-        titleState: String = "manual"
+        titleState: String = "manual",
+        sourceContext: CaptureSourceContext? = nil
     ) throws -> CiderCaptureResult {
         var todo = todoStorage.createTodoCard(title: title, dueDate: dueDate, priority: priority)
         var assignmentSucceeded: Bool?
@@ -617,7 +693,8 @@ final class CiderCaptureService {
             duplicateStatus: "not_checked",
             routing: routing,
             nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
-            partialSuccess: partialSuccess
+            partialSuccess: partialSuccess,
+            sourceContext: sourceContext
         )
     }
 
@@ -629,7 +706,8 @@ final class CiderCaptureService {
         allDay: Bool,
         location: String?,
         folderID: UUID?,
-        titleState: String = "manual"
+        titleState: String = "manual",
+        sourceContext: CaptureSourceContext? = nil
     ) throws -> CiderCaptureResult {
         var card = dateCardStorage.createDateCard(
             title: title,
@@ -702,7 +780,8 @@ final class CiderCaptureService {
             duplicateStatus: "not_checked",
             routing: routing,
             nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
-            partialSuccess: partialSuccess
+            partialSuccess: partialSuccess,
+            sourceContext: sourceContext
         )
     }
 
@@ -713,7 +792,8 @@ final class CiderCaptureService {
         email: String?,
         phone: String?,
         folderID: UUID?,
-        titleState: String = "manual"
+        titleState: String = "manual",
+        sourceContext: CaptureSourceContext? = nil
     ) throws -> CiderCaptureResult {
         var contact = contactStorage.createContact(displayName: displayName)
         var needsUpdate = false
@@ -786,22 +866,25 @@ final class CiderCaptureService {
             duplicateStatus: "not_checked",
             routing: routing,
             nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
-            partialSuccess: partialSuccess
+            partialSuccess: partialSuccess,
+            sourceContext: sourceContext
         )
     }
 
     private func addFile(
         _ source: String,
         title: String?,
-        folderID: UUID?
+        folderID: UUID?,
+        sourceContext: CaptureSourceContext?
     ) throws -> CiderCaptureResult {
-        try addFileCapture(sourcePath: source, title: title, folderID: folderID)
+        try addFileCapture(sourcePath: source, title: title, folderID: folderID, sourceContext: sourceContext)
     }
 
     func addFileCapture(
         sourcePath: String,
         title: String?,
-        folderID: UUID?
+        folderID: UUID?,
+        sourceContext: CaptureSourceContext? = nil
     ) throws -> CiderCaptureResult {
         let source = sourcePath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !source.isEmpty else { throw CiderCaptureError.missingSource }
@@ -871,7 +954,8 @@ final class CiderCaptureService {
             titleState: file.title == nil ? "filename_derived" : "manual",
             duplicateStatus: "not_checked",
             routing: routing,
-            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item"
+            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            sourceContext: sourceContext
         )
     }
 
@@ -955,9 +1039,10 @@ final class CiderCaptureService {
         duplicateStatus: String,
         routing: CiderCaptureResult.Routing,
         nextSafeAction: String,
-        partialSuccess: CiderCaptureResult.PartialSuccess? = nil
+        partialSuccess: CiderCaptureResult.PartialSuccess? = nil,
+        sourceContext: CaptureSourceContext? = nil
     ) -> CiderCaptureResult {
-        CiderCaptureResult(
+        let result = CiderCaptureResult(
             command: "capture.add",
             source: .init(
                 kind: sourceKind,
@@ -989,6 +1074,193 @@ final class CiderCaptureService {
             nextSafeAction: nextSafeAction,
             partialSuccess: partialSuccess
         )
+        return attachCaptureEvent(to: result, sourceContext: sourceContext)
+    }
+
+    private func attachCaptureEvent(
+        to result: CiderCaptureResult,
+        sourceContext: CaptureSourceContext?
+    ) -> CiderCaptureResult {
+        var result = result
+        let eventID = UUID()
+        let resolvedContext = sourceContext ?? CaptureSourceContext(
+            surface: "cider",
+            channel: nil,
+            channelID: nil,
+            threadID: nil,
+            messageID: nil,
+            senderID: nil,
+            senderName: nil,
+            originalText: result.source.text,
+            attachments: [],
+            metadata: [:]
+        )
+        result.captureEventID = eventID
+        result.sourceContext = resolvedContext
+
+        guard let database, database.isOpen else { return result }
+        do {
+            let metadata = DatabaseHelpers.encodeJSON(resolvedContext.metadata) ?? "{}"
+            let stmt = try database.prepare("""
+                INSERT INTO capture_events (
+                    id, source_kind, surface, channel, channel_id, thread_id, message_id,
+                    sender_id, sender_name, source_url, source_file, source_text,
+                    attachment_count, metadata, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """)
+            stmt.bind(eventID.uuidString, at: 1)
+                .bind(result.source.kind, at: 2)
+                .bind(resolvedContext.surface, at: 3)
+                .bind(resolvedContext.channel, at: 4)
+                .bind(resolvedContext.channelID, at: 5)
+                .bind(resolvedContext.threadID, at: 6)
+                .bind(resolvedContext.messageID, at: 7)
+                .bind(resolvedContext.senderID, at: 8)
+                .bind(resolvedContext.senderName, at: 9)
+                .bind(result.source.url, at: 10)
+                .bind(result.source.file, at: 11)
+                .bind(resolvedContext.originalText ?? result.source.text, at: 12)
+                .bind(resolvedContext.attachments.count, at: 13)
+                .bind(metadata, at: 14)
+                .bind(DatabaseHelpers.encode(Date()), at: 15)
+            try stmt.step()
+
+            let captureOwner = SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString)
+            let itemOwner = SecondBrainOwnerRef(
+                ownerType: ownerType(forCaptureItemType: result.item.type),
+                ownerID: result.item.id.uuidString
+            )
+            let secondBrainStore = SecondBrainStore(database: database)
+            try secondBrainStore.recordRelation(SecondBrainRelation(
+                sourceOwner: captureOwner,
+                targetOwner: itemOwner,
+                relationType: "produced_item",
+                evidence: "Capture event produced \(result.item.type) \(result.item.title).",
+                source: "capture.add",
+                actor: "system",
+                confidence: 1,
+                metadata: [
+                    "command": result.command,
+                    "source_kind": result.source.kind,
+                    "item_type": result.item.type,
+                ]
+            ))
+            try persistCaptureAttachments(
+                resolvedContext.attachments,
+                eventID: eventID,
+                captureOwner: captureOwner,
+                itemOwner: itemOwner,
+                itemTitle: result.item.title,
+                database: database,
+                secondBrainStore: secondBrainStore
+            )
+        } catch {
+            return result
+        }
+        return result
+    }
+
+    private func persistCaptureAttachments(
+        _ attachments: [CaptureSourceContext.Attachment],
+        eventID: UUID,
+        captureOwner: SecondBrainOwnerRef,
+        itemOwner: SecondBrainOwnerRef,
+        itemTitle: String,
+        database: CiderDatabase,
+        secondBrainStore: SecondBrainStore
+    ) throws {
+        guard !attachments.isEmpty else { return }
+
+        let now = DatabaseHelpers.encode(Date())
+        for (index, attachment) in attachments.enumerated() {
+            let attachmentID = UUID()
+            let metadata = DatabaseHelpers.encodeJSON([
+                "capture_event_id": eventID.uuidString,
+                "attachment_index": String(index),
+            ]) ?? "{}"
+            let byteSize = attachment.localPath.flatMap { localPath -> Int64? in
+                let attrs = try? FileManager.default.attributesOfItem(atPath: localPath)
+                return attrs?[.size] as? Int64
+            }
+
+            let stmt = try database.prepare("""
+                INSERT INTO capture_attachments (
+                    id, capture_event_id, attachment_index, source_attachment_id,
+                    filename, mime_type, local_path, remote_url, byte_size,
+                    metadata, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """)
+            stmt.bind(attachmentID.uuidString, at: 1)
+                .bind(eventID.uuidString, at: 2)
+                .bind(index, at: 3)
+                .bind(attachment.id, at: 4)
+                .bind(attachment.filename, at: 5)
+                .bind(attachment.mimeType, at: 6)
+                .bind(attachment.localPath, at: 7)
+                .bind(attachment.remoteURL, at: 8)
+                .bind(byteSize, at: 9)
+                .bind(metadata, at: 10)
+                .bind(now, at: 11)
+            try stmt.step()
+
+            let attachmentOwner = SecondBrainOwnerRef(
+                ownerType: "capture_attachment",
+                ownerID: attachmentID.uuidString
+            )
+            try secondBrainStore.recordRelation(SecondBrainRelation(
+                sourceOwner: captureOwner,
+                targetOwner: attachmentOwner,
+                relationType: "had_attachment",
+                evidence: attachment.filename.map { "Capture event included attachment \($0)." }
+                    ?? "Capture event included an attachment.",
+                source: "capture.add",
+                actor: "system",
+                confidence: 1,
+                metadata: captureAttachmentRelationMetadata(
+                    attachment: attachment,
+                    eventID: eventID,
+                    attachmentIndex: index
+                )
+            ))
+            try secondBrainStore.recordRelation(SecondBrainRelation(
+                sourceOwner: attachmentOwner,
+                targetOwner: itemOwner,
+                relationType: "associated_item",
+                evidence: attachment.filename.map { "Attachment \($0) was associated with \(itemTitle)." }
+                    ?? "Capture attachment was associated with \(itemTitle).",
+                source: "capture.add",
+                actor: "system",
+                confidence: 1,
+                metadata: captureAttachmentRelationMetadata(
+                    attachment: attachment,
+                    eventID: eventID,
+                    attachmentIndex: index
+                )
+            ))
+        }
+    }
+
+    private func captureAttachmentRelationMetadata(
+        attachment: CaptureSourceContext.Attachment,
+        eventID: UUID,
+        attachmentIndex: Int
+    ) -> [String: String] {
+        var metadata: [String: String] = [
+            "capture_event_id": eventID.uuidString,
+            "attachment_index": String(attachmentIndex),
+        ]
+        if let id = attachment.id { metadata["source_attachment_id"] = id }
+        if let filename = attachment.filename { metadata["filename"] = filename }
+        if let mimeType = attachment.mimeType { metadata["mime_type"] = mimeType }
+        if let remoteURL = attachment.remoteURL { metadata["remote_url"] = remoteURL }
+        return metadata
+    }
+
+    private func ownerType(forCaptureItemType itemType: String) -> String {
+        switch itemType {
+        case "event": return "dateCard"
+        default: return itemType
+        }
     }
 
     private func assignmentPartialSuccess(

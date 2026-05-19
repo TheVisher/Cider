@@ -6,6 +6,7 @@ struct KanbanTestingGuideFloatingView: View {
     var onReanchor: CiderFloatingReanchorAction?
 
     @ObservedObject private var progressStore = KanbanTestingGuideProgressStore.shared
+    @State private var overallNoteDraft = ""
 
     private var completedStepCount: Int {
         progressStore.completedCount(guideID: payload.id, steps: payload.steps)
@@ -48,6 +49,8 @@ struct KanbanTestingGuideFloatingView: View {
                             ForEach(Array(payload.steps.enumerated()), id: \.element.id) { index, step in
                                 guideStep(index: index, step: step)
                             }
+
+                            overallNotesEditor
                         }
                         .padding(.bottom, Spacing.md)
                     }
@@ -56,6 +59,9 @@ struct KanbanTestingGuideFloatingView: View {
             }
             .padding(Spacing.lg)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .onAppear {
+                overallNoteDraft = progressStore.overallNote(guideID: payload.id) ?? ""
+            }
         }
     }
 
@@ -135,6 +141,54 @@ struct KanbanTestingGuideFloatingView: View {
             .background(Capsule().fill(CiderColors.surfaceInput))
     }
 
+    private var overallNotesEditor: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "text.bubble")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.secondary)
+                Text("Overall QA Notes")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.primary)
+                Spacer(minLength: Spacing.sm)
+                Button {
+                    saveOverallNote()
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Save overall QA notes")
+            }
+
+            TextField("Summary, retest context, or follow-up for agents", text: $overallNoteDraft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(2...5)
+                .padding(Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                        .fill(CiderColors.surfaceElevated)
+                )
+                .onSubmit {
+                    saveOverallNote()
+                }
+        }
+        .padding(Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.surfaceInput)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .stroke(CiderColors.separator.opacity(0.65), lineWidth: CiderBorder.thinStrokeWidth)
+        )
+    }
+
     @MainActor
     private func dock() {
         let surface = CiderFloatableSurface.kanbanTestingGuide(payload)
@@ -157,6 +211,12 @@ struct KanbanTestingGuideFloatingView: View {
                 userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: surface]
             )
         }
+    }
+
+    @MainActor
+    private func saveOverallNote() {
+        progressStore.setOverallNote(overallNoteDraft, guideID: payload.id)
+        KanbanTestingGuideCardResultSync.recordOverallNote(payload: payload, note: overallNoteDraft)
     }
 }
 

@@ -70,7 +70,9 @@ struct CiderDatabaseTests {
             "folders", "labels", "items", "bookmarks", "notes", "todos",
             "events", "contacts", "vault_files", "sessions",
             "item_labels", "dismissed_labels", "tags", "item_tags",
-            "item_links", "trash", "mutation_audit", "folder_sync_decisions",
+            "item_links", "owner_relations", "projects", "capture_events",
+            "capture_attachments", "enrichment_outputs", "similarity_candidates",
+            "trash", "mutation_audit", "folder_sync_decisions",
             "schema_version", "schema_migrations",
         ]
 

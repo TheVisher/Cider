@@ -118,18 +118,32 @@ Board files live in `~/CiderVault/.cider/boards/`.
 For Cider development work with a Kanban card, agents should use the structured card contract before reading raw board YAML:
 
 1. If the active card ID is unknown, run `cider-cli board recent <board> --limit 20 --json`.
-2. For Testing queue triage, run `cider-cli board testing-summary <board> --json` and use its `needsErik` / `agentCanVerify` grouping.
-3. Inspect the active card with `cider-cli board card inspect <board> --card <id> --json`.
-4. Read `dashboard.currentState`, `dashboard.nextStep`, `dashboard.openLoops`, `dashboard.evidenceEntries`, and `dashboard.agentContext`.
-5. Move or create cards through `cider-cli board ...` commands, not direct YAML edits.
-6. Update active status with `cider-cli board section update <board> --card <id> --section "Current State" --value "..." --json`.
-7. Add implementation summaries with `cider-cli board history add <board> --card <id> --type implementation --text "..." --source "..." --json`.
-8. Add failed-attempt notes with `cider-cli board history add <board> --card <id> --type failed-attempt --text "..." --source "..." --json` when they would save a future agent time.
-9. Add verification through `cider-cli board evidence add <board> --card <id> --text "..." --source "..." --json`.
-10. Record durable product, architecture, storage, CLI, QA, or agent-behavior choices with `cider-cli board history add <board> --card <id> --type decision --text "..." --source "..." --json` before promoting them into core docs.
-11. Before stopping, refresh `Agent Handoff` with the current status, exact commands the next agent should run, known gaps, and merge/push constraints.
+2. For workflow pickup or review routing, run `cider-cli board workflow <board> --json` and follow `automationActions` as approval-aware guidance, not as silent automation.
+3. For Testing queue triage, run `cider-cli board testing-summary <board> --json` and use its `needsErik` / `agentCanVerify` grouping.
+4. Inspect the active card with `cider-cli board card inspect <board> --card <id> --json`.
+5. Read `dashboard.currentState`, `dashboard.nextStep`, `dashboard.openLoops`, `dashboard.evidenceEntries`, and `dashboard.agentContext`.
+6. Move or create cards through `cider-cli board ...` commands, not direct YAML edits.
+7. Update active status with `cider-cli board section update <board> --card <id> --section "Current State" --value "..." --json`.
+8. Add implementation summaries with `cider-cli board history add <board> --card <id> --type implementation --text "..." --source "..." --json`.
+9. Add failed-attempt notes with `cider-cli board history add <board> --card <id> --type failed-attempt --text "..." --source "..." --json` when they would save a future agent time.
+10. Add verification through `cider-cli board evidence add <board> --card <id> --text "..." --source "..." --json`.
+11. Record durable product, architecture, storage, CLI, QA, or agent-behavior choices with `cider-cli board history add <board> --card <id> --type decision --text "..." --source "..." --json` before promoting them into core docs.
+12. When repo changes are available, add commit traceability with `cider-cli board history add <board> --card <id> --type commit --text "<sha> <branch/files/tests summary>" --source "git" --json`.
+13. Before stopping, refresh `Agent Handoff` with the current status, exact commands the next agent should run, known gaps, and merge/push constraints.
 
 Use `cider-cli item get card <id> --json` when an agent only needs projected sections/provenance, and `cider-cli item search <query> --json` when it needs retrieval across projected chunks. Raw Markdown or YAML inspection is for parser/storage debugging, not normal handoff.
+
+## Accepted Graph Workflow
+
+The accepted second-brain graph backend is the agent-facing memory foundation. Agents should use graph commands before falling back to raw SQLite, prose inference, or folder-path guesses.
+
+- Run `cider-cli item graph-health --json` before raw SQLite inspection when checking graph readiness. Treat `needs_rebuild`, `needs_sync`, and `needs_review` as actionable state, not as permission to mutate silently.
+- Use `cider-cli item project-context <project> --json` for project graph context. Prefer the returned owner refs, relations, counts, and safe commands over reading project folders or scraping Kanban YAML.
+- Use item/project/owner context commands to understand relationships, backlinks, `captureProvenance`, routing, enrichment, and similarity state before making organization changes.
+- Capture new source material through canonical capture commands/services so `capture_events`, `capture_attachments`, owner relations, routing, review, and agent-visible result JSON stay connected.
+- Generated enrichment, similarity candidates, and grouping suggestions are reviewable outputs. Do not silently promote them into user organization unless the command explicitly records an approved mutation.
+- Record friction as scoped Kanban follow-up cards instead of reopening broad architecture plans. Good follow-ups include bounded output, missing relation visibility, stale projection repair, or dogfood findings.
+- Promote only durable product, storage, CLI, QA, or agent-behavior contracts into core docs after the card evidence proves them.
 
 ## Development Rules
 

@@ -1,5 +1,24 @@
 import AppKit
 
+private func servicesImageSourceContext(
+    sourceFile: String?,
+    preferredFileExtension: String?
+) -> CaptureSourceContext {
+    let filename = sourceFile.map { URL(fileURLWithPath: $0).lastPathComponent }
+    let mimeType = preferredFileExtension.map { "image/\($0.lowercased())" }
+    let attachment = CaptureSourceContext.Attachment(
+        filename: filename,
+        mimeType: mimeType,
+        localPath: sourceFile
+    )
+    let hasAttachmentMetadata = filename != nil || mimeType != nil || sourceFile != nil
+
+    return CaptureSourceContext(
+        surface: "macos_services",
+        attachments: hasAttachmentMetadata ? [attachment] : []
+    )
+}
+
 /// Handles macOS Services menu requests ("Send to Cider").
 /// Two service entries: one for text (URLs + plain text), one for images.
 /// Requires a proper .app bundle to appear in the Services menu.
@@ -12,17 +31,26 @@ final class CiderServicesProvider: NSObject {
 
     init(
         urlCaptureHandler: @escaping (String) throws -> CiderCaptureResult = {
-            try CiderCaptureService().add($0)
+            try CiderCaptureService().add(
+                $0,
+                sourceContext: CaptureSourceContext(surface: "macos_services", originalText: $0)
+            )
         },
         noteCaptureHandler: @escaping (String) throws -> CiderCaptureResult = {
-            try CiderCaptureService().addNoteCapture(title: nil, content: $0, folderID: nil)
+            try CiderCaptureService().addNoteCapture(
+                title: nil,
+                content: $0,
+                folderID: nil,
+                sourceContext: CaptureSourceContext(surface: "macos_services", originalText: $0)
+            )
         },
         imageCaptureHandler: @escaping (Data, String?, String?) throws -> CiderCaptureResult = {
             try CiderCaptureService().addImageBookmarkCapture(
                 title: "Image from Services",
                 imageData: $0,
                 preferredFileExtension: $1,
-                sourceFile: $2
+                sourceFile: $2,
+                sourceContext: servicesImageSourceContext(sourceFile: $2, preferredFileExtension: $1)
             )
         },
         toastHandler: @escaping (String, Bool) -> Void = { message, isSuccess in

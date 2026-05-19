@@ -125,6 +125,7 @@ struct ProjectWorkspaceOverviewModel: Equatable {
     let totals: ProjectWorkspaceCardTotals
     let boardSummaries: [ProjectWorkspaceBoardSummary]
     let projectRows: [ProjectWorkspaceProjectRow]
+    let artifacts: [ProjectWorkspaceArtifactRow]
     let boardCreationActionTitle: String?
 }
 
@@ -153,11 +154,22 @@ struct ProjectWorkspaceProjectRow: Identifiable, Equatable {
     var id: String { projectID }
 }
 
+struct ProjectWorkspaceArtifactRow: Identifiable, Equatable {
+    let owner: SecondBrainOwnerRef
+    let title: String
+    let relationType: String
+    let evidence: String
+    let safeCommand: String
+
+    var id: String { "\(owner.canonicalRef):\(relationType)" }
+}
+
 enum ProjectWorkspaceOverviewProvider {
     static func model(
         for workspace: ProjectWorkspace,
         catalog: ProjectWorkspaceCatalog,
-        boards: [KanbanBoard]
+        boards: [KanbanBoard],
+        artifactRelations: [SecondBrainRelation] = []
     ) -> ProjectWorkspaceOverviewModel {
         let boardSummaries = scopedBoards(for: workspace, boards: boards)
             .map { board in
@@ -189,6 +201,7 @@ enum ProjectWorkspaceOverviewProvider {
             totals: aggregate(boardSummaries.map(\.totals)),
             boardSummaries: boardSummaries,
             projectRows: projectRows,
+            artifacts: artifactRows(from: artifactRelations, projectID: workspace.id),
             boardCreationActionTitle: workspace.kind == .project ? "New Board" : nil
         )
     }
@@ -258,6 +271,40 @@ enum ProjectWorkspaceOverviewProvider {
         let text = [card.title, card.notes ?? "", card.aiSummary ?? ""].joined(separator: " ")
         return text.localizedCaseInsensitiveContains("blocked")
             || text.localizedCaseInsensitiveContains("blocker")
+    }
+
+    private static func artifactRows(
+        from relations: [SecondBrainRelation],
+        projectID: String
+    ) -> [ProjectWorkspaceArtifactRow] {
+        let projectOwner = SecondBrainProjectGraphService.owner(projectID: projectID)
+        return relations.map { relation in
+            let owner = relation.sourceOwner == projectOwner ? relation.targetOwner : relation.sourceOwner
+            return ProjectWorkspaceArtifactRow(
+                owner: owner,
+                title: artifactTitle(for: owner, relation: relation),
+                relationType: relation.relationType,
+                evidence: relation.evidence,
+                safeCommand: "cider-cli item context \(owner.ownerType) \(owner.ownerID) --json"
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.title.localizedCaseInsensitiveCompare(rhs.title) != .orderedSame {
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            return lhs.owner.canonicalRef < rhs.owner.canonicalRef
+        }
+    }
+
+    private static func artifactTitle(for owner: SecondBrainOwnerRef, relation: SecondBrainRelation) -> String {
+        let metadataKeys = ["title", "card_title", "name", "filename", "path"]
+        for key in metadataKeys {
+            if let value = relation.metadata[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                return value
+            }
+        }
+        return owner.canonicalRef
     }
 }
 

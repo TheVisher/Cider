@@ -765,6 +765,29 @@ struct CiderStorageAuditServiceTests {
         #expect(afterRepair.schemaFindings.isEmpty)
     }
 
+    @Test("storage audit repairs missing capture attachments table")
+    func storageAuditRepairsMissingCaptureAttachmentsTable() throws {
+        let (db, dbURL) = try makeTestDB()
+        defer { db.close(); cleanup(dbURL) }
+
+        try db.runSQL("DROP TABLE capture_attachments;")
+        let service = makeStorageAuditService(db: db)
+
+        let beforeRepair = try service.audit()
+        #expect(beforeRepair.schemaFindings.contains { finding in
+            finding.id == "missing_expected_table:capture_attachments"
+                && finding.isRepairable
+                && finding.repairCommand == "cider-cli storage repair-schema --json"
+        })
+
+        let repair = try service.repairSchemaFindings()
+
+        #expect(repair.repairedFindingIDs.contains("missing_expected_table:capture_attachments"))
+        #expect(repair.remainingFindings.isEmpty)
+        #expect(try sqliteObjectExists("capture_attachments", type: "table", in: db))
+        #expect(try sqliteObjectExists("idx_capture_attachments_event", type: "index", in: db))
+    }
+
     @Test("storage audit repair restores content chunk FTS artifacts")
     func storageAuditRepairRestoresContentChunkFTSArtifacts() throws {
         let (db, dbURL) = try makeTestDB()

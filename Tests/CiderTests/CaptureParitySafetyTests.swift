@@ -132,6 +132,48 @@ struct CaptureParitySafetyTests {
         #expect(violations.isEmpty, "macOS Services intake must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("capture intake surfaces pass source context")
+    func captureIntakeSurfacesPassSourceContext() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let expectations: [(file: String, surface: String, requiredSnippets: [String])] = [
+            (
+                "Sources/Cider/App/CiderDropZoneContext.swift",
+                "drop_zone",
+                [
+                    "sourceContext: CaptureSourceContext(",
+                    "surface: \"drop_zone\"",
+                ]
+            ),
+            (
+                "Sources/Cider/Services/CiderServicesProvider.swift",
+                "macos_services",
+                [
+                    "sourceContext: CaptureSourceContext(",
+                    "surface: \"macos_services\"",
+                ]
+            ),
+            (
+                "Sources/Cider/App/AppDelegate+ScreenCapture.swift",
+                "screen_capture",
+                [
+                    "sourceContext: CaptureSourceContext(",
+                    "surface: \"screen_capture\"",
+                ]
+            ),
+        ]
+        var violations: [String] = []
+
+        for expectation in expectations {
+            let fileURL = repoRoot.appendingPathComponent(expectation.file)
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            for snippet in expectation.requiredSnippets where !source.contains(snippet) {
+                violations.append("\(expectation.file): missing \(snippet) for \(expectation.surface) provenance")
+            }
+        }
+
+        #expect(violations.isEmpty, "Capture intake surfaces must pass source context:\n\(violations.joined(separator: "\n"))")
+    }
+
     private func block(named marker: String, in source: String) -> String? {
         guard let markerRange = source.range(of: marker) else { return nil }
         let tail = source[markerRange.lowerBound...]

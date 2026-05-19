@@ -605,6 +605,7 @@ enum MLXToolExecutor {
         MutationAuditContext.withSource(.agent) {
         let title = string("title", from: args)
         let content = string("content", from: args)
+        let requestedFolderName = optString("folderName", from: args)
         let targetFolder = optString("folderName", from: args).flatMap { folderName in
             VaultFolderService.shared.folders.first(where: {
                 $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
@@ -618,16 +619,34 @@ enum MLXToolExecutor {
                 folderID: targetFolder?.id
             )
             let finalTitle = result.item.title
-            if let folderName = optString("folderName", from: args), targetFolder == nil {
-                return "Created note \"\(finalTitle)\" (folder \"\(folderName)\" not found, saved for review)."
+            if let folderName = requestedFolderName, targetFolder == nil {
+                return AgentCaptureToolResultFormatter.jsonString(
+                    message: "Created note \"\(finalTitle)\" (folder \"\(folderName)\" not found, saved for review).",
+                    captureResult: result,
+                    additionalPartialFailures: [
+                        AgentCaptureToolResultFormatter.partialFailure(
+                            status: "requested_folder_not_found",
+                            reason: "Folder \"\(folderName)\" was not found, so the note stayed in its capture destination."
+                        )
+                    ]
+                )
             }
             if let targetFolder {
                 if result.partialSuccess?.status == "assignment_failed" {
-                    return "Created note \"\(finalTitle)\" but failed to move it to folder \"\(targetFolder.name)\"."
+                    return AgentCaptureToolResultFormatter.jsonString(
+                        message: "Created note \"\(finalTitle)\" but failed to move it to folder \"\(targetFolder.name)\".",
+                        captureResult: result
+                    )
                 }
-                return "Created note \"\(finalTitle)\" in folder \"\(targetFolder.name)\"."
+                return AgentCaptureToolResultFormatter.jsonString(
+                    message: "Created note \"\(finalTitle)\" in folder \"\(targetFolder.name)\".",
+                    captureResult: result
+                )
             }
-            return "Created note \"\(finalTitle)\"."
+            return AgentCaptureToolResultFormatter.jsonString(
+                message: "Created note \"\(finalTitle)\".",
+                captureResult: result
+            )
         } catch {
             return "Failed to create note: \(error.localizedDescription)"
         }
@@ -640,29 +659,52 @@ enum MLXToolExecutor {
         guard !urlString.isEmpty else { return "URL cannot be empty." }
 
         let title = optString("title", from: args)
-        let targetFolder = optString("folderName", from: args).flatMap { folderName in
+        let requestedFolderName = optString("folderName", from: args)
+        let targetFolder = requestedFolderName.flatMap { folderName in
             VaultFolderService.shared.folders.first {
                 $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
             }
         }
-        guard let bookmark = try? CiderBookmarkCaptureAdapter()
-            .addURLBookmark(urlString: urlString, title: title, folderID: targetFolder?.id)
-            .bookmark else {
+        guard let adapterResult = try? CiderBookmarkCaptureAdapter()
+            .addURLBookmark(urlString: urlString, title: title, folderID: targetFolder?.id) else {
             return "Failed to create bookmark for \"\(urlString)\"."
         }
+        let bookmark = adapterResult.bookmark
 
         var actions: [String] = ["Saved bookmark \"\(bookmark.title)\""]
+        var partialFailures: [[String: Any]] = []
 
         if let targetFolder {
             actions.append("moved to folder \"\(targetFolder.name)\"")
+        } else if let requestedFolderName {
+            actions.append("folder \"\(requestedFolderName)\" not found")
+            partialFailures.append(
+                AgentCaptureToolResultFormatter.partialFailure(
+                    status: "requested_folder_not_found",
+                    reason: "Folder \"\(requestedFolderName)\" was not found, so the bookmark stayed in its capture destination."
+                )
+            )
         }
         if let tagName = optString("tagName", from: args) {
             let label = CardLabelStorage.shared.findOrCreate(name: tagName)
-            _ = VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: label.id)
-            actions.append("tagged \"\(label.name)\"")
+            if VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: label.id) {
+                actions.append("tagged \"\(label.name)\"")
+            } else {
+                partialFailures.append(
+                    AgentCaptureToolResultFormatter.partialFailure(
+                        status: "tag_assignment_failed",
+                        reason: "Tag \"\(label.name)\" could not be assigned to the bookmark."
+                    )
+                )
+            }
         }
 
-        return actions.joined(separator: ", ") + "."
+        return AgentCaptureToolResultFormatter.jsonString(
+            message: actions.joined(separator: ", ") + ".",
+            captureResult: adapterResult.captureResult,
+            finalBookmark: bookmark,
+            additionalPartialFailures: partialFailures
+        )
         }
     }
 

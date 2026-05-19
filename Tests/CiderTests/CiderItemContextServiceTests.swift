@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Cider
+@testable import CiderCLI
 
 @Suite("Cider Item Context Service Tests")
 @MainActor
@@ -89,6 +90,79 @@ struct CiderItemContextServiceTests {
         #expect(bundle.sections.map(\.sectionKey) == ["summary"])
         #expect(bundle.chunks.map(\.body) == ["Call the dentist and check insurance first."])
         #expect(bundle.related.map(\.title) == ["Dental insurance portal"])
+    }
+
+    @Test("captured item context exposes capture source context")
+    func capturedItemContextExposesCaptureSourceContext() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(note, title: "Dogfood graph backend capture", relativePath: "Inbox/Notes/Dogfood graph backend capture.md", into: db)
+
+        let eventID = UUID()
+        let createdAt = Date(timeIntervalSince1970: 1_745_084_400)
+        let metadata = DatabaseHelpers.encodeJSON(["workspace": "Cider"]) ?? "{}"
+        let insertEvent = try db.prepare("""
+            INSERT INTO capture_events (
+                id, source_kind, surface, channel, channel_id, thread_id, message_id,
+                sender_id, sender_name, source_url, source_file, source_text,
+                attachment_count, metadata, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """)
+        insertEvent.bind(eventID.uuidString, at: 1)
+            .bind("text", at: 2)
+            .bind("codex_dogfood", at: 3)
+            .bind("cli", at: 4)
+            .bind("local", at: 5)
+            .bind("thread-42", at: 6)
+            .bind("dogfood-2026-05-19", at: 7)
+            .bind("codex", at: 8)
+            .bind("Codex", at: 9)
+            .bind(String?.none, at: 10)
+            .bind(String?.none, at: 11)
+            .bind("Original dogfood capture text", at: 12)
+            .bind(0, at: 13)
+            .bind(metadata, at: 14)
+            .bind(DatabaseHelpers.encode(createdAt), at: 15)
+        try insertEvent.step()
+
+        let store = SecondBrainStore(database: db)
+        let captureOwner = SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString)
+        let noteOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: note.entityID.uuidString)
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: captureOwner,
+            targetOwner: noteOwner,
+            relationType: "produced_item",
+            evidence: "Capture event produced note Dogfood graph backend capture.",
+            source: "capture.add",
+            actor: "system",
+            confidence: 1,
+            metadata: ["command": "capture.add"]
+        ))
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let bundle = try service.context(for: note)
+
+        #expect(bundle.captureProvenance.count == 1)
+        #expect(bundle.captureProvenance[0].eventID == eventID.uuidString)
+        #expect(bundle.captureProvenance[0].surface == "codex_dogfood")
+        #expect(bundle.captureProvenance[0].channel == "cli")
+        #expect(bundle.captureProvenance[0].messageID == "dogfood-2026-05-19")
+        #expect(bundle.captureProvenance[0].senderID == "codex")
+        #expect(bundle.captureProvenance[0].sourceText == "Original dogfood capture text")
+        #expect(bundle.captureProvenance[0].metadata["workspace"] == "Cider")
+
+        let dict = CiderCLI.itemContextBundleToDict(bundle)
+        let provenance = try #require(dict["captureProvenance"] as? [[String: Any]])
+        #expect(provenance.count == 1)
+        #expect(provenance[0]["surface"] as? String == "codex_dogfood")
+        #expect(provenance[0]["channel"] as? String == "cli")
+        #expect(provenance[0]["messageID"] as? String == "dogfood-2026-05-19")
+
+        let packet = try service.agentContext(for: note)
+        #expect(packet.provenance.contains("capture:codex_dogfood/cli"))
+        #expect(packet.captureProvenance.map(\.eventID) == [eventID.uuidString])
     }
 
     @Test("search returns item title matches and chunk text matches through one surface")

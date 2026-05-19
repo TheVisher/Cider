@@ -189,7 +189,55 @@ struct KanbanAgentWorkflowTests {
         #expect(nextUp.sequence[2].isNextActionable)
         #expect(nextUp.suggestedInsertion.columnName == "Queued")
         #expect(nextUp.suggestedInsertion.parentID == "parent")
-        #expect(nextUp.suggestedInsertion.command == "cider-cli board add-card \"Roadmap Board\" --column \"Queued\" --title \"<title>\" --parent parent")
+        #expect(nextUp.suggestedInsertion.command == "cider-cli board add-card \"Roadmap Board\" --column \"Queued\" --title \"<title>\" --parent parent --after next-child")
+    }
+
+    @Test("roadmap next up groups children by parent plan status")
+    func roadmapNextUpGroupsChildrenByParentPlanStatus() throws {
+        let board = KanbanBoard(
+            id: "roadmap-board",
+            name: "Roadmap Board",
+            columns: [
+                KanbanColumn(
+                    id: "backlog",
+                    name: "Backlog",
+                    cards: [
+                        KanbanCard(id: "later-child", title: "Later child", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "queued",
+                    name: "Queued",
+                    cards: [
+                        KanbanCard(id: "next-child", title: "Next child", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "testing",
+                    name: "Testing",
+                    cards: [
+                        KanbanCard(id: "review-child", title: "Review child", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "done",
+                    name: "Done",
+                    isDoneColumn: true,
+                    cards: [
+                        KanbanCard(id: "done-child", title: "Done child", parentCardID: "parent", completed: Date()),
+                    ]
+                ),
+            ]
+        )
+
+        let nextUp = try #require(KanbanRoadmapNextUpProjection(board: board, parentID: "parent"))
+
+        #expect(nextUp.groups.map(\.kind) == [.currentGate, .nextUp, .later, .testingNeedsReview, .done])
+        #expect(nextUp.groups.first { $0.kind == .currentGate }?.items.map(\.id) == ["review-child"])
+        #expect(nextUp.groups.first { $0.kind == .nextUp }?.items.map(\.id) == ["next-child"])
+        #expect(nextUp.groups.first { $0.kind == .later }?.items.map(\.id) == ["later-child"])
+        #expect(nextUp.groups.first { $0.kind == .testingNeedsReview }?.items.map(\.id) == ["review-child"])
+        #expect(nextUp.groups.first { $0.kind == .done }?.items.map(\.id) == ["done-child"])
     }
 
     @Test("agent workflow summary groups implementation testing and fix loops")
@@ -253,6 +301,61 @@ struct KanbanAgentWorkflowTests {
         #expect(summary.completedCards.map(\.id) == ["done-card"])
         #expect(summary.agentNames == ["codex", "hermes"])
         #expect(summary.laneSummaries.map(\.role) == [.backlog, .implementationQueue, .inProgress, .testing, .needsFix, .done])
+    }
+
+    @Test("agent workflow summary exposes approval-aware routing actions")
+    func agentWorkflowSummaryExposesApprovalAwareRoutingActions() throws {
+        let board = KanbanBoard(
+            id: "agent-loop-board",
+            name: "Agent Loop",
+            columns: [
+                KanbanColumn(
+                    id: "queued",
+                    name: "Queued",
+                    cards: [
+                        KanbanCard(id: "next", title: "Next implementation", priority: .high),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "in_progress",
+                    name: "In Progress",
+                    cards: []
+                ),
+                KanbanColumn(
+                    id: "testing",
+                    name: "Testing",
+                    cards: [
+                        KanbanCard(
+                            id: "failed",
+                            title: "Failed review",
+                            notes: """
+                            ## QA Results
+                            - Step 1 failed: The review button moved the card without recording why.
+                            """
+                        ),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "needs_fix",
+                    name: "Needs Fix",
+                    cards: []
+                ),
+            ]
+        )
+
+        let summary = KanbanAgentWorkflowSummary(board: board)
+
+        let startAction = try #require(summary.automationActions.first { $0.cardID == "next" })
+        #expect(startAction.action == .startAgent)
+        #expect(startAction.requiresApproval)
+        #expect(startAction.safeCommands.contains("cider-cli board move-card \"Agent Loop\" --card next --to \"In Progress\""))
+
+        let failedReviewAction = try #require(summary.automationActions.first { $0.cardID == "failed" })
+        #expect(failedReviewAction.action == .routeBackForFix)
+        #expect(failedReviewAction.destinationColumnID == "needs_fix")
+        #expect(failedReviewAction.reason == "Manual QA failed; route back with an explicit failed-attempt note before more implementation.")
+        #expect(failedReviewAction.safeCommands.contains("cider-cli board history add \"Agent Loop\" --card failed --type failed-attempt --text \"Step 1 failed: The review button moved the card without recording why.\" --source reviewer"))
+        #expect(failedReviewAction.safeCommands.contains("cider-cli board move-card \"Agent Loop\" --card failed --to \"Needs Fix\""))
     }
 
     @Test("testing triage separates Erik manual QA from agent-verifiable cards")

@@ -244,7 +244,7 @@ struct CiderCLI {
         case "review":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
         case "item":
-            return isMutationSubcommand(subcommand, in: ["move", "unfile", "route", "link", "backfill-kanban"])
+            return isMutationSubcommand(subcommand, in: ["move", "unfile", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "accept-similarity", "project-context", "project", "sync-project", "project-sync"])
         case "label", "tag":
             return isMutationSubcommand(subcommand, in: ["create", "rename", "delete", "rm"])
         case "view", "saved-view":
@@ -857,7 +857,7 @@ struct CiderCLI {
         switch subcommand {
         case "add":
             guard let source = args.first else {
-                print("Error: Source required. Usage: cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--timeout <seconds>|--no-wait] [--json]")
+                print("Error: Source required. Usage: cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
                 return
             }
 
@@ -873,7 +873,8 @@ struct CiderCLI {
                 let result = try CiderCaptureService(bookmarkService: bookmarkService, database: database).add(
                     source,
                     title: parseFlag("--title", from: args),
-                    folderID: targetFolder?.id
+                    folderID: targetFolder?.id,
+                    sourceContext: captureSourceContext(from: args, originalText: source)
                 )
                 let waitResult: BookmarkNativeCaptureWaitResult?
                 if result.item.type == "bookmark", let timeout = bookmarkNativeCaptureWaitTimeout(from: args) {
@@ -921,7 +922,7 @@ struct CiderCLI {
             }
 
         case nil, "help", "--help", "-h":
-            print("Usage: cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--timeout <seconds>|--no-wait] [--json]")
+            print("Usage: cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
 
         default:
             print("Unknown capture command: \(subcommand ?? "nil")")
@@ -3356,7 +3357,19 @@ struct CiderCLI {
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
               cider-cli item capability-map [--json]
+              cider-cli item graph-health [--json]
               cider-cli item related <type> <id-or-ref> [--json]
+              cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
+              cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
+              cider-cli item related-owners <owner-type> <owner-id-or-ref> [--json]
+              cider-cli item rebuild-references <note|card|board> <id-or-ref> [--json]
+              cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]
+              cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
+              cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
+              cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
+              cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]
+              cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
+              cider-cli item sync-project <project-id-or-name> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
               cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <vault-path>) [--actor <name>] [--source <source>] [--json]
               cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
@@ -3553,6 +3566,30 @@ struct CiderCLI {
                 }
             }
 
+        case "graph-health", "health", "readiness":
+            do {
+                let status = try secondBrainGraphHealthStatus()
+                if jsonOutput {
+                    outputJSON(status)
+                } else {
+                    print("Second-brain graph health: \(status["status"] ?? "")")
+                    if let components = status["components"] as? [[String: Any]] {
+                        for component in components {
+                            let id = component["id"] as? String ?? "component"
+                            let state = component["state"] as? String ?? "unknown"
+                            let count = component["count"] as? Int
+                            print("  \(id): \(state)\(count.map { " (\($0))" } ?? "")")
+                        }
+                    }
+                    if let commands = status["suggestedCommands"] as? [String], !commands.isEmpty {
+                        print("Safe next commands:")
+                        commands.forEach { print("  \($0)") }
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case "why-surfaced", "why":
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
@@ -3605,6 +3642,244 @@ struct CiderCLI {
                     print("Why: \(packet.surfacing.reason)")
                     print("Next: \(packet.surfacing.suggestedAction)")
                 }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "relations", "owner-relations":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item relations <owner-type> <owner-id-or-ref> [--json]")
+                return
+            }
+            do {
+                let owner = normalizedOwner(type: positional[0], ref: positional[1])
+                let relations = try store.outgoingRelations(for: owner)
+                printOwnerRelations(relations, command: "item.relations", sourceType: positional[0], sourceRef: positional[1], owner: owner)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "backlinks", "owner-backlinks":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]")
+                return
+            }
+            do {
+                let owner = normalizedOwner(type: positional[0], ref: positional[1])
+                let relations = try store.backlinks(for: owner)
+                printOwnerRelations(relations, command: "item.backlinks", sourceType: positional[0], sourceRef: positional[1], owner: owner)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "related-owners", "owner-related":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item related-owners <owner-type> <owner-id-or-ref> [--json]")
+                return
+            }
+            do {
+                let owner = normalizedOwner(type: positional[0], ref: positional[1])
+                let relations = try store.relatedRelations(for: owner)
+                printOwnerRelations(relations, command: "item.related-owners", sourceType: positional[0], sourceRef: positional[1], owner: owner)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "rebuild-references", "reference-rebuild", "references-rebuild":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item rebuild-references <note|card|board> <id-or-ref> [--json]")
+                return
+            }
+            do {
+                let extractor = SecondBrainReferenceExtractionService(store: store)
+                let rawType = positional[0].lowercased().replacingOccurrences(of: "-", with: "_")
+                switch rawType {
+                case "note":
+                    guard let note = findNote(positional[1], in: NotesStorage.shared) else { return }
+                    let result = try extractor.rebuildNote(note)
+                    printReferenceExtractionResults([result], command: "item.rebuild-references", sourceType: positional[0], sourceRef: positional[1])
+                case "card", "kanban_card", "kanban":
+                    let detail = try resolveKanbanCardDetail(ref: positional[1])
+                    let result = try extractor.rebuildCard(boardID: detail.board.id, card: detail.card)
+                    printReferenceExtractionResults([result], command: "item.rebuild-references", sourceType: positional[0], sourceRef: positional[1])
+                case "board", "kanban_board":
+                    guard let board = findBoard(positional[1], in: KanbanStorage.shared) else { return }
+                    let results = try extractor.rebuildBoard(board)
+                    printReferenceExtractionResults(results, command: "item.rebuild-references", sourceType: positional[0], sourceRef: positional[1])
+                default:
+                    printCLIError("Unsupported reference rebuild type '\(positional[0])'. Use note, card, or board.")
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "rebuild-chunks", "rebuild-content", "content-rebuild":
+            let positional = leadingPositionalArgs(from: args)
+            guard let type = positional.first else {
+                printCLIError("Usage: cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]")
+                return
+            }
+            do {
+                let indexer = SecondBrainItemContentIndexingService(database: .shared, store: store)
+                let results: [SecondBrainItemContentIndexResult]
+                if type.lowercased() == "all" {
+                    let limit = parseFlag("--limit", from: args).flatMap(Int.init)
+                    results = try indexer.rebuildAll(limit: limit)
+                } else {
+                    guard positional.count >= 2 else {
+                        printCLIError("Usage: cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]")
+                        return
+                    }
+                    let owner = normalizedOwner(type: positional[0], ref: positional[1])
+                    results = [try indexer.rebuild(owner: owner)]
+                }
+                printItemContentIndexResults(results, command: "item.rebuild-chunks", sourceType: type, sourceRef: positional.dropFirst().first)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "rebuild-enrichment", "enrichment-rebuild":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]")
+                return
+            }
+            do {
+                let owner = normalizedOwner(type: positional[0], ref: positional[1])
+                let result = try SecondBrainEnrichmentOutputService(database: .shared).rebuildFromChunks(owner: owner)
+                if jsonOutput {
+                    outputJSON([
+                        "ok": true,
+                        "command": "item.rebuild-enrichment",
+                        "owner": ownerToDict(result.owner),
+                        "outputCount": result.outputCount,
+                        "kindCounts": result.kindCounts,
+                    ])
+                } else {
+                    print("Rebuilt enrichment outputs for \(result.owner.canonicalRef): \(result.outputCount)")
+                    for key in result.kindCounts.keys.sorted() {
+                        print("  \(key): \(result.kindCounts[key] ?? 0)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "rebuild-similarity", "similarity-rebuild":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]")
+                return
+            }
+            do {
+                let owner = normalizedOwner(type: positional[0], ref: positional[1])
+                let threshold = parseFlag("--threshold", from: args).flatMap(Double.init) ?? 0.34
+                let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 10
+                let service = SecondBrainSimilarityCandidateService(database: .shared, store: store)
+                let result = try service.rebuildChunkOverlapCandidates(for: owner, threshold: threshold, limit: limit)
+                let candidates = try service.candidates(for: owner)
+                printSimilarityCandidates(
+                    candidates,
+                    command: "item.rebuild-similarity",
+                    owner: result.owner,
+                    extra: [
+                        "candidateCount": result.candidateCount,
+                        "signal": result.signal,
+                    ]
+                )
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "similarity", "similarity-candidates":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]")
+                return
+            }
+            do {
+                let owner = normalizedOwner(type: positional[0], ref: positional[1])
+                let candidates = try SecondBrainSimilarityCandidateService(database: .shared, store: store).candidates(for: owner)
+                printSimilarityCandidates(candidates, command: "item.similarity", owner: owner)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "accept-similarity", "similarity-accept":
+            let positional = leadingPositionalArgs(from: args)
+            guard let candidateID = positional.first else {
+                printCLIError("Usage: cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]")
+                return
+            }
+            do {
+                let relation = parseFlag("--relation", from: args)
+                let actor = parseFlag("--actor", from: args) ?? "agent"
+                let accepted = try SecondBrainSimilarityCandidateService(database: .shared, store: store)
+                    .accept(candidateID: candidateID, relationType: relation, actor: actor)
+                if jsonOutput {
+                    outputJSON([
+                        "ok": true,
+                        "command": "item.accept-similarity",
+                        "candidate": similarityCandidateToDict(accepted),
+                    ])
+                } else {
+                    print("Accepted \(accepted.id): \(accepted.sourceOwner.canonicalRef) -> \(accepted.targetOwner.canonicalRef) as \(relation ?? accepted.candidateType)")
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "project-context", "project":
+            let positional = leadingPositionalArgs(from: args)
+            guard let ref = positional.first else {
+                printCLIError("Usage: cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]")
+                return
+            }
+            let catalog = ProjectWorkspaceCatalog.defaultCatalog(
+                boards: KanbanStorage.shared.boards,
+                boardAssociations: ProjectWorkspaceAssociationStore.shared.associations
+            )
+            let workspace = projectWorkspace(ref: ref, catalog: catalog)
+            do {
+                let payload = try SecondBrainProjectGraphService(database: .shared, store: store).contextOrSyncWorkspace(
+                    for: ref,
+                    workspace: workspace,
+                    boards: KanbanStorage.shared.boards
+                )
+                printProjectContext(
+                    payload,
+                    command: "item.project-context",
+                    sourceRef: ref,
+                    limits: projectContextOutputLimits(from: args)
+                )
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "sync-project", "project-sync":
+            let positional = leadingPositionalArgs(from: args)
+            guard let ref = positional.first else {
+                printCLIError("Usage: cider-cli item sync-project <project-id-or-name> [--json]")
+                return
+            }
+            let catalog = ProjectWorkspaceCatalog.defaultCatalog(
+                boards: KanbanStorage.shared.boards,
+                boardAssociations: ProjectWorkspaceAssociationStore.shared.associations
+            )
+            guard let workspace = projectWorkspace(ref: ref, catalog: catalog) else {
+                printCLIError("Project workspace '\(ref)' not found")
+                return
+            }
+            do {
+                let payload = try SecondBrainProjectGraphService(database: .shared, store: store).syncWorkspace(
+                    workspace,
+                    boards: KanbanStorage.shared.boards
+                )
+                printProjectContext(payload, command: "item.sync-project", sourceRef: ref)
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -4870,6 +5145,16 @@ struct CiderCLI {
                             print("    [\(card.id)] \(card.title)\(agent)\(priority)")
                         }
                     }
+                    if !summary.automationActions.isEmpty {
+                        print("\n  Automation / review routing:")
+                        for action in summary.automationActions {
+                            let approval = action.requiresApproval ? " approval-required" : ""
+                            print("    [\(action.cardID)] \(action.label) (\(action.action.rawValue))\(approval): \(action.reason)")
+                            for command in action.safeCommands {
+                                print("      \(command)")
+                            }
+                        }
+                    }
                 }
             }
 
@@ -4918,6 +5203,64 @@ struct CiderCLI {
                 printTestingTriageSection("Needs Erik", items: summary.needsErik)
                 printTestingTriageSection("Agent can verify", items: summary.agentCanVerify)
                 printTestingTriageSection("Mixed / needs triage", items: summary.mixed)
+            }
+
+        case "parent-summary":
+            guard let boardRef = args.first,
+                  let cardID = parseFlag("--card", from: args) else {
+                printCLIError("Usage: cider-cli board parent-summary <board> --card <id> [--refresh --dry-run|--confirm] [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard var parent = board.card(id: cardID) else {
+                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+            guard let rollup = KanbanParentChildRollup(board: board, parentID: parent.id) else {
+                printCLIError("Card '\(parent.title)' has no child cards.")
+                return
+            }
+
+            let refreshRequested = args.contains("--refresh")
+            let confirmRefresh = args.contains("--confirm")
+            let plan = parentRefreshPlan(board: board, parent: parent, rollup: rollup)
+            var applied = false
+
+            if refreshRequested && confirmRefresh {
+                parent.notes = KanbanCardSectionParser.updatingSection(
+                    in: parent.notes,
+                    title: "Current State",
+                    body: plan.currentState
+                )
+                parent.notes = KanbanCardSectionParser.updatingSection(
+                    in: parent.notes,
+                    title: "Next Step",
+                    body: plan.nextStep
+                )
+                storage.updateCard(boardID: board.id, card: parent)
+                refreshSecondBrainProjection(boardID: board.id, card: parent)
+                applied = true
+            }
+
+            if jsonOutput {
+                outputJSON(parentSummaryToDict(
+                    board: board,
+                    parent: parent,
+                    rollup: rollup,
+                    plan: plan,
+                    refreshRequested: refreshRequested,
+                    applied: applied
+                ))
+            } else {
+                print("Parent summary: \(parent.title) [\(parent.id)]")
+                print(rollup.statusLine)
+                print(rollup.nextActionLine)
+                if !plan.staleFindings.isEmpty {
+                    print("Stale parent text: \(plan.staleFindings.count) finding(s)")
+                }
+                if refreshRequested {
+                    print(applied ? "Refreshed Current State / Next Step." : "Dry run only. Add --confirm to apply.")
+                }
             }
 
         case "card":
@@ -4995,7 +5338,7 @@ struct CiderCLI {
 
         case "add-card":
             guard let boardName = args.first else {
-                print("Error: Usage: cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>]")
+                print("Error: Usage: cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>] [--after <sibling-id>]")
                 return
             }
             guard let colName = parseFlag("--column", from: args),
@@ -5006,11 +5349,22 @@ struct CiderCLI {
             if let board = storage.boards.first(where: { $0.name.localizedCaseInsensitiveCompare(boardName) == .orderedSame || $0.id == boardName }) {
                 if let col = board.columns.first(where: { $0.name.localizedCaseInsensitiveCompare(colName) == .orderedSame || $0.id == colName }) {
                     let parentCardID = parseFlag("--parent", from: args)
+                    let afterCardID = parseFlag("--after", from: args)
                     if let parentCardID, board.card(id: parentCardID) == nil {
                         print("Error: Parent card '\(parentCardID)' not found in board '\(board.name)'")
                         return
                     }
-                    if let card = storage.addCard(boardID: board.id, columnID: col.id, title: title, parentCardID: parentCardID) {
+                    if let afterCardID {
+                        guard let afterCard = col.cards.first(where: { $0.id == afterCardID }) else {
+                            print("Error: After card '\(afterCardID)' not found in column '\(col.name)'")
+                            return
+                        }
+                        if let parentCardID, afterCard.parentCardID != parentCardID {
+                            print("Error: After card '\(afterCardID)' is not a child of parent '\(parentCardID)'")
+                            return
+                        }
+                    }
+                    if let card = storage.addCard(boardID: board.id, columnID: col.id, title: title, parentCardID: parentCardID, afterCardID: afterCardID) {
                         // Apply optional notes and priority via updateCard while preserving creation activity.
                         var updated = card
                         var changed = false
@@ -5220,7 +5574,7 @@ struct CiderCLI {
 
         case "history":
             guard args.first == "add" else {
-                printCLIError("Usage: cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text> [--source <source>] [--json]")
+                printCLIError("Usage: cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff|commit> --text <text> [--source <source>] [--json]")
                 return
             }
             let historyArgs = Array(args.dropFirst())
@@ -5228,7 +5582,7 @@ struct CiderCLI {
                   let cardID = parseFlag("--card", from: historyArgs),
                   let type = parseFlag("--type", from: historyArgs),
                   let text = parseFlag("--text", from: historyArgs) else {
-                printCLIError("Usage: cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text> [--source <source>] [--json]")
+                printCLIError("Usage: cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff|commit> --text <text> [--source <source>] [--json]")
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
@@ -5354,7 +5708,7 @@ struct CiderCLI {
 
         default:
             print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, tags, workflow, recent, testing-summary, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
+            print("Commands: list, show, tags, workflow, recent, testing-summary, parent-summary, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -7806,7 +8160,7 @@ struct CiderCLI {
 
     static func failedQASteps(in notes: String?) -> [String] {
         KanbanCardSectionParser.sections(from: notes)
-            .filter { ["qa_results", "testing_results", "manual_qa_results"].contains($0.key) }
+            .filter { ["qa_results", "qa_findings", "testing_results", "manual_qa_results"].contains($0.key) }
             .flatMap { section in
                 section.body.components(separatedBy: .newlines).compactMap { rawLine -> String? in
                     let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -7821,6 +8175,9 @@ struct CiderCLI {
         let normalized = line
             .trimmingCharacters(in: CharacterSet(charactersIn: "-•* "))
             .lowercased()
+        if normalized == "failed steps:" || normalized == "failed steps" {
+            return false
+        }
         if normalized.range(of: #"^step\s+\d+\s+failed:"#, options: .regularExpression) != nil {
             return true
         }
@@ -7941,6 +8298,8 @@ struct CiderCLI {
         let projectedSections = (try? store.sections(for: owner)) ?? []
         let routes = (try? store.routingDecisions(for: owner)) ?? []
         let actions = (try? store.agentActions(for: owner)) ?? []
+        let relations = (try? store.outgoingRelations(for: owner)) ?? []
+        let backlinks = (try? store.backlinks(for: owner)) ?? []
 
         var cardDict: [String: Any] = [
             "id": card.id,
@@ -7971,11 +8330,18 @@ struct CiderCLI {
             "children": board.childCards(of: card.id).map(minimalCardToDict),
             "relatedCards": board.relatedCards(for: card.id).map(minimalCardToDict),
             "linkedEntities": card.linkedEntities.map(libraryEntityRefToDict),
+            "ownerRelations": relations.map(ownerRelationToDict),
+            "backlinks": backlinks.map(ownerRelationToDict),
             "routingDecisions": routes.map(routingDecisionToDict),
             "agentActions": actions.map(agentActionToDict),
         ]
         if let column {
             dict["column"] = ["id": column.id, "name": column.name, "isDoneColumn": column.isDoneColumn]
+        }
+        dict["hasFailedQA"] = model.hasFailedQA
+        let failedSteps = failedQASteps(in: card.notes)
+        if !failedSteps.isEmpty {
+            dict["failedQASteps"] = failedSteps
         }
         if let parent {
             dict["parent"] = minimalCardToDict(parent)
@@ -8029,6 +8395,11 @@ struct CiderCLI {
         return SecondBrainOwnerRef(ownerType: normalizedType, ownerID: rawRef)
     }
 
+    static func projectWorkspace(ref: String, catalog: ProjectWorkspaceCatalog) -> ProjectWorkspace? {
+        catalog.workspace(id: SecondBrainProjectGraphService.normalizedProjectID(ref))
+            ?? catalog.activeProjects.first { $0.title.localizedCaseInsensitiveCompare(ref) == .orderedSame }
+    }
+
     static let itemGetLegacyOwnerDeprecationMessage = "item get with non-library owner refs is deprecated; use cider-cli item owner-get <owner-type> <owner-id-or-ref> --json for legacy owner-section inspection."
 
     static func ownerInspectionPayload(
@@ -8049,6 +8420,8 @@ struct CiderCLI {
         let sections = try store.sections(for: owner)
         let routes = try store.routingDecisions(for: owner)
         let actions = try store.agentActions(for: owner)
+        let relations = try store.outgoingRelations(for: owner)
+        let backlinks = try store.backlinks(for: owner)
         var dict: [String: Any] = [
             "ok": true,
             "command": command,
@@ -8061,6 +8434,8 @@ struct CiderCLI {
             ],
             "owner": ownerToDict(owner),
             "sections": sections.map(secondBrainSectionToDict),
+            "ownerRelations": relations.map(ownerRelationToDict),
+            "backlinks": backlinks.map(ownerRelationToDict),
             "routingDecisions": routes.map(routingDecisionToDict),
             "agentActions": actions.map(agentActionToDict),
         ]
@@ -8106,6 +8481,14 @@ struct CiderCLI {
         }
         if !payload.actions.isEmpty {
             print("  Agent actions: \(payload.actions.count)")
+        }
+        let relations = payload.dict["ownerRelations"] as? [[String: Any]] ?? []
+        let backlinks = payload.dict["backlinks"] as? [[String: Any]] ?? []
+        if !relations.isEmpty {
+            print("  Owner relations: \(relations.count)")
+        }
+        if !backlinks.isEmpty {
+            print("  Backlinks: \(backlinks.count)")
         }
     }
 
@@ -8178,6 +8561,8 @@ struct CiderCLI {
         let routes = try store.routingDecisions(for: owner)
         let actions = try store.agentActions(for: owner)
         let related = try relatedKanbanCardItems(ref: "\(detail.board.id)/\(detail.card.id)")
+        let ownerRelations = try store.outgoingRelations(for: owner)
+        let backlinks = try store.backlinks(for: owner)
 
         return [
             "ok": true,
@@ -8190,6 +8575,8 @@ struct CiderCLI {
             "owner": ownerToDict(owner),
             "item": kanbanCardItemToDict(board: detail.board, column: detail.column, card: detail.card),
             "sections": sections.map(secondBrainSectionToDict),
+            "ownerRelations": ownerRelations.map(ownerRelationToDict),
+            "backlinks": backlinks.map(ownerRelationToDict),
             "routingDecisions": routes.map(routingDecisionToDict),
             "agentActions": actions.map(agentActionToDict),
             "related": related,
@@ -8197,6 +8584,8 @@ struct CiderCLI {
                 "cider-cli item get card \(detail.card.id) --json",
                 "cider-cli item context card \(detail.card.id) --json",
                 "cider-cli item related card \(detail.card.id) --json",
+                "cider-cli item relations card \(detail.card.id) --json",
+                "cider-cli item backlinks card \(detail.card.id) --json",
                 "cider-cli board card inspect \(detail.board.id) --card \(detail.card.id) --json",
             ],
         ]
@@ -8210,6 +8599,8 @@ struct CiderCLI {
         let limits = itemAgentContextLimits(from: args)
         let sections = try store.sections(for: owner)
         let related = try relatedKanbanCardItems(ref: "\(detail.board.id)/\(detail.card.id)")
+        let ownerRelations = try store.outgoingRelations(for: owner)
+        let backlinks = try store.backlinks(for: owner)
         let summary = kanbanCardSummary(card: detail.card, sections: sections, limit: limits.maxBodyCharacters)
         let contentBlocks = sections
             .prefix(max(0, limits.maxSections))
@@ -8232,6 +8623,8 @@ struct CiderCLI {
             "cider-cli item get card \(detail.card.id) --json",
             "cider-cli item context card \(detail.card.id) --json",
             "cider-cli item related card \(detail.card.id) --json",
+            "cider-cli item relations card \(detail.card.id) --json",
+            "cider-cli item backlinks card \(detail.card.id) --json",
             "cider-cli board card inspect \(detail.board.name) --card \(detail.card.id) --json",
         ]
 
@@ -8247,6 +8640,8 @@ struct CiderCLI {
             "provenance": kanbanCardProvenance(board: detail.board, card: detail.card, sections: sections),
             "contentBlocks": contentBlocks,
             "related": related,
+            "ownerRelations": ownerRelations.map(ownerRelationToDict),
+            "backlinks": backlinks.map(ownerRelationToDict),
             "surfacing": [
                 "reason": summary,
                 "urgency": detail.column.isDoneColumn ? "done" : "normal",
@@ -8516,7 +8911,210 @@ struct CiderCLI {
         [
             "ownerType": owner.ownerType,
             "ownerID": owner.ownerID,
+            "ref": owner.canonicalRef,
         ]
+    }
+
+    static func ownerRelationToDict(_ relation: SecondBrainRelation) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": relation.id,
+            "sourceOwner": ownerToDict(relation.sourceOwner),
+            "targetOwner": ownerToDict(relation.targetOwner),
+            "relationType": relation.relationType,
+            "evidence": relation.evidence,
+            "source": relation.source,
+            "actor": relation.actor,
+            "metadata": relation.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: relation.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: relation.updatedAt),
+        ]
+        if let confidence = relation.confidence {
+            dict["confidence"] = confidence
+        }
+        return dict
+    }
+
+    static func printOwnerRelations(
+        _ relations: [SecondBrainRelation],
+        command: String,
+        sourceType: String,
+        sourceRef: String,
+        owner: SecondBrainOwnerRef
+    ) {
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "command": command,
+                "sourceRef": [
+                    "type": sourceType,
+                    "ref": sourceRef,
+                ],
+                "owner": ownerToDict(owner),
+                "relations": relations.map(ownerRelationToDict),
+            ])
+            return
+        }
+        if relations.isEmpty {
+            print("No owner relations.")
+            return
+        }
+        for relation in relations {
+            print("  [\(relation.relationType)] \(relation.sourceOwner.canonicalRef) -> \(relation.targetOwner.canonicalRef) (\(relation.source))")
+        }
+    }
+
+    static func printReferenceExtractionResults(
+        _ results: [SecondBrainReferenceExtractionResult],
+        command: String,
+        sourceType: String,
+        sourceRef: String
+    ) {
+        let relationCount = results.reduce(0) { $0 + $1.relations.count }
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "command": command,
+                "sourceRef": [
+                    "type": sourceType,
+                    "ref": sourceRef,
+                ],
+                "sources": results.map { result in
+                    [
+                        "owner": ownerToDict(result.sourceOwner),
+                        "surface": result.surface,
+                        "relationCount": result.relations.count,
+                        "relations": result.relations.map(ownerRelationToDict),
+                    ] as [String: Any]
+                },
+                "sourceCount": results.count,
+                "relationCount": relationCount,
+            ])
+            return
+        }
+
+        print("Rebuilt extracted references for \(results.count) source\(results.count == 1 ? "" : "s") (\(relationCount) relation\(relationCount == 1 ? "" : "s")).")
+        for result in results {
+            print("  \(result.sourceOwner.canonicalRef): \(result.relations.count)")
+        }
+    }
+
+    static func projectToDict(_ project: SecondBrainProject) -> [String: Any] {
+        [
+            "id": project.id,
+            "title": project.title,
+            "subtitle": project.subtitle,
+            "status": project.status,
+            "metadata": project.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: project.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: project.updatedAt),
+            "owner": ownerToDict(project.owner),
+        ]
+    }
+
+    struct ProjectContextOutputLimits {
+        var mode: String
+        var maxSamples: Int
+
+        static let full = ProjectContextOutputLimits(mode: "full", maxSamples: Int.max)
+
+        static func summary(maxSamples: Int) -> ProjectContextOutputLimits {
+            ProjectContextOutputLimits(mode: "summary", maxSamples: max(0, maxSamples))
+        }
+
+        var isSummary: Bool { mode == "summary" }
+    }
+
+    static func projectContextOutputLimits(from args: [String]) -> ProjectContextOutputLimits {
+        if args.contains("--full") {
+            return .full
+        }
+        if args.contains("--summary") || parseFlag("--limit", from: args) != nil {
+            let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 25
+            return .summary(maxSamples: limit)
+        }
+        return .full
+    }
+
+    static func projectContextToDict(
+        _ context: SecondBrainProjectContext,
+        command: String,
+        sourceRef: String,
+        limits: ProjectContextOutputLimits = .full
+    ) -> [String: Any] {
+        var safeCommands = context.safeCommands
+        let fullCommand = "cider-cli item project-context \(context.project.id) --full --json"
+        if limits.isSummary, !safeCommands.contains(fullCommand) {
+            safeCommands.append(fullCommand)
+        }
+
+        var dict: [String: Any] = [
+            "ok": true,
+            "command": command,
+            "sourceRef": [
+                "type": "project",
+                "ref": sourceRef,
+            ],
+            "project": projectToDict(context.project),
+            "owner": ownerToDict(context.owner),
+            "sections": context.sections.prefix(limits.maxSamples).map(secondBrainSectionToDict),
+            "ownerRelations": context.outgoingRelations.prefix(limits.maxSamples).map(ownerRelationToDict),
+            "backlinks": context.backlinks.prefix(limits.maxSamples).map(ownerRelationToDict),
+            "artifactRelations": context.artifactRelations.prefix(limits.maxSamples).map(ownerRelationToDict),
+            "artifactOwners": context.artifactOwners.prefix(limits.maxSamples).map(ownerToDict),
+            "boardOwners": context.boardOwners.prefix(limits.maxSamples).map(ownerToDict),
+            "cardOwners": context.cardOwners.prefix(limits.maxSamples).map(ownerToDict),
+            "safeCommands": safeCommands,
+        ]
+        if limits.isSummary {
+            dict["mode"] = limits.mode
+            dict["limits"] = ["maxSamples": limits.maxSamples]
+            dict["counts"] = [
+                "sections": context.sections.count,
+                "ownerRelations": context.outgoingRelations.count,
+                "backlinks": context.backlinks.count,
+                "artifactRelations": context.artifactRelations.count,
+                "artifactOwners": context.artifactOwners.count,
+                "boardOwners": context.boardOwners.count,
+                "cardOwners": context.cardOwners.count,
+            ]
+            dict["truncation"] = [
+                "sections": context.sections.count > limits.maxSamples,
+                "ownerRelations": context.outgoingRelations.count > limits.maxSamples,
+                "backlinks": context.backlinks.count > limits.maxSamples,
+                "artifactRelations": context.artifactRelations.count > limits.maxSamples,
+                "artifactOwners": context.artifactOwners.count > limits.maxSamples,
+                "boardOwners": context.boardOwners.count > limits.maxSamples,
+                "cardOwners": context.cardOwners.count > limits.maxSamples,
+            ]
+        }
+        return dict
+    }
+
+    static func printProjectContext(
+        _ context: SecondBrainProjectContext,
+        command: String,
+        sourceRef: String,
+        limits: ProjectContextOutputLimits = .full
+    ) {
+        if jsonOutput {
+            outputJSON(projectContextToDict(context, command: command, sourceRef: sourceRef, limits: limits))
+            return
+        }
+        print("Project: \(context.project.title) [\(context.project.id)]")
+        if !context.project.subtitle.isEmpty {
+            print("  \(context.project.subtitle)")
+        }
+        print("  Owner: \(context.owner.canonicalRef)")
+        print("  Boards: \(context.boardOwners.count)")
+        print("  Cards: \(context.cardOwners.count)")
+        print("  Artifacts: \(context.artifactOwners.count)")
+        print("  Relations: \(context.outgoingRelations.count)")
+        if !context.safeCommands.isEmpty {
+            print("  Safe commands:")
+            for command in context.safeCommands {
+                print("    \(command)")
+            }
+        }
     }
 
     static func kanbanSectionToDict(_ section: KanbanCardSection) -> [String: Any] {
@@ -8541,6 +9139,8 @@ struct CiderCLI {
             "decisions": model.decisions.map(dashboardEntryToDict),
             "historyEntries": model.historyEntries.map(dashboardEntryToDict),
             "evidenceEntries": model.evidenceEntries.map(dashboardEntryToDict),
+            "qaFindingsEntries": model.qaFindingsEntries.map(dashboardEntryToDict),
+            "hasFailedQA": model.hasFailedQA,
             "relatedItems": model.relatedItems.map(dashboardEntryToDict),
             "missingCoreSections": model.missingCoreSections,
             "fallbackSummary": model.fallbackSummary,
@@ -8604,6 +9204,99 @@ struct CiderCLI {
         return dict
     }
 
+    struct KanbanParentRefreshPlan {
+        var currentState: String
+        var nextStep: String
+        var staleFindings: [[String: String]]
+        var safeCommands: [String]
+    }
+
+    static func parentRefreshPlan(
+        board: KanbanBoard,
+        parent: KanbanCard,
+        rollup: KanbanParentChildRollup
+    ) -> KanbanParentRefreshPlan {
+        let currentState = "\(rollup.statusLine) Next gate: \(rollup.nextActionLine)"
+        let nextStep = rollup.nextActionLine
+        let boardRef = quoted(board.name)
+        let safeCommands = [
+            "cider-cli board parent-summary \(boardRef) --card \(parent.id) --refresh --dry-run --json",
+            "cider-cli board parent-summary \(boardRef) --card \(parent.id) --refresh --confirm --json",
+        ]
+
+        return KanbanParentRefreshPlan(
+            currentState: currentState,
+            nextStep: nextStep,
+            staleFindings: staleParentTextFindings(parent: parent, rollup: rollup),
+            safeCommands: safeCommands
+        )
+    }
+
+    static func parentSummaryToDict(
+        board: KanbanBoard,
+        parent: KanbanCard,
+        rollup: KanbanParentChildRollup,
+        plan: KanbanParentRefreshPlan,
+        refreshRequested: Bool,
+        applied: Bool
+    ) -> [String: Any] {
+        [
+            "ok": true,
+            "board": [
+                "id": board.id,
+                "name": board.name,
+            ],
+            "parent": minimalCardToDict(parent),
+            "childRollup": parentChildRollupToDict(rollup),
+            "staleParentText": [
+                "isStale": !plan.staleFindings.isEmpty,
+                "findings": plan.staleFindings,
+            ],
+            "proposedSections": [
+                "Current State": plan.currentState,
+                "Next Step": plan.nextStep,
+            ],
+            "refreshRequested": refreshRequested,
+            "applied": applied,
+            "safeCommands": plan.safeCommands,
+        ]
+    }
+
+    private static func staleParentTextFindings(
+        parent: KanbanCard,
+        rollup: KanbanParentChildRollup
+    ) -> [[String: String]] {
+        let model = KanbanCardDashboardModel(title: parent.title, notes: parent.notes)
+        let sections: [(String, String)] = [
+            ("Current State", model.currentState ?? ""),
+            ("Next Step", model.nextStep ?? ""),
+        ]
+        let doneChildren = rollup.children.filter { $0.role == .done }
+        let actionWords = ["next", "remaining", "finish", "start", "queue", "continue", "waiting", "open", "todo", "to do"]
+
+        var findings: [[String: String]] = []
+        for (section, body) in sections {
+            let normalizedBody = body.lowercased()
+            guard actionWords.contains(where: { normalizedBody.contains($0) }) else { continue }
+            for child in doneChildren where normalizedBody.contains(child.title.lowercased()) {
+                findings.append([
+                    "section": section,
+                    "referencedDoneChildID": child.id,
+                    "referencedDoneChildTitle": child.title,
+                    "reason": "Parent section appears to name a completed child as remaining or next work.",
+                ])
+            }
+        }
+        return findings
+    }
+
+    private static func quoted(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
     static func parentChildRollupChildToDict(_ child: KanbanParentChildRollup.Child) -> [String: Any] {
         var dict: [String: Any] = [
             "id": child.id,
@@ -8625,6 +9318,7 @@ struct CiderCLI {
             "parentID": nextUp.parentID,
             "nextActionLine": nextUp.nextActionLine,
             "sequence": nextUp.sequence.map(roadmapNextUpSequenceItemToDict),
+            "groups": nextUp.groups.map(roadmapNextUpGroupToDict),
             "suggestedInsertion": roadmapNextUpSuggestedInsertionToDict(nextUp.suggestedInsertion),
         ]
         if let currentGate = nextUp.currentGate {
@@ -8634,6 +9328,15 @@ struct CiderCLI {
             dict["nextActionableChild"] = roadmapNextUpSequenceItemToDict(nextActionableChild)
         }
         return dict
+    }
+
+    static func roadmapNextUpGroupToDict(_ group: KanbanRoadmapNextUpProjection.Group) -> [String: Any] {
+        [
+            "id": group.id,
+            "kind": group.kind.rawValue,
+            "label": group.label,
+            "items": group.items.map(roadmapNextUpSequenceItemToDict),
+        ]
     }
 
     static func roadmapNextUpSequenceItemToDict(_ item: KanbanRoadmapNextUpProjection.SequenceItem) -> [String: Any] {
@@ -8746,6 +9449,43 @@ struct CiderCLI {
         return dict
     }
 
+    static func itemContentIndexResultToDict(_ result: SecondBrainItemContentIndexResult) -> [String: Any] {
+        [
+            "owner": ownerToDict(result.owner),
+            "title": result.title,
+            "itemType": result.itemType,
+            "chunkCount": result.chunkCount,
+            "sources": result.sources,
+        ]
+    }
+
+    static func printItemContentIndexResults(
+        _ results: [SecondBrainItemContentIndexResult],
+        command: String,
+        sourceType: String,
+        sourceRef: String?
+    ) {
+        if jsonOutput {
+            var payload: [String: Any] = [
+                "ok": true,
+                "command": command,
+                "sourceType": sourceType,
+                "count": results.count,
+                "results": results.map(itemContentIndexResultToDict),
+            ]
+            if let sourceRef {
+                payload["sourceRef"] = sourceRef
+            }
+            outputJSON(payload)
+            return
+        }
+
+        print("Rebuilt content chunks for \(results.count) item(s).")
+        for result in results {
+            print("  \(result.owner.canonicalRef) - \(result.chunkCount) chunk(s) - \(result.title)")
+        }
+    }
+
     static func itemLinkSummaryToDict(_ summary: ItemLinkSummary) -> [String: Any] {
         [
             "type": summary.ref.type.rawValue,
@@ -8763,9 +9503,110 @@ struct CiderCLI {
             "sections": bundle.sections.map(secondBrainSectionToDict),
             "chunks": bundle.chunks.map(itemChunkToDict),
             "related": bundle.related.map(itemLinkSummaryToDict),
+            "ownerRelations": bundle.ownerRelations.map(ownerRelationToDict),
+            "backlinks": bundle.backlinks.map(ownerRelationToDict),
             "routingDecisions": bundle.routingDecisions.map(routingDecisionToDict),
             "agentActions": bundle.agentActions.map(agentActionToDict),
+            "enrichmentOutputs": bundle.enrichmentOutputs.map(enrichmentOutputToDict),
+            "captureProvenance": bundle.captureProvenance.map(captureProvenanceToDict),
         ]
+    }
+
+    static func captureProvenanceToDict(_ provenance: CiderItemCaptureProvenance) -> [String: Any] {
+        var dict: [String: Any] = [
+            "eventID": provenance.eventID,
+            "owner": ownerToDict(provenance.owner),
+            "sourceKind": provenance.sourceKind,
+            "attachmentCount": provenance.attachmentCount,
+            "metadata": provenance.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: provenance.createdAt),
+            "relation": ownerRelationToDict(provenance.relation),
+        ]
+        if let surface = provenance.surface { dict["surface"] = surface }
+        if let channel = provenance.channel { dict["channel"] = channel }
+        if let channelID = provenance.channelID { dict["channelID"] = channelID }
+        if let threadID = provenance.threadID { dict["threadID"] = threadID }
+        if let messageID = provenance.messageID { dict["messageID"] = messageID }
+        if let senderID = provenance.senderID { dict["senderID"] = senderID }
+        if let senderName = provenance.senderName { dict["senderName"] = senderName }
+        if let sourceURL = provenance.sourceURL { dict["sourceURL"] = sourceURL }
+        if let sourceFile = provenance.sourceFile { dict["sourceFile"] = sourceFile }
+        if let sourceText = provenance.sourceText { dict["sourceText"] = sourceText }
+        return dict
+    }
+
+    static func enrichmentOutputToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": output.id,
+            "owner": ownerToDict(output.owner),
+            "kind": output.kind,
+            "value": output.value,
+            "normalizedValue": output.normalizedValue,
+            "label": output.label,
+            "evidence": output.evidence,
+            "source": output.source,
+            "reviewState": output.reviewState,
+            "metadata": output.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: output.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: output.updatedAt),
+        ]
+        if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
+        if let confidence = output.confidence { dict["confidence"] = confidence }
+        return dict
+    }
+
+    static func similarityCandidateToDict(_ candidate: SecondBrainSimilarityCandidate) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": candidate.id,
+            "sourceOwner": ownerToDict(candidate.sourceOwner),
+            "targetOwner": ownerToDict(candidate.targetOwner),
+            "candidateType": candidate.candidateType,
+            "signal": candidate.signal,
+            "score": candidate.score,
+            "reason": candidate.reason,
+            "evidence": candidate.evidence,
+            "source": candidate.source,
+            "reviewState": candidate.reviewState,
+            "metadata": candidate.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: candidate.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: candidate.updatedAt),
+        ]
+        if let reviewedAt = candidate.reviewedAt {
+            dict["reviewedAt"] = ISO8601DateFormatter().string(from: reviewedAt)
+        }
+        return dict
+    }
+
+    static func printSimilarityCandidates(
+        _ candidates: [SecondBrainSimilarityCandidate],
+        command: String,
+        owner: SecondBrainOwnerRef,
+        extra: [String: Any] = [:]
+    ) {
+        if jsonOutput {
+            var payload: [String: Any] = [
+                "ok": true,
+                "command": command,
+                "owner": ownerToDict(owner),
+                "candidates": candidates.map(similarityCandidateToDict),
+            ]
+            for (key, value) in extra {
+                payload[key] = value
+            }
+            outputJSON(payload)
+            return
+        }
+
+        if candidates.isEmpty {
+            print("No similarity candidates for \(owner.canonicalRef).")
+            return
+        }
+        print("Similarity candidates for \(owner.canonicalRef):")
+        for candidate in candidates {
+            let score = String(format: "%.2f", candidate.score)
+            print("  [\(candidate.id)] \(candidate.candidateType) \(score) \(candidate.targetOwner.canonicalRef) - \(candidate.reviewState)")
+            print("    \(candidate.evidence)")
+        }
     }
 
     static func itemAgentContextLimits(from args: [String]) -> CiderItemAgentContextLimits {
@@ -8787,6 +9628,9 @@ struct CiderCLI {
             "spaceMemberships": packet.spaceMemberships.map(itemSpaceMembershipToDict),
             "contentBlocks": packet.contentBlocks.map(itemAgentContextBlockToDict),
             "related": packet.related.map(itemLinkSummaryToDict),
+            "ownerRelations": packet.ownerRelations.map(ownerRelationToDict),
+            "backlinks": packet.backlinks.map(ownerRelationToDict),
+            "captureProvenance": packet.captureProvenance.map(captureProvenanceToDict),
             "surfacing": surfacingExplanationToDict(packet.surfacing),
             "recentHistory": packet.recentHistory.map(itemAgentContextHistoryToDict),
             "safeCommands": packet.safeCommands,
@@ -8942,6 +9786,220 @@ struct CiderCLI {
         ]
     }
 
+    static func secondBrainGraphHealthStatus() throws -> [String: Any] {
+        let db = CiderDatabase.shared
+
+        func tableExists(_ table: String) throws -> Bool {
+            let stmt = try db.prepare("""
+                SELECT count(*)
+                FROM sqlite_master
+                WHERE type = 'table' AND name = ?;
+                """)
+            stmt.bind(table, at: 1)
+            try stmt.step()
+            return stmt.int(at: 0) == 1
+        }
+
+        func rowCount(_ table: String) throws -> Int? {
+            guard try tableExists(table), table != "content_chunks_fts" else { return nil }
+            let stmt = try db.prepare("SELECT count(*) FROM \(table);")
+            try stmt.step()
+            return Int(stmt.int64(at: 0))
+        }
+
+        let itemCount = try rowCount("items") ?? 0
+        let ownerRelationCount = try rowCount("owner_relations") ?? 0
+        let projectCount = try rowCount("projects") ?? 0
+        let captureEventCount = try rowCount("capture_events") ?? 0
+        let captureAttachmentCount = try rowCount("capture_attachments") ?? 0
+        let chunkCount = try rowCount("content_chunks") ?? 0
+        let enrichmentCount = try rowCount("enrichment_outputs") ?? 0
+        let similarityCount = try rowCount("similarity_candidates") ?? 0
+        let knownWorkspaceCount = ProjectWorkspaceCatalog.defaultCatalog(
+            boards: KanbanStorage.shared.boards,
+            boardAssociations: ProjectWorkspaceAssociationStore.shared.associations
+        ).activeProjects.count
+
+        var suggestedCommands: [String] = []
+        func addSuggestedCommand(_ command: String) {
+            guard !suggestedCommands.contains(command) else { return }
+            suggestedCommands.append(command)
+        }
+        func component(
+            id: String,
+            table: String,
+            label: String,
+            count: Int?,
+            emptyState: String = "implemented_empty",
+            emptyDetail: String,
+            healthyDetail: String,
+            suggestedCommand: String? = nil,
+            needsWorkWhenEmpty: Bool = false,
+            needsWorkState: String = "needs_rebuild"
+        ) throws -> [String: Any] {
+            guard try tableExists(table) else {
+                addSuggestedCommand("cider-cli storage repair-schema --json")
+                return [
+                    "id": id,
+                    "label": label,
+                    "table": table,
+                    "exists": false,
+                    "state": "not_implemented",
+                    "detail": "Required graph table \(table) is missing.",
+                    "safeNextCommands": ["cider-cli storage repair-schema --json"],
+                ]
+            }
+
+            let resolvedCount = count ?? 0
+            if resolvedCount > 0 {
+                return [
+                    "id": id,
+                    "label": label,
+                    "table": table,
+                    "exists": true,
+                    "count": resolvedCount,
+                    "state": "healthy",
+                    "detail": healthyDetail,
+                    "safeNextCommands": [],
+                ]
+            }
+
+            let state = needsWorkWhenEmpty ? needsWorkState : emptyState
+            let commandList = suggestedCommand.map { [$0] } ?? []
+            if let suggestedCommand {
+                addSuggestedCommand(suggestedCommand)
+            }
+            return [
+                "id": id,
+                "label": label,
+                "table": table,
+                "exists": true,
+                "count": resolvedCount,
+                "state": state,
+                "detail": emptyDetail,
+                "safeNextCommands": commandList,
+            ]
+        }
+
+        let components = try [
+            component(
+                id: "owner_relations",
+                table: "owner_relations",
+                label: "Owner relations",
+                count: ownerRelationCount,
+                emptyDetail: "Owner relation graph is implemented but has no edges yet.",
+                healthyDetail: "Typed owner relations are populated.",
+                suggestedCommand: "cider-cli item rebuild-references board \"Second-Brain Roadmap v1\" --json",
+                needsWorkWhenEmpty: itemCount > 0 || captureEventCount > 0 || projectCount > 0
+            ),
+            component(
+                id: "projects",
+                table: "projects",
+                label: "Project graph",
+                count: projectCount,
+                emptyDetail: knownWorkspaceCount > 0
+                    ? "Project graph is implemented but project workspace rows have not been synced."
+                    : "Project graph is implemented but no project workspaces are currently known.",
+                healthyDetail: "Project graph rows are populated.",
+                suggestedCommand: knownWorkspaceCount > 0 ? "cider-cli item sync-project <project-id-or-name> --json" : nil,
+                needsWorkWhenEmpty: knownWorkspaceCount > 0,
+                needsWorkState: "needs_sync"
+            ),
+            component(
+                id: "capture_events",
+                table: "capture_events",
+                label: "Capture events",
+                count: captureEventCount,
+                emptyDetail: "Capture provenance is implemented but no captures have been recorded yet.",
+                healthyDetail: "Capture event provenance is populated."
+            ),
+            component(
+                id: "capture_attachments",
+                table: "capture_attachments",
+                label: "Capture attachments",
+                count: captureAttachmentCount,
+                emptyDetail: captureEventCount > 0
+                    ? "Capture attachment provenance is empty despite existing capture events."
+                    : "Attachment-level provenance is implemented but no attachment captures have been recorded yet.",
+                healthyDetail: "Capture attachment provenance is populated.",
+                suggestedCommand: captureEventCount > 0 ? "cider-cli item backlinks capture_event <capture-event-id> --json" : nil,
+                needsWorkWhenEmpty: captureEventCount > 0,
+                needsWorkState: "needs_review"
+            ),
+            component(
+                id: "content_chunks",
+                table: "content_chunks",
+                label: "Content chunks",
+                count: chunkCount,
+                emptyDetail: itemCount > 0
+                    ? "Content chunking is implemented but indexed chunks are empty."
+                    : "Content chunking is implemented but no items are available to index yet.",
+                healthyDetail: "Content chunks are populated.",
+                suggestedCommand: "cider-cli item rebuild-chunks all --json",
+                needsWorkWhenEmpty: itemCount > 0
+            ),
+            component(
+                id: "enrichment_outputs",
+                table: "enrichment_outputs",
+                label: "Enrichment outputs",
+                count: enrichmentCount,
+                emptyDetail: chunkCount > 0
+                    ? "Enrichment output storage is implemented but no extracted outputs exist."
+                    : "Enrichment output storage is implemented but waits for content chunks.",
+                healthyDetail: "Structured enrichment outputs are populated.",
+                suggestedCommand: chunkCount > 0 ? "cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> --json" : nil,
+                needsWorkWhenEmpty: chunkCount > 0
+            ),
+            component(
+                id: "similarity_candidates",
+                table: "similarity_candidates",
+                label: "Similarity candidates",
+                count: similarityCount,
+                emptyDetail: chunkCount > 1
+                    ? "Similarity candidate storage is implemented but no reviewable candidates exist."
+                    : "Similarity candidate storage is implemented but waits for enough chunks to compare.",
+                healthyDetail: "Reviewable similarity/grouping candidates are populated.",
+                suggestedCommand: chunkCount > 1 ? "cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> --json" : nil,
+                needsWorkWhenEmpty: chunkCount > 1
+            ),
+        ]
+
+        let states = Set(components.compactMap { $0["state"] as? String })
+        let status: String
+        if states.contains("not_implemented") {
+            status = "not_implemented"
+        } else if states.contains("needs_sync") {
+            status = "needs_sync"
+        } else if states.contains("needs_rebuild") {
+            status = "needs_rebuild"
+        } else if states.contains("needs_review") {
+            status = "needs_review"
+        } else if states.contains("implemented_empty") {
+            status = "implemented_empty"
+        } else {
+            status = "healthy"
+        }
+
+        let integrity = try db.integrityCheck()
+        return [
+            "ok": integrity.isHealthy && !states.contains("not_implemented"),
+            "command": "item.graph-health",
+            "readOnly": true,
+            "status": status,
+            "schemaVersion": DatabaseMigrations.latestVersion,
+            "integrity": [
+                "healthy": integrity.isHealthy,
+                "messages": integrity.messages,
+            ],
+            "counts": [
+                "items": itemCount,
+                "knownProjectWorkspaces": knownWorkspaceCount,
+            ],
+            "components": components,
+            "suggestedCommands": suggestedCommands,
+        ]
+    }
+
     static func secondBrainDoctorStatus() throws -> [String: Any] {
         let expected = [
             "item_sections",
@@ -8949,6 +10007,11 @@ struct CiderCLI {
             "content_chunks_fts",
             "routing_decisions",
             "agent_actions",
+            "owner_relations",
+            "projects",
+            "capture_events",
+            "enrichment_outputs",
+            "similarity_candidates",
         ]
         let tableRows = try expected.map { table -> [String: Any] in
             let existsStmt = try CiderDatabase.shared.prepare(
@@ -9260,6 +10323,41 @@ struct CiderCLI {
             values.append(arg)
         }
         return values
+    }
+
+    static func captureSourceContext(from args: [String], originalText: String?) -> CaptureSourceContext? {
+        let surface = parseFlag("--surface", from: args)
+        let channel = parseFlag("--channel", from: args)
+        let channelID = parseFlag("--channel-id", from: args)
+        let threadID = parseFlag("--thread-id", from: args)
+        let messageID = parseFlag("--message-id", from: args)
+        let senderID = parseFlag("--sender-id", from: args)
+        let senderName = parseFlag("--sender-name", from: args)
+        let metadataPairs = parseFlagAll("--source-meta", from: args)
+        var metadata: [String: String] = [:]
+        for pair in metadataPairs {
+            let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { continue }
+            metadata[parts[0]] = parts[1]
+        }
+
+        let hasStructuredContext = [
+            surface, channel, channelID, threadID, messageID, senderID, senderName,
+        ].contains { ($0 ?? "").isEmpty == false } || !metadata.isEmpty
+        guard hasStructuredContext else { return nil }
+
+        return CaptureSourceContext(
+            surface: surface,
+            channel: channel,
+            channelID: channelID,
+            threadID: threadID,
+            messageID: messageID,
+            senderID: senderID,
+            senderName: senderName,
+            originalText: originalText,
+            attachments: [],
+            metadata: metadata
+        )
     }
 
     static func hasHelpArg(_ args: [String]) -> Bool {
@@ -9670,6 +10768,7 @@ struct CiderCLI {
           cider-cli item related <type> <id-or-ref> [--json]
           cider-cli item why-surfaced <type> <id-or-ref> [--json]
           cider-cli item capability-map [--json]
+          cider-cli item graph-health [--json]
 
         BOOKMARKS (alias: bm)
           cider-cli bookmark list [--folder <name|path>] [--limit <n>]
@@ -9774,22 +10873,24 @@ struct CiderCLI {
           cider-cli board tags [--json]
           cider-cli board recent <board> [--limit <count>] [--json]
           cider-cli board testing-summary <board> [--json]
+          cider-cli board parent-summary <board> --card <id> [--refresh --dry-run|--confirm] [--json]
           cider-cli board card inspect <board> --card <id> [--json]
           cider-cli board create <name> [--project <project-id-or-name>]
           cider-cli board rename <name|id> --to <new-name>
           cider-cli board delete <name|id>
-          cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>]
+          cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>] [--after <sibling-id>]
           cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes]
                                          [--priority low|medium|high|none] [--agent <name>] [--clear-agent]
                                          [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none]
                                          [--parent <card-id>] [--clear-parent]
           cider-cli board section update <board> --card <id> --section <name> --value <text> [--json]
           cider-cli board evidence add <board> --card <id> --text <text> [--source <source>] [--json]
-          cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff> --text <text> [--source <source>] [--json]
+          cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff|commit> --text <text> [--source <source>] [--json]
           cider-cli board move-card <board> --card <id> --to <column>
           cider-cli board delete-card <board> --card <id>
           cider-cli board workflow <board> [--json]
           cider-cli board testing-summary <board> [--json]
+          cider-cli board parent-summary <board> --card <id> [--refresh --dry-run|--confirm] [--json]
           cider-cli board children <board> --card <id> [--json]
           cider-cli board add-column <board> --name <col-name> [--done]
           cider-cli board rename-column <board> --column <col> --to <new-name>

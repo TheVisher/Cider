@@ -37,10 +37,32 @@ Current second-brain foundation tables include:
 - `content_chunks_fts`: FTS5 exact-search index over chunk title/body.
 - `routing_decisions`: durable record of where an item was routed, why, by whom, and with what confidence.
 - `agent_actions`: durable record of agent/CLI/tool actions against an item or projected owner.
+- `owner_relations`: typed graph edges between universal owners such as items, Kanban cards, projects, capture events, capture attachments, docs, and future owner types.
+- `projects`: backend project graph rows used by project context, project-scoped artifacts, board/card relations, and agent-safe project inspection.
+- `capture_events`: canonical capture provenance records with source surface/channel/message/sender context and produced-item relations.
+- `capture_attachments`: per-attachment capture provenance with source filename, local/remote reference, MIME type, byte size when available, and owner relations to capture events/items.
+- `enrichment_outputs`: structured AI/enrichment outputs such as entities, topics, dates, links, summaries, and review state.
+- `similarity_candidates`: reviewable grouping/linking suggestions that can be accepted into typed owner relations.
 
 Vectors and embeddings may augment retrieval later, but they are not the source of truth. Hybrid retrieval should layer structured filters, FTS5, links/graph expansion, optional embeddings, and reranking.
 
 The storage model follows the product loop: capture source identity, enrich metadata/content, record routing/review state, and make resurfacing explainable.
+
+## Accepted Backend Graph Contract
+
+The accepted backend graph foundation is operational enough for documentation, dogfooding, and UX planning. It is not a promise that every table is always populated; readiness is explicit and inspectable.
+
+- Universal owners use stable `{ownerType, ownerID}` refs. Current owners include library items, Kanban cards, Kanban boards, projects, docs/artifacts, `capture_event`, `capture_attachment`, and future external owners.
+- `owner_relations` is the typed, queryable relationship layer. Relations should be idempotent where rebuildable, include source/provenance metadata when useful, and avoid replacing existing `item_links` behavior without a bridge.
+- `capture_events` and `capture_attachments` are the canonical provenance path for capture surfaces. Source context should preserve surface/channel/message/sender/original text and attachment metadata where available, and item context should expose producing capture events through `captureProvenance`.
+- `projects` and project graph services provide project context through backend relations, not folder-path inference. `item project-context <project> --json` is the preferred agent entry point for project graph context.
+- `content_chunks` and `content_chunks_fts` are rebuildable retrieval projections for notes, cards, captures, imported content, docs/artifacts, and other item content.
+- `enrichment_outputs` stores structured, reviewable enrichment data. Generated enrichment must not overwrite user-owned fields without explicit review/approval.
+- `similarity_candidates` stores explainable suggestions. Accepting a candidate may create typed owner relations, but candidate generation itself must not silently reorganize user knowledge.
+- `item graph-health --json` is the preferred readiness command before raw SQLite inspection. Empty/rebuild-needed components are findings for sync/rebuild/dogfood, not automatic acceptance failures.
+- Graph-heavy commands should report counts, bounded samples where practical, and safe next commands so agents can continue without dumping unbounded context.
+
+Durable docs should describe the contract; Kanban cards should hold implementation history, QA evidence, dogfood notes, and follow-up friction.
 
 ## Kanban Projection Lifecycle
 

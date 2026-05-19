@@ -3,6 +3,25 @@ import Combine
 import Foundation
 import UniformTypeIdentifiers
 
+private func dropZoneImageSourceContext(
+    sourceFile: String?,
+    preferredFileExtension: String?
+) -> CaptureSourceContext {
+    let filename = sourceFile.map { URL(fileURLWithPath: $0).lastPathComponent }
+    let mimeType = preferredFileExtension.map { "image/\($0.lowercased())" }
+    let attachment = CaptureSourceContext.Attachment(
+        filename: filename,
+        mimeType: mimeType,
+        localPath: sourceFile
+    )
+    let hasAttachmentMetadata = filename != nil || mimeType != nil || sourceFile != nil
+
+    return CaptureSourceContext(
+        surface: "drop_zone",
+        attachments: hasAttachmentMetadata ? [attachment] : []
+    )
+}
+
 @MainActor
 final class CiderDropZoneContext: ObservableObject {
     enum DropStatus: Equatable {
@@ -85,17 +104,36 @@ final class CiderDropZoneContext: ObservableObject {
         title: String = "Drop Zone",
         subtitle: String = "Quickly toss things into Cider.",
         noteCaptureHandler: @escaping (String) throws -> CiderCaptureResult = {
-            try CiderCaptureService().addNoteCapture(title: nil, content: $0, folderID: nil)
+            try CiderCaptureService().addNoteCapture(
+                title: nil,
+                content: $0,
+                folderID: nil,
+                sourceContext: CaptureSourceContext(surface: "drop_zone", originalText: $0)
+            )
         },
         fileCaptureHandler: @escaping (URL) throws -> CiderCaptureResult = {
-            try CiderCaptureService().addFileCapture(sourcePath: $0.path, title: nil, folderID: nil)
+            try CiderCaptureService().addFileCapture(
+                sourcePath: $0.path,
+                title: nil,
+                folderID: nil,
+                sourceContext: CaptureSourceContext(
+                    surface: "drop_zone",
+                    attachments: [
+                        CaptureSourceContext.Attachment(
+                            filename: $0.lastPathComponent,
+                            localPath: $0.path
+                        )
+                    ]
+                )
+            )
         },
         imageBookmarkCaptureHandler: @escaping (String, Data, String?, String?) throws -> CiderCaptureResult = {
             try CiderCaptureService().addImageBookmarkCapture(
                 title: $0,
                 imageData: $1,
                 preferredFileExtension: $2,
-                sourceFile: $3
+                sourceFile: $3,
+                sourceContext: dropZoneImageSourceContext(sourceFile: $3, preferredFileExtension: $2)
             )
         }
     ) {
