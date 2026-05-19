@@ -127,4 +127,28 @@ struct FileBackedDomainContractsTests {
 
         #expect(featuresSource.contains("The target backend shape is a native SQLite `spaces` table"))
     }
+
+    @Test("core docs declare space membership owner relation bridge")
+    func coreDocsDeclareSpaceMembershipOwnerRelationBridge() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let storageDoc = repoRoot.appendingPathComponent("Docs/STORAGE.md")
+        let cliDoc = repoRoot.appendingPathComponent("Docs/CLI.md")
+        let storageSource = try String(contentsOf: storageDoc, encoding: .utf8)
+        let cliSource = try String(contentsOf: cliDoc, encoding: .utf8)
+
+        for snippet in [
+            "`space_memberships` writes are mirrored into `owner_relations`",
+            "`belongs_to_space`",
+            "`space` owner",
+        ] {
+            #expect(storageSource.contains(snippet), "Docs/STORAGE.md missing Space owner relation bridge snippet: \(snippet)")
+        }
+
+        for snippet in [
+            "`item route ... --target-type space`",
+            "creates a `belongs_to_space` owner relation",
+        ] {
+            #expect(cliSource.contains(snippet), "Docs/CLI.md missing Space owner relation bridge snippet: \(snippet)")
+        }
+    }
 }

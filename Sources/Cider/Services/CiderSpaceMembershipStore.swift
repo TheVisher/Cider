@@ -63,6 +63,16 @@ final class CiderSpaceMembershipStore {
             .bind(DatabaseHelpers.encode(now), at: 10)
         try stmt.step()
 
+        try mirrorMembershipToOwnerRelation(
+            item: item,
+            spaceID: spaceID,
+            spaceName: finalSpaceName,
+            reason: trimmedReason,
+            confidence: confidence,
+            membershipSource: source,
+            actor: actor
+        )
+
         return try membership(for: item, inSpaceID: spaceID) ?? CiderSpaceMembership(
             spaceID: spaceID,
             spaceName: finalSpaceName,
@@ -74,6 +84,34 @@ final class CiderSpaceMembershipStore {
             createdAt: createdAt,
             updatedAt: now
         )
+    }
+
+    private func mirrorMembershipToOwnerRelation(
+        item: LibraryEntityRef,
+        spaceID: String,
+        spaceName: String,
+        reason: String,
+        confidence: Double?,
+        membershipSource: String,
+        actor: String
+    ) throws {
+        let evidence = reason.isEmpty ? "Item belongs to Space \(spaceName)." : reason
+        try SecondBrainStore(database: database).recordRelation(SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(
+                ownerType: item.type.rawValue,
+                ownerID: item.entityID.uuidString
+            ),
+            targetOwner: SecondBrainOwnerRef(ownerType: "space", ownerID: spaceID),
+            relationType: "belongs_to_space",
+            evidence: evidence,
+            source: "space_memberships",
+            actor: actor,
+            confidence: confidence,
+            metadata: [
+                "spaceName": spaceName,
+                "membershipSource": membershipSource,
+            ]
+        ))
     }
 
     func memberships(for item: LibraryEntityRef) throws -> [CiderSpaceMembership] {

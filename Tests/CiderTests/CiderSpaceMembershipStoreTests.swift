@@ -81,4 +81,47 @@ struct CiderSpaceMembershipStoreTests {
         #expect(itemStmt.optionalString(at: 0) == nil)
         #expect(itemStmt.string(at: 1) == "Inbox/Bookmarks/Steam page.webloc")
     }
+
+    @Test("space membership is mirrored into owner relations idempotently")
+    func spaceMembershipIsMirroredIntoOwnerRelationsIdempotently() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let itemID = try insertItem(db)
+        let ref = LibraryEntityRef(type: .bookmark, entityID: itemID)
+        let store = CiderSpaceMembershipStore(database: db)
+
+        _ = try store.assign(
+            item: ref,
+            toSpaceID: "space-media",
+            spaceName: "Media",
+            reason: "Steam URL belongs in the Media meaning layer.",
+            confidence: 0.94,
+            source: "test.space.assign",
+            actor: "codex"
+        )
+        _ = try store.assign(
+            item: ref,
+            toSpaceID: "space-media",
+            spaceName: "Media",
+            reason: "Updated Space reason.",
+            confidence: 0.96,
+            source: "test.space.assign",
+            actor: "codex"
+        )
+
+        let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: itemID.uuidString)
+        let outgoing = try SecondBrainStore(database: db).outgoingRelations(for: owner)
+
+        #expect(outgoing.count == 1)
+        let relation = try #require(outgoing.first)
+        #expect(relation.sourceOwner == owner)
+        #expect(relation.targetOwner == SecondBrainOwnerRef(ownerType: "space", ownerID: "space-media"))
+        #expect(relation.relationType == "belongs_to_space")
+        #expect(relation.evidence == "Updated Space reason.")
+        #expect(relation.source == "space_memberships")
+        #expect(relation.actor == "codex")
+        #expect(relation.confidence == 0.96)
+        #expect(relation.metadata["spaceName"] == "Media")
+        #expect(relation.metadata["membershipSource"] == "test.space.assign")
+    }
 }

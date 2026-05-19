@@ -72,6 +72,7 @@ Core commands:
 - `item project-context <project> --json`: project graph context with project owner, board/card/doc/artifact relations, backend project metadata, and safe follow-up commands. This is read-only; JSON reports `readOnly: true` and `changed: false`.
 - `item sync-project <project> --json`: explicit project workspace sync/seed path for backend project metadata and Kanban owner relations. This can mutate state; JSON reports `readOnly: false`, `changed`, and `mutationReason`.
 - `item route <type> <id-or-ref> --target-type <space|folder|board> --reason <text> --json`: records a routing decision without silently moving files.
+- `item route ... --target-type space` records native Space membership and creates a `belongs_to_space` owner relation so item context and graph inspection can see the Space assignment.
 - `item backfill-kanban [--board <name-or-id>] --json`: rebuilds Kanban card projections from YAML into SQLite sections/chunks.
 - `item doctor --json`: checks second-brain tables and SQLite integrity.
 - `space explain <name-or-id> --json`: returns purpose, routing hints, default views, and agent instructions for a Space.

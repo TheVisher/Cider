@@ -282,6 +282,13 @@ struct CiderItemContextServiceTests {
         let filtered = try service.search("Steam", limit: 10, inSpaceID: "space-media")
         #expect(filtered.map(\.item?.id) == [inSpace.entityID])
         #expect(!filtered.contains { $0.item?.id == outside.entityID })
+
+        let context = try service.context(for: inSpace)
+        #expect(context.ownerRelations.contains { relation in
+            relation.targetOwner == SecondBrainOwnerRef(ownerType: "space", ownerID: "space-media")
+                && relation.relationType == "belongs_to_space"
+                && relation.source == "space_memberships"
+        })
     }
 
     @Test("agent context bundle is bounded and includes provenance review history and safe commands")

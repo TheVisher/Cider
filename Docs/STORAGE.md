@@ -148,6 +148,8 @@ The native cutover target is a SQLite `spaces` table with stable ID, name, prese
 
 Path containment is storage topology, not semantic membership. `.cider-space.yaml` should become an export/projection compatibility surface for Finder visibility, sync/export, and rollback while SQLite owns Space identity and meaning.
 
+`space_memberships` writes are mirrored into `owner_relations` as item-owner `belongs_to_space` edges targeting a `space` owner. This makes accepted Space membership discoverable through item context, backlinks, and related-owner graph inspection without treating folder containment as meaning.
+
 ## Dashboard Data
 
 Dashboard data is local-first Cider state. Topics, cards, runs, soft-deletes, and provenance belong in Cider-managed storage. Web or remote clients may consume the model only after schema compatibility is explicit.
