@@ -231,13 +231,18 @@ final class CiderSpaceCaptureDashboardService {
             reason: row.reason,
             reviewState: row.reviewState,
             routedAt: row.routedAt,
-            safeActions: safeActions(for: row.reviewState)
+            safeActions: safeActions(for: row.reviewState, itemType: row.itemType)
         )
     }
 
-    private func safeActions(for reviewState: String) -> [String] {
+    private func safeActions(for reviewState: String, itemType: String) -> [String] {
         if isReviewState(reviewState) {
-            return ["routing explain", "review approve", "review correct", "review defer"]
+            return [
+                "routing explain",
+                "review approve",
+                itemType == "bookmark" ? "review correct" : "item move",
+                "review defer",
+            ]
         }
         return ["routing explain"]
     }

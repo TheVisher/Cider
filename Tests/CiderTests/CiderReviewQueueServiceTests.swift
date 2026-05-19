@@ -85,6 +85,30 @@ struct CiderReviewQueueServiceTests {
         return id
     }
 
+    private func insertItem(
+        _ db: CiderDatabase,
+        id: UUID = UUID(),
+        type: String,
+        title: String,
+        relativePath: String,
+        folderID: UUID? = nil,
+        updatedAt: Date = Date()
+    ) throws -> UUID {
+        let item = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """)
+        item.bind(id.uuidString, at: 1)
+            .bind(type, at: 2)
+            .bind(title, at: 3)
+            .bind(Date().timeIntervalSince1970, at: 4)
+            .bind(updatedAt.timeIntervalSince1970, at: 5)
+            .bind(folderID?.uuidString, at: 6)
+            .bind(relativePath, at: 7)
+        try item.step()
+        return id
+    }
+
     @Test("review queue lists low-confidence routing once and exposes safe actions")
     func reviewQueueListsLowConfidenceRouting() throws {
         let (db, url) = try makeTempDB()
@@ -113,6 +137,37 @@ struct CiderReviewQueueServiceTests {
         #expect(result.items[0].routingDecisionID == decision.id)
         #expect(result.items[0].reviewState == "needs_review")
         #expect(result.items[0].safeActions == ["approve", "correct", "defer"])
+    }
+
+    @Test("review queue routes non-bookmark correction to item move instead of review correct")
+    func reviewQueueRoutesNonBookmarkCorrectionToItemMove() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let itemID = try insertItem(
+            db,
+            type: "note",
+            title: "Routeable Note",
+            relativePath: "Inbox/Notes/Routeable Note.md"
+        )
+        let routing = CiderRoutingDecisionService(database: db)
+        _ = try routing.recordDecision(
+            itemID: itemID,
+            itemType: "note",
+            target: .init(kind: "inbox", name: "Inbox/Notes", relativePath: "Inbox/Notes", folderID: nil),
+            confidence: 0,
+            reason: "No deterministic note route was supplied.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+
+        let queue = CiderReviewQueueService(database: db, routingDecisionService: routing)
+        let result = try queue.list()
+
+        let item = try #require(result.items.first { $0.itemID == itemID })
+        #expect(item.itemType == "note")
+        #expect(item.safeActions == ["approve", "item move", "defer"])
+        #expect(item.safeActions.contains("correct") == false)
     }
 
     @Test("review queue approve and defer remove active routing items while preserving deferred history")

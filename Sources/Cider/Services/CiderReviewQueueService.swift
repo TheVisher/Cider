@@ -641,7 +641,10 @@ final class CiderReviewQueueService {
             VaultBookmarkService.shared.refetchMetadata(for: bookmarkID)
         }
         self.duplicateFindingsProvider = duplicateFindingsProvider ?? {
-            VaultDuplicateAuditor.scan()
+            if let database, database !== CiderDatabase.shared {
+                return []
+            }
+            return VaultDuplicateAuditor.scan()
         }
     }
 
@@ -1518,9 +1521,17 @@ final class CiderReviewQueueService {
             target: decision.target,
             createdAt: decision.createdAt,
             safeActions: decision.reviewState == "deferred"
-                ? ["approve", "correct"]
-                : ["approve", "correct", "defer"]
+                ? routingSafeActions(for: item.type, includeDefer: false)
+                : routingSafeActions(for: item.type, includeDefer: true)
         )
+    }
+
+    private func routingSafeActions(for itemType: String, includeDefer: Bool) -> [String] {
+        var actions = ["approve", itemType == "bookmark" ? "correct" : "item move"]
+        if includeDefer {
+            actions.append("defer")
+        }
+        return actions
     }
 
     private func enrichmentReviewItem(

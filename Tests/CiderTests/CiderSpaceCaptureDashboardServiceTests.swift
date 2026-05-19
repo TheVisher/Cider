@@ -67,6 +67,30 @@ struct CiderSpaceCaptureDashboardServiceTests {
         return id
     }
 
+    private func insertItem(
+        _ db: CiderDatabase,
+        id: UUID = UUID(),
+        type: String,
+        title: String,
+        folderID: UUID?,
+        relativePath: String,
+        createdAt: Date = Date()
+    ) throws -> UUID {
+        let item = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """)
+        item.bind(id.uuidString, at: 1)
+            .bind(type, at: 2)
+            .bind(title, at: 3)
+            .bind(createdAt.timeIntervalSince1970, at: 4)
+            .bind(createdAt.timeIntervalSince1970, at: 5)
+            .bind(folderID?.uuidString, at: 6)
+            .bind(relativePath, at: 7)
+        try item.step()
+        return id
+    }
+
     private func makeSpace(path: String = "Spaces/Research") -> CiderSpace {
         CiderSpace(
             id: "space-research",
@@ -171,6 +195,40 @@ struct CiderSpaceCaptureDashboardServiceTests {
         let recentJSON = try #require(dashboard.toDictionary()["recentRouted"] as? [[String: Any]])
         let commands = try #require(recentJSON.first?["itemContextCommands"] as? [String])
         #expect(commands.contains("cider-cli item context bookmark \(acceptedID.uuidString) --json"))
+    }
+
+    @Test("space dashboard routes non-bookmark review correction to item move")
+    func dashboardRoutesNonBookmarkReviewCorrectionToItemMove() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let space = makeSpace()
+        let folderID = try insertFolder(db, path: space.rootRelativePath)
+        let itemID = try insertItem(
+            db,
+            type: "note",
+            title: "Ambiguous Note",
+            folderID: nil,
+            relativePath: "Inbox/Notes/Ambiguous Note.md"
+        )
+        let routing = CiderRoutingDecisionService(database: db)
+        _ = try routing.recordDecision(
+            itemID: itemID,
+            itemType: "note",
+            target: .init(kind: "folder", name: "Research", relativePath: space.rootRelativePath, folderID: folderID),
+            confidence: 0.4,
+            reason: "Candidate note route needs confirmation.",
+            actor: "agent",
+            source: "routing.rerun",
+            reviewState: "needs_review",
+            createdAt: Date(timeIntervalSince1970: 210)
+        )
+
+        let dashboard = try CiderSpaceCaptureDashboardService(database: db).dashboard(for: space)
+
+        let item = try #require(dashboard.needsReview.first { $0.itemID == itemID })
+        #expect(item.itemType == "note")
+        #expect(item.safeActions == ["routing explain", "review approve", "item move", "review defer"])
+        #expect(item.safeActions.contains("review correct") == false)
     }
 
     @Test("space dashboard uses the latest routing decision for each item")
