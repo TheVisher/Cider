@@ -72,6 +72,36 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("Usage: cider-cli review approve") == true)
     }
 
+    @Test("unknown top level json command fails closed")
+    func unknownTopLevelJSONCommandFailsClosed() throws {
+        let result = try runCLI(args: ["definitely-not-a-command", "--json"])
+
+        let dict = try parseJSONObject(result.stdout)
+        #expect(result.status != 0)
+        #expect(dict["ok"] as? Bool == false)
+        #expect((dict["error"] as? String)?.contains("Unknown command") == true)
+    }
+
+    @Test("review correct json rejects missing target")
+    func reviewCorrectJSONRejectsMissingTarget() throws {
+        let result = try runCLI(args: ["review", "correct", "missing-item", "--json"])
+
+        let dict = try parseJSONObject(result.stdout)
+        #expect(result.status != 0)
+        #expect(dict["ok"] as? Bool == false)
+        #expect((dict["error"] as? String)?.contains("requires --folder, --path, or --inbox") == true)
+    }
+
+    @Test("routing correct json rejects missing target")
+    func routingCorrectJSONRejectsMissingTarget() throws {
+        let result = try runCLI(args: ["routing", "correct", "missing-item", "--json"])
+
+        let dict = try parseJSONObject(result.stdout)
+        #expect(result.status != 0)
+        #expect(dict["ok"] as? Bool == false)
+        #expect((dict["error"] as? String)?.contains("requires --folder, --path, or --inbox") == true)
+    }
+
     @Test("legacy bookmark batch enrichment is removed")
     func legacyBookmarkBatchEnrichmentIsRemoved() throws {
         let result = try runCLI(args: ["bookmark", "enrich", "--all", "--json"])

@@ -211,7 +211,7 @@ struct CiderCLI {
         case "help", "--help", "-h":
             printUsage()
         default:
-            print("Unknown command: \(command). Run 'cider-cli help' for usage.")
+            printCLIError("Unknown command: \(command). Run 'cider-cli help' for usage.")
         }
     }
 
@@ -1058,8 +1058,8 @@ struct CiderCLI {
             }
 
         case "correct":
-            guard let itemRef = args.first else {
-                print("Error: Usage: cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
+            guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--folder", "--path", "--reason", "--actor"]) else {
+                printCLIError("Usage: cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
                 return
             }
 
@@ -1074,7 +1074,7 @@ struct CiderCLI {
             } else {
                 switch resolveFolderArg(from: args) {
                 case .unspecified:
-                    print("Error: review correct requires --folder, --path, or --inbox.")
+                    printCLIError("review correct requires --folder, --path, or --inbox.")
                     return
                 case .failed:
                     return
@@ -1330,8 +1330,8 @@ struct CiderCLI {
             }
 
         case "correct":
-            guard let itemRef = args.first else {
-                print("Error: Usage: cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
+            guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--folder", "--path", "--reason", "--actor"]) else {
+                printCLIError("Usage: cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
                 return
             }
 
@@ -1346,7 +1346,7 @@ struct CiderCLI {
             } else {
                 switch resolveFolderArg(from: args) {
                 case .unspecified:
-                    print("Error: routing correct requires --folder, --path, or --inbox.")
+                    printCLIError("routing correct requires --folder, --path, or --inbox.")
                     return
                 case .failed:
                     return
