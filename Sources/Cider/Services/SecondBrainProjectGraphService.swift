@@ -25,6 +25,9 @@ struct SecondBrainProjectContext: Equatable {
     var boardOwners: [SecondBrainOwnerRef]
     var cardOwners: [SecondBrainOwnerRef]
     var safeCommands: [String]
+    var readOnly: Bool = true
+    var changed: Bool = false
+    var mutationReason: String? = nil
 }
 
 @MainActor
@@ -149,7 +152,11 @@ final class SecondBrainProjectGraphService {
             sourcePrefix: Self.workspaceSource,
             with: relations
         )
-        return try context(for: project.id)
+        var context = try context(for: project.id)
+        context.readOnly = false
+        context.changed = true
+        context.mutationReason = "Synced project workspace metadata and Kanban owner relations."
+        return context
     }
 
     func context(for rawID: String) throws -> SecondBrainProjectContext {
@@ -172,6 +179,7 @@ final class SecondBrainProjectGraphService {
             cardOwners: outgoing.map(\.targetOwner).filter { $0.ownerType == "kanban_card" },
             safeCommands: [
                 "cider-cli item project-context \(project.id) --json",
+                "cider-cli item sync-project \(project.id) --json",
                 "cider-cli item relations project \(project.id) --json",
                 "cider-cli item backlinks project \(project.id) --json",
             ]

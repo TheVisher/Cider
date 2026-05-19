@@ -253,7 +253,7 @@ struct CiderCLI {
         case "review":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
         case "item":
-            return isMutationSubcommand(subcommand, in: ["move", "unfile", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "accept-similarity", "project-context", "project", "sync-project", "project-sync"])
+            return isMutationSubcommand(subcommand, in: ["move", "unfile", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "accept-similarity", "sync-project", "project-sync"])
         case "label", "tag":
             return isMutationSubcommand(subcommand, in: ["create", "rename", "delete", "rm"])
         case "view", "saved-view":
@@ -3842,17 +3842,8 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]")
                 return
             }
-            let catalog = ProjectWorkspaceCatalog.defaultCatalog(
-                boards: KanbanStorage.shared.boards,
-                boardAssociations: ProjectWorkspaceAssociationStore.shared.associations
-            )
-            let workspace = projectWorkspace(ref: ref, catalog: catalog)
             do {
-                let payload = try SecondBrainProjectGraphService(database: .shared, store: store).contextOrSyncWorkspace(
-                    for: ref,
-                    workspace: workspace,
-                    boards: KanbanStorage.shared.boards
-                )
+                let payload = try SecondBrainProjectGraphService(database: .shared, store: store).context(for: ref)
                 printProjectContext(
                     payload,
                     command: "item.project-context",
@@ -9070,6 +9061,8 @@ struct CiderCLI {
         var dict: [String: Any] = [
             "ok": true,
             "command": command,
+            "readOnly": context.readOnly,
+            "changed": context.changed,
             "sourceRef": [
                 "type": "project",
                 "ref": sourceRef,
@@ -9085,6 +9078,9 @@ struct CiderCLI {
             "cardOwners": context.cardOwners.prefix(limits.maxSamples).map(ownerToDict),
             "safeCommands": safeCommands,
         ]
+        if let mutationReason = context.mutationReason {
+            dict["mutationReason"] = mutationReason
+        }
         if limits.isSummary {
             dict["mode"] = limits.mode
             dict["limits"] = ["maxSamples": limits.maxSamples]

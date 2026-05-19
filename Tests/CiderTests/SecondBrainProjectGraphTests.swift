@@ -103,8 +103,21 @@ struct SecondBrainProjectGraphTests {
         #expect(context.artifactRelations.map(\.relationType) == ["artifact_of"])
     }
 
-    @Test("Project context can seed a known workspace when graph row is missing")
-    func projectContextSeedsKnownWorkspaceWhenMissing() throws {
+    @Test("Project context is read-only when graph row is missing")
+    func projectContextIsReadOnlyWhenGraphRowIsMissing() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = SecondBrainProjectGraphService(database: db)
+
+        #expect(throws: SecondBrainProjectGraphService.ProjectGraphError.self) {
+            _ = try service.context(for: "cider")
+        }
+        #expect(try service.project(id: "cider") == nil)
+    }
+
+    @Test("Project sync seeds a known workspace when graph row is missing")
+    func projectSyncSeedsKnownWorkspaceWhenMissing() throws {
         let (db, url) = try makeTestDB()
         defer { db.close(); cleanup(url) }
 
@@ -127,11 +140,7 @@ struct SecondBrainProjectGraphTests {
         )
         let service = SecondBrainProjectGraphService(database: db)
 
-        let context = try service.contextOrSyncWorkspace(
-            for: "cider",
-            workspace: workspace,
-            boards: [board]
-        )
+        let context = try service.syncWorkspace(workspace, boards: [board])
 
         #expect(context.project.id == "cider")
         #expect(context.boardOwners == [SecondBrainOwnerRef(ownerType: "kanban_board", ownerID: "2afee0")])

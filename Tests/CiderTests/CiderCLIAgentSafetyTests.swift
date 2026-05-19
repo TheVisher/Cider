@@ -283,8 +283,8 @@ struct CiderCLIAgentSafetyTests {
         #expect(unfiledAfter["folderID"] == nil)
     }
 
-    @Test("project context seeds known Cider workspace in a fresh vault")
-    func projectContextSeedsKnownCiderWorkspaceInFreshVault() throws {
+    @Test("sync project seeds known Cider workspace in a fresh vault")
+    func syncProjectSeedsKnownCiderWorkspaceInFreshVault() throws {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-cli-project-context-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
@@ -293,14 +293,39 @@ struct CiderCLIAgentSafetyTests {
         let boardCreate = try runCLI(args: ["board", "create", "Cider", "--json"], vault: vault)
         #expect(boardCreate.status == 0)
 
-        let result = try runCLI(args: ["item", "project-context", "cider", "--json"], vault: vault)
+        let result = try runCLI(args: ["item", "sync-project", "cider", "--json"], vault: vault)
         let payload = try parseJSONObject(result.stdout)
 
         #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.sync-project")
+        #expect(payload["readOnly"] as? Bool == false)
+        #expect(payload["changed"] as? Bool == true)
         let project = try #require(payload["project"] as? [String: Any])
         #expect(project["id"] as? String == "cider")
         let boardOwners = try #require(payload["boardOwners"] as? [[String: Any]])
         #expect(boardOwners.contains { $0["ownerType"] as? String == "kanban_board" })
+    }
+
+    @Test("project context reports read-only inspection contract")
+    func projectContextReportsReadOnlyInspectionContract() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-project-context-readonly-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["board", "create", "Cider", "--json"], vault: vault)
+        _ = try runCLI(args: ["item", "sync-project", "cider", "--json"], vault: vault)
+
+        let result = try runCLI(args: ["item", "project-context", "cider", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.project-context")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["mutationReason"] == nil)
+        let safeCommands = try #require(payload["safeCommands"] as? [String])
+        #expect(safeCommands.contains("cider-cli item sync-project cider --json"))
     }
 
     @Test("project context summary bounds relation-heavy output")
