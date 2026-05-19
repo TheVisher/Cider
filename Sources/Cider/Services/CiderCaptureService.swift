@@ -92,6 +92,8 @@ struct CiderCaptureResult {
         var confidence: Double
         var reason: String
         var reviewState: String
+        var status: String = "not_applicable"
+        var statusReason: String? = nil
     }
 
     struct PartialSuccess {
@@ -99,6 +101,23 @@ struct CiderCaptureResult {
         var reason: String
         var requestedFolderID: UUID?
         var actualFolderID: UUID?
+    }
+
+    struct SideEffectStatus {
+        var status: String
+        var reason: String?
+        var ownerType: String?
+        var ownerID: String?
+        var captureEventID: UUID?
+
+        func toDictionary() -> [String: Any] {
+            var dict: [String: Any] = ["status": status]
+            if let reason { dict["reason"] = reason }
+            if let ownerType { dict["ownerType"] = ownerType }
+            if let ownerID { dict["ownerID"] = ownerID }
+            if let captureEventID { dict["captureEventID"] = captureEventID.uuidString }
+            return dict
+        }
     }
 
     var command: String
@@ -111,6 +130,20 @@ struct CiderCaptureResult {
     var partialSuccess: PartialSuccess? = nil
     var captureEventID: UUID? = nil
     var sourceContext: CaptureSourceContext? = nil
+    var provenance: SideEffectStatus = .init(
+        status: "not_applicable",
+        reason: "Capture provenance has not run.",
+        ownerType: nil,
+        ownerID: nil,
+        captureEventID: nil
+    )
+    var indexing: SideEffectStatus = .init(
+        status: "not_applicable",
+        reason: "Capture indexing has not run.",
+        ownerType: nil,
+        ownerID: nil,
+        captureEventID: nil
+    )
 
     var captureEventOwner: SecondBrainOwnerRef? {
         captureEventID.map { SecondBrainOwnerRef(ownerType: "capture_event", ownerID: $0.uuidString) }
@@ -157,7 +190,9 @@ struct CiderCaptureResult {
             "confidence": routing.confidence,
             "reason": routing.reason,
             "reviewState": routing.reviewState,
+            "status": routing.status,
         ]
+        if let statusReason = routing.statusReason { routingDict["statusReason"] = statusReason }
         if let decisionID = routing.decisionID { routingDict["decisionID"] = decisionID.uuidString }
         if let target = routing.candidateTarget {
             var targetDict: [String: Any] = [
@@ -176,9 +211,12 @@ struct CiderCaptureResult {
             "enrichment": enrichmentDict,
             "duplicate": duplicateDict,
             "routing": routingDict,
+            "provenance": provenance.toDictionary(),
+            "indexing": indexing.toDictionary(),
             "nextSafeAction": nextSafeAction,
+            "safeNextCommands": safeNextCommands(),
         ]
-        if let partialSuccess {
+        if let partialSuccess = partialSuccess ?? canonicalSideEffectPartialSuccess() {
             var partialDict: [String: Any] = [
                 "status": partialSuccess.status,
                 "reason": partialSuccess.reason,
@@ -203,6 +241,32 @@ struct CiderCaptureResult {
             dict["sourceContext"] = sourceContext.toDictionary()
         }
         return dict
+    }
+
+    private func safeNextCommands() -> [String] {
+        var commands = ["cider-cli item get \(item.id.uuidString) --json"]
+        if canonicalSideEffectPartialSuccess() != nil {
+            commands.append("cider-cli storage audit --json")
+        }
+        return commands
+    }
+
+    private func canonicalSideEffectPartialSuccess() -> PartialSuccess? {
+        let incomplete = [
+            ("provenance", provenance.status),
+            ("routing", routing.status),
+            ("indexing", indexing.status),
+        ].filter { _, status in
+            status == "failed" || status == "unavailable"
+        }
+        guard !incomplete.isEmpty else { return nil }
+        let names = incomplete.map(\.0).joined(separator: ", ")
+        return .init(
+            status: "canonical_side_effects_incomplete",
+            reason: "Capture stored the source item, but canonical side effects are incomplete: \(names).",
+            requestedFolderID: nil,
+            actualFolderID: nil
+        )
     }
 
     @MainActor
@@ -384,14 +448,12 @@ final class CiderCaptureService {
         let reason = reviewNeeded
             ? "No deterministic route was supplied, so Cider kept the capture in Inbox/Bookmarks for review."
             : "Capture used the supplied deterministic target."
-        let routingDecision = try? routingDecisionService?.recordDecision(
+        let routingStatus = recordRoutingDecisionStatus(
             itemID: bookmark.id,
             itemType: "bookmark",
-            target: target.routingDecisionTarget,
+            target: target,
             confidence: reviewNeeded ? 0.0 : 1.0,
             reason: reason,
-            actor: "agent",
-            source: "capture.add",
             reviewState: reviewState
         )
 
@@ -424,12 +486,14 @@ final class CiderCaptureService {
                 existingItemID: isDuplicate ? bookmark.id : nil
             ),
             routing: .init(
-                decisionID: routingDecision?.id,
+                decisionID: routingStatus.decisionID,
                 candidateTarget: target,
                 reviewNeeded: reviewNeeded,
                 confidence: reviewNeeded ? 0.0 : 1.0,
                 reason: reason,
-                reviewState: reviewState
+                reviewState: reviewState,
+                status: routingStatus.status,
+                statusReason: routingStatus.reason
             ),
             nextSafeAction: isDuplicate ? "inspect_existing_item" : "enrich"
         )
@@ -1097,7 +1161,16 @@ final class CiderCaptureService {
         )
         result.sourceContext = resolvedContext
 
-        guard let database, database.isOpen else { return result }
+        guard let database, database.isOpen else {
+            result.provenance = .init(
+                status: "unavailable",
+                reason: "Capture provenance could not be recorded because no writable database is available.",
+                ownerType: "capture_event",
+                ownerID: nil,
+                captureEventID: nil
+            )
+            return result
+        }
         do {
             let metadata = DatabaseHelpers.encodeJSON(resolvedContext.metadata) ?? "{}"
             let stmt = try database.prepare("""
@@ -1154,23 +1227,61 @@ final class CiderCaptureService {
                 secondBrainStore: secondBrainStore
             )
             result.captureEventID = eventID
+            result.provenance = .init(
+                status: "recorded",
+                reason: nil,
+                ownerType: "capture_event",
+                ownerID: eventID.uuidString,
+                captureEventID: eventID
+            )
         } catch {
+            result.provenance = .init(
+                status: "failed",
+                reason: "Capture provenance failed: \(error.localizedDescription)",
+                ownerType: "capture_event",
+                ownerID: nil,
+                captureEventID: nil
+            )
             return result
         }
         return result
     }
 
     private func indexCapturedItem(_ result: CiderCaptureResult) -> CiderCaptureResult {
-        guard let database, database.isOpen else { return result }
+        var result = result
         let owner = SecondBrainOwnerRef(
             ownerType: ownerType(forCaptureItemType: result.item.type),
             ownerID: result.item.id.uuidString
         )
+        guard let database, database.isOpen else {
+            result.indexing = .init(
+                status: "unavailable",
+                reason: "Capture indexing could not run because no writable database is available.",
+                ownerType: owner.ownerType,
+                ownerID: owner.ownerID,
+                captureEventID: nil
+            )
+            return result
+        }
         do {
             _ = try SecondBrainItemContentIndexingService(database: database).rebuild(owner: owner)
         } catch {
+            result.indexing = .init(
+                status: "failed",
+                reason: "Capture indexing failed: \(error.localizedDescription)",
+                ownerType: owner.ownerType,
+                ownerID: owner.ownerID,
+                captureEventID: nil
+            )
             return result
         }
+        result.indexing = .init(
+            status: "indexed",
+            reason: nil,
+            ownerType: owner.ownerType,
+            ownerID: owner.ownerID,
+            captureEventID: nil
+        )
         return result
     }
 
@@ -1316,24 +1427,56 @@ final class CiderCaptureService {
     ) throws -> CiderCaptureResult.Routing {
         let reviewState = reviewNeeded ? "needs_review" : "accepted"
         let reason = reviewNeeded ? reviewReason : acceptedReason
-        let routingDecision = try? routingDecisionService?.recordDecision(
+        let routingStatus = recordRoutingDecisionStatus(
             itemID: itemID,
             itemType: itemType,
-            target: target.routingDecisionTarget,
+            target: target,
             confidence: reviewNeeded ? 0.0 : 1.0,
             reason: reason,
-            actor: "agent",
-            source: "capture.add",
             reviewState: reviewState
         )
         return .init(
-            decisionID: routingDecision?.id,
+            decisionID: routingStatus.decisionID,
             candidateTarget: target,
             reviewNeeded: reviewNeeded,
             confidence: reviewNeeded ? 0.0 : 1.0,
             reason: reason,
-            reviewState: reviewState
+            reviewState: reviewState,
+            status: routingStatus.status,
+            statusReason: routingStatus.reason
         )
+    }
+
+    private func recordRoutingDecisionStatus(
+        itemID: UUID,
+        itemType: String,
+        target: CiderCaptureResult.Target,
+        confidence: Double,
+        reason: String,
+        reviewState: String
+    ) -> (decisionID: UUID?, status: String, reason: String?) {
+        guard let routingDecisionService else {
+            return (
+                nil,
+                "unavailable",
+                "Capture routing could not be recorded because no routing decision service is available."
+            )
+        }
+        do {
+            let decision = try routingDecisionService.recordDecision(
+                itemID: itemID,
+                itemType: itemType,
+                target: target.routingDecisionTarget,
+                confidence: confidence,
+                reason: reason,
+                actor: "agent",
+                source: "capture.add",
+                reviewState: reviewState
+            )
+            return (decision.id, "recorded", nil)
+        } catch {
+            return (nil, "failed", "Capture routing failed: \(error.localizedDescription)")
+        }
     }
 
     private func routingTarget(

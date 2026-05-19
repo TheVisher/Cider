@@ -514,6 +514,79 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("capture result reports canonical side effect statuses on success")
+    func captureResultReportsCanonicalSideEffectStatusesOnSuccess() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let routing = CiderRoutingDecisionService(database: db)
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: routing
+            )
+
+            let result = try service.addNoteCapture(
+                title: "Status contract",
+                content: "capture-status-contract-token",
+                folderID: nil
+            )
+            let dict = result.toDictionary()
+            let provenance = try #require(dict["provenance"] as? [String: Any])
+            let routingDict = try #require(dict["routing"] as? [String: Any])
+            let indexing = try #require(dict["indexing"] as? [String: Any])
+            let safeNextCommands = try #require(dict["safeNextCommands"] as? [String])
+
+            #expect(provenance["status"] as? String == "recorded")
+            #expect(provenance["captureEventID"] as? String == result.captureEventID?.uuidString)
+            #expect(routingDict["status"] as? String == "recorded")
+            #expect(routingDict["decisionID"] as? String == result.routing.decisionID?.uuidString)
+            #expect(indexing["status"] as? String == "indexed")
+            #expect(indexing["ownerType"] as? String == "note")
+            #expect(indexing["ownerID"] as? String == result.item.id.uuidString)
+            #expect(dict["partialSuccess"] == nil)
+            #expect(safeNextCommands == ["cider-cli item get \(result.item.id.uuidString) --json"])
+        }
+    }
+
+    @Test("capture result reports unavailable provenance routing and indexing")
+    func captureResultReportsUnavailableCanonicalSideEffects() throws {
+        try withIsolatedVault { _, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: nil,
+                routingDecisionService: nil
+            )
+
+            let result = try service.addNoteCapture(
+                title: "Status unavailable",
+                content: "This capture is stored but canonical side effects cannot run.",
+                folderID: nil
+            )
+            let dict = result.toDictionary()
+            let provenance = try #require(dict["provenance"] as? [String: Any])
+            let routingDict = try #require(dict["routing"] as? [String: Any])
+            let indexing = try #require(dict["indexing"] as? [String: Any])
+            let partialSuccess = try #require(dict["partialSuccess"] as? [String: Any])
+            let safeNextCommands = try #require(dict["safeNextCommands"] as? [String])
+
+            #expect(result.captureEventID == nil)
+            #expect(provenance["status"] as? String == "unavailable")
+            #expect((provenance["reason"] as? String)?.contains("database") == true)
+            #expect(routingDict["status"] as? String == "unavailable")
+            #expect((routingDict["statusReason"] as? String)?.contains("routing decision service") == true)
+            #expect(indexing["status"] as? String == "unavailable")
+            #expect((indexing["reason"] as? String)?.contains("database") == true)
+            #expect(partialSuccess["status"] as? String == "canonical_side_effects_incomplete")
+            #expect((partialSuccess["reason"] as? String)?.contains("provenance") == true)
+            #expect(safeNextCommands.contains("cider-cli storage audit --json"))
+        }
+    }
+
     @Test("blank note quick capture still returns the shared result shape")
     func blankNoteQuickCaptureReturnsSharedResultShape() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in
