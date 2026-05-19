@@ -70,6 +70,17 @@ struct SecondBrainFoundationTests {
         return (object as? [[String: Any]]) ?? []
     }
 
+    private func requireCaptureAddWrapperContract(
+        _ payload: [String: Any],
+        command: String
+    ) throws -> [String: Any] {
+        #expect(payload["command"] as? String == command)
+        #expect(payload["backendCommand"] as? String == "capture.add")
+        let capture = try #require(payload["capture"] as? [String: Any])
+        #expect(capture["command"] as? String == "capture.add")
+        return capture
+    }
+
     @Test("bookmark add records unified capture routing review metadata")
     func bookmarkAddRecordsUnifiedCaptureRoutingReviewMetadata() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -158,12 +169,9 @@ struct SecondBrainFoundationTests {
         ], vaultURL: vault)
         let bookmark = try jsonObject(from: output)
 
-        #expect(bookmark["command"] as? String == "bookmark.add")
-        #expect(bookmark["backendCommand"] as? String == "capture.add")
+        let capture = try requireCaptureAddWrapperContract(bookmark, command: "bookmark.add")
         let bookmarkID = try #require(bookmark["id"] as? String)
 
-        let capture = try #require(bookmark["capture"] as? [String: Any])
-        #expect(capture["command"] as? String == "capture.add")
         let source = try #require(capture["source"] as? [String: Any])
         #expect(source["kind"] as? String == "url")
         let routing = try #require(capture["routing"] as? [String: Any])
@@ -194,9 +202,7 @@ struct SecondBrainFoundationTests {
             "--json",
         ], vaultURL: vault)
         let notePayload = try jsonObject(from: noteOutput)
-        #expect(notePayload["command"] as? String == "note.create")
-        #expect(notePayload["backendCommand"] as? String == "capture.add")
-        let noteCapture = try #require(notePayload["capture"] as? [String: Any])
+        let noteCapture = try requireCaptureAddWrapperContract(notePayload, command: "note.create")
         let noteItem = try #require(noteCapture["item"] as? [String: Any])
         let noteRouting = try #require(noteCapture["routing"] as? [String: Any])
         #expect(noteItem["type"] as? String == "note")
@@ -210,9 +216,7 @@ struct SecondBrainFoundationTests {
             "--json",
         ], vaultURL: vault)
         let todoPayload = try jsonObject(from: todoOutput)
-        #expect(todoPayload["command"] as? String == "todo.create")
-        #expect(todoPayload["backendCommand"] as? String == "capture.add")
-        let todoCapture = try #require(todoPayload["capture"] as? [String: Any])
+        let todoCapture = try requireCaptureAddWrapperContract(todoPayload, command: "todo.create")
         let todoItem = try #require(todoCapture["item"] as? [String: Any])
         let todoRouting = try #require(todoCapture["routing"] as? [String: Any])
         #expect(todoItem["type"] as? String == "todo")
@@ -227,9 +231,7 @@ struct SecondBrainFoundationTests {
             "--json",
         ], vaultURL: vault)
         let filePayload = try jsonObject(from: fileOutput)
-        #expect(filePayload["command"] as? String == "file.import")
-        #expect(filePayload["backendCommand"] as? String == "capture.add")
-        let fileCapture = try #require(filePayload["capture"] as? [String: Any])
+        let fileCapture = try requireCaptureAddWrapperContract(filePayload, command: "file.import")
         let fileItem = try #require(fileCapture["item"] as? [String: Any])
         let fileRouting = try #require(fileCapture["routing"] as? [String: Any])
         #expect(fileItem["type"] as? String == "vaultFile")
