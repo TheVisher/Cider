@@ -253,7 +253,7 @@ struct CiderCLI {
         case "review":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
         case "item":
-            return isMutationSubcommand(subcommand, in: ["move", "unfile", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "accept-similarity", "sync-project", "project-sync"])
+            return isMutationSubcommand(subcommand, in: ["move", "unfile", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "sync-project", "project-sync"])
         case "label", "tag":
             return isMutationSubcommand(subcommand, in: ["create", "rename", "delete", "rm"])
         case "view", "saved-view":
@@ -3369,6 +3369,7 @@ struct CiderCLI {
               cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]
               cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
               cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
+              cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
               cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
               cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]
               cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
@@ -3794,6 +3795,18 @@ struct CiderCLI {
                         "signal": result.signal,
                     ]
                 )
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "dogfood-intelligence", "intelligence-dogfood":
+            do {
+                let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 5
+                let threshold = parseFlag("--threshold", from: args).flatMap(Double.init) ?? 0.34
+                let candidateLimit = parseFlag("--candidate-limit", from: args).flatMap(Int.init) ?? 10
+                let result = try SecondBrainIntelligenceDogfoodService(database: .shared, store: store)
+                    .rebuild(limit: limit, threshold: threshold, candidateLimit: candidateLimit)
+                printIntelligenceDogfoodResult(result)
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -9596,6 +9609,51 @@ struct CiderCLI {
         return dict
     }
 
+    static func intelligenceDogfoodOwnerResultToDict(_ result: SecondBrainIntelligenceDogfoodOwnerResult) -> [String: Any] {
+        [
+            "owner": ownerToDict(result.owner),
+            "chunkCount": result.chunkCount,
+            "enrichmentOutputCount": result.enrichmentOutputCount,
+            "enrichmentKindCounts": result.enrichmentKindCounts,
+            "enrichmentReviewStates": result.enrichmentReviewStates,
+            "similarityCandidateCount": result.similarityCandidateCount,
+            "similarityReviewStates": result.similarityReviewStates,
+        ]
+    }
+
+    static func intelligenceDogfoodResultToDict(_ result: SecondBrainIntelligenceDogfoodResult) -> [String: Any] {
+        [
+            "ok": true,
+            "command": "item.dogfood-intelligence",
+            "changed": result.enrichmentOutputCount > 0 || result.similarityCandidateCount > 0,
+            "reviewRequired": result.reviewRequired,
+            "ownerCount": result.ownerCount,
+            "limit": result.limit,
+            "threshold": result.threshold,
+            "candidateLimit": result.candidateLimit,
+            "enrichmentOutputCount": result.enrichmentOutputCount,
+            "similarityCandidateCount": result.similarityCandidateCount,
+            "owners": result.owners.map(intelligenceDogfoodOwnerResultToDict),
+        ]
+    }
+
+    static func printIntelligenceDogfoodResult(_ result: SecondBrainIntelligenceDogfoodResult) {
+        if jsonOutput {
+            outputJSON(intelligenceDogfoodResultToDict(result))
+            return
+        }
+
+        print("Dogfooded intelligence stores for \(result.ownerCount) owner(s).")
+        print("  Enrichment outputs: \(result.enrichmentOutputCount)")
+        print("  Similarity candidates: \(result.similarityCandidateCount)")
+        if result.reviewRequired {
+            print("  Review required before applying generated suggestions.")
+        }
+        for owner in result.owners {
+            print("  \(owner.owner.canonicalRef): \(owner.chunkCount) chunk(s), \(owner.enrichmentOutputCount) output(s), \(owner.similarityCandidateCount) candidate(s)")
+        }
+    }
+
     static func printSimilarityCandidates(
         _ candidates: [SecondBrainSimilarityCandidate],
         command: String,
@@ -9872,6 +9930,7 @@ struct CiderCLI {
             emptyState: String = "implemented_empty",
             emptyDetail: String,
             healthyDetail: String,
+            emptyReason: String? = nil,
             suggestedCommand: String? = nil,
             needsWorkWhenEmpty: Bool = false,
             needsWorkState: String = "needs_rebuild"
@@ -9908,7 +9967,7 @@ struct CiderCLI {
             if let suggestedCommand {
                 addSuggestedCommand(suggestedCommand)
             }
-            return [
+            var payload: [String: Any] = [
                 "id": id,
                 "label": label,
                 "table": table,
@@ -9918,6 +9977,10 @@ struct CiderCLI {
                 "detail": emptyDetail,
                 "safeNextCommands": commandList,
             ]
+            if let emptyReason {
+                payload["emptyReason"] = emptyReason
+            }
+            return payload
         }
 
         let components = try [
@@ -9986,7 +10049,8 @@ struct CiderCLI {
                     ? "Enrichment output storage is implemented but no extracted outputs exist."
                     : "Enrichment output storage is implemented but waits for content chunks.",
                 healthyDetail: "Structured enrichment outputs are populated.",
-                suggestedCommand: chunkCount > 0 ? "cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> --json" : nil,
+                emptyReason: chunkCount > 0 ? "unseeded" : "waiting_for_content_chunks",
+                suggestedCommand: chunkCount > 0 ? "cider-cli item dogfood-intelligence --limit 5 --json" : nil,
                 needsWorkWhenEmpty: chunkCount > 0
             ),
             component(
@@ -9998,7 +10062,8 @@ struct CiderCLI {
                     ? "Similarity candidate storage is implemented but no reviewable candidates exist."
                     : "Similarity candidate storage is implemented but waits for enough chunks to compare.",
                 healthyDetail: "Reviewable similarity/grouping candidates are populated.",
-                suggestedCommand: chunkCount > 1 ? "cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> --json" : nil,
+                emptyReason: chunkCount > 1 ? "unseeded" : "waiting_for_comparable_chunks",
+                suggestedCommand: chunkCount > 1 ? "cider-cli item dogfood-intelligence --limit 5 --json" : nil,
                 needsWorkWhenEmpty: chunkCount > 1
             ),
         ]
@@ -10815,6 +10880,7 @@ struct CiderCLI {
           cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]
           cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
           cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
+          cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
           cider-cli item sync-project <project-id-or-name> [--json]
 
         DOCTOR

@@ -280,6 +280,52 @@ struct CiderCLIAgentSafetyTests {
         #expect(commands.contains("cider-cli item rebuild-chunks all --json"))
     }
 
+    @Test("item graph health distinguishes unseeded intelligence stores")
+    func itemGraphHealthDistinguishesUnseededIntelligenceStores() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-graph-intelligence-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(
+            args: ["note", "create", "Launch graph", "--content", "Cider graph launch roadmap agent context Apple Park", "--json"],
+            vault: vault
+        )
+        _ = try runCLI(
+            args: ["note", "create", "Launch roadmap", "--content", "Apple Park product launch roadmap for Cider agent context", "--json"],
+            vault: vault
+        )
+
+        let result = try runCLI(args: ["item", "graph-health", "--json"], vault: vault)
+        let dict = try parseJSONObject(result.stdout)
+        let components = try #require(dict["components"] as? [[String: Any]])
+        #expect(components.contains { component in
+            component["id"] as? String == "enrichment_outputs"
+                && component["state"] as? String == "needs_rebuild"
+                && component["emptyReason"] as? String == "unseeded"
+        })
+        #expect(components.contains { component in
+            component["id"] as? String == "similarity_candidates"
+                && component["state"] as? String == "needs_rebuild"
+                && component["emptyReason"] as? String == "unseeded"
+        })
+        let commands = try #require(dict["suggestedCommands"] as? [String])
+        #expect(commands.contains("cider-cli item dogfood-intelligence --limit 5 --json"))
+    }
+
+    @Test("item dogfood intelligence reports bounded reviewable JSON output")
+    func itemDogfoodIntelligenceReportsBoundedReviewableJSONOutput() throws {
+        let result = try runCLI(args: ["item", "dogfood-intelligence", "--limit", "2", "--json"])
+
+        let dict = try parseJSONObject(result.stdout)
+        #expect(dict["ok"] as? Bool == true)
+        #expect(dict["command"] as? String == "item.dogfood-intelligence")
+        #expect(dict["limit"] as? Int == 2)
+        #expect(dict["ownerCount"] as? Int == 0)
+        #expect(dict["reviewRequired"] as? Bool == false)
+        #expect((dict["owners"] as? [[String: Any]])?.isEmpty == true)
+    }
+
     @Test("read-only folder filters do not adopt untracked disk folders")
     func readOnlyFolderFiltersDoNotAdoptUntrackedDiskFolders() throws {
         let vault = FileManager.default.temporaryDirectory
