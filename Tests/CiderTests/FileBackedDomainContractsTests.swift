@@ -74,6 +74,54 @@ struct FileBackedDomainContractsTests {
         }
     }
 
+    @Test("cli docs declare second brain v1 agent capture contract")
+    func cliDocsDeclareSecondBrainV1AgentCaptureContract() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let cliDoc = repoRoot.appendingPathComponent("Docs/CLI.md")
+        let agentDoc = repoRoot.appendingPathComponent("Docs/AGENT.md")
+        let cliSource = try String(contentsOf: cliDoc, encoding: .utf8)
+        let agentSource = try String(contentsOf: agentDoc, encoding: .utf8)
+
+        for snippet in [
+            "## Second Brain v1 Agent CLI Surface",
+            "`cider-cli capture add` is the canonical agent capture API.",
+            "`--kind note|todo|bookmark|file|event|contact`",
+            "`--stdin` reads exact raw source text from standard input.",
+            "`--text-file <path>` reads exact raw source text from a file.",
+            "`--url <url>` is the explicit bookmark source.",
+            "`--path <path>` is the explicit file source.",
+            "`--json` is required for agent verification.",
+            "printf '%s' \"$RAW_NOTE\" | cider-cli capture add --kind note --stdin --json",
+            "printf '%s' \"$RAW_TODO\" | cider-cli capture add --kind todo --stdin --json",
+            "cider-cli capture add --kind bookmark --url \"https://example.com?a=1&b=two\" --json",
+            "cider-cli capture add --kind file --path \"/path/with spaces.txt\" --json",
+            "cider-cli capture add --kind event --title \"Passport appointment\" --date 2026-05-20 --time \"10:30 AM\" --location \"City Hall\" --stdin --json",
+            "cider-cli capture add --kind contact --name \"Avery Example\" --email avery@example.com --phone \"555-0100\" --stdin --json",
+            "`bookmark add`, `note create`, `todo create`, and `file import` are temporary compatibility wrappers.",
+            "`compatibilityWrapper: true`",
+            "Hidden or removed legacy commands return `legacyRemoved: true`",
+        ] {
+            #expect(cliSource.contains(snippet), "Docs/CLI.md missing Second Brain v1 CLI snippet: \(snippet)")
+        }
+
+        for legacySnippet in [
+            "event create --json` and `contact create --json` should return",
+            "Legacy bookmark batch enrichment remains available as `bookmark enrich --all --confirm`",
+            "- bookmarks: add, get, list/search",
+            "- todos/events/contacts/files: create, list",
+            "Active todos come from non-completed `todo list --json` items only.",
+        ] {
+            #expect(!cliSource.contains(legacySnippet), "Docs/CLI.md still presents legacy command contract: \(legacySnippet)")
+        }
+
+        for snippet in [
+            "New agent capture must use `cider-cli capture add --kind ... --json`.",
+            "Do not call hidden type-specific legacy commands such as `bookmark`, `note`, `todo`, `event`, `contact`, `file`, `folder`, `tag`, `label`, or `dashboard` as alternate APIs.",
+        ] {
+            #expect(agentSource.contains(snippet), "Docs/AGENT.md missing Second Brain v1 CLI agent rule: \(snippet)")
+        }
+    }
+
     @Test("core docs declare sync and media bridge boundaries")
     func coreDocsDeclareSyncAndMediaBridgeBoundaries() throws {
         let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)

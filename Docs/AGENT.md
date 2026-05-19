@@ -57,6 +57,8 @@ Use core docs for:
 Agents should be conservative operators over real Cider data:
 
 - Use `cider-cli` or Cider services for current facts whenever possible.
+- New agent capture must use `cider-cli capture add --kind ... --json`.
+- Do not call hidden type-specific legacy commands such as `bookmark`, `note`, `todo`, `event`, `contact`, `file`, `folder`, `tag`, `label`, or `dashboard` as alternate APIs.
 - Do not treat memory as more current than the Cider store, CLI, vault, or active Kanban card.
 - Do not write AI-generated text into user-owned fields such as bookmark notes.
 - Use AI-owned enrichment fields for generated summaries.
@@ -162,21 +164,21 @@ The accepted second-brain graph backend is the agent-facing memory foundation. A
 
 When the user sends a bare URL, use the full capture loop:
 
-1. Run duplicate check.
-2. Save to a conservative staging path unless the destination is obvious.
-3. Enrich metadata.
-4. Re-read the bookmark.
-5. Route only when confidence is high.
-6. Re-read and report final title, folder, path, and caveat.
+1. Capture through `cider-cli capture add --kind bookmark --url "<url>" --json`.
+2. Inspect the capture JSON for duplicate, routing, review, provenance, indexing, `nextSafeAction`, and `safeNextCommands`.
+3. Re-read through `cider-cli item get bookmark <id> --json` when an item ID is available.
+4. Route or review only through backend-backed `item`/`review` commands.
+5. Report the verified final title, routing/review state, and caveat.
 
 ## Agent Save Routing
 
 When an agent saves a bookmark, note, contact, todo, date card, or file:
 
+- Use `cider-cli capture add --kind ... --json`; use `--stdin` or `--text-file` for exact raw text, `--url` for bookmarks, and `--path` for files.
 - Route obvious items before creation when the destination is clear.
 - Use Inbox when classification is uncertain.
 - Do not create in Inbox and move later unless routing is genuinely unclear.
-- Search/duplicate-check before creating a likely duplicate.
+- Inspect capture duplicate state and use backend-backed item search before creating a likely duplicate.
 - Report the verified final destination after mutation.
 
 ## Checkpoints And Handoffs

@@ -17,8 +17,7 @@ Status: canonical core doc.
 Use CLI commands for:
 
 - Cider-owned capture, routing, review, and recall
-- duplicate checks before bookmark capture
-- bookmark creation and enrichment
+- exact agent capture through `capture add`
 - vault search and item lookup
 - current vault totals and status checks
 - Kanban card creation and movement
@@ -34,27 +33,48 @@ Prefer supported `cider-cli board ...` commands where available. If a command la
 
 Every card must include `created: 'YYYY-MM-DD'`.
 
-## Bookmark Capture
+## Second Brain v1 Agent CLI Surface
 
-The expected capture loop is:
+`cider-cli capture add` is the canonical agent capture API. Agents should use it for new notes, todos, bookmarks, files, events, and contacts, and should include `--json` for verification.
 
-1. Duplicate check.
-2. Save to an obvious folder or conservative Inbox staging folder.
-3. Enrich metadata.
-4. Re-read.
-5. Route if confidence is high.
-6. Re-read and report verified final state.
+Core capture flags:
+
+- `--kind note|todo|bookmark|file|event|contact` selects the item kind explicitly. Do not rely on inference when the kind is known.
+- `--stdin` reads exact raw source text from standard input.
+- `--text-file <path>` reads exact raw source text from a file.
+- `--url <url>` is the explicit bookmark source.
+- `--path <path>` is the explicit file source.
+- `--json` is required for agent verification.
+
+Canonical examples:
+
+```bash
+printf '%s' "$RAW_NOTE" | cider-cli capture add --kind note --stdin --json
+printf '%s' "$RAW_TODO" | cider-cli capture add --kind todo --stdin --json
+cider-cli capture add --kind bookmark --url "https://example.com?a=1&b=two" --json
+cider-cli capture add --kind file --path "/path/with spaces.txt" --json
+printf '%s' "$RAW_EVENT_DETAILS" | cider-cli capture add --kind event --title "Passport appointment" --date 2026-05-20 --time "10:30 AM" --location "City Hall" --stdin --json
+printf '%s' "$RAW_CONTACT_NOTES" | cider-cli capture add --kind contact --name "Avery Example" --email avery@example.com --phone "555-0100" --stdin --json
+```
+
+The capture JSON contract reports `command: capture.add`, source text/source metadata, item identity when available, routing/review state, provenance/indexing status, `nextSafeAction`, and `safeNextCommands`.
+
+Hidden or removed legacy commands return `legacyRemoved: true` with a canonical replacement. Legacy type-specific commands such as `bookmark`, `note`, `todo`, `event`, `contact`, `file`, `folder`, `tag`, `label`, `dashboard`, `media`, `recall`, and top-level `search/query/recent/status/snapshot` are not part of the visible agent API.
+
+`bookmark add`, `note create`, `todo create`, and `file import` are temporary compatibility wrappers. They should remain hidden from top-level help, call the capture backend, and return `compatibilityWrapper: true`, `backendCommand: capture.add`, and nested `capture.command: capture.add`.
+
+After capture, agents should verify and continue through backend-backed item/review commands: `item get`, `item search`, `item context`, `item relations`, `item backlinks`, `item move`, `item route`, `item link`, `review list`, `review approve`, `review correct`, `review enrich`, and `storage audit`.
 
 ## Important Command Areas
 
 Keep command details in CLI help and tests, not sprawling docs. The core command areas agents rely on are:
 
-- bookmarks: add, get, list/search, move, tag/update, enrich, duplicate-check, date-suggestions, date-suggestions approve
-- notes: create, list, update
-- todos/events/contacts/files: create, list, update where supported
-- links: related/backlink operations where available
-- dashboard: topic/card list and upsert with JSON
-- item graph: inspect/search/routing/provenance, Kanban projection backfill, and doctor checks
+- capture: `capture add --kind ... --json` for all new user material
+- item: get/search/query/recent/context/relations/backlinks/graph-health/project-context/doctor, plus backend-backed move/unfile/route/link
+- review: list/summary/drilldown/approve/correct/defer/enrich/enrich-batch/jobs
+- storage: audit/doctor-plan/doctor-apply/repair-schema
+- route/routing: temporary routing aliases until consolidated
+- migrate, doctor, and db integrity
 - spaces: explain routing context and agent instructions
 - boards: show, recent, testing-summary, card inspect, add-card, update-card, move-card, children, section update, evidence add, history add
 - database: backup list and isolated restore verification
@@ -89,13 +109,7 @@ The second-brain command surface should support the product loop: capture -> enr
 
 Review queue JSON includes `reasonCodes` for trust-boundary states such as `routing_low_confidence`, `enrichment_failed`, `inbox_unrouted`, and duplicate-specific codes so agents do not need to parse prose reasons.
 
-Legacy bookmark creation is a compatibility surface over the unified capture backend. `bookmark add --json` preserves bookmark fields and includes `command: bookmark.add`, `backendCommand: capture.add`, and a nested `capture` result so agents can see the capture/routing/review contract without switching commands mid-workflow.
-
-Structured create commands may use domain-specific provenance instead of creating a generic capture event. `event create --json` and `contact create --json` should return `command: event.create` / `command: contact.create` and record routing provenance with sources such as `event.create`, `contact.create`, and `contact.birthday_date_card` for generated birthday date cards.
-
 Media identification is a bridge command over file-backed MediaItem metadata. `media identify --dry-run --json` reports `readOnly: true` and `changed: false`; `media identify --apply --json` reports `readOnly: false` and must include a mutation reason when applying proposed YAML writes. `reviewLane.safeActions` must include only read-only commands; mutating follow-ups belong in `reviewLane.actions` with `readOnly: false` and `requiresApproval: true`.
-
-Legacy bookmark batch enrichment remains available as `bookmark enrich --all --confirm`, but agents should prefer `review enrich-batch --confirm` so enrichment work is review-backed and records batch history.
 
 Kanban card details can be discovered with `board recent <board> --limit <count> --json`, which lists newest card activity with board, column, parent, priority, timestamps, recent edit/move/completion activity kind, and compact current-state/next-step context. `board workflow <board> --json` groups workflow lanes and exposes approval-aware `automationActions` with safe inspection, history, move, and review-routing commands; these actions are guidance, not an agent scheduler. Testing gates can be triaged with `board testing-summary <board> --json`, which groups cards in Testing/Ready to Test columns into `needsErik` and `agentCanVerify` queues. Parent plan status can be inspected with `board parent-summary <board> --card <id> --json`; `--refresh --dry-run` returns proposed Current State / Next Step text and stale-parent findings, while `--refresh --confirm` applies those sections explicitly. Exact cards can be inspected through `board card inspect <board> --card <id> --json`, which returns parsed dashboard lanes, sections, card metadata, hierarchy, roadmap `roadmapNextUp` sequence/groups, links, routing decisions, and agent actions. Card details can be edited through `board section update <board> --card <id> --section <name> --value <text>`, `board evidence add <board> --card <id> --text <text>`, and `board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff|commit> --text <text>`. `board add-card <board> --column <col> --title <title> --parent <card-id> --after <sibling-id>` inserts a roadmap child immediately after an existing sibling in the same column. These update the YAML card and refresh its SQLite projection.
 
@@ -128,7 +142,7 @@ Agent reports should reduce noise, not turn every dated item into an alarm. This
 
 - Add or maintain a canonical agenda/briefing query path that returns agent-ready items with resolved relevance/status, not just raw todo/event records.
 - The daily brief should focus on items important/relevant today, plus reminders whose configured reminder rule says to surface today.
-- Active todos come from non-completed `todo list --json` items only.
+- Active todos should come from backend-backed item/review/agenda queries, not legacy type-specific todo list output.
 - If a completed todo matches a same-cycle date card or event, reports should not keep calling the dated item overdue. Example: completed `Pay rent` suppresses a same-title `Pay Rent` event for that cycle.
 - Rent/monthly bills should only appear when the next due date is close, roughly within five days, or when the configured reminder rule says to surface today.
 - Birthdays/anniversaries should not appear in every daily report merely because they are future dated. Cider should support reminder policies such as "one week before," "on the day," or "start-of-month birthday digest," and the agenda API should return `surfaceToday`, reason, reminder policy, and next surface date.
@@ -138,7 +152,7 @@ Agent reports should reduce noise, not turn every dated item into an alarm. This
 Historical CLI and storage bug detail belongs on Kanban cards, not in this core doc. Durable cautions for agents:
 
 - After CLI capture while Cider.app is running, verify the final item with duplicate/search/get commands instead of assuming a single row exists.
-- Inbox can be virtual or type-scoped. Prefer item lists, snapshot/status JSON, or review queue commands over raw folder lookup when reporting Inbox health.
+- Inbox can be virtual or type-scoped. Prefer item/review/storage JSON over raw folder lookup when reporting Inbox health.
 - Duplicate folder/note/bookmark regressions should be audited against the current second-brain backend before cleanup. Use the current roadmap/bug cards for exact evidence and acceptance criteria.
 - CLI/date handling must preserve local-date semantics for all-day events, birthdays, due dates, and Kanban `created` dates.
 
