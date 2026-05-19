@@ -66,12 +66,16 @@ Agents should prefer `cider-cli item ...` and `cider-cli space ...` for second-b
 Core commands:
 
 - `item search <query> --json`: FTS-backed search over projected chunks.
-- `item get <type> <id-or-ref> --json`: unified item context for library item refs such as bookmark, note, todo, dateCard/event, contact, and vaultFile.
+- `item get <type> <id-or-ref> --json`: unified item context for library item refs such as bookmark, note, todo, dateCard/event, contact, and vaultFile, including `captureProvenance` when a capture event produced the item.
 - `item owner-get <owner-type> <owner-id-or-ref> --json`: legacy owner-section inspection for projected owners such as Kanban cards; returns structured sections, routing decisions, agent actions, and owner resolution metadata.
+- `item graph-health --json`: read-only graph readiness across owner relations, projects, capture events/attachments, content chunks, enrichment outputs, similarity candidates, schema state, counts, findings, and safe next commands.
+- `item project-context <project> --json`: project graph context with project owner, board/card/doc/artifact relations, backend project metadata, and safe follow-up commands.
 - `item route <type> <id-or-ref> --target-type <space|folder|board> --reason <text> --json`: records a routing decision without silently moving files.
 - `item backfill-kanban [--board <name-or-id>] --json`: rebuilds Kanban card projections from YAML into SQLite sections/chunks.
 - `item doctor --json`: checks second-brain tables and SQLite integrity.
 - `space explain <name-or-id> --json`: returns purpose, routing hints, default views, and agent instructions for a Space.
+
+Graph-heavy commands should expose counts and safe follow-up commands. Prefer bounded summaries or explicit full-detail flags when relation-heavy responses, such as project card lists, would otherwise flood agent context.
 
 `item get` still accepts legacy non-library owner refs as a deprecated compatibility fallback and marks JSON with `command: item.get.legacy-owner-fallback`, `deprecated: true`, and a `deprecationMessage`. New callers should use `item owner-get` for owner projections and `item context`/`item get` for unified library items.
 

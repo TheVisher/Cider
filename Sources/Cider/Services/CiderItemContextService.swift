@@ -23,6 +23,27 @@ struct CiderItemChunk: Identifiable, Codable, Equatable {
     var updatedAt: Date
 }
 
+struct CiderItemCaptureProvenance: Identifiable, Equatable {
+    var id: String { eventID }
+    var eventID: String
+    var owner: SecondBrainOwnerRef
+    var sourceKind: String
+    var surface: String?
+    var channel: String?
+    var channelID: String?
+    var threadID: String?
+    var messageID: String?
+    var senderID: String?
+    var senderName: String?
+    var sourceURL: String?
+    var sourceFile: String?
+    var sourceText: String?
+    var attachmentCount: Int
+    var metadata: [String: String]
+    var createdAt: Date
+    var relation: SecondBrainRelation
+}
+
 struct CiderItemContextBundle: Equatable {
     var item: CiderItemSummary
     var owner: SecondBrainOwnerRef
@@ -35,6 +56,7 @@ struct CiderItemContextBundle: Equatable {
     var routingDecisions: [SecondBrainRoutingDecision]
     var agentActions: [SecondBrainAgentAction]
     var enrichmentOutputs: [SecondBrainEnrichmentOutput]
+    var captureProvenance: [CiderItemCaptureProvenance]
 }
 
 struct CiderItemAgentContextLimits: Equatable {
@@ -84,6 +106,7 @@ struct CiderItemAgentContextPacket: Equatable {
     var related: [ItemLinkSummary]
     var ownerRelations: [SecondBrainRelation]
     var backlinks: [SecondBrainRelation]
+    var captureProvenance: [CiderItemCaptureProvenance]
     var review: CiderItemAgentReviewState?
     var surfacing: CiderSurfacingExplanation
     var recentHistory: [CiderItemAgentContextHistoryEntry]
@@ -151,6 +174,7 @@ final class CiderItemContextService {
     func context(for ref: LibraryEntityRef) throws -> CiderItemContextBundle {
         let item = try itemSummary(id: ref.entityID)
         let owner = owner(for: item)
+        let backlinks = try secondBrainStore.backlinks(for: owner)
         return CiderItemContextBundle(
             item: item,
             owner: owner,
@@ -158,11 +182,12 @@ final class CiderItemContextService {
             chunks: try chunks(for: owner),
             related: linkService.summaries(for: try linkService.relatedRefs(for: ref)),
             ownerRelations: try secondBrainStore.outgoingRelations(for: owner),
-            backlinks: try secondBrainStore.backlinks(for: owner),
+            backlinks: backlinks,
             spaceMemberships: try spaceMembershipStore.memberships(for: ref),
             routingDecisions: try secondBrainStore.routingDecisions(for: owner),
             agentActions: try secondBrainStore.agentActions(for: owner),
-            enrichmentOutputs: try SecondBrainEnrichmentOutputService(database: database).outputs(for: owner)
+            enrichmentOutputs: try SecondBrainEnrichmentOutputService(database: database).outputs(for: owner),
+            captureProvenance: try captureProvenance(from: backlinks)
         )
     }
 
@@ -182,6 +207,7 @@ final class CiderItemContextService {
             related: Array(bundle.related.prefix(normalizedLimits.maxRelated)),
             ownerRelations: Array(bundle.ownerRelations.prefix(normalizedLimits.maxRelated)),
             backlinks: Array(bundle.backlinks.prefix(normalizedLimits.maxRelated)),
+            captureProvenance: Array(bundle.captureProvenance.prefix(normalizedLimits.maxHistory)),
             review: reviewState(for: bundle),
             surfacing: surfacingExplanation(for: bundle),
             recentHistory: recentHistory(for: bundle, limit: normalizedLimits.maxHistory),
@@ -351,6 +377,15 @@ final class CiderItemContextService {
         values += bundle.spaceMemberships.map { "space:\($0.spaceName)" }
         values += bundle.routingDecisions.map { "routing:\($0.source)" }
         values += bundle.agentActions.map { "agent:\($0.source)" }
+        values += bundle.captureProvenance.map { provenance in
+            if let surface = provenance.surface, let channel = provenance.channel {
+                return "capture:\(surface)/\(channel)"
+            }
+            if let surface = provenance.surface {
+                return "capture:\(surface)"
+            }
+            return "capture:\(provenance.sourceKind)"
+        }
         if !bundle.enrichmentOutputs.isEmpty {
             values.append("enrichment_outputs:\(bundle.enrichmentOutputs.count)")
         }
@@ -486,6 +521,61 @@ final class CiderItemContextService {
                 return lhs.id < rhs.id
             }
             .prefix(limit))
+    }
+
+    private func captureProvenance(from backlinks: [SecondBrainRelation]) throws -> [CiderItemCaptureProvenance] {
+        let captureRelations = backlinks.filter {
+            $0.sourceOwner.ownerType == "capture_event" && $0.relationType == "produced_item"
+        }
+        guard !captureRelations.isEmpty else { return [] }
+
+        var provenance: [CiderItemCaptureProvenance] = []
+        for relation in captureRelations {
+            guard let event = try captureEvent(owner: relation.sourceOwner, relation: relation) else {
+                continue
+            }
+            provenance.append(event)
+        }
+        return provenance.sorted { lhs, rhs in
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+            return lhs.eventID < rhs.eventID
+        }
+    }
+
+    private func captureEvent(
+        owner: SecondBrainOwnerRef,
+        relation: SecondBrainRelation
+    ) throws -> CiderItemCaptureProvenance? {
+        let stmt = try database.prepare("""
+            SELECT id, source_kind, surface, channel, channel_id, thread_id, message_id,
+                   sender_id, sender_name, source_url, source_file, source_text,
+                   attachment_count, metadata, created_at
+            FROM capture_events
+            WHERE id = ?
+            LIMIT 1;
+            """)
+        stmt.bind(owner.ownerID, at: 1)
+        guard try stmt.step() else { return nil }
+
+        return CiderItemCaptureProvenance(
+            eventID: stmt.string(at: 0),
+            owner: owner,
+            sourceKind: stmt.string(at: 1),
+            surface: stmt.optionalString(at: 2),
+            channel: stmt.optionalString(at: 3),
+            channelID: stmt.optionalString(at: 4),
+            threadID: stmt.optionalString(at: 5),
+            messageID: stmt.optionalString(at: 6),
+            senderID: stmt.optionalString(at: 7),
+            senderName: stmt.optionalString(at: 8),
+            sourceURL: stmt.optionalString(at: 9),
+            sourceFile: stmt.optionalString(at: 10),
+            sourceText: stmt.optionalString(at: 11),
+            attachmentCount: stmt.int(at: 12),
+            metadata: DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 13)) ?? [:],
+            createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 14)),
+            relation: relation
+        )
     }
 
     private func safeCommands(for bundle: CiderItemContextBundle) -> [String] {

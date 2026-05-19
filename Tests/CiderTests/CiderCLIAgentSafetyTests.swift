@@ -213,6 +213,56 @@ struct CiderCLIAgentSafetyTests {
         #expect(boardOwners.contains { $0["ownerType"] as? String == "kanban_board" })
     }
 
+    @Test("project context summary bounds relation-heavy output")
+    func projectContextSummaryBoundsRelationHeavyOutput() throws {
+        let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cider")
+        let cardOwners = (0..<5).map {
+            SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "2afee0/card-\($0)")
+        }
+        let relations = cardOwners.map {
+            SecondBrainRelation(
+                sourceOwner: projectOwner,
+                targetOwner: $0,
+                relationType: "has_card",
+                evidence: "Project includes \($0.ownerID).",
+                source: "test",
+                actor: "codex",
+                confidence: 1
+            )
+        }
+        let context = SecondBrainProjectContext(
+            project: SecondBrainProject(id: "cider", title: "Cider", subtitle: "", status: "active"),
+            owner: projectOwner,
+            sections: [],
+            outgoingRelations: relations,
+            backlinks: [],
+            artifactRelations: [],
+            artifactOwners: [],
+            boardOwners: [SecondBrainOwnerRef(ownerType: "kanban_board", ownerID: "2afee0")],
+            cardOwners: cardOwners,
+            safeCommands: ["cider-cli item project-context cider --json"]
+        )
+
+        let full = CiderCLI.projectContextToDict(context, command: "item.project-context", sourceRef: "cider")
+        #expect((full["cardOwners"] as? [[String: Any]])?.count == 5)
+
+        let summary = CiderCLI.projectContextToDict(
+            context,
+            command: "item.project-context",
+            sourceRef: "cider",
+            limits: .summary(maxSamples: 2)
+        )
+        let counts = try #require(summary["counts"] as? [String: Any])
+        let truncation = try #require(summary["truncation"] as? [String: Any])
+        let safeCommands = try #require(summary["safeCommands"] as? [String])
+
+        #expect(summary["mode"] as? String == "summary")
+        #expect(counts["cardOwners"] as? Int == 5)
+        #expect((summary["cardOwners"] as? [[String: Any]])?.count == 2)
+        #expect(truncation["cardOwners"] as? Bool == true)
+        #expect(safeCommands.contains("cider-cli item project-context cider --full --json"))
+    }
+
     @Test("reminder mutation ID resolution rejects ambiguous prefixes")
     func reminderMutationIDResolutionRejectsAmbiguousPrefixes() throws {
         let first = UUID(uuidString: "aaaaaaaa-1111-1111-1111-111111111111")!

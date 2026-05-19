@@ -133,6 +133,18 @@ For Cider development work with a Kanban card, agents should use the structured 
 
 Use `cider-cli item get card <id> --json` when an agent only needs projected sections/provenance, and `cider-cli item search <query> --json` when it needs retrieval across projected chunks. Raw Markdown or YAML inspection is for parser/storage debugging, not normal handoff.
 
+## Accepted Graph Workflow
+
+The accepted second-brain graph backend is the agent-facing memory foundation. Agents should use graph commands before falling back to raw SQLite, prose inference, or folder-path guesses.
+
+- Run `cider-cli item graph-health --json` before raw SQLite inspection when checking graph readiness. Treat `needs_rebuild`, `needs_sync`, and `needs_review` as actionable state, not as permission to mutate silently.
+- Use `cider-cli item project-context <project> --json` for project graph context. Prefer the returned owner refs, relations, counts, and safe commands over reading project folders or scraping Kanban YAML.
+- Use item/project/owner context commands to understand relationships, backlinks, `captureProvenance`, routing, enrichment, and similarity state before making organization changes.
+- Capture new source material through canonical capture commands/services so `capture_events`, `capture_attachments`, owner relations, routing, review, and agent-visible result JSON stay connected.
+- Generated enrichment, similarity candidates, and grouping suggestions are reviewable outputs. Do not silently promote them into user organization unless the command explicitly records an approved mutation.
+- Record friction as scoped Kanban follow-up cards instead of reopening broad architecture plans. Good follow-ups include bounded output, missing relation visibility, stale projection repair, or dogfood findings.
+- Promote only durable product, storage, CLI, QA, or agent-behavior contracts into core docs after the card evidence proves them.
+
 ## Development Rules
 
 - Use existing Cider patterns before adding abstractions.

@@ -3368,7 +3368,7 @@ struct CiderCLI {
               cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
               cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
               cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]
-              cider-cli item project-context <project-id-or-name> [--json]
+              cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
               cider-cli item sync-project <project-id-or-name> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
               cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <vault-path>) [--actor <name>] [--source <source>] [--json]
@@ -3836,7 +3836,7 @@ struct CiderCLI {
         case "project-context", "project":
             let positional = leadingPositionalArgs(from: args)
             guard let ref = positional.first else {
-                printCLIError("Usage: cider-cli item project-context <project-id-or-name> [--json]")
+                printCLIError("Usage: cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]")
                 return
             }
             let catalog = ProjectWorkspaceCatalog.defaultCatalog(
@@ -3850,7 +3850,12 @@ struct CiderCLI {
                     workspace: workspace,
                     boards: KanbanStorage.shared.boards
                 )
-                printProjectContext(payload, command: "item.project-context", sourceRef: ref)
+                printProjectContext(
+                    payload,
+                    command: "item.project-context",
+                    sourceRef: ref,
+                    limits: projectContextOutputLimits(from: args)
+                )
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -9006,8 +9011,43 @@ struct CiderCLI {
         ]
     }
 
-    static func projectContextToDict(_ context: SecondBrainProjectContext, command: String, sourceRef: String) -> [String: Any] {
-        [
+    struct ProjectContextOutputLimits {
+        var mode: String
+        var maxSamples: Int
+
+        static let full = ProjectContextOutputLimits(mode: "full", maxSamples: Int.max)
+
+        static func summary(maxSamples: Int) -> ProjectContextOutputLimits {
+            ProjectContextOutputLimits(mode: "summary", maxSamples: max(0, maxSamples))
+        }
+
+        var isSummary: Bool { mode == "summary" }
+    }
+
+    static func projectContextOutputLimits(from args: [String]) -> ProjectContextOutputLimits {
+        if args.contains("--full") {
+            return .full
+        }
+        if args.contains("--summary") || parseFlag("--limit", from: args) != nil {
+            let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 25
+            return .summary(maxSamples: limit)
+        }
+        return .full
+    }
+
+    static func projectContextToDict(
+        _ context: SecondBrainProjectContext,
+        command: String,
+        sourceRef: String,
+        limits: ProjectContextOutputLimits = .full
+    ) -> [String: Any] {
+        var safeCommands = context.safeCommands
+        let fullCommand = "cider-cli item project-context \(context.project.id) --full --json"
+        if limits.isSummary, !safeCommands.contains(fullCommand) {
+            safeCommands.append(fullCommand)
+        }
+
+        var dict: [String: Any] = [
             "ok": true,
             "command": command,
             "sourceRef": [
@@ -9016,20 +9056,48 @@ struct CiderCLI {
             ],
             "project": projectToDict(context.project),
             "owner": ownerToDict(context.owner),
-            "sections": context.sections.map(secondBrainSectionToDict),
-            "ownerRelations": context.outgoingRelations.map(ownerRelationToDict),
-            "backlinks": context.backlinks.map(ownerRelationToDict),
-            "artifactRelations": context.artifactRelations.map(ownerRelationToDict),
-            "artifactOwners": context.artifactOwners.map(ownerToDict),
-            "boardOwners": context.boardOwners.map(ownerToDict),
-            "cardOwners": context.cardOwners.map(ownerToDict),
-            "safeCommands": context.safeCommands,
+            "sections": context.sections.prefix(limits.maxSamples).map(secondBrainSectionToDict),
+            "ownerRelations": context.outgoingRelations.prefix(limits.maxSamples).map(ownerRelationToDict),
+            "backlinks": context.backlinks.prefix(limits.maxSamples).map(ownerRelationToDict),
+            "artifactRelations": context.artifactRelations.prefix(limits.maxSamples).map(ownerRelationToDict),
+            "artifactOwners": context.artifactOwners.prefix(limits.maxSamples).map(ownerToDict),
+            "boardOwners": context.boardOwners.prefix(limits.maxSamples).map(ownerToDict),
+            "cardOwners": context.cardOwners.prefix(limits.maxSamples).map(ownerToDict),
+            "safeCommands": safeCommands,
         ]
+        if limits.isSummary {
+            dict["mode"] = limits.mode
+            dict["limits"] = ["maxSamples": limits.maxSamples]
+            dict["counts"] = [
+                "sections": context.sections.count,
+                "ownerRelations": context.outgoingRelations.count,
+                "backlinks": context.backlinks.count,
+                "artifactRelations": context.artifactRelations.count,
+                "artifactOwners": context.artifactOwners.count,
+                "boardOwners": context.boardOwners.count,
+                "cardOwners": context.cardOwners.count,
+            ]
+            dict["truncation"] = [
+                "sections": context.sections.count > limits.maxSamples,
+                "ownerRelations": context.outgoingRelations.count > limits.maxSamples,
+                "backlinks": context.backlinks.count > limits.maxSamples,
+                "artifactRelations": context.artifactRelations.count > limits.maxSamples,
+                "artifactOwners": context.artifactOwners.count > limits.maxSamples,
+                "boardOwners": context.boardOwners.count > limits.maxSamples,
+                "cardOwners": context.cardOwners.count > limits.maxSamples,
+            ]
+        }
+        return dict
     }
 
-    static func printProjectContext(_ context: SecondBrainProjectContext, command: String, sourceRef: String) {
+    static func printProjectContext(
+        _ context: SecondBrainProjectContext,
+        command: String,
+        sourceRef: String,
+        limits: ProjectContextOutputLimits = .full
+    ) {
         if jsonOutput {
-            outputJSON(projectContextToDict(context, command: command, sourceRef: sourceRef))
+            outputJSON(projectContextToDict(context, command: command, sourceRef: sourceRef, limits: limits))
             return
         }
         print("Project: \(context.project.title) [\(context.project.id)]")
@@ -9440,7 +9508,31 @@ struct CiderCLI {
             "routingDecisions": bundle.routingDecisions.map(routingDecisionToDict),
             "agentActions": bundle.agentActions.map(agentActionToDict),
             "enrichmentOutputs": bundle.enrichmentOutputs.map(enrichmentOutputToDict),
+            "captureProvenance": bundle.captureProvenance.map(captureProvenanceToDict),
         ]
+    }
+
+    static func captureProvenanceToDict(_ provenance: CiderItemCaptureProvenance) -> [String: Any] {
+        var dict: [String: Any] = [
+            "eventID": provenance.eventID,
+            "owner": ownerToDict(provenance.owner),
+            "sourceKind": provenance.sourceKind,
+            "attachmentCount": provenance.attachmentCount,
+            "metadata": provenance.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: provenance.createdAt),
+            "relation": ownerRelationToDict(provenance.relation),
+        ]
+        if let surface = provenance.surface { dict["surface"] = surface }
+        if let channel = provenance.channel { dict["channel"] = channel }
+        if let channelID = provenance.channelID { dict["channelID"] = channelID }
+        if let threadID = provenance.threadID { dict["threadID"] = threadID }
+        if let messageID = provenance.messageID { dict["messageID"] = messageID }
+        if let senderID = provenance.senderID { dict["senderID"] = senderID }
+        if let senderName = provenance.senderName { dict["senderName"] = senderName }
+        if let sourceURL = provenance.sourceURL { dict["sourceURL"] = sourceURL }
+        if let sourceFile = provenance.sourceFile { dict["sourceFile"] = sourceFile }
+        if let sourceText = provenance.sourceText { dict["sourceText"] = sourceText }
+        return dict
     }
 
     static func enrichmentOutputToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
@@ -9538,6 +9630,7 @@ struct CiderCLI {
             "related": packet.related.map(itemLinkSummaryToDict),
             "ownerRelations": packet.ownerRelations.map(ownerRelationToDict),
             "backlinks": packet.backlinks.map(ownerRelationToDict),
+            "captureProvenance": packet.captureProvenance.map(captureProvenanceToDict),
             "surfacing": surfacingExplanationToDict(packet.surfacing),
             "recentHistory": packet.recentHistory.map(itemAgentContextHistoryToDict),
             "safeCommands": packet.safeCommands,
