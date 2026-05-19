@@ -31,7 +31,7 @@ struct SecondBrainFoundationTests {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) } ?? candidates[0]
     }
 
-    private func runCLI(_ args: [String], vaultURL: URL) throws -> String {
+    private func runCLI(_ args: [String], vaultURL: URL, stdin: String? = nil) throws -> String {
         let process = Process()
         process.executableURL = ciderCLIURL
         process.currentDirectoryURL = packageRootURL
@@ -39,10 +39,18 @@ struct SecondBrainFoundationTests {
 
         let output = Pipe()
         let error = Pipe()
+        let input = stdin.map { _ in Pipe() }
         process.standardOutput = output
         process.standardError = error
+        if let input {
+            process.standardInput = input
+        }
 
         try process.run()
+        if let stdin, let input {
+            input.fileHandleForWriting.write(Data(stdin.utf8))
+            input.fileHandleForWriting.closeFile()
+        }
         process.waitUntilExit()
 
         let stdout = String(
@@ -79,6 +87,11 @@ struct SecondBrainFoundationTests {
         let capture = try #require(payload["capture"] as? [String: Any])
         #expect(capture["command"] as? String == "capture.add")
         return capture
+    }
+
+    private func requireCaptureAddContract(_ payload: [String: Any]) throws -> [String: Any] {
+        #expect(payload["command"] as? String == "capture.add")
+        return payload
     }
 
     @Test("bookmark add records unified capture routing review metadata")
@@ -253,6 +266,148 @@ struct SecondBrainFoundationTests {
         #expect(try routing.explain(itemID: noteID).latestDecision?.source == "capture.add")
         #expect(try routing.explain(itemID: todoID).latestDecision?.source == "capture.add")
         #expect(try routing.explain(itemID: fileID).latestDecision?.source == "capture.add")
+    }
+
+    @Test("capture add stdin note preserves shell sensitive multiline text")
+    func captureAddStdinNotePreservesShellSensitiveMultilineText() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-stdin-note-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let raw = """
+        Budget is $500; say "yes", don't trim it.
+        Run `echo hello`; visit https://example.com/path?a=1&b=two.
+        File path: /tmp/Cider Path/with spaces.txt
+        Emoji: 🍎
+        """
+
+        let payload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "note",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: raw))
+        let capture = try requireCaptureAddContract(payload)
+        let source = try #require(capture["source"] as? [String: Any])
+        let item = try #require(capture["item"] as? [String: Any])
+
+        #expect(source["kind"] as? String == "text")
+        #expect(source["text"] as? String == raw)
+        #expect(item["type"] as? String == "note")
+    }
+
+    @Test("capture add text file note preserves shell sensitive multiline text")
+    func captureAddTextFileNotePreservesShellSensitiveMultilineText() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-text-file-note-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let raw = """
+        Budget is $500; say "yes", don't trim it.
+        Run `echo hello`; visit https://example.com/path?a=1&b=two.
+        File path: /tmp/Cider Path/with spaces.txt
+        Emoji: 🍎
+        """
+        let inputURL = vault.appendingPathComponent("raw capture.txt")
+        try raw.write(to: inputURL, atomically: true, encoding: .utf8)
+
+        let payload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "note",
+            "--text-file", inputURL.path,
+            "--json",
+        ], vaultURL: vault))
+        let capture = try requireCaptureAddContract(payload)
+        let source = try #require(capture["source"] as? [String: Any])
+        let item = try #require(capture["item"] as? [String: Any])
+
+        #expect(source["text"] as? String == raw)
+        #expect(item["type"] as? String == "note")
+    }
+
+    @Test("capture add explicit kind avoids inference for raw text")
+    func captureAddExplicitKindAvoidsInferenceForRawText() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-explicit-kind-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let todoText = "todo: Preserve exact todo text with $500 and `ticks`."
+        let todoPayload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "todo",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: todoText))
+        let todoItem = try #require(todoPayload["item"] as? [String: Any])
+        let todoSource = try #require(todoPayload["source"] as? [String: Any])
+        #expect(todoPayload["command"] as? String == "capture.add")
+        #expect(todoItem["type"] as? String == "todo")
+        #expect(todoSource["text"] as? String == todoText)
+
+        let urlLookingText = "https://example.com/looks-like-bookmark?cost=$500&quoted=yes"
+        let noteURLPayload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "note",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: urlLookingText))
+        let noteURLItem = try #require(noteURLPayload["item"] as? [String: Any])
+        let noteURLSource = try #require(noteURLPayload["source"] as? [String: Any])
+        #expect(noteURLItem["type"] as? String == "note")
+        #expect(noteURLSource["text"] as? String == urlLookingText)
+
+        let sourceFile = vault.appendingPathComponent("looks like file.txt")
+        try "real file contents".write(to: sourceFile, atomically: true, encoding: .utf8)
+        let noteFilePayload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "note",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: sourceFile.path))
+        let noteFileItem = try #require(noteFilePayload["item"] as? [String: Any])
+        let noteFileSource = try #require(noteFilePayload["source"] as? [String: Any])
+        #expect(noteFileItem["type"] as? String == "note")
+        #expect(noteFileSource["text"] as? String == sourceFile.path)
+    }
+
+    @Test("capture add explicit bookmark url and file path use canonical JSON")
+    func captureAddExplicitBookmarkURLAndFilePathUseCanonicalJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-url-file-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let bookmarkPayload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "bookmark",
+            "--url", "https://example.com/capture?x=1&price=$500",
+            "--no-wait",
+            "--json",
+        ], vaultURL: vault))
+        let bookmarkSource = try #require(bookmarkPayload["source"] as? [String: Any])
+        let bookmarkItem = try #require(bookmarkPayload["item"] as? [String: Any])
+        #expect(bookmarkPayload["command"] as? String == "capture.add")
+        #expect(bookmarkSource["kind"] as? String == "url")
+        #expect(bookmarkItem["type"] as? String == "bookmark")
+
+        let sourceURL = vault.appendingPathComponent("path with spaces.txt")
+        try "file body".write(to: sourceURL, atomically: true, encoding: .utf8)
+        let filePayload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "file",
+            "--path", sourceURL.path,
+            "--json",
+        ], vaultURL: vault))
+        let fileSource = try #require(filePayload["source"] as? [String: Any])
+        let fileItem = try #require(filePayload["item"] as? [String: Any])
+        #expect(filePayload["command"] as? String == "capture.add")
+        #expect(fileSource["kind"] as? String == "file")
+        #expect(fileSource["file"] as? String == sourceURL.path)
+        #expect(fileItem["type"] as? String == "vaultFile")
+        #expect(fileItem["relativePath"] as? String == "Inbox/Files/path with spaces.txt")
     }
 
     @Test("process CLI event and contact creates record provenance")

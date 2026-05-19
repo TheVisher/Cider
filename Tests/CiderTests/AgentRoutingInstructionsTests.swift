@@ -87,7 +87,7 @@ struct AgentRoutingInstructionsTests {
             context: .empty
         ))
         let capturePrompt = try #require(runtime.lastSystemPrompt)
-        #expect(capturePrompt.contains("cider-cli capture add \"<url>\" --json"))
+        #expect(capturePrompt.contains("cider-cli capture add --kind bookmark --url \"<url>\" --json"))
         #expect(capturePrompt.contains("cider-cli item get <type> <id> --json"))
         #expect(!capturePrompt.contains("cider-cli bookmark add"))
         #expect(!capturePrompt.contains("cider-cli bookmark get"))

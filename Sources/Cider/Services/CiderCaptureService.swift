@@ -415,7 +415,7 @@ final class CiderCaptureService {
 
         switch inferredKind(for: source) {
         case .url:
-            return try addURL(source, title: title, folderID: folderID, sourceContext: sourceContext)
+            return try addBookmarkCapture(urlString: source, title: title, folderID: folderID, sourceContext: sourceContext)
         case .file:
             return try addFile(source, title: title, folderID: folderID, sourceContext: sourceContext)
         case .todo:
@@ -425,11 +425,11 @@ final class CiderCaptureService {
         }
     }
 
-    private func addURL(
-        _ source: String,
+    func addBookmarkCapture(
+        urlString source: String,
         title: String?,
         folderID: UUID?,
-        sourceContext: CaptureSourceContext?
+        sourceContext: CaptureSourceContext? = nil
     ) throws -> CiderCaptureResult {
         guard bookmarkService.previewNormalizedURLString(from: source) != nil else {
             throw CiderCaptureError.unsupportedSource(source)
@@ -1526,7 +1526,7 @@ final class CiderCaptureService {
         return String(line.prefix(80))
     }
 
-    private func derivedTodoTitle(from source: String) -> String {
+    func derivedTodoTitle(from source: String) -> String {
         let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowercased = trimmed.lowercased()
         let prefixes = ["todo:", "task:", "reminder:", "remember to ", "remind me to "]

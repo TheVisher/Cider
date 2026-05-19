@@ -862,16 +862,16 @@ struct CiderCLI {
     static func handleCapture(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) async {
         switch subcommand {
         case "add":
-            guard let source = firstPositionalArgument(
-                from: args,
-                valueFlags: ["--title", "--folder", "--path", "--surface", "--channel", "--message-id", "--sender-id", "--timeout", "--wait-timeout", "--capture-timeout"]
-            ) else {
-                printCLIError("Source required. Usage: cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+            let source: CaptureAddSource
+            do {
+                source = try resolveCaptureAddSource(from: args)
+            } catch {
+                printCLIError(error.localizedDescription)
                 return
             }
 
             let targetFolder: VaultFolder?
-            switch resolveFolderArg(from: args) {
+            switch resolveCaptureFolderArg(from: args) {
             case .unspecified: targetFolder = nil
             case .resolved(let folder): targetFolder = folder
             case .failed: return
@@ -879,12 +879,50 @@ struct CiderCLI {
 
             do {
                 let database = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil
-                let result = try CiderCaptureService(bookmarkService: bookmarkService, database: database).add(
-                    source,
-                    title: parseFlag("--title", from: args),
-                    folderID: targetFolder?.id,
-                    sourceContext: captureSourceContext(from: args, originalText: source)
-                )
+                let service = CiderCaptureService(bookmarkService: bookmarkService, database: database)
+                let title = parseFlag("--title", from: args)
+                let sourceContext = captureSourceContext(from: args, originalText: source.originalText)
+                let result: CiderCaptureResult
+                switch source {
+                case .inferred(let raw):
+                    result = try service.add(
+                        raw,
+                        title: title,
+                        folderID: targetFolder?.id,
+                        sourceContext: sourceContext
+                    )
+                case .note(let raw):
+                    result = try service.addNoteCapture(
+                        title: title,
+                        content: raw,
+                        folderID: targetFolder?.id,
+                        sourceContext: sourceContext
+                    )
+                case .todo(let raw):
+                    result = try service.addTodoCapture(
+                        title: title ?? service.derivedTodoTitle(from: raw),
+                        sourceText: raw,
+                        dueDate: nil,
+                        priority: nil,
+                        folderID: targetFolder?.id,
+                        titleState: title == nil ? "derived" : "manual",
+                        sourceContext: sourceContext
+                    )
+                case .bookmark(let url):
+                    result = try service.addBookmarkCapture(
+                        urlString: url,
+                        title: title,
+                        folderID: targetFolder?.id,
+                        sourceContext: sourceContext
+                    )
+                case .file(let path):
+                    result = try service.addFileCapture(
+                        sourcePath: path,
+                        title: title,
+                        folderID: targetFolder?.id,
+                        sourceContext: sourceContext
+                    )
+                }
                 let waitResult: BookmarkNativeCaptureWaitResult?
                 if result.item.type == "bookmark", let timeout = bookmarkNativeCaptureWaitTimeout(from: args) {
                     waitResult = await waitForNativeBookmarkCapture(
@@ -931,7 +969,7 @@ struct CiderCLI {
             }
 
         case nil, "help", "--help", "-h":
-            print("Usage: cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+            print("Usage: cider-cli capture add [--kind note|todo|bookmark|file] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
 
         default:
             print("Unknown capture command: \(subcommand ?? "nil")")
@@ -6994,6 +7032,97 @@ struct CiderCLI {
         return nil
     }
 
+    enum CaptureAddSource {
+        case inferred(String)
+        case note(String)
+        case todo(String)
+        case bookmark(String)
+        case file(String)
+
+        var originalText: String {
+            switch self {
+            case .inferred(let raw), .note(let raw), .todo(let raw), .bookmark(let raw), .file(let raw):
+                raw
+            }
+        }
+    }
+
+    enum CaptureAddArgumentError: LocalizedError {
+        case message(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .message(let message): message
+            }
+        }
+    }
+
+    static func resolveCaptureAddSource(from args: [String]) throws -> CaptureAddSource {
+        let kind = parseFlag("--kind", from: args)?.lowercased()
+        let rawText = try rawCaptureText(from: args)
+        let url = parseFlag("--url", from: args)
+        let path = parseFlag("--path", from: args)
+        let positional = firstPositionalArgument(
+            from: args,
+            valueFlags: [
+                "--kind", "--title", "--folder", "--path", "--text-file", "--url",
+                "--surface", "--channel", "--channel-id", "--thread-id", "--message-id",
+                "--sender-id", "--sender-name", "--timeout", "--wait-timeout", "--capture-timeout",
+                "--source-meta",
+            ]
+        )
+
+        switch kind {
+        case nil:
+            if let url { return .inferred(url) }
+            if let path { return .inferred(path) }
+            if let rawText { return .note(rawText) }
+            if let positional { return .inferred(positional) }
+        case "note":
+            if let rawText { return .note(rawText) }
+            if let positional { return .note(positional) }
+        case "todo":
+            if let rawText { return .todo(rawText) }
+            if let positional { return .todo(positional) }
+        case "bookmark", "url":
+            if let url { return .bookmark(url) }
+            if let positional { return .bookmark(positional) }
+        case "file":
+            if let path { return .file(path) }
+            if let positional { return .file(positional) }
+        case let unsupported?:
+            throw CaptureAddArgumentError.message("Unsupported --kind '\(unsupported)'. Use note, todo, bookmark, or file.")
+        }
+
+        throw CaptureAddArgumentError.message("Source required. Usage: cider-cli capture add [--kind note|todo|bookmark|file] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+    }
+
+    static func rawCaptureText(from args: [String]) throws -> String? {
+        let wantsStdin = args.contains("--stdin")
+        let textFile = parseFlag("--text-file", from: args)
+        if wantsStdin, textFile != nil {
+            throw CaptureAddArgumentError.message("Use only one raw text source: --stdin or --text-file.")
+        }
+        if wantsStdin {
+            let data = FileHandle.standardInput.readDataToEndOfFile()
+            guard let raw = String(data: data, encoding: .utf8) else {
+                throw CaptureAddArgumentError.message("Could not read UTF-8 text from stdin.")
+            }
+            guard !raw.isEmpty else { throw CiderCaptureError.missingSource }
+            return raw
+        }
+        if let textFile {
+            do {
+                let raw = try String(contentsOfFile: NSString(string: textFile).expandingTildeInPath, encoding: .utf8)
+                guard !raw.isEmpty else { throw CiderCaptureError.missingSource }
+                return raw
+            } catch {
+                throw CaptureAddArgumentError.message("Could not read UTF-8 text file: \(textFile)")
+            }
+        }
+        return nil
+    }
+
     static func bookmarkNativeCaptureWaitTimeout(from args: [String]) -> TimeInterval? {
         if args.contains("--no-wait") { return nil }
 
@@ -10331,6 +10460,25 @@ struct CiderCLI {
         return .unspecified
     }
 
+    /// `capture add --path` is the canonical source-file flag, so capture target
+    /// placement only honors `--folder`.
+    static func resolveCaptureFolderArg(from args: [String]) -> FolderArgResolution {
+        guard let name = parseFlag("--folder", from: args) else {
+            return .unspecified
+        }
+        if name.contains("/") {
+            if let folder = findFolderStrict(name) {
+                return .resolved(folder)
+            }
+            return .failed
+        }
+        if let folder = findFolder(named: name) {
+            return .resolved(folder)
+        }
+        print("Error: No folder found with name '\(name)'")
+        return .failed
+    }
+
     static func routingTarget(for folder: VaultFolder?, inboxPath: String) -> CiderRoutingDecisionTarget {
         if let folder {
             return CiderRoutingDecisionTarget(
@@ -10862,7 +11010,7 @@ struct CiderCLI {
         CiderCLI — Second Brain v1 agent API
 
         CAPTURE
-          cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--timeout <seconds>|--no-wait] [--json]
+          cider-cli capture add [--kind note|todo|bookmark|file] (--stdin|--text-file <path>|--url <url>|--path <path>) [--title <title>] [--folder <name|path>] [--timeout <seconds>|--no-wait] [--json]
 
         ITEM
           cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]

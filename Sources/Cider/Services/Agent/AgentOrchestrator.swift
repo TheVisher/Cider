@@ -637,7 +637,7 @@ actor AgentOrchestrator {
                 detail = "bookmark existence or search"
             }
             hints.append("- For bookmark existence, duplicate, or saved-before questions, prefer `cider-cli item search \"<url-or-query>\" --json` and inspect backend duplicate, provenance, and owner results.")
-            hints.append("- If the user gave a URL and wants to save it, use `cider-cli capture add \"<url>\" --json`; do not start from legacy duplicate or bookmark commands.")
+            hints.append("- If the user gave a URL and wants to save it, use `cider-cli capture add --kind bookmark --url \"<url>\" --json`; do not start from legacy duplicate or bookmark commands.")
         } else if asksForSearch && !matchedEntityScopes.isEmpty {
             let entityDescriptions = matchedEntityScopes.map(\.entityLabel).joined(separator: ", ")
             route = "scoped-search"
@@ -663,7 +663,7 @@ actor AgentOrchestrator {
         if containsURL && !asksForBookmarkExistence && (asksToCaptureOrSave || !asksForSearch) {
             route = "bookmark-capture"
             detail = "url capture"
-            hints.append("- This looks like a URL capture. Use the canonical backend path: `cider-cli capture add \"<url>\" --json`.")
+            hints.append("- This looks like a URL capture. Use the canonical backend path: `cider-cli capture add --kind bookmark --url \"<url>\" --json`.")
             hints.append("- Inspect the capture JSON for duplicate, provenance, routing, review, and safe next command fields before deciding whether to report a new save or an existing item.")
             hints.append("- Decide the destination path before saving when confidence is high enough; otherwise let the backend route/review state stand.")
             hints.append("- Let Cider own the native bookmark title and thumbnail scraping. Do not pass `--title` unless the user explicitly gave the final title or Cider already exposed a trustworthy title that should be preserved verbatim.")
@@ -677,7 +677,7 @@ actor AgentOrchestrator {
             if taskReminderSignals && !calendarEventSignals {
                 route = "todo-create"
                 detail = "task-like reminder capture"
-                hints.append("- This sounds like an actionable reminder. Use `cider-cli capture add \"<task text>\" --json` and inspect the backend item/review state instead of legacy todo commands.")
+                hints.append("- This sounds like an actionable reminder. Send the exact task text on stdin to `cider-cli capture add --kind todo --stdin --json` and inspect the backend item/review state instead of legacy todo commands.")
                 hints.append("- If the user gave a date and time, preserve it in the capture text so backend extraction can keep the reminder semantics.")
                 hints.append("- After creating the item, verify with `cider-cli item get <type> <id> --json`.")
                 hints.append("- Reserve event-style capture text for actual calendar occurrences like appointments, meetings, reservations, flights, birthdays, or other scheduled events.")
