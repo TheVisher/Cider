@@ -968,12 +968,33 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "archive-artifacts":
+            do {
+                let result = try archiveGeneratedArtifacts(args: args, bookmarkService: bookmarkService)
+                if jsonOutput {
+                    outputJSON(result)
+                } else {
+                    print("Archived artifacts: \(result["title"] as? String ?? "Generated artifact archive")")
+                    print("  Source: \(result["sourcePath"] as? String ?? "")")
+                    print("  Files: \(result["fileCount"] ?? 0)")
+                    print("  Omitted: \(result["omittedArtifactCount"] ?? 0) files")
+                    if let cleanup = result["cleanup"] as? [String: Any],
+                       cleanup["performed"] as? Bool == true,
+                       let trashPath = cleanup["trashPath"] as? String {
+                        print("  Trashed: \(trashPath)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case nil, "help", "--help", "-h":
             print("Usage: cider-cli capture add [--kind note|todo|bookmark|file] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+            print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
 
         default:
             print("Unknown capture command: \(subcommand ?? "nil")")
-            print("Commands: add")
+            print("Commands: add, archive-artifacts")
         }
     }
 
@@ -7055,6 +7076,237 @@ struct CiderCLI {
             case .message(let message): message
             }
         }
+    }
+
+    struct GeneratedArtifactSummaryFile {
+        var relativePath: String
+        var byteCount: Int64
+        var omitted: Bool
+
+        func toDictionary() -> [String: Any] {
+            [
+                "path": relativePath,
+                "bytes": byteCount,
+                "omitted": omitted,
+            ] as [String: Any]
+        }
+    }
+
+    struct GeneratedArtifactSummary {
+        var sourceURL: URL
+        var files: [GeneratedArtifactSummaryFile]
+
+        var fileCount: Int { files.count }
+        var totalBytes: Int64 { files.reduce(0) { $0 + $1.byteCount } }
+        var omittedArtifactCount: Int { files.filter(\.omitted).count }
+        var omittedBytes: Int64 { files.filter(\.omitted).reduce(0) { $0 + $1.byteCount } }
+        var representativeFiles: [GeneratedArtifactSummaryFile] {
+            Array(files.sorted { lhs, rhs in
+                if lhs.omitted != rhs.omitted { return lhs.omitted && !rhs.omitted }
+                if lhs.byteCount != rhs.byteCount { return lhs.byteCount > rhs.byteCount }
+                return lhs.relativePath < rhs.relativePath
+            }.prefix(10))
+        }
+    }
+
+    static func archiveGeneratedArtifacts(
+        args: [String],
+        bookmarkService: VaultBookmarkService
+    ) throws -> [String: Any] {
+        guard let sourcePath = firstPositionalArgument(
+            from: args,
+            valueFlags: [
+                "--title", "--card", "--commit", "--cleanup", "--large-threshold-bytes",
+            ]
+        ) else {
+            throw CaptureAddArgumentError.message("Source path required. Usage: cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
+        }
+
+        let sourceURL = URL(fileURLWithPath: NSString(string: sourcePath).expandingTildeInPath)
+            .standardizedFileURL
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw CaptureAddArgumentError.message("Artifact source not found: \(sourcePath)")
+        }
+
+        let threshold = parseFlag("--large-threshold-bytes", from: args).flatMap(Int64.init) ?? 1_048_576
+        guard threshold >= 0 else {
+            throw CaptureAddArgumentError.message("--large-threshold-bytes must be zero or greater.")
+        }
+
+        let cleanupMode = (parseFlag("--cleanup", from: args) ?? "none").lowercased()
+        guard ["none", "trash"].contains(cleanupMode) else {
+            throw CaptureAddArgumentError.message("--cleanup must be none or trash.")
+        }
+
+        let title = parseFlag("--title", from: args) ?? "Generated artifact archive"
+        let relatedCards = parseFlagAll("--card", from: args)
+        let commits = parseFlagAll("--commit", from: args)
+        let summary = try summarizeGeneratedArtifacts(at: sourceURL, largeThresholdBytes: threshold)
+        let noteContent = generatedArtifactArchiveNote(
+            title: title,
+            summary: summary,
+            relatedCards: relatedCards,
+            commits: commits,
+            cleanupMode: cleanupMode
+        )
+
+        let database = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil
+        let service = CiderCaptureService(bookmarkService: bookmarkService, database: database)
+        let sourceContext = CaptureSourceContext(
+            surface: "cli",
+            channel: nil,
+            channelID: nil,
+            threadID: nil,
+            messageID: nil,
+            senderID: nil,
+            senderName: nil,
+            originalText: sourceURL.path,
+            attachments: [],
+            metadata: [
+                "command": "capture.archive-artifacts",
+                "sourcePath": sourceURL.path,
+                "summaryOnly": "true",
+            ]
+        )
+        let capture = try service.addNoteCapture(
+            title: title,
+            content: noteContent,
+            folderID: nil,
+            sourceContext: sourceContext
+        )
+
+        let cleanup = try performGeneratedArtifactCleanupIfNeeded(
+            sourceURL: sourceURL,
+            mode: cleanupMode
+        )
+
+        return [
+            "ok": true,
+            "command": "capture.archive-artifacts",
+            "backendCommand": "capture.add",
+            "changed": true,
+            "readOnly": false,
+            "title": title,
+            "sourcePath": sourceURL.path,
+            "summaryOnly": true,
+            "fileCount": summary.fileCount,
+            "totalBytes": summary.totalBytes,
+            "omittedArtifactCount": summary.omittedArtifactCount,
+            "omittedBytes": summary.omittedBytes,
+            "representativeFiles": summary.representativeFiles.map { $0.toDictionary() },
+            "relatedCards": relatedCards,
+            "commits": commits,
+            "cleanup": cleanup,
+            "capture": capture.toDictionary(finalBookmark: nil),
+        ] as [String: Any]
+    }
+
+    static func summarizeGeneratedArtifacts(
+        at sourceURL: URL,
+        largeThresholdBytes: Int64
+    ) throws -> GeneratedArtifactSummary {
+        let resourceKeys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey]
+        let fileURLs: [URL]
+        if (try sourceURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+            fileURLs = [sourceURL]
+        } else {
+            let enumerator = FileManager.default.enumerator(
+                at: sourceURL,
+                includingPropertiesForKeys: Array(resourceKeys),
+                options: [.skipsHiddenFiles]
+            )
+            fileURLs = (enumerator?.compactMap { $0 as? URL } ?? []).filter { url in
+                (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+            }
+        }
+
+        let files = try fileURLs.map { url -> GeneratedArtifactSummaryFile in
+            let values = try url.resourceValues(forKeys: resourceKeys)
+            let size = Int64(values.fileSize ?? 0)
+            return GeneratedArtifactSummaryFile(
+                relativePath: relativeArtifactPath(for: url, sourceURL: sourceURL),
+                byteCount: size,
+                omitted: size > largeThresholdBytes
+            )
+        }.sorted { $0.relativePath < $1.relativePath }
+
+        return GeneratedArtifactSummary(sourceURL: sourceURL, files: files)
+    }
+
+    static func relativeArtifactPath(for fileURL: URL, sourceURL: URL) -> String {
+        let sourcePath = sourceURL.resolvingSymlinksInPath().path
+        let filePath = fileURL.resolvingSymlinksInPath().path
+        guard filePath.hasPrefix(sourcePath) else { return fileURL.lastPathComponent }
+        let suffix = String(filePath.dropFirst(sourcePath.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return suffix.isEmpty ? fileURL.lastPathComponent : suffix
+    }
+
+    static func generatedArtifactArchiveNote(
+        title: String,
+        summary: GeneratedArtifactSummary,
+        relatedCards: [String],
+        commits: [String],
+        cleanupMode: String
+    ) -> String {
+        let files = summary.representativeFiles.map { file in
+            "- \(file.relativePath) (\(file.byteCount) bytes)\(file.omitted ? " omitted from raw archive" : "")"
+        }.joined(separator: "\n")
+        let cardLine = relatedCards.isEmpty ? "None" : relatedCards.joined(separator: ", ")
+        let commitLine = commits.isEmpty ? "None" : commits.joined(separator: ", ")
+        let cleanupLine = cleanupMode == "trash"
+            ? "Trash source directory after successful capture."
+            : "Leave source artifacts in place; remove manually after review."
+
+        return """
+        # \(title)
+
+        Source path: \(summary.sourceURL.path)
+        Summary only: true
+        File count: \(summary.fileCount)
+        Total bytes: \(summary.totalBytes)
+        Omitted artifact count: \(summary.omittedArtifactCount)
+        Omitted bytes: \(summary.omittedBytes)
+        Related cards: \(cardLine)
+        Commits: \(commitLine)
+        Cleanup recommendation: \(cleanupLine)
+
+        ## Representative Files
+        \(files.isEmpty ? "- No files found." : files)
+        """
+    }
+
+    static func performGeneratedArtifactCleanupIfNeeded(
+        sourceURL: URL,
+        mode: String
+    ) throws -> [String: Any] {
+        switch mode {
+        case "none":
+            return [
+                "mode": mode,
+                "performed": false,
+                "safeNextCommands": ["rm -rf \(shellQuoted(sourceURL.path))"],
+            ] as [String: Any]
+        case "trash":
+            let trashRoot = StoragePaths.cachedVaultDirectoryURL
+                .appendingPathComponent(".cider/artifact-trash", isDirectory: true)
+            try FileManager.default.createDirectory(at: trashRoot, withIntermediateDirectories: true)
+            let destination = trashRoot
+                .appendingPathComponent("\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString)-\(sourceURL.lastPathComponent)")
+            try FileManager.default.moveItem(at: sourceURL, to: destination)
+            return [
+                "mode": mode,
+                "performed": true,
+                "trashPath": destination.path,
+                "safeNextCommands": ["rm -rf \(shellQuoted(destination.path))"],
+            ] as [String: Any]
+        default:
+            throw CaptureAddArgumentError.message("--cleanup must be none or trash.")
+        }
+    }
+
+    static func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
     static func resolveCaptureAddSource(from args: [String]) throws -> CaptureAddSource {

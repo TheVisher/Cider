@@ -410,6 +410,66 @@ struct SecondBrainFoundationTests {
         #expect(fileItem["relativePath"] as? String == "Inbox/Files/path with spaces.txt")
     }
 
+    @Test("capture archive artifacts summarizes generated audit directory and trashes only after capture")
+    func captureArchiveArtifactsSummarizesGeneratedAuditDirectoryAndTrashesOnlyAfterCapture() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-artifact-archive-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let artifactDir = vault.appendingPathComponent("audit-reports", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: artifactDir.appendingPathComponent("logs", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try "Summary: capture path is healthy.".write(
+            to: artifactDir.appendingPathComponent("summary.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try String(repeating: "large-log-line\n", count: 8).write(
+            to: artifactDir.appendingPathComponent("logs/full.log"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let payload = try jsonObject(from: runCLI([
+            "capture", "archive-artifacts",
+            artifactDir.path,
+            "--title", "Backend audit artifact archive",
+            "--card", "2ad7b4",
+            "--commit", "abc1234",
+            "--large-threshold-bytes", "40",
+            "--cleanup", "trash",
+            "--json",
+        ], vaultURL: vault))
+
+        #expect(payload["command"] as? String == "capture.archive-artifacts")
+        #expect(payload["summaryOnly"] as? Bool == true)
+        #expect(payload["sourcePath"] as? String == artifactDir.path)
+        #expect(payload["fileCount"] as? Int == 2)
+        #expect(payload["omittedArtifactCount"] as? Int == 1)
+        #expect((payload["omittedBytes"] as? Int ?? 0) > 40)
+        #expect((payload["relatedCards"] as? [String]) == ["2ad7b4"])
+        #expect((payload["commits"] as? [String]) == ["abc1234"])
+
+        let representativeFiles = try #require(payload["representativeFiles"] as? [[String: Any]])
+        #expect(representativeFiles.contains { $0["path"] as? String == "logs/full.log" })
+        #expect(representativeFiles.contains { $0["omitted"] as? Bool == true })
+
+        let capture = try #require(payload["capture"] as? [String: Any])
+        let item = try #require(capture["item"] as? [String: Any])
+        #expect(capture["command"] as? String == "capture.add")
+        #expect(item["type"] as? String == "note")
+
+        let cleanup = try #require(payload["cleanup"] as? [String: Any])
+        #expect(cleanup["mode"] as? String == "trash")
+        #expect(cleanup["performed"] as? Bool == true)
+        let trashPath = try #require(cleanup["trashPath"] as? String)
+        #expect(!FileManager.default.fileExists(atPath: artifactDir.path))
+        #expect(FileManager.default.fileExists(atPath: trashPath))
+    }
+
     @Test("process CLI event and contact creates record provenance")
     func processCLIEventAndContactCreatesRecordProvenance() throws {
         let vault = FileManager.default.temporaryDirectory
