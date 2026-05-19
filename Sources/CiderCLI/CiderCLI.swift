@@ -10735,20 +10735,34 @@ struct CiderCLI {
 
     static func printUsage() {
         print("""
-        CiderCLI — Full command-line interface to Cider's vault
+        CiderCLI — Second Brain v1 agent API
 
         CAPTURE
           cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--timeout <seconds>|--no-wait] [--json]
 
-        ROUTING
-          cider-cli routing explain <item-id> [--json]
-          cider-cli routing approve <item-id> [--actor user|agent] [--json]
-          cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
-          cider-cli routing rerun <item-id> [--actor user|agent] [--json]
+        ITEM
+          cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]
+          cider-cli item get <type> <id-or-ref> [--json]
+          cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
+          cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
+          cider-cli item related <type> <id-or-ref> [--json]
+          cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
+          cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
+          cider-cli item related-owners <owner-type> <owner-id-or-ref> [--json]
+          cider-cli item why-surfaced <type> <id-or-ref> [--json]
+          cider-cli item capability-map [--json]
+          cider-cli item graph-health [--json]
+          cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
+          cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
+          cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <vault-path>) [--actor <name>] [--source <source>] [--json]
+          cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
+          cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
+          cider-cli item doctor [--json]
 
         REVIEW
           cider-cli review list [--include-deferred] [--limit <n>] [--json]
           cider-cli review summary [--include-deferred] [--json]
+          cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]
           cider-cli review enrichment-diagnosis [--sample-limit <n>] [--json]
           cider-cli review enrichment-reconcile-plan [--sample-limit <n>] [--json]
           cider-cli review enrichment-reconcile-samples [--group <group-id>] [--limit <n>] [--json]
@@ -10758,14 +10772,13 @@ struct CiderCLI {
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
           cider-cli review enrich <item-id> [--actor user|agent] [--json]
           cider-cli review enrich-batch --confirm [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
+          cider-cli review jobs [--limit <n>] [--json]
 
-        REMINDERS
-          cider-cli reminder complete <todo|dateCard> <id-prefix> [--json]
-          cider-cli reminder snooze <todo|dateCard> <id-prefix> --until yyyy-MM-dd [--time "h:mm a"] [--json]
-
-        RECALL
-          cider-cli recall scorecard [--limit <n>] [--search-limit <n>] [--json]
-          cider-cli recall probes [--limit <n>] [--json]
+        ROUTE
+          cider-cli route explain <item-id> [--json]
+          cider-cli route approve <item-id> [--actor user|agent] [--json]
+          cider-cli route correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+          cider-cli route rerun <item-id> [--actor user|agent] [--json]
 
         STORAGE
           cider-cli storage audit [--json]
@@ -10773,117 +10786,22 @@ struct CiderCLI {
           cider-cli storage doctor-apply --finding <id> --canonical <path> --duplicate <path> --approve <token> [--execute] [--json]
           cider-cli storage repair-schema [--json]
 
-        SPACES
-          cider-cli space list [--json]
-          cider-cli space captures <space-id|name> [--limit <n>] [--json]
+        MIGRATE
+          cider-cli item backfill-kanban [--board <name-or-id>] [--json]
+          cider-cli item rebuild-references <note|card|board> <id-or-ref> [--json]
+          cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]
+          cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
+          cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
+          cider-cli item sync-project <project-id-or-name> [--json]
 
-        ITEM
-          cider-cli item search <query> [--limit <n>] [--json]
-          cider-cli item get <type> <id-or-ref> [--json]
-          cider-cli item context <type> <id-or-ref> [--json]
-          cider-cli item related <type> <id-or-ref> [--json]
-          cider-cli item why-surfaced <type> <id-or-ref> [--json]
+        DOCTOR
+          cider-cli item doctor [--json]
           cider-cli item capability-map [--json]
           cider-cli item graph-health [--json]
+          cider-cli storage audit [--json]
+          cider-cli db integrity
 
-        BOOKMARKS (alias: bm)
-          cider-cli bookmark list [--folder <name|path>] [--limit <n>]
-          cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--timeout <seconds>|--no-wait]
-          cider-cli bookmark get <id-prefix>
-          cider-cli bookmark search <query>
-          cider-cli bookmark move <id-prefix> --folder <name|path>
-          cider-cli bookmark tag <id-prefix> <label-name>
-          cider-cli bookmark untag <id-prefix> <label-name>
-          cider-cli bookmark delete <id-prefix>
-          cider-cli bookmark enrich <id-prefix> [--timeout <seconds>|--no-wait]
-          cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
-                    [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]
-          cider-cli bookmark date-suggestions <id-prefix> [--json]
-          cider-cli bookmark date-suggestions approve <id-prefix> [--index <n>|--key <suggestion-key>] [--json]
-          cider-cli bookmark similar <id-prefix> [--limit <n>]
-          cider-cli bookmark carousel-add <id-prefix> <image-path>
-          cider-cli bookmark carousel-remove <id-prefix> --index <n>
-          cider-cli bookmark carousel-reorder <id-prefix> --from <n> --to <n>
-
-        NOTES
-          cider-cli note list [--folder <name|path>]
-          cider-cli note create <title> [--content <text>] [--folder <name|path>]
-          cider-cli note get <id-prefix>
-          cider-cli note pin <id-prefix>
-          cider-cli note move <id-prefix> --folder <name|path>
-          cider-cli note delete <id-prefix>
-          cider-cli note update <id-prefix> [--title <t>] [--content <c>]
-          cider-cli note snapshots <id-prefix>
-          cider-cli note restore-snapshot <id-prefix> --at <index>
-          cider-cli note attach-image <id-prefix> <image-path>
-
-        TODOS
-          cider-cli todo list [--completed]      (--completed = include completed)
-          cider-cli todo get <id-prefix>
-          cider-cli todo create <title> [--due yyyy-MM-dd] [--time "h:mm a"] [--priority high|medium|low] [--folder <name|path>]
-          cider-cli todo complete <id-prefix>
-          cider-cli todo delete <id-prefix>
-          cider-cli todo update <id-prefix> [--title <t>] [--details <d>] [--due <date>] [--time "h:mm a"] [--priority <p>]
-          cider-cli todo export <id-prefix> --to <path.ics>
-          cider-cli todo checklist list <todo-id>
-          cider-cli todo checklist add <todo-id> --title <title>
-          cider-cli todo checklist toggle <todo-id> --item <item-id> [--subtask <subtask-id>]
-          cider-cli todo checklist remove <todo-id> --item <item-id>
-
-        EVENTS
-          cider-cli event list
-          cider-cli event create <title> [--date yyyy-MM-dd] [--folder <name|path>]
-          cider-cli event delete <id-prefix>
-          cider-cli event update <id-prefix> [--title <t>] [--date <d>] [--location <l>]
-          cider-cli event export <id-prefix> --to <path.ics>
-
-        CONTACTS
-          cider-cli contact list
-          cider-cli contact create <name> [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>] [--folder <name|path>]
-          cider-cli contact delete <id-prefix>
-          cider-cli contact update <id-prefix> [--name <n>] [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]
-          cider-cli contact profile show <id|name> [--json]
-          cider-cli contact profile apply <id|name> --profile-json <json> [--create] [--json]
-          cider-cli contact profile apply <id|name> --profile-file <path> [--create] [--json]
-          cider-cli contact field list <id|name> [--json]
-          cider-cli contact field add <id|name> --section <s> --label <l> --value <v> [--kind text|phone|email|url|date|number] [--pinned]
-          cider-cli contact field update <id|name> <field-id|label> [--section <s>] [--label <l>] [--value <v>] [--kind <kind>] [--pinned true|false]
-          cider-cli contact field delete <id|name> <field-id|label>
-          cider-cli contact export <id-prefix> --to <path.vcf>
-          cider-cli contact set-avatar <id-prefix> <image-path>
-          cider-cli contact remove-avatar <id-prefix>
-
-        FILES
-          cider-cli file list [--type image|pdf|video|audio|document|archive] [--folder <name|path>]
-          cider-cli file get <id-prefix>
-          cider-cli file move <id-prefix> --folder <name|path>
-          cider-cli file delete <id-prefix>
-          cider-cli file enrich <id-prefix> | --all
-
-        FOLDERS
-          cider-cli folder list
-          cider-cli folder get <name|path>
-          cider-cli folder children <name|path|/>
-          cider-cli folder ancestors <name|path>
-          cider-cli folder create <name|path> [--parent <name>]
-          cider-cli folder rename <name|path> --to <new-name>
-          cider-cli folder move <name|path> --to <parent-path>
-          cider-cli folder delete <name|path>
-          cider-cli folder set-icon <name|path> <emoji>
-          cider-cli folder remove-icon <name|path>
-          cider-cli folder set-cover <name|path> <image-path>
-          cider-cli folder remove-cover <name|path>
-          cider-cli folder doctor [--fix] [--yes]
-
-        FOLDER ARGUMENT FORMS
-          --folder accepts a leaf name OR a vault-relative path:
-            --folder Italian             (leaf name; errors if ambiguous)
-            --folder "Restaurants/Italian" (path; errors if missing)
-          --path is similar but auto-creates missing folders along the way:
-            --path "Food/Restaurants/Tacoma"
-          A bare folder name that contains '/' is always treated as a path.
-
-        BOARDS (Kanban)
+        BOARD WORKFLOW
           cider-cli board list
           cider-cli board show <board-name-or-id> [--tag <tag>] [--tags <csv>] [--json]
           cider-cli board tags [--json]
@@ -10912,64 +10830,12 @@ struct CiderCLI {
           cider-cli board rename-column <board> --column <col> --to <new-name>
           cider-cli board delete-column <board> --column <col>
 
-        DASHBOARD (alias: dash)
-          cider-cli dashboard topic list [--json]
-          cider-cli dashboard topic upsert --title <title> [--id <id>] [--icon <sf-symbol>] [--position <n>] [--color <token>] [--pinned true|false]
-          cider-cli dashboard topic move <id|title> --position <n>
-          cider-cli dashboard topic archive <id|title>
-          cider-cli dashboard card list [--topic <id|title>] [--include-hidden] [--json]
-          cider-cli dashboard card upsert --json-file <path|-> [--json]
-          cider-cli dashboard card upsert --title <title> --summary <summary> --topic <id|title> [--source-url <url>] [--priority low|normal|high|urgent]
-          cider-cli dashboard card move <card-id> --topic <id|title> [--topic <id|title> ...]
-          cider-cli dashboard card seen <card-id>
-          cider-cli dashboard card dismiss <card-id>
-          cider-cli dashboard card archive <card-id>
-          cider-cli dashboard card delete <card-id>
-          cider-cli dashboard card feedback <card-id> [--more-like-this|--less-like-this|--clear-preference] [--rating 1-5]
-
-        MEDIA
-          cider-cli media identify --dry-run [--json]
-          cider-cli media identify --apply [--json]
-
-        LABELS (alias: tag)
-          cider-cli label list
-          cider-cli label create <name> [--color <hex>]
-          cider-cli label rename <name> --to <new-name>
-          cider-cli label delete <id-prefix|name>
-          cider-cli label merge <source>[,<source>...] --into <target>
-
-        SAVED VIEWS (alias: view, saved-view)
-          cider-cli view list
-          cider-cli view get <id|name>
-          cider-cli view create <name> [--type <types>] [--folder <name|path>] [--query <text>]
-          cider-cli view create-kanban <name> --board <board-name-or-id>
-          cider-cli view rename <id|name> --to <new-name>
-          cider-cli view delete <id|name>
-          cider-cli view pin <id|name>
-          cider-cli view unpin <id|name>
-
-        TRASH
-          cider-cli trash list [--type <bookmark|note|todo|event|contact|file|folder>]
-          cider-cli trash restore <id-prefix>
-          cider-cli trash empty
-          cider-cli trash purge [--days <n>]
-
-        SQLITE DATABASE
+        DATABASE
           cider-cli db backups
           cider-cli db backup
           cider-cli db integrity
           cider-cli db audit [--limit <n>] [--type <item-type>] [--action <action>] [--source <ui|cli|agent|migration|cleanup>] [--item <id-prefix>]
           cider-cli db restore <index|filename|latest> --yes
-
-        CLIPBOARD (alias: cb)
-          cider-cli clipboard list [--limit <n>]
-          cider-cli clipboard get <id-prefix>
-          cider-cli clipboard dismiss <id-prefix>
-          cider-cli clipboard clear
-          cider-cli clipboard stats
-
-        DUPLICATE CHECK
-          cider-cli duplicate-check <url>
 
         GLOBAL FLAGS
           --vault <path>   Use a sandbox vault for this invocation. Bypasses

@@ -367,13 +367,13 @@ actor AgentOrchestrator {
 
             This runtime has direct access to the mounted vault on disk and can run local shell commands.
             Do not claim the user must enable a separate vault connector if the answer can be obtained from the local vault or `cider-cli`.
-            For count questions like "how many bookmarks/folders/notes/todos/events/contacts/files/images/labels/boards do I have?", use `cider-cli status --json` first and treat that output as canonical unless the user explicitly asks for on-disk filesystem counts.
+            For count questions like "how many bookmarks/folders/notes/todos/events/contacts/files/images/labels/boards do I have?", use Second Brain v1 health and audit commands such as `cider-cli item graph-health --json` and `cider-cli storage audit --json` before falling back to raw filesystem counts.
             Prefer `cider-cli` for exact counts, searches, and mutations. Fall back to `.cider` indexes next. Only use raw filesystem counts as a last resort.
             Do not inspect arbitrary vault files, `_cider_*` sidecars, or run broad shell exploration when a direct `cider-cli` command can answer the question.
             Do not probe CLI help during a live user turn unless command syntax is truly unknown and cannot be inferred from the known command set.
             If filesystem counts differ from `cider-cli` or Cider indexes, report the `cider-cli` value as the app-authoritative count and mention the filesystem count only as a secondary caveat.
             Do not derive app-level totals by counting Markdown files or folders directly when `cider-cli` or Cider indexes can answer.
-            Do not answer factual vault questions from memory alone when a current `cider-cli` query can verify the answer.
+            Do not answer factual vault questions from memory alone when a current Second Brain v1 `cider-cli` command can verify the answer.
             Do not ask to enable tools unless the request truly requires an unavailable app-only capability.
             """
 
@@ -433,8 +433,8 @@ actor AgentOrchestrator {
         - Default to `Inbox/Bookmarks` if routing is not obvious within one quick check.
         - Reuse an obvious existing folder pattern if one is immediately confirmed by a direct CLI lookup.
         - Do not spend multiple exploratory steps deciding on a folder for a single URL.
-        - Save first, wait for Cider enrichment, then re-read the bookmark.
-        - Only add AI-owned enrichment with `cider-cli bookmark update <id> --ai-summary "<text>"` when the extra context is clearly useful and can be inferred quickly from the saved bookmark or the user's message.
+        - Save first, wait for Cider enrichment, then re-read the captured item with `cider-cli item get <type> <id> --json`.
+        - Only add extra AI-owned enrichment when the capture or review command exposes a backend-backed JSON path for it.
         - If extra AI enrichment is not clearly useful, skip it.
         - Final reply style: one short paragraph or 2-4 short lines with the saved title and folder only. Include the bookmark id only when it helps.
         """
@@ -603,27 +603,26 @@ actor AgentOrchestrator {
         ].contains(where: normalized.contains)
 
         if asksForCount {
-            route = "status"
+            route = "graph-health"
             detail = "count question"
-            hints.append("- For high-level totals, run `cider-cli status --json` first and answer from that output.")
-            hints.append("- Do not replace that with manual vault file counting unless the user explicitly asks for filesystem numbers.")
+            hints.append("- For high-level totals and graph readiness, run `cider-cli item graph-health --json` and `cider-cli storage audit --json` before considering raw filesystem counts.")
+            hints.append("- Treat Second Brain v1 database-backed output as app-authoritative unless the user explicitly asks for filesystem numbers.")
         }
 
         if asksForRecent {
             if asksForWholeVaultRecent {
-                route = "recent:whole-vault"
+                route = "item-search:whole-vault-recency"
                 detail = "whole-vault recency"
-                hints.append("- For whole-vault recency questions, do not rely on the default 24-hour recent window.")
-                hints.append("- Prefer `cider-cli recent --hours 87600 --json` so older items remain eligible, then preserve the user's requested limit if they gave one.")
+                hints.append("- For whole-vault recency questions, use `cider-cli item search \"<topic-or-recent-signal>\" --json` and preserve the user's requested limit when possible.")
             } else {
-                route = "recent"
+                route = "item-search:recency"
                 detail = "recent activity"
-                hints.append("- For recent vault activity, prefer `cider-cli recent --json` and preserve any requested limit.")
+                hints.append("- For recent vault activity, prefer `cider-cli item search \"<topic-or-recent-signal>\" --json` and preserve any requested limit.")
             }
         }
 
         if asksForRecent, let requestedLimit {
-            hints.append("- The user asked for \(requestedLimit) item(s); preserve that with `--limit \(requestedLimit)` when using `cider-cli recent`.")
+            hints.append("- The user asked for \(requestedLimit) item(s); preserve that with `--limit \(requestedLimit)` on the backend-backed item command.")
         }
 
         if asksForBookmarkExistence {
@@ -634,68 +633,65 @@ actor AgentOrchestrator {
                 route = "query"
                 detail = "saved-before verification"
             } else {
-                route = "bookmark-search/list"
+                route = "item-search"
                 detail = "bookmark existence or search"
             }
-            hints.append("- For bookmark existence, duplicate, or bookmark search questions, prefer `cider-cli duplicate-check \"<url>\" --json` when the user gave a URL, otherwise prefer `cider-cli bookmark search \"<query>\" --json` or `cider-cli bookmark list --json`.")
-            hints.append("- If the user asks whether they already saved something and the item is not clearly a bookmark, use `cider-cli query \"<question>\" --json` to verify the current vault state before answering.")
+            hints.append("- For bookmark existence, duplicate, or saved-before questions, prefer `cider-cli item search \"<url-or-query>\" --json` and inspect backend duplicate, provenance, and owner results.")
+            hints.append("- If the user gave a URL and wants to save it, use `cider-cli capture add \"<url>\" --json`; do not start from legacy duplicate or bookmark commands.")
         } else if asksForSearch && !matchedEntityScopes.isEmpty {
             let entityDescriptions = matchedEntityScopes.map(\.entityLabel).joined(separator: ", ")
             route = "scoped-search"
             detail = matchedEntityScopes.map(\.cliScope).joined(separator: ", ")
-            hints.append("- This looks scoped to specific entity types: \(entityDescriptions). Prefer a scoped search first, such as `cider-cli search \"\(matchedEntityScopes[0].cliScope) <topic>\" --json`, then expand with `cider-cli query \"<question>\" --json` if the request becomes cross-entity.")
+            hints.append("- This looks scoped to specific entity types: \(entityDescriptions). Prefer `cider-cli item search \"<topic>\" --json`, then inspect exact matches with `cider-cli item get <type> <id> --json`.")
             hints.append("- If the user is asking for one exact item, verify against the scoped search results before summarizing.")
         } else if asksForBroadTopicLookup {
-            route = "query"
+            route = "item-search"
             detail = "broad topic lookup"
-            hints.append("- For broad topical or cross-entity questions like \"what do I have about X?\" or \"summarize my notes/bookmarks on X\", start with `cider-cli query \"<topic>\" --json`.")
-            hints.append("- If the request is clearly scoped to one entity type, use the matching search path next, such as `cider-cli search \"@notes <topic>\" --json`, `@bookmarks`, `@contacts`, `@todos`, `@events`, or `@files` as appropriate.")
-            hints.append("- Use the entity-specific CLI when it is a better fit than a general vault sweep; do not fall back to ad hoc filesystem inspection for topic lookups.")
+            hints.append("- For broad topical or cross-entity questions like \"what do I have about X?\" or \"summarize my notes/bookmarks on X\", start with `cider-cli item search \"<topic>\" --json`.")
+            hints.append("- Use `cider-cli item get <type> <id> --json` or `cider-cli item context <type> <id> --json` for exact follow-up context; do not fall back to ad hoc filesystem inspection for topic lookups.")
         } else if asksAmbiguousRetrieval {
-            route = "query"
+            route = "item-search"
             detail = "ambiguous retrieval"
-            hints.append("- This retrieval request is ambiguous. Start with `cider-cli query \"<question>\" --json` to sweep the vault before making assumptions about entity type or location.")
+            hints.append("- This retrieval request is ambiguous. Start with `cider-cli item search \"<question>\" --json` before making assumptions about entity type or location.")
             hints.append("- If the query result is mixed or unclear, answer with the best verified result and briefly ask a clarifying follow-up instead of guessing.")
         } else if asksForSearch {
-            route = "query"
+            route = "item-search"
             detail = "generic vault search"
-            hints.append("- For factual lookups across the vault, prefer `cider-cli query \"<question>\" --json` before ad hoc file inspection.")
+            hints.append("- For factual lookups across the vault, prefer `cider-cli item search \"<question>\" --json` before ad hoc file inspection.")
         }
 
         if containsURL && !asksForBookmarkExistence && (asksToCaptureOrSave || !asksForSearch) {
             route = "bookmark-capture"
             detail = "url capture"
-            hints.append("- This looks like a bookmark capture. Duplicate-check the URL first with `cider-cli duplicate-check \"<url>\" --json`.")
-            hints.append("- Keep this turn on the native capture path: `duplicate-check -> bookmark add -> bookmark get`. `bookmark add` waits briefly for Cider's native title/thumbnail capture before returning. If the duplicate check finds an existing bookmark, report that result and stop.")
-            hints.append("- Decide the destination path before saving when confidence is high enough. Use folder-aware CLI lookups if needed, then save directly with `cider-cli bookmark add \"<url>\" --path \"<vault-path>\"`.")
+            hints.append("- This looks like a URL capture. Use the canonical backend path: `cider-cli capture add \"<url>\" --json`.")
+            hints.append("- Inspect the capture JSON for duplicate, provenance, routing, review, and safe next command fields before deciding whether to report a new save or an existing item.")
+            hints.append("- Decide the destination path before saving when confidence is high enough; otherwise let the backend route/review state stand.")
             hints.append("- Let Cider own the native bookmark title and thumbnail scraping. Do not pass `--title` unless the user explicitly gave the final title or Cider already exposed a trustworthy title that should be preserved verbatim.")
             hints.append("- Do not save to Inbox first and move it later unless routing is genuinely unclear.")
-            hints.append("- Let Cider do the native scraping/enrichment pass during and after save. Save first, then re-read the bookmark with `cider-cli bookmark get <id-prefix> --json` and report the stored result.")
+            hints.append("- Let Cider do the native scraping/enrichment pass during and after save. Save first, then re-read the item with `cider-cli item get <type> <id> --json` and report the stored result.")
             hints.append("- Do not fetch raw page HTML, do not manually call oEmbed or WebView, do not read `.cider` indexes or `_cider_bookmarks.json`, and do not scan random vault files before saving unless the direct CLI path failed.")
-            hints.append("- Only add extra AI enrichment after the bookmark already exists and only by writing AI-owned fields such as `--ai-summary` when that extra context is genuinely useful, for example store location, hours, product context, or movie notes.")
+            hints.append("- Only add extra AI-owned enrichment after the item already exists and only through backend-backed review or item commands.")
         }
 
         if asksToCreateEvent {
             if taskReminderSignals && !calendarEventSignals {
                 route = "todo-create"
                 detail = "task-like reminder capture"
-                hints.append("- This sounds like an actionable reminder, so prefer creating a todo instead of a date card unless the user clearly described a calendar event.")
-                hints.append("- For task-like reminders such as \"remind me to call/pay/take/send/do X\", prefer `cider-cli todo create \"<title>\" --due YYYY-MM-DD --time \"h:mm AM\" --priority medium` when a time is known.")
-                hints.append("- If the user gave a date and time, keep it as a timed todo so it can later be completed, snoozed, or stopped.")
-                hints.append("- After creating the todo, verify with `cider-cli todo get <id-prefix> --json` or `cider-cli todo list --json` instead of a natural-language `query`.")
-                hints.append("- Reserve `cider-cli event create` for actual calendar occurrences like appointments, meetings, reservations, flights, birthdays, or other scheduled events.")
+                hints.append("- This sounds like an actionable reminder. Use `cider-cli capture add \"<task text>\" --json` and inspect the backend item/review state instead of legacy todo commands.")
+                hints.append("- If the user gave a date and time, preserve it in the capture text so backend extraction can keep the reminder semantics.")
+                hints.append("- After creating the item, verify with `cider-cli item get <type> <id> --json`.")
+                hints.append("- Reserve event-style capture text for actual calendar occurrences like appointments, meetings, reservations, flights, birthdays, or other scheduled events.")
             } else {
                 route = "event-create"
                 detail = "appointment or date-card capture"
-                hints.append("- For appointments and calendar occurrences, prefer one complete `cider-cli event create` call with all known fields instead of create-then-edit.")
-                hints.append("- Use `cider-cli event create \"<title>\" --date YYYY-MM-DD --time \"h:mm AM\" --location \"<location>\" --details \"<details>\"` when the request includes a specific time.")
-                hints.append("- Use `--all-day` for date-only events and `--timed` or `--time` for timed events.")
-                hints.append("- If the destination folder is clear, include `--path \"<vault-path>\"` at creation time instead of creating in Inbox and fixing it later.")
+                hints.append("- For appointments and calendar occurrences, use `cider-cli capture add \"<event text>\" --json` with all known date, time, location, and detail fields in the captured text.")
+                hints.append("- After creating the item, verify with `cider-cli item get <type> <id> --json` and inspect review/routing state.")
+                hints.append("- If the destination is clear, use backend item routing commands after capture rather than legacy type-specific create-then-edit commands.")
             }
         }
 
         if !asksForCount && !asksForRecent && !asksForSearch {
-            hints.append("- If a current vault fact is needed, verify with `cider-cli query \"<question>\" --json` or another matching `cider-cli` command before answering.")
+            hints.append("- If a current vault fact is needed, verify with `cider-cli item search \"<question>\" --json` or another matching Second Brain v1 `cider-cli` command before answering.")
         }
 
         if !explicitlyRequestsFilesystem {

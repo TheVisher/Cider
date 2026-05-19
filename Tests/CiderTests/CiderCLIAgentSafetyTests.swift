@@ -184,6 +184,81 @@ struct CiderCLIAgentSafetyTests {
         #expect(!output.contains("cider-cli folder kanban"))
     }
 
+    @Test("top level help is limited to second brain v1 agent api")
+    func topLevelHelpIsLimitedToSecondBrainV1AgentAPI() throws {
+        let result = try runCLI(args: ["help"])
+        let output = result.stdout
+
+        let visibleSectionHeaders = output
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { line in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                return !trimmed.isEmpty
+                    && trimmed == trimmed.uppercased()
+                    && !trimmed.hasPrefix("  ")
+                    && trimmed != "CiderCLI — Full command-line interface to Cider's vault"
+            }
+
+        #expect(visibleSectionHeaders == [
+            "CAPTURE",
+            "ITEM",
+            "REVIEW",
+            "ROUTE",
+            "STORAGE",
+            "MIGRATE",
+            "DOCTOR",
+            "BOARD WORKFLOW",
+            "DATABASE",
+            "GLOBAL FLAGS",
+        ])
+
+        let hiddenLegacySnippets = [
+            "BOOKMARKS",
+            "NOTES",
+            "TODOS",
+            "EVENTS",
+            "CONTACTS",
+            "FILES",
+            "FOLDERS",
+            "LABELS",
+            "SAVED VIEWS",
+            "TRASH",
+            "CLIPBOARD",
+            "DASHBOARD",
+            "MEDIA",
+            "RECALL",
+            "cider-cli bookmark",
+            "cider-cli note",
+            "cider-cli todo",
+            "cider-cli event",
+            "cider-cli contact",
+            "cider-cli file",
+            "cider-cli folder",
+            "cider-cli label",
+            "cider-cli view",
+            "cider-cli trash",
+            "cider-cli clipboard",
+            "cider-cli dashboard",
+            "cider-cli media",
+            "cider-cli recall",
+            "cider-cli link ",
+            "cider-cli doctor",
+            "cider-cli duplicate-check",
+        ]
+        for snippet in hiddenLegacySnippets {
+            #expect(!output.contains(snippet), "Expected top-level help to hide \(snippet)")
+        }
+
+        #expect(output.contains("cider-cli item relations"))
+        #expect(output.contains("cider-cli item backlinks"))
+        #expect(output.contains("cider-cli item project-context"))
+        #expect(output.contains("cider-cli item move"))
+        #expect(output.contains("cider-cli item link"))
+        #expect(output.contains("cider-cli storage audit"))
+        #expect(output.contains("cider-cli db integrity"))
+    }
+
     @Test("item graph health is a read-only JSON readiness report")
     func itemGraphHealthIsReadOnlyJSONReadinessReport() throws {
         let result = try runCLI(args: ["item", "graph-health", "--json"])

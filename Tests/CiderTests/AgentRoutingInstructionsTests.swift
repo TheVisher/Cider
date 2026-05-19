@@ -64,6 +64,35 @@ struct AgentRoutingInstructionsTests {
         }
         #expect(runtime.lastSystemPrompt == nil)
     }
+
+    @Test("process runtime routing hints prefer second brain v1 cli")
+    func processRuntimeRoutingHintsPreferSecondBrainV1CLI() async throws {
+        let runtime = PromptCapturingProcessRuntime()
+        let orchestrator = AgentOrchestrator()
+        await orchestrator.setRuntime(runtime)
+
+        _ = try await orchestrator.handleMessage(.uiPanel(
+            text: "how many bookmarks do I have?",
+            threadID: UUID(),
+            context: .empty
+        ))
+        let countPrompt = try #require(runtime.lastSystemPrompt)
+        #expect(countPrompt.contains("cider-cli item graph-health --json"))
+        #expect(countPrompt.contains("cider-cli storage audit --json"))
+        #expect(!countPrompt.contains("cider-cli status --json"))
+
+        _ = try await orchestrator.handleMessage(.uiPanel(
+            text: "save https://example.com",
+            threadID: UUID(),
+            context: .empty
+        ))
+        let capturePrompt = try #require(runtime.lastSystemPrompt)
+        #expect(capturePrompt.contains("cider-cli capture add \"<url>\" --json"))
+        #expect(capturePrompt.contains("cider-cli item get <type> <id> --json"))
+        #expect(!capturePrompt.contains("cider-cli bookmark add"))
+        #expect(!capturePrompt.contains("cider-cli bookmark get"))
+        #expect(!capturePrompt.contains("cider-cli duplicate-check"))
+    }
 }
 
 private final class PromptCapturingProcessRuntime: @unchecked Sendable, AgentRuntime {
