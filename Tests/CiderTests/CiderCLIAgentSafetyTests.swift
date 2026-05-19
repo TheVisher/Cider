@@ -42,6 +42,36 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("--confirm") == true)
     }
 
+    @Test("capture add json rejects missing source")
+    func captureAddJSONRejectsMissingSource() throws {
+        let result = try runCLI(args: ["capture", "add", "--json"])
+
+        let dict = try parseJSONObject(result.stdout)
+        #expect(result.status != 0)
+        #expect(dict["ok"] as? Bool == false)
+        #expect((dict["error"] as? String)?.contains("Usage: cider-cli capture add") == true)
+    }
+
+    @Test("bookmark add json rejects missing url")
+    func bookmarkAddJSONRejectsMissingURL() throws {
+        let result = try runCLI(args: ["bookmark", "add", "--json"])
+
+        let dict = try parseJSONObject(result.stdout)
+        #expect(result.status != 0)
+        #expect(dict["ok"] as? Bool == false)
+        #expect((dict["error"] as? String)?.contains("Usage: cider-cli bookmark add") == true)
+    }
+
+    @Test("review approve json rejects missing item")
+    func reviewApproveJSONRejectsMissingItem() throws {
+        let result = try runCLI(args: ["review", "approve", "--json"])
+
+        let dict = try parseJSONObject(result.stdout)
+        #expect(result.status != 0)
+        #expect(dict["ok"] as? Bool == false)
+        #expect((dict["error"] as? String)?.contains("Usage: cider-cli review approve") == true)
+    }
+
     @Test("legacy bookmark batch enrichment is removed")
     func legacyBookmarkBatchEnrichmentIsRemoved() throws {
         let result = try runCLI(args: ["bookmark", "enrich", "--all", "--json"])

@@ -83,6 +83,8 @@ The second-brain command surface should support the product loop: capture -> enr
 
 Legacy bookmark creation is a compatibility surface over the unified capture backend. `bookmark add --json` preserves bookmark fields and includes `command: bookmark.add`, `backendCommand: capture.add`, and a nested `capture` result so agents can see the capture/routing/review contract without switching commands mid-workflow.
 
+Structured create commands may use domain-specific provenance instead of creating a generic capture event. `event create --json` and `contact create --json` should return `command: event.create` / `command: contact.create` and record routing provenance with sources such as `event.create`, `contact.create`, and `contact.birthday_date_card` for generated birthday date cards.
+
 Legacy bookmark batch enrichment remains available as `bookmark enrich --all --confirm`, but agents should prefer `review enrich-batch --confirm` so enrichment work is review-backed and records batch history.
 
 Kanban card details can be discovered with `board recent <board> --limit <count> --json`, which lists newest card activity with board, column, parent, priority, timestamps, recent edit/move/completion activity kind, and compact current-state/next-step context. `board workflow <board> --json` groups workflow lanes and exposes approval-aware `automationActions` with safe inspection, history, move, and review-routing commands; these actions are guidance, not an agent scheduler. Testing gates can be triaged with `board testing-summary <board> --json`, which groups cards in Testing/Ready to Test columns into `needsErik` and `agentCanVerify` queues. Parent plan status can be inspected with `board parent-summary <board> --card <id> --json`; `--refresh --dry-run` returns proposed Current State / Next Step text and stale-parent findings, while `--refresh --confirm` applies those sections explicitly. Exact cards can be inspected through `board card inspect <board> --card <id> --json`, which returns parsed dashboard lanes, sections, card metadata, hierarchy, roadmap `roadmapNextUp` sequence/groups, links, routing decisions, and agent actions. Card details can be edited through `board section update <board> --card <id> --section <name> --value <text>`, `board evidence add <board> --card <id> --text <text>`, and `board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff|commit> --text <text>`. `board add-card <board> --column <col> --title <title> --parent <card-id> --after <sibling-id>` inserts a roadmap child immediately after an existing sibling in the same column. These update the YAML card and refresh its SQLite projection.
@@ -97,8 +99,10 @@ Normal agent workflow for a Cider card:
 6. `board history add ... --type failed-attempt --text "..." --source "..." --json` when an attempted path matters for future agents.
 7. `board evidence add ... --text "..." --source "..." --json` after verification. `board history add ... --type test` writes the same durable test-evidence lane.
 8. `board history add ... --type decision --text "..." --source "..." --json` when a durable product, architecture, storage, CLI, QA, or agent-behavior choice is made.
-9. `board history add ... --type commit --text "<sha> <branch/files/tests summary>" --source "git" --json` when repo changes are available for regression traceability.
-10. `board history add ... --type handoff --text "..." --source "..." --json` before stopping, or use `board section update ... --section "Agent Handoff" --value "..." --json` for a full replacement handoff.
+9. For implementation work with repo changes, commit the scoped changes before moving the card to Done unless the user explicitly says not to commit.
+10. `board history add ... --type commit --text "<sha> <branch/files/tests summary>" --source "git" --json` after committing, so Done cards can be traced to landed code.
+11. If work is verified but intentionally uncommitted, record that state on the card and keep it out of Done.
+12. `board history add ... --type handoff --text "..." --source "..." --json` before stopping, or use `board section update ... --section "Agent Handoff" --value "..." --json` for a full replacement handoff.
 
 Kanban projection lifecycle:
 

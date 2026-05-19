@@ -16,6 +16,36 @@ struct SecondBrainItemContentIndexingTests {
         try? FileManager.default.removeItem(atPath: url.path + "-shm")
     }
 
+    private func makeTempVault() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-item-index-vault-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func withIsolatedVault<T>(_ body: (CiderDatabase, NotesStorage) throws -> T) throws -> T {
+        let previousOverride = StoragePaths.vaultOverride
+        let vault = try makeTempVault()
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        StoragePaths.ensureVaultStructure()
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        try FileManager.default.createDirectory(
+            at: dbURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let db = CiderDatabase()
+        try db.open(at: dbURL)
+        defer {
+            db.close()
+            StoragePaths.vaultOverride = previousOverride
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        let notes = NotesStorage(database: db)
+        return try body(db, notes)
+    }
+
     private func makeTestDB() throws -> (CiderDatabase, URL) {
         let url = makeTempDBURL()
         let db = CiderDatabase()
@@ -67,6 +97,19 @@ struct SecondBrainItemContentIndexingTests {
         #expect(result.chunkCount == 1)
         #expect(try store.searchChunks(query: "obsolete-index-token", limit: 5).isEmpty)
         #expect(try store.searchChunks(query: "fresh-index-token", limit: 5).first?.owner == owner)
+    }
+
+    @Test("direct note creation immediately indexes searchable chunks")
+    func directNoteCreationImmediatelyIndexesSearchableChunks() throws {
+        try withIsolatedVault { db, notes in
+            let note = notes.createNew(initialContent: "direct-note-index-token")
+
+            let matches = try SecondBrainStore(database: db).searchChunks(
+                query: "direct-note-index-token",
+                limit: 5
+            )
+            #expect(matches.first?.owner == SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString))
+        }
     }
 
     private func insertItem(id: String, type: String, title: String, into db: CiderDatabase) throws {

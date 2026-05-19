@@ -1993,9 +1993,16 @@ final class NotesStorage: ObservableObject {
             try db.withTransaction {
                 try persistNoteToDatabaseInner(db, note: note)
             }
+            try indexNoteContent(db, noteID: note.id)
         } catch {
             logger.error("Failed to persist note \(note.id) to database: \(error.localizedDescription)")
         }
+    }
+
+    private func indexNoteContent(_ db: CiderDatabase, noteID: UUID) throws {
+        _ = try SecondBrainItemContentIndexingService(database: db).rebuild(
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        )
     }
 
     /// Core persist logic for a single note — must be called inside a transaction.

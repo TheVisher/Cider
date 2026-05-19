@@ -101,6 +101,43 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("default capture service persists provenance through shared database")
+    func defaultCaptureServicePersistsProvenanceThroughSharedDatabase() throws {
+        let previousOverride = StoragePaths.vaultOverride
+        let vault = try makeTempVault()
+        CiderDatabase.shared.close()
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        StoragePaths.ensureVaultStructure()
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        try FileManager.default.createDirectory(
+            at: dbURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try CiderDatabase.shared.open(at: dbURL)
+        defer {
+            CiderDatabase.shared.close()
+            StoragePaths.vaultOverride = previousOverride
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+
+        let notes = NotesStorage(database: CiderDatabase.shared)
+        let service = CiderCaptureService(notesStorage: notes)
+        let result = try service.addNoteCapture(
+            title: "Shared DB capture",
+            content: "Default capture service should persist provenance",
+            folderID: nil,
+            sourceContext: CaptureSourceContext(surface: "test-harness")
+        )
+
+        let eventID = try #require(result.captureEventID)
+        let statement = try CiderDatabase.shared.prepare("SELECT surface FROM capture_events WHERE id = ?;")
+        statement.bind(eventID.uuidString, at: 1)
+        #expect(try statement.step())
+        #expect(statement.string(at: 0) == "test-harness")
+    }
+
     private func withIsolatedVault<T>(
         _ body: (CiderDatabase, VaultBookmarkService, NotesStorage, TodoCardStorage, VaultFileStorage) async throws -> T
     ) async throws -> T {
@@ -434,6 +471,24 @@ struct CiderCaptureServiceTests {
             #expect(explanation.item.type == "note")
             #expect(explanation.latestDecision?.reviewState == "needs_review")
             #expect(explanation.latestDecision?.target.relativePath == "Inbox/Notes")
+        }
+    }
+
+    @Test("note capture immediately indexes content chunks")
+    func noteCaptureImmediatelyIndexesContentChunks() throws {
+        try withIsolatedVault { db, _, notes, _, _ in
+            let service = CiderCaptureService(notesStorage: notes, database: db)
+            let result = try service.addNoteCapture(
+                title: "Indexed capture note",
+                content: "instant-capture-index-token",
+                folderID: nil
+            )
+
+            let matches = try SecondBrainStore(database: db).searchChunks(
+                query: "instant-capture-index-token",
+                limit: 5
+            )
+            #expect(matches.first?.owner == SecondBrainOwnerRef(ownerType: "note", ownerID: result.item.id.uuidString))
         }
     }
 

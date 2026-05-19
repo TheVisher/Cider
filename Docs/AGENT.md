@@ -109,6 +109,7 @@ Board files live in `~/CiderVault/.cider/boards/`.
 - Put test evidence and implementation notes on the card.
 - Move fixed bugs to the bugs board `Fixed` column.
 - Move implementation work through `Queued`, `In Progress`, `Testing`, and `Done` as reality changes.
+- For implementation cards with repo changes, do not move to `Done` until the changes are committed and the card has commit traceability. If the user explicitly asks not to commit, keep the card out of `Done` or mark the card state as verified but unlanded.
 - Do not leave cards in Testing when an agent can verify the result with CLI/tests/builds that produce the same evidence Erik would read. Run the verification, record evidence, and move the card forward.
 - Testing handoffs to Erik must be ID-readable from chat: group cards by `Needs Erik` vs `Agent can verify`, include the card title/status, and use IDs only as secondary references.
 - Preserve YAML structure and quote dates with single quotes.
@@ -128,8 +129,10 @@ For Cider development work with a Kanban card, agents should use the structured 
 9. Add failed-attempt notes with `cider-cli board history add <board> --card <id> --type failed-attempt --text "..." --source "..." --json` when they would save a future agent time.
 10. Add verification through `cider-cli board evidence add <board> --card <id> --text "..." --source "..." --json`.
 11. Record durable product, architecture, storage, CLI, QA, or agent-behavior choices with `cider-cli board history add <board> --card <id> --type decision --text "..." --source "..." --json` before promoting them into core docs.
-12. When repo changes are available, add commit traceability with `cider-cli board history add <board> --card <id> --type commit --text "<sha> <branch/files/tests summary>" --source "git" --json`.
-13. Before stopping, refresh `Agent Handoff` with the current status, exact commands the next agent should run, known gaps, and merge/push constraints.
+12. For repo changes, commit the scoped work before `Done` unless the user explicitly says not to commit.
+13. After committing, add commit traceability with `cider-cli board history add <board> --card <id> --type commit --text "<sha> <branch/files/tests summary>" --source "git" --json`.
+14. Move the card to `Done` only after verification and commit traceability are recorded, or explicitly record that the work is verified but unlanded and keep it out of `Done`.
+15. Before stopping, refresh `Agent Handoff` with the current status, exact commands the next agent should run, known gaps, and merge/push constraints.
 
 Use `cider-cli item get card <id> --json` when an agent only needs projected sections/provenance, and `cider-cli item search <query> --json` when it needs retrieval across projected chunks. Raw Markdown or YAML inspection is for parser/storage debugging, not normal handoff.
 

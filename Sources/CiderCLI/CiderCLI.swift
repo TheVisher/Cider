@@ -1,5 +1,6 @@
 import AppKit
 @testable import Cider
+import Darwin
 import Foundation
 import OSLog
 
@@ -8,6 +9,8 @@ import OSLog
 @main
 @MainActor
 struct CiderCLI {
+    static var processExitCode: Int32 = 0
+
     static func handleRemovedLegacyTopLevelCommand(_ command: String, subcommand: String?) -> Bool {
         let replacement: String
         let reason: String
@@ -53,6 +56,12 @@ struct CiderCLI {
     }
 
     static func main() async {
+        processExitCode = 0
+        defer {
+            if processExitCode != 0 {
+                Darwin.exit(processExitCode)
+            }
+        }
         var args = Array(CommandLine.arguments.dropFirst())
 
         // Sandbox vault override — `--vault <path>` points the CLI at an
@@ -856,8 +865,11 @@ struct CiderCLI {
     static func handleCapture(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) async {
         switch subcommand {
         case "add":
-            guard let source = args.first else {
-                print("Error: Source required. Usage: cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+            guard let source = firstPositionalArgument(
+                from: args,
+                valueFlags: ["--title", "--folder", "--path", "--surface", "--channel", "--message-id", "--sender-id", "--timeout", "--wait-timeout", "--capture-timeout"]
+            ) else {
+                printCLIError("Source required. Usage: cider-cli capture add <url|text|file-path> [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
                 return
             }
 
@@ -918,7 +930,7 @@ struct CiderCLI {
                     print("  Next safe action: \(result.nextSafeAction)")
                 }
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printCLIError(error.localizedDescription)
             }
 
         case nil, "help", "--help", "-h":
@@ -1030,8 +1042,8 @@ struct CiderCLI {
             }
 
         case "approve":
-            guard let itemRef = args.first else {
-                print("Error: Usage: cider-cli review approve <item-id> [--actor user|agent] [--json]")
+            guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--actor"]) else {
+                printCLIError("Usage: cider-cli review approve <item-id> [--actor user|agent] [--json]")
                 return
             }
             do {
@@ -1042,7 +1054,7 @@ struct CiderCLI {
                 )
                 printReviewRoutingActionResult(result)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printCLIError(error.localizedDescription)
             }
 
         case "correct":
@@ -1417,8 +1429,11 @@ struct CiderCLI {
             }
 
         case "add", "create":
-            guard let url = args.first else {
-                print("Error: URL required. Usage: cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--path <vault-path>] [--timeout <seconds>|--no-wait]")
+            guard let url = firstPositionalArgument(
+                from: args,
+                valueFlags: ["--title", "--folder", "--path", "--timeout", "--wait-timeout", "--capture-timeout"]
+            ) else {
+                printCLIError("URL required. Usage: cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--path <vault-path>] [--timeout <seconds>|--no-wait] [--json]")
                 return
             }
             // Resolve the destination folder BEFORE creating, so that a bad
@@ -1466,7 +1481,7 @@ struct CiderCLI {
                     }
                 }
             } catch {
-                print("Error: Could not create bookmark for URL: \(url)")
+                printCLIError("Could not create bookmark for URL: \(url)")
             }
 
         case "get", "show":
@@ -6971,6 +6986,25 @@ struct CiderCLI {
         return args[flagIndex + 1]
     }
 
+    static func firstPositionalArgument(from args: [String], valueFlags: Set<String> = []) -> String? {
+        var skipNext = false
+        for arg in args {
+            if skipNext {
+                skipNext = false
+                continue
+            }
+            if valueFlags.contains(arg) {
+                skipNext = true
+                continue
+            }
+            if arg.hasPrefix("--") {
+                continue
+            }
+            return arg
+        }
+        return nil
+    }
+
     static func bookmarkNativeCaptureWaitTimeout(from args: [String]) -> TimeInterval? {
         if args.contains("--no-wait") { return nil }
 
@@ -8360,6 +8394,7 @@ struct CiderCLI {
     }
 
     static func printCLIError(_ message: String, details: [String: Any]?) {
+        processExitCode = 1
         if jsonOutput {
             var dict: [String: Any] = ["ok": false, "error": message]
             if let details {

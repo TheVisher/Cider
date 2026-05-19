@@ -22,6 +22,7 @@ For Cider development work, agents should use the boards in `~/CiderVault/.cider
 - If the work already has a card, move it to the active work column before implementing.
 - If the work does not have a card, add one with a concise title, useful notes/spec context, and `created: 'YYYY-MM-DD'`.
 - Move work through the board as reality changes: backlog/planned -> queued -> in_progress -> testing/ready to test -> done.
+- For implementation cards with repo changes, commit the scoped work and record the commit on the card before moving it to done. If the user explicitly says not to commit, keep the card out of done or mark it as verified but unlanded.
 - On project boards, use `Queued` as the selected work stack between `Backlog` and `In Progress`. Pull chosen cards or parent groups into `Queued`, then move one scoped card at a time into `In Progress`, finish it, move it to `Testing`, and return to `Queued` for the next item.
 - For bugs, use the bugs board and move fixed items to `fixed`.
 - Put implementation notes, test evidence, blockers, failed attempts, and follow-up context on the card instead of scattering one-off Markdown files.

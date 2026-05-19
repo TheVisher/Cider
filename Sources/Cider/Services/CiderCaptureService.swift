@@ -303,7 +303,7 @@ final class CiderCaptureService {
         dateCardStorage: DateCardStorage = .shared,
         contactStorage: ContactStorage = .shared,
         vaultFileStorage: VaultFileStorage = .shared,
-        database: CiderDatabase? = nil,
+        database: CiderDatabase? = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil,
         routingDecisionService: CiderRoutingDecisionService? = CiderRoutingDecisionService(),
         noteAssignmentHandler: ((UUID, UUID?) -> Bool)? = nil,
         thumbnailAssignmentHandler: ((UUID, Data, String?) -> Bool)? = nil,
@@ -1074,7 +1074,7 @@ final class CiderCaptureService {
             nextSafeAction: nextSafeAction,
             partialSuccess: partialSuccess
         )
-        return attachCaptureEvent(to: result, sourceContext: sourceContext)
+        return indexCapturedItem(attachCaptureEvent(to: result, sourceContext: sourceContext))
     }
 
     private func attachCaptureEvent(
@@ -1095,7 +1095,6 @@ final class CiderCaptureService {
             attachments: [],
             metadata: [:]
         )
-        result.captureEventID = eventID
         result.sourceContext = resolvedContext
 
         guard let database, database.isOpen else { return result }
@@ -1154,6 +1153,21 @@ final class CiderCaptureService {
                 database: database,
                 secondBrainStore: secondBrainStore
             )
+            result.captureEventID = eventID
+        } catch {
+            return result
+        }
+        return result
+    }
+
+    private func indexCapturedItem(_ result: CiderCaptureResult) -> CiderCaptureResult {
+        guard let database, database.isOpen else { return result }
+        let owner = SecondBrainOwnerRef(
+            ownerType: ownerType(forCaptureItemType: result.item.type),
+            ownerID: result.item.id.uuidString
+        )
+        do {
+            _ = try SecondBrainItemContentIndexingService(database: database).rebuild(owner: owner)
         } catch {
             return result
         }
