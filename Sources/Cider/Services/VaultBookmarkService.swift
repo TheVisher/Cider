@@ -1624,6 +1624,80 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     @discardableResult
+    func replaceCarouselImagesForEnrichment(
+        for bookmarkID: UUID,
+        imageDataList: [Data],
+        preferredFileExtension: String? = nil
+    ) -> Bool {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
+
+        let validImageData = imageDataList.filter { data in
+            data.count > 128 && data.count < 12_000_000 && NSImage(data: data) != nil
+        }
+
+        var bookmark = bookmarks[index]
+        let existingOriginalPath = bookmark.originalImageRelativePath?.isEmpty == false
+            ? bookmark.originalImageRelativePath
+            : nil
+        let existingOriginalURL = existingOriginalPath.map {
+            bookmarksMetaDir.appendingPathComponent($0)
+        }
+        let hasExistingOriginal = existingOriginalURL.map {
+            FileManager.default.fileExists(atPath: $0.path)
+        } ?? false
+
+        guard hasExistingOriginal || !validImageData.isEmpty else { return false }
+
+        let previousCarouselPaths = bookmark.carouselImagePaths ?? []
+        for path in previousCarouselPaths where path != existingOriginalPath {
+            removeImageIfPresent(relativePath: path)
+        }
+
+        var replacementPaths: [String] = []
+        if let existingOriginalPath, let existingOriginalURL, hasExistingOriginal {
+            let ext = normalizedImageFileExtension(existingOriginalURL.pathExtension)
+            let promotedPath = "\(originalImagesDirectoryName)/\(bookmarkID.uuidString)_0.\(ext)"
+            let promotedURL = bookmarksMetaDir.appendingPathComponent(promotedPath)
+            if existingOriginalURL.path != promotedURL.path {
+                try? FileManager.default.removeItem(at: promotedURL)
+                do {
+                    try FileManager.default.moveItem(at: existingOriginalURL, to: promotedURL)
+                    bookmark.originalImageRelativePath = promotedPath
+                    replacementPaths.append(promotedPath)
+                } catch {
+                    bookmark.originalImageRelativePath = existingOriginalPath
+                    replacementPaths.append(existingOriginalPath)
+                }
+            } else {
+                bookmark.originalImageRelativePath = promotedPath
+                replacementPaths.append(promotedPath)
+            }
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: originalImagesDirectoryURL, withIntermediateDirectories: true)
+            let availableSlots = max(0, Self.maxCarouselImages - replacementPaths.count)
+            for data in validImageData.prefix(availableSlots) {
+                let nextIndex = replacementPaths.count
+                let ext = normalizedImageFileExtension(preferredFileExtension)
+                let relativePath = "\(originalImagesDirectoryName)/\(bookmarkID.uuidString)_\(nextIndex).\(ext)"
+                let fileURL = bookmarksMetaDir.appendingPathComponent(relativePath)
+                try data.write(to: fileURL, options: .atomic)
+                replacementPaths.append(relativePath)
+            }
+        } catch {
+            return false
+        }
+
+        bookmark.originalImageRelativePath = replacementPaths.first
+        bookmark.carouselImagePaths = replacementPaths.count > 1 ? replacementPaths : nil
+        bookmark.updatedAt = Date()
+        bookmarks[index] = bookmark
+        persist()
+        return true
+    }
+
+    @discardableResult
     func removeCarouselImage(for bookmarkID: UUID, at imageIndex: Int) -> Bool {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
         var bookmark = bookmarks[index]
@@ -1947,8 +2021,11 @@ final class VaultBookmarkService: ObservableObject {
 
         // Download additional carousel images (e.g. Reddit gallery)
         if let carouselURLs = payload?.carouselImageURLs, !carouselURLs.isEmpty {
+            var seenCarouselURLs = Set<String>()
+            var downloadedCarouselImageData: [Data] = []
             for carouselURL in carouselURLs {
                 guard !Task.isCancelled else { break }
+                guard seenCarouselURLs.insert(carouselURL.absoluteString).inserted else { continue }
                 // Only fetch HTTPS URLs from known Reddit CDN hosts (SSRF prevention)
                 guard let scheme = carouselURL.scheme?.lowercased(), scheme == "https",
                       let host = carouselURL.host?.lowercased(),
@@ -1958,10 +2035,16 @@ final class VaultBookmarkService: ObservableObject {
                     request.timeoutInterval = 8
                     let (imageData, _) = try await URLSession.shared.data(for: request)
                     guard imageData.count <= 12_000_000 else { continue } // Align with addCarouselImage's internal limit
-                    _ = addCarouselImage(for: bookmarkID, imageData: imageData)
+                    downloadedCarouselImageData.append(imageData)
                 } catch {
                     // Skip failed downloads silently
                 }
+            }
+            if !downloadedCarouselImageData.isEmpty {
+                _ = replaceCarouselImagesForEnrichment(
+                    for: bookmarkID,
+                    imageDataList: downloadedCarouselImageData
+                )
             }
         }
 

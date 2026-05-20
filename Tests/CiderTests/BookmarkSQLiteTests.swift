@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Cider
@@ -30,9 +31,55 @@ struct BookmarkSQLiteTests {
         return (db, url)
     }
 
+    private func makeTempVault() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-bookmark-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func makeTempDatabase(in vault: URL) throws -> CiderDatabase {
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        try FileManager.default.createDirectory(
+            at: dbURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let db = CiderDatabase()
+        try db.open(at: dbURL)
+        return db
+    }
+
+    private func withIsolatedVault<T>(
+        _ body: (CiderDatabase, VaultBookmarkService) throws -> T
+    ) throws -> T {
+        let previousOverride = StoragePaths.vaultOverride
+        let vault = try makeTempVault()
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        StoragePaths.ensureVaultStructure()
+        let db = try makeTempDatabase(in: vault)
+        defer {
+            db.close()
+            StoragePaths.vaultOverride = previousOverride
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        let service = VaultBookmarkService(database: db, schedulesEnrichment: false)
+        return try body(db, service)
+    }
+
     /// Create VaultBookmarkService wired to the test database.
     private func makeService(_ db: CiderDatabase) -> VaultBookmarkService {
         VaultBookmarkService(database: db)
+    }
+
+    private func makeImageData(color: NSColor) throws -> Data {
+        let image = NSImage(size: NSSize(width: 8, height: 8))
+        image.lockFocus()
+        color.setFill()
+        NSRect(x: 0, y: 0, width: 8, height: 8).fill()
+        image.unlockFocus()
+        return try #require(image.tiffRepresentation)
     }
 
     private func setFilesystemDates(
@@ -134,6 +181,52 @@ struct BookmarkSQLiteTests {
         #expect(loaded.preferredHeroMode == "thumbnail")
         #expect(loaded.titleManuallySet == true)
         #expect(loaded.notesManuallySet == true)
+    }
+
+    @Test("Provider carousel replacement is idempotent across metadata refetches")
+    func providerCarouselReplacementIsIdempotent() throws {
+        try withIsolatedVault { db, service in
+            let heroData = try makeImageData(color: .blue)
+            let firstExtraData = try makeImageData(color: .green)
+            let secondExtraData = try makeImageData(color: .red)
+
+            let bookmarkID = UUID()
+            let originalRelativePath = ".originals/\(bookmarkID.uuidString).tiff"
+            let originalURL = StoragePaths.cachedDirectoryURL(for: .bookmarks)
+                .appendingPathComponent(originalRelativePath)
+            try FileManager.default.createDirectory(
+                at: originalURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try heroData.write(to: originalURL)
+
+            let bookmark = Bookmark(
+                id: bookmarkID,
+                title: "Reddit gallery",
+                urlString: "https://www.reddit.com/r/macapps/comments/example/gallery/",
+                originalImageRelativePath: originalRelativePath
+            )
+            service.persistBookmarkToDatabase(db, bookmark: bookmark)
+            service.loadBookmarksFromDatabase(db)
+
+            #expect(service.replaceCarouselImagesForEnrichment(
+                for: bookmarkID,
+                imageDataList: [firstExtraData, secondExtraData],
+                preferredFileExtension: "tiff"
+            ))
+            let firstPass = try #require(service.bookmarks.first?.carouselImagePaths)
+            #expect(firstPass.count == 3)
+
+            #expect(service.replaceCarouselImagesForEnrichment(
+                for: bookmarkID,
+                imageDataList: [firstExtraData, secondExtraData],
+                preferredFileExtension: "tiff"
+            ))
+            let secondPass = try #require(service.bookmarks.first?.carouselImagePaths)
+            #expect(secondPass == firstPass)
+            #expect(secondPass.count == 3)
+            #expect(!secondPass.contains { $0.contains("_3.") })
+        }
     }
 
     @Test("Bookmark with nil optional fields round-trips correctly")
