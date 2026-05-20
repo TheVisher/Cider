@@ -806,15 +806,52 @@ final class TodoCardStorage: ObservableObject {
         }
     }
 
+    private func existingItemType(for id: UUID) -> String? {
+        guard let db = resolvedDatabase else { return nil }
+        do {
+            let stmt = try db.prepare("SELECT type FROM items WHERE id = ? LIMIT 1;")
+            stmt.bind(DatabaseHelpers.encode(id), at: 1)
+            guard try stmt.step() else { return nil }
+            return stmt.string(at: 0)
+        } catch {
+            logger.error("Failed to inspect existing item type for todo adoption: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     private func adoptOrphanICS(at url: URL, folderID: UUID?) -> TodoCard? {
         guard let content = try? String(contentsOf: url, encoding: .utf8),
               var todo = ICalendarSerializer.parseTodo(content) else { return nil }
 
         todo.folderID = folderID
         let filename = url.lastPathComponent
-        guard index[todo.id] == nil else {
-            logger.warning("Skipped duplicate orphan .ics VTODO UUID \(todo.id.uuidString) at \(filename)")
+        if let existingType = existingItemType(for: todo.id), existingType != "todo" {
+            logger.warning("Skipped orphan .ics VTODO UUID \(todo.id.uuidString) at \(filename): existing item type is \(existingType)")
             return nil
+        }
+        guard index[todo.id] == nil else {
+            guard let existingEntry = index[todo.id] else { return nil }
+            let existingURL = resolveDirectoryURL(folderID: existingEntry.folderID)
+                .appendingPathComponent(existingEntry.filename)
+            guard !FileManager.default.fileExists(atPath: existingURL.path) else {
+                logger.warning("Skipped duplicate orphan .ics VTODO UUID \(todo.id.uuidString) at \(filename)")
+                return nil
+            }
+
+            var movedEntry = existingEntry
+            movedEntry.filename = filename
+            movedEntry.folderID = folderID
+            movedEntry.labelIDs = todo.labelIDs.isEmpty ? existingEntry.labelIDs : todo.labelIDs
+            movedEntry.createdAt = existingEntry.createdAt ?? todo.createdAt
+            movedEntry.isCompleted = todo.isCompleted
+            movedEntry.dueDate = todo.dueDate
+            movedEntry.priority = todo.priority
+            index[todo.id] = movedEntry
+            if todo.labelIDs.isEmpty, let labelIDs = existingEntry.labelIDs {
+                todo.labelIDs = labelIDs
+            }
+            logger.info("Reassigned moved orphan .ics VTODO UUID \(todo.id.uuidString) to \(filename)")
+            return todo
         }
 
         index[todo.id] = IndexEntry(

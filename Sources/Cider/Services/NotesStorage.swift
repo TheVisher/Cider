@@ -230,6 +230,14 @@ final class NotesStorage: ObservableObject {
                 filenameToUUID[entry.filename] = uuid
             }
         }
+        var idByRelativePath: [String: UUID] = [:]
+        for note in notes {
+            let key = Self.normalizedNoteRelativePath(note.relativePath)
+            if !key.isEmpty, idByRelativePath[key] == nil {
+                idByRelativePath[key] = note.id
+            }
+        }
+        var scannedUUIDs = Set<UUID>()
 
         var scannedNotes: [Note] = []
         for (fileURL, relativePrefix) in allFiles {
@@ -239,10 +247,24 @@ final class NotesStorage: ObservableObject {
 
             let title = String(filename.dropLast(3)) // Remove .md
 
+            // Build relativePath: Inbox/Notes/file.md for inbox, plain filename for legacy .cider/notes/
+            let relativePath: String
+            if let prefix = relativePrefix {
+                relativePath = "\(prefix)/\(filename)"
+            } else {
+                relativePath = filename
+            }
+
             // Resolve UUID from the persisted note index when available.
             // If the index does not know about this file yet, assign a fresh ID
             // and persist it back into the index during this scan.
-            let uuid = filenameToUUID[filename] ?? UUID()
+            let relativePathKey = Self.normalizedNoteRelativePath(relativePath)
+            let matchedByPath = idByRelativePath[relativePathKey]
+            var uuid = matchedByPath ?? filenameToUUID[filename] ?? UUID()
+            if scannedUUIDs.contains(uuid), matchedByPath != uuid {
+                uuid = UUID()
+            }
+            scannedUUIDs.insert(uuid)
             let existingEntry = index[uuid]
             let folderID = existingEntry?.folderID
             let labelIDs = existingEntry?.labelIDs ?? []
@@ -259,14 +281,6 @@ final class NotesStorage: ObservableObject {
             // Register in index if new, or backfill createdAt if missing
             if filenameToUUID[filename] == nil || existingEntry?.createdAt == nil {
                 index[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, labelIDs: labelIDs, createdAt: createDate, isPinned: isPinned ? true : nil)
-            }
-
-            // Build relativePath: Inbox/Notes/file.md for inbox, plain filename for legacy .cider/notes/
-            let relativePath: String
-            if let prefix = relativePrefix {
-                relativePath = "\(prefix)/\(filename)"
-            } else {
-                relativePath = filename
             }
 
             // Lazy: don't load content during scan
@@ -368,18 +382,21 @@ final class NotesStorage: ObservableObject {
         //    at the lowest level so a single stale reference can't abort the
         //    whole transaction.
         //
-        //    IMPORTANT: the disk scan (scanNotes/discoverVaultFolderNoteFiles)
-        //    has no way to read DB-only state like `tags` (stored in item_tags,
-        //    not in the sidecar or filename). Re-persisting the scanned notes
-        //    as-is would blow away every tag. Preload tags from the DB and
-        //    merge them onto the in-memory notes before the upsert so disk
-        //    scans can't wipe DB-only fields.
+        //    IMPORTANT: the disk scan builds lightweight placeholders. Hydrate
+        //    file content and DB-only fields before upsert so rescan cannot
+        //    erase note bodies, tags, or summaries.
         guard let db = resolvedDatabase else { return }
         let currentIDs = Set(notes.map(\.id))
         let removedIDs = previousIDs.subtracting(currentIDs)
         do {
-            // Preserve DB-only tags through the rescan round-trip.
+            // Preserve note bodies and DB-only fields through the rescan round-trip.
             for i in notes.indices {
+                if notes[i].content.isEmpty {
+                    let diskContent = loadContent(for: notes[i])
+                    if !diskContent.isEmpty {
+                        notes[i].content = diskContent
+                    }
+                }
                 if let existingTags = try? loadTags(db, itemID: notes[i].id), !existingTags.isEmpty {
                     notes[i].tags = existingTags
                 }
@@ -1766,7 +1783,19 @@ final class NotesStorage: ObservableObject {
     }
 
     private func canonicalizedScannedNotes(_ loaded: [Note]) -> [Note] {
-        canonicalizedNoteGroups(loaded).notes
+        var seen = Set<UUID>()
+        var result: [Note] = []
+        for note in loaded where seen.insert(note.id).inserted {
+            result.append(note)
+        }
+        return result
+    }
+
+    private static func normalizedNoteRelativePath(_ relativePath: String) -> String {
+        relativePath
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
     }
 
     private func canonicalizedNoteGroups(_ loaded: [Note]) -> (notes: [Note], mergedNotes: [Note], removedIDs: [UUID]) {

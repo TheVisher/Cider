@@ -35,6 +35,11 @@ struct NotesSQLiteTests {
         NotesStorage(database: db)
     }
 
+    private func makeTempVaultURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-notes-vault-\(UUID().uuidString)", isDirectory: true)
+    }
+
     // MARK: - Basic Round-Trip
 
     @Test("addTag via service persists to item_tags (CLI flow)")
@@ -435,6 +440,66 @@ struct NotesSQLiteTests {
         #expect(displayed.title == "QA Cider thought save test 20260515-1349")
         #expect(Set(displayed.tags) == Set(["qa", "duplicate"]))
         #expect(displayed.relativePath == "Inbox/Notes/QA Cider thought save test 20260515-1349.md")
+    }
+
+    @Test("Markdown rescan preserves same filename notes in legacy and inbox paths")
+    func markdownRescanPreservesSameFilenameInDistinctNoteRoots() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let legacyDir = StoragePaths.directoryURL(for: .notes)
+        let inboxDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
+        try fm.createDirectory(at: legacyDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: inboxDir, withIntermediateDirectories: true)
+        try "Legacy body".write(to: legacyDir.appendingPathComponent("Shared.md"), atomically: true, encoding: .utf8)
+        try "Inbox body".write(to: inboxDir.appendingPathComponent("Shared.md"), atomically: true, encoding: .utf8)
+
+        let legacyID = UUID()
+        let inboxID = UUID()
+        let service = makeService(db)
+        service.persistNoteToDatabase(
+            db,
+            note: Note(
+                id: legacyID,
+                title: "Shared",
+                content: "Legacy body",
+                createdAt: Date(timeIntervalSince1970: 1_000),
+                modifiedAt: Date(timeIntervalSince1970: 1_100),
+                relativePath: "Shared.md"
+            )
+        )
+        service.persistNoteToDatabase(
+            db,
+            note: Note(
+                id: inboxID,
+                title: "Shared",
+                content: "Inbox body",
+                createdAt: Date(timeIntervalSince1970: 2_000),
+                modifiedAt: Date(timeIntervalSince1970: 2_100),
+                relativePath: "Inbox/Notes/Shared.md"
+            )
+        )
+
+        let reconciler = makeService(db)
+        reconciler.loadNotesFromDatabase(db)
+        reconciler.rescan()
+
+        let reloaded = makeService(db)
+        reloaded.loadNotesFromDatabase(db)
+
+        #expect(Set(reloaded.notes.map(\.id)) == Set([legacyID, inboxID]))
+        #expect(Set(reloaded.notes.map(\.relativePath)) == Set(["Shared.md", "Inbox/Notes/Shared.md"]))
+        #expect(Set(reloaded.notes.map(\.content)) == Set(["Legacy body", "Inbox body"]))
     }
 
     // MARK: - Label IDs

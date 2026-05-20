@@ -736,15 +736,51 @@ final class DateCardStorage: ObservableObject {
         }
     }
 
+    private func existingItemType(for id: UUID) -> String? {
+        guard let db = resolvedDatabase else { return nil }
+        do {
+            let stmt = try db.prepare("SELECT type FROM items WHERE id = ? LIMIT 1;")
+            stmt.bind(DatabaseHelpers.encode(id), at: 1)
+            guard try stmt.step() else { return nil }
+            return stmt.string(at: 0)
+        } catch {
+            logger.error("Failed to inspect existing item type for date card adoption: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     private func adoptOrphanICS(at url: URL, folderID: UUID?) -> DateCard? {
         guard let content = try? String(contentsOf: url, encoding: .utf8),
               var dc = ICalendarSerializer.parseDateCard(content) else { return nil }
 
         dc.folderID = folderID
         let filename = url.lastPathComponent
-        guard index[dc.id] == nil else {
-            logger.warning("Skipped duplicate orphan .ics VEVENT UUID \(dc.id.uuidString) at \(filename)")
+        if let existingType = existingItemType(for: dc.id), existingType != "event" {
+            logger.warning("Skipped orphan .ics VEVENT UUID \(dc.id.uuidString) at \(filename): existing item type is \(existingType)")
             return nil
+        }
+        guard index[dc.id] == nil else {
+            guard let existingEntry = index[dc.id] else { return nil }
+            let existingURL = resolveDirectoryURL(folderID: existingEntry.folderID)
+                .appendingPathComponent(existingEntry.filename)
+            guard !FileManager.default.fileExists(atPath: existingURL.path) else {
+                logger.warning("Skipped duplicate orphan .ics VEVENT UUID \(dc.id.uuidString) at \(filename)")
+                return nil
+            }
+
+            var movedEntry = existingEntry
+            movedEntry.filename = filename
+            movedEntry.folderID = folderID
+            movedEntry.labelIDs = dc.labelIDs.isEmpty ? existingEntry.labelIDs : dc.labelIDs
+            movedEntry.createdAt = existingEntry.createdAt ?? dc.createdAt
+            movedEntry.isCompleted = dc.isCompleted
+            movedEntry.startAt = dc.startAt
+            index[dc.id] = movedEntry
+            if dc.labelIDs.isEmpty, let labelIDs = existingEntry.labelIDs {
+                dc.labelIDs = labelIDs
+            }
+            logger.info("Reassigned moved orphan .ics VEVENT UUID \(dc.id.uuidString) to \(filename)")
+            return dc
         }
 
         index[dc.id] = IndexEntry(

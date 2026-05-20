@@ -38,6 +38,13 @@ final class VaultFileStorage: ObservableObject {
         return exists ? encoded : nil
     }
 
+    private func existingItemType(_ db: CiderDatabase, itemID: UUID) throws -> String? {
+        let stmt = try db.prepare("SELECT type FROM items WHERE id = ? LIMIT 1;")
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        guard try stmt.step() else { return nil }
+        return stmt.optionalString(at: 0)
+    }
+
     private var storageDir: URL {
         StoragePaths.cachedVaultDirectoryURL
             .appendingPathComponent(StoragePaths.ciderInternalDir)
@@ -403,6 +410,13 @@ final class VaultFileStorage: ObservableObject {
     /// don't accidentally null out labels/notes/title in SQLite.
     // Internal for testing
     func persistVaultFileToDatabaseInner(_ db: CiderDatabase, file: VaultFile) throws {
+        let itemID = DatabaseHelpers.encode(file.id)
+        if let existingType = try existingItemType(db, itemID: file.id),
+           existingType != "vaultFile" {
+            logger.error("Skipped vault file persist for \(file.id.uuidString, privacy: .public): existing item type is \(existingType, privacy: .public)")
+            return
+        }
+
         // Overlay in-memory metadata so scan-time persists preserve user edits.
         var effective = file
         var effectiveTitleManuallySet = false
@@ -437,7 +451,6 @@ final class VaultFileStorage: ObservableObject {
                 folder_id = excluded.folder_id,
                 relative_path = excluded.relative_path;
             """)
-        let itemID = DatabaseHelpers.encode(effective.id)
         itemStmt.bind(itemID, at: 1)
             .bind(displayTitle, at: 2)
             .bind(DatabaseHelpers.encode(effective.createdAt), at: 3)
