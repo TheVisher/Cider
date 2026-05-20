@@ -1346,13 +1346,13 @@ final class VaultBookmarkService: ObservableObject {
                             .map { fm.fileExists(atPath: vaultRoot.appendingPathComponent($0).path) }
                             ?? false
                         if existingFileExists {
-                            logger.warning("Duplicate URL at \(bookmark.relativePath ?? "?"); adopting as separate duplicate candidate")
-                            bookmark.folderID = folderID
-                            adopted.append(bookmark)
-                            existingIDs.insert(bookmark.id)
-                            if let relativePath = bookmark.relativePath {
-                                existingIDByRelativePath[relativePath] = bookmark.id
+                            let merged = mergeLoadedDuplicateBookmark(existing: bookmarks[idx], duplicate: bookmark)
+                            if merged != bookmarks[idx] {
+                                bookmarks[idx] = merged
+                                externalURLUpdates += 1
                             }
+                            deleteDuplicateBookmarkArtifact(bookmark)
+                            logger.warning("Deleted duplicate bookmark URL artifact at \(bookmark.relativePath ?? "?", privacy: .public); kept canonical bookmark \(existingID.uuidString, privacy: .public)")
                         } else if bookmarks[idx].folderID != folderID || bookmarks[idx].relativePath != bookmark.relativePath {
                             bookmarks[idx].folderID = folderID
                             bookmarks[idx].relativePath = bookmark.relativePath
@@ -2859,7 +2859,10 @@ final class VaultBookmarkService: ObservableObject {
 
                 loaded.append(bookmark)
             }
-            bookmarks = canonicalizedLoadedBookmarks(loaded, repairing: db)
+            bookmarks = repairNumericSuffixBookmarkArtifacts(
+                canonicalizedLoadedBookmarks(loaded, repairing: db),
+                repairing: db
+            )
         } catch {
             logger.error("Failed to load bookmarks from database: \(error.localizedDescription)")
             bookmarks = []
@@ -2978,7 +2981,8 @@ final class VaultBookmarkService: ObservableObject {
 
         var repaired: [Bookmark] = []
         var mergedBookmarks: [Bookmark] = []
-        var removedIDs: [UUID] = []
+        var removedRowBookmarks: [Bookmark] = []
+        var artifactDeletionCandidates: [Bookmark] = []
 
         for key in orderedKeys {
             guard let group = groups[key], !group.isEmpty else { continue }
@@ -2993,39 +2997,107 @@ final class VaultBookmarkService: ObservableObject {
             var merged = winner
             for duplicate in group where duplicate.id != winner.id {
                 merged = mergeLoadedDuplicateBookmark(existing: merged, duplicate: duplicate)
-                removedIDs.append(duplicate.id)
+                removedRowBookmarks.append(duplicate)
+            }
+            if let preferredPath = preferredCanonicalBookmarkPath(in: group, currentPath: merged.relativePath) {
+                merged.relativePath = preferredPath
+            }
+            for candidate in group where candidate.relativePath != merged.relativePath {
+                artifactDeletionCandidates.append(candidate)
             }
             repaired.append(merged)
             mergedBookmarks.append(merged)
         }
 
-        repairCanonicalDuplicateBookmarks(db, mergedBookmarks: mergedBookmarks, removedIDs: removedIDs)
+        repairCanonicalDuplicateBookmarks(
+            db,
+            mergedBookmarks: mergedBookmarks,
+            removedRowBookmarks: removedRowBookmarks,
+            artifactDeletionCandidates: artifactDeletionCandidates
+        )
         return repaired
     }
 
     private func repairCanonicalDuplicateBookmarks(
         _ db: CiderDatabase,
         mergedBookmarks: [Bookmark],
-        removedIDs: [UUID]
+        removedRowBookmarks: [Bookmark],
+        artifactDeletionCandidates: [Bookmark]
     ) {
-        guard !removedIDs.isEmpty else { return }
+        guard !removedRowBookmarks.isEmpty else { return }
         do {
             try db.withTransaction {
+                let deleteStmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+                for bookmark in removedRowBookmarks {
+                    deleteStmt.reset()
+                    deleteStmt.bind(DatabaseHelpers.encode(bookmark.id), at: 1)
+                    try deleteStmt.step()
+                }
+
                 for bookmark in mergedBookmarks {
                     try persistBookmarkToDatabaseInner(db, bookmark: bookmark)
                 }
-
-                let deleteStmt = try db.prepare("DELETE FROM items WHERE id = ?;")
-                for id in removedIDs {
-                    deleteStmt.reset()
-                    deleteStmt.bind(DatabaseHelpers.encode(id), at: 1)
-                    try deleteStmt.step()
-                }
             }
-            logger.info("Repaired \(removedIDs.count) duplicate canonical bookmark row(s)")
+            for bookmark in artifactDeletionCandidates {
+                deleteDuplicateBookmarkArtifact(bookmark)
+            }
+            logger.info("Repaired \(removedRowBookmarks.count) duplicate canonical bookmark row(s)")
         } catch {
             logger.error("Failed to repair duplicate canonical bookmark rows: \(error.localizedDescription)")
         }
+    }
+
+    private func repairNumericSuffixBookmarkArtifacts(
+        _ loaded: [Bookmark],
+        repairing db: CiderDatabase
+    ) -> [Bookmark] {
+        var repaired = loaded
+        var occupiedPaths = Set(loaded.compactMap(\.relativePath))
+        var repairedBookmarks: [Bookmark] = []
+        let fm = FileManager.default
+
+        for index in repaired.indices {
+            guard let relativePath = repaired[index].relativePath,
+                  relativePath.lowercased().hasSuffix(".webloc"),
+                  let cleanRelativePath = Self.pathByRemovingNumericDuplicateSuffix(relativePath),
+                  !occupiedPaths.contains(cleanRelativePath) else { continue }
+
+            let sourceURL = vaultRoot.appendingPathComponent(relativePath)
+            let destinationURL = vaultRoot.appendingPathComponent(cleanRelativePath)
+            guard fm.fileExists(atPath: sourceURL.path),
+                  !fm.fileExists(atPath: destinationURL.path) else { continue }
+
+            do {
+                try fm.moveItem(at: sourceURL, to: destinationURL)
+                BookmarkFileService.shared.removeSidecarEntry(
+                    at: sourceURL.deletingLastPathComponent(),
+                    filename: sourceURL.lastPathComponent
+                )
+                BookmarkFileService.shared.removeSidecarEntry(
+                    at: destinationURL.deletingLastPathComponent(),
+                    filename: destinationURL.lastPathComponent
+                )
+                occupiedPaths.remove(relativePath)
+                occupiedPaths.insert(cleanRelativePath)
+                repaired[index].relativePath = cleanRelativePath
+                repairedBookmarks.append(repaired[index])
+            } catch {
+                logger.error("Failed to repair numeric suffix bookmark artifact \(relativePath, privacy: .public): \(error.localizedDescription)")
+            }
+        }
+
+        guard !repairedBookmarks.isEmpty else { return repaired }
+        do {
+            try db.withTransaction {
+                for bookmark in repairedBookmarks {
+                    try persistBookmarkToDatabaseInner(db, bookmark: bookmark)
+                }
+            }
+            logger.info("Renamed \(repairedBookmarks.count) numeric suffix bookmark artifact(s) back to canonical paths")
+        } catch {
+            logger.error("Failed to persist numeric suffix bookmark artifact repair: \(error.localizedDescription)")
+        }
+        return repaired
     }
 
     private func bookmarkCanonicalScore(_ bookmark: Bookmark) -> Int {
@@ -3038,6 +3110,7 @@ final class VaultBookmarkService: ObservableObject {
             score += 50
         }
         if bookmark.relativePath != nil { score += 30 }
+        if bookmark.relativePath.map({ Self.pathHasNumericDuplicateSuffix($0) }) == true { score -= 10_000 }
         if bookmark.folderID != nil { score += 20 }
         if !bookmark.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 15 }
         if bookmark.aiSummary != nil { score += 10 }
@@ -3046,6 +3119,51 @@ final class VaultBookmarkService: ObservableObject {
         if bookmark.title.localizedCaseInsensitiveContains(" (2)") { score -= 25 }
         if bookmark.title.localizedCaseInsensitiveContains(" copy") { score -= 25 }
         return score
+    }
+
+    private func preferredCanonicalBookmarkPath(in group: [Bookmark], currentPath: String?) -> String? {
+        if let currentPath,
+           !Self.pathHasNumericDuplicateSuffix(currentPath) {
+            return currentPath
+        }
+
+        return group
+            .compactMap(\.relativePath)
+            .filter { $0.lowercased().hasSuffix(".webloc") }
+            .filter { !Self.pathHasNumericDuplicateSuffix($0) }
+            .sorted { lhs, rhs in
+                let lhsExists = FileManager.default.fileExists(atPath: vaultRoot.appendingPathComponent(lhs).path)
+                let rhsExists = FileManager.default.fileExists(atPath: vaultRoot.appendingPathComponent(rhs).path)
+                if lhsExists != rhsExists { return lhsExists }
+                return lhs.localizedStandardCompare(rhs) == .orderedAscending
+            }
+            .first
+    }
+
+    private func deleteDuplicateBookmarkArtifact(_ bookmark: Bookmark) {
+        guard let relativePath = bookmark.relativePath,
+              relativePath.lowercased().hasSuffix(".webloc") else { return }
+        deleteWeblocFileOnly(for: bookmark)
+    }
+
+    private static func pathHasNumericDuplicateSuffix(_ relativePath: String) -> Bool {
+        let filename = (relativePath as NSString).lastPathComponent
+        let stem = (filename as NSString).deletingPathExtension
+        return stem.range(of: #" \([0-9]+\)$"#, options: .regularExpression) != nil
+            || stem.range(of: #" [0-9]+$"#, options: .regularExpression) != nil
+    }
+
+    private static func pathByRemovingNumericDuplicateSuffix(_ relativePath: String) -> String? {
+        let filename = (relativePath as NSString).lastPathComponent
+        let directory = (relativePath as NSString).deletingLastPathComponent
+        let stem = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        let cleanedStem = stem
+            .replacingOccurrences(of: #" \([0-9]+\)$"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #" [0-9]+$"#, with: "", options: .regularExpression)
+        guard cleanedStem != stem, !cleanedStem.isEmpty else { return nil }
+        let cleanFilename = ext.isEmpty ? cleanedStem : "\(cleanedStem).\(ext)"
+        return directory == "." || directory.isEmpty ? cleanFilename : "\(directory)/\(cleanFilename)"
     }
 
     private func mergeLoadedDuplicateBookmark(existing: Bookmark, duplicate: Bookmark) -> Bookmark {

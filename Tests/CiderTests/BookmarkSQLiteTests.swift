@@ -899,8 +899,8 @@ struct BookmarkSQLiteTests {
         #expect(service2.bookmarks.first?.id == existingID)
     }
 
-    @Test("Orphan adoption preserves .webloc whose URL canonicalizes to an existing bookmark")
-    func orphanAdoptionPreservesCanonicalDuplicateURLArtifact() throws {
+    @Test("Orphan adoption deletes exact duplicate .webloc whose URL is already tracked")
+    func orphanAdoptionDeletesCanonicalDuplicateURLArtifact() throws {
         let (db, url) = try makeTestDB()
         let fm = FileManager.default
         let vault = fm.temporaryDirectory.appendingPathComponent("cider-orphan-duplicate-bookmark-\(UUID().uuidString)", isDirectory: true)
@@ -942,23 +942,19 @@ struct BookmarkSQLiteTests {
         service.loadBookmarksFromDatabase(db)
         service.adoptOrphanedVaultFiles()
 
-        #expect(service.bookmarks.count == 2)
-        #expect(service.bookmarks.contains { bookmark in
-            bookmark.id == existing.id &&
-                bookmark.relativePath == "Inbox/Bookmarks/Stonewards on Steam.webloc"
-        })
-        #expect(service.bookmarks.contains { bookmark in
-            bookmark.id != existing.id &&
-                bookmark.relativePath == "Inbox/Bookmarks/Store.Steampowered.Com (2).webloc"
-        })
+        #expect(service.bookmarks.count == 1)
+        #expect(service.bookmarks.first?.id == existing.id)
+        #expect(service.bookmarks.first?.relativePath == "Inbox/Bookmarks/Stonewards on Steam.webloc")
+        #expect(fm.fileExists(atPath: inbox.appendingPathComponent("Stonewards on Steam.webloc").path))
+        #expect(!fm.fileExists(atPath: inbox.appendingPathComponent("Store.Steampowered.Com (2).webloc").path))
 
         let itemStmt = try db.prepare("SELECT COUNT(*) FROM items WHERE type = 'bookmark';")
         try itemStmt.step()
-        #expect(itemStmt.int(at: 0) == 2)
+        #expect(itemStmt.int(at: 0) == 1)
 
         let bookmarkStmt = try db.prepare("SELECT COUNT(*) FROM bookmarks;")
         try bookmarkStmt.step()
-        #expect(bookmarkStmt.int(at: 0) == 2)
+        #expect(bookmarkStmt.int(at: 0) == 1)
     }
 
     @Test("Orphan .webloc adoption preserves filesystem creation date")
@@ -998,8 +994,8 @@ struct BookmarkSQLiteTests {
         #expect(abs(adoptedDates.createdAt.timeIntervalSince(fileDate)) < 0.01)
     }
 
-    @Test("Duplicate .webloc adoption preserves duplicate file creation date")
-    func duplicateWeblocAdoptionPreservesFilesystemCreationDate() throws {
+    @Test("Duplicate .webloc adoption keeps canonical row and deletes duplicate file")
+    func duplicateWeblocAdoptionKeepsCanonicalRowAndDeletesDuplicateFile() throws {
         let (db, url) = try makeTestDB()
         let fm = FileManager.default
         let vault = fm.temporaryDirectory.appendingPathComponent("cider-duplicate-bookmark-date-\(UUID().uuidString)", isDirectory: true)
@@ -1030,7 +1026,6 @@ struct BookmarkSQLiteTests {
             toDirectory: inbox,
             dirRelativePath: "Inbox/Bookmarks"
         )
-        let duplicateDate = Date(timeIntervalSince1970: 1_700_000_000)
         let duplicateRelativePath = try BookmarkFileService.shared.write(
             bookmark: Bookmark(
                 title: "Tiktok.Com (2)",
@@ -1039,15 +1034,19 @@ struct BookmarkSQLiteTests {
             toDirectory: inbox,
             dirRelativePath: "Inbox/Bookmarks"
         )
-        try setFilesystemDates(for: vault.appendingPathComponent(duplicateRelativePath), createdAt: duplicateDate)
 
         service.loadBookmarksFromDatabase(db)
         service.adoptOrphanedVaultFiles()
 
-        let duplicate = try #require(service.bookmarks.first { $0.relativePath == duplicateRelativePath })
-        let duplicateDates = try storedItemDates(db, id: duplicate.id)
-        #expect(abs(duplicate.createdAt.timeIntervalSince(duplicateDate)) < 0.01)
-        #expect(abs(duplicateDates.createdAt.timeIntervalSince(duplicateDate)) < 0.01)
+        #expect(service.bookmarks.count == 1)
+        let canonical = try #require(service.bookmarks.first)
+        #expect(canonical.id == existing.id)
+        #expect(canonical.relativePath == "Inbox/Bookmarks/Fatty Fish Sushi Everett review.webloc")
+        #expect(!fm.fileExists(atPath: vault.appendingPathComponent(duplicateRelativePath).path))
+
+        let itemStmt = try db.prepare("SELECT COUNT(*) FROM items WHERE type = 'bookmark';")
+        try itemStmt.step()
+        #expect(itemStmt.int(at: 0) == 1)
     }
 
     @Test("SQLite load repairs adoption-created bookmark date from older .webloc date")
@@ -1234,6 +1233,190 @@ struct BookmarkSQLiteTests {
         reloaded.loadBookmarksFromDatabase(db)
         #expect(reloaded.bookmarks.count == 1)
         #expect(reloaded.bookmarks.first?.id == canonicalID)
+    }
+
+    @Test("SQLite load removes duplicate URL .webloc artifact after row repair")
+    func sqliteLoadRemovesDuplicateURLWeblocArtifactAfterRowRepair() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-bookmark-duplicate-repair-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let canonicalID = UUID()
+        let duplicateID = UUID()
+        let service = makeService(db)
+        let canonical = Bookmark(
+            id: canonicalID,
+            title: "Wyldheart co-op RPG for busy schedules — Furo",
+            urlString: "https://www.tiktok.com/t/ZP8pShRv1/",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            relativePath: "Inbox/Bookmarks/Wyldheart co-op RPG for busy schedules — Furo.webloc"
+        )
+        let duplicate = Bookmark(
+            id: duplicateID,
+            title: "Wyldheart co-op RPG for busy schedules — Furo",
+            urlString: "https://www.tiktok.com/t/ZP8pShRv1/",
+            createdAt: Date(timeIntervalSince1970: 1_500),
+            updatedAt: Date(timeIntervalSince1970: 3_000),
+            relativePath: "Inbox/Bookmarks/Wyldheart co-op RPG for busy schedules — Furo (2).webloc"
+        )
+
+        service.persistBookmarkToDatabase(db, bookmark: canonical)
+        service.persistBookmarkToDatabase(db, bookmark: duplicate)
+        _ = try BookmarkFileService.shared.write(
+            bookmark: canonical,
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        _ = try BookmarkFileService.shared.write(
+            bookmark: duplicate,
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+
+        let reloaded = makeService(db)
+        reloaded.loadBookmarksFromDatabase(db)
+
+        #expect(reloaded.bookmarks.count == 1)
+        #expect(reloaded.bookmarks.first?.id == canonicalID)
+        #expect(fm.fileExists(atPath: inbox.appendingPathComponent("Wyldheart co-op RPG for busy schedules — Furo.webloc").path))
+        #expect(!fm.fileExists(atPath: inbox.appendingPathComponent("Wyldheart co-op RPG for busy schedules — Furo (2).webloc").path))
+
+        let itemStmt = try db.prepare("SELECT COUNT(*) FROM items WHERE type = 'bookmark';")
+        try itemStmt.step()
+        #expect(itemStmt.int(at: 0) == 1)
+    }
+
+    @Test("SQLite duplicate URL repair keeps clean artifact path even when suffix row is richer")
+    func sqliteDuplicateURLRepairKeepsCleanArtifactPathWhenSuffixRowIsRicher() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-bookmark-rich-duplicate-repair-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let canonicalID = UUID()
+        let duplicateID = UUID()
+        let service = makeService(db)
+        let canonical = Bookmark(
+            id: canonicalID,
+            title: "Thick As Thieves co-op Steam game — GROMO",
+            urlString: "https://www.tiktok.com/t/ZP8pBDjbU/",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            relativePath: "Inbox/Bookmarks/Thick As Thieves co-op Steam game — GROMO.webloc"
+        )
+        var duplicate = Bookmark(
+            id: duplicateID,
+            title: "Thick As Thieves co-op Steam game — GROMO",
+            urlString: "https://www.tiktok.com/t/ZP8pBDjbU/",
+            createdAt: Date(timeIntervalSince1970: 1_500),
+            updatedAt: Date(timeIntervalSince1970: 3_000),
+            relativePath: "Inbox/Bookmarks/Thick As Thieves co-op Steam game — GROMO (2).webloc",
+            titleManuallySet: true
+        )
+        duplicate.notes = "Richer duplicate metadata should merge into the clean artifact row."
+        duplicate.aiSummary = "A co-op game clip."
+        duplicate.thumbnailRemoteURLString = "https://example.com/thumb.jpg"
+
+        service.persistBookmarkToDatabase(db, bookmark: canonical)
+        service.persistBookmarkToDatabase(db, bookmark: duplicate)
+        _ = try BookmarkFileService.shared.write(
+            bookmark: canonical,
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        _ = try BookmarkFileService.shared.write(
+            bookmark: duplicate,
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+
+        let reloaded = makeService(db)
+        reloaded.loadBookmarksFromDatabase(db)
+
+        #expect(reloaded.bookmarks.count == 1)
+        let repaired = try #require(reloaded.bookmarks.first)
+        #expect(repaired.id == canonicalID)
+        #expect(repaired.relativePath == "Inbox/Bookmarks/Thick As Thieves co-op Steam game — GROMO.webloc")
+        #expect(repaired.notes == duplicate.notes)
+        #expect(repaired.aiSummary == duplicate.aiSummary)
+        #expect(fm.fileExists(atPath: inbox.appendingPathComponent("Thick As Thieves co-op Steam game — GROMO.webloc").path))
+        #expect(!fm.fileExists(atPath: inbox.appendingPathComponent("Thick As Thieves co-op Steam game — GROMO (2).webloc").path))
+    }
+
+    @Test("SQLite load renames lone numeric suffix bookmark artifact when clean path is free")
+    func sqliteLoadRenamesLoneNumericSuffixBookmarkArtifactWhenCleanPathIsFree() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-bookmark-lone-suffix-repair-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let service = makeService(db)
+        let bookmarkID = UUID()
+        var bookmark = Bookmark(
+            id: bookmarkID,
+            title: "Wyldheart co-op RPG for busy schedules — Furo",
+            urlString: "https://www.tiktok.com/t/ZP8pShRv1/",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let cleanRelativePath = try BookmarkFileService.shared.write(
+            bookmark: bookmark,
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        let suffixRelativePath = "Inbox/Bookmarks/Wyldheart co-op RPG for busy schedules — Furo (2).webloc"
+        try fm.moveItem(
+            at: vault.appendingPathComponent(cleanRelativePath),
+            to: vault.appendingPathComponent(suffixRelativePath)
+        )
+        bookmark.relativePath = suffixRelativePath
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+
+        let reloaded = makeService(db)
+        reloaded.loadBookmarksFromDatabase(db)
+
+        #expect(reloaded.bookmarks.count == 1)
+        #expect(reloaded.bookmarks.first?.id == bookmarkID)
+        #expect(reloaded.bookmarks.first?.relativePath == cleanRelativePath)
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent(cleanRelativePath).path))
+        #expect(!fm.fileExists(atPath: vault.appendingPathComponent(suffixRelativePath).path))
+
+        let pathStmt = try db.prepare("SELECT relative_path FROM items WHERE id = ?;")
+        pathStmt.bind(DatabaseHelpers.encode(bookmarkID), at: 1)
+        try pathStmt.step()
+        #expect(pathStmt.string(at: 0) == cleanRelativePath)
     }
 
     @Test("Legacy index metadata merges into the SQLite canonical bookmark for the same URL")
