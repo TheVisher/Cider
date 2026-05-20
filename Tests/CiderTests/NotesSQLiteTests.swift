@@ -537,6 +537,7 @@ struct NotesSQLiteTests {
         #expect(reconciler.notes.first?.title == "Games Library")
         #expect(fm.fileExists(atPath: canonicalURL.path))
         #expect(!fm.fileExists(atPath: duplicateURL.path))
+        #expect(!fm.fileExists(atPath: inboxDir.appendingPathComponent(".deduplicated").path))
 
         let reloaded = makeService(db)
         reloaded.loadNotesFromDatabase(db)

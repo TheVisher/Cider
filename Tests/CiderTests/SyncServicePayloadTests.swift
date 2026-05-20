@@ -161,6 +161,18 @@ struct SyncServicePayloadTests {
         #expect(source.contains("VaultDoctor.shared.logStartupFolderIntegrity(origin: \"sync-pull\")"))
     }
 
+    @Test("WebSync runtime is hard-disabled for desktop")
+    func webSyncRuntimeIsHardDisabledForDesktop() throws {
+        let source = try String(
+            contentsOfFile: "Sources/Cider/Services/SyncService.swift",
+            encoding: .utf8
+        )
+
+        #expect(source.contains("static let webSyncRuntimeEnabled = false"))
+        #expect(source.contains("guard Self.webSyncRuntimeEnabled else"))
+        #expect(source.contains("WebSync disabled for desktop"))
+    }
+
     @Test("note payload includes tags for web sync")
     @MainActor
     func notePayloadIncludesTags() {

@@ -85,6 +85,7 @@ struct SyncNotePayloadPreview: Equatable {
 @MainActor
 final class SyncService: ObservableObject {
     static let shared = SyncService()
+    static let webSyncRuntimeEnabled = false
 
     @Published var isSyncing = false
     @Published var lastSyncedAt: Date?
@@ -269,6 +270,12 @@ final class SyncService: ObservableObject {
     // MARK: - Lifecycle
 
     func startIfEnabled() {
+        guard Self.webSyncRuntimeEnabled else {
+            logger.info("WebSync disabled for desktop; skipping start")
+            stop()
+            return
+        }
+
         let config = CiderConfig.load()
         migrateSyncTokenToKeychainIfNeeded()
         let token = Self.loadSyncToken()
@@ -384,6 +391,7 @@ final class SyncService: ObservableObject {
     // MARK: - Deletion tracking (public API for BookmarksStorage/NotesStorage)
 
     func trackDeletion(of bookmarkID: UUID) {
+        guard Self.webSyncRuntimeEnabled else { return }
         let syncId = bookmarkID.uuidString.lowercased()
         guard !pendingDeletions.contains(syncId) else { return }
         pendingDeletions.append(syncId)
@@ -398,6 +406,7 @@ final class SyncService: ObservableObject {
     }
 
     func trackNoteDeletion(of noteID: UUID) {
+        guard Self.webSyncRuntimeEnabled else { return }
         let syncId = noteID.uuidString.lowercased()
         guard !pendingNoteDeletions.contains(syncId) else { return }
         pendingNoteDeletions.append(syncId)
@@ -412,6 +421,7 @@ final class SyncService: ObservableObject {
     }
 
     func trackFolderDeletion(of folderID: UUID) {
+        guard Self.webSyncRuntimeEnabled else { return }
         let syncId = folderID.uuidString.lowercased()
         guard !pendingFolderDeletions.contains(syncId) else { return }
         pendingFolderDeletions.append(syncId)
@@ -452,6 +462,11 @@ final class SyncService: ObservableObject {
     // MARK: - Manual trigger
 
     func syncNow() {
+        guard Self.webSyncRuntimeEnabled else {
+            logger.info("WebSync disabled for desktop; ignoring manual sync")
+            return
+        }
+
         let token = Self.loadSyncToken()
         guard !token.isEmpty else { return }
         consecutiveFailures = 0
@@ -461,6 +476,11 @@ final class SyncService: ObservableObject {
     /// Forces a full reconciliation — compares all local items against the server
     /// and pushes any corrections. Use when folder assignments or data seem out of sync.
     func forceReconcile() {
+        guard Self.webSyncRuntimeEnabled else {
+            logger.info("WebSync disabled for desktop; ignoring manual reconcile")
+            return
+        }
+
         let token = Self.loadSyncToken()
         guard !token.isEmpty else { return }
         performReconciliation(token: token)
@@ -475,6 +495,7 @@ final class SyncService: ObservableObject {
 
     /// Called when local data changes to trigger a push after a brief debounce.
     func pushAfterLocalChange() {
+        guard Self.webSyncRuntimeEnabled else { return }
         guard !isApplyingRemoteChanges else { return }
         pushDebounceTask?.cancel()
         pushDebounceTask = Task { @MainActor [weak self] in
@@ -489,6 +510,7 @@ final class SyncService: ObservableObject {
     // MARK: - Push
 
     private func performPush(token: String) {
+        guard Self.webSyncRuntimeEnabled else { return }
         guard !isSyncing, let client = convexClient else { return }
         if consecutiveFailures >= 3 {
             logger.warning("Sync paused after \(self.consecutiveFailures) consecutive failures")
@@ -616,6 +638,7 @@ final class SyncService: ObservableObject {
     /// client, the changeSignal fires on every save (~1-2s). We coalesce
     /// these into a single pull after the signal stabilizes.
     private func debouncePull(token: String) {
+        guard Self.webSyncRuntimeEnabled else { return }
         pullDebounceTask?.cancel()
         pullDebounceTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(3))
@@ -625,6 +648,7 @@ final class SyncService: ObservableObject {
     }
 
     private func performPull(token: String, nothingWasPushed: Bool = false) {
+        guard Self.webSyncRuntimeEnabled else { return }
         guard !isSyncing, let client = convexClient else { return }
 
         isSyncing = true
@@ -950,6 +974,7 @@ final class SyncService: ObservableObject {
     // MARK: - Reconciliation
 
     private func maybeReconcile(token: String) {
+        guard Self.webSyncRuntimeEnabled else { return }
         guard !isReconciling else { return }
         let config = CiderConfig.load()
         let elapsed = Date().timeIntervalSince1970 - config.lastReconciliationAt
@@ -961,6 +986,7 @@ final class SyncService: ObservableObject {
     }
 
     private func performReconciliation(token: String) {
+        guard Self.webSyncRuntimeEnabled else { return }
         guard let client = convexClient else { return }
         isReconciling = true
         logger.info("Reconcile: starting full inventory check")

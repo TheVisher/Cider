@@ -383,7 +383,7 @@ final class NotesStorage: ObservableObject {
                 notes[i].content = loadContent(for: notes[i])
             }
             let canonicalized = canonicalizedScannedNotes(notes)
-            quarantineDuplicateNoteFiles(canonicalized.removedNotes)
+            deleteDuplicateNoteFiles(canonicalized.removedNotes)
             notes = canonicalized.notes
             index = rebuiltNoteIndex(from: notes)
             return
@@ -406,7 +406,7 @@ final class NotesStorage: ObservableObject {
         }
 
         let canonicalized = canonicalizedScannedNotes(notes)
-        quarantineDuplicateNoteFiles(canonicalized.removedNotes)
+        deleteDuplicateNoteFiles(canonicalized.removedNotes)
         notes = canonicalized.notes
         index = rebuiltNoteIndex(from: notes)
 
@@ -1873,47 +1873,19 @@ final class NotesStorage: ObservableObject {
         return (result.notes, removedNotes)
     }
 
-    private func quarantineDuplicateNoteFiles(_ removedNotes: [Note]) {
+    private func deleteDuplicateNoteFiles(_ removedNotes: [Note]) {
         guard !removedNotes.isEmpty else { return }
         let fm = FileManager.default
         for note in removedNotes {
             let sourceURL = noteFileURL(for: note)
             guard fm.fileExists(atPath: sourceURL.path) else { continue }
-            let quarantineDir = sourceURL
-                .deletingLastPathComponent()
-                .appendingPathComponent(".deduplicated", isDirectory: true)
             do {
-                try fm.createDirectory(at: quarantineDir, withIntermediateDirectories: true)
-                let destinationURL = uniqueQuarantineURL(
-                    for: sourceURL.lastPathComponent,
-                    in: quarantineDir
-                )
-                try fm.moveItem(at: sourceURL, to: destinationURL)
-                logger.info("Quarantined exact duplicate note file: \(sourceURL.path, privacy: .public)")
+                try fm.removeItem(at: sourceURL)
+                logger.info("Deleted exact duplicate note file: \(sourceURL.path, privacy: .public)")
             } catch {
-                logger.error("Failed to quarantine duplicate note file \(sourceURL.path, privacy: .public): \(error.localizedDescription)")
+                logger.error("Failed to delete duplicate note file \(sourceURL.path, privacy: .public): \(error.localizedDescription)")
             }
         }
-    }
-
-    private func uniqueQuarantineURL(for filename: String, in directoryURL: URL) -> URL {
-        let fm = FileManager.default
-        var candidate = directoryURL.appendingPathComponent(filename)
-        guard fm.fileExists(atPath: candidate.path) else { return candidate }
-
-        let base = (filename as NSString).deletingPathExtension
-        let ext = (filename as NSString).pathExtension
-        for index in 2...100 {
-            let nextName = ext.isEmpty ? "\(base) \(index)" : "\(base) \(index).\(ext)"
-            candidate = directoryURL.appendingPathComponent(nextName)
-            if !fm.fileExists(atPath: candidate.path) {
-                return candidate
-            }
-        }
-        let fallbackName = ext.isEmpty
-            ? "\(base) \(UUID().uuidString)"
-            : "\(base) \(UUID().uuidString).\(ext)"
-        return directoryURL.appendingPathComponent(fallbackName)
     }
 
     private static func normalizedNoteRelativePath(_ relativePath: String) -> String {
