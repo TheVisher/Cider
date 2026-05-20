@@ -2695,7 +2695,8 @@ final class VaultBookmarkService: ObservableObject {
 
     private func shouldApplyEnrichedTitle(_ title: String, to bookmark: Bookmark, sourceURL: URL) -> Bool {
         if bookmark.titleManuallySet,
-           !isProviderGenericTitle(bookmark.title, sourceURL: sourceURL) {
+           !isProviderGenericTitle(bookmark.title, sourceURL: sourceURL),
+           !isHostDerivedTitle(bookmark, sourceURL: sourceURL) {
             return false
         }
         let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)

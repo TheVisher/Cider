@@ -1636,6 +1636,38 @@ struct BookmarkSQLiteTests {
         #expect(updated.titleManuallySet == true)
     }
 
+    @Test("OEmbed title enrichment can replace Reddit host-derived manual title")
+    func oEmbedTitleEnrichmentReplacesRedditHostDerivedManualTitle() throws {
+        let (db, url) = try makeTestDB()
+        defer {
+            db.close()
+            cleanup(url)
+        }
+
+        let bookmarkID = UUID()
+        let service = makeService(db)
+        let bookmark = Bookmark(
+            id: bookmarkID,
+            title: "Reddit.Com (15)",
+            urlString: "https://www.reddit.com/r/wow/comments/1rw8g15/gandalins_gearing_guide_midnight_season_1/",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            titleManuallySet: true
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        service.applyOEmbedResults(
+            for: bookmarkID,
+            title: "Gandalin's Gearing Guide: Midnight Season 1",
+            notes: nil
+        )
+
+        let updated = try #require(service.bookmarks.first)
+        #expect(updated.title == "Gandalin's Gearing Guide: Midnight Season 1")
+        #expect(updated.titleManuallySet == true)
+    }
+
     @Test("OEmbed title enrichment preserves curated bookmark artifact path")
     func oEmbedTitleEnrichmentPreservesCuratedArtifactPath() throws {
         let (db, url) = try makeTestDB()
