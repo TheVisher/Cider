@@ -298,6 +298,7 @@ enum BookmarksDesign {
     static let thumbnailIconOverlaySizeGrid: CGFloat = 52
     static let thumbnailIconCandidateMinDimension: CGFloat = 12
     static let thumbnailIconCandidateMaxDimension: CGFloat = 96
+    static let thumbnailIconURLHintMaxDimension: CGFloat = 256
     static let thumbnailIconCandidateMaxAspectDelta: CGFloat = 0.28
     static let cardMinWidth: CGFloat = 220
     static let cardContentSpacing: CGFloat = Spacing.sm

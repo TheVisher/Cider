@@ -37,4 +37,56 @@ struct BookmarkThumbnailDecodePolicyTests {
             ) == nil
         )
     }
+
+    @Test("large product thumbnails are not rendered as icon overlays even when the URL contains touch-icon")
+    func largeTouchIconURLImageDoesNotUseIconOverlay() {
+        let rendersAsIcon = BookmarkThumbnailView.shouldRenderAsIconOverlay(
+            width: 575,
+            height: 720,
+            remoteURLString: "https://www.vans.com/touch-icon-iphone.png?v=2"
+        )
+
+        #expect(rendersAsIcon == false)
+    }
+
+    @Test("small square icon thumbnails still render as icon overlays")
+    func smallSquareImageUsesIconOverlay() {
+        let rendersAsIcon = BookmarkThumbnailView.shouldRenderAsIconOverlay(
+            width: 64,
+            height: 64,
+            remoteURLString: "https://example.com/image.png"
+        )
+
+        #expect(rendersAsIcon == true)
+    }
+
+    @Test("small favicon URL thumbnails render as icon overlays")
+    func smallFaviconURLImageUsesIconOverlay() {
+        let rendersAsIcon = BookmarkThumbnailView.shouldRenderAsIconOverlay(
+            width: 128,
+            height: 128,
+            remoteURLString: "https://example.com/favicon.png"
+        )
+
+        #expect(rendersAsIcon == true)
+    }
+
+    @Test("thumbnail cache stamp falls back to file modification time when bookmark metadata timestamp is missing")
+    func thumbnailCacheStampUsesFileModificationTimeWhenMetadataIsMissing() throws {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("png")
+        try Data([0x89, 0x50, 0x4e, 0x47]).write(to: tempURL)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let modifiedAt = Date(timeIntervalSince1970: 1_779_309_749)
+        try FileManager.default.setAttributes([.modificationDate: modifiedAt], ofItemAtPath: tempURL.path)
+
+        let stamp = BookmarkThumbnailView.thumbnailCacheModifiedAt(
+            fileURL: tempURL,
+            metadataUpdatedAt: nil
+        )
+
+        #expect(abs(stamp - modifiedAt.timeIntervalSince1970) < 0.001)
+    }
 }

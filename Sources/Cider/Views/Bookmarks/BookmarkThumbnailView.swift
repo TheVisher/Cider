@@ -50,8 +50,11 @@ struct BookmarkThumbnailView: View {
     }
 
     private var thumbnailFingerprint: String {
-        let path = bookmark.thumbnailFileURL?.path ?? ""
-        let ts = String(bookmark.metadataUpdatedAt?.timeIntervalSince1970 ?? -1)
+        let fileURL = bookmark.thumbnailFileURL
+        let path = fileURL?.path ?? ""
+        let ts = fileURL.map {
+            Self.thumbnailCacheModifiedAt(fileURL: $0, metadataUpdatedAt: bookmark.metadataUpdatedAt)
+        } ?? -1
         let remote = bookmark.thumbnailRemoteURLString ?? ""
         return "\(path)|\(ts)|\(remote)"
     }
@@ -216,7 +219,10 @@ struct BookmarkThumbnailView: View {
 
         let remoteURLString = bookmark.thumbnailRemoteURLString
         let cacheKey = fileURL.path
-        let modifiedAt = bookmark.metadataUpdatedAt?.timeIntervalSince1970 ?? -1
+        let modifiedAt = Self.thumbnailCacheModifiedAt(
+            fileURL: fileURL,
+            metadataUpdatedAt: bookmark.metadataUpdatedAt
+        )
         let minPixelSize = BookmarkThumbnailDecodePolicy.cardMaxPixelSize(for: mode)
 
         // Check shared cache first
@@ -270,7 +276,7 @@ struct BookmarkThumbnailView: View {
         }
     }
 
-    nonisolated private static func shouldRenderAsIconOverlay(
+    nonisolated static func shouldRenderAsIconOverlay(
         width: CGFloat, height: CGFloat, remoteURLString: String?
     ) -> Bool {
         let aspectRatio = width / height
@@ -290,7 +296,30 @@ struct BookmarkThumbnailView: View {
             remoteFingerprint.contains("mask-icon") ||
             remoteFingerprint.hasSuffix(".ico")
 
-        return hasIconURLHint || isTinySquareAsset
+        let isIconSizedAsset =
+            maxDimension <= BookmarksDesign.thumbnailIconURLHintMaxDimension
+
+        return isTinySquareAsset || (hasIconURLHint && isIconSizedAsset)
+    }
+
+    nonisolated static func thumbnailCacheModifiedAt(
+        fileURL: URL,
+        metadataUpdatedAt: Date?
+    ) -> TimeInterval {
+        let fileModifiedAt = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.modificationDate] as? Date)?
+            .timeIntervalSince1970
+        let metadataTimestamp = metadataUpdatedAt?.timeIntervalSince1970
+
+        switch (fileModifiedAt, metadataTimestamp) {
+        case let (file?, metadata?):
+            return max(file, metadata)
+        case let (file?, nil):
+            return file
+        case let (nil, metadata?):
+            return metadata
+        case (nil, nil):
+            return -1
+        }
     }
 }
 
