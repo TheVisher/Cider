@@ -806,6 +806,75 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("image bookmark capture records provenance relation and indexing trace")
+    func imageBookmarkCaptureRecordsProvenanceRelationAndIndexingTrace() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db),
+                thumbnailAssignmentHandler: { _, _, _ in true }
+            )
+            let sourcePath = "/tmp/cider-copied-image.png"
+            let result = try service.addImageBookmarkCapture(
+                title: "Clipboard provenance image",
+                imageData: Data([0x89, 0x50, 0x4E, 0x47]),
+                preferredFileExtension: "png",
+                sourceFile: sourcePath,
+                sourceContext: CaptureSourceContext(
+                    surface: "clipboard_viewer",
+                    channel: "pasteboard",
+                    attachments: [
+                        CaptureSourceContext.Attachment(
+                            filename: "cider-copied-image.png",
+                            mimeType: "image/png",
+                            localPath: sourcePath
+                        )
+                    ]
+                )
+            )
+
+            let eventID = try #require(result.captureEventID)
+            let dict = result.toDictionary()
+            let indexing = try #require(dict["indexing"] as? [String: Any])
+            #expect(indexing["status"] as? String == "indexed")
+            #expect(indexing["ownerType"] as? String == "bookmark")
+            #expect(indexing["ownerID"] as? String == result.item.id.uuidString)
+            #expect(indexing["captureEventID"] as? String == eventID.uuidString)
+
+            let event = try db.prepare("""
+                SELECT source_kind, surface, channel, source_file, attachment_count
+                FROM capture_events
+                WHERE id = ?;
+                """)
+            event.bind(eventID.uuidString, at: 1)
+            #expect(try event.step())
+            #expect(event.string(at: 0) == "image")
+            #expect(event.string(at: 1) == "clipboard_viewer")
+            #expect(event.string(at: 2) == "pasteboard")
+            #expect(event.string(at: 3) == sourcePath)
+            #expect(event.int(at: 4) == 1)
+
+            let relations = try SecondBrainStore(database: db).outgoingRelations(
+                for: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString)
+            )
+            #expect(relations.contains { relation in
+                relation.relationType == "produced_item" &&
+                    relation.targetOwner == SecondBrainOwnerRef(ownerType: "bookmark", ownerID: result.item.id.uuidString)
+            })
+            #expect(relations.contains { $0.relationType == "had_attachment" })
+
+            let matches = try SecondBrainStore(database: db).searchChunks(
+                query: "Clipboard provenance image",
+                limit: 5
+            )
+            #expect(matches.first?.owner == SecondBrainOwnerRef(ownerType: "bookmark", ownerID: result.item.id.uuidString))
+        }
+    }
+
     @Test("image bookmark capture reports partial success when thumbnail assignment fails")
     func imageBookmarkCaptureReportsPartialSuccessWhenThumbnailAssignmentFails() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in
@@ -1127,6 +1196,91 @@ struct CiderCaptureServiceTests {
             #expect(audit?.afterState["title"] == "Audited receipt")
             #expect(audit?.afterState["relativePath"] == result.item.relativePath)
             #expect(audit?.metadata["source"] == "capture.add")
+        }
+    }
+
+    @Test("file capture records canonical provenance relation and indexing trace")
+    func fileCaptureRecordsCanonicalProvenanceRelationAndIndexingTrace() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
+            )
+            let sourceURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cider-contract-\(UUID().uuidString).pdf")
+            try Data([0x25, 0x50, 0x44, 0x46]).write(to: sourceURL)
+            defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+            let result = try service.addFileCapture(
+                sourcePath: sourceURL.path,
+                title: "Canonical provenance PDF",
+                folderID: nil,
+                sourceContext: CaptureSourceContext(
+                    surface: "drop_zone",
+                    attachments: [
+                        CaptureSourceContext.Attachment(
+                            filename: sourceURL.lastPathComponent,
+                            mimeType: "application/pdf",
+                            localPath: sourceURL.path
+                        )
+                    ]
+                )
+            )
+
+            let eventID = try #require(result.captureEventID)
+            let dict = result.toDictionary()
+            let indexing = try #require(dict["indexing"] as? [String: Any])
+            #expect(result.item.type == "vaultFile")
+            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.reviewState == "needs_review")
+            #expect(indexing["status"] as? String == "indexed")
+            #expect(indexing["ownerType"] as? String == "vaultFile")
+            #expect(indexing["ownerID"] as? String == result.item.id.uuidString)
+            #expect(indexing["captureEventID"] as? String == eventID.uuidString)
+
+            let itemStatement = try db.prepare("""
+                SELECT i.type, i.title, i.relative_path, vf.filename, vf.file_type
+                FROM items i JOIN vault_files vf ON vf.item_id = i.id
+                WHERE i.id = ?;
+                """)
+            itemStatement.bind(result.item.id.uuidString, at: 1)
+            #expect(try itemStatement.step())
+            #expect(itemStatement.string(at: 0) == "vaultFile")
+            #expect(itemStatement.string(at: 1) == "Canonical provenance PDF")
+            #expect(itemStatement.string(at: 2).hasPrefix("Inbox/Files/"))
+            #expect(itemStatement.string(at: 3).hasSuffix(".pdf"))
+            #expect(itemStatement.string(at: 4) == "pdf")
+
+            let event = try db.prepare("""
+                SELECT source_kind, surface, source_file, attachment_count
+                FROM capture_events
+                WHERE id = ?;
+                """)
+            event.bind(eventID.uuidString, at: 1)
+            #expect(try event.step())
+            #expect(event.string(at: 0) == "file")
+            #expect(event.string(at: 1) == "drop_zone")
+            #expect(event.string(at: 2) == sourceURL.path)
+            #expect(event.int(at: 3) == 1)
+
+            let relations = try SecondBrainStore(database: db).outgoingRelations(
+                for: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString)
+            )
+            #expect(relations.contains { relation in
+                relation.relationType == "produced_item" &&
+                    relation.targetOwner == SecondBrainOwnerRef(ownerType: "vaultFile", ownerID: result.item.id.uuidString)
+            })
+            #expect(relations.contains { $0.relationType == "had_attachment" })
+
+            let matches = try SecondBrainStore(database: db).searchChunks(
+                query: "Canonical provenance PDF",
+                limit: 5
+            )
+            #expect(matches.first?.owner == SecondBrainOwnerRef(ownerType: "vaultFile", ownerID: result.item.id.uuidString))
         }
     }
 }
