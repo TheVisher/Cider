@@ -75,6 +75,39 @@ Reusable audits belong here; task evidence belongs on cards.
 - Dead-code/code-health audit: identify oversized files, force unwraps, debug logs, stale feature paths, and unsafe direct file mutation.
 - Docs-health audit: compare active docs against `Docs/PRODUCT.md`, core-doc policy, and the active roadmap card; convert active work to Kanban and leave legacy context in git history.
 
+## Capture Quality Matrix
+
+Use this matrix when capture, bookmark enrichment, provider metadata, review routing, or agent-visible capture JSON changes. A capture is not good just because an item row exists. Check lifecycle success and visible quality separately.
+
+For each fixture, record:
+
+- command or UI entry point used
+- final canonical item ID
+- title and `.webloc` relative path
+- thumbnail/card source and local thumbnail presence
+- enrichment status and provider/fallback reason
+- route/review state
+- app/CLI/API agreement after the capture settles
+
+Reusable fixtures:
+
+| Fixture | Example | Expected visible quality | Quality checks |
+| --- | --- | --- | --- |
+| GitHub repo, old-good comparison | `https://github.com/nodes-app/swift-markdown-engine` | Repository-shaped title, GitHub Open Graph or repo-specific card, thumbnail stored locally, no generic `Github.Com` card after settle. | Compare against an existing good capture; verify `item get`, `bookmark get`, SQLite, and Library card agree on title, thumbnail, and path. |
+| GitHub repo, current regression | `https://github.com/AndrewPrifer/liquid-dom` | Same repo-card quality as the old-good fixture. A remote Open Graph URL without a local thumbnail is partial/degraded, not complete quality. | Verify title is rich, path is not host-only drift, thumbnail download/card source is present or a retryable provider failure is reported. |
+| Social short link | TikTok short URLs such as `https://www.tiktok.com/t/...` | oEmbed/native title and author when available, real video thumbnail, canonical item updated instead of app-only rich state. | Check app, CLI, duplicate-check, and SQLite converge on the same item ID/title/thumbnail after bounded wait. |
+| Store/media page | Steam store URLs such as `https://store.steampowered.com/app/...` | Store title, provider capsule/header image, media-route metadata where applicable. | Confirm provider image beats generic screenshot, thumbnail is local or failure is explicit, and route/review state is observable. |
+| Product page | Vans/product URLs | Product title and hero image fill card area; icon/touch-icon fallbacks must not count as quality. | Check thumbnail dimensions/render mode, remote URL provenance, and no stale icon-overlay cache decision. |
+| Local/restaurant page | Restaurant or local discovery pages | Human-meaningful place title and useful image when provider metadata exists. | Verify capture does not settle as high quality with only host title, missing thumbnail, and no route/review explanation. |
+
+Pass/fail guidance:
+
+- Lifecycle pass: item exists, duplicate state is correct, provenance/indexing/routing side effects are recorded or explicitly reported as partial.
+- Metadata pass: title is not generic host-only unless no better metadata exists and the fallback is reported.
+- Thumbnail/card pass: expected provider thumbnail/card is local and app-visible, or provider failure is retryable and marked degraded.
+- Canonical parity pass: app, CLI JSON, duplicate-check, search/context, and SQLite refer to the same item ID and final metadata.
+- Drift pass: title, filename/path, search chunks, and visible card state agree unless an explicit review/repair state explains the mismatch.
+
 ## Release Scope
 
 Before external users, clearly decide what is included, experimental, or deferred. Do not let old docs promise features that are not currently supported.
