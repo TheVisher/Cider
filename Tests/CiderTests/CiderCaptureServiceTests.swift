@@ -286,6 +286,48 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("todo capture reuses an existing open todo with the same title")
+    func todoCaptureReusesExistingOpenTodoWithSameTitle() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db
+            )
+
+            let title = "Pay Labcorp bill — invoice 91885413 ($5.78)"
+            let first = try service.addTodoCapture(
+                title: title,
+                sourceText: "Labcorp bill from screenshot.",
+                dueDate: nil,
+                priority: nil,
+                folderID: nil
+            )
+            let second = try service.addTodoCapture(
+                title: title,
+                sourceText: "Pay Labcorp bill",
+                dueDate: nil,
+                priority: nil,
+                folderID: nil
+            )
+
+            #expect(todos.todoCards.count == 1)
+            #expect(second.item.id == first.item.id)
+            #expect(second.duplicate.status == "duplicate")
+            #expect(second.duplicate.existingItemID == first.item.id)
+            #expect(second.nextSafeAction == "inspect_existing_item")
+
+            let duplicateFiles = try FileManager.default.contentsOfDirectory(
+                at: StoragePaths.cachedInboxSubdirectoryURL(for: .todos),
+                includingPropertiesForKeys: nil
+            )
+            .filter { $0.pathExtension == "ics" }
+            #expect(duplicateFiles.count == 1)
+        }
+    }
+
     @Test("capture result dictionary refreshes bookmark enrichment from final stored item")
     func captureResultDictionaryRefreshesBookmarkEnrichment() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in

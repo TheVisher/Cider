@@ -709,6 +709,44 @@ final class CiderCaptureService {
         titleState: String = "manual",
         sourceContext: CaptureSourceContext? = nil
     ) throws -> CiderCaptureResult {
+        if let existing = existingOpenTodoDuplicate(title: title, dueDate: dueDate) {
+            let relativePath = itemRelativePathFromDatabase(itemID: existing.id) ?? "Inbox/Todos"
+            let target = routingTarget(
+                itemType: "todo",
+                relativePath: relativePath,
+                folderID: existing.folderID,
+                fallbackInboxPath: "Inbox/Todos"
+            )
+            let routing = try recordRouting(
+                itemID: existing.id,
+                itemType: "todo",
+                target: target,
+                reviewNeeded: existing.folderID == nil,
+                acceptedReason: "Capture matched an existing open todo and preserved its current location.",
+                reviewReason: "Capture matched an existing open Inbox/Todos item instead of creating a duplicate."
+            )
+
+            return sharedResult(
+                sourceKind: "text",
+                sourceURL: nil,
+                sourceFile: nil,
+                sourceText: sourceText ?? title,
+                itemID: existing.id,
+                itemType: "todo",
+                title: existing.title,
+                relativePath: relativePath,
+                folderID: existing.folderID,
+                folderName: target.name,
+                enrichmentStatus: "not_applicable",
+                titleState: titleState,
+                duplicateStatus: "duplicate",
+                duplicateExistingItemID: existing.id,
+                routing: routing,
+                nextSafeAction: "inspect_existing_item",
+                sourceContext: sourceContext
+            )
+        }
+
         var todo = todoStorage.createTodoCard(title: title, dueDate: dueDate, priority: priority)
         var assignmentSucceeded: Bool?
         if let folderID {
@@ -754,7 +792,7 @@ final class CiderCaptureService {
             folderName: target.name,
             enrichmentStatus: "not_applicable",
             titleState: titleState,
-            duplicateStatus: "not_checked",
+            duplicateStatus: "new",
             routing: routing,
             nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
             partialSuccess: partialSuccess,
@@ -1101,6 +1139,7 @@ final class CiderCaptureService {
         enrichmentStatus: String,
         titleState: String,
         duplicateStatus: String,
+        duplicateExistingItemID: UUID? = nil,
         routing: CiderCaptureResult.Routing,
         nextSafeAction: String,
         partialSuccess: CiderCaptureResult.PartialSuccess? = nil,
@@ -1132,13 +1171,43 @@ final class CiderCaptureService {
             ),
             duplicate: .init(
                 status: duplicateStatus,
-                existingItemID: nil
+                existingItemID: duplicateExistingItemID
             ),
             routing: routing,
             nextSafeAction: nextSafeAction,
             partialSuccess: partialSuccess
         )
         return indexCapturedItem(attachCaptureEvent(to: result, sourceContext: sourceContext))
+    }
+
+    private func existingOpenTodoDuplicate(title: String, dueDate: Date?) -> TodoCard? {
+        let normalizedTitle = normalizedTodoDuplicateTitle(title)
+        guard !normalizedTitle.isEmpty else { return nil }
+        return todoStorage.todoCards.first { candidate in
+            !candidate.isCompleted
+                && normalizedTodoDuplicateTitle(candidate.title) == normalizedTitle
+                && todoDueDatesMatch(candidate.dueDate, dueDate)
+        }
+    }
+
+    private func normalizedTodoDuplicateTitle(_ title: String) -> String {
+        title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .lowercased()
+    }
+
+    private func todoDueDatesMatch(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+        case let (lhs?, rhs?):
+            return abs(lhs.timeIntervalSince(rhs)) < 1
+        default:
+            return false
+        }
     }
 
     private func attachCaptureEvent(
