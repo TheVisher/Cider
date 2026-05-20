@@ -99,6 +99,38 @@ struct SecondBrainFoundationTests {
         return payload
     }
 
+    private func requireAgentFacingCaptureState(
+        _ capture: [String: Any],
+        expectedOriginalText: String? = nil
+    ) throws {
+        let item = try #require(capture["item"] as? [String: Any])
+        #expect(item["id"] as? String != nil)
+        #expect(item["type"] as? String != nil)
+        #expect(item["relativePath"] as? String != nil)
+
+        let duplicate = try #require(capture["duplicate"] as? [String: Any])
+        #expect(duplicate["status"] as? String != nil)
+
+        let routing = try #require(capture["routing"] as? [String: Any])
+        #expect(routing["reviewNeeded"] as? Bool != nil)
+        #expect(routing["reviewState"] as? String != nil)
+
+        let provenance = try #require(capture["provenance"] as? [String: Any])
+        #expect(provenance["status"] as? String != nil)
+
+        let indexing = try #require(capture["indexing"] as? [String: Any])
+        #expect(indexing["status"] as? String != nil)
+
+        let safeNextCommands = try #require(capture["safeNextCommands"] as? [String])
+        #expect(!safeNextCommands.isEmpty)
+        #expect(capture["nextSafeAction"] as? String != nil)
+
+        if let expectedOriginalText {
+            let sourceContext = try #require(capture["sourceContext"] as? [String: Any])
+            #expect(sourceContext["originalText"] as? String == expectedOriginalText)
+        }
+    }
+
     @Test("bookmark add records unified capture routing review metadata")
     func bookmarkAddRecordsUnifiedCaptureRoutingReviewMetadata() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -300,6 +332,7 @@ struct SecondBrainFoundationTests {
         #expect(source["kind"] as? String == "text")
         #expect(source["text"] as? String == raw)
         #expect(item["type"] as? String == "note")
+        try requireAgentFacingCaptureState(capture, expectedOriginalText: raw)
     }
 
     @Test("capture add text file note preserves shell sensitive multiline text")
@@ -330,6 +363,7 @@ struct SecondBrainFoundationTests {
 
         #expect(source["text"] as? String == raw)
         #expect(item["type"] as? String == "note")
+        try requireAgentFacingCaptureState(capture, expectedOriginalText: raw)
     }
 
     @Test("capture add explicit kind avoids inference for raw text")
@@ -351,6 +385,7 @@ struct SecondBrainFoundationTests {
         #expect(todoPayload["command"] as? String == "capture.add")
         #expect(todoItem["type"] as? String == "todo")
         #expect(todoSource["text"] as? String == todoText)
+        try requireAgentFacingCaptureState(todoPayload, expectedOriginalText: todoText)
 
         let urlLookingText = "https://example.com/looks-like-bookmark?cost=$500&quoted=yes"
         let noteURLPayload = try jsonObject(from: runCLI([
@@ -363,6 +398,7 @@ struct SecondBrainFoundationTests {
         let noteURLSource = try #require(noteURLPayload["source"] as? [String: Any])
         #expect(noteURLItem["type"] as? String == "note")
         #expect(noteURLSource["text"] as? String == urlLookingText)
+        try requireAgentFacingCaptureState(noteURLPayload, expectedOriginalText: urlLookingText)
 
         let sourceFile = vault.appendingPathComponent("looks like file.txt")
         try "real file contents".write(to: sourceFile, atomically: true, encoding: .utf8)
@@ -376,6 +412,41 @@ struct SecondBrainFoundationTests {
         let noteFileSource = try #require(noteFilePayload["source"] as? [String: Any])
         #expect(noteFileItem["type"] as? String == "note")
         #expect(noteFileSource["text"] as? String == sourceFile.path)
+        try requireAgentFacingCaptureState(noteFilePayload, expectedOriginalText: sourceFile.path)
+    }
+
+    @Test("capture add positional note joins shell split text exactly")
+    func captureAddPositionalNoteJoinsShellSplitTextExactly() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-positional-note-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let parts = [
+            "Dinner",
+            "costs",
+            "$500;",
+            "say",
+            "\"yes\",",
+            "don't",
+            "run",
+            "`rm -rf /`.",
+            "URL:",
+            "https://example.com/path?a=1&b=two",
+        ]
+        let raw = parts.joined(separator: " ")
+        let payload = try jsonObject(from: runCLI(
+            ["capture", "add", "--kind", "note"] + parts + ["--json"],
+            vaultURL: vault
+        ))
+        let capture = try requireCaptureAddContract(payload)
+        let source = try #require(capture["source"] as? [String: Any])
+        let item = try #require(capture["item"] as? [String: Any])
+
+        #expect(source["kind"] as? String == "text")
+        #expect(source["text"] as? String == raw)
+        #expect(item["type"] as? String == "note")
+        try requireAgentFacingCaptureState(capture, expectedOriginalText: raw)
     }
 
     @Test("capture add explicit bookmark url and file path use canonical JSON")
@@ -396,7 +467,9 @@ struct SecondBrainFoundationTests {
         let bookmarkItem = try #require(bookmarkPayload["item"] as? [String: Any])
         #expect(bookmarkPayload["command"] as? String == "capture.add")
         #expect(bookmarkSource["kind"] as? String == "url")
+        #expect(bookmarkSource["url"] as? String == "https://example.com/capture?x=1&price=$500")
         #expect(bookmarkItem["type"] as? String == "bookmark")
+        try requireAgentFacingCaptureState(bookmarkPayload, expectedOriginalText: "https://example.com/capture?x=1&price=$500")
 
         let sourceURL = vault.appendingPathComponent("path with spaces.txt")
         try "file body".write(to: sourceURL, atomically: true, encoding: .utf8)
@@ -413,6 +486,7 @@ struct SecondBrainFoundationTests {
         #expect(fileSource["file"] as? String == sourceURL.path)
         #expect(fileItem["type"] as? String == "vaultFile")
         #expect(fileItem["relativePath"] as? String == "Inbox/Files/path with spaces.txt")
+        try requireAgentFacingCaptureState(filePayload, expectedOriginalText: sourceURL.path)
     }
 
     @Test("capture add event supports structured flags and stdin source text")
@@ -449,6 +523,7 @@ struct SecondBrainFoundationTests {
         #expect(routing["reviewState"] as? String == "needs_review")
         #expect(capture["nextSafeAction"] as? String == "review_route")
         #expect(capture["safeNextCommands"] as? [String] != nil)
+        try requireAgentFacingCaptureState(capture, expectedOriginalText: raw)
     }
 
     @Test("capture add contact supports structured flags and text file source text")
@@ -487,6 +562,7 @@ struct SecondBrainFoundationTests {
         #expect(routing["reviewState"] as? String == "needs_review")
         #expect(capture["nextSafeAction"] as? String == "review_route")
         #expect(capture["safeNextCommands"] as? [String] != nil)
+        try requireAgentFacingCaptureState(capture, expectedOriginalText: raw)
     }
 
     @Test("capture archive artifacts summarizes generated audit directory and trashes only after capture")

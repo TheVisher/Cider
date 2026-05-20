@@ -7468,28 +7468,25 @@ struct CiderCLI {
         let rawText = try rawCaptureText(from: args)
         let url = parseFlag("--url", from: args)
         let path = parseFlag("--path", from: args)
-        let positional = firstPositionalArgument(
-            from: args,
-            valueFlags: [
-                "--kind", "--title", "--folder", "--path", "--text-file", "--url",
-                "--surface", "--channel", "--channel-id", "--thread-id", "--message-id",
-                "--sender-id", "--sender-name", "--timeout", "--wait-timeout", "--capture-timeout",
-                "--source-meta",
-            ]
-        )
+        let positionalArgs = capturePositionalArguments(from: args)
+        let positional = positionalArgs.first
+        let positionalText = positionalArgs.isEmpty ? nil : positionalArgs.joined(separator: " ")
 
         switch kind {
         case nil:
             if let url { return .inferred(url) }
             if let path { return .inferred(path) }
             if let rawText { return .note(rawText) }
-            if let positional { return .inferred(positional) }
+            if let positionalText {
+                if positionalArgs.count == 1 { return .inferred(positionalText) }
+                return .note(positionalText)
+            }
         case "note":
             if let rawText { return .note(rawText) }
-            if let positional { return .note(positional) }
+            if let positionalText { return .note(positionalText) }
         case "todo":
             if let rawText { return .todo(rawText) }
-            if let positional { return .todo(positional) }
+            if let positionalText { return .todo(positionalText) }
         case "bookmark", "url":
             if let url { return .bookmark(url) }
             if let positional { return .bookmark(positional) }
@@ -7505,6 +7502,36 @@ struct CiderCLI {
         }
 
         throw CaptureAddArgumentError.message("Source required. Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+    }
+
+    static func capturePositionalArguments(from args: [String]) -> [String] {
+        let valueFlags: Set<String> = [
+            "--kind", "--title", "--folder", "--path", "--text-file", "--url",
+            "--surface", "--channel", "--channel-id", "--thread-id", "--message-id",
+            "--sender-id", "--sender-name", "--timeout", "--wait-timeout", "--capture-timeout",
+            "--source-meta", "--date", "--time", "--location", "--details", "--name",
+            "--relationship", "--email", "--phone",
+        ]
+        let booleanFlags: Set<String> = [
+            "--stdin", "--json", "--no-wait", "--all-day", "--help", "-h",
+        ]
+        var values: [String] = []
+        var skipNext = false
+        for arg in args {
+            if skipNext {
+                skipNext = false
+                continue
+            }
+            if valueFlags.contains(arg) {
+                skipNext = true
+                continue
+            }
+            if booleanFlags.contains(arg) || arg.hasPrefix("--") {
+                continue
+            }
+            values.append(arg)
+        }
+        return values
     }
 
     static func resolveCaptureAddEventInput(from args: [String], rawText: String?) throws -> CaptureAddEventInput {
@@ -11085,7 +11112,8 @@ struct CiderCLI {
         let hasStructuredContext = [
             surface, channel, channelID, threadID, messageID, senderID, senderName,
         ].contains { ($0 ?? "").isEmpty == false } || !metadata.isEmpty
-        guard hasStructuredContext else { return nil }
+        let hasOriginalText = (originalText ?? "").isEmpty == false
+        guard hasStructuredContext || hasOriginalText else { return nil }
 
         return CaptureSourceContext(
             surface: surface,
