@@ -1280,7 +1280,7 @@ final class CiderCaptureService {
             reason: nil,
             ownerType: owner.ownerType,
             ownerID: owner.ownerID,
-            captureEventID: nil
+            captureEventID: result.captureEventID
         )
         return result
     }
