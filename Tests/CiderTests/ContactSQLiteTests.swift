@@ -615,19 +615,26 @@ struct ContactSQLiteTests {
     @Test("Duplicate orphan contact UUID is skipped during adoption")
     func duplicateOrphanContactUUIDIsSkipped() throws {
         let (db, url) = try makeTestDB()
-        defer { db.close(); cleanup(url) }
-
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cider-contact-duplicate-orphan-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let fm = FileManager.default
+        let vault = makeTempVaultURL()
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = StoragePaths.cachedInboxSubdirectoryURL(for: .contacts)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
 
         let contact = ContactCard(displayName: "Duplicate embedded UUID", email: "duplicate@example.com")
         let writer = makeService(db)
-        let firstURL = tmpDir.appendingPathComponent("first.vcf")
-        let secondURL = tmpDir.appendingPathComponent("second.vcf")
+        let firstURL = inbox.appendingPathComponent("first.vcf")
+        let secondURL = inbox.appendingPathComponent("second.vcf")
         #expect(writer.writeVCardFile(for: contact, to: firstURL) == true)
-        try FileManager.default.copyItem(at: firstURL, to: secondURL)
+        try fm.copyItem(at: firstURL, to: secondURL)
 
         let adopter = makeService(db)
         #expect(adopter._adoptOrphanForTesting(at: firstURL)?.id == contact.id)
@@ -638,6 +645,81 @@ struct ContactSQLiteTests {
         stmt.bind(DatabaseHelpers.encode(contact.id), at: 1)
         try stmt.step()
         #expect(stmt.int(at: 0) == 1)
+    }
+
+    @Test("Moved orphan contact UUID reassigns missing indexed path")
+    func movedOrphanContactUUIDReassignsMissingIndexedPath() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = makeTempVaultURL()
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = StoragePaths.cachedInboxSubdirectoryURL(for: .contacts)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let contact = ContactCard(displayName: "Moved Contact", email: "move@example.com")
+        let service = makeService(db)
+        service._setIndexEntryForTesting(contactID: contact.id, filename: "Old Contact.vcf")
+        let movedURL = inbox.appendingPathComponent("Moved Contact.vcf")
+        #expect(service.writeVCardFile(for: contact, to: movedURL) == true)
+
+        let adopted = service._adoptOrphanForTesting(at: movedURL)
+
+        #expect(adopted?.id == contact.id)
+        #expect(service._indexFilenameForTesting(contactID: contact.id) == "Moved Contact.vcf")
+
+        let stmt = try db.prepare("SELECT relative_path FROM items WHERE id = ?;")
+        stmt.bind(DatabaseHelpers.encode(contact.id), at: 1)
+        try stmt.step()
+        #expect(stmt.optionalString(at: 0) == "Inbox/Contacts/Moved Contact.vcf")
+    }
+
+    @Test("Orphan contact UUID matching another item type is skipped")
+    func orphanContactUUIDMatchingAnotherItemTypeIsSkipped() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = makeTempVaultURL()
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = StoragePaths.cachedInboxSubdirectoryURL(for: .contacts)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let sharedID = UUID()
+        let existingTodo = TodoCard(id: sharedID, title: "Existing Todo")
+        TodoCardStorage(database: db).persistTodoToDatabase(db, todo: existingTodo)
+
+        let contact = ContactCard(id: sharedID, displayName: "Wrong Type Contact")
+        let service = makeService(db)
+        let contactURL = inbox.appendingPathComponent("Wrong Type Contact.vcf")
+        #expect(service.writeVCardFile(for: contact, to: contactURL) == true)
+
+        #expect(service._adoptOrphanForTesting(at: contactURL) == nil)
+
+        let itemStmt = try db.prepare("SELECT type, title, relative_path FROM items WHERE id = ?;")
+        itemStmt.bind(DatabaseHelpers.encode(sharedID), at: 1)
+        try itemStmt.step()
+        #expect(itemStmt.string(at: 0) == "todo")
+        #expect(itemStmt.string(at: 1) == "Existing Todo")
+        #expect(itemStmt.optionalString(at: 2) == "Inbox/Todos/Existing Todo.ics")
+
+        let contactStmt = try db.prepare("SELECT COUNT(*) FROM contacts WHERE item_id = ?;")
+        contactStmt.bind(DatabaseHelpers.encode(sharedID), at: 1)
+        try contactStmt.step()
+        #expect(contactStmt.int(at: 0) == 0)
     }
 
     @Test("hasAvatar flag round-trips through SQLite when mutated via persist path")

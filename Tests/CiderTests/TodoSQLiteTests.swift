@@ -715,19 +715,26 @@ struct TodoSQLiteTests {
     @Test("Duplicate orphan todo UUID is skipped during adoption")
     func duplicateOrphanTodoUUIDIsSkipped() throws {
         let (db, url) = try makeTestDB()
-        defer { db.close(); cleanup(url) }
-
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cider-todo-duplicate-orphan-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let fm = FileManager.default
+        let vault = makeTempVaultURL()
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = StoragePaths.cachedInboxSubdirectoryURL(for: .todos)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
 
         let todo = TodoCard(title: "Duplicate embedded UUID", details: "Only one row should win")
         let writer = makeService(db)
-        let firstURL = tmpDir.appendingPathComponent("first.ics")
-        let secondURL = tmpDir.appendingPathComponent("second.ics")
+        let firstURL = inbox.appendingPathComponent("first.ics")
+        let secondURL = inbox.appendingPathComponent("second.ics")
         #expect(writer.writeICSFile(for: todo, to: firstURL) == true)
-        try FileManager.default.copyItem(at: firstURL, to: secondURL)
+        try fm.copyItem(at: firstURL, to: secondURL)
 
         let adopter = makeService(db)
         #expect(adopter._adoptOrphanForTesting(at: firstURL)?.id == todo.id)
@@ -738,5 +745,80 @@ struct TodoSQLiteTests {
         stmt.bind(DatabaseHelpers.encode(todo.id), at: 1)
         try stmt.step()
         #expect(stmt.int(at: 0) == 1)
+    }
+
+    @Test("Moved orphan todo UUID reassigns missing indexed path")
+    func movedOrphanTodoUUIDReassignsMissingIndexedPath() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = makeTempVaultURL()
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = StoragePaths.cachedInboxSubdirectoryURL(for: .todos)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let todo = TodoCard(title: "Moved Todo", details: "same uuid, new path")
+        let service = makeService(db)
+        service._setIndexEntryForTesting(todoID: todo.id, filename: "Old Todo.ics")
+        let movedURL = inbox.appendingPathComponent("Moved Todo.ics")
+        #expect(service.writeICSFile(for: todo, to: movedURL) == true)
+
+        let adopted = service._adoptOrphanForTesting(at: movedURL)
+
+        #expect(adopted?.id == todo.id)
+        #expect(service._indexFilenameForTesting(todoID: todo.id) == "Moved Todo.ics")
+
+        let stmt = try db.prepare("SELECT relative_path FROM items WHERE id = ?;")
+        stmt.bind(DatabaseHelpers.encode(todo.id), at: 1)
+        try stmt.step()
+        #expect(stmt.optionalString(at: 0) == "Inbox/Todos/Moved Todo.ics")
+    }
+
+    @Test("Orphan todo UUID matching another item type is skipped")
+    func orphanTodoUUIDMatchingAnotherItemTypeIsSkipped() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = makeTempVaultURL()
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = StoragePaths.cachedInboxSubdirectoryURL(for: .todos)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let sharedID = UUID()
+        let existingContact = ContactCard(id: sharedID, displayName: "Existing Contact")
+        ContactStorage(database: db).persistContactToDatabase(db, contact: existingContact)
+
+        let todo = TodoCard(id: sharedID, title: "Wrong Type Todo")
+        let service = makeService(db)
+        let todoURL = inbox.appendingPathComponent("Wrong Type Todo.ics")
+        #expect(service.writeICSFile(for: todo, to: todoURL) == true)
+
+        #expect(service._adoptOrphanForTesting(at: todoURL) == nil)
+
+        let itemStmt = try db.prepare("SELECT type, title, relative_path FROM items WHERE id = ?;")
+        itemStmt.bind(DatabaseHelpers.encode(sharedID), at: 1)
+        try itemStmt.step()
+        #expect(itemStmt.string(at: 0) == "contact")
+        #expect(itemStmt.string(at: 1) == "Existing Contact")
+        #expect(itemStmt.optionalString(at: 2) == "Inbox/Contacts/Existing Contact.vcf")
+
+        let todoStmt = try db.prepare("SELECT COUNT(*) FROM todos WHERE item_id = ?;")
+        todoStmt.bind(DatabaseHelpers.encode(sharedID), at: 1)
+        try todoStmt.step()
+        #expect(todoStmt.int(at: 0) == 0)
     }
 }

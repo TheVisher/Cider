@@ -749,22 +749,29 @@ struct EventSQLiteTests {
     @Test("Duplicate orphan event UUID is skipped during adoption")
     func duplicateOrphanEventUUIDIsSkipped() throws {
         let (db, url) = try makeTestDB()
-        defer { db.close(); cleanup(url) }
-
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cider-event-duplicate-orphan-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let fm = FileManager.default
+        let vault = makeTempVaultURL()
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = StoragePaths.cachedInboxSubdirectoryURL(for: .dateCards)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
 
         let event = DateCard(
             title: "Duplicate embedded UUID",
             startAt: Date(timeIntervalSince1970: 1_800_000_000)
         )
         let writer = makeService(db)
-        let firstURL = tmpDir.appendingPathComponent("first.ics")
-        let secondURL = tmpDir.appendingPathComponent("second.ics")
+        let firstURL = inbox.appendingPathComponent("first.ics")
+        let secondURL = inbox.appendingPathComponent("second.ics")
         #expect(writer.writeICSFile(for: event, to: firstURL) == true)
-        try FileManager.default.copyItem(at: firstURL, to: secondURL)
+        try fm.copyItem(at: firstURL, to: secondURL)
 
         let adopter = makeService(db)
         #expect(adopter._adoptOrphanForTesting(at: firstURL)?.id == event.id)
@@ -775,5 +782,87 @@ struct EventSQLiteTests {
         stmt.bind(DatabaseHelpers.encode(event.id), at: 1)
         try stmt.step()
         #expect(stmt.int(at: 0) == 1)
+    }
+
+    @Test("Moved orphan event UUID reassigns missing indexed path")
+    func movedOrphanEventUUIDReassignsMissingIndexedPath() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = makeTempVaultURL()
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = StoragePaths.cachedInboxSubdirectoryURL(for: .dateCards)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let event = DateCard(
+            title: "Moved Event",
+            startAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+        let service = makeService(db)
+        service._setIndexEntryForTesting(dateCardID: event.id, filename: "Old Event.ics")
+        let movedURL = inbox.appendingPathComponent("Moved Event.ics")
+        #expect(service.writeICSFile(for: event, to: movedURL) == true)
+
+        let adopted = service._adoptOrphanForTesting(at: movedURL)
+
+        #expect(adopted?.id == event.id)
+        #expect(service._indexFilenameForTesting(dateCardID: event.id) == "Moved Event.ics")
+
+        let stmt = try db.prepare("SELECT relative_path FROM items WHERE id = ?;")
+        stmt.bind(DatabaseHelpers.encode(event.id), at: 1)
+        try stmt.step()
+        #expect(stmt.optionalString(at: 0) == "Inbox/Date Cards/Moved Event.ics")
+    }
+
+    @Test("Orphan event UUID matching another item type is skipped")
+    func orphanEventUUIDMatchingAnotherItemTypeIsSkipped() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = makeTempVaultURL()
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = StoragePaths.cachedInboxSubdirectoryURL(for: .dateCards)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let sharedID = UUID()
+        let existingTodo = TodoCard(id: sharedID, title: "Existing Todo")
+        TodoCardStorage(database: db).persistTodoToDatabase(db, todo: existingTodo)
+
+        let event = DateCard(
+            id: sharedID,
+            title: "Wrong Type Event",
+            startAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+        let service = makeService(db)
+        let eventURL = inbox.appendingPathComponent("Wrong Type Event.ics")
+        #expect(service.writeICSFile(for: event, to: eventURL) == true)
+
+        #expect(service._adoptOrphanForTesting(at: eventURL) == nil)
+
+        let itemStmt = try db.prepare("SELECT type, title, relative_path FROM items WHERE id = ?;")
+        itemStmt.bind(DatabaseHelpers.encode(sharedID), at: 1)
+        try itemStmt.step()
+        #expect(itemStmt.string(at: 0) == "todo")
+        #expect(itemStmt.string(at: 1) == "Existing Todo")
+        #expect(itemStmt.optionalString(at: 2) == "Inbox/Todos/Existing Todo.ics")
+
+        let eventStmt = try db.prepare("SELECT COUNT(*) FROM events WHERE item_id = ?;")
+        eventStmt.bind(DatabaseHelpers.encode(sharedID), at: 1)
+        try eventStmt.step()
+        #expect(eventStmt.int(at: 0) == 0)
     }
 }

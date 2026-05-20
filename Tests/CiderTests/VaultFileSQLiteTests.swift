@@ -695,6 +695,43 @@ struct VaultFileSQLiteTests {
         #expect(stmt.string(at: 0) == "vaultFile")
     }
 
+    @Test("Vault file persist does not mutate an existing non-vaultFile item")
+    func persistDoesNotMutateExistingNonVaultFileItem() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let sharedID = UUID()
+        let seed = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, relative_path)
+            VALUES (?, 'contact', 'Alice', ?, ?, 'Inbox/Contacts/alice.vcf');
+            """)
+        seed.bind(DatabaseHelpers.encode(sharedID), at: 1)
+            .bind(DatabaseHelpers.encode(Date(timeIntervalSince1970: 1_700_000_000)), at: 2)
+            .bind(DatabaseHelpers.encode(Date(timeIntervalSince1970: 1_700_000_000)), at: 3)
+        try seed.step()
+
+        let service = makeService(db)
+        let file = makeFile(
+            id: sharedID,
+            filename: "alice.jpg",
+            relativePath: "Inbox/Images/alice.jpg",
+            title: "Alice Photo"
+        )
+        service.persistVaultFileToDatabase(db, file: file)
+
+        let itemStmt = try db.prepare("SELECT type, title, relative_path FROM items WHERE id = ?;")
+        itemStmt.bind(DatabaseHelpers.encode(sharedID), at: 1)
+        try itemStmt.step()
+        #expect(itemStmt.string(at: 0) == "contact")
+        #expect(itemStmt.string(at: 1) == "Alice")
+        #expect(itemStmt.optionalString(at: 2) == "Inbox/Contacts/alice.vcf")
+
+        let detailStmt = try db.prepare("SELECT COUNT(*) FROM vault_files WHERE item_id = ?;")
+        detailStmt.bind(DatabaseHelpers.encode(sharedID), at: 1)
+        try detailStmt.step()
+        #expect(detailStmt.int(at: 0) == 0)
+    }
+
     // MARK: - 19. Schema migration v2 lands title_manually_set column
 
     @Test("Migration v2 adds vault_files.title_manually_set column and schema_migrations table")

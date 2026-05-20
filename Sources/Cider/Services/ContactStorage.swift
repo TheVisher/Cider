@@ -776,6 +776,19 @@ final class ContactStorage: ObservableObject {
         }
     }
 
+    private func existingItemType(for id: UUID) -> String? {
+        guard let db = resolvedDatabase else { return nil }
+        do {
+            let stmt = try db.prepare("SELECT type FROM items WHERE id = ? LIMIT 1;")
+            stmt.bind(DatabaseHelpers.encode(id), at: 1)
+            guard try stmt.step() else { return nil }
+            return stmt.string(at: 0)
+        } catch {
+            logger.error("Failed to inspect existing item type for contact adoption: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     /// Adopts a .vcf file that exists on disk but isn't in the index.
     private func adoptOrphanVCard(at url: URL, folderID: UUID?) -> ContactCard? {
         guard let content = try? String(contentsOf: url, encoding: .utf8),
@@ -783,9 +796,30 @@ final class ContactStorage: ObservableObject {
 
         contact.folderID = folderID
         let filename = url.lastPathComponent
-        guard index[contact.id] == nil else {
-            logger.warning("Skipped duplicate orphan .vcf UUID \(contact.id.uuidString) at \(filename)")
+        if let existingType = existingItemType(for: contact.id), existingType != "contact" {
+            logger.warning("Skipped orphan .vcf UUID \(contact.id.uuidString) at \(filename): existing item type is \(existingType)")
             return nil
+        }
+        guard index[contact.id] == nil else {
+            guard let existingEntry = index[contact.id] else { return nil }
+            let existingURL = resolveDirectoryURL(folderID: existingEntry.folderID)
+                .appendingPathComponent(existingEntry.filename)
+            guard !FileManager.default.fileExists(atPath: existingURL.path) else {
+                logger.warning("Skipped duplicate orphan .vcf UUID \(contact.id.uuidString) at \(filename)")
+                return nil
+            }
+
+            var movedEntry = existingEntry
+            movedEntry.filename = filename
+            movedEntry.folderID = folderID
+            movedEntry.labelIDs = contact.labelIDs.isEmpty ? existingEntry.labelIDs : contact.labelIDs
+            movedEntry.createdAt = existingEntry.createdAt ?? contact.createdAt
+            index[contact.id] = movedEntry
+            if contact.labelIDs.isEmpty, let labelIDs = existingEntry.labelIDs {
+                contact.labelIDs = labelIDs
+            }
+            logger.info("Reassigned moved orphan .vcf UUID \(contact.id.uuidString) to \(filename)")
+            return contact
         }
 
         index[contact.id] = IndexEntry(
