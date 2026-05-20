@@ -502,6 +502,110 @@ struct NotesSQLiteTests {
         #expect(Set(reloaded.notes.map(\.content)) == Set(["Legacy body", "Inbox body"]))
     }
 
+    @Test("Markdown rescan collapses exact duplicate note artifacts")
+    func markdownRescanCollapsesExactDuplicateNoteArtifacts() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let inboxDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
+        try fm.createDirectory(at: inboxDir, withIntermediateDirectories: true)
+        let content = """
+        # Games Library
+
+        Seeded: 2026-04-30
+        Purpose: Track games Erik loves and future recommendation signals.
+        """
+        let canonicalURL = inboxDir.appendingPathComponent("Games Library.md")
+        let duplicateURL = inboxDir.appendingPathComponent("Games Library 2.md")
+        try content.write(to: canonicalURL, atomically: true, encoding: .utf8)
+        try content.write(to: duplicateURL, atomically: true, encoding: .utf8)
+
+        let reconciler = makeService(db)
+        reconciler.rescan()
+
+        #expect(reconciler.notes.count == 1)
+        #expect(reconciler.notes.first?.title == "Games Library")
+        #expect(fm.fileExists(atPath: canonicalURL.path))
+        #expect(!fm.fileExists(atPath: duplicateURL.path))
+
+        let reloaded = makeService(db)
+        reloaded.loadNotesFromDatabase(db)
+        #expect(reloaded.notes.count == 1)
+        #expect(reloaded.notes.first?.relativePath == "Inbox/Notes/Games Library.md")
+    }
+
+    @Test("Sync pull skips exact duplicate note instead of creating suffixed Markdown")
+    func addFromSyncSkipsExactDuplicateNote() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let inboxDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
+        try fm.createDirectory(at: inboxDir, withIntermediateDirectories: true)
+        let content = """
+        # Movies Library
+
+        Seeded: 2026-04-30
+        Purpose: Track movies Erik loves and future recommendation signals.
+        """
+        let canonicalURL = inboxDir.appendingPathComponent("Movies Library.md")
+        try content.write(to: canonicalURL, atomically: true, encoding: .utf8)
+
+        let existingID = UUID()
+        let service = makeService(db)
+        service.persistNoteToDatabase(
+            db,
+            note: Note(
+                id: existingID,
+                title: "Movies Library",
+                content: content,
+                createdAt: Date(timeIntervalSince1970: 1_000),
+                modifiedAt: Date(timeIntervalSince1970: 2_000),
+                relativePath: "Inbox/Notes/Movies Library.md",
+                tags: ["media"]
+            )
+        )
+        service.loadNotesFromDatabase(db)
+
+        service.addFromSync(
+            id: UUID(),
+            title: "Movies Library 2",
+            content: content,
+            folderID: nil,
+            isPinned: false,
+            tags: ["sync"],
+            createdAt: Date(timeIntervalSince1970: 3_000),
+            updatedAt: Date(timeIntervalSince1970: 4_000)
+        )
+
+        #expect(service.notes.count == 1)
+        let merged = try #require(service.notes.first)
+        #expect(merged.id == existingID)
+        #expect(merged.title == "Movies Library")
+        #expect(Set(merged.tags) == Set(["media", "sync"]))
+        #expect(fm.fileExists(atPath: canonicalURL.path))
+        #expect(!fm.fileExists(atPath: inboxDir.appendingPathComponent("Movies Library 2.md").path))
+    }
+
     // MARK: - Label IDs
 
     @Test("Label IDs round-trip through item_labels join table")

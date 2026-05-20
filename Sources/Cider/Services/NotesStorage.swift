@@ -373,10 +373,44 @@ final class NotesStorage: ObservableObject {
         // 3. Pick up already-indexed vault folder notes (in case step 2 added
         //    new index entries).
         loadVaultFolderNotes()
-        notes = canonicalizedScannedNotes(notes)
+
+        // 4. Hydrate scanned placeholders before duplicate repair. The scan
+        // path deliberately avoids reading every file body until now; exact
+        // duplicate detection needs the real content so distinct edited notes
+        // with similar suffixed titles are preserved.
+        guard let db = resolvedDatabase else {
+            for i in notes.indices where notes[i].content.isEmpty {
+                notes[i].content = loadContent(for: notes[i])
+            }
+            let canonicalized = canonicalizedScannedNotes(notes)
+            quarantineDuplicateNoteFiles(canonicalized.removedNotes)
+            notes = canonicalized.notes
+            index = rebuiltNoteIndex(from: notes)
+            return
+        }
+        for i in notes.indices {
+            if notes[i].content.isEmpty {
+                let diskContent = loadContent(for: notes[i])
+                if !diskContent.isEmpty {
+                    notes[i].content = diskContent
+                }
+            }
+            if let existingTags = try? loadTags(db, itemID: notes[i].id), !existingTags.isEmpty {
+                notes[i].tags = existingTags
+            }
+            if let existingSummary = try? loadSummary(db, itemID: notes[i].id),
+               !existingSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               (notes[i].summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+                notes[i].summary = existingSummary
+            }
+        }
+
+        let canonicalized = canonicalizedScannedNotes(notes)
+        quarantineDuplicateNoteFiles(canonicalized.removedNotes)
+        notes = canonicalized.notes
         index = rebuiltNoteIndex(from: notes)
 
-        // 4. Sync the full in-memory state to SQLite. Upsert everything we
+        // 5. Sync the full in-memory state to SQLite. Upsert everything we
         //    have now, and delete rows for notes that disappeared.
         //    `persistNoteToDatabaseInner` scrubs dangling folder_id references
         //    at the lowest level so a single stale reference can't abort the
@@ -385,33 +419,18 @@ final class NotesStorage: ObservableObject {
         //    IMPORTANT: the disk scan builds lightweight placeholders. Hydrate
         //    file content and DB-only fields before upsert so rescan cannot
         //    erase note bodies, tags, or summaries.
-        guard let db = resolvedDatabase else { return }
         let currentIDs = Set(notes.map(\.id))
-        let removedIDs = previousIDs.subtracting(currentIDs)
+        let removedIDs = previousIDs
+            .subtracting(currentIDs)
+            .union(Set(canonicalized.removedNotes.map(\.id)))
         do {
-            // Preserve note bodies and DB-only fields through the rescan round-trip.
-            for i in notes.indices {
-                if notes[i].content.isEmpty {
-                    let diskContent = loadContent(for: notes[i])
-                    if !diskContent.isEmpty {
-                        notes[i].content = diskContent
-                    }
-                }
-                if let existingTags = try? loadTags(db, itemID: notes[i].id), !existingTags.isEmpty {
-                    notes[i].tags = existingTags
-                }
-                if let existingSummary = try? loadSummary(db, itemID: notes[i].id),
-                   !existingSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                   (notes[i].summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
-                    notes[i].summary = existingSummary
-                }
-            }
             try db.withTransaction {
                 for note in self.notes {
                     try self.persistNoteToDatabaseInner(db, note: note)
                 }
+                let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
                 for removedID in removedIDs {
-                    let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+                    stmt.reset()
                     stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
                     try stmt.step()
                 }
@@ -1192,6 +1211,20 @@ final class NotesStorage: ObservableObject {
         let sanitizedTitle = title.replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
         let safeTitle = sanitizedTitle.isEmpty ? "Untitled" : sanitizedTitle
+
+        if let duplicateIndex = exactDuplicateNoteIndex(title: safeTitle, content: content) {
+            mergeExactDuplicateFromSync(
+                at: duplicateIndex,
+                content: content,
+                isPinned: isPinned,
+                tags: tags,
+                createdAt: createdAt,
+                updatedAt: updatedAt
+            )
+            logger.warning("Sync skipped exact duplicate note pull: \(safeTitle, privacy: .public)")
+            return
+        }
+
         let uniqued = uniqueTitle(safeTitle)
         let filename = "\(uniqued).md"
 
@@ -1237,6 +1270,52 @@ final class NotesStorage: ObservableObject {
         )
         notes.insert(note, at: 0)
         persistNoteToDatabase(note)
+    }
+
+    private func exactDuplicateNoteIndex(title: String, content: String) -> Int? {
+        let incomingKey = noteDedupKey(title: title, content: content, relativePath: "")
+        guard !incomingKey.isEmpty else { return nil }
+
+        for index in notes.indices {
+            var candidate = notes[index]
+            if candidate.content.isEmpty {
+                candidate.content = loadContent(for: candidate)
+            }
+            if noteDedupKey(candidate) == incomingKey {
+                return index
+            }
+        }
+        return nil
+    }
+
+    private func mergeExactDuplicateFromSync(
+        at index: Int,
+        content: String,
+        isPinned: Bool,
+        tags: [String],
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        guard notes.indices.contains(index) else { return }
+
+        if createdAt < notes[index].createdAt {
+            notes[index].createdAt = createdAt
+        }
+        if updatedAt > notes[index].modifiedAt {
+            notes[index].modifiedAt = updatedAt
+            try? FileManager.default.setAttributes(
+                [.modificationDate: updatedAt],
+                ofItemAtPath: noteFileURL(for: notes[index]).path
+            )
+        }
+        if notes[index].content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            notes[index].content = content
+            try? content.write(to: noteFileURL(for: notes[index]), atomically: true, encoding: .utf8)
+        }
+        notes[index].isPinned = notes[index].isPinned || isPinned
+        notes[index].tags = deduplicatedNoteTags(from: notes[index].tags + tags)
+        persistNoteToDatabase(notes[index])
     }
 
     /// Update an existing note from a sync pull (remote is newer).
@@ -1782,13 +1861,59 @@ final class NotesStorage: ObservableObject {
         return result.notes
     }
 
-    private func canonicalizedScannedNotes(_ loaded: [Note]) -> [Note] {
+    private func canonicalizedScannedNotes(_ loaded: [Note]) -> (notes: [Note], removedNotes: [Note]) {
         var seen = Set<UUID>()
-        var result: [Note] = []
+        var uuidUniqueNotes: [Note] = []
         for note in loaded where seen.insert(note.id).inserted {
-            result.append(note)
+            uuidUniqueNotes.append(note)
         }
-        return result
+        let result = canonicalizedNoteGroups(uuidUniqueNotes)
+        let removedIDs = Set(result.removedIDs)
+        let removedNotes = uuidUniqueNotes.filter { removedIDs.contains($0.id) }
+        return (result.notes, removedNotes)
+    }
+
+    private func quarantineDuplicateNoteFiles(_ removedNotes: [Note]) {
+        guard !removedNotes.isEmpty else { return }
+        let fm = FileManager.default
+        for note in removedNotes {
+            let sourceURL = noteFileURL(for: note)
+            guard fm.fileExists(atPath: sourceURL.path) else { continue }
+            let quarantineDir = sourceURL
+                .deletingLastPathComponent()
+                .appendingPathComponent(".deduplicated", isDirectory: true)
+            do {
+                try fm.createDirectory(at: quarantineDir, withIntermediateDirectories: true)
+                let destinationURL = uniqueQuarantineURL(
+                    for: sourceURL.lastPathComponent,
+                    in: quarantineDir
+                )
+                try fm.moveItem(at: sourceURL, to: destinationURL)
+                logger.info("Quarantined exact duplicate note file: \(sourceURL.path, privacy: .public)")
+            } catch {
+                logger.error("Failed to quarantine duplicate note file \(sourceURL.path, privacy: .public): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func uniqueQuarantineURL(for filename: String, in directoryURL: URL) -> URL {
+        let fm = FileManager.default
+        var candidate = directoryURL.appendingPathComponent(filename)
+        guard fm.fileExists(atPath: candidate.path) else { return candidate }
+
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        for index in 2...100 {
+            let nextName = ext.isEmpty ? "\(base) \(index)" : "\(base) \(index).\(ext)"
+            candidate = directoryURL.appendingPathComponent(nextName)
+            if !fm.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        let fallbackName = ext.isEmpty
+            ? "\(base) \(UUID().uuidString)"
+            : "\(base) \(UUID().uuidString).\(ext)"
+        return directoryURL.appendingPathComponent(fallbackName)
     }
 
     private static func normalizedNoteRelativePath(_ relativePath: String) -> String {
@@ -1843,9 +1968,13 @@ final class NotesStorage: ObservableObject {
     }
 
     private func noteDedupKey(_ note: Note) -> String {
-        let relativePath = note.relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        let content = note.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nameKey = VaultDuplicateAuditor.normalizedDuplicateName(note.title.isEmpty ? note.relativePath : note.title)
+        noteDedupKey(title: note.title, content: note.content, relativePath: note.relativePath)
+    }
+
+    private func noteDedupKey(title: String, content: String, relativePath: String) -> String {
+        let relativePath = relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let content = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nameKey = VaultDuplicateAuditor.normalizedDuplicateName(title.isEmpty ? relativePath : title)
         if !nameKey.isEmpty {
             return "exact:\(nameKey)|\(content)"
         }
