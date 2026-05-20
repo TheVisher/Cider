@@ -1304,16 +1304,47 @@ struct CiderCLI {
 
         case "enrich":
             guard let itemRef = args.first else {
-                printCLIError("Usage: cider-cli review enrich <item-id> [--actor user|agent] [--json]")
+                printCLIError("Usage: cider-cli review enrich <item-id> [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]")
                 return
             }
             do {
                 let itemID = try service.resolveItemID(ref: itemRef)
-                let result = try service.enrich(
-                    itemID: itemID,
-                    actor: parseFlag("--actor", from: args) ?? "user"
-                )
-                printReviewQueueActionResult(result)
+                let actor = parseFlag("--actor", from: args) ?? "user"
+                let before = bookmarkService.bookmarks.first(where: { $0.id == itemID })
+                let result: CiderReviewQueueActionResult
+                do {
+                    result = try service.enrich(itemID: itemID, actor: actor)
+                } catch CiderReviewQueueActionError.noEnrichmentIssue {
+                    guard let before else { throw CiderReviewQueueActionError.itemNotFound(itemID) }
+                    bookmarkService.refetchMetadata(for: itemID)
+                    result = CiderReviewQueueActionResult(
+                        action: "review.enrich",
+                        itemID: itemID,
+                        itemType: "bookmark",
+                        title: before.title,
+                        status: "scheduled",
+                        message: "Scheduled bookmark enrichment for an explicit bookmark refetch.",
+                        actor: actor,
+                        safeActions: ["review list", "item get"]
+                    )
+                }
+                if let timeout = bookmarkNativeCaptureWaitTimeout(from: args) {
+                    let waitResult = await waitForNativeBookmarkCapture(
+                        itemID,
+                        in: bookmarkService,
+                        timeout: timeout
+                    )
+                    let after = waitResult.bookmark ?? bookmarkService.bookmarks.first(where: { $0.id == itemID })
+                    printReviewEnrichmentLifecycleResult(
+                        scheduledResult: result,
+                        before: before,
+                        after: after,
+                        waitResult: waitResult,
+                        reviewResolved: isReviewEnrichmentResolved(itemID)
+                    )
+                } else {
+                    printReviewQueueActionResult(result)
+                }
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -1369,7 +1400,7 @@ struct CiderCLI {
               cider-cli review approve <item-id> [--actor user|agent] [--json]
               cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
               cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
-              cider-cli review enrich <item-id> [--actor user|agent] [--json]
+              cider-cli review enrich <item-id> [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
               cider-cli review enrich-batch --confirm [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
               cider-cli review jobs [--limit <n>] [--json]
             """)
@@ -7119,6 +7150,7 @@ struct CiderCLI {
     struct BookmarkNativeCaptureWaitResult {
         let bookmark: Bookmark?
         let elapsedSeconds: TimeInterval
+        let timeoutSeconds: TimeInterval
         let timedOut: Bool
     }
 
@@ -7717,6 +7749,20 @@ struct CiderCLI {
         }
     }
 
+    static func isReviewEnrichmentResolved(_ bookmarkID: UUID) -> Bool {
+        do {
+            let service = CiderReviewQueueService()
+            return try service.list(
+                limit: Int.max,
+                kind: "enrichment",
+                itemType: "bookmark",
+                requiredSafeAction: "enrich"
+            ).items.contains { $0.itemID == bookmarkID } == false
+        } catch {
+            return false
+        }
+    }
+
     static func reviewMutationAuditSource(for actor: String) -> MutationAuditSource {
         switch actor.lowercased() {
         case "agent": return .agent
@@ -7748,6 +7794,7 @@ struct CiderCLI {
                     return BookmarkNativeCaptureWaitResult(
                         bookmark: bookmark,
                         elapsedSeconds: now.timeIntervalSince(startedAt),
+                        timeoutSeconds: timeout,
                         timedOut: false
                     )
                 }
@@ -7761,6 +7808,7 @@ struct CiderCLI {
         return BookmarkNativeCaptureWaitResult(
             bookmark: service.bookmarks.first(where: { $0.id == bookmarkID }),
             elapsedSeconds: Date().timeIntervalSince(startedAt),
+            timeoutSeconds: timeout,
             timedOut: true
         )
     }
@@ -8493,6 +8541,143 @@ struct CiderCLI {
         print("  Actor: \(result.actor)")
         print("  Message: \(result.message)")
         print("  Safe actions: \(result.safeActions.joined(separator: ", "))")
+    }
+
+    static func printReviewEnrichmentLifecycleResult(
+        scheduledResult: CiderReviewQueueActionResult,
+        before: Bookmark?,
+        after: Bookmark?,
+        waitResult: BookmarkNativeCaptureWaitResult,
+        reviewResolved: Bool
+    ) {
+        let status = waitResult.timedOut ? "timed_out" : "completed"
+        let changedFields = changedBookmarkMetadataFields(before: before, after: after)
+        let safeActions = reviewEnrichmentLifecycleSafeActions(
+            itemID: scheduledResult.itemID,
+            status: status,
+            reviewResolved: reviewResolved
+        )
+
+        if jsonOutput {
+            outputJSON([
+                "action": scheduledResult.action,
+                "itemID": scheduledResult.itemID.uuidString,
+                "itemType": scheduledResult.itemType,
+                "title": after?.title ?? scheduledResult.title,
+                "actor": scheduledResult.actor,
+                "status": status,
+                "message": reviewEnrichmentLifecycleMessage(
+                    status: status,
+                    changedFields: changedFields,
+                    reviewResolved: reviewResolved
+                ),
+                "waited": true,
+                "elapsedSeconds": waitResult.elapsedSeconds,
+                "timeoutSeconds": waitResult.timeoutSeconds,
+                "before": bookmarkLifecycleSnapshot(before),
+                "after": bookmarkLifecycleSnapshot(after),
+                "changedFields": changedFields,
+                "reviewResolved": reviewResolved,
+                "safeActions": safeActions,
+            ])
+            return
+        }
+
+        print("\(status.replacingOccurrences(of: "_", with: " ").capitalized): \(after?.title ?? scheduledResult.title) (\(scheduledResult.itemID.uuidString.prefix(8)))")
+        print("  Action: \(scheduledResult.action)")
+        print("  Type: \(scheduledResult.itemType)")
+        print("  Actor: \(scheduledResult.actor)")
+        print("  Waited: \(String(format: "%.1f", waitResult.elapsedSeconds))s / \(String(format: "%.1f", waitResult.timeoutSeconds))s")
+        print("  Changed: \(changedFields.isEmpty ? "none" : changedFields.joined(separator: ", "))")
+        print("  Review resolved: \(reviewResolved ? "yes" : "no")")
+        print("  Message: \(reviewEnrichmentLifecycleMessage(status: status, changedFields: changedFields, reviewResolved: reviewResolved))")
+        print("  Safe actions: \(safeActions.joined(separator: ", "))")
+    }
+
+    static func reviewEnrichmentLifecycleMessage(
+        status: String,
+        changedFields: [String],
+        reviewResolved: Bool
+    ) -> String {
+        switch status {
+        case "completed":
+            if reviewResolved {
+                return changedFields.isEmpty
+                    ? "Bookmark enrichment completed; no visible metadata fields changed."
+                    : "Bookmark enrichment completed and updated \(changedFields.joined(separator: ", "))."
+            }
+            return "Bookmark enrichment completed, but the review item still needs attention."
+        case "timed_out":
+            return "Bookmark enrichment was scheduled, but did not reach a final complete state before the timeout."
+        default:
+            return "Bookmark enrichment finished with status \(status)."
+        }
+    }
+
+    static func reviewEnrichmentLifecycleSafeActions(
+        itemID: UUID,
+        status: String,
+        reviewResolved: Bool
+    ) -> [String] {
+        var actions = [
+            "item get \(itemID.uuidString)",
+            "review list --kind enrichment",
+        ]
+        if status == "timed_out" || !reviewResolved {
+            actions.insert("review enrich \(itemID.uuidString) --timeout 20", at: 0)
+        }
+        return actions
+    }
+
+    static func bookmarkLifecycleSnapshot(_ bookmark: Bookmark?) -> [String: Any] {
+        guard let bookmark else { return [:] }
+        var snapshot: [String: Any] = [
+            "id": bookmark.id.uuidString,
+            "title": bookmark.title,
+            "url": bookmark.urlString,
+            "relativePath": bookmark.relativePath ?? NSNull(),
+            "thumbnailRelativePath": bookmark.thumbnailRelativePath ?? NSNull(),
+            "thumbnailRemoteURL": bookmark.thumbnailRemoteURLString ?? NSNull(),
+            "originalImagePath": bookmark.originalImageRelativePath ?? NSNull(),
+            "enrichmentStatus": bookmark.enrichmentStatus ?? NSNull(),
+            "isEnriching": bookmark.isEnriching,
+            "titleManuallySet": bookmark.titleManuallySet,
+            "notesManuallySet": bookmark.notesManuallySet,
+        ]
+        if let metadataUpdatedAt = bookmark.metadataUpdatedAt {
+            snapshot["metadataUpdatedAt"] = ISO8601DateFormatter().string(from: metadataUpdatedAt)
+        } else {
+            snapshot["metadataUpdatedAt"] = NSNull()
+        }
+        if let lastEnrichedAt = bookmark.lastEnrichedAt {
+            snapshot["lastEnrichedAt"] = ISO8601DateFormatter().string(from: lastEnrichedAt)
+        } else {
+            snapshot["lastEnrichedAt"] = NSNull()
+        }
+        if let aiSummary = bookmark.aiSummary { snapshot["aiSummary"] = aiSummary }
+        if let ocrText = bookmark.ocrText { snapshot["ocrText"] = ocrText }
+        if let dominantColors = bookmark.dominantColors { snapshot["dominantColors"] = dominantColors }
+        return snapshot
+    }
+
+    static func changedBookmarkMetadataFields(before: Bookmark?, after: Bookmark?) -> [String] {
+        guard let before, let after else {
+            return after == nil ? [] : ["bookmark"]
+        }
+        var fields: [String] = []
+        if before.title != after.title { fields.append("title") }
+        if before.notes != after.notes { fields.append("notes") }
+        if before.relativePath != after.relativePath { fields.append("relativePath") }
+        if before.thumbnailRelativePath != after.thumbnailRelativePath { fields.append("thumbnailRelativePath") }
+        if before.thumbnailRemoteURLString != after.thumbnailRemoteURLString { fields.append("thumbnailRemoteURL") }
+        if before.originalImageRelativePath != after.originalImageRelativePath { fields.append("originalImagePath") }
+        if before.metadataUpdatedAt != after.metadataUpdatedAt { fields.append("metadataUpdatedAt") }
+        if before.enrichmentStatus != after.enrichmentStatus { fields.append("enrichmentStatus") }
+        if before.lastEnrichedAt != after.lastEnrichedAt { fields.append("lastEnrichedAt") }
+        if before.aiSummary != after.aiSummary { fields.append("aiSummary") }
+        if before.ocrText != after.ocrText { fields.append("ocrText") }
+        if before.dominantColors != after.dominantColors { fields.append("dominantColors") }
+        return fields
     }
 
     static func printReviewRoutingActionResult(_ result: CiderReviewRoutingActionResult) {
@@ -11523,7 +11708,7 @@ struct CiderCLI {
           cider-cli review approve <item-id> [--actor user|agent] [--json]
           cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
-          cider-cli review enrich <item-id> [--actor user|agent] [--json]
+          cider-cli review enrich <item-id> [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
           cider-cli review enrich-batch --confirm [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
           cider-cli review jobs [--limit <n>] [--json]
 

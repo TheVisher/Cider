@@ -44,6 +44,44 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("--confirm") == true)
     }
 
+    @Test("review enrich json waits with bounded lifecycle result")
+    func reviewEnrichJSONWaitsWithBoundedLifecycleResult() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-enrich-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "bookmark",
+                "--url", "https://example.com/review-enrich-\(UUID().uuidString)",
+                "--title", "Needs CLI Enrichment",
+                "--no-wait",
+                "--json",
+            ],
+            vault: vault
+        )
+        let capturePayload = try parseJSONObject(captureResult.stdout)
+        let bookmark = try #require(capturePayload["bookmark"] as? [String: Any])
+        let itemID = try #require(bookmark["id"] as? String)
+
+        let result = try runCLI(
+            args: ["review", "enrich", itemID, "--actor", "agent", "--timeout", "0", "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(payload["action"] as? String == "review.enrich")
+        #expect(payload["status"] as? String == "timed_out")
+        #expect(payload["waited"] as? Bool == true)
+        #expect(payload["elapsedSeconds"] as? Double != nil)
+        #expect(payload["before"] as? [String: Any] != nil)
+        #expect(payload["after"] as? [String: Any] != nil)
+        #expect(payload["changedFields"] as? [String] != nil)
+        #expect(payload["reviewResolved"] as? Bool != nil)
+    }
+
     @Test("capture add json rejects missing source")
     func captureAddJSONRejectsMissingSource() throws {
         let result = try runCLI(args: ["capture", "add", "--json"])
