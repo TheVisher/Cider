@@ -2798,6 +2798,7 @@ final class VaultBookmarkService: ObservableObject {
     /// labels, dismissed labels, and tags from join tables.
     func loadBookmarksFromDatabase(_ db: CiderDatabase) {
         do {
+            _ = repairAdoptionCreatedBookmarkDatesFromFilesystem(db)
             let stmt = try db.prepare("""
                 SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
                        b.url, b.notes, b.notes_manually_set, b.title_manually_set,
@@ -2863,6 +2864,98 @@ final class VaultBookmarkService: ObservableObject {
             logger.error("Failed to load bookmarks from database: \(error.localizedDescription)")
             bookmarks = []
         }
+    }
+
+    @discardableResult
+    func repairAdoptionCreatedBookmarkDatesFromFilesystem(_ db: CiderDatabase) -> Int {
+        do {
+            let candidates = try bookmarkCreationDateRepairCandidates(db)
+            guard !candidates.isEmpty else { return 0 }
+
+            var repairs: [(id: UUID, createdAt: Date)] = []
+            for candidate in candidates {
+                guard let relativePath = candidate.relativePath,
+                      relativePath.lowercased().hasSuffix(".webloc") else { continue }
+
+                let fileURL = vaultRoot.appendingPathComponent(relativePath)
+                guard FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+
+                let filesystemDates = BookmarkFileService.filesystemDates(for: fileURL)
+                guard let fileCreatedAt = filesystemDates.creationDate ?? filesystemDates.modificationDate,
+                      fileCreatedAt < candidate.createdAt.addingTimeInterval(-1),
+                      Self.looksLikeAdoptionCreatedBookmarkRow(candidate) else { continue }
+
+                repairs.append((candidate.id, fileCreatedAt))
+            }
+
+            guard !repairs.isEmpty else { return 0 }
+            try db.withTransaction {
+                let stmt = try db.prepare("UPDATE items SET created_at = ? WHERE id = ? AND type = 'bookmark';")
+                for repair in repairs {
+                    stmt.reset()
+                    stmt.bind(DatabaseHelpers.encode(repair.createdAt), at: 1)
+                        .bind(DatabaseHelpers.encode(repair.id), at: 2)
+                    try stmt.step()
+                }
+            }
+            logger.info("Repaired \(repairs.count) adoption-created bookmark date(s) from .webloc filesystem metadata")
+            return repairs.count
+        } catch {
+            logger.error("Failed to repair adoption-created bookmark dates: \(error.localizedDescription)")
+            return 0
+        }
+    }
+
+    private struct BookmarkCreationDateRepairCandidate {
+        let id: UUID
+        let title: String
+        let createdAt: Date
+        let updatedAt: Date
+        let relativePath: String?
+        let notes: String
+        let notesManuallySet: Bool
+    }
+
+    private func bookmarkCreationDateRepairCandidates(_ db: CiderDatabase) throws -> [BookmarkCreationDateRepairCandidate] {
+        let stmt = try db.prepare("""
+            SELECT i.id, i.title, i.created_at, i.updated_at, i.relative_path,
+                   b.notes, b.notes_manually_set
+            FROM items i
+            JOIN bookmarks b ON b.item_id = i.id
+            WHERE i.type = 'bookmark'
+              AND i.relative_path IS NOT NULL;
+            """)
+        var candidates: [BookmarkCreationDateRepairCandidate] = []
+        while try stmt.step() {
+            guard let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+            candidates.append(
+                BookmarkCreationDateRepairCandidate(
+                    id: id,
+                    title: stmt.string(at: 1),
+                    createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 2)),
+                    updatedAt: DatabaseHelpers.decodeDate(stmt.double(at: 3)),
+                    relativePath: stmt.optionalString(at: 4),
+                    notes: stmt.string(at: 5),
+                    notesManuallySet: stmt.bool(at: 6)
+                )
+            )
+        }
+        return candidates
+    }
+
+    private static func looksLikeAdoptionCreatedBookmarkRow(_ candidate: BookmarkCreationDateRepairCandidate) -> Bool {
+        let createdUpdatedClose = abs(candidate.updatedAt.timeIntervalSince(candidate.createdAt)) <= 10
+        let notesEmpty = candidate.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let filenameTitleMatches = candidate.relativePath.map { relativePath in
+            let filenameTitle = ((relativePath as NSString).lastPathComponent as NSString)
+                .deletingPathExtension
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return filenameTitle.caseInsensitiveCompare(
+                candidate.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            ) == .orderedSame
+        } ?? false
+
+        return createdUpdatedClose || (filenameTitleMatches && notesEmpty && !candidate.notesManuallySet)
     }
 
     private func canonicalizedLoadedBookmarks(_ loaded: [Bookmark], repairing db: CiderDatabase) -> [Bookmark] {

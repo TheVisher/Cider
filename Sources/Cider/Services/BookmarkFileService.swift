@@ -109,13 +109,17 @@ final class BookmarkFileService {
             return nil
         }
 
-        let entry: BookmarkSidecarEntry?
-        if includeLegacySidecarMetadata {
-            let sidecar = loadSidecar(at: dirURL)
-            entry = sidecar.items[filename]
-        } else {
-            entry = nil
-        }
+        let sidecarEntry = loadSidecar(at: dirURL).items[filename]
+        let entry = includeLegacySidecarMetadata ? sidecarEntry : nil
+        let filesystemDates = Self.filesystemDates(for: fileURL)
+        let createdAt = sidecarEntry?.createdAt
+            ?? filesystemDates.creationDate
+            ?? filesystemDates.modificationDate
+            ?? Date()
+        let updatedAt = sidecarEntry?.updatedAt
+            ?? filesystemDates.modificationDate
+            ?? filesystemDates.creationDate
+            ?? createdAt
 
         let relativePath = dirRelativePath.isEmpty ? filename : "\(dirRelativePath)/\(filename)"
 
@@ -123,8 +127,8 @@ final class BookmarkFileService {
             id: entry?.id ?? UUID(),
             title: entry?.title ?? titleFromFilename(filename),
             urlString: urlString,
-            createdAt: entry?.createdAt ?? Date(),
-            updatedAt: entry?.updatedAt ?? Date(),
+            createdAt: createdAt,
+            updatedAt: updatedAt,
             notes: entry?.notes ?? "",
             tags: entry?.tags ?? [],
             labelIDs: entry?.labelIDs ?? [],
@@ -143,6 +147,13 @@ final class BookmarkFileService {
             preferredHeroMode: entry?.preferredHeroMode,
             relativePath: relativePath
         )
+    }
+
+    static func filesystemDates(for fileURL: URL) -> (creationDate: Date?, modificationDate: Date?) {
+        guard let values = try? fileURL.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey]) else {
+            return (nil, nil)
+        }
+        return (values.creationDate, values.contentModificationDate)
     }
 
     /// Scans a directory for all `.webloc` files and returns bookmarks.

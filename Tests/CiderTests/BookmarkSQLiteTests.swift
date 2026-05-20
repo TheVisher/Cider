@@ -35,6 +35,28 @@ struct BookmarkSQLiteTests {
         VaultBookmarkService(database: db)
     }
 
+    private func setFilesystemDates(
+        for fileURL: URL,
+        createdAt: Date,
+        modifiedAt: Date? = nil
+    ) throws {
+        var values = URLResourceValues()
+        values.creationDate = createdAt
+        values.contentModificationDate = modifiedAt ?? createdAt
+        var mutableURL = fileURL
+        try mutableURL.setResourceValues(values)
+    }
+
+    private func storedItemDates(_ db: CiderDatabase, id: UUID) throws -> (createdAt: Date, updatedAt: Date) {
+        let stmt = try db.prepare("SELECT created_at, updated_at FROM items WHERE id = ?;")
+        stmt.bind(DatabaseHelpers.encode(id), at: 1)
+        #expect(try stmt.step())
+        return (
+            DatabaseHelpers.decodeDate(stmt.double(at: 0)),
+            DatabaseHelpers.decodeDate(stmt.double(at: 1))
+        )
+    }
+
     // MARK: - Basic Round-Trip
 
     @Test("Bookmark round-trips through SQLite: persist and load")
@@ -937,6 +959,227 @@ struct BookmarkSQLiteTests {
         let bookmarkStmt = try db.prepare("SELECT COUNT(*) FROM bookmarks;")
         try bookmarkStmt.step()
         #expect(bookmarkStmt.int(at: 0) == 2)
+    }
+
+    @Test("Orphan .webloc adoption preserves filesystem creation date")
+    func orphanWeblocAdoptionPreservesFilesystemCreationDate() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-orphan-bookmark-date-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let fileDate = Date(timeIntervalSince1970: 1_701_000_000)
+        let bookmark = Bookmark(title: "Plex", urlString: "https://www.plex.tv/")
+        let relativePath = try BookmarkFileService.shared.write(
+            bookmark: bookmark,
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        try setFilesystemDates(for: vault.appendingPathComponent(relativePath), createdAt: fileDate)
+
+        let service = makeService(db)
+        service.loadBookmarksFromDatabase(db)
+        service.adoptOrphanedVaultFiles()
+
+        let adopted = try #require(service.bookmarks.first)
+        let adoptedDates = try storedItemDates(db, id: adopted.id)
+        #expect(adopted.title == "Plex")
+        #expect(abs(adopted.createdAt.timeIntervalSince(fileDate)) < 0.01)
+        #expect(abs(adoptedDates.createdAt.timeIntervalSince(fileDate)) < 0.01)
+    }
+
+    @Test("Duplicate .webloc adoption preserves duplicate file creation date")
+    func duplicateWeblocAdoptionPreservesFilesystemCreationDate() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-duplicate-bookmark-date-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let existing = Bookmark(
+            title: "Fatty Fish Sushi Everett review",
+            urlString: "https://www.tiktok.com/t/ZP8pPEsky/",
+            createdAt: Date(timeIntervalSince1970: 1_750_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_750_000_000),
+            relativePath: "Inbox/Bookmarks/Fatty Fish Sushi Everett review.webloc"
+        )
+        let service = makeService(db)
+        service.persistBookmarkToDatabase(db, bookmark: existing)
+
+        _ = try BookmarkFileService.shared.write(
+            bookmark: existing,
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        let duplicateDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let duplicateRelativePath = try BookmarkFileService.shared.write(
+            bookmark: Bookmark(
+                title: "Tiktok.Com (2)",
+                urlString: "https://www.tiktok.com/t/ZP8pPEsky/?utm_source=ios#caption"
+            ),
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        try setFilesystemDates(for: vault.appendingPathComponent(duplicateRelativePath), createdAt: duplicateDate)
+
+        service.loadBookmarksFromDatabase(db)
+        service.adoptOrphanedVaultFiles()
+
+        let duplicate = try #require(service.bookmarks.first { $0.relativePath == duplicateRelativePath })
+        let duplicateDates = try storedItemDates(db, id: duplicate.id)
+        #expect(abs(duplicate.createdAt.timeIntervalSince(duplicateDate)) < 0.01)
+        #expect(abs(duplicateDates.createdAt.timeIntervalSince(duplicateDate)) < 0.01)
+    }
+
+    @Test("SQLite load repairs adoption-created bookmark date from older .webloc date")
+    func sqliteLoadRepairsAdoptionCreatedBookmarkDateFromFilesystem() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-bookmark-date-repair-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let fileDate = Date(timeIntervalSince1970: 1_690_000_000)
+        let corruptedScanDate = Date(timeIntervalSince1970: 1_770_000_000)
+        let relativePath = try BookmarkFileService.shared.write(
+            bookmark: Bookmark(title: "Plex", urlString: "https://www.plex.tv/"),
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        try setFilesystemDates(for: vault.appendingPathComponent(relativePath), createdAt: fileDate)
+
+        let corrupted = Bookmark(
+            title: "Plex",
+            urlString: "https://www.plex.tv/",
+            createdAt: corruptedScanDate,
+            updatedAt: corruptedScanDate,
+            relativePath: relativePath
+        )
+        let service = makeService(db)
+        service.persistBookmarkToDatabase(db, bookmark: corrupted)
+
+        let nonBookmarkID = UUID()
+        let nonBookmarkRelativePath = "Inbox/Bookmarks/Plex note.webloc"
+        let nonBookmarkFileURL = vault.appendingPathComponent(nonBookmarkRelativePath)
+        let plist = ["URL": "https://www.plex.tv/note"]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: nonBookmarkFileURL, options: .atomic)
+        try setFilesystemDates(for: nonBookmarkFileURL, createdAt: fileDate.addingTimeInterval(-86_400))
+        try db.withTransaction {
+            let stmt = try db.prepare("""
+                INSERT INTO items (id, type, title, created_at, updated_at, relative_path)
+                VALUES (?, 'note', 'Plex note', ?, ?, ?);
+                """)
+            stmt.bind(DatabaseHelpers.encode(nonBookmarkID), at: 1)
+                .bind(DatabaseHelpers.encode(corruptedScanDate), at: 2)
+                .bind(DatabaseHelpers.encode(corruptedScanDate), at: 3)
+                .bind(nonBookmarkRelativePath, at: 4)
+            try stmt.step()
+        }
+
+        let reloaded = makeService(db)
+        reloaded.loadBookmarksFromDatabase(db)
+
+        let repaired = try #require(reloaded.bookmarks.first)
+        let repairedDates = try storedItemDates(db, id: corrupted.id)
+        let nonBookmarkDates = try storedItemDates(db, id: nonBookmarkID)
+        #expect(abs(repaired.createdAt.timeIntervalSince(fileDate)) < 0.01)
+        #expect(abs(repairedDates.createdAt.timeIntervalSince(fileDate)) < 0.01)
+        #expect(abs(nonBookmarkDates.createdAt.timeIntervalSince(corruptedScanDate)) < 0.01)
+    }
+
+    @Test("Date Added sort uses repaired Plex and Fatty Fish capture dates")
+    func dateAddedSortUsesRepairedBookmarkFilesystemDates() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-bookmark-sort-date-repair-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+
+        let corruptedScanDate = Date(timeIntervalSince1970: 1_770_000_000)
+        let plexDate = Date(timeIntervalSince1970: 1_690_000_000)
+        let fattyFishDate = Date(timeIntervalSince1970: 1_720_000_000)
+
+        let plexPath = try BookmarkFileService.shared.write(
+            bookmark: Bookmark(title: "Plex", urlString: "https://www.plex.tv/"),
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        try setFilesystemDates(for: vault.appendingPathComponent(plexPath), createdAt: plexDate)
+        let fattyFishPath = try BookmarkFileService.shared.write(
+            bookmark: Bookmark(
+                title: "Fatty Fish Sushi Everett review - CiderGuyRatesIt",
+                urlString: "https://www.tiktok.com/t/ZP8pPEsky/"
+            ),
+            toDirectory: inbox,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        try setFilesystemDates(for: vault.appendingPathComponent(fattyFishPath), createdAt: fattyFishDate)
+
+        let service = makeService(db)
+        service.persistBookmarkToDatabase(db, bookmark: Bookmark(
+            title: "Plex",
+            urlString: "https://www.plex.tv/",
+            createdAt: corruptedScanDate.addingTimeInterval(1),
+            updatedAt: corruptedScanDate.addingTimeInterval(1),
+            relativePath: plexPath
+        ))
+        service.persistBookmarkToDatabase(db, bookmark: Bookmark(
+            title: "Fatty Fish Sushi Everett review - CiderGuyRatesIt",
+            urlString: "https://www.tiktok.com/t/ZP8pPEsky/",
+            createdAt: corruptedScanDate,
+            updatedAt: corruptedScanDate,
+            relativePath: fattyFishPath
+        ))
+
+        let reloaded = makeService(db)
+        reloaded.loadBookmarksFromDatabase(db)
+        let sortedTitles = reloaded.bookmarks
+            .map(LibraryItemV2.bookmark)
+            .sorted { $0.createdDate > $1.createdDate }
+            .map(\.title)
+
+        #expect(sortedTitles == [
+            "Fatty Fish Sushi Everett review - CiderGuyRatesIt",
+            "Plex",
+        ])
     }
 
     @Test("SQLite load collapses canonical duplicate URL rows into one displayed bookmark")
