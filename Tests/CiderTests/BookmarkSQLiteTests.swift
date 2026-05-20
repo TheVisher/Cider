@@ -1604,6 +1604,38 @@ struct BookmarkSQLiteTests {
         #expect(!fm.fileExists(atPath: oldURL.path))
     }
 
+    @Test("OEmbed title enrichment can replace provider-generic manual title")
+    func oEmbedTitleEnrichmentReplacesProviderGenericManualTitle() throws {
+        let (db, url) = try makeTestDB()
+        defer {
+            db.close()
+            cleanup(url)
+        }
+
+        let bookmarkID = UUID()
+        let service = makeService(db)
+        let bookmark = Bookmark(
+            id: bookmarkID,
+            title: "X.Com",
+            urlString: "https://x.com/someone/status/123",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            titleManuallySet: true
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        service.applyOEmbedResults(
+            for: bookmarkID,
+            title: "Someone on X: Actual post title",
+            notes: nil
+        )
+
+        let updated = try #require(service.bookmarks.first)
+        #expect(updated.title == "Someone on X: Actual post title")
+        #expect(updated.titleManuallySet == true)
+    }
+
     @Test("OEmbed title enrichment preserves curated bookmark artifact path")
     func oEmbedTitleEnrichmentPreservesCuratedArtifactPath() throws {
         let (db, url) = try makeTestDB()

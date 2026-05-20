@@ -1543,7 +1543,9 @@ final class VaultBookmarkService: ObservableObject {
         let previous = bookmarks[index]
         var bookmark = bookmarks[index]
         var changed = false
-        if let title, !title.isEmpty, bookmark.title != title, !bookmark.titleManuallySet {
+        if let title, !title.isEmpty,
+           let sourceURL = URL(string: bookmark.urlString),
+           shouldApplyEnrichedTitle(title, to: bookmark, sourceURL: sourceURL) {
             bookmark.title = title; changed = true
         }
         // Only set notes if the bookmark doesn't already have user-written notes
@@ -1729,7 +1731,8 @@ final class VaultBookmarkService: ObservableObject {
     private func recoverMissingThumbnails() {
         let candidates = bookmarks.filter { bookmark in
             guard let remoteURLString = bookmark.thumbnailRemoteURLString,
-                  URL(string: remoteURLString) != nil else { return false }
+                  let remoteURL = URL(string: remoteURLString),
+                  !Self.isLowConfidenceThumbnailURL(remoteURL) else { return false }
             return !localThumbnailExists(relativePath: bookmark.thumbnailRelativePath)
         }
 
@@ -1801,9 +1804,12 @@ final class VaultBookmarkService: ObservableObject {
             }
 
             let payload = await Self.fetchEnrichmentPayload(for: url)
+            let trustedThumbnailURL = payload?.thumbnailURL.flatMap { candidate in
+                Self.isLowConfidenceThumbnailURL(candidate) ? nil : candidate
+            }
 
             var imageAssets: BookmarkImageAssets?
-            if let thumbnailURL = payload?.thumbnailURL {
+            if let thumbnailURL = trustedThumbnailURL {
                 imageAssets = await self.cacheImageAssets(from: thumbnailURL, for: bookmarkID, pageURL: url)
             }
 
@@ -1811,7 +1817,7 @@ final class VaultBookmarkService: ObservableObject {
             // thumbnail. If a provider thumbnail URL exists but downloading it fails,
             // keep the remote URL for retry instead of locking in a generic page shell.
             if imageAssets == nil,
-               BookmarkNativeCapturePolicy.allowsScreenshotFallback(thumbnailURL: payload?.thumbnailURL),
+               BookmarkNativeCapturePolicy.allowsScreenshotFallback(thumbnailURL: trustedThumbnailURL),
                let screenshotData = payload?.screenshotData {
                 imageAssets = self.cacheImageAssets(
                     from: screenshotData,
@@ -1872,14 +1878,16 @@ final class VaultBookmarkService: ObservableObject {
                 bookmark.originalImageRelativePath = imageAssets.originalImageRelativePath
                 changed = true
             }
-            if let remoteURL = payload?.thumbnailURL?.absoluteString,
-               bookmark.thumbnailRemoteURLString != remoteURL {
-                bookmark.thumbnailRemoteURLString = remoteURL
+            if let remoteURL = payload?.thumbnailURL,
+               !Self.isLowConfidenceThumbnailURL(remoteURL),
+               bookmark.thumbnailRemoteURLString != remoteURL.absoluteString {
+                bookmark.thumbnailRemoteURLString = remoteURL.absoluteString
                 changed = true
             }
-        } else if let remoteURL = payload?.thumbnailURL?.absoluteString {
-            if bookmark.thumbnailRemoteURLString != remoteURL {
-                bookmark.thumbnailRemoteURLString = remoteURL
+        } else if let remoteURL = payload?.thumbnailURL,
+                  !Self.isLowConfidenceThumbnailURL(remoteURL) {
+            if bookmark.thumbnailRemoteURLString != remoteURL.absoluteString {
+                bookmark.thumbnailRemoteURLString = remoteURL.absoluteString
                 changed = true
             }
 
@@ -1896,18 +1904,20 @@ final class VaultBookmarkService: ObservableObject {
                 }
             }
         } else {
-            // New URL has no thumbnail — clear stale references and files
-            if let path = bookmark.thumbnailRelativePath, !path.isEmpty {
-                removeImageIfPresent(relativePath: path)
-                bookmark.thumbnailRelativePath = nil
-                changed = true
-            }
-            if let path = bookmark.originalImageRelativePath, !path.isEmpty {
-                removeImageIfPresent(relativePath: path)
-                bookmark.originalImageRelativePath = nil
-                changed = true
-            }
-            if bookmark.thumbnailRemoteURLString != nil {
+            // Failed/noisy refetches should not erase an existing good thumbnail.
+            if let remoteURLString = bookmark.thumbnailRemoteURLString,
+               let remoteURL = URL(string: remoteURLString),
+               Self.isLowConfidenceThumbnailURL(remoteURL) {
+                if let path = bookmark.thumbnailRelativePath, !path.isEmpty {
+                    removeImageIfPresent(relativePath: path)
+                    bookmark.thumbnailRelativePath = nil
+                    changed = true
+                }
+                if let path = bookmark.originalImageRelativePath, !path.isEmpty {
+                    removeImageIfPresent(relativePath: path)
+                    bookmark.originalImageRelativePath = nil
+                    changed = true
+                }
                 bookmark.thumbnailRemoteURLString = nil
                 changed = true
             }
@@ -2460,8 +2470,28 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     private static func isFaviconURL(_ url: URL?) -> Bool {
-        guard let path = url?.path.lowercased() else { return false }
-        return path.contains("favicon") || path.contains("apple-touch-icon")
+        isLowConfidenceThumbnailURL(url)
+    }
+
+    private static func isLowConfidenceThumbnailURL(_ url: URL?) -> Bool {
+        guard let url else { return false }
+        let fingerprint = [
+            url.host ?? "",
+            url.path,
+            url.query ?? "",
+        ]
+            .joined(separator: " ")
+            .lowercased()
+
+        return fingerprint.contains("favicon")
+            || fingerprint.contains("apple-touch-icon")
+            || fingerprint.contains("touch-icon")
+            || fingerprint.contains("mask-icon")
+            || fingerprint.contains("/site-icon")
+            || fingerprint.contains("/app-icon")
+            || fingerprint.contains("%22")
+            || fingerprint.contains("\"")
+            || fingerprint.contains("created_time")
     }
 
     private static func fetchHTMLEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
@@ -2664,7 +2694,10 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     private func shouldApplyEnrichedTitle(_ title: String, to bookmark: Bookmark, sourceURL: URL) -> Bool {
-        if bookmark.titleManuallySet { return false }
+        if bookmark.titleManuallySet,
+           !isProviderGenericTitle(bookmark.title, sourceURL: sourceURL) {
+            return false
+        }
         let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }
         if bookmark.title.caseInsensitiveCompare(normalized) == .orderedSame { return false }
@@ -2694,9 +2727,12 @@ final class VaultBookmarkService: ObservableObject {
         } else if host.contains("instagram.com") {
             genericTitles = ["instagram"]
         } else if host.contains("reddit.com") {
-            genericTitles = ["reddit - dive into anything"]
+            genericTitles = [
+                "reddit - dive into anything",
+                "reddit - the heart of the internet",
+            ]
         } else if host.contains("x.com") || host.contains("twitter.com") {
-            genericTitles = ["x", "twitter"]
+            genericTitles = ["x", "x.com", "twitter", "twitter.com"]
         } else {
             genericTitles = []
         }

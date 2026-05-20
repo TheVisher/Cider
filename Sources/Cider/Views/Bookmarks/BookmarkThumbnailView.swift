@@ -286,6 +286,7 @@ struct BookmarkThumbnailView: View {
         let hasIconURLHint =
             remoteFingerprint.contains("favicon") ||
             remoteFingerprint.contains("apple-touch-icon") ||
+            remoteFingerprint.contains("touch-icon") ||
             remoteFingerprint.contains("mask-icon") ||
             remoteFingerprint.hasSuffix(".ico")
 

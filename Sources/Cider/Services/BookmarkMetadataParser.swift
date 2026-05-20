@@ -79,8 +79,6 @@ enum BookmarkMetadataParser {
         let imageMetaURL = imageMetaRaw.flatMap { resolvedRemoteURL(from: $0, baseURL: pageURL) }
         let jsonLDURL = jsonLDImageURL(html: html, pageURL: pageURL)
         let siteAdapterURL = siteSpecificThumbnailURL(html: html, pageURL: pageURL)
-        let favicon = faviconURL(html: html, pageURL: pageURL)
-
         let thumbnailCandidates: [URL?]
         if host.contains("reddit.com") {
             // Reddit meta tags frequently point to removed/default placeholders.
@@ -100,7 +98,6 @@ enum BookmarkMetadataParser {
                 imageMetaURL,
                 jsonLDURL,
                 siteAdapterURL,
-                favicon,
             ]
         }
 
@@ -442,12 +439,53 @@ enum BookmarkMetadataParser {
     }
 
     private static func isThumbnailCandidateAcceptable(_ url: URL, for pageURL: URL) -> Bool {
+        if isLikelyIconURL(url) || isMalformedImageFragment(url) {
+            return false
+        }
+
         let host = normalizedHost(for: pageURL)
         if host.contains("reddit.com"),
            isLikelyRedditPlaceholderImage(url: url) {
             return false
         }
         return true
+    }
+
+    private static func isLikelyIconURL(_ url: URL) -> Bool {
+        let fingerprint = [
+            url.host ?? "",
+            url.path,
+            url.query ?? "",
+        ]
+            .joined(separator: " ")
+            .lowercased()
+
+        let iconFragments = [
+            "favicon",
+            "apple-touch-icon",
+            "touch-icon",
+            "mask-icon",
+            "/site-icon",
+            "/app-icon",
+        ]
+
+        return iconFragments.contains { fingerprint.contains($0) }
+    }
+
+    private static func isMalformedImageFragment(_ url: URL) -> Bool {
+        let fingerprint = [
+            url.path,
+            url.query ?? "",
+            url.fragment ?? "",
+        ]
+            .joined(separator: " ")
+            .lowercased()
+
+        return fingerprint.contains("%22")
+            || fingerprint.contains("\"")
+            || fingerprint.contains("%2c%22")
+            || fingerprint.contains("created_time")
+            || fingerprint.contains("createdtime")
     }
 
     private static func isLikelyRedditPlaceholderImage(url: URL) -> Bool {

@@ -1151,8 +1151,12 @@ final class BookmarksStorage: ObservableObject {
 
             let payload = await Self.fetchEnrichmentPayload(for: url)
 
+            let trustedThumbnailURL = payload?.thumbnailURL.flatMap { candidate in
+                Self.isFaviconURL(candidate) ? nil : candidate
+            }
+
             var imageAssets: BookmarkImageAssets?
-            if let thumbnailURL = payload?.thumbnailURL {
+            if let thumbnailURL = trustedThumbnailURL {
                 imageAssets = await self.cacheImageAssets(from: thumbnailURL, for: bookmarkID, pageURL: url)
             }
 
@@ -1995,7 +1999,22 @@ final class BookmarksStorage: ObservableObject {
     /// Check if a URL looks like a favicon (not a real og:image thumbnail).
     private static func isFaviconURL(_ url: URL?) -> Bool {
         guard let path = url?.path.lowercased() else { return false }
-        return path.contains("favicon") || path.contains("apple-touch-icon")
+        let fingerprint = [
+            url?.host ?? "",
+            path,
+            url?.query ?? "",
+        ]
+            .joined(separator: " ")
+            .lowercased()
+        return fingerprint.contains("favicon")
+            || fingerprint.contains("apple-touch-icon")
+            || fingerprint.contains("touch-icon")
+            || fingerprint.contains("mask-icon")
+            || fingerprint.contains("/site-icon")
+            || fingerprint.contains("/app-icon")
+            || fingerprint.contains("%22")
+            || fingerprint.contains("\"")
+            || fingerprint.contains("created_time")
     }
 
     private static func fetchHTMLEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {

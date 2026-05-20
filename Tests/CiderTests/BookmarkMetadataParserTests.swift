@@ -68,11 +68,10 @@ struct BookmarkMetadataParserTests {
         #expect(result?.title == "OG Wins")
     }
 
-    @Test("Returns no title for empty HTML but still finds default favicon")
+    @Test("Returns no payload for empty HTML")
     func emptyHTML() {
         let result = BookmarkMetadataParser.parse(html: "", pageURL: exampleURL)
-        #expect(result?.title == nil)
-        #expect(result?.thumbnailURL?.absoluteString == "https://example.com/favicon.ico")
+        #expect(result == nil)
     }
 
     @Test("Returns no title when only whitespace title")
@@ -222,7 +221,7 @@ struct BookmarkMetadataParserTests {
         #expect(item.extractionStatus == RecipeExtractionStatus.parsed)
     }
 
-    @Test("Falls back to favicon when no og:image")
+    @Test("Does not promote favicon to bookmark thumbnail")
     func faviconFallback() {
         let html = """
         <html><head>
@@ -231,10 +230,11 @@ struct BookmarkMetadataParserTests {
         </head></html>
         """
         let result = BookmarkMetadataParser.parse(html: html, pageURL: exampleURL)
-        #expect(result?.thumbnailURL?.absoluteString == "https://example.com/favicon.ico")
+        #expect(result?.title == "Test Page")
+        #expect(result?.thumbnailURL == nil)
     }
 
-    @Test("Prefers apple-touch-icon over shortcut icon")
+    @Test("Does not promote touch icons to bookmark thumbnail")
     func faviconPriority() {
         let html = """
         <html><head>
@@ -244,14 +244,30 @@ struct BookmarkMetadataParserTests {
         </head></html>
         """
         let result = BookmarkMetadataParser.parse(html: html, pageURL: exampleURL)
-        #expect(result?.thumbnailURL?.absoluteString == "https://example.com/apple-touch-icon.png")
+        #expect(result?.title == "Test")
+        #expect(result?.thumbnailURL == nil)
     }
 
-    @Test("Default favicon.ico when no link tags")
+    @Test("Does not synthesize default favicon thumbnail")
     func defaultFavicon() {
         let html = "<html><head><title>Test</title></head></html>"
         let result = BookmarkMetadataParser.parse(html: html, pageURL: exampleURL)
-        #expect(result?.thumbnailURL?.absoluteString == "https://example.com/favicon.ico")
+        #expect(result?.title == "Test")
+        #expect(result?.thumbnailURL == nil)
+    }
+
+    @Test("Does not treat Vans touch icon as product thumbnail")
+    func vansTouchIconIsNotProductThumbnail() {
+        let vansURL = URL(string: "https://www.vans.com/en-us/shoes-c00081/ave-2-0-shoe-pvn000d1hy28")!
+        let html = """
+        <html><head>
+        <title>Vans AVE 2.0 - Gum Black</title>
+        <link rel="apple-touch-icon" href="/touch-icon-iphone.png?v=2">
+        </head></html>
+        """
+        let result = BookmarkMetadataParser.parse(html: html, pageURL: vansURL)
+        #expect(result?.title == "Vans AVE 2.0 - Gum Black")
+        #expect(result?.thumbnailURL == nil)
     }
 
     // MARK: - Site-Specific Behavior
@@ -283,6 +299,20 @@ struct BookmarkMetadataParserTests {
         """
         let result = BookmarkMetadataParser.parse(html: html, pageURL: redditURL)
         #expect(result?.thumbnailURL?.host == "i.redd.it")
+    }
+
+    @Test("Reddit: rejects malformed script image fragments")
+    func redditRejectsMalformedScriptImageFragment() {
+        let redditURL = URL(string: "https://www.reddit.com/r/linux/s/fahgV5IU4M")!
+        let html = """
+        <html><head>
+        <meta property="og:title" content="Reddit - The heart of the internet">
+        </head><body>
+        {"url":"https://i.redd.it/vadjty7u3xvg1.png%22,%22created_time"}
+        </body></html>
+        """
+        let result = BookmarkMetadataParser.parse(html: html, pageURL: redditURL)
+        #expect(result?.thumbnailURL == nil)
     }
 
     @Test("X/Twitter: no favicon fallback")
