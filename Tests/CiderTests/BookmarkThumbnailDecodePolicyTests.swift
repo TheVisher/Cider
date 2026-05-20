@@ -89,4 +89,21 @@ struct BookmarkThumbnailDecodePolicyTests {
 
         #expect(abs(stamp - modifiedAt.timeIntervalSince1970) < 0.001)
     }
+
+    @MainActor
+    @Test("GitHub repository captures can render a local fallback card")
+    func githubRepositoryFallbackCardRendersImageData() throws {
+        let pageURL = try #require(URL(string: "https://github.com/AndrewPrifer/liquid-dom"))
+        let data = try #require(
+            VaultBookmarkService.githubRepositoryFallbackCardData(
+                for: pageURL,
+                title: "GitHub - AndrewPrifer/liquid-dom: Tiny DOM helpers"
+            )
+        )
+
+        #expect(data.count > 1_000)
+        let image = try #require(NSImage(data: data))
+        #expect(image.size.width > 0)
+        #expect(image.size.height > 0)
+    }
 }

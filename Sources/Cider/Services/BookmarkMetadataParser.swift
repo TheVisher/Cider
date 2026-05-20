@@ -4,6 +4,7 @@ struct BookmarkEnrichmentPayload {
     let title: String?
     let thumbnailURL: URL?
     let screenshotData: Data?
+    let thumbnailFallbackData: Data?
     let recipeExtractionText: String?
     var carouselImageURLs: [URL]?  // Additional images (e.g. Reddit gallery)
 
@@ -11,12 +12,14 @@ struct BookmarkEnrichmentPayload {
         title: String?,
         thumbnailURL: URL?,
         screenshotData: Data?,
+        thumbnailFallbackData: Data? = nil,
         recipeExtractionText: String? = nil,
         carouselImageURLs: [URL]? = nil
     ) {
         self.title = title
         self.thumbnailURL = thumbnailURL
         self.screenshotData = screenshotData
+        self.thumbnailFallbackData = thumbnailFallbackData
         self.recipeExtractionText = recipeExtractionText
         self.carouselImageURLs = carouselImageURLs
     }
@@ -365,15 +368,19 @@ enum BookmarkMetadataParser {
             #"(?is)(https?://external-preview\.redd\.it/[^"'\\s<]+)"#,
         ]
 
+        var best: (score: Int, url: URL)?
         for pattern in patterns {
-            if let raw = firstRegexCapture(pattern: pattern, in: html),
-               let resolved = resolvedRemoteURL(from: raw, baseURL: pageURL),
-               !isLikelyRedditPlaceholderImage(url: resolved) {
-                return resolved
+            for match in regexCaptureMatches(pattern: pattern, in: html) {
+                guard let resolved = resolvedRemoteURL(from: match.rawValue, baseURL: pageURL) else { continue }
+                let score = redditThumbnailCandidateScore(url: resolved, context: match.context)
+                guard score >= 0 else { continue }
+                if best == nil || score > best!.score {
+                    best = (score, resolved)
+                }
             }
         }
 
-        return nil
+        return best?.url
     }
 
     private static func xThumbnailURL(html: String, pageURL: URL) -> URL? {
@@ -517,6 +524,58 @@ enum BookmarkMetadataParser {
         }
     }
 
+    private static func redditThumbnailCandidateScore(url: URL, context: String) -> Int {
+        if isLikelyRedditPlaceholderImage(url: url) || isMalformedImageFragment(url) {
+            return -1
+        }
+
+        let normalizedContext = context.lowercased()
+        var score = 0
+        let positiveContextFragments = [
+            "data-testid=\"post-media\"",
+            "data-testid='post-media'",
+            "shreddit-post",
+            "url_overridden_by_dest",
+            "media_metadata",
+            "gallery_data",
+            "post-media",
+            "preview",
+        ]
+        for fragment in positiveContextFragments where normalizedContext.contains(fragment) {
+            score += 10
+        }
+
+        let blockedContextFragments = [
+            "promotedlink",
+            "promoted",
+            "advertis",
+            "ad-container",
+            "ad_",
+            "right-sidebar",
+            "sidebar",
+            "community-banner",
+            "subreddit-icon",
+            "avatar",
+            "user-icon",
+        ]
+        let blockedScore = blockedContextFragments.reduce(0) { partial, fragment in
+            normalizedContext.contains(fragment) ? partial + 12 : partial
+        }
+        score -= blockedScore
+        if score < 0 {
+            return -1
+        }
+
+        let host = normalizedHost(for: url)
+        if host == "i.redd.it" {
+            score += 6
+        } else if host == "preview.redd.it" || host == "external-preview.redd.it" || host == "cf.preview.redd.it" {
+            score += 4
+        }
+
+        return score
+    }
+
     private static func defaultFaviconURL(for pageURL: URL) -> URL? {
         guard var components = URLComponents(url: pageURL, resolvingAgainstBaseURL: false),
               let scheme = components.scheme?.lowercased(),
@@ -609,6 +668,34 @@ enum BookmarkMetadataParser {
             return nil
         }
         return String(text[range])
+    }
+
+    private struct RegexCaptureMatch {
+        let rawValue: String
+        let context: String
+    }
+
+    private static func regexCaptureMatches(pattern: String, in text: String, contextRadius: Int = 80) -> [RegexCaptureMatch] {
+        guard let regex = try? NSRegularExpression(
+            pattern: pattern,
+            options: [.dotMatchesLineSeparators, .caseInsensitive]
+        ) else {
+            return []
+        }
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        let matches = regex.matches(in: text, options: [], range: nsRange)
+
+        return matches.compactMap { match in
+            let captureRange = match.numberOfRanges > 1 ? match.range(at: 1) : match.range(at: 0)
+            guard let range = Range(captureRange, in: text) else { return nil }
+
+            let lower = text.index(range.lowerBound, offsetBy: -contextRadius, limitedBy: text.startIndex) ?? text.startIndex
+            let upper = text.index(range.upperBound, offsetBy: contextRadius, limitedBy: text.endIndex) ?? text.endIndex
+            return RegexCaptureMatch(
+                rawValue: String(text[range]),
+                context: String(text[lower..<upper])
+            )
+        }
     }
 
     private static func decodeEscapedURLString(_ value: String) -> String {

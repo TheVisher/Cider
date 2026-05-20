@@ -301,6 +301,28 @@ struct BookmarkMetadataParserTests {
         #expect(result?.thumbnailURL?.host == "i.redd.it")
     }
 
+    @Test("Reddit: skips promoted/sidebar images before post media")
+    func redditSkipsPromotedImagesBeforePostMedia() {
+        let redditURL = URL(string: "https://www.reddit.com/r/macapps/comments/abc123/native_markdown_renderer/")!
+        let html = """
+        <html><head>
+        <meta property="og:title" content="Native Markdown Renderer">
+        </head><body>
+        <aside class="right-sidebar promotedlink ad-container">
+          https://preview.redd.it/promoted-app-install-v0-ad123.jpg?width=640&auto=webp
+        </aside>
+        <shreddit-post>
+          <div data-testid="post-media">
+            https://preview.redd.it/native-markdown-renderer-v0-realpost.png?width=1440&format=png&auto=webp
+          </div>
+        </shreddit-post>
+        </body></html>
+        """
+        let result = BookmarkMetadataParser.parse(html: html, pageURL: redditURL)
+        #expect(result?.thumbnailURL?.absoluteString.contains("native-markdown-renderer") == true)
+        #expect(result?.thumbnailURL?.absoluteString.contains("promoted") == false)
+    }
+
     @Test("Reddit: rejects malformed script image fragments")
     func redditRejectsMalformedScriptImageFragment() {
         let redditURL = URL(string: "https://www.reddit.com/r/linux/s/fahgV5IU4M")!

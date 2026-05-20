@@ -1813,6 +1813,15 @@ final class VaultBookmarkService: ObservableObject {
                 imageAssets = await self.cacheImageAssets(from: thumbnailURL, for: bookmarkID, pageURL: url)
             }
 
+            if imageAssets == nil,
+               let fallbackData = payload?.thumbnailFallbackData {
+                imageAssets = self.cacheImageAssets(
+                    from: fallbackData,
+                    for: bookmarkID,
+                    preferredFileExtension: "png"
+                )
+            }
+
             // Screenshot fallback only when native metadata did not find a provider
             // thumbnail. If a provider thumbnail URL exists but downloading it fails,
             // keep the remote URL for retry instead of locking in a generic page shell.
@@ -2280,11 +2289,19 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         let htmlResult = await fetchHTMLEnrichmentPayload(for: pageURL)
+        let githubFallbackData = githubRepositoryFallbackCardData(for: pageURL, title: htmlResult?.title)
 
         let hasRealThumbnail = htmlResult?.thumbnailURL != nil
             && !isFaviconURL(htmlResult?.thumbnailURL)
         if let htmlResult, hasRealThumbnail {
-            return htmlResult
+            return BookmarkEnrichmentPayload(
+                title: htmlResult.title,
+                thumbnailURL: htmlResult.thumbnailURL,
+                screenshotData: htmlResult.screenshotData,
+                thumbnailFallbackData: githubFallbackData,
+                recipeExtractionText: htmlResult.recipeExtractionText,
+                carouselImageURLs: htmlResult.carouselImageURLs
+            )
         }
 
         // oEmbed fallback
@@ -2308,12 +2325,142 @@ final class VaultBookmarkService: ObservableObject {
                     title: extracted.title ?? htmlResult?.title,
                     thumbnailURL: extracted.imageURL ?? htmlResult?.thumbnailURL,
                     screenshotData: extracted.screenshotData,
+                    thumbnailFallbackData: githubFallbackData,
                     recipeExtractionText: htmlResult?.recipeExtractionText
                 )
             }
         }
 
+        if let htmlResult, githubFallbackData != nil {
+            return BookmarkEnrichmentPayload(
+                title: htmlResult.title,
+                thumbnailURL: htmlResult.thumbnailURL,
+                screenshotData: htmlResult.screenshotData,
+                thumbnailFallbackData: githubFallbackData,
+                recipeExtractionText: htmlResult.recipeExtractionText,
+                carouselImageURLs: htmlResult.carouselImageURLs
+            )
+        }
+
         return htmlResult
+    }
+
+    static func githubRepositoryFallbackCardData(for pageURL: URL, title: String?) -> Data? {
+        guard let repo = githubRepositoryIdentity(for: pageURL) else { return nil }
+
+        let width = 1200
+        let height = 630
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: width,
+            pixelsHigh: height,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        defer { NSGraphicsContext.restoreGraphicsState() }
+
+        let size = NSSize(width: width, height: height)
+
+        let rect = NSRect(origin: .zero, size: size)
+        NSColor(calibratedRed: 0.05, green: 0.07, blue: 0.10, alpha: 1).setFill()
+        rect.fill()
+
+        NSColor(calibratedRed: 0.16, green: 0.45, blue: 0.94, alpha: 1).setFill()
+        NSRect(x: 0, y: 0, width: size.width, height: 14).fill()
+
+        let markRect = NSRect(x: 72, y: 430, width: 86, height: 86)
+        NSColor(calibratedWhite: 1, alpha: 0.10).setFill()
+        NSBezierPath(ovalIn: markRect).fill()
+        ("GH" as NSString).draw(
+            in: markRect.insetBy(dx: 11, dy: 25),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 25, weight: .bold),
+                .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.84),
+            ]
+        )
+
+        (repo.owner as NSString).draw(
+            in: NSRect(x: 184, y: 474, width: 880, height: 40),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 26, weight: .semibold),
+                .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.62),
+            ]
+        )
+
+        let titleParagraph = NSMutableParagraphStyle()
+        titleParagraph.lineBreakMode = .byTruncatingTail
+        (repo.name as NSString).draw(
+            in: NSRect(x: 184, y: 372, width: 880, height: 98),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 74, weight: .bold),
+                .foregroundColor: NSColor.white,
+                .paragraphStyle: titleParagraph,
+            ]
+        )
+
+        if let description = githubRepositoryDescription(from: title, owner: repo.owner, repo: repo.name) {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byTruncatingTail
+            (description as NSString).draw(
+                in: NSRect(x: 74, y: 222, width: 990, height: 86),
+                withAttributes: [
+                    .font: NSFont.systemFont(ofSize: 30, weight: .regular),
+                    .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.78),
+                    .paragraphStyle: paragraph,
+                ]
+            )
+        }
+
+        ("github.com/\(repo.owner)/\(repo.name)" as NSString).draw(
+            in: NSRect(x: 74, y: 82, width: 990, height: 36),
+            withAttributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 24, weight: .medium),
+                .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.58),
+            ]
+        )
+
+        return bitmap.representation(using: .png, properties: [:])
+    }
+
+    private static func githubRepositoryIdentity(for pageURL: URL) -> (owner: String, name: String)? {
+        let host = pageURL.host?.lowercased() ?? ""
+        guard host == "github.com" || host == "www.github.com" else { return nil }
+        let components = pageURL.pathComponents.filter { $0 != "/" }
+        guard components.count >= 2 else { return nil }
+
+        let owner = components[0]
+        let name = components[1]
+        let reservedOwners = [
+            "about", "apps", "blog", "collections", "contact", "customer-stories",
+            "enterprise", "events", "explore", "features", "marketplace", "new",
+            "notifications", "organizations", "pricing", "search", "settings", "topics",
+        ]
+        guard !reservedOwners.contains(owner.lowercased()),
+              !owner.isEmpty,
+              !name.isEmpty,
+              !name.hasPrefix(".") else {
+            return nil
+        }
+        return (owner, name)
+    }
+
+    private static func githubRepositoryDescription(from title: String?, owner: String, repo: String) -> String? {
+        guard let title else { return nil }
+        let prefix = "GitHub - \(owner)/\(repo):"
+        guard title.hasPrefix(prefix) else { return nil }
+        let description = title.dropFirst(prefix.count)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return description.isEmpty ? nil : description
     }
 
     /// Extracts product info directly from an Amazon URL without scraping.
