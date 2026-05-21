@@ -730,7 +730,33 @@ struct CiderCaptureServiceTests {
             #expect(indexing["ownerType"] as? String == "note")
             #expect(indexing["ownerID"] as? String == result.item.id.uuidString)
             #expect(dict["partialSuccess"] == nil)
-            #expect(safeNextCommands == ["cider-cli item get \(result.item.id.uuidString) --json"])
+            #expect(safeNextCommands == ["cider-cli item get note \(result.item.id.uuidString) --json"])
+            #expect(!safeNextCommands.contains("cider-cli item get \(result.item.id.uuidString) --json"))
+        }
+    }
+
+    @Test("bookmark capture safe next commands include item type")
+    func bookmarkCaptureSafeNextCommandsIncludeItemType() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
+            )
+
+            let result = try service.addBookmarkCapture(
+                urlString: "https://example.com/typed-safe-next-command",
+                title: "Typed Safe Next Command",
+                folderID: nil
+            )
+            let dict = result.toDictionary()
+            let safeNextCommands = try #require(dict["safeNextCommands"] as? [String])
+
+            #expect(safeNextCommands.first == "cider-cli item get bookmark \(result.item.id.uuidString) --json")
+            #expect(!safeNextCommands.contains("cider-cli item get \(result.item.id.uuidString) --json"))
         }
     }
 

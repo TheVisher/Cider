@@ -244,7 +244,7 @@ struct CiderCaptureResult {
     }
 
     private func safeNextCommands() -> [String] {
-        var commands = ["cider-cli item get \(item.id.uuidString) --json"]
+        var commands = ["cider-cli item get \(item.type) \(item.id.uuidString) --json"]
         if canonicalSideEffectPartialSuccess() != nil {
             commands.append("cider-cli storage audit --json")
         }
