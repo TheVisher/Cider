@@ -27,6 +27,12 @@ enum WorkspaceContextualTabPolicy {
             return result
         }
         if domain == .browse { return [CiderTab.domainDashboard(.browse)] + domainTabs }
+        if domain == .spaces {
+            return [CiderTab.domainDashboard(.spaces)] + allTabs.filter { tab in
+                if case .spaceOverview = tab { return true }
+                return tab == .spacesManager
+            }
+        }
         if domain == .projects, let selectedProject {
             switch selectedProject.kind {
             case .project:
@@ -114,6 +120,8 @@ enum WorkspaceContextualTabPolicy {
         switch domain {
         case .mainDashboard:
             return savedView.kind == .dashboard
+        case .spaces:
+            return false
         case .projects:
             if case .kanban = savedView.kind { return true }
             return false

@@ -44,20 +44,22 @@ enum WorkspaceDomainRoutePolicy {
         switch domain {
         case .mainDashboard:
             return []
+        case .spaces:
+            return []
         case .browse:
             return [.inbox, .all, .bookmarks, .notes, .files, .folders, .tags]
         case .projects:
-            return [.overview]
+            return []
         case .aiAssistant:
-            return [.overview, .chats]
+            return [.chats]
         case .bookmarks:
-            return [.overview, .inbox, .folders, .tags, .recent, .savedViews]
+            return [.inbox, .folders, .tags, .recent, .savedViews]
         case .tasksEvents:
-            return [.overview, .inbox]
+            return [.inbox]
         case .media, .people:
-            return [.overview]
+            return []
         case .notes, .files:
-            return [.overview, .folders, .tags, .recent, .savedViews]
+            return [.folders, .tags, .recent, .savedViews]
         }
     }
 
@@ -98,19 +100,15 @@ enum WorkspaceDomainSidebarModel {
         selectedDomain: WorkspaceNavigationDomain?,
         pinnedSpaces: [CiderSpace]
     ) -> [WorkspaceNavigationDomain] {
-        var domains: [WorkspaceNavigationDomain] = [
+        let domains: [WorkspaceNavigationDomain] = [
             .mainDashboard,
             .browse,
-            .media,
+            .spaces,
             .projects,
             .tasksEvents,
             .people,
             .aiAssistant
         ]
-
-        if pinnedSpaces.contains(where: { $0.preset == .media }) {
-            domains.removeAll { $0 == .media }
-        }
 
         return domains
     }
@@ -125,6 +123,11 @@ enum WorkspaceDomainSidebarModel {
             return selectedDomain == nil
                 && selectedSpaceID == nil
                 && !isSpacesManagerSelected
+        }
+        if domain == .spaces {
+            return selectedDomain == .spaces
+                || selectedSpaceID != nil
+                || isSpacesManagerSelected
         }
         return selectedDomain == domain
     }

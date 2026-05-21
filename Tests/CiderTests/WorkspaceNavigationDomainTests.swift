@@ -6,6 +6,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         let domains = WorkspaceNavigationDomain.allCases
 
         XCTAssertTrue(domains.contains(.mainDashboard))
+        XCTAssertTrue(domains.contains(.spaces))
         XCTAssertTrue(domains.contains(.media))
         XCTAssertTrue(domains.contains(.projects))
         XCTAssertTrue(domains.contains(.aiAssistant))
@@ -47,7 +48,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(domains, [
             .mainDashboard,
             .browse,
-            .media,
+            .spaces,
             .projects,
             .tasksEvents,
             .people,
@@ -58,7 +59,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertFalse(domains.contains(.files))
     }
 
-    func testPinnedMediaSpaceReplacesGenericMediaDomainInPersistentSidebar() {
+    func testPinnedMediaSpaceLivesUnderSpacesWithoutAddingMediaAsTopLevelDomain() {
         let mediaSpace = CiderSpace(
             id: "media-space",
             name: "Media",
@@ -81,6 +82,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(domains, [
             .mainDashboard,
             .browse,
+            .spaces,
             .projects,
             .tasksEvents,
             .people,
@@ -101,19 +103,23 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
     func testDomainRoutesUseWorkflowDestinationsInsteadOfContentTypeDomains() {
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .tasksEvents).map(\.kind),
-            [.overview, .inbox]
+            [.inbox]
         )
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .media).map(\.kind),
-            [.overview]
+            []
+        )
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.routes(for: .spaces).map(\.kind),
+            []
         )
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .people).map(\.kind),
-            [.overview]
+            []
         )
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .aiAssistant).map(\.kind),
-            [.overview, .chats]
+            [.chats]
         )
     }
 
@@ -195,6 +201,33 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertTrue(WorkspaceDomainSidebarModel.isDomainSelected(
             .projects,
             selectedDomain: .projects,
+            selectedSpaceID: "media-space",
+            isSpacesManagerSelected: false
+        ))
+    }
+
+    func testSpacesSidebarSelectionFollowsPinnedSpacesAndSpacesManager() {
+        XCTAssertTrue(WorkspaceDomainSidebarModel.isDomainSelected(
+            .spaces,
+            selectedDomain: nil,
+            selectedSpaceID: "media-space",
+            isSpacesManagerSelected: false
+        ))
+        XCTAssertTrue(WorkspaceDomainSidebarModel.isDomainSelected(
+            .spaces,
+            selectedDomain: nil,
+            selectedSpaceID: nil,
+            isSpacesManagerSelected: true
+        ))
+        XCTAssertTrue(WorkspaceDomainSidebarModel.isDomainSelected(
+            .spaces,
+            selectedDomain: .spaces,
+            selectedSpaceID: nil,
+            isSpacesManagerSelected: false
+        ))
+        XCTAssertFalse(WorkspaceDomainSidebarModel.isDomainSelected(
+            .browse,
+            selectedDomain: nil,
             selectedSpaceID: "media-space",
             isSpacesManagerSelected: false
         ))

@@ -18,12 +18,13 @@ extension CiderPanelView {
             expandedDomains: $expandedNavigationDomains,
             searchText: $sidebarSearchText,
             domains: WorkspaceNavigationDomain.allCases,
-            pinnedSpaces: spaceStorage.pinnedSpaces,
+            spaces: spaceStorage.spaces,
             selectedSpaceID: selectedSpaceID,
             isSpacesManagerSelected: selectedTab == .spacesManager,
             onTriggerSearch: { isSearchPaletteVisible = true },
             onSelectDomain: openNavigationDomain,
             onSelectSpace: openSpace,
+            onCreateSpace: createSpace,
             onOpenSpacesManager: openSpacesManager
         ) { domain in
             domainSidebarContent(for: domain)
@@ -51,6 +52,8 @@ extension CiderPanelView {
                 onSelectWorkspace: selectProjectWorkspace,
                 onSelectDestination: selectProjectWorkspaceDestination
             )
+        } else if domain == .spaces {
+            EmptyView()
         } else {
             WorkspaceDomainRouteSidebarView(
                 domain: domain,
@@ -174,7 +177,7 @@ extension CiderPanelView {
             )
         }
 
-        selectedNavigationDomain = nil
+        selectedNavigationDomain = .spaces
         selectedProjectWorkspaceID = nil
         selectedDomainRouteKind = .overview
         selectedFolderID = nil
@@ -195,7 +198,7 @@ extension CiderPanelView {
             )
         }
 
-        selectedNavigationDomain = nil
+        selectedNavigationDomain = .spaces
         selectedProjectWorkspaceID = nil
         selectedDomainRouteKind = .overview
         selectedFolderID = nil

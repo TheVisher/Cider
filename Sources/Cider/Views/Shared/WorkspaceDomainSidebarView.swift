@@ -5,12 +5,13 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
     @Binding var expandedDomains: Set<WorkspaceNavigationDomain>
     @Binding var searchText: String
     let domains: [WorkspaceNavigationDomain]
-    let pinnedSpaces: [CiderSpace]
+    let spaces: [CiderSpace]
     let selectedSpaceID: String?
     let isSpacesManagerSelected: Bool
     let onTriggerSearch: () -> Void
     let onSelectDomain: (WorkspaceNavigationDomain) -> Void
     let onSelectSpace: (CiderSpace) -> Void
+    let onCreateSpace: (CiderSpacePresetKind) -> Void
     let onOpenSpacesManager: () -> Void
     @ViewBuilder let domainContent: (WorkspaceNavigationDomain) -> DomainContent
 
@@ -34,13 +35,13 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
                             domainButton(domain)
 
                             if isExpanded(domain) {
-                                domainContent(domain)
-                                    .padding(.leading, WorkspaceSidebarNestedRowMetrics.childIndent)
+                                if domain == .spaces {
+                                    spacesSection
+                                } else {
+                                    domainContent(domain)
+                                        .padding(.leading, WorkspaceSidebarNestedRowMetrics.childIndent)
+                                }
                             }
-                        }
-
-                        if domain == .browse {
-                            spacesSection
                         }
                     }
                 }
@@ -54,20 +55,12 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
 
     private var spacesSection: some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
-            WorkspaceSidebarNestedSectionHeader(title: "Spaces", count: pinnedSpaces.isEmpty ? nil : pinnedSpaces.count)
-
             ForEach(pinnedSpaces) { space in
-                Button {
-                    onSelectSpace(space)
-                } label: {
-                    WorkspaceSidebarNestedRowLabel(
-                        title: space.name,
-                        systemImage: space.systemImage,
-                        isSelected: selectedSpaceID == space.id
-                    )
-                }
-                .buttonStyle(.plain)
-                .help(space.purpose)
+                spaceButton(space)
+            }
+
+            ForEach(missingStarterPresets, id: \.self) { preset in
+                starterSpaceButton(preset)
             }
 
             Button {
@@ -83,6 +76,46 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
             .help("Manage Spaces")
         }
         .padding(.leading, WorkspaceSidebarNestedRowMetrics.childIndent)
+    }
+
+    private var pinnedSpaces: [CiderSpace] {
+        CiderSpaceSidebarModel.pinnedSpaces(from: spaces)
+    }
+
+    private var missingStarterPresets: [CiderSpacePresetKind] {
+        [.media, .recipes].filter { preset in
+            spaces.contains { $0.preset == preset } == false
+        }
+    }
+
+    private func spaceButton(_ space: CiderSpace) -> some View {
+        Button {
+            onSelectSpace(space)
+        } label: {
+            WorkspaceSidebarNestedRowLabel(
+                title: space.name,
+                systemImage: space.systemImage,
+                isSelected: selectedSpaceID == space.id
+            )
+        }
+        .buttonStyle(.plain)
+        .help(space.purpose)
+    }
+
+    private func starterSpaceButton(_ preset: CiderSpacePresetKind) -> some View {
+        let defaults = CiderSpacePreset.defaults(for: preset)
+
+        return Button {
+            onCreateSpace(preset)
+        } label: {
+            WorkspaceSidebarNestedRowLabel(
+                title: defaults.title,
+                systemImage: defaults.systemImage,
+                isSelected: false
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Create \(defaults.title) Space")
     }
 
     private var contextualDomains: [WorkspaceNavigationDomain] {

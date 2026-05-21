@@ -198,6 +198,7 @@ enum WorkspaceDomainDashboardProvider {
     private static func sectionTitle(for domain: WorkspaceNavigationDomain) -> String {
         switch domain {
         case .mainDashboard: "Dashboard"
+        case .spaces: "Spaces"
         case .media: "Media views"
         case .bookmarks: "Bookmark views"
         case .notes: "Note views"
