@@ -229,12 +229,14 @@ final class VaultDoctor {
             if Self.reservedTopDirs.contains(topComponent) { continue }
             if indexedPaths.contains(relativePath) { continue }
 
-            // Determine emptiness (any non-hidden non-reserved child files
-            // OR subdirectories count as non-empty)
+            // Determine emptiness from all child entries, including dotfiles.
+            // Hidden-only directories are not safe to auto-delete: files like
+            // `.keep`, `.gitignore`, or sync metadata can be meaningful even
+            // when Finder makes the directory look empty.
             let contents = (try? fm.contentsOfDirectory(
                 at: url,
                 includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
+                options: []
             )) ?? []
             if contents.isEmpty {
                 out.append(Finding(
@@ -856,6 +858,18 @@ final class VaultDoctor {
         guard let relPath = finding.payload.relativePath else { return false }
         let url = vaultRoot.appendingPathComponent(relPath)
         do {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { return false }
+            let contents = try FileManager.default.contentsOfDirectory(
+                at: url,
+                includingPropertiesForKeys: nil,
+                options: []
+            )
+            guard contents.isEmpty else {
+                logger.warning("Doctor fix refused stale untracked-empty-dir finding for non-empty directory \(relPath)")
+                return false
+            }
             try FileManager.default.removeItem(at: url)
             logger.info("Doctor fix: removed untracked empty directory \(relPath)")
             return true

@@ -152,6 +152,46 @@ struct CiderStorageAuditServiceTests {
         #expect(finding.summary.contains("../Secrets"))
     }
 
+    @Test("VaultDoctor treats hidden-only directories as non-empty and refuses stale empty-dir fixes")
+    func vaultDoctorHiddenOnlyDirectoriesAreNotAutoDeleted() throws {
+        let fm = FileManager.default
+        let vault = try makeTempVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let hiddenOnly = vault.appendingPathComponent("Projects/HiddenOnly", isDirectory: true)
+        try fm.createDirectory(at: hiddenOnly, withIntermediateDirectories: true)
+        let hiddenFile = hiddenOnly.appendingPathComponent(".keep")
+        try "keep me".write(to: hiddenFile, atomically: true, encoding: .utf8)
+
+        let hiddenFinding = try #require(VaultDoctor.shared.scanFolderIntegrity().findings.first {
+            $0.payload.relativePath?.hasSuffix("Projects/HiddenOnly") == true
+        })
+        #expect(hiddenFinding.kind == .untrackedNonEmptyDir)
+        #expect(!hiddenFinding.isFixable)
+        #expect(fm.fileExists(atPath: hiddenFile.path))
+
+        let initiallyEmpty = vault.appendingPathComponent("Projects/InitiallyEmpty", isDirectory: true)
+        try fm.createDirectory(at: initiallyEmpty, withIntermediateDirectories: true)
+        let staleFinding = try #require(VaultDoctor.shared.scanFolderIntegrity().findings.first {
+            $0.payload.relativePath?.hasSuffix("Projects/InitiallyEmpty") == true
+        })
+        #expect(staleFinding.kind == .untrackedEmptyDir)
+        #expect(staleFinding.isFixable)
+
+        let lateHiddenFile = initiallyEmpty.appendingPathComponent(".late")
+        try "arrived after scan".write(to: lateHiddenFile, atomically: true, encoding: .utf8)
+
+        #expect(!VaultDoctor.shared.fix(staleFinding))
+        #expect(fm.fileExists(atPath: lateHiddenFile.path))
+        #expect(fm.fileExists(atPath: initiallyEmpty.path))
+    }
+
     private func flattenedFolderDoctorReport(folderID: UUID) -> VaultDoctor.Report {
         VaultDoctor.Report(
             startedAt: Date(timeIntervalSince1970: 11),
