@@ -6,6 +6,65 @@ enum ProjectWorkspaceKind: String, Codable, Hashable {
     case browseAllBoards
 }
 
+enum ProjectWorkspaceSurface: String, CaseIterable, Codable, Hashable, Identifiable {
+    case boards
+    case notes
+    case decisions
+    case assets
+    case qaAudits
+    case plansHandoffs
+
+    var id: String { rawValue.kebabCasedProjectSurfaceID }
+
+    var title: String {
+        switch self {
+        case .boards: "Boards"
+        case .notes: "Notes"
+        case .decisions: "Decisions"
+        case .assets: "Assets"
+        case .qaAudits: "QA/Audits"
+        case .plansHandoffs: "Plans/Handoffs"
+        }
+    }
+
+    var tabName: String { title }
+
+    var systemImage: String {
+        switch self {
+        case .boards: "rectangle.split.3x1"
+        case .notes: "note.text"
+        case .decisions: "checkmark.seal"
+        case .assets: "photo.on.rectangle"
+        case .qaAudits: "checklist.checked"
+        case .plansHandoffs: "doc.text.magnifyingglass"
+        }
+    }
+
+    var placeholderSubtitle: String {
+        switch self {
+        case .boards:
+            "Kanban boards linked to this project workspace."
+        case .notes:
+            "Full project discussions, notes, and captured context will collect here."
+        case .decisions:
+            "Durable project decisions and their evidence will collect here."
+        case .assets:
+            "Screenshots, files, references, and design inspiration will collect here."
+        case .qaAudits:
+            "QA evidence, audit results, and verification trails will collect here."
+        case .plansHandoffs:
+            "Implementation plans, agent handoffs, and commit traces will collect here."
+        }
+    }
+}
+
+private extension String {
+    var kebabCasedProjectSurfaceID: String {
+        replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1-$2", options: .regularExpression)
+            .localizedLowercase
+    }
+}
+
 struct ProjectWorkspace: Identifiable, Codable, Hashable {
     let id: String
     var kind: ProjectWorkspaceKind
@@ -13,6 +72,10 @@ struct ProjectWorkspace: Identifiable, Codable, Hashable {
     var subtitle: String
     var boardIDs: [String]
     var referenceSearchTerms: [String]
+
+    var surfaces: [ProjectWorkspaceSurface] {
+        kind == .project ? ProjectWorkspaceSurface.allCases : []
+    }
 
     var systemImage: String {
         switch kind {
@@ -232,7 +295,7 @@ enum ProjectWorkspaceSidebarDestinationKind: Hashable {
     case overview
     case boardsGroup
     case board(String)
-    case references
+    case surface(ProjectWorkspaceSurface)
 }
 
 struct ProjectWorkspaceSidebarDestination: Identifiable, Equatable {
@@ -262,6 +325,18 @@ enum ProjectWorkspaceSidebarTree {
             )
         }
 
+        let surfaceDestinations = workspace.surfaces
+            .filter { $0 != .boards }
+            .map { surface in
+                ProjectWorkspaceSidebarDestination(
+                    id: "surface-\(surface.id)",
+                    title: surface.title,
+                    systemImage: surface.systemImage,
+                    kind: .surface(surface),
+                    isSelectable: true
+                )
+            }
+
         return [
             ProjectWorkspaceSidebarDestination(
                 id: "overview",
@@ -273,18 +348,10 @@ enum ProjectWorkspaceSidebarTree {
             ProjectWorkspaceSidebarDestination(
                 id: "boards",
                 title: "Boards",
-                systemImage: "rectangle.split.3x1",
+                systemImage: ProjectWorkspaceSurface.boards.systemImage,
                 kind: .boardsGroup,
                 isSelectable: false
             )
-        ] + boardDestinations + [
-            ProjectWorkspaceSidebarDestination(
-                id: "references",
-                title: "References",
-                systemImage: "photo.on.rectangle",
-                kind: .references,
-                isSelectable: true
-            )
-        ]
+        ] + boardDestinations + surfaceDestinations
     }
 }

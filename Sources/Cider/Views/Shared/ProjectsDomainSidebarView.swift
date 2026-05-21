@@ -95,8 +95,10 @@ struct ProjectsDomainSidebarView: View {
         switch selectedTab {
         case .projectOverview:
             return .overview
+        case .projectSurface(_, let surface, _):
+            return .surface(surface)
         case .projectReferences:
-            return .references
+            return .surface(.assets)
         case .savedView:
             return selectedBoardID.map { .board($0) }
         case .search, .tag, .domainDashboard, .spaceOverview, .spacesManager, .aiAssistant:

@@ -164,7 +164,33 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(sections[2].entries.map(\.id), ["browse-all-boards"])
     }
 
-    func testSidebarTreeBuildsProjectViewDestinations() {
+    func testProjectWorkspaceExposesMVPContainerSurfaces() {
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [
+            KanbanBoard(id: "2afee0", name: "Cider")
+        ])
+        let cider = catalog.workspace(id: "cider")!
+
+        XCTAssertEqual(cider.surfaces.map(\.id), [
+            "boards",
+            "notes",
+            "decisions",
+            "assets",
+            "qa-audits",
+            "plans-handoffs"
+        ])
+        XCTAssertEqual(cider.surfaces.map(\.title), [
+            "Boards",
+            "Notes",
+            "Decisions",
+            "Assets",
+            "QA/Audits",
+            "Plans/Handoffs"
+        ])
+        XCTAssertEqual(cider.surfaces.first?.tabName, "Boards")
+        XCTAssertTrue(catalog.home.surfaces.isEmpty)
+    }
+
+    func testSidebarTreeBuildsProjectWorkspaceSurfaceDestinations() {
         let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [
             KanbanBoard(id: "2afee0", name: "Cider"),
             KanbanBoard(id: "08c899", name: "Cider Web")
@@ -179,7 +205,25 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             ]
         )
 
-        XCTAssertEqual(destinations.map(\.title), ["Overview", "Boards", "Cider", "References"])
-        XCTAssertEqual(destinations.map(\.kind), [.overview, .boardsGroup, .board("2afee0"), .references])
+        XCTAssertEqual(destinations.map(\.title), [
+            "Overview",
+            "Boards",
+            "Cider",
+            "Notes",
+            "Decisions",
+            "Assets",
+            "QA/Audits",
+            "Plans/Handoffs"
+        ])
+        XCTAssertEqual(destinations.map(\.kind), [
+            .overview,
+            .boardsGroup,
+            .board("2afee0"),
+            .surface(.notes),
+            .surface(.decisions),
+            .surface(.assets),
+            .surface(.qaAudits),
+            .surface(.plansHandoffs)
+        ])
     }
 }

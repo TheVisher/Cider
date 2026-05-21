@@ -364,8 +364,8 @@ extension CiderPanelView {
             break
         case .board(let boardID):
             openProjectBoard(boardID)
-        case .references:
-            selectedTab = .projectReferences(projectID: workspace.id, name: "References")
+        case .surface(let surface):
+            selectedTab = .projectSurface(projectID: workspace.id, surface: surface, name: surface.tabName)
         }
     }
 

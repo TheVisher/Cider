@@ -207,6 +207,33 @@ struct ProjectWorkspaceOverviewView: View {
     }
 }
 
+struct ProjectWorkspaceSurfacePlaceholderView: View {
+    let project: ProjectWorkspace
+    let surface: ProjectWorkspaceSurface
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Label(surface.title, systemImage: surface.systemImage)
+                    .font(CiderFont.headingSemibold)
+                    .foregroundColor(CiderColors.primary)
+                Text("\(project.title) workspace")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.secondary)
+            }
+
+            EmptyStateView(
+                icon: surface.systemImage,
+                title: "\(surface.title) surface is ready",
+                subtitle: surface.placeholderSubtitle
+            )
+            .frame(maxWidth: .infinity, minHeight: 260)
+        }
+        .padding(Spacing.lg)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
 struct ProjectReferencesView: View {
     let project: ProjectWorkspace
     let references: [ProjectReferenceItem]

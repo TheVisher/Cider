@@ -67,11 +67,15 @@ enum WorkspaceContextualTabPolicy {
             return .savedView(id: savedView.id, name: savedView.name)
         }
 
+        let surfaceTabs = project.surfaces
+            .filter { $0 != .boards }
+            .map { surface in
+                CiderTab.projectSurface(projectID: project.id, surface: surface, name: surface.tabName)
+            }
+
         var result: [CiderTab] = [
             .projectOverview(projectID: project.id, name: "Overview")
-        ] + boardTabs + [
-            .projectReferences(projectID: project.id, name: "References")
-        ]
+        ] + boardTabs + surfaceTabs
 
         for tab in allTabs where isCompatibilityTab(tab) && !result.contains(tab) {
             result.append(tab)

@@ -253,6 +253,14 @@ enum WorkspaceDomainDashboardProvider {
                 systemImage: tab.systemImage,
                 target: tab
             )
+        case .projectSurface(let projectID, let surface, let name):
+            return WorkspaceDomainDashboardItem(
+                id: tab.id,
+                title: name,
+                subtitle: "\(projectID) \(surface.title.localizedLowercase) workspace surface",
+                systemImage: tab.systemImage,
+                target: tab
+            )
         case .projectReferences(let projectID, let name):
             return WorkspaceDomainDashboardItem(
                 id: tab.id,

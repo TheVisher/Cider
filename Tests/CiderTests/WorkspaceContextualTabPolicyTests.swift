@@ -81,10 +81,14 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
             "saved-\(ciderID.uuidString)",
             "saved-\(webID.uuidString)",
             "saved-\(iosID.uuidString)",
-            "project-references-cider"
+            "project-surface-cider-notes",
+            "project-surface-cider-decisions",
+            "project-surface-cider-assets",
+            "project-surface-cider-qa-audits",
+            "project-surface-cider-plans-handoffs"
         ])
         XCTAssertEqual(result.first?.displayName, "Overview")
-        XCTAssertEqual(result.last?.displayName, "References")
+        XCTAssertEqual(result.last?.displayName, "Plans/Handoffs")
     }
 
     func testProjectsHomeUsesProjectsDashboardWhenNoProjectIsSelected() {

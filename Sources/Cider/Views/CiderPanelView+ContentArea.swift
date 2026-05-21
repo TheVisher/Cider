@@ -198,6 +198,15 @@ extension CiderPanelView {
                         title: "Project not found"
                     )
                 }
+            case .projectSurface(let projectID, let surface, _):
+                if let project = projectWorkspaceCatalog.workspace(id: projectID) {
+                    ProjectWorkspaceSurfacePlaceholderView(project: project, surface: surface)
+                } else {
+                    EmptyStateView(
+                        icon: surface.systemImage,
+                        title: "Project surface not found"
+                    )
+                }
             case .projectReferences(let projectID, _):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
                     ProjectReferencesView(
