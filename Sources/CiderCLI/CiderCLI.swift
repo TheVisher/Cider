@@ -1143,6 +1143,10 @@ struct CiderCLI {
                     if let waitResult {
                         dict["nativeCaptureStatus"] = waitResult.timedOut ? "timedOut" : "settled"
                         dict["nativeCaptureElapsedSeconds"] = waitResult.elapsedSeconds
+                        if let quality = dict["captureQuality"] as? [String: Any],
+                           let qualityStatus = quality["semanticStatus"] as? String {
+                            dict["nativeCaptureQualityStatus"] = qualityStatus
+                        }
                     }
                     if let finalBookmark {
                         dict["bookmark"] = bookmarkToDict(finalBookmark)
@@ -1163,6 +1167,11 @@ struct CiderCLI {
                     print("  Enrichment: \(result.enrichment.status)")
                     if let waitResult {
                         print("  Native capture: \(waitResult.timedOut ? "timed out" : "settled") after \(String(format: "%.1f", waitResult.elapsedSeconds))s")
+                    }
+                    if let finalBookmark,
+                       let quality = result.toDictionary(finalBookmark: finalBookmark)["captureQuality"] as? [String: Any],
+                       let qualityStatus = quality["semanticStatus"] as? String {
+                        print("  Visible quality: \(qualityStatus)")
                     }
                     print("  Review needed: \(result.routing.reviewNeeded)")
                     print("  Next safe action: \(result.nextSafeAction)")

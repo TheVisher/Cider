@@ -366,6 +366,92 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("capture result dictionary reports visible bookmark quality")
+    func captureResultDictionaryReportsVisibleBookmarkQuality() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db
+            )
+
+            let result = try service.add("https://github.com/nodes-app/swift-markdown-engine")
+            let enrichedAt = Date(timeIntervalSince1970: 1_775_000_000)
+            let degradedBookmark = Bookmark(
+                id: result.item.id,
+                title: "Github.Com",
+                urlString: "https://github.com/nodes-app/swift-markdown-engine",
+                createdAt: Date(timeIntervalSince1970: 1_774_999_000),
+                updatedAt: Date(timeIntervalSince1970: 1_774_999_500),
+                metadataUpdatedAt: enrichedAt,
+                relativePath: "Inbox/Bookmarks/Github.Com.webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: enrichedAt
+            )
+            let degradedDict = result.toDictionary(finalBookmark: degradedBookmark)
+            let degradedQuality = try #require(degradedDict["captureQuality"] as? [String: Any])
+            let degradedReasons = try #require(degradedQuality["degradedReasons"] as? [String])
+
+            #expect(degradedQuality["metadataComplete"] as? Bool == true)
+            #expect(degradedQuality["cardComplete"] as? Bool == false)
+            #expect(degradedQuality["semanticStatus"] as? String == "degraded")
+            #expect(degradedQuality["titleQuality"] as? String == "generic")
+            #expect(degradedQuality["thumbnailStatus"] as? String == "missing")
+            #expect(degradedQuality["pathStatus"] as? String == "current")
+            #expect(degradedQuality["visibleCardCurrent"] as? Bool == false)
+            #expect(degradedReasons.contains("title_generic"))
+            #expect(degradedReasons.contains("card_image_missing"))
+
+            let stalePathBookmark = Bookmark(
+                id: result.item.id,
+                title: "GitHub - nodes-app/swift-markdown-engine",
+                urlString: "https://github.com/nodes-app/swift-markdown-engine",
+                createdAt: Date(timeIntervalSince1970: 1_774_999_000),
+                updatedAt: Date(timeIntervalSince1970: 1_774_999_500),
+                thumbnailRelativePath: ".thumbnails/swift-markdown-engine.jpg",
+                metadataUpdatedAt: enrichedAt,
+                relativePath: "Inbox/Bookmarks/Github.Com (2).webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: enrichedAt
+            )
+            let stalePathDict = result.toDictionary(finalBookmark: stalePathBookmark)
+            let stalePathQuality = try #require(stalePathDict["captureQuality"] as? [String: Any])
+            let stalePathReasons = try #require(stalePathQuality["degradedReasons"] as? [String])
+
+            #expect(stalePathQuality["semanticStatus"] as? String == "degraded")
+            #expect(stalePathQuality["pathStatus"] as? String == "stale_or_generic")
+            #expect(stalePathQuality["visibleCardCurrent"] as? Bool == false)
+            #expect(stalePathReasons.contains("path_stale_or_generic"))
+
+            let richBookmark = Bookmark(
+                id: result.item.id,
+                title: "GitHub - nodes-app/swift-markdown-engine",
+                urlString: "https://github.com/nodes-app/swift-markdown-engine",
+                createdAt: Date(timeIntervalSince1970: 1_774_999_000),
+                updatedAt: Date(timeIntervalSince1970: 1_774_999_500),
+                thumbnailRelativePath: ".thumbnails/swift-markdown-engine.jpg",
+                metadataUpdatedAt: enrichedAt,
+                relativePath: "Inbox/Bookmarks/GitHub - nodes-app-swift-markdown-engine.webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: enrichedAt
+            )
+            let richDict = result.toDictionary(finalBookmark: richBookmark)
+            let richQuality = try #require(richDict["captureQuality"] as? [String: Any])
+            let richReasons = try #require(richQuality["degradedReasons"] as? [String])
+
+            #expect(richQuality["metadataComplete"] as? Bool == true)
+            #expect(richQuality["cardComplete"] as? Bool == true)
+            #expect(richQuality["semanticStatus"] as? String == "complete")
+            #expect(richQuality["titleQuality"] as? String == "rich")
+            #expect(richQuality["thumbnailStatus"] as? String == "local")
+            #expect(richQuality["pathStatus"] as? String == "current")
+            #expect(richQuality["visibleCardCurrent"] as? Bool == true)
+            #expect(richReasons.isEmpty)
+        }
+    }
+
     @Test("capture add duplicate preserves existing bookmark location when no folder is supplied")
     func captureAddDuplicatePreservesExistingLocation() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in

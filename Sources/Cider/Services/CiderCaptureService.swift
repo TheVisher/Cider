@@ -300,6 +300,8 @@ struct CiderCaptureResult {
         }
         dict["enrichment"] = enrichmentDict
 
+        dict["captureQuality"] = Self.captureQualityDictionary(for: finalBookmark)
+
         return dict
     }
 
@@ -318,6 +320,157 @@ struct CiderCaptureResult {
         if bookmark.titleManuallySet { return "manual" }
         if bookmark.metadataUpdatedAt != nil { return "enriched" }
         return "host_derived"
+    }
+
+    @MainActor
+    private static func captureQualityDictionary(for bookmark: Bookmark) -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        let metadataStatus = enrichmentStatus(for: bookmark)
+        let metadataComplete = bookmark.metadataUpdatedAt != nil
+            || metadataStatus == "complete"
+            || metadataStatus == "metadata_complete"
+        let titleQuality = bookmarkTitleQuality(bookmark)
+        let thumbnailStatus = bookmarkThumbnailStatus(bookmark)
+        let pathStatus = bookmarkPathStatus(bookmark)
+
+        var degradedReasons: [String] = []
+        if bookmark.isEnriching {
+            degradedReasons.append("enrichment_running")
+        }
+        if !metadataComplete {
+            degradedReasons.append("metadata_pending")
+        }
+        switch titleQuality {
+        case "missing": degradedReasons.append("title_missing")
+        case "generic": degradedReasons.append("title_generic")
+        default: break
+        }
+        if thumbnailStatus == "missing" {
+            degradedReasons.append("card_image_missing")
+        }
+        switch pathStatus {
+        case "missing": degradedReasons.append("path_missing")
+        case "stale_or_generic": degradedReasons.append("path_stale_or_generic")
+        default: break
+        }
+
+        let cardComplete = metadataComplete
+            && titleQuality == "rich"
+            && thumbnailStatus != "missing"
+            && pathStatus == "current"
+        let semanticStatus: String
+        if bookmark.isEnriching || !metadataComplete {
+            semanticStatus = "pending"
+        } else if degradedReasons.isEmpty {
+            semanticStatus = "complete"
+        } else {
+            semanticStatus = "degraded"
+        }
+
+        var dict: [String: Any] = [
+            "lifecycleStatus": bookmark.isEnriching ? "enriching" : (metadataComplete ? "metadata_committed" : "pending"),
+            "semanticStatus": semanticStatus,
+            "metadataStatus": metadataStatus,
+            "metadataComplete": metadataComplete,
+            "cardStatus": cardComplete ? "complete" : (metadataComplete ? "degraded" : "pending"),
+            "cardComplete": cardComplete,
+            "visibleCardCurrent": cardComplete,
+            "titleQuality": titleQuality,
+            "thumbnailStatus": thumbnailStatus,
+            "pathStatus": pathStatus,
+            "degraded": !degradedReasons.isEmpty,
+            "degradedReasons": degradedReasons,
+            "fallbackReason": degradedReasons.first ?? NSNull(),
+            "safeNextAction": degradedReasons.isEmpty ? "inspect_visible_card" : "repair_or_refetch_metadata",
+        ]
+        if let metadataUpdatedAt = bookmark.metadataUpdatedAt {
+            dict["metadataUpdatedAt"] = formatter.string(from: metadataUpdatedAt)
+        }
+        if let lastEnrichedAt = bookmark.lastEnrichedAt {
+            dict["lastEnrichedAt"] = formatter.string(from: lastEnrichedAt)
+        }
+        dict["canonicalCommitAt"] = formatter.string(from: bookmark.updatedAt)
+        return dict
+    }
+
+    private static func bookmarkTitleQuality(_ bookmark: Bookmark) -> String {
+        let title = bookmark.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return "missing" }
+        guard title.lowercased() != "untitled" else { return "missing" }
+
+        guard let host = URLComponents(string: bookmark.urlString)?.host?
+            .replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression)
+            .lowercased() else {
+            return "rich"
+        }
+        let normalizedTitle = normalizedQualityToken(title)
+        let hostLabels = host.split(separator: ".").map(String.init)
+        let hostStem = hostLabels.dropLast().joined(separator: ".")
+        let genericCandidates = [
+            host,
+            hostStem,
+            host.replacingOccurrences(of: ".", with: " "),
+            hostStem.replacingOccurrences(of: ".", with: " "),
+        ]
+        if genericCandidates.contains(where: { normalizedQualityToken($0) == normalizedTitle }) {
+            return "generic"
+        }
+        return "rich"
+    }
+
+    private static func bookmarkThumbnailStatus(_ bookmark: Bookmark) -> String {
+        if let carouselImagePaths = bookmark.carouselImagePaths, !carouselImagePaths.isEmpty {
+            return "local_carousel"
+        }
+        if let thumbnailRelativePath = bookmark.thumbnailRelativePath,
+           !thumbnailRelativePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "local"
+        }
+        if let originalImageRelativePath = bookmark.originalImageRelativePath,
+           !originalImageRelativePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "local_original"
+        }
+        if let thumbnailRemoteURLString = bookmark.thumbnailRemoteURLString,
+           !thumbnailRemoteURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "remote"
+        }
+        return "missing"
+    }
+
+    @MainActor
+    private static func bookmarkPathStatus(_ bookmark: Bookmark) -> String {
+        guard let relativePath = bookmark.relativePath?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !relativePath.isEmpty else {
+            return "missing"
+        }
+        let currentBase = stripDuplicateSuffix(
+            (relativePath as NSString).lastPathComponent as NSString
+        ).deletingPathExtension
+        let expectedBase = BookmarkFileService.shared.sanitizedFilename(
+            bookmark.title.isEmpty ? "Untitled" : bookmark.title
+        )
+        return normalizedQualityToken(currentBase) == normalizedQualityToken(expectedBase)
+            ? "current"
+            : "stale_or_generic"
+    }
+
+    private static func stripDuplicateSuffix(_ filename: NSString) -> NSString {
+        let stripped = (filename as String).replacingOccurrences(
+            of: #" \(\d+\)(?=(\.[^.]+)?$)"#,
+            with: "",
+            options: .regularExpression
+        )
+        return stripped as NSString
+    }
+
+    private static func normalizedQualityToken(_ value: String) -> String {
+        value
+            .lowercased()
+            .unicodeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) }
+            .map(String.init)
+            .joined()
     }
 }
 

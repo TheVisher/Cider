@@ -82,6 +82,39 @@ struct CiderCLIAgentSafetyTests {
         #expect(payload["reviewResolved"] as? Bool != nil)
     }
 
+    @Test("capture add json reports visible bookmark quality")
+    func captureAddJSONReportsVisibleBookmarkQuality() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-capture-quality-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "bookmark",
+                "--url", "https://example.com/capture-quality-\(UUID().uuidString)",
+                "--title", "Example.Com",
+                "--no-wait",
+                "--json",
+            ],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+        let quality = try #require(payload["captureQuality"] as? [String: Any])
+        let reasons = try #require(quality["degradedReasons"] as? [String])
+
+        #expect(quality["semanticStatus"] as? String == "pending")
+        #expect(quality["metadataComplete"] as? Bool == false)
+        #expect(quality["cardComplete"] as? Bool == false)
+        #expect(quality["titleQuality"] as? String == "generic")
+        #expect(quality["thumbnailStatus"] as? String == "missing")
+        #expect(quality["visibleCardCurrent"] as? Bool == false)
+        #expect(reasons.contains("metadata_pending"))
+        #expect(reasons.contains("title_generic"))
+        #expect(reasons.contains("card_image_missing"))
+    }
+
     @Test("capture add json rejects missing source")
     func captureAddJSONRejectsMissingSource() throws {
         let result = try runCLI(args: ["capture", "add", "--json"])
