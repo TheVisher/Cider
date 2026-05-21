@@ -61,7 +61,10 @@ struct BookmarkCard: View {
                     bookmark: bookmark,
                     mode: mode == .grid ? .grid : .masonry,
                     isHovered: isHovered,
-                    onAspectRatioResolved: { resolvedThumbnailAspectRatio = $0 }
+                    onAspectRatioResolved: { aspectRatio in
+                        guard mode == .masonry else { return }
+                        updateResolvedThumbnailAspectRatio(aspectRatio)
+                    }
                 )
                     .frame(height: resolvedThumbnailHeight)
                     .overlay(alignment: .topTrailing) {
@@ -221,6 +224,29 @@ struct BookmarkCard: View {
             }
 
             return effectiveCardWidth * aspectRatio
+        }
+    }
+
+    private func updateResolvedThumbnailAspectRatio(_ aspectRatio: CGFloat?) {
+        guard Self.shouldUpdateResolvedAspectRatio(
+            current: resolvedThumbnailAspectRatio,
+            candidate: aspectRatio
+        ) else { return }
+        resolvedThumbnailAspectRatio = aspectRatio
+    }
+
+    nonisolated static func shouldUpdateResolvedAspectRatio(
+        current: CGFloat?,
+        candidate: CGFloat?,
+        tolerance: CGFloat = 0.001
+    ) -> Bool {
+        switch (current, candidate) {
+        case (nil, nil):
+            return false
+        case let (lhs?, rhs?):
+            return abs(lhs - rhs) > tolerance
+        default:
+            return true
         }
     }
 
