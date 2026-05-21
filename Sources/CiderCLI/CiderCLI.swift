@@ -369,7 +369,7 @@ struct CiderCLI {
         case "reminder", "reminders":
             return isMutationSubcommand(subcommand, in: ["complete", "done", "snooze"])
         case "storage":
-            return subcommand == "doctor-apply" || subcommand == "bookmark-drift-repair" || subcommand == "repair-schema"
+            return subcommand == "doctor-apply" || subcommand == "bookmark-drift-repair" || (subcommand == "repair-schema" && args.contains("--execute"))
         case "doctor":
             return args.contains("--fix") || args.contains("--apply") || args.contains("--execute")
         default:
@@ -402,7 +402,7 @@ struct CiderCLI {
               cider-cli storage active-duplicate-invariants [--limit <n>] [--json]
               cider-cli storage bookmark-drift-audit [--limit <n>] [--json]
               cider-cli storage bookmark-drift-repair --item <id> --approve <token> [--execute] [--json]
-              cider-cli storage repair-schema [--json]
+              cider-cli storage repair-schema [--approve REPAIR_SCHEMA] [--execute] [--json]
             """)
 
         case "audit":
@@ -627,12 +627,39 @@ struct CiderCLI {
             }
 
         case "repair-schema":
+            let approvalToken = parseFlag("--approve", from: args)
+            let execute = args.contains("--execute")
             do {
-                let report = try CiderStorageAuditService().repairSchemaFindings()
+                let report = try CiderStorageAuditService().repairSchemaFindings(
+                    approvalToken: approvalToken,
+                    execute: execute
+                )
                 if jsonOutput {
                     outputJSON(storageAuditSchemaRepairReportToDict(report))
                 } else {
                     print("Storage schema repair")
+                    print("  Status: \(report.status)")
+                    print("  Mutating: \(report.isMutating ? "yes" : "no")")
+                    print("  Approval required: \(report.approvalRequired ? "yes" : "no")")
+                    print("  Required approval token: \(report.requiredApprovalToken)")
+                    if !report.plannedActions.isEmpty {
+                        print("  Planned actions:")
+                        for action in report.plannedActions {
+                            print("    \(action)")
+                        }
+                    }
+                    if !report.appliedActions.isEmpty {
+                        print("  Applied actions:")
+                        for action in report.appliedActions {
+                            print("    \(action)")
+                        }
+                    }
+                    if !report.blockers.isEmpty {
+                        print("  Blockers:")
+                        for blocker in report.blockers {
+                            print("    \(blocker)")
+                        }
+                    }
                     print("  Repaired: \(report.repairedFindingIDs.count)")
                     for id in report.repairedFindingIDs {
                         print("    \(id)")
@@ -10845,7 +10872,7 @@ struct CiderCLI {
             needsWorkState: String = "needs_rebuild"
         ) throws -> [String: Any] {
             guard try tableExists(table) else {
-                let command = "cider-cli storage repair-schema --json"
+                let command = "cider-cli storage repair-schema --approve REPAIR_SCHEMA --execute --json"
                 addSuggestedCommand(command)
                 return [
                     "id": id,
@@ -11837,7 +11864,7 @@ struct CiderCLI {
           cider-cli storage doctor-apply --finding <id> --canonical <path> --duplicate <path> --approve <token> [--execute] [--json]
           cider-cli storage bookmark-drift-audit [--limit <n>] [--json]
           cider-cli storage bookmark-drift-repair --item <id> --approve <token> [--execute] [--json]
-          cider-cli storage repair-schema [--json]
+          cider-cli storage repair-schema [--approve REPAIR_SCHEMA] [--execute] [--json]
 
         MIGRATE
           cider-cli item backfill-kanban [--board <name-or-id>] [--json]

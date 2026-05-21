@@ -484,7 +484,15 @@ func bookmarkDriftRepairReportToDict(_ report: CiderBookmarkDriftRepairReport) -
 
 func storageAuditSchemaRepairReportToDict(_ report: CiderStorageAuditSchemaRepairReport) -> [String: Any] {
     [
+        "command": report.command,
         "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
+        "status": report.status,
+        "isMutating": report.isMutating,
+        "approvalRequired": report.approvalRequired,
+        "requiredApprovalToken": report.requiredApprovalToken,
+        "plannedActions": report.plannedActions,
+        "appliedActions": report.appliedActions,
+        "blockers": report.blockers,
         "repairedFindingIDs": report.repairedFindingIDs,
         "skippedFindingIDs": report.skippedFindingIDs,
         "remainingFindings": report.remainingFindings.map(storageAuditSchemaFindingToDict),

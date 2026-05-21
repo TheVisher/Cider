@@ -47,7 +47,15 @@ struct CiderStorageAuditSchemaFinding: Codable, Equatable {
 }
 
 struct CiderStorageAuditSchemaRepairReport: Equatable {
+    var command: String = "storage.repair-schema"
     var generatedAt: Date
+    var status: String
+    var isMutating: Bool
+    var approvalRequired: Bool = true
+    var requiredApprovalToken: String
+    var plannedActions: [String]
+    var appliedActions: [String]
+    var blockers: [String]
     var repairedFindingIDs: [String]
     var skippedFindingIDs: [String]
     var remainingFindings: [CiderStorageAuditSchemaFinding]
@@ -248,10 +256,50 @@ final class CiderStorageAuditService {
         )
     }
 
-    func repairSchemaFindings() throws -> CiderStorageAuditSchemaRepairReport {
+    func repairSchemaFindings(
+        approvalToken: String? = nil,
+        execute: Bool = false
+    ) throws -> CiderStorageAuditSchemaRepairReport {
         let findings = try schemaFindings()
+        let requiredApprovalToken = "REPAIR_SCHEMA"
+        let repairableFindings = findings.filter { $0.isRepairable && repairSQL(for: $0) != nil }
+        let plannedActions = repairableFindings.map { "repair_schema:\($0.id)" }.sorted()
+        var blockers: [String] = []
+
+        guard execute else {
+            return CiderStorageAuditSchemaRepairReport(
+                generatedAt: nowProvider(),
+                status: plannedActions.isEmpty ? "clean" : "planned",
+                isMutating: false,
+                requiredApprovalToken: requiredApprovalToken,
+                plannedActions: plannedActions,
+                appliedActions: [],
+                blockers: [],
+                repairedFindingIDs: [],
+                skippedFindingIDs: findings.filter { !$0.isRepairable || repairSQL(for: $0) == nil }.map(\.id).sorted(),
+                remainingFindings: findings
+            )
+        }
+
+        guard approvalToken == requiredApprovalToken else {
+            blockers.append("Refusing schema repair without exact approval token \(requiredApprovalToken).")
+            return CiderStorageAuditSchemaRepairReport(
+                generatedAt: nowProvider(),
+                status: "refused",
+                isMutating: false,
+                requiredApprovalToken: requiredApprovalToken,
+                plannedActions: plannedActions,
+                appliedActions: [],
+                blockers: blockers,
+                repairedFindingIDs: [],
+                skippedFindingIDs: findings.filter { !$0.isRepairable || repairSQL(for: $0) == nil }.map(\.id).sorted(),
+                remainingFindings: findings
+            )
+        }
+
         var repairedFindingIDs: [String] = []
         var skippedFindingIDs: [String] = []
+        var appliedActions: [String] = []
 
         for finding in findings {
             guard finding.isRepairable else {
@@ -268,10 +316,17 @@ final class CiderStorageAuditService {
                 }
             }
             repairedFindingIDs.append(finding.id)
+            appliedActions.append("repair_schema:\(finding.id)")
         }
 
         return CiderStorageAuditSchemaRepairReport(
             generatedAt: nowProvider(),
+            status: repairedFindingIDs.isEmpty && skippedFindingIDs.isEmpty ? "clean" : "applied",
+            isMutating: !repairedFindingIDs.isEmpty,
+            requiredApprovalToken: requiredApprovalToken,
+            plannedActions: plannedActions,
+            appliedActions: appliedActions.sorted(),
+            blockers: [],
             repairedFindingIDs: repairedFindingIDs.sorted(),
             skippedFindingIDs: skippedFindingIDs.sorted(),
             remainingFindings: try schemaFindings()
@@ -1139,7 +1194,7 @@ final class CiderStorageAuditService {
     }
 
     private var repairSchemaCommand: String {
-        "cider-cli storage repair-schema --json"
+        "cider-cli storage repair-schema --approve REPAIR_SCHEMA --execute --json"
     }
 
     private func nextSafeActionForMissingTable(named tableName: String) -> String {

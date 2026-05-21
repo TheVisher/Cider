@@ -538,9 +538,9 @@ struct CiderStorageAuditServiceTests {
                     affectedTable: "routing_decisions",
                     summary: "Missing expected second-brain table routing_decisions.",
                     detail: "The routing_decisions table is required for explainable capture routing and review queues.",
-                    nextSafeAction: "Run cider-cli storage repair-schema --json to create the missing table and indexes, then rerun storage audit.",
+                    nextSafeAction: "Run cider-cli storage repair-schema --approve REPAIR_SCHEMA --execute --json to create the missing table and indexes, then rerun storage audit.",
                     isRepairable: true,
-                    repairCommand: "cider-cli storage repair-schema --json"
+                    repairCommand: "cider-cli storage repair-schema --approve REPAIR_SCHEMA --execute --json"
                 )
             ],
             mismatches: [
@@ -569,7 +569,7 @@ struct CiderStorageAuditServiceTests {
             $0["affectedTable"] as? String == "routing_decisions" &&
             $0["nextSafeAction"] as? String != nil &&
             $0["isRepairable"] as? Bool == true &&
-            $0["repairCommand"] as? String == "cider-cli storage repair-schema --json"
+            $0["repairCommand"] as? String == "cider-cli storage repair-schema --approve REPAIR_SCHEMA --execute --json"
         })
         let doctorGroups = try #require(dict["doctorFindingGroups"] as? [String: Int])
         #expect(doctorGroups["warning:duplicateNoteContent"] == 1)
@@ -944,10 +944,16 @@ struct CiderStorageAuditServiceTests {
         #expect(!chunk.body.contains("Path: Inbox/Bookmarks/Github.Com (2).webloc"))
     }
 
-    @Test("storage audit repair JSON exposes repaired skipped and remaining findings")
+    @Test("storage audit repair JSON exposes approval gated mutation metadata")
     func storageAuditRepairJSONExposesRepairState() throws {
         let report = CiderStorageAuditSchemaRepairReport(
             generatedAt: Date(timeIntervalSince1970: 12),
+            status: "applied",
+            isMutating: true,
+            requiredApprovalToken: "REPAIR_SCHEMA",
+            plannedActions: ["repair_schema:missing_expected_table:second_brain_routing_decisions"],
+            appliedActions: ["repair_schema:missing_expected_table:second_brain_routing_decisions"],
+            blockers: [],
             repairedFindingIDs: ["missing_expected_table:second_brain_routing_decisions"],
             skippedFindingIDs: ["missing_expected_column:routing_decisions:item_type"],
             remainingFindings: [
@@ -964,6 +970,14 @@ struct CiderStorageAuditServiceTests {
 
         let dict = storageAuditSchemaRepairReportToDict(report)
 
+        #expect(dict["command"] as? String == "storage.repair-schema")
+        #expect(dict["status"] as? String == "applied")
+        #expect(dict["isMutating"] as? Bool == true)
+        #expect(dict["approvalRequired"] as? Bool == true)
+        #expect(dict["requiredApprovalToken"] as? String == "REPAIR_SCHEMA")
+        #expect(dict["plannedActions"] as? [String] == ["repair_schema:missing_expected_table:second_brain_routing_decisions"])
+        #expect(dict["appliedActions"] as? [String] == ["repair_schema:missing_expected_table:second_brain_routing_decisions"])
+        #expect(dict["blockers"] as? [String] == [])
         #expect(dict["repairedFindingIDs"] as? [String] == ["missing_expected_table:second_brain_routing_decisions"])
         #expect(dict["skippedFindingIDs"] as? [String] == ["missing_expected_column:routing_decisions:item_type"])
         let remainingFindings = try #require(dict["remainingFindings"] as? [[String: Any]])
@@ -1002,9 +1016,58 @@ struct CiderStorageAuditServiceTests {
             finding.severity == "error" &&
             finding.affectedTable == "routing_decisions" &&
             finding.isRepairable &&
-            finding.repairCommand == "cider-cli storage repair-schema --json"
+            finding.repairCommand == "cider-cli storage repair-schema --approve REPAIR_SCHEMA --execute --json"
         }
         #expect(missingRoutingTableFinding)
+    }
+
+    @Test("storage audit schema repair plans by default and refuses execution without approval")
+    func storageAuditSchemaRepairPlansByDefaultAndRequiresApproval() throws {
+        let (db, dbURL) = try makeTestDB()
+        defer { db.close(); cleanup(dbURL) }
+
+        try db.runSQL("DROP TABLE second_brain_routing_decisions;")
+        let service = makeStorageAuditService(db: db)
+
+        let plan = try service.repairSchemaFindings()
+
+        #expect(plan.status == "planned")
+        #expect(plan.isMutating == false)
+        #expect(plan.requiredApprovalToken == "REPAIR_SCHEMA")
+        #expect(plan.plannedActions == ["repair_schema:missing_expected_table:second_brain_routing_decisions"])
+        #expect(plan.appliedActions.isEmpty)
+        #expect(plan.repairedFindingIDs.isEmpty)
+        #expect(plan.remainingFindings.contains { $0.id == "missing_expected_table:second_brain_routing_decisions" })
+        #expect(!(try sqliteObjectExists("second_brain_routing_decisions", type: "table", in: db)))
+
+        let refused = try service.repairSchemaFindings(approvalToken: nil, execute: true)
+
+        #expect(refused.status == "refused")
+        #expect(refused.isMutating == false)
+        #expect(refused.blockers.contains { $0.contains("exact approval") })
+        #expect(!(try sqliteObjectExists("second_brain_routing_decisions", type: "table", in: db)))
+    }
+
+    @Test("storage audit schema repair executes only with exact approval and execute")
+    func storageAuditSchemaRepairExecutesOnlyWithExactApproval() throws {
+        let (db, dbURL) = try makeTestDB()
+        defer { db.close(); cleanup(dbURL) }
+
+        try db.runSQL("DROP TABLE second_brain_routing_decisions;")
+        let service = makeStorageAuditService(db: db)
+
+        let repair = try service.repairSchemaFindings(
+            approvalToken: "REPAIR_SCHEMA",
+            execute: true
+        )
+
+        #expect(repair.status == "applied")
+        #expect(repair.isMutating == true)
+        #expect(repair.repairedFindingIDs == ["missing_expected_table:second_brain_routing_decisions"])
+        #expect(repair.appliedActions == ["repair_schema:missing_expected_table:second_brain_routing_decisions"])
+        #expect(repair.blockers.isEmpty)
+        #expect(repair.remainingFindings.isEmpty)
+        #expect(try sqliteObjectExists("second_brain_routing_decisions", type: "table", in: db))
     }
 
     @Test("storage audit repairs missing expected second brain table")
@@ -1035,7 +1098,7 @@ struct CiderStorageAuditServiceTests {
         }
         #expect(missingSecondBrainRoutingTableFinding)
 
-        let repair = try service.repairSchemaFindings()
+        let repair = try service.repairSchemaFindings(approvalToken: "REPAIR_SCHEMA", execute: true)
 
         #expect(repair.repairedFindingIDs.contains("missing_expected_table:second_brain_routing_decisions"))
         #expect(repair.remainingFindings.isEmpty)
@@ -1055,10 +1118,10 @@ struct CiderStorageAuditServiceTests {
         #expect(beforeRepair.schemaFindings.contains { finding in
             finding.id == "missing_expected_table:capture_attachments"
                 && finding.isRepairable
-                && finding.repairCommand == "cider-cli storage repair-schema --json"
+                && finding.repairCommand == "cider-cli storage repair-schema --approve REPAIR_SCHEMA --execute --json"
         })
 
-        let repair = try service.repairSchemaFindings()
+        let repair = try service.repairSchemaFindings(approvalToken: "REPAIR_SCHEMA", execute: true)
 
         #expect(repair.repairedFindingIDs.contains("missing_expected_table:capture_attachments"))
         #expect(repair.remainingFindings.isEmpty)
@@ -1098,7 +1161,7 @@ struct CiderStorageAuditServiceTests {
         }
         #expect(missingContentChunksFinding)
 
-        let repair = try service.repairSchemaFindings()
+        let repair = try service.repairSchemaFindings(approvalToken: "REPAIR_SCHEMA", execute: true)
 
         #expect(repair.repairedFindingIDs.contains("missing_expected_table:content_chunks"))
         #expect(try sqliteObjectExists("content_chunks", type: "table", in: db))
@@ -1125,11 +1188,11 @@ struct CiderStorageAuditServiceTests {
             finding.id == "missing_expected_table:content_chunks_fts" &&
             finding.affectedTable == "content_chunks_fts" &&
             finding.isRepairable &&
-            finding.repairCommand == "cider-cli storage repair-schema --json"
+            finding.repairCommand == "cider-cli storage repair-schema --approve REPAIR_SCHEMA --execute --json"
         }
         #expect(missingFTSFinding)
 
-        let repair = try service.repairSchemaFindings()
+        let repair = try service.repairSchemaFindings(approvalToken: "REPAIR_SCHEMA", execute: true)
 
         #expect(repair.repairedFindingIDs.contains("missing_expected_table:content_chunks_fts"))
         #expect(try sqliteObjectExists("content_chunks_fts", type: "table", in: db))
@@ -1153,11 +1216,11 @@ struct CiderStorageAuditServiceTests {
             finding.id == "missing_expected_trigger:content_chunks_au" &&
             finding.affectedTable == "content_chunks_au" &&
             finding.isRepairable &&
-            finding.repairCommand == "cider-cli storage repair-schema --json"
+            finding.repairCommand == "cider-cli storage repair-schema --approve REPAIR_SCHEMA --execute --json"
         }
         #expect(missingTriggerFinding)
 
-        let repair = try service.repairSchemaFindings()
+        let repair = try service.repairSchemaFindings(approvalToken: "REPAIR_SCHEMA", execute: true)
 
         #expect(repair.repairedFindingIDs.contains("missing_expected_trigger:content_chunks_au"))
         #expect(try sqliteObjectExists("content_chunks_au", type: "trigger", in: db))
