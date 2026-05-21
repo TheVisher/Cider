@@ -192,6 +192,7 @@ final class SavedViewStorage: ObservableObject {
             decoder.dateDecodingStrategy = .iso8601
             let snapshot = try decoder.decode(SavedViewsSnapshot.self, from: data)
             savedViews = snapshot.savedViews
+            let didNormalizeInboxViews = normalizeCanonicalInboxSavedViews()
 
             // Backward compat: if tabOrder is nil, derive from isTabPinned views
             if let order = snapshot.tabOrder {
@@ -204,10 +205,28 @@ final class SavedViewStorage: ObservableObject {
                     .sorted { $0.updatedAt > $1.updatedAt }
                     .map(\.id)
             }
+            if didNormalizeInboxViews {
+                persist()
+            }
         } catch {
             savedViews = []
             tabOrder = []
         }
+    }
+
+    private func normalizeCanonicalInboxSavedViews() -> Bool {
+        var changed = false
+        for index in savedViews.indices {
+            guard savedViews[index].kind == .library,
+                  savedViews[index].filterSpec.onlyUnassigned,
+                  savedViews[index].name.localizedCaseInsensitiveCompare("Inbox") == .orderedSame,
+                  savedViews[index].filterSpec.entityTypes != LibraryEntityType.activeCases else {
+                continue
+            }
+            savedViews[index].filterSpec.entityTypes = LibraryEntityType.activeCases
+            changed = true
+        }
+        return changed
     }
 
     private func persist() {
