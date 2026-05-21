@@ -346,6 +346,7 @@ struct TagDetailView: View {
                 onOpenVaultFile: onOpenVaultFile,
                 activeLabelIDs: tagIDs,
                 onToggleLabelBulk: onToggleLabelBulk,
+                showComingUp: LibraryFeedPresentationPolicy.showsComingUpSection(on: .tagDetail),
                 scrollToItemID: $scrollToItemID,
                 focusedItemID: focusedItemID
             )

@@ -393,7 +393,7 @@ extension CiderPanelView {
                             activeLabelIDs: savedView.filterSpec.labelIDs,
                             maxVisibleItems: libraryFeedMaxVisibleItems(for: savedView),
                             onToggleLabelBulk: { toggleTagOnSelected($0) },
-                            showComingUp: savedView.layoutSpec.showComingUpSection,
+                            showComingUp: LibraryFeedPresentationPolicy.showsComingUpSection(on: .savedView),
                             scrollToItemID: $scrollToItemID,
                             focusedItemID: focusedItemID
                         )
@@ -434,6 +434,7 @@ extension CiderPanelView {
                     onOpenVaultFile: { openVaultFileDetail($0) },
     
                     onToggleLabelBulk: { toggleTagOnSelected($0) },
+                    showComingUp: LibraryFeedPresentationPolicy.showsComingUpSection(on: .searchResults),
                     scrollToItemID: $scrollToItemID,
                     focusedItemID: focusedItemID
                 )

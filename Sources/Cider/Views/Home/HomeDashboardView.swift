@@ -25,7 +25,7 @@ struct HomeDashboardView: View {
     var activeLabelIDs: Set<UUID> = []
     var maxVisibleItems: Int?
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
-    var showComingUp: Bool = true
+    var showComingUp: Bool = false
     @Binding var scrollToItemID: String?
     var focusedItemID: String? = nil
 

@@ -81,8 +81,7 @@ extension CiderPanelView {
                         sortMode: sortModeBinding(for: savedViewID),
                         entityFilter: entityFilterBinding(for: savedViewID),
                         tagFilter: tagFilterBinding(for: savedViewID),
-                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID),
-                        showComingUp: showComingUpBinding(for: savedViewID)
+                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID)
                     )
                 }
             } else {
@@ -131,8 +130,7 @@ extension CiderPanelView {
                         sortMode: sortModeBinding(for: savedViewID),
                         entityFilter: entityFilterBinding(for: savedViewID),
                         tagFilter: tagFilterBinding(for: savedViewID),
-                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID),
-                        showComingUp: showComingUpBinding(for: savedViewID)
+                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID)
                     )
                 }
             } else {
@@ -366,8 +364,7 @@ extension CiderPanelView {
                         sortMode: sortModeBinding(for: savedViewID),
                         entityFilter: entityFilterBinding(for: savedViewID),
                         tagFilter: tagFilterBinding(for: savedViewID),
-                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID),
-                        showComingUp: showComingUpBinding(for: savedViewID)
+                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID)
                     )
                 }
         } else {
@@ -428,19 +425,6 @@ extension CiderPanelView {
                 guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
                 savedView.sortSpec.mode = newValue
                 if savedView.isBlank { savedView.isBlank = false }
-                savedViewStorage.updateSavedView(savedView)
-            }
-        )
-    }
-
-    func showComingUpBinding(for savedViewID: UUID) -> Binding<Bool> {
-        Binding(
-            get: {
-                savedViewStorage.savedView(for: savedViewID)?.layoutSpec.showComingUpSection ?? true
-            },
-            set: { newValue in
-                guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
-                savedView.layoutSpec.showComingUpSection = newValue
                 savedViewStorage.updateSavedView(savedView)
             }
         )
