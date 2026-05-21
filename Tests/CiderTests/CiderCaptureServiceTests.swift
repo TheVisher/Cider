@@ -406,6 +406,54 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("duplicate URL capture does not downgrade rich canonical metadata with a generic title")
+    func duplicateURLCaptureDoesNotDowngradeRichCanonicalMetadataWithGenericTitle() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let existingID = UUID()
+            let existing = Bookmark(
+                id: existingID,
+                title: "Sharks Loved This TINY Charger",
+                urlString: "https://www.tiktok.com/@wealth/video/12345?is_from_webapp=1&sender_device=pc",
+                createdAt: Date(timeIntervalSince1970: 1_000),
+                updatedAt: Date(timeIntervalSince1970: 2_000),
+                notes: "Sharks Loved This TINY Charger\n\nBy wealth\nVia TikTok",
+                tags: ["tiktok"],
+                thumbnailRemoteURLString: "https://p16-sign-va.tiktokcdn.com/example.jpeg",
+                metadataUpdatedAt: Date(timeIntervalSince1970: 2_000),
+                relativePath: "Inbox/Bookmarks/Sharks Loved This TINY Charger.webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: Date(timeIntervalSince1970: 2_000)
+            )
+            bookmarks.persistBookmarkToDatabase(db, bookmark: existing)
+            bookmarks.loadBookmarksFromDatabase(db)
+
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db
+            )
+
+            let result = try service.add(
+                "https://www.tiktok.com/@wealth/video/12345?sender_device=pc&is_from_webapp=1",
+                title: "Tiktok.Com"
+            )
+
+            #expect(result.duplicate.status == "duplicate")
+            #expect(result.item.id == existingID)
+            let captured = try #require(bookmarks.bookmarks.first)
+            #expect(captured.title == "Sharks Loved This TINY Charger")
+            #expect(captured.notes.contains("By wealth"))
+            #expect(captured.thumbnailRemoteURLString == "https://p16-sign-va.tiktokcdn.com/example.jpeg")
+            #expect(captured.relativePath == "Inbox/Bookmarks/Sharks Loved This TINY Charger.webloc")
+
+            let reloaded = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            reloaded.loadBookmarksFromDatabase(db)
+            #expect(reloaded.bookmarks.first?.title == "Sharks Loved This TINY Charger")
+        }
+    }
+
     @Test("capture wait holds for late canonical metadata convergence")
     func captureWaitHoldsForLateCanonicalMetadataConvergence() throws {
         let startedAt = Date(timeIntervalSince1970: 10_000)

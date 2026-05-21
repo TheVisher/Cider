@@ -581,8 +581,8 @@ final class VaultBookmarkService: ObservableObject {
         }) {
             var existing = bookmarks.remove(at: existingIndex)
             let previous = existing
-            if let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                existing.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let title = duplicateCaptureTitleToApply(title, to: existing, sourceURL: normalizedURL) {
+                existing.title = title
             }
             existing.updatedAt = Date()
             existing.urlString = canonical
@@ -2921,6 +2921,26 @@ final class VaultBookmarkService: ObservableObject {
             return hostWithoutWWW.capitalized
         }
         return url.absoluteString
+    }
+
+    private func duplicateCaptureTitleToApply(_ title: String?, to bookmark: Bookmark, sourceURL: URL) -> String? {
+        guard let title else { return nil }
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        if bookmark.title.caseInsensitiveCompare(normalized) == .orderedSame { return nil }
+
+        let incomingBookmark = Bookmark(title: normalized, urlString: sourceURL.absoluteString)
+        let incomingIsGeneric =
+            isHostDerivedTitle(incomingBookmark, sourceURL: sourceURL)
+            || isProviderGenericTitle(normalized, sourceURL: sourceURL)
+        guard incomingIsGeneric else { return normalized }
+
+        if isHostDerivedTitle(bookmark, sourceURL: sourceURL)
+            || isProviderGenericTitle(bookmark.title, sourceURL: sourceURL) {
+            return normalized
+        }
+
+        return nil
     }
 
     private func shouldApplyEnrichedTitle(_ title: String, to bookmark: Bookmark, sourceURL: URL) -> Bool {
