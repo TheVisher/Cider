@@ -206,6 +206,63 @@ struct CiderStorageAuditServiceTests {
         try stmt.step()
     }
 
+    private func insertBookmarkDriftFixture(
+        _ db: CiderDatabase,
+        id: UUID,
+        title: String = "GitHub - AndrewPrifer/liquid-dom",
+        url: String = "https://github.com/AndrewPrifer/liquid-dom",
+        relativePath: String = "Inbox/Bookmarks/Github.Com (2).webloc"
+    ) throws {
+        let now = DatabaseHelpers.encode(Date(timeIntervalSince1970: 10))
+        let itemStmt = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'bookmark', ?, ?, ?, NULL, ?);
+            """)
+        itemStmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(title, at: 2)
+            .bind(now, at: 3)
+            .bind(now, at: 4)
+            .bind(relativePath, at: 5)
+        try itemStmt.step()
+
+        let bookmarkStmt = try db.prepare("""
+            INSERT INTO bookmarks (item_id, url, notes, notes_manually_set, title_manually_set)
+            VALUES (?, ?, '', 0, 0);
+            """)
+        bookmarkStmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(url, at: 2)
+        try bookmarkStmt.step()
+
+        let chunkStmt = try db.prepare("""
+            INSERT INTO content_chunks (
+                id, item_id, owner_type, owner_id, source, title, body,
+                chunk_index, content_hash, metadata, created_at, updated_at
+            )
+            VALUES (?, ?, 'bookmark', ?, 'bookmark:item', 'Github.Com',
+                    'Title: Github.Com\nURL: https://github.com/AndrewPrifer/liquid-dom\nPath: Inbox/Bookmarks/Github.Com (2).webloc',
+                    0, 'stale-hash', '{}', ?, ?);
+            """)
+        chunkStmt.bind(DatabaseHelpers.encode(UUID()), at: 1)
+            .bind(DatabaseHelpers.encode(id), at: 2)
+            .bind(DatabaseHelpers.encode(id), at: 3)
+            .bind(now, at: 4)
+            .bind(now, at: 5)
+        try chunkStmt.step()
+    }
+
+    private func firstBookmarkChunk(_ db: CiderDatabase, ownerID: UUID) throws -> (title: String, body: String) {
+        let stmt = try db.prepare("""
+            SELECT title, body
+            FROM content_chunks
+            WHERE owner_type = 'bookmark' AND owner_id = ?
+            ORDER BY chunk_index ASC
+            LIMIT 1;
+            """)
+        stmt.bind(DatabaseHelpers.encode(ownerID), at: 1)
+        try #require(try stmt.step())
+        return (stmt.string(at: 0), stmt.string(at: 1))
+    }
+
     private func contentChunkFTSMatchCount(_ query: String, in db: CiderDatabase) throws -> Int {
         let stmt = try db.prepare("""
             SELECT COUNT(*)
@@ -664,6 +721,129 @@ struct CiderStorageAuditServiceTests {
         #expect(result.blockers.contains { $0.contains("non-empty") })
         #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent("Games/save.txt").path))
         #expect(try folderExists(db, relativePath: "Games"))
+    }
+
+    @Test("bookmark drift audit detects rich title with stale webloc path and chunks")
+    func bookmarkDriftAuditDetectsRichTitleWithStaleWeblocPathAndChunks() throws {
+        let bookmarkID = UUID(uuidString: "DE38FB8B-4910-489D-8DCD-C07C6DAACA6A")!
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try makeDirectories(["Inbox/Bookmarks"], under: vault)
+        _ = try BookmarkFileService.shared.write(
+            bookmark: Bookmark(
+                title: "Github.Com",
+                urlString: "https://github.com/example/existing"
+            ),
+            toDirectory: vault.appendingPathComponent("Inbox/Bookmarks"),
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        try BookmarkFileService.shared.write(
+            bookmark: Bookmark(
+                id: bookmarkID,
+                title: "Github.Com",
+                urlString: "https://github.com/AndrewPrifer/liquid-dom"
+            ),
+            toDirectory: vault.appendingPathComponent("Inbox/Bookmarks"),
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        try insertBookmarkDriftFixture(db, id: bookmarkID)
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            doctorReportProvider: { VaultDoctor.Report(startedAt: Date(), finishedAt: Date(), findings: []) },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.bookmarkDriftAudit(limit: 10)
+
+        #expect(report.command == "storage.bookmark-drift.audit")
+        #expect(report.isMutating == false)
+        #expect(report.findings.count == 1)
+        let finding = try #require(report.findings.first)
+        #expect(finding.itemID == bookmarkID.uuidString)
+        #expect(finding.kind == "bookmark_title_path_drift")
+        #expect(finding.currentTitle == "GitHub - AndrewPrifer/liquid-dom")
+        #expect(finding.currentRelativePath == "Inbox/Bookmarks/Github.Com (2).webloc")
+        #expect(finding.proposedRelativePath == "Inbox/Bookmarks/GitHub - AndrewPrifer-liquid-dom.webloc")
+        #expect(finding.pathDrift == true)
+        #expect(finding.chunkDrift == true)
+        #expect(finding.repairCommand.contains("--execute"))
+        #expect(finding.repairCommand.contains(bookmarkID.uuidString))
+    }
+
+    @Test("bookmark drift repair refuses without approval and repairs path and chunks with approval")
+    func bookmarkDriftRepairRefusesWithoutApprovalAndRepairsPathAndChunksWithApproval() throws {
+        let bookmarkID = UUID(uuidString: "DE38FB8B-4910-489D-8DCD-C07C6DAACA6A")!
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try makeDirectories(["Inbox/Bookmarks"], under: vault)
+        _ = try BookmarkFileService.shared.write(
+            bookmark: Bookmark(
+                title: "Github.Com",
+                urlString: "https://github.com/example/existing"
+            ),
+            toDirectory: vault.appendingPathComponent("Inbox/Bookmarks"),
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        try BookmarkFileService.shared.write(
+            bookmark: Bookmark(
+                id: bookmarkID,
+                title: "Github.Com",
+                urlString: "https://github.com/AndrewPrifer/liquid-dom"
+            ),
+            toDirectory: vault.appendingPathComponent("Inbox/Bookmarks"),
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        try insertBookmarkDriftFixture(db, id: bookmarkID)
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            doctorReportProvider: { VaultDoctor.Report(startedAt: Date(), finishedAt: Date(), findings: []) },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let refused = try service.repairBookmarkDrift(
+            itemID: bookmarkID.uuidString,
+            approvalToken: nil,
+            execute: true
+        )
+        #expect(refused.status == "refused")
+        #expect(refused.isMutating == false)
+        #expect(refused.blockers.contains { $0.contains("exact approval") })
+
+        let audit = try service.bookmarkDriftAudit(limit: 10)
+        let token = try #require(audit.findings.first?.approvalToken)
+        let repair = try service.repairBookmarkDrift(
+            itemID: bookmarkID.uuidString,
+            approvalToken: token,
+            execute: true
+        )
+
+        #expect(repair.status == "applied")
+        #expect(repair.isMutating == true)
+        #expect(repair.appliedActions.contains("rename_webloc_artifact"))
+        #expect(repair.appliedActions.contains("update_bookmark_relative_path"))
+        #expect(repair.appliedActions.contains("rebuild_bookmark_content_chunks"))
+        #expect(repair.auditRecorded == true)
+        #expect(repair.proposedRelativePath == "Inbox/Bookmarks/GitHub - AndrewPrifer-liquid-dom.webloc")
+        #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent(repair.proposedRelativePath).path))
+        #expect(!FileManager.default.fileExists(atPath: vault.appendingPathComponent("Inbox/Bookmarks/Github.Com (2).webloc").path))
+
+        let pathStmt = try db.prepare("SELECT relative_path FROM items WHERE id = ?;")
+        pathStmt.bind(DatabaseHelpers.encode(bookmarkID), at: 1)
+        try #require(try pathStmt.step())
+        #expect(pathStmt.string(at: 0) == "Inbox/Bookmarks/GitHub - AndrewPrifer-liquid-dom.webloc")
+
+        let chunk = try firstBookmarkChunk(db, ownerID: bookmarkID)
+        #expect(chunk.title == "GitHub - AndrewPrifer/liquid-dom")
+        #expect(chunk.body.contains("Path: Inbox/Bookmarks/GitHub - AndrewPrifer-liquid-dom.webloc"))
+        #expect(!chunk.body.contains("Path: Inbox/Bookmarks/Github.Com (2).webloc"))
     }
 
     @Test("storage audit repair JSON exposes repaired skipped and remaining findings")

@@ -95,6 +95,47 @@ struct CiderStorageDoctorRemediationApplyReport: Equatable {
     var auditRecorded: Bool = false
 }
 
+struct CiderBookmarkDriftAuditReport: Equatable {
+    var command: String = "storage.bookmark-drift.audit"
+    var generatedAt: Date
+    var isMutating: Bool = false
+    var approvalRequired: Bool = true
+    var findingLimit: Int
+    var findings: [CiderBookmarkDriftFinding]
+}
+
+struct CiderBookmarkDriftFinding: Equatable {
+    var id: String
+    var kind: String
+    var severity: String
+    var itemID: String
+    var currentTitle: String
+    var url: String
+    var currentRelativePath: String
+    var proposedRelativePath: String
+    var pathDrift: Bool
+    var chunkDrift: Bool
+    var reasons: [String]
+    var approvalToken: String
+    var repairCommand: String
+}
+
+struct CiderBookmarkDriftRepairReport: Equatable {
+    var command: String = "storage.bookmark-drift.repair"
+    var generatedAt: Date
+    var itemID: String
+    var status: String
+    var isMutating: Bool
+    var approvalRequired: Bool = true
+    var requiredApprovalToken: String?
+    var currentRelativePath: String?
+    var proposedRelativePath: String
+    var plannedActions: [String]
+    var appliedActions: [String]
+    var blockers: [String]
+    var auditRecorded: Bool = false
+}
+
 @MainActor
 final class CiderStorageAuditService {
     private static let defaultDoctorFindingSampleLimit = 20
@@ -203,6 +244,138 @@ final class CiderStorageAuditService {
             planLimit: normalizedLimit,
             plans: Array(plans)
         )
+    }
+
+    func bookmarkDriftAudit(limit: Int = defaultDoctorFindingSampleLimit) throws -> CiderBookmarkDriftAuditReport {
+        let normalizedLimit = max(0, limit)
+        let findings = try bookmarkDriftFindings()
+            .prefix(normalizedLimit)
+
+        return CiderBookmarkDriftAuditReport(
+            generatedAt: nowProvider(),
+            findingLimit: normalizedLimit,
+            findings: Array(findings)
+        )
+    }
+
+    func repairBookmarkDrift(
+        itemID: String,
+        approvalToken: String?,
+        execute: Bool = false
+    ) throws -> CiderBookmarkDriftRepairReport {
+        let matchingFinding = try bookmarkDriftFindings().first { $0.itemID == itemID }
+        let requiredApprovalToken = matchingFinding?.approvalToken
+        let plannedActions = ["rename_webloc_artifact", "update_bookmark_relative_path", "rebuild_bookmark_content_chunks", "record_mutation_audit"]
+        var report = CiderBookmarkDriftRepairReport(
+            generatedAt: nowProvider(),
+            itemID: itemID,
+            status: execute ? "refused" : "planned",
+            isMutating: false,
+            requiredApprovalToken: requiredApprovalToken,
+            currentRelativePath: matchingFinding?.currentRelativePath,
+            proposedRelativePath: matchingFinding?.proposedRelativePath ?? "",
+            plannedActions: plannedActions,
+            appliedActions: [],
+            blockers: []
+        )
+
+        guard let finding = matchingFinding else {
+            report.blockers.append("bookmark drift finding is not present in the current audit")
+            return report
+        }
+        report.currentRelativePath = finding.currentRelativePath
+        report.proposedRelativePath = finding.proposedRelativePath
+
+        guard approvalToken == finding.approvalToken else {
+            report.blockers.append("exact approval token required: \(finding.approvalToken)")
+            return report
+        }
+        guard execute else {
+            report.status = "planned"
+            report.blockers.append("dry-run only; pass --execute with the exact approval token to mutate")
+            return report
+        }
+        guard isSafeRelativePath(finding.currentRelativePath),
+              isSafeRelativePath(finding.proposedRelativePath) else {
+            report.blockers.append("paths must be vault-relative and cannot contain traversal")
+            return report
+        }
+
+        let currentURL = vaultRoot.appendingPathComponent(finding.currentRelativePath)
+        guard FileManager.default.fileExists(atPath: currentURL.path) else {
+            report.blockers.append("current bookmark artifact does not exist on disk")
+            return report
+        }
+
+        let dirRelativePath = (finding.currentRelativePath as NSString).deletingLastPathComponent
+        let filename = (finding.currentRelativePath as NSString).lastPathComponent
+        let dirURL = vaultRoot.appendingPathComponent(dirRelativePath, isDirectory: true)
+        let bookmarkID = UUID(uuidString: itemID)
+        let bookmark = Bookmark(
+            id: bookmarkID ?? UUID(),
+            title: finding.currentTitle,
+            urlString: finding.url,
+            updatedAt: nowProvider(),
+            relativePath: finding.currentRelativePath
+        )
+
+        do {
+            let newRelativePath = try BookmarkFileService.shared.renameInPlace(
+                bookmark: bookmark,
+                filename: filename,
+                in: dirURL,
+                dirRelativePath: dirRelativePath
+            )
+            report.proposedRelativePath = newRelativePath
+            if newRelativePath != finding.currentRelativePath {
+                report.appliedActions.append("rename_webloc_artifact")
+            }
+
+            let updateStmt = try database.prepare("""
+                UPDATE items
+                SET relative_path = ?, updated_at = ?
+                WHERE id = ? AND type = 'bookmark';
+                """)
+            updateStmt.bind(newRelativePath, at: 1)
+                .bind(DatabaseHelpers.encode(nowProvider()), at: 2)
+                .bind(itemID, at: 3)
+            try updateStmt.step()
+            report.appliedActions.append("update_bookmark_relative_path")
+
+            let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: itemID)
+            _ = try SecondBrainItemContentIndexingService(database: database).rebuild(owner: owner)
+            report.appliedActions.append("rebuild_bookmark_content_chunks")
+
+            if let bookmarkID {
+                MutationAuditService(database: database).record(
+                    action: "storage.bookmark-drift.repair",
+                    itemType: "bookmark",
+                    itemID: bookmarkID,
+                    before: [
+                        "relativePath": finding.currentRelativePath,
+                    ],
+                    after: [
+                        "relativePath": newRelativePath,
+                    ],
+                    metadata: [
+                        "findingID": finding.id,
+                        "pathDrift": String(finding.pathDrift),
+                        "chunkDrift": String(finding.chunkDrift),
+                    ],
+                    source: .cleanup
+                )
+                report.auditRecorded = true
+                report.appliedActions.append("record_mutation_audit")
+            }
+
+            report.status = "applied"
+            report.isMutating = true
+            return report
+        } catch {
+            report.status = "failed"
+            report.blockers.append(error.localizedDescription)
+            return report
+        }
     }
 
     func applyDoctorRemediation(
@@ -339,6 +512,14 @@ final class CiderStorageAuditService {
         "\(findingID):\(duplicateRelativePath)=>\(canonicalRelativePath)"
     }
 
+    static func bookmarkDriftApprovalToken(
+        itemID: String,
+        currentRelativePath: String,
+        proposedRelativePath: String
+    ) -> String {
+        "bookmark-drift:\(itemID):\(currentRelativePath)=>\(proposedRelativePath)"
+    }
+
     private func sqliteCountsByEntity() throws -> [String: Int] {
         var counts: [String: Int] = [:]
         if try tableExists("folders") {
@@ -384,6 +565,190 @@ final class CiderStorageAuditService {
         let safeTable = table.replacingOccurrences(of: "\"", with: "\"\"")
         let stmt = try database.prepare("SELECT COUNT(*) FROM \"\(safeTable)\";")
         return try stmt.step() ? Int(stmt.int64(at: 0)) : 0
+    }
+
+    private struct BookmarkDriftCandidate {
+        var itemID: String
+        var title: String
+        var url: String
+        var relativePath: String
+    }
+
+    private func bookmarkDriftFindings() throws -> [CiderBookmarkDriftFinding] {
+        guard try tableExists("items"), try tableExists("bookmarks") else { return [] }
+        let candidates = try bookmarkDriftCandidates()
+        return try candidates.compactMap(bookmarkDriftFinding)
+    }
+
+    private func bookmarkDriftCandidates() throws -> [BookmarkDriftCandidate] {
+        let stmt = try database.prepare("""
+            SELECT i.id, i.title, b.url, COALESCE(i.relative_path, '')
+            FROM items i
+            JOIN bookmarks b ON b.item_id = i.id
+            WHERE i.type = 'bookmark'
+              AND i.relative_path IS NOT NULL
+              AND i.relative_path != ''
+            ORDER BY i.updated_at DESC, i.title COLLATE NOCASE ASC;
+            """)
+        var candidates: [BookmarkDriftCandidate] = []
+        while try stmt.step() {
+            candidates.append(
+                BookmarkDriftCandidate(
+                    itemID: stmt.string(at: 0),
+                    title: stmt.string(at: 1),
+                    url: stmt.string(at: 2),
+                    relativePath: stmt.string(at: 3)
+                )
+            )
+        }
+        return candidates
+    }
+
+    private func bookmarkDriftFinding(for candidate: BookmarkDriftCandidate) throws -> CiderBookmarkDriftFinding? {
+        guard candidate.relativePath.lowercased().hasSuffix(".webloc"),
+              isSafeRelativePath(candidate.relativePath),
+              meaningfulBookmarkTitle(candidate.title) else {
+            return nil
+        }
+
+        let currentFilename = (candidate.relativePath as NSString).lastPathComponent
+        let currentBase = stripDuplicateSuffix((currentFilename as NSString).deletingPathExtension)
+        let expectedBase = BookmarkFileService.shared.sanitizedFilename(candidate.title)
+        let proposedRelativePath = proposedBookmarkRelativePath(
+            title: candidate.title,
+            currentRelativePath: candidate.relativePath
+        )
+        let fileExists = FileManager.default.fileExists(atPath: vaultRoot.appendingPathComponent(candidate.relativePath).path)
+        let pathDrift = fileExists
+            && proposedRelativePath != candidate.relativePath
+            && normalizedFilenameBase(currentBase) != normalizedFilenameBase(expectedBase)
+            && likelyStaleBookmarkFilename(currentBase, title: candidate.title, urlString: candidate.url)
+
+        let chunkDrift = try bookmarkChunkDrift(candidate: candidate)
+        guard pathDrift || chunkDrift else { return nil }
+
+        let approvalToken = Self.bookmarkDriftApprovalToken(
+            itemID: candidate.itemID,
+            currentRelativePath: candidate.relativePath,
+            proposedRelativePath: proposedRelativePath
+        )
+        var reasons: [String] = []
+        if pathDrift {
+            reasons.append("bookmark title is rich but the .webloc filename still looks host-derived or stale")
+        }
+        if chunkDrift {
+            reasons.append("bookmark content chunks still contain stale title/path text")
+        }
+
+        return CiderBookmarkDriftFinding(
+            id: "bookmark-title-path-drift:\(candidate.itemID)",
+            kind: "bookmark_title_path_drift",
+            severity: "warning",
+            itemID: candidate.itemID,
+            currentTitle: candidate.title,
+            url: candidate.url,
+            currentRelativePath: candidate.relativePath,
+            proposedRelativePath: proposedRelativePath,
+            pathDrift: pathDrift,
+            chunkDrift: chunkDrift,
+            reasons: reasons,
+            approvalToken: approvalToken,
+            repairCommand: "cider-cli storage bookmark-drift-repair --item \(Self.shellQuoted(candidate.itemID)) --approve \(Self.shellQuoted(approvalToken)) --execute --json"
+        )
+    }
+
+    private func proposedBookmarkRelativePath(title: String, currentRelativePath: String) -> String {
+        let dirRelativePath = (currentRelativePath as NSString).deletingLastPathComponent
+        let currentFilename = (currentRelativePath as NSString).lastPathComponent
+        let currentBase = stripDuplicateSuffix((currentFilename as NSString).deletingPathExtension)
+        let sanitizedTitle = BookmarkFileService.shared.sanitizedFilename(title)
+        if normalizedFilenameBase(currentBase) == normalizedFilenameBase(sanitizedTitle) {
+            return currentRelativePath
+        }
+        let dirURL = vaultRoot.appendingPathComponent(dirRelativePath, isDirectory: true)
+        let filename = BookmarkFileService.shared.uniqueFilename(
+            for: sanitizedTitle,
+            extension: "webloc",
+            in: dirURL
+        )
+        return dirRelativePath.isEmpty ? filename : "\(dirRelativePath)/\(filename)"
+    }
+
+    private func bookmarkChunkDrift(candidate: BookmarkDriftCandidate) throws -> Bool {
+        guard try tableExists("content_chunks") else { return false }
+        let stmt = try database.prepare("""
+            SELECT title, body
+            FROM content_chunks
+            WHERE owner_type = 'bookmark' AND owner_id = ?
+            ORDER BY chunk_index ASC;
+            """)
+        stmt.bind(candidate.itemID, at: 1)
+
+        var sawChunk = false
+        while try stmt.step() {
+            sawChunk = true
+            let chunkTitle = stmt.string(at: 0)
+            let chunkBody = stmt.string(at: 1)
+            if chunkTitle != candidate.title {
+                return true
+            }
+            if chunkBody.contains(candidate.relativePath) {
+                let proposedPath = proposedBookmarkRelativePath(
+                    title: candidate.title,
+                    currentRelativePath: candidate.relativePath
+                )
+                if proposedPath != candidate.relativePath {
+                    return true
+                }
+            }
+        }
+        return sawChunk == false ? false : false
+    }
+
+    private func meaningfulBookmarkTitle(_ title: String) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 4 else { return false }
+        let lower = trimmed.lowercased()
+        return !["untitled", "bookmark"].contains(lower)
+    }
+
+    private func likelyStaleBookmarkFilename(_ filenameBase: String, title: String, urlString: String) -> Bool {
+        let normalizedFilename = normalizedFilenameBase(filenameBase)
+        guard normalizedFilename != normalizedFilenameBase(title) else { return false }
+        if hostDerivedTitleCandidates(urlString: urlString).contains(normalizedFilename) {
+            return true
+        }
+        return !normalizedFilename.isEmpty && !normalizedFilenameBase(title).contains(normalizedFilename)
+    }
+
+    private func hostDerivedTitleCandidates(urlString: String) -> Set<String> {
+        guard let url = URL(string: urlString),
+              let host = url.host?.lowercased() else {
+            return []
+        }
+        let trimmedHost = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        let parts = trimmedHost.split(separator: ".").map(String.init)
+        var candidates = Set<String>()
+        candidates.insert(normalizedFilenameBase(trimmedHost))
+        if let first = parts.first {
+            candidates.insert(normalizedFilenameBase(first))
+        }
+        candidates.insert(normalizedFilenameBase(trimmedHost.capitalized))
+        return candidates
+    }
+
+    private func normalizedFilenameBase(_ value: String) -> String {
+        value
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "", options: .regularExpression)
+    }
+
+    private func stripDuplicateSuffix(_ value: String) -> String {
+        value.replacingOccurrences(
+            of: #" \(\d+\)$"#,
+            with: "",
+            options: .regularExpression
+        )
     }
 
     private func schemaFindings() throws -> [CiderStorageAuditSchemaFinding] {

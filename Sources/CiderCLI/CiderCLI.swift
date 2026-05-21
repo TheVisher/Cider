@@ -369,7 +369,7 @@ struct CiderCLI {
         case "reminder", "reminders":
             return isMutationSubcommand(subcommand, in: ["complete", "done", "snooze"])
         case "storage":
-            return subcommand == "doctor-apply" || subcommand == "repair-schema"
+            return subcommand == "doctor-apply" || subcommand == "bookmark-drift-repair" || subcommand == "repair-schema"
         case "doctor":
             return args.contains("--fix") || args.contains("--apply") || args.contains("--execute")
         default:
@@ -399,6 +399,8 @@ struct CiderCLI {
               cider-cli storage audit [--json]
               cider-cli storage doctor-plan [--limit <n>] [--json]
               cider-cli storage doctor-apply --finding <id> --canonical <path> --duplicate <path> --approve <token> [--execute] [--json]
+              cider-cli storage bookmark-drift-audit [--limit <n>] [--json]
+              cider-cli storage bookmark-drift-repair --item <id> --approve <token> [--execute] [--json]
               cider-cli storage repair-schema [--json]
             """)
 
@@ -522,6 +524,80 @@ struct CiderCLI {
                 }
             }
 
+        case "bookmark-drift-audit":
+            let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+            do {
+                let report = try CiderStorageAuditService().bookmarkDriftAudit(limit: limit)
+                if jsonOutput {
+                    outputJSON(bookmarkDriftAuditReportToDict(report))
+                } else {
+                    print("Bookmark drift audit")
+                    print("  Mutating: \(report.isMutating ? "yes" : "no")")
+                    print("  Approval required: \(report.approvalRequired ? "yes" : "no")")
+                    print("  Findings: \(report.findings.count)")
+                    for finding in report.findings {
+                        print("    [\(finding.severity)] \(finding.currentTitle)")
+                        print("      Item: \(finding.itemID)")
+                        print("      Current path: \(finding.currentRelativePath)")
+                        print("      Proposed path: \(finding.proposedRelativePath)")
+                        print("      Path drift: \(finding.pathDrift ? "yes" : "no"), chunk drift: \(finding.chunkDrift ? "yes" : "no")")
+                        print("      Repair: \(finding.repairCommand)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "bookmark-drift-repair":
+            guard let itemID = parseFlag("--item", from: args) else {
+                printCLIError("Usage: cider-cli storage bookmark-drift-repair --item <id> --approve <token> [--execute] [--json]")
+                return
+            }
+            let approvalToken = parseFlag("--approve", from: args)
+            do {
+                let report = try CiderStorageAuditService().repairBookmarkDrift(
+                    itemID: itemID,
+                    approvalToken: approvalToken,
+                    execute: args.contains("--execute")
+                )
+                if jsonOutput {
+                    outputJSON(bookmarkDriftRepairReportToDict(report))
+                } else {
+                    print("Bookmark drift repair")
+                    print("  Status: \(report.status)")
+                    print("  Mutating: \(report.isMutating ? "yes" : "no")")
+                    print("  Approval required: \(report.approvalRequired ? "yes" : "no")")
+                    print("  Item: \(report.itemID)")
+                    if let current = report.currentRelativePath {
+                        print("  Current path: \(current)")
+                    }
+                    print("  Proposed path: \(report.proposedRelativePath)")
+                    if let token = report.requiredApprovalToken {
+                        print("  Required approval token: \(token)")
+                    }
+                    if !report.plannedActions.isEmpty {
+                        print("  Planned actions:")
+                        for action in report.plannedActions {
+                            print("    \(action)")
+                        }
+                    }
+                    if !report.appliedActions.isEmpty {
+                        print("  Applied actions:")
+                        for action in report.appliedActions {
+                            print("    \(action)")
+                        }
+                    }
+                    if !report.blockers.isEmpty {
+                        print("  Blockers:")
+                        for blocker in report.blockers {
+                            print("    \(blocker)")
+                        }
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case "repair-schema":
             do {
                 let report = try CiderStorageAuditService().repairSchemaFindings()
@@ -548,7 +624,7 @@ struct CiderCLI {
             }
 
         default:
-            printCLIError("Unknown storage command: \(subcommand ?? "nil"). Commands: audit, doctor-plan, doctor-apply, repair-schema")
+            printCLIError("Unknown storage command: \(subcommand ?? "nil"). Commands: audit, doctor-plan, doctor-apply, bookmark-drift-audit, bookmark-drift-repair, repair-schema")
         }
     }
 
@@ -11722,6 +11798,8 @@ struct CiderCLI {
           cider-cli storage audit [--json]
           cider-cli storage doctor-plan [--limit <n>] [--json]
           cider-cli storage doctor-apply --finding <id> --canonical <path> --duplicate <path> --approve <token> [--execute] [--json]
+          cider-cli storage bookmark-drift-audit [--limit <n>] [--json]
+          cider-cli storage bookmark-drift-repair --item <id> --approve <token> [--execute] [--json]
           cider-cli storage repair-schema [--json]
 
         MIGRATE

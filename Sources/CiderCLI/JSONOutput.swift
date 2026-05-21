@@ -375,6 +375,58 @@ func storageDoctorRemediationApplyReportToDict(_ report: CiderStorageDoctorRemed
     return dict
 }
 
+func bookmarkDriftAuditReportToDict(_ report: CiderBookmarkDriftAuditReport) -> [String: Any] {
+    [
+        "command": report.command,
+        "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
+        "isMutating": report.isMutating,
+        "approvalRequired": report.approvalRequired,
+        "findingLimit": report.findingLimit,
+        "findings": report.findings.map(bookmarkDriftFindingToDict),
+    ]
+}
+
+func bookmarkDriftFindingToDict(_ finding: CiderBookmarkDriftFinding) -> [String: Any] {
+    [
+        "id": finding.id,
+        "kind": finding.kind,
+        "severity": finding.severity,
+        "itemID": finding.itemID,
+        "currentTitle": finding.currentTitle,
+        "url": finding.url,
+        "currentRelativePath": finding.currentRelativePath,
+        "proposedRelativePath": finding.proposedRelativePath,
+        "pathDrift": finding.pathDrift,
+        "chunkDrift": finding.chunkDrift,
+        "reasons": finding.reasons,
+        "approvalToken": finding.approvalToken,
+        "repairCommand": finding.repairCommand,
+    ]
+}
+
+func bookmarkDriftRepairReportToDict(_ report: CiderBookmarkDriftRepairReport) -> [String: Any] {
+    var dict: [String: Any] = [
+        "command": report.command,
+        "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
+        "itemID": report.itemID,
+        "status": report.status,
+        "isMutating": report.isMutating,
+        "approvalRequired": report.approvalRequired,
+        "proposedRelativePath": report.proposedRelativePath,
+        "plannedActions": report.plannedActions,
+        "appliedActions": report.appliedActions,
+        "blockers": report.blockers,
+        "auditRecorded": report.auditRecorded,
+    ]
+    if let requiredApprovalToken = report.requiredApprovalToken {
+        dict["requiredApprovalToken"] = requiredApprovalToken
+    }
+    if let currentRelativePath = report.currentRelativePath {
+        dict["currentRelativePath"] = currentRelativePath
+    }
+    return dict
+}
+
 func storageAuditSchemaRepairReportToDict(_ report: CiderStorageAuditSchemaRepairReport) -> [String: Any] {
     [
         "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
