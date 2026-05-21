@@ -136,6 +136,29 @@ struct CiderBookmarkDriftRepairReport: Equatable {
     var auditRecorded: Bool = false
 }
 
+struct CiderActiveDuplicateInvariantReport: Equatable {
+    var command: String = "storage.active-duplicate-invariants"
+    var generatedAt: Date
+    var isMutating: Bool = false
+    var status: String
+    var summary: [String: Int]
+    var duplicateFindingLimit: Int
+    var duplicateFindings: [VaultDuplicateAuditor.Finding]
+    var duplicateRelativePaths: [CiderDuplicateRelativePathFinding]
+    var sqliteMismatches: [CiderStorageAuditMismatch]
+}
+
+struct CiderDuplicateRelativePathFinding: Equatable {
+    var relativePath: String
+    var items: [CiderDuplicateRelativePathItem]
+}
+
+struct CiderDuplicateRelativePathItem: Equatable {
+    var id: String
+    var type: String
+    var title: String
+}
+
 @MainActor
 final class CiderStorageAuditService {
     private static let defaultDoctorFindingSampleLimit = 20
@@ -199,6 +222,29 @@ final class CiderStorageAuditService {
             ),
             schemaFindings: try schemaFindings(),
             mismatches: mismatches(modelCounts: modelCounts, sqliteCounts: sqliteCounts)
+        )
+    }
+
+    func activeDuplicateInvariantCheck(limit: Int = defaultDoctorFindingSampleLimit) throws -> CiderActiveDuplicateInvariantReport {
+        let normalizedLimit = max(0, limit)
+        let duplicateFindings = Array(duplicateFindingsProvider().prefix(normalizedLimit))
+        let duplicateRelativePaths = try duplicateRelativePathFindings(limit: normalizedLimit)
+        let mismatches = try mismatches(modelCounts: modelCountsProvider(), sqliteCounts: sqliteCountsByEntity())
+        let issueCount = duplicateFindings.count + duplicateRelativePaths.count + mismatches.count
+
+        return CiderActiveDuplicateInvariantReport(
+            generatedAt: nowProvider(),
+            status: issueCount == 0 ? "clean" : "issues_found",
+            summary: [
+                "duplicateFindings": duplicateFindings.count,
+                "duplicateRelativePaths": duplicateRelativePaths.count,
+                "sqliteMismatches": mismatches.count,
+                "totalIssues": issueCount,
+            ],
+            duplicateFindingLimit: normalizedLimit,
+            duplicateFindings: duplicateFindings,
+            duplicateRelativePaths: duplicateRelativePaths,
+            sqliteMismatches: mismatches
         )
     }
 
@@ -565,6 +611,32 @@ final class CiderStorageAuditService {
         let safeTable = table.replacingOccurrences(of: "\"", with: "\"\"")
         let stmt = try database.prepare("SELECT COUNT(*) FROM \"\(safeTable)\";")
         return try stmt.step() ? Int(stmt.int64(at: 0)) : 0
+    }
+
+    private func duplicateRelativePathFindings(limit: Int) throws -> [CiderDuplicateRelativePathFinding] {
+        guard limit > 0, try tableExists("items") else { return [] }
+        let stmt = try database.prepare("""
+            SELECT relative_path, id, type, title
+            FROM items
+            WHERE relative_path IS NOT NULL AND relative_path != ''
+            ORDER BY relative_path COLLATE NOCASE ASC, updated_at DESC, title COLLATE NOCASE ASC;
+            """)
+        var grouped: [String: [CiderDuplicateRelativePathItem]] = [:]
+        while try stmt.step() {
+            let relativePath = stmt.string(at: 0)
+            grouped[relativePath, default: []].append(
+                CiderDuplicateRelativePathItem(
+                    id: stmt.string(at: 1),
+                    type: stmt.string(at: 2),
+                    title: stmt.string(at: 3)
+                )
+            )
+        }
+        return grouped
+            .filter { $0.value.count > 1 }
+            .sorted { lhs, rhs in lhs.key.localizedCaseInsensitiveCompare(rhs.key) == .orderedAscending }
+            .prefix(limit)
+            .map { CiderDuplicateRelativePathFinding(relativePath: $0.key, items: $0.value) }
     }
 
     private struct BookmarkDriftCandidate {

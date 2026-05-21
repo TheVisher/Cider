@@ -399,6 +399,7 @@ struct CiderCLI {
               cider-cli storage audit [--json]
               cider-cli storage doctor-plan [--limit <n>] [--json]
               cider-cli storage doctor-apply --finding <id> --canonical <path> --duplicate <path> --approve <token> [--execute] [--json]
+              cider-cli storage active-duplicate-invariants [--limit <n>] [--json]
               cider-cli storage bookmark-drift-audit [--limit <n>] [--json]
               cider-cli storage bookmark-drift-repair --item <id> --approve <token> [--execute] [--json]
               cider-cli storage repair-schema [--json]
@@ -473,6 +474,33 @@ struct CiderCLI {
                     print("      Action: \(plan.proposedAction) (\(plan.confidence))")
                     print("      No files or folders were changed.")
                 }
+            }
+
+        case "active-duplicate-invariants", "duplicate-invariants":
+            let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+            do {
+                let report = try CiderStorageAuditService().activeDuplicateInvariantCheck(limit: limit)
+                if jsonOutput {
+                    outputJSON(activeDuplicateInvariantReportToDict(report))
+                } else {
+                    print("Active duplicate invariant check")
+                    print("  Mutating: \(report.isMutating ? "yes" : "no")")
+                    print("  Status: \(report.status)")
+                    print("  Duplicate findings: \(report.duplicateFindings.count)")
+                    print("  Duplicate relative paths: \(report.duplicateRelativePaths.count)")
+                    print("  SQLite mismatches: \(report.sqliteMismatches.count)")
+                    for finding in report.duplicateFindings {
+                        print("    [\(finding.entityType.rawValue)/\(finding.kind.rawValue)] \(finding.summary)")
+                    }
+                    for finding in report.duplicateRelativePaths {
+                        print("    [relative_path] \(finding.relativePath): \(finding.items.count) active rows")
+                    }
+                    for mismatch in report.sqliteMismatches {
+                        print("    [mismatch] \(mismatch.detail)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
             }
 
         case "doctor-apply":
@@ -624,7 +652,7 @@ struct CiderCLI {
             }
 
         default:
-            printCLIError("Unknown storage command: \(subcommand ?? "nil"). Commands: audit, doctor-plan, doctor-apply, bookmark-drift-audit, bookmark-drift-repair, repair-schema")
+            printCLIError("Unknown storage command: \(subcommand ?? "nil"). Commands: audit, doctor-plan, doctor-apply, active-duplicate-invariants, bookmark-drift-audit, bookmark-drift-repair, repair-schema")
         }
     }
 

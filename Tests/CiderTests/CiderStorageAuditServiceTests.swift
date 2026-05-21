@@ -53,6 +53,27 @@ struct CiderStorageAuditServiceTests {
         try stmt.step()
     }
 
+    private func insertItem(
+        _ db: CiderDatabase,
+        id: UUID,
+        type: String,
+        title: String,
+        relativePath: String?
+    ) throws {
+        let now = DatabaseHelpers.encode(Date(timeIntervalSince1970: 10))
+        let stmt = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, ?, ?, ?, ?, NULL, ?);
+            """)
+        stmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(type, at: 2)
+            .bind(title, at: 3)
+            .bind(now, at: 4)
+            .bind(now, at: 5)
+            .bind(relativePath, at: 6)
+        try stmt.step()
+    }
+
     private func insertFolderSyncDecision(
         _ db: CiderDatabase,
         remoteFolderID: UUID,
@@ -181,6 +202,83 @@ struct CiderStorageAuditServiceTests {
             duplicateFindingsProvider: { [] },
             nowProvider: { Date(timeIntervalSince1970: 12) }
         )
+    }
+
+    @Test("active duplicate invariant check reports duplicate candidates and count drift read-only")
+    func activeDuplicateInvariantCheckReportsDuplicateCandidatesAndCountDriftReadOnly() throws {
+        let (db, url) = try makeTestDB()
+        defer { cleanup(url) }
+        let firstID = UUID()
+        let secondID = UUID()
+        try db.runSQL("DROP INDEX IF EXISTS idx_items_path;")
+        try insertItem(db, id: firstID, type: "note", title: "CodexNote", relativePath: "Inbox/Notes/CodexNote.md")
+        try insertItem(db, id: secondID, type: "note", title: "CodexNote 2", relativePath: "Inbox/Notes/CodexNote.md")
+        let duplicateFinding = VaultDuplicateAuditor.Finding(
+            id: "duplicate-note-content-test",
+            entityType: .note,
+            kind: .exactContent,
+            confidence: .exact,
+            summary: "Exact duplicate note content: CodexNote, CodexNote 2",
+            detail: "2 note records share exactContent.",
+            items: [
+                VaultDuplicateAuditor.Item(id: firstID.uuidString, title: "CodexNote", path: "Inbox/Notes/CodexNote.md", value: nil),
+                VaultDuplicateAuditor.Item(id: secondID.uuidString, title: "CodexNote 2", path: "Inbox/Notes/CodexNote.md", value: nil),
+            ]
+        )
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: FileManager.default.temporaryDirectory,
+            modelCountsProvider: { ["note": 1] },
+            doctorReportProvider: {
+                VaultDoctor.Report(
+                    startedAt: Date(timeIntervalSince1970: 10),
+                    finishedAt: Date(timeIntervalSince1970: 11),
+                    findings: []
+                )
+            },
+            duplicateFindingsProvider: { [duplicateFinding] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.activeDuplicateInvariantCheck(limit: 10)
+
+        #expect(report.command == "storage.active-duplicate-invariants")
+        #expect(report.isMutating == false)
+        #expect(report.status == "issues_found")
+        #expect(report.summary["duplicateFindings"] == 1)
+        #expect(report.summary["duplicateRelativePaths"] == 1)
+        #expect(report.summary["sqliteMismatches"] == 1)
+        #expect(report.duplicateFindings.first?.id == "duplicate-note-content-test")
+        #expect(report.duplicateRelativePaths.first?.relativePath == "Inbox/Notes/CodexNote.md")
+        #expect(report.duplicateRelativePaths.first?.items.map(\.id).contains(firstID.uuidString) == true)
+        #expect(report.sqliteMismatches.first?.key == "note")
+    }
+
+    @Test("active duplicate invariant JSON exposes non-mutating status and duplicate paths")
+    func activeDuplicateInvariantJSONExposesNonMutatingStatusAndDuplicatePaths() throws {
+        let report = CiderActiveDuplicateInvariantReport(
+            generatedAt: Date(timeIntervalSince1970: 12),
+            status: "issues_found",
+            summary: ["duplicateFindings": 0, "duplicateRelativePaths": 1, "sqliteMismatches": 0, "totalIssues": 1],
+            duplicateFindingLimit: 20,
+            duplicateFindings: [],
+            duplicateRelativePaths: [
+                CiderDuplicateRelativePathFinding(
+                    relativePath: "Inbox/Notes/CodexNote.md",
+                    items: [CiderDuplicateRelativePathItem(id: "note-1", type: "note", title: "CodexNote")]
+                )
+            ],
+            sqliteMismatches: []
+        )
+
+        let dict = activeDuplicateInvariantReportToDict(report)
+        let duplicatePaths = try #require(dict["duplicateRelativePaths"] as? [[String: Any]])
+        let firstPath = try #require(duplicatePaths.first)
+
+        #expect(dict["command"] as? String == "storage.active-duplicate-invariants")
+        #expect(dict["isMutating"] as? Bool == false)
+        #expect(dict["status"] as? String == "issues_found")
+        #expect(firstPath["relativePath"] as? String == "Inbox/Notes/CodexNote.md")
     }
 
     private func insertContentChunk(

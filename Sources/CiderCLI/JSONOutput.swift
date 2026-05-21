@@ -404,6 +404,61 @@ func bookmarkDriftFindingToDict(_ finding: CiderBookmarkDriftFinding) -> [String
     ]
 }
 
+func activeDuplicateInvariantReportToDict(_ report: CiderActiveDuplicateInvariantReport) -> [String: Any] {
+    [
+        "command": report.command,
+        "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
+        "isMutating": report.isMutating,
+        "status": report.status,
+        "summary": report.summary,
+        "duplicateFindingLimit": report.duplicateFindingLimit,
+        "duplicateFindings": report.duplicateFindings.map(duplicateFindingToDict),
+        "duplicateRelativePaths": report.duplicateRelativePaths.map(duplicateRelativePathFindingToDict),
+        "sqliteMismatches": report.sqliteMismatches.map(storageAuditMismatchToDict),
+    ]
+}
+
+func duplicateFindingToDict(_ finding: VaultDuplicateAuditor.Finding) -> [String: Any] {
+    [
+        "id": finding.id,
+        "entityType": finding.entityType.rawValue,
+        "kind": finding.kind.rawValue,
+        "confidence": finding.confidence.rawValue,
+        "summary": finding.summary,
+        "detail": finding.detail,
+        "items": finding.items.map(duplicateFindingItemToDict),
+    ]
+}
+
+func duplicateFindingItemToDict(_ item: VaultDuplicateAuditor.Item) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": item.id,
+        "title": item.title,
+    ]
+    if let path = item.path {
+        dict["path"] = path
+    }
+    if let value = item.value {
+        dict["value"] = value
+    }
+    return dict
+}
+
+func duplicateRelativePathFindingToDict(_ finding: CiderDuplicateRelativePathFinding) -> [String: Any] {
+    [
+        "relativePath": finding.relativePath,
+        "items": finding.items.map(duplicateRelativePathItemToDict),
+    ]
+}
+
+func duplicateRelativePathItemToDict(_ item: CiderDuplicateRelativePathItem) -> [String: Any] {
+    [
+        "id": item.id,
+        "type": item.type,
+        "title": item.title,
+    ]
+}
+
 func bookmarkDriftRepairReportToDict(_ report: CiderBookmarkDriftRepairReport) -> [String: Any] {
     var dict: [String: Any] = [
         "command": report.command,
