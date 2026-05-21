@@ -36,6 +36,15 @@ struct WorkspaceDomainRoute: Identifiable, Equatable {
 }
 
 enum WorkspaceDomainRoutePolicy {
+    static func headerDefaultTab(for domain: WorkspaceNavigationDomain) -> CiderTab? {
+        switch domain {
+        case .mainDashboard:
+            return nil
+        case .spaces, .media, .bookmarks, .notes, .projects, .tasksEvents, .files, .people, .aiAssistant, .browse:
+            return .domainDashboard(domain)
+        }
+    }
+
     static func routes(for domain: WorkspaceNavigationDomain) -> [WorkspaceDomainRoute] {
         routeKinds(for: domain).map(route)
     }

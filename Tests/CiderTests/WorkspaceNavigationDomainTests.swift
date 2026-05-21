@@ -100,6 +100,16 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(WorkspaceDomainRouteKind.files.libraryEntityTypes, [.vaultFile])
     }
 
+    func testHeaderDestinationsOpenSectionDashboardsInsteadOfFirstChildRoutes() {
+        XCTAssertNil(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .mainDashboard))
+        XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .browse), .domainDashboard(.browse))
+        XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .spaces), .domainDashboard(.spaces))
+        XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .projects), .domainDashboard(.projects))
+        XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .tasksEvents), .domainDashboard(.tasksEvents))
+        XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .people), .domainDashboard(.people))
+        XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .aiAssistant), .domainDashboard(.aiAssistant))
+    }
+
     func testDomainRoutesUseWorkflowDestinationsInsteadOfContentTypeDomains() {
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .tasksEvents).map(\.kind),

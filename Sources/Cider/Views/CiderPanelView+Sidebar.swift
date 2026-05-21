@@ -143,28 +143,12 @@ extension CiderPanelView {
         }
 
         selectedProjectWorkspaceID = nil
-        selectedDomainRouteKind = defaultRouteKind(for: domain)
+        selectedDomainRouteKind = .overview
 
         folderContentScope = WorkspaceDomainContentScope.defaultScope(for: domain)
 
-        if domain == .browse {
-            openLibraryView(onlyUnassigned: true)
-            return
-        }
-
-        if domain == .aiAssistant {
-            if allTabs.contains(.aiAssistant) == false {
-                dynamicTabs.append(.aiAssistant)
-                CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(true)
-            }
-            selectedTab = .domainDashboard(.aiAssistant)
-            return
-        }
-
-        if domain == .mainDashboard {
-            normalizeSelectedTabForCurrentDomain()
-        } else {
-            selectedTab = .domainDashboard(domain)
+        if let headerTab = WorkspaceDomainRoutePolicy.headerDefaultTab(for: domain) {
+            selectedTab = headerTab
         }
     }
 
