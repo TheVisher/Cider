@@ -568,6 +568,58 @@ struct CiderCLIAgentSafetyTests {
         #expect(unfiledAfter["folderID"] == nil)
     }
 
+    @Test("item move note into project notes records project ownership and unfile clears it")
+    func itemMoveNoteIntoProjectNotesRecordsProjectOwnership() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-project-note-move-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let createResult = try runCLI(
+            args: ["note", "create", "Migrated Cider Note", "--content", "project note body", "--json"],
+            vault: vault
+        )
+        let created = try parseJSONObject(createResult.stdout)
+        let noteID = try #require(created["id"] as? String)
+
+        let moveResult = try runCLI(
+            args: ["item", "move", "note", noteID, "--path", "Projects/Cider/Notes", "--json"],
+            vault: vault
+        )
+        let move = try parseJSONObject(moveResult.stdout)
+        #expect(move["ok"] as? Bool == true)
+        let after = try #require(move["after"] as? [String: Any])
+        #expect(after["relativePath"] as? String == "Projects/Cider/Notes/Migrated Cider Note.md")
+
+        let inspectResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
+        let inspected = try parseJSONObject(inspectResult.stdout)
+        let item = try #require(inspected["item"] as? [String: Any])
+        #expect(item["relativePath"] as? String == "Projects/Cider/Notes/Migrated Cider Note.md")
+        let ownerRelations = try #require(inspected["ownerRelations"] as? [[String: Any]])
+        #expect(ownerRelations.contains { relation in
+            guard relation["relationType"] as? String == "artifact_of",
+                  let target = relation["targetOwner"] as? [String: Any],
+                  target["ownerType"] as? String == "project",
+                  target["ownerID"] as? String == "cider",
+                  let metadata = relation["metadata"] as? [String: String]
+            else { return false }
+            return metadata["artifactType"] == "note"
+                && metadata["path"] == "Projects/Cider/Notes/Migrated Cider Note.md"
+        })
+
+        let unfileResult = try runCLI(args: ["item", "unfile", "note", noteID, "--json"], vault: vault)
+        let unfile = try parseJSONObject(unfileResult.stdout)
+        #expect(unfile["ok"] as? Bool == true)
+
+        let reinspectResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
+        let reinspected = try parseJSONObject(reinspectResult.stdout)
+        let clearedRelations = try #require(reinspected["ownerRelations"] as? [[String: Any]])
+        #expect(!clearedRelations.contains { relation in
+            relation["relationType"] as? String == "artifact_of"
+                && (relation["targetOwner"] as? [String: Any])?["ownerType"] as? String == "project"
+        })
+    }
+
     @Test("sync project seeds known Cider workspace in a fresh vault")
     func syncProjectSeedsKnownCiderWorkspaceInFreshVault() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -733,13 +785,15 @@ struct CiderCLIAgentSafetyTests {
     }
 
     private func parseJSONObject(_ output: String) throws -> [String: Any] {
-        let data = Data(output.utf8)
+        let json = output.drop { $0 != "{" }
+        let data = Data(json.utf8)
         let object = try JSONSerialization.jsonObject(with: data)
         return try #require(object as? [String: Any])
     }
 
     private func parseJSONArray(_ output: String) throws -> [[String: Any]] {
-        let data = Data(output.utf8)
+        let json = output.drop { $0 != "[" }
+        let data = Data(json.utf8)
         let object = try JSONSerialization.jsonObject(with: data)
         return try #require(object as? [[String: Any]])
     }

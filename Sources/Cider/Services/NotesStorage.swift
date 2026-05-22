@@ -1185,7 +1185,15 @@ final class NotesStorage: ObservableObject {
     @discardableResult
     func assignNote(_ noteID: UUID, toFolder folderID: UUID?) -> Bool {
         guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
-        guard notes[idx].folderID != folderID else { return true }
+        if notes[idx].folderID == folderID {
+            let projectMetadata = Self.projectArtifactMetadata(forRelativePath: notes[idx].relativePath)
+            if notes[idx].projectID != projectMetadata?.projectID || notes[idx].artifactType != projectMetadata?.artifactType {
+                notes[idx].projectID = projectMetadata?.projectID
+                notes[idx].artifactType = projectMetadata?.artifactType
+                persistNoteToDatabase(notes[idx])
+            }
+            return true
+        }
 
         let note = notes[idx]
         let before = MutationAuditSnapshots.note(note)
@@ -1235,8 +1243,11 @@ final class NotesStorage: ObservableObject {
             finalRelativePath = "\(StoragePaths.inboxDir)/Notes/\(finalFilename)"
         }
 
+        let projectMetadata = Self.projectArtifactMetadata(forRelativePath: finalRelativePath)
         notes[idx].folderID = folderID
         notes[idx].relativePath = finalRelativePath
+        notes[idx].projectID = projectMetadata?.projectID
+        notes[idx].artifactType = projectMetadata?.artifactType
         notes[idx].modifiedAt = Date()
         contentCache.removeValue(forKey: noteID)
 
@@ -2409,7 +2420,19 @@ final class NotesStorage: ObservableObject {
         return (projectID.isEmpty ? nil : projectID, artifactType)
     }
 
-    private func persistProjectArtifactRelationIfNeeded(_ db: CiderDatabase, note: Note) throws {
+    private func replaceProjectArtifactRelationIfNeeded(_ db: CiderDatabase, note: Note) throws {
+        let noteOwnerID = DatabaseHelpers.encode(note.id)
+        let deleteStale = try db.prepare("""
+            DELETE FROM owner_relations
+            WHERE source_owner_type = 'note'
+              AND source_owner_id = ?
+              AND target_owner_type = 'project'
+              AND relation_type = 'artifact_of'
+              AND source = 'project_notes';
+            """)
+        deleteStale.bind(noteOwnerID, at: 1)
+        try deleteStale.step()
+
         guard let rawProjectID = note.projectID else { return }
         let projectID = SecondBrainProjectGraphService.normalizedProjectID(rawProjectID)
         guard !projectID.isEmpty else { return }
@@ -2565,7 +2588,18 @@ final class NotesStorage: ObservableObject {
             }
         }
 
-        try persistProjectArtifactRelationIfNeeded(db, note: note)
+        try replaceProjectArtifactRelationIfNeeded(db, note: note)
+    }
+
+    private static func projectArtifactMetadata(forRelativePath relativePath: String) -> (projectID: String, artifactType: String)? {
+        let components = relativePath.split(separator: "/").map(String.init)
+        guard components.count >= 4,
+              components[0].localizedCaseInsensitiveCompare("Projects") == .orderedSame,
+              components[2].localizedCaseInsensitiveCompare("Notes") == .orderedSame
+        else { return nil }
+        let projectID = SecondBrainProjectGraphService.normalizedProjectID(components[1])
+        guard !projectID.isEmpty else { return nil }
+        return (projectID, "note")
     }
 
     /// Delete a note from the database by ID. CASCADE handles detail + join tables.
