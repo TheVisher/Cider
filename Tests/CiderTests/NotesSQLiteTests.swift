@@ -1022,6 +1022,63 @@ struct NotesSQLiteTests {
         #expect(reloaded.notes.filter { $0.projectID == "cider" && $0.artifactType == "note" }.count == 1)
     }
 
+    @Test("Cider project note seed repairs dangling relation into item and note rows")
+    func ciderProjectNoteSeedRepairsDanglingRelationIntoRows() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = makeTempVaultURL()
+        defer {
+            cleanup(vault)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        let service = makeService(db)
+        let relativePath = "Projects/Cider/Notes/Cider Project Notes.md"
+        let fileURL = vault.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "# Cider Project Notes\n".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let danglingID = UUID(uuidString: "D94674C0-ACC9-493E-AE24-A15DE6C4B5B5")!
+        try SecondBrainStore(database: db).recordRelation(SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: danglingID.uuidString),
+            targetOwner: SecondBrainProjectGraphService.owner(projectID: "cider"),
+            relationType: "artifact_of",
+            evidence: "Pre-existing dangling project note relation from dogfood failure.",
+            source: "project_notes",
+            actor: "cider",
+            confidence: 1,
+            metadata: [
+                "title": "Cider Project Notes",
+                "artifactType": "note",
+                "path": relativePath
+            ]
+        ))
+        #expect(try itemRowCount(db, id: danglingID, relativePath: relativePath) == 0)
+        #expect(try noteRowCount(db, id: danglingID) == 0)
+        #expect(try projectNotePathRelationRowCount(db, relativePath: relativePath) == 1)
+
+        let repaired = try #require(service.ensureCiderProjectNoteSeedIfNeeded())
+        #expect(repaired.id == danglingID)
+        #expect(try itemRowCount(db, id: danglingID, relativePath: relativePath) == 1)
+        #expect(try noteRowCount(db, id: danglingID) == 1)
+        #expect(try projectNoteRelationRowCount(db, id: danglingID, relativePath: relativePath) == 1)
+        #expect(try projectNotePathRelationRowCount(db, relativePath: relativePath) == 1)
+
+        service.rescan()
+        let repairedProjectNoteCount = service.notes.filter { note in
+            note.id == danglingID && note.projectID == "cider" && note.artifactType == "note"
+        }.count
+        #expect(repairedProjectNoteCount == 1)
+        #expect(try itemRowCount(db, id: danglingID, relativePath: relativePath) == 1)
+        #expect(try noteRowCount(db, id: danglingID) == 1)
+        #expect(try projectNotePathRelationRowCount(db, relativePath: relativePath) == 1)
+    }
+
     private func itemRowCount(_ db: CiderDatabase, id: UUID, relativePath: String) throws -> Int {
         let stmt = try db.prepare("SELECT COUNT(*) FROM items WHERE id = ? AND type = 'note' AND title = 'Cider Project Notes' AND relative_path = ?;")
         stmt.bind(DatabaseHelpers.encode(id), at: 1)
@@ -1050,6 +1107,22 @@ struct NotesSQLiteTests {
         var count = 0
         while try stmt.step() {
             let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 1)) ?? [:]
+            if metadata["path"] == relativePath { count += 1 }
+        }
+        return count
+    }
+
+    private func projectNotePathRelationRowCount(_ db: CiderDatabase, relativePath: String) throws -> Int {
+        let stmt = try db.prepare("""
+            SELECT metadata FROM owner_relations
+            WHERE source_owner_type = 'note'
+              AND target_owner_type = 'project'
+              AND target_owner_id = 'cider'
+              AND relation_type = 'artifact_of';
+            """)
+        var count = 0
+        while try stmt.step() {
+            let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 0)) ?? [:]
             if metadata["path"] == relativePath { count += 1 }
         }
         return count

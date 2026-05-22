@@ -594,6 +594,35 @@ final class NotesStorage: ObservableObject {
         return nil
     }
 
+    private func removeDuplicateProjectNoteRelations(relativePath: String, keeping keptID: UUID) {
+        guard let db = resolvedDatabase else { return }
+        do {
+            let keptOwnerID = DatabaseHelpers.encode(keptID)
+            let normalizedPath = Self.normalizedNoteRelativePath(relativePath)
+            let select = try db.prepare("""
+                SELECT id, source_owner_id, metadata
+                FROM owner_relations
+                WHERE source_owner_type = 'note'
+                  AND target_owner_type = 'project'
+                  AND relation_type = 'artifact_of';
+                """)
+            var duplicateIDs: [String] = []
+            while try select.step() {
+                let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: select.optionalString(at: 2)) ?? [:]
+                guard Self.normalizedNoteRelativePath(metadata["path"] ?? "") == normalizedPath else { continue }
+                guard select.string(at: 1) != keptOwnerID else { continue }
+                duplicateIDs.append(select.string(at: 0))
+            }
+            for relationID in duplicateIDs {
+                let delete = try db.prepare("DELETE FROM owner_relations WHERE id = ?;")
+                delete.bind(relationID, at: 1)
+                try delete.step()
+            }
+        } catch {
+            logger.error("Failed to remove duplicate project note relations: \(error.localizedDescription)")
+        }
+    }
+
     /// Loads notes that live in vault folders (not in the Notes/ directory).
     /// Called after the initial scan or background load to pick up folder-based notes
     /// that the Notes/-only scan can't find.
@@ -845,6 +874,7 @@ final class NotesStorage: ObservableObject {
             SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID
                 && (note.artifactType?.localizedLowercase == "note" || note.artifactType == nil)
         }) {
+            removeDuplicateProjectNoteRelations(relativePath: existing.relativePath, keeping: existing.id)
             return existing
         }
 
@@ -854,6 +884,7 @@ final class NotesStorage: ObservableObject {
             notes[existingIndex].projectID = projectID
             notes[existingIndex].artifactType = "note"
             persistNoteToDatabase(notes[existingIndex])
+            removeDuplicateProjectNoteRelations(relativePath: relativePath, keeping: notes[existingIndex].id)
             return notes[existingIndex]
         }
 
@@ -868,7 +899,9 @@ final class NotesStorage: ObservableObject {
         if FileManager.default.fileExists(atPath: seedURL.path) {
             let content = (try? String(contentsOf: seedURL, encoding: .utf8)) ?? seedContent
             let now = Date()
+            let noteID = projectNoteIDFromExistingRelation(relativePath: relativePath) ?? UUID()
             let note = Note(
+                id: noteID,
                 title: title,
                 content: content,
                 createdAt: now,
@@ -880,6 +913,7 @@ final class NotesStorage: ObservableObject {
             index[note.id] = NoteIndexEntry(filename: "\(title).md", folderID: nil, createdAt: now)
             notes.insert(note, at: 0)
             persistNoteToDatabase(note)
+            removeDuplicateProjectNoteRelations(relativePath: relativePath, keeping: note.id)
             MutationAuditService.shared.record(
                 action: "register",
                 itemType: "note",
