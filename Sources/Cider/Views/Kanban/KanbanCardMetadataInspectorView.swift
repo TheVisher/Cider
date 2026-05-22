@@ -17,6 +17,7 @@ struct KanbanCardMetadataInspectorView: View {
     @State private var isPlanningExpanded = true
     @State private var isHierarchyExpanded = true
     @State private var isLinkedExpanded = true
+    @State private var isRelationshipsExpanded = true
     @State private var isActionsExpanded = true
     @State private var isDatesExpanded = true
     @State private var isAddingChild = false
@@ -122,6 +123,10 @@ struct KanbanCardMetadataInspectorView: View {
             ItemMetadataDivider()
 
             kanbanLinkedSection
+
+            ItemMetadataDivider()
+
+            projectRelationshipsSection
 
             ItemMetadataDivider()
 
@@ -438,6 +443,23 @@ struct KanbanCardMetadataInspectorView: View {
         }
     }
 
+    private var relationshipModel: ProjectArtifactRelationshipPanelModel {
+        ProjectArtifactRelationService.relatedModel(
+            for: ProjectArtifactRelationService.cardOwner(boardID: board.id, cardID: card.id),
+            boards: [board]
+        )
+    }
+
+    private var projectRelationshipsSection: some View {
+        ItemMetadataSectionView(title: "Project Relationships", isExpanded: $isRelationshipsExpanded) {
+            if relationshipModel.isEmpty {
+                ItemMetadataEmptyText(text: "No source note, decision, or QA links yet.")
+            } else {
+                ProjectArtifactRelationshipPanel(model: relationshipModel)
+            }
+        }
+    }
+
     private var relatedCardsView: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text("Related Cards")
@@ -701,6 +723,21 @@ struct KanbanCardMetadataInspectorView: View {
         guard !draft.linkedEntities.contains(ref) else { return }
         draft.linkedEntities.append(ref)
         onSave()
+        ProjectArtifactRelationService.recordCardRelation(
+            boardID: board.id,
+            boardName: board.name,
+            card: card,
+            relationType: ProjectArtifactRelationType.derivesFrom,
+            target: ref,
+            targetTitle: candidateTitle(for: ref)
+        )
+    }
+
+    private func candidateTitle(for ref: LibraryEntityRef) -> String? {
+        candidateGroups
+            .flatMap(\.candidates)
+            .first { $0.ref == ref }?
+            .title
     }
 
     private func removeLink(_ ref: LibraryEntityRef) {

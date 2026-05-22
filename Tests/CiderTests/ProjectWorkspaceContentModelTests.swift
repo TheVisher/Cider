@@ -216,4 +216,129 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(model.notes.first?.path, "Projects/Cider/Notes/Cider project note.md")
         XCTAssertEqual(model.notes.first?.owner, SecondBrainOwnerRef(ownerType: "note", ownerID: matchingID.uuidString))
     }
+
+    func testProjectArtifactRelationshipsConnectPlanningNotesToSpawnedCardsAndQA() {
+        let noteID = UUID(uuidString: "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE")!
+        let qaID = UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!
+        let note = Note(
+            id: noteID,
+            title: "Project workspace plan",
+            content: "Spawn relation graph card.",
+            relativePath: "Projects/Cider/Notes/Project workspace plan.md",
+            projectID: "cider",
+            artifactType: "note"
+        )
+        let qaNote = Note(
+            id: qaID,
+            title: "Relationship graph QA",
+            content: "Findings",
+            relativePath: "Projects/Cider/QA/Relationship graph QA.md",
+            projectID: "cider",
+            artifactType: "qa"
+        )
+        let card = KanbanCard(id: "8b6f3c", title: "Project workspace relationship graph MVP")
+        let board = KanbanBoard(id: "2afee0", name: "Cider", columns: [
+            KanbanColumn(id: "in_progress", name: "In Progress", cards: [card])
+        ])
+        let noteOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let cardOwner = SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "\(board.id)/\(card.id)")
+        let qaOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: qaID.uuidString)
+        let relations = [
+            SecondBrainRelation(
+                sourceOwner: cardOwner,
+                targetOwner: noteOwner,
+                relationType: ProjectArtifactRelationType.spawnedFrom,
+                evidence: "Card was spawned from the plan.",
+                source: "test",
+                actor: "agent",
+                confidence: 1,
+                metadata: ["card_title": card.title]
+            ),
+            SecondBrainRelation(
+                sourceOwner: qaOwner,
+                targetOwner: noteOwner,
+                relationType: ProjectArtifactRelationType.foundBugIn,
+                evidence: "QA found a follow-up in the plan.",
+                source: "test",
+                actor: "agent",
+                confidence: 1,
+                metadata: [:]
+            )
+        ]
+
+        let model = ProjectArtifactRelationshipProvider.model(
+            for: noteOwner,
+            relations: relations,
+            boards: [board],
+            notes: [note, qaNote]
+        )
+
+        XCTAssertEqual(model.derivedCards.map(\.title), ["Project workspace relationship graph MVP"])
+        XCTAssertEqual(model.derivedCards.map(\.relationType), [ProjectArtifactRelationType.spawnedFrom])
+        XCTAssertEqual(model.derivedCards.first?.subtitle.contains("Open · In Progress"), true)
+        XCTAssertEqual(model.qaFindings.map(\.title), ["Relationship graph QA"])
+        XCTAssertTrue(model.sourceArtifacts.isEmpty)
+    }
+
+    func testProjectArtifactRelationshipsShowCardSourcesDecisionsAndQA() {
+        let noteID = UUID(uuidString: "12121212-1212-1212-1212-121212121212")!
+        let decisionID = UUID(uuidString: "34343434-3434-3434-3434-343434343434")!
+        let qaID = UUID(uuidString: "56565656-5656-5656-5656-565656565656")!
+        let notes = [
+            Note(id: noteID, title: "Workspace plan", content: "", artifactType: "note"),
+            Note(id: decisionID, title: "Use contextual panels", content: "", artifactType: "decision"),
+            Note(id: qaID, title: "Panels QA", content: "", artifactType: "qa")
+        ]
+        let card = KanbanCard(id: "8b6f3c", title: "Project workspace relationship graph MVP")
+        let board = KanbanBoard(id: "2afee0", name: "Cider", columns: [
+            KanbanColumn(id: "testing", name: "Testing", cards: [card])
+        ])
+        let cardOwner = SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "\(board.id)/\(card.id)")
+        let noteOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let decisionOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: decisionID.uuidString)
+        let qaOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: qaID.uuidString)
+        let relations = [
+            SecondBrainRelation(
+                sourceOwner: cardOwner,
+                targetOwner: noteOwner,
+                relationType: ProjectArtifactRelationType.spawnedFrom,
+                evidence: "Card came from the workspace plan.",
+                source: "test",
+                actor: "agent",
+                confidence: 1,
+                metadata: [:]
+            ),
+            SecondBrainRelation(
+                sourceOwner: cardOwner,
+                targetOwner: decisionOwner,
+                relationType: ProjectArtifactRelationType.decidedFrom,
+                evidence: "Implementation follows the contextual-panels decision.",
+                source: "test",
+                actor: "agent",
+                confidence: 1,
+                metadata: [:]
+            ),
+            SecondBrainRelation(
+                sourceOwner: qaOwner,
+                targetOwner: cardOwner,
+                relationType: ProjectArtifactRelationType.validates,
+                evidence: "QA validates the card.",
+                source: "test",
+                actor: "agent",
+                confidence: 1,
+                metadata: [:]
+            )
+        ]
+
+        let model = ProjectArtifactRelationshipProvider.model(
+            for: cardOwner,
+            relations: relations,
+            boards: [board],
+            notes: notes
+        )
+
+        XCTAssertEqual(model.sourceArtifacts.map(\.title), ["Workspace plan"])
+        XCTAssertEqual(model.relatedDecisions.map(\.title), ["Use contextual panels"])
+        XCTAssertEqual(model.qaFindings.map(\.title), ["Panels QA"])
+    }
 }

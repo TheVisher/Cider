@@ -752,6 +752,15 @@ extension CiderPanelView {
         var updated = found.card
         updated.linkedEntities.append(ref)
         KanbanStorage.shared.updateCard(boardID: boardID, card: updated)
+        ProjectArtifactRelationService.recordCardRelation(
+            boardID: boardID,
+            boardName: found.board.name,
+            card: updated,
+            relationType: ProjectArtifactRelationType.derivesFrom,
+            target: ref,
+            targetTitle: title(for: ref),
+            evidence: "Project reference linked to Kanban card \(updated.title)."
+        )
     }
 
     func promoteProjectReference(_ reference: ProjectReferenceItem, in project: ProjectWorkspace) {
@@ -776,7 +785,20 @@ extension CiderPanelView {
         ) else { return }
         card.linkedEntities = [reference.ref]
         KanbanStorage.shared.updateCard(boardID: board.id, card: card)
+        ProjectArtifactRelationService.recordCardRelation(
+            boardID: board.id,
+            boardName: board.name,
+            card: card,
+            relationType: ProjectArtifactRelationType.spawnedFrom,
+            target: reference.ref,
+            targetTitle: reference.item.title,
+            evidence: "Promoted from \(project.title) reference \(reference.item.title)."
+        )
         openKanbanCardDetail(boardID: board.id, cardID: card.id)
+    }
+
+    private func title(for ref: LibraryEntityRef) -> String? {
+        ItemLinkService.shared.summaries(for: [ref]).first?.title
     }
 
     private func preferredProjectWorkColumnID(in board: KanbanBoard) -> String? {

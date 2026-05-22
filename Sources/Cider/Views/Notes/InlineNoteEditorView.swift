@@ -891,6 +891,7 @@ struct NoteMetadataSidebar: View {
     @State private var isFolderExpanded = true
     @State private var isTagsExpanded = true
     @State private var isLinkedExpanded = true
+    @State private var isRelationshipsExpanded = true
     @State private var isSourcesExpanded = true
     @State private var isHistoryExpanded = false
     @State private var showAllSnapshots = false
@@ -913,6 +914,10 @@ struct NoteMetadataSidebar: View {
 
             sectionDivider
             linkedSection
+
+            sectionDivider
+            relationshipsSection
+                .padding(.vertical, Spacing.md)
 
             sectionDivider
             sourcesSection
@@ -950,6 +955,7 @@ struct NoteMetadataSidebar: View {
         isHistoryExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .history, hasContent: !snapshotChoices.isEmpty)
         isAIExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .intelligence, hasContent: false)
         isLinkedExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .linked, hasContent: !relatedRows.isEmpty)
+        isRelationshipsExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .linked, hasContent: !relationshipModel.isEmpty)
     }
 
     // MARK: - Section Header
@@ -1151,6 +1157,31 @@ struct NoteMetadataSidebar: View {
         let ref = LibraryEntityRef(type: .note, entityID: note.id)
         let refs = (try? ItemLinkService.shared.relatedRefs(for: ref)) ?? []
         return ItemLinkService.shared.summaries(for: refs).map(ItemMetadataRow.related)
+    }
+
+    // MARK: - Project Relationships
+
+    private var relationshipModel: ProjectArtifactRelationshipPanelModel {
+        ProjectArtifactRelationService.relatedModel(
+            for: SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString)
+        )
+    }
+
+    @ViewBuilder
+    private var relationshipsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Project Relationships", isExpanded: $isRelationshipsExpanded)
+
+            if isRelationshipsExpanded {
+                if relationshipModel.isEmpty {
+                    Text("No project artifact links yet")
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.tertiary)
+                } else {
+                    ProjectArtifactRelationshipPanel(model: relationshipModel)
+                }
+            }
+        }
     }
 
     // MARK: - Sources (extracted links)
