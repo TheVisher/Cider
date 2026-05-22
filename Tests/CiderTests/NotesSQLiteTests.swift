@@ -1214,6 +1214,64 @@ struct NotesSQLiteTests {
         #expect(try projectNotePathRelationRowCount(db, relativePath: relativePath) == 1)
     }
 
+    @Test("Project decision and QA artifacts record typed relation producers")
+    func projectDecisionAndQAArtifactsRecordTypedRelationProducers() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = makeTempVaultURL()
+        defer {
+            cleanup(vault)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let service = makeService(db)
+        let decision = service.createProjectNote(
+            projectID: "cider",
+            title: "Decision source relation",
+            content: "Decision body",
+            artifactType: "decision"
+        )
+        let qa = service.createProjectNote(
+            projectID: "cider",
+            title: "QA relation producer",
+            content: "QA body",
+            artifactType: "qa"
+        )
+        let sourceCard = SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "2afee0/8b6f3c")
+        let targetCard = SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "2afee0/2c0a04")
+
+        let decisionRelations = ProjectArtifactRelationService.recordArtifactRelations(
+            note: decision,
+            targets: [
+                .init(owner: sourceCard, relationType: ProjectArtifactRelationType.decidedFrom, title: "Project workspace relationship graph MVP")
+            ],
+            actor: "test",
+            database: db
+        )
+        let qaRelations = ProjectArtifactRelationService.recordArtifactRelations(
+            note: qa,
+            targets: [
+                .init(owner: targetCard, relationType: ProjectArtifactRelationType.validates, title: "Plans/Handoffs surface"),
+                .init(owner: sourceCard, relationType: ProjectArtifactRelationType.foundBugIn, title: "Relationship graph MVP")
+            ],
+            actor: "test",
+            database: db
+        )
+
+        #expect(decisionRelations.map(\.relationType) == [ProjectArtifactRelationType.decidedFrom])
+        #expect(qaRelations.map(\.relationType).sorted() == [ProjectArtifactRelationType.foundBugIn, ProjectArtifactRelationType.validates].sorted())
+        let decisionOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: decision.id.uuidString)
+        let qaOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: qa.id.uuidString)
+        let storedDecisionRelations = try SecondBrainStore(database: db).outgoingRelations(for: decisionOwner)
+        let storedQARelations = try SecondBrainStore(database: db).outgoingRelations(for: qaOwner)
+        #expect(storedDecisionRelations.contains { $0.relationType == ProjectArtifactRelationType.decidedFrom && $0.targetOwner == sourceCard })
+        #expect(storedQARelations.contains { $0.relationType == ProjectArtifactRelationType.validates && $0.targetOwner == targetCard })
+        #expect(storedQARelations.contains { $0.relationType == ProjectArtifactRelationType.foundBugIn && $0.targetOwner == sourceCard })
+    }
+
     private func itemRowCount(_ db: CiderDatabase, id: UUID, relativePath: String) throws -> Int {
         let stmt = try db.prepare("SELECT COUNT(*) FROM items WHERE id = ? AND type = 'note' AND title = 'Cider Project Notes' AND relative_path = ?;")
         stmt.bind(DatabaseHelpers.encode(id), at: 1)

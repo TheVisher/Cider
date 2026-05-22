@@ -2565,7 +2565,7 @@ struct CiderCLI {
         case nil, "help", "--help", "-h":
             print("""
             Project artifact note commands:
-              cider-cli note project-artifact create --project <project-id-or-name> --type note|plan|handoff|decision|qa --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--json]
+              cider-cli note project-artifact create --project <project-id-or-name> --type note|plan|handoff|decision|qa --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--decided-from-card <id>] [--validates-card <id>] [--found-bug-in-card <id>] [--json]
               cider-cli note project-artifact append <note-id-prefix> (--stdin|--text-file <path>|--content <text>) [--json]
               cider-cli note project-artifact list --project <project-id-or-name> [--type note|plan|handoff|decision|qa|plans-handoffs] [--json]
               cider-cli note project-artifact get <note-id-prefix> [--json]
@@ -2587,19 +2587,22 @@ struct CiderCLI {
                 content: content,
                 artifactType: type
             )
-            let linkedCards = recordProjectArtifactCardLinks(note: note, args: rest)
+            let linkedRelations = recordProjectArtifactRelations(note: note, args: rest)
             if jsonOutput {
                 var dict = noteToDict(note)
                 dict["ok"] = true
                 dict["command"] = "note.project-artifact.create"
                 dict["content"] = storage.loadContent(for: note)
-                dict["linkedCards"] = linkedCards.map(ownerToDict)
+                dict["linkedRelations"] = linkedRelations.map(relationToDict)
+                dict["linkedCards"] = linkedRelations
+                    .filter { $0.targetOwner.ownerType == "kanban_card" }
+                    .map { ownerToDict($0.targetOwner) }
                 outputJSON(dict)
             } else {
                 print("Created project \(note.artifactType ?? "artifact"): \(note.title) (\(note.id.uuidString.prefix(8)))")
                 print("  Path: \(note.relativePath)")
-                if !linkedCards.isEmpty {
-                    print("  Linked cards: \(linkedCards.map(\.canonicalRef).joined(separator: ", "))")
+                if !linkedRelations.isEmpty {
+                    print("  Linked relations: \(linkedRelations.map { "\($0.relationType):\($0.targetOwner.canonicalRef)" }.joined(separator: ", "))")
                 }
             }
 
@@ -2675,6 +2678,7 @@ struct CiderCLI {
                 dict["ok"] = true
                 dict["command"] = "note.project-artifact.get"
                 dict["content"] = storage.loadContent(for: note)
+                dict["relations"] = projectArtifactRelations(for: note).map(relationToDict)
                 outputJSON(dict)
             } else {
                 print("Project artifact: \(note.title)")
@@ -2693,7 +2697,9 @@ struct CiderCLI {
 
     static let projectArtifactValueFlags: Set<String> = [
         "--project", "--project-id", "--type", "--artifact-type", "--title",
-        "--content", "--text-file", "--card", "--source-agent", "--target-agent",
+        "--content", "--text-file", "--card", "--card-id", "--source-agent", "--target-agent",
+        "--decided-from-card", "--decided-from-note", "--source-card", "--source-note",
+        "--validates-card", "--validates-note", "--found-bug-in-card", "--found-bug-in-note",
     ]
 
     static func projectArtifactContent(from args: [String]) -> String? {
@@ -2710,35 +2716,136 @@ struct CiderCLI {
         }
     }
 
-    static func recordProjectArtifactCardLinks(note: Note, args: [String]) -> [SecondBrainOwnerRef] {
-        let cardRefs = parseFlagAll("--card", from: args) + parseFlagAll("--card-id", from: args)
-        guard !cardRefs.isEmpty else { return [] }
-        let noteOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString)
-        let store = SecondBrainStore(database: .shared)
-        var linked: [SecondBrainOwnerRef] = []
-        for cardRef in cardRefs {
-            let cardOwner = normalizedOwner(type: "kanban_card", ref: cardRef)
-            do {
-                try store.recordRelation(SecondBrainRelation(
-                    sourceOwner: noteOwner,
-                    targetOwner: cardOwner,
-                    relationType: "documents",
-                    evidence: "Project \(note.artifactType ?? "artifact") artifact links to Kanban card \(cardRef).",
-                    source: "note.project-artifact",
-                    actor: parseFlag("--source-agent", from: args) ?? "cider-cli",
-                    confidence: 1,
-                    metadata: [
-                        "artifactType": note.artifactType ?? "note",
-                        "path": note.relativePath,
-                        "title": note.title,
-                    ]
-                ))
-                linked.append(cardOwner)
-            } catch {
-                printCLIError("Failed to link card \(cardRef): \(error.localizedDescription)")
-            }
+    static func recordProjectArtifactRelations(note: Note, args: [String]) -> [SecondBrainRelation] {
+        let targets = projectArtifactRelationTargets(from: args)
+        return ProjectArtifactRelationService.recordArtifactRelations(
+            note: note,
+            targets: targets,
+            actor: parseFlag("--source-agent", from: args) ?? "cider-cli",
+            source: ProjectArtifactRelationService.cliSource
+        )
+    }
+
+    static func projectArtifactRelationTargets(from args: [String]) -> [ProjectArtifactRelationService.ArtifactRelationTarget] {
+        var targets: [ProjectArtifactRelationService.ArtifactRelationTarget] = []
+        appendRelationTargets(
+            &targets,
+            owners: parseFlagAll("--card", from: args) + parseFlagAll("--card-id", from: args),
+            ownerType: "kanban_card",
+            relationType: "documents",
+            evidencePrefix: "Project artifact documents Kanban card"
+        )
+        appendRelationTargets(
+            &targets,
+            owners: parseFlagAll("--decided-from-card", from: args) + parseFlagAll("--source-card", from: args),
+            ownerType: "kanban_card",
+            relationType: ProjectArtifactRelationType.decidedFrom,
+            evidencePrefix: "Decision artifact was decided from Kanban card"
+        )
+        appendRelationTargets(
+            &targets,
+            owners: parseFlagAll("--decided-from-note", from: args) + parseFlagAll("--source-note", from: args),
+            ownerType: "note",
+            relationType: ProjectArtifactRelationType.decidedFrom,
+            evidencePrefix: "Decision artifact was decided from note"
+        )
+        appendRelationTargets(
+            &targets,
+            owners: parseFlagAll("--validates-card", from: args),
+            ownerType: "kanban_card",
+            relationType: ProjectArtifactRelationType.validates,
+            evidencePrefix: "QA artifact validates Kanban card"
+        )
+        appendRelationTargets(
+            &targets,
+            owners: parseFlagAll("--validates-note", from: args),
+            ownerType: "note",
+            relationType: ProjectArtifactRelationType.validates,
+            evidencePrefix: "QA artifact validates note"
+        )
+        appendRelationTargets(
+            &targets,
+            owners: parseFlagAll("--found-bug-in-card", from: args),
+            ownerType: "kanban_card",
+            relationType: ProjectArtifactRelationType.foundBugIn,
+            evidencePrefix: "QA artifact found bug in Kanban card"
+        )
+        appendRelationTargets(
+            &targets,
+            owners: parseFlagAll("--found-bug-in-note", from: args),
+            ownerType: "note",
+            relationType: ProjectArtifactRelationType.foundBugIn,
+            evidencePrefix: "QA artifact found bug in note"
+        )
+        return targets
+    }
+
+    static func appendRelationTargets(
+        _ targets: inout [ProjectArtifactRelationService.ArtifactRelationTarget],
+        owners: [String],
+        ownerType: String,
+        relationType: String,
+        evidencePrefix: String
+    ) {
+        for ownerID in owners {
+            let owner = normalizedOwner(type: ownerType, ref: ownerID)
+            targets.append(ProjectArtifactRelationService.ArtifactRelationTarget(
+                owner: owner,
+                relationType: relationType,
+                evidence: "\(evidencePrefix) \(ownerID)."
+            ))
         }
-        return linked
+    }
+
+    static func projectArtifactRelations(for note: Note) -> [SecondBrainRelation] {
+        let db = CiderDatabase.shared
+        guard db.isOpen else { return [] }
+        do {
+            let stmt = try db.prepare("""
+                SELECT id, source_owner_type, source_owner_id, target_owner_type, target_owner_id,
+                       relation_type, evidence, source, actor, confidence, metadata, created_at, updated_at
+                FROM owner_relations
+                WHERE source_owner_type = 'note'
+                  AND source_owner_id = ?
+                  AND (source = ? OR source = ?)
+                ORDER BY updated_at DESC, relation_type COLLATE NOCASE ASC;
+                """)
+            stmt.bind(note.id.uuidString, at: 1)
+                .bind(ProjectArtifactRelationService.cliSource, at: 2)
+                .bind(ProjectArtifactRelationService.source, at: 3)
+            var relations: [SecondBrainRelation] = []
+            while try stmt.step() {
+                relations.append(SecondBrainRelation(
+                    id: stmt.string(at: 0),
+                    sourceOwner: SecondBrainOwnerRef(ownerType: stmt.string(at: 1), ownerID: stmt.string(at: 2)),
+                    targetOwner: SecondBrainOwnerRef(ownerType: stmt.string(at: 3), ownerID: stmt.string(at: 4)),
+                    relationType: stmt.string(at: 5),
+                    evidence: stmt.string(at: 6),
+                    source: stmt.string(at: 7),
+                    actor: stmt.string(at: 8),
+                    confidence: stmt.optionalDouble(at: 9),
+                    metadata: DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 10)) ?? [:],
+                    createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 11)),
+                    updatedAt: DatabaseHelpers.decodeDate(stmt.double(at: 12))
+                ))
+            }
+            return relations
+        } catch {
+            return []
+        }
+    }
+
+    static func relationToDict(_ relation: SecondBrainRelation) -> [String: Any] {
+        [
+            "id": relation.id,
+            "relationType": relation.relationType,
+            "sourceOwner": ownerToDict(relation.sourceOwner),
+            "targetOwner": ownerToDict(relation.targetOwner),
+            "evidence": relation.evidence,
+            "source": relation.source,
+            "actor": relation.actor,
+            "metadata": relation.metadata,
+        ]
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
