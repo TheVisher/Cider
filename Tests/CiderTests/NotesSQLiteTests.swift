@@ -918,6 +918,60 @@ struct NotesSQLiteTests {
         #expect(service2.indexFilename(for: note.id) == "NoPath.md")
     }
 
+    // MARK: - Project Notes
+
+    @Test("Project notes are file-backed under project containers and reload explicit project ownership")
+    func projectNotesAreFileBackedAndReloadOwnership() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let service = makeService(db)
+        let note = service.createProjectNote(
+            projectID: "cider",
+            title: "Project Native Notes",
+            content: "# Body\nFile-backed project note."
+        )
+
+        #expect(note.projectID == "cider")
+        #expect(note.artifactType == "note")
+        #expect(note.relativePath == "Projects/Cider/Notes/Project Native Notes.md")
+        let fileURL = vault.appendingPathComponent(note.relativePath)
+        #expect(fm.fileExists(atPath: fileURL.path))
+        #expect(try String(contentsOf: fileURL, encoding: .utf8) == "# Body\nFile-backed project note.")
+
+        let relationStmt = try db.prepare("""
+            SELECT target_owner_type, target_owner_id, relation_type, metadata
+            FROM owner_relations
+            WHERE source_owner_type = 'note' AND source_owner_id = ?;
+            """)
+        relationStmt.bind(DatabaseHelpers.encode(note.id), at: 1)
+        #expect(try relationStmt.step())
+        #expect(relationStmt.string(at: 0) == "project")
+        #expect(relationStmt.string(at: 1) == "cider")
+        #expect(relationStmt.string(at: 2) == "artifact_of")
+        let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: relationStmt.optionalString(at: 3)) ?? [:]
+        #expect(metadata["artifactType"] == "note")
+        #expect(metadata["path"] == note.relativePath)
+
+        let reloaded = makeService(db)
+        reloaded.loadNotesFromDatabase(db)
+        #expect(reloaded.notes.count == 1)
+        #expect(reloaded.notes[0].id == note.id)
+        #expect(reloaded.notes[0].projectID == "cider")
+        #expect(reloaded.notes[0].artifactType == "note")
+        #expect(reloaded.loadContent(for: reloaded.notes[0]) == "# Body\nFile-backed project note.")
+    }
+
     // MARK: - Sort Order
 
     @Test("Notes load sorted: pinned first, then by newest created")

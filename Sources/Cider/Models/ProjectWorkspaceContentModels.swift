@@ -164,6 +164,57 @@ struct ProjectWorkspaceArtifactRow: Identifiable, Equatable {
     var id: String { "\(owner.canonicalRef):\(relationType)" }
 }
 
+struct ProjectWorkspaceNoteRow: Identifiable, Equatable {
+    let note: Note
+    let owner: SecondBrainOwnerRef
+    let path: String
+
+    var id: UUID { note.id }
+    var title: String { note.title }
+    var preview: String {
+        let content = note.content.isEmpty ? note.resolvedContent : note.content
+        return String(content.trimmingCharacters(in: .whitespacesAndNewlines).prefix(180))
+    }
+}
+
+struct ProjectWorkspaceSurfaceModel: Equatable {
+    let workspace: ProjectWorkspace
+    let surface: ProjectWorkspaceSurface
+    let notes: [ProjectWorkspaceNoteRow]
+}
+
+enum ProjectWorkspaceSurfaceProvider {
+    static func model(
+        for workspace: ProjectWorkspace,
+        surface: ProjectWorkspaceSurface,
+        notes: [Note]
+    ) -> ProjectWorkspaceSurfaceModel {
+        let rows: [ProjectWorkspaceNoteRow]
+        if surface == .notes {
+            let projectID = SecondBrainProjectGraphService.normalizedProjectID(workspace.id)
+            rows = notes
+                .filter { note in
+                    guard note.artifactType?.localizedLowercase == "note" || note.artifactType == nil else { return false }
+                    return SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID
+                }
+                .sorted { lhs, rhs in
+                    if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
+                    return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+                }
+                .map { note in
+                    ProjectWorkspaceNoteRow(
+                        note: note,
+                        owner: SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString),
+                        path: note.relativePath
+                    )
+                }
+        } else {
+            rows = []
+        }
+        return ProjectWorkspaceSurfaceModel(workspace: workspace, surface: surface, notes: rows)
+    }
+}
+
 enum ProjectWorkspaceOverviewProvider {
     static func model(
         for workspace: ProjectWorkspace,

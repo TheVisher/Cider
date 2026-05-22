@@ -14,8 +14,12 @@ struct Note: Identifiable, Hashable {
     var folderID: UUID?
     var isPinned: Bool
     var tags: [String]
+    /// Explicit project owner for file-backed project artifacts. Path containment is storage topology only.
+    var projectID: String?
+    /// Project artifact kind such as "note", "decision", "qa", "handoff", or "plan".
+    var artifactType: String?
 
-    init(id: UUID = UUID(), title: String, content: String = "", summary: String? = nil, createdAt: Date = Date(), modifiedAt: Date = Date(), relativePath: String = "", labelIDs: [UUID] = [], folderID: UUID? = nil, isPinned: Bool = false, tags: [String] = []) {
+    init(id: UUID = UUID(), title: String, content: String = "", summary: String? = nil, createdAt: Date = Date(), modifiedAt: Date = Date(), relativePath: String = "", labelIDs: [UUID] = [], folderID: UUID? = nil, isPinned: Bool = false, tags: [String] = [], projectID: String? = nil, artifactType: String? = nil) {
         self.id = id
         self.title = title
         self.content = content
@@ -27,6 +31,12 @@ struct Note: Identifiable, Hashable {
         self.folderID = folderID
         self.isPinned = isPinned
         self.tags = tags
+        self.projectID = projectID
+        self.artifactType = artifactType
+    }
+
+    var isProjectArtifact: Bool {
+        projectID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
     // MARK: - Computed Properties for Card Display

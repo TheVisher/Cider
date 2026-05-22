@@ -234,6 +234,85 @@ struct ProjectWorkspaceSurfacePlaceholderView: View {
     }
 }
 
+struct ProjectWorkspaceSurfaceView: View {
+    let model: ProjectWorkspaceSurfaceModel
+    var onOpenNote: (Note) -> Void
+
+    var body: some View {
+        if model.surface == .notes {
+            notesBody
+        } else {
+            ProjectWorkspaceSurfacePlaceholderView(project: model.workspace, surface: model.surface)
+        }
+    }
+
+    private var notesBody: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Label(model.surface.title, systemImage: model.surface.systemImage)
+                    .font(CiderFont.headingSemibold)
+                    .foregroundColor(CiderColors.primary)
+                Text("Markdown-backed notes stored under Projects/\(model.workspace.title)/Notes")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.secondary)
+            }
+
+            if model.notes.isEmpty {
+                EmptyStateView(
+                    icon: model.surface.systemImage,
+                    title: "No project notes yet",
+                    subtitle: model.surface.placeholderSubtitle
+                )
+                .frame(maxWidth: .infinity, minHeight: 260)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: Spacing.xs) {
+                        ForEach(model.notes) { row in
+                            Button {
+                                onOpenNote(row.note)
+                            } label: {
+                                HStack(spacing: Spacing.sm) {
+                                    Image(systemName: "note.text")
+                                        .foregroundColor(CiderColors.tertiary)
+                                        .frame(width: 24)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(row.title)
+                                            .font(CiderFont.bodySemibold)
+                                            .foregroundColor(CiderColors.primary)
+                                            .lineLimit(1)
+                                        if !row.preview.isEmpty {
+                                            Text(row.preview)
+                                                .font(CiderFont.caption)
+                                                .foregroundColor(CiderColors.secondary)
+                                                .lineLimit(2)
+                                        }
+                                        Text(row.path)
+                                            .font(CiderFont.caption)
+                                            .foregroundColor(CiderColors.tertiary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Text(row.owner.canonicalRef)
+                                        .font(CiderFont.caption)
+                                        .foregroundColor(CiderColors.tertiary)
+                                        .lineLimit(1)
+                                }
+                                .padding(Spacing.md)
+                                .sectionContainer(cornerRadius: Radius.sm)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.bottom, Spacing.lg)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+        .padding(Spacing.lg)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
 struct ProjectReferencesView: View {
     let project: ProjectWorkspace
     let references: [ProjectReferenceItem]

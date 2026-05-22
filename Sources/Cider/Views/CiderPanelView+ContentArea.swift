@@ -200,7 +200,16 @@ extension CiderPanelView {
                 }
             case .projectSurface(let projectID, let surface, _):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
-                    ProjectWorkspaceSurfacePlaceholderView(project: project, surface: surface)
+                    ProjectWorkspaceSurfaceView(
+                        model: ProjectWorkspaceSurfaceProvider.model(
+                            for: project,
+                            surface: surface,
+                            notes: NotesStorage.shared.notes
+                        ),
+                        onOpenNote: { note in
+                            openNoteDetail(note)
+                        }
+                    )
                 } else {
                     EmptyStateView(
                         icon: surface.systemImage,

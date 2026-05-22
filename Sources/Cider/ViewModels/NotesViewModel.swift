@@ -76,7 +76,7 @@ final class NotesViewModel: ObservableObject {
     private var pendingExternalDiskContent: String?
     private var ignoredExternalDiskContent: String?
     var notes: [Note] {
-        NotesStorage.shared.notes
+        NotesStorage.shared.notes.filter { !$0.isProjectArtifact }
     }
 
     @discardableResult

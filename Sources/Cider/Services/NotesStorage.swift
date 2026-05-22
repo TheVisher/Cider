@@ -692,6 +692,58 @@ final class NotesStorage: ObservableObject {
         return note
     }
 
+    /// Create a Markdown-backed project note under `Projects/<Project>/Notes/` and
+    /// register explicit project ownership in SQLite via owner_relations.
+    func createProjectNote(
+        projectID rawProjectID: String,
+        title rawTitle: String,
+        content: String = "",
+        artifactType rawArtifactType: String = "note"
+    ) -> Note {
+        let projectID = SecondBrainProjectGraphService.normalizedProjectID(rawProjectID)
+        let artifactType = rawArtifactType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "note"
+            : rawArtifactType.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+        let baseTitle = sanitizedNoteTitle(rawTitle).isEmpty ? "Untitled" : sanitizedNoteTitle(rawTitle)
+        let projectDirName = projectDirectoryName(for: projectID)
+        let notesDir = vaultRoot
+            .appendingPathComponent("Projects", isDirectory: true)
+            .appendingPathComponent(projectDirName, isDirectory: true)
+            .appendingPathComponent("Notes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: notesDir, withIntermediateDirectories: true)
+
+        let filename = uniqueFilename(baseTitle: baseTitle, in: notesDir)
+        let fileURL = notesDir.appendingPathComponent(filename)
+        let uuid = UUID()
+        let now = Date()
+        try? content.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let relativePath = "Projects/\(projectDirName)/Notes/\(filename)"
+        index[uuid] = NoteIndexEntry(filename: filename, folderID: nil, createdAt: now)
+        saveIndex()
+
+        let note = Note(
+            id: uuid,
+            title: String(filename.dropLast(3)),
+            content: content,
+            createdAt: now,
+            modifiedAt: now,
+            relativePath: relativePath,
+            projectID: projectID,
+            artifactType: artifactType
+        )
+        notes.insert(note, at: 0)
+        persistNoteToDatabase(note)
+        MutationAuditService.shared.record(
+            action: "create",
+            itemType: "note",
+            itemID: note.id,
+            after: MutationAuditSnapshots.note(note),
+            metadata: ["projectID": projectID, "artifactType": artifactType]
+        )
+        return note
+    }
+
     /// Create a note from a screen capture, saving the screenshot to Attachments.
     /// - Parameters:
     ///   - title: Initial note title (derived from OCR text or a default).
@@ -1577,6 +1629,45 @@ final class NotesStorage: ObservableObject {
         return "\(base) \(UUID().uuidString.prefix(8))"
     }
 
+    private func sanitizedNoteTitle(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func uniqueFilename(baseTitle: String, in directory: URL) -> String {
+        let base = sanitizedNoteTitle(baseTitle).isEmpty ? "Untitled" : sanitizedNoteTitle(baseTitle)
+        let fm = FileManager.default
+        for index in 1...100 {
+            let title = index == 1 ? base : "\(base) \(index)"
+            let filename = "\(title).md"
+            if !fm.fileExists(atPath: directory.appendingPathComponent(filename).path) {
+                return filename
+            }
+        }
+        return "\(base) \(UUID().uuidString.prefix(8)).md"
+    }
+
+    private func projectDirectoryName(for projectID: String) -> String {
+        switch SecondBrainProjectGraphService.normalizedProjectID(projectID) {
+        case "cider":
+            return "Cider"
+        case "cider-web":
+            return "Cider Web"
+        case "cider-ios":
+            return "Cider iOS"
+        default:
+            return projectID
+                .split(separator: "-")
+                .map { word in
+                    guard let first = word.first else { return "" }
+                    return String(first).uppercased() + String(word.dropFirst())
+                }
+                .joined(separator: " ")
+        }
+    }
+
     private func snapshotsRootURL() -> URL {
         directoryURL.appendingPathComponent(snapshotsDirectoryName, isDirectory: true)
     }
@@ -1824,6 +1915,7 @@ final class NotesStorage: ObservableObject {
                 let title = stmt.string(at: 1)
                 let isPinned = stmt.bool(at: 8)
                 let createdAt = DatabaseHelpers.decodeDate(stmt.double(at: 2))
+                let projectMetadata = try projectArtifactMetadata(db, noteID: id)
 
                 var note = Note(
                     id: id,
@@ -1835,7 +1927,9 @@ final class NotesStorage: ObservableObject {
                     relativePath: relativePath,
                     labelIDs: [],
                     folderID: folderID,
-                    isPinned: isPinned
+                    isPinned: isPinned,
+                    projectID: projectMetadata.projectID,
+                    artifactType: projectMetadata.artifactType
                 )
 
                 // Load labels and free-text tags from join tables
@@ -2099,6 +2193,54 @@ final class NotesStorage: ObservableObject {
         return names
     }
 
+    private func projectArtifactMetadata(_ db: CiderDatabase, noteID: UUID) throws -> (projectID: String?, artifactType: String?) {
+        let noteOwnerID = DatabaseHelpers.encode(noteID)
+        let stmt = try db.prepare("""
+            SELECT target_owner_id, metadata
+            FROM owner_relations
+            WHERE source_owner_type = 'note'
+              AND source_owner_id = ?
+              AND target_owner_type = 'project'
+              AND relation_type = 'artifact_of'
+            ORDER BY updated_at DESC
+            LIMIT 1;
+            """)
+        stmt.bind(noteOwnerID, at: 1)
+        guard try stmt.step() else { return (nil, nil) }
+        let projectID = SecondBrainProjectGraphService.normalizedProjectID(stmt.string(at: 0))
+        let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 1)) ?? [:]
+        let artifactType = metadata["artifactType"] ?? metadata["artifact_type"] ?? "note"
+        return (projectID.isEmpty ? nil : projectID, artifactType)
+    }
+
+    private func persistProjectArtifactRelationIfNeeded(_ db: CiderDatabase, note: Note) throws {
+        guard let rawProjectID = note.projectID else { return }
+        let projectID = SecondBrainProjectGraphService.normalizedProjectID(rawProjectID)
+        guard !projectID.isEmpty else { return }
+        let artifactType = note.artifactType?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? note.artifactType!.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+            : "note"
+        try SecondBrainProjectGraphService(database: db).upsertProject(
+            id: projectID,
+            title: projectDirectoryName(for: projectID),
+            metadata: ["rootPath": "Projects/\(projectDirectoryName(for: projectID))"]
+        )
+        try SecondBrainStore(database: db).recordRelation(SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString),
+            targetOwner: SecondBrainProjectGraphService.owner(projectID: projectID),
+            relationType: "artifact_of",
+            evidence: "Markdown project \(artifactType) lives at \(note.relativePath).",
+            source: "project_notes",
+            actor: "cider",
+            confidence: 1,
+            metadata: [
+                "artifactType": artifactType,
+                "title": note.title,
+                "path": note.relativePath
+            ]
+        ))
+    }
+
     private func loadSummary(_ db: CiderDatabase, itemID: UUID) throws -> String? {
         let stmt = try db.prepare("SELECT summary FROM notes WHERE item_id = ?;")
         stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
@@ -2226,6 +2368,8 @@ final class NotesStorage: ObservableObject {
                 try insItemTag.step()
             }
         }
+
+        try persistProjectArtifactRelationIfNeeded(db, note: note)
     }
 
     /// Delete a note from the database by ID. CASCADE handles detail + join tables.

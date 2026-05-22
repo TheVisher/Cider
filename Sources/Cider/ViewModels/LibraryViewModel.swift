@@ -19,7 +19,9 @@ final class LibraryViewModel: ObservableObject {
 
     func rebuildItems() {
         let bookmarkItems = VaultBookmarkService.shared.bookmarks.map { LibraryItemV2.bookmark($0) }
-        let noteItems = NotesStorage.shared.notes.map { LibraryItemV2.note($0) }
+        let noteItems = NotesStorage.shared.notes
+            .filter { !$0.isProjectArtifact }
+            .map { LibraryItemV2.note($0) }
         let dateCardItems = DateCardStorage.shared.dateCards.map { LibraryItemV2.dateCard($0) }
         let contactItems = ContactStorage.shared.contacts.map { LibraryItemV2.contact($0) }
         let todoItems = TodoCardStorage.shared.todoCards.map { LibraryItemV2.todo($0) }

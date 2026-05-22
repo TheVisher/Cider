@@ -161,4 +161,59 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(model.artifacts.map(\.relationType), ["artifact_of"])
         XCTAssertEqual(model.artifacts.map(\.safeCommand), ["cider-cli item context note CF06DD4E --json"])
     }
+
+    func testProjectNotesSurfaceShowsOnlyMatchingFileBackedProjectNotes() {
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+        let matchingID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let genericID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let otherProjectID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
+        let decisionID = UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!
+        let notes = [
+            Note(
+                id: matchingID,
+                title: "Cider project note",
+                content: "Project-body",
+                modifiedAt: Date(timeIntervalSince1970: 4_000),
+                relativePath: "Projects/Cider/Notes/Cider project note.md",
+                projectID: "cider",
+                artifactType: "note"
+            ),
+            Note(
+                id: genericID,
+                title: "Generic library note",
+                content: "Generic-body",
+                modifiedAt: Date(timeIntervalSince1970: 5_000),
+                relativePath: "Inbox/Notes/Generic library note.md"
+            ),
+            Note(
+                id: otherProjectID,
+                title: "iOS project note",
+                content: "Other-body",
+                modifiedAt: Date(timeIntervalSince1970: 6_000),
+                relativePath: "Projects/Cider iOS/Notes/iOS project note.md",
+                projectID: "cider-ios",
+                artifactType: "note"
+            ),
+            Note(
+                id: decisionID,
+                title: "Cider decision",
+                content: "Decision-body",
+                modifiedAt: Date(timeIntervalSince1970: 7_000),
+                relativePath: "Projects/Cider/Decisions/Cider decision.md",
+                projectID: "cider",
+                artifactType: "decision"
+            )
+        ]
+
+        let model = ProjectWorkspaceSurfaceProvider.model(
+            for: ciderWorkspace,
+            surface: .notes,
+            notes: notes
+        )
+
+        XCTAssertEqual(model.notes.map(\.id), [matchingID])
+        XCTAssertEqual(model.notes.first?.path, "Projects/Cider/Notes/Cider project note.md")
+        XCTAssertEqual(model.notes.first?.owner, SecondBrainOwnerRef(ownerType: "note", ownerID: matchingID.uuidString))
+    }
 }
