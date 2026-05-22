@@ -106,15 +106,18 @@ Board files live in `~/CiderVault/.cider/boards/`.
 
 - Check the relevant board before substantial work.
 - For read-only inspections, do not move or create cards unless the user asks.
-- If work already has a card, move it to the active column before implementation.
-- If work does not have a card, create an agent-ready card with `created: 'YYYY-MM-DD'`.
-- Put test evidence and implementation notes on the card.
-- Move fixed bugs to the bugs board `Fixed` column.
-- Move implementation work through `Queued`, `In Progress`, `Testing`, and `Done` as reality changes.
+- Use `cider-cli board ...` commands for routine Kanban mutations: card creation, card movement, section updates, implementation history, evidence, handoffs, and commit traceability.
+- If work already has a card, move it to the active column before implementation with `cider-cli board move-card`.
+- If work does not have a card, create an agent-ready card with `cider-cli board add-card`; the card must include `created: 'YYYY-MM-DD'`.
+- Put test evidence and implementation notes on the card with `cider-cli board evidence add` and `cider-cli board history add`.
+- Move fixed bugs to the bugs board `Fixed` column with `cider-cli board move-card`.
+- Move implementation work through `Queued`, `In Progress`, `Testing`, and `Done` as reality changes with `cider-cli board move-card`.
 - For implementation cards with repo changes, do not move to `Done` until the changes are committed and the card has commit traceability. If the user explicitly asks not to commit, keep the card out of `Done` or mark the card state as verified but unlanded.
 - Do not leave cards in Testing when an agent can verify the result with CLI/tests/builds that produce the same evidence Erik would read. Run the verification, record evidence, and move the card forward.
 - Testing handoffs to Erik must be ID-readable from chat: group cards by `Needs Erik` vs `Agent can verify`, include the card title/status, and use IDs only as secondary references.
-- Preserve YAML structure and quote dates with single quotes.
+- Do not patch board YAML by hand for normal card work. Raw board YAML edits are allowed only for parser/storage debugging or emergency repair, and must be followed by a full board parse validation and projection refresh when relevant.
+- If a needed Kanban mutation is not supported by `cider-cli board ...`, create or update a scoped follow-up card to add the missing CLI command instead of normalizing manual YAML patching.
+- For emergency direct edits only: preserve YAML structure, quote dates with single quotes, validate the board file, and record why the CLI path could not be used.
 
 ## Second-Brain Card Workflow
 

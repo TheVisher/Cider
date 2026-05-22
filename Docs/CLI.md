@@ -29,7 +29,9 @@ Use CLI commands for:
 
 Kanban boards live in `~/CiderVault/.cider/boards/`.
 
-Prefer supported `cider-cli board ...` commands where available. If a command lacks a needed operation, use structured YAML parsing or a careful whole-file rewrite.
+Use supported `cider-cli board ...` commands for routine card creation, movement, section updates, evidence, history, handoffs, and commit traceability. If a command lacks a needed routine operation, create a scoped follow-up to add the missing CLI command instead of normalizing direct YAML patching.
+
+Raw board YAML edits are only for parser/storage debugging or emergency repair. Any direct board-file write must use structured parsing or a careful whole-file rewrite, then validate the board file and refresh projections when relevant.
 
 Every card must include `created: 'YYYY-MM-DD'`.
 

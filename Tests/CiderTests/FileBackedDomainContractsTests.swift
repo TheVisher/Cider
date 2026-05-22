@@ -117,8 +117,19 @@ struct FileBackedDomainContractsTests {
         for snippet in [
             "New agent capture must use `cider-cli capture add --kind ... --json`.",
             "Do not call hidden type-specific legacy commands such as `bookmark`, `note`, `todo`, `event`, `contact`, `file`, `folder`, `tag`, `label`, or `dashboard` as alternate APIs.",
+            "Use `cider-cli board ...` commands for routine Kanban mutations",
+            "Do not patch board YAML by hand for normal card work.",
+            "If a needed Kanban mutation is not supported by `cider-cli board ...`, create or update a scoped follow-up card to add the missing CLI command",
         ] {
             #expect(agentSource.contains(snippet), "Docs/AGENT.md missing Second Brain v1 CLI agent rule: \(snippet)")
+        }
+
+        for snippet in [
+            "Use supported `cider-cli board ...` commands for routine card creation",
+            "If a command lacks a needed routine operation, create a scoped follow-up to add the missing CLI command",
+            "Raw board YAML edits are only for parser/storage debugging or emergency repair.",
+        ] {
+            #expect(cliSource.contains(snippet), "Docs/CLI.md missing Kanban CLI safety snippet: \(snippet)")
         }
     }
 
