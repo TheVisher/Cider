@@ -386,9 +386,15 @@ final class NotesStorage: ObservableObject {
             for i in notes.indices where notes[i].content.isEmpty {
                 notes[i].content = loadContent(for: notes[i])
             }
+            restoreProjectArtifactMetadataFromPaths()
             let canonicalized = canonicalizedScannedNotes(notes)
             deleteDuplicateNoteFiles(canonicalized.removedNotes)
-            notes = canonicalized.notes
+            notes = canonicalized.notes.map { note in
+                var restored = note
+                restoreProjectArtifactMetadataFromPathIfNeeded(&restored)
+                return restored
+            }
+            logProjectNoteBoundary(stage: "rescan-after-canonicalize")
             index = rebuiltNoteIndex(from: notes)
             return
         }
@@ -409,9 +415,16 @@ final class NotesStorage: ObservableObject {
             }
         }
 
+        restoreProjectArtifactMetadataFromPaths()
+
         let canonicalized = canonicalizedScannedNotes(notes)
         deleteDuplicateNoteFiles(canonicalized.removedNotes)
-        notes = canonicalized.notes
+        notes = canonicalized.notes.map { note in
+            var restored = note
+            restoreProjectArtifactMetadataFromPathIfNeeded(&restored)
+            return restored
+        }
+        logProjectNoteBoundary(stage: "rescan-after-canonicalize")
         index = rebuiltNoteIndex(from: notes)
 
         // 5. Sync the full in-memory state to SQLite. Upsert everything we
@@ -439,9 +452,9 @@ final class NotesStorage: ObservableObject {
                     try stmt.step()
                 }
             }
-            logger.info("Rescan synced \(self.notes.count) notes to SQLite (removed \(removedIDs.count))")
+            logger.info("Rescan synced \(self.notes.count, privacy: .public) notes to SQLite (removed \(removedIDs.count, privacy: .public); projectCiderNotes=\(self.projectArtifactNoteCount(projectID: "cider"), privacy: .public))")
         } catch {
-            logger.error("Failed to sync rescan to SQLite: \(error.localizedDescription)")
+            logger.error("Failed to sync rescan to SQLite: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -2122,7 +2135,8 @@ final class NotesStorage: ObservableObject {
                 let title = stmt.string(at: 1)
                 let isPinned = stmt.bool(at: 8)
                 let createdAt = DatabaseHelpers.decodeDate(stmt.double(at: 2))
-                let projectMetadata = try projectArtifactMetadata(db, noteID: id)
+                let dbProjectMetadata = try projectArtifactMetadata(db, noteID: id)
+                let pathProjectMetadata = Self.projectArtifactMetadata(forRelativePath: relativePath)
 
                 var note = Note(
                     id: id,
@@ -2135,8 +2149,8 @@ final class NotesStorage: ObservableObject {
                     labelIDs: [],
                     folderID: folderID,
                     isPinned: isPinned,
-                    projectID: projectMetadata.projectID,
-                    artifactType: projectMetadata.artifactType
+                    projectID: dbProjectMetadata.projectID ?? pathProjectMetadata?.projectID,
+                    artifactType: dbProjectMetadata.artifactType ?? pathProjectMetadata?.artifactType
                 )
 
                 // Load labels and free-text tags from join tables
@@ -2286,6 +2300,8 @@ final class NotesStorage: ObservableObject {
         var score = 0
         if !hasDuplicateNumericSuffix(note.title) { score += 200 }
         if !hasDuplicateNumericSuffix((note.relativePath as NSString).deletingPathExtension) { score += 100 }
+        if note.projectID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false { score += 500 }
+        if Self.projectArtifactMetadata(forRelativePath: note.relativePath) != nil { score += 400 }
         if !note.relativePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 50 }
         if note.folderID != nil { score += 25 }
         if !note.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 20 }
@@ -2323,10 +2339,47 @@ final class NotesStorage: ObservableObject {
         if merged.relativePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             merged.relativePath = duplicate.relativePath
         }
+        if merged.projectID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+           duplicate.projectID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            merged.projectID = duplicate.projectID
+        }
+        if merged.artifactType?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+           duplicate.artifactType?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            merged.artifactType = duplicate.artifactType
+        }
+        restoreProjectArtifactMetadataFromPathIfNeeded(&merged)
         merged.isPinned = merged.isPinned || duplicate.isPinned
         merged.labelIDs = deduplicatedNoteUUIDs(from: merged.labelIDs + duplicate.labelIDs)
         merged.tags = deduplicatedNoteTags(from: merged.tags + duplicate.tags)
         return merged
+    }
+
+    private func restoreProjectArtifactMetadataFromPaths() {
+        for index in notes.indices {
+            restoreProjectArtifactMetadataFromPathIfNeeded(&notes[index])
+        }
+    }
+
+    private func logProjectNoteBoundary(stage: String) {
+        logger.info("NotesStorage \(stage, privacy: .public): projectCiderNotes=\(self.projectArtifactNoteCount(projectID: "cider"), privacy: .public) totalNotes=\(self.notes.count, privacy: .public)")
+    }
+
+    private func projectArtifactNoteCount(projectID rawProjectID: String) -> Int {
+        let projectID = SecondBrainProjectGraphService.normalizedProjectID(rawProjectID)
+        return notes.filter { note in
+            SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID
+                && (note.artifactType?.localizedLowercase == "note" || note.artifactType == nil)
+        }.count
+    }
+
+    private func restoreProjectArtifactMetadataFromPathIfNeeded(_ note: inout Note) {
+        guard let metadata = Self.projectArtifactMetadata(forRelativePath: note.relativePath) else { return }
+        if note.projectID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            note.projectID = metadata.projectID
+        }
+        if note.artifactType?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            note.artifactType = metadata.artifactType
+        }
     }
 
     private func rebuiltNoteIndex(from source: [Note]) -> [UUID: NoteIndexEntry] {

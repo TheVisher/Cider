@@ -9,6 +9,7 @@ struct CiderPanelView: View {
     @ObservedObject var savedViewStorage = SavedViewStorage.shared
     @ObservedObject var kanbanStorage = KanbanStorage.shared
     @ObservedObject var projectAssociationStore = ProjectWorkspaceAssociationStore.shared
+    @ObservedObject var notesStorage = NotesStorage.shared
     @ObservedObject var spaceStorage = CiderSpaceStorage.shared
     @ObservedObject var mediaItemStorage = MediaItemStorage()
     @StateObject var libraryViewModel = LibraryViewModel()

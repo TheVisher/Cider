@@ -972,6 +972,91 @@ struct NotesSQLiteTests {
         #expect(reloaded.loadContent(for: reloaded.notes[0]) == "# Body\nFile-backed project note.")
     }
 
+    @Test("Project note metadata is inferred from project note path when relation metadata is missing")
+    func projectNoteMetadataFallsBackToProjectPath() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+        let note = Note(
+            title: "Path Owned Note",
+            content: "body",
+            relativePath: "Projects/Cider/Notes/Path Owned Note.md"
+        )
+        service.persistNoteToDatabase(db, note: note)
+
+        let reloaded = makeService(db)
+        reloaded.loadNotesFromDatabase(db)
+
+        let loaded = try #require(reloaded.notes.first(where: { $0.id == note.id }))
+        #expect(loaded.projectID == "cider")
+        #expect(loaded.artifactType == "note")
+
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
+        let model = ProjectWorkspaceSurfaceProvider.model(
+            for: catalog.workspace(id: "cider")!,
+            surface: .notes,
+            notes: reloaded.notes
+        )
+        #expect(model.notes.map(\.id) == [note.id])
+    }
+
+    @Test("Project note metadata survives duplicate canonicalization during rescan")
+    func projectNoteMetadataSurvivesDuplicateCanonicalizationDuringRescan() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let service = makeService(db)
+        let body = "# Shared\nSame body."
+        let legacy = Note(
+            title: "Shared Duplicate",
+            content: body,
+            relativePath: "Shared Duplicate.md"
+        )
+        let project = Note(
+            title: "Shared Duplicate",
+            content: body,
+            relativePath: "Projects/Cider/Notes/Shared Duplicate.md",
+            projectID: "cider",
+            artifactType: "note"
+        )
+        try fm.createDirectory(
+            at: StoragePaths.directoryURL(for: .notes),
+            withIntermediateDirectories: true
+        )
+        try body.write(to: StoragePaths.directoryURL(for: .notes).appendingPathComponent("Shared Duplicate.md"), atomically: true, encoding: .utf8)
+        let projectFile = vault.appendingPathComponent(project.relativePath)
+        try fm.createDirectory(at: projectFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try body.write(to: projectFile, atomically: true, encoding: .utf8)
+        service.persistNoteToDatabase(db, note: legacy)
+        service.persistNoteToDatabase(db, note: project)
+
+        service.loadNotesFromDatabase(db)
+        service.rescan()
+
+        let projectNotes = service.notes.filter { $0.projectID == "cider" && $0.artifactType == "note" }
+        #expect(projectNotes.count == 1)
+        #expect(projectNotes.first?.relativePath == "Projects/Cider/Notes/Shared Duplicate.md")
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
+        let model = ProjectWorkspaceSurfaceProvider.model(
+            for: catalog.workspace(id: "cider")!,
+            surface: .notes,
+            notes: service.notes
+        )
+        #expect(model.notes.count == 1)
+        #expect(model.notes.first?.path == "Projects/Cider/Notes/Shared Duplicate.md")
+    }
+
     @Test("Cider project note seed creates a visible project note once")
     func ciderProjectNoteSeedCreatesVisibleProjectNoteOnce() throws {
         let (db, url) = try makeTestDB()

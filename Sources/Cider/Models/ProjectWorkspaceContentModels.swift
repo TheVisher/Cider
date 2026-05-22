@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 struct ProjectReferenceItem: Identifiable, Equatable {
     let item: LibraryItemV2
@@ -184,6 +185,8 @@ struct ProjectWorkspaceSurfaceModel: Equatable {
 }
 
 enum ProjectWorkspaceSurfaceProvider {
+    private static let logger = Logger(subsystem: "com.cider.app", category: "ProjectWorkspaceSurface")
+
     static func model(
         for workspace: ProjectWorkspace,
         surface: ProjectWorkspaceSurface,
@@ -192,6 +195,9 @@ enum ProjectWorkspaceSurfaceProvider {
         let rows: [ProjectWorkspaceNoteRow]
         if surface == .notes {
             let projectID = SecondBrainProjectGraphService.normalizedProjectID(workspace.id)
+            let candidateCount = notes.filter { note in
+                SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID
+            }.count
             rows = notes
                 .filter { note in
                     guard note.artifactType?.localizedLowercase == "note" || note.artifactType == nil else { return false }
@@ -208,6 +214,7 @@ enum ProjectWorkspaceSurfaceProvider {
                         path: note.relativePath
                     )
                 }
+            logger.info("Project notes surface model workspace=\(workspace.id, privacy: .public) candidateProjectNotes=\(candidateCount, privacy: .public) renderedNotes=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
         } else {
             rows = []
         }
