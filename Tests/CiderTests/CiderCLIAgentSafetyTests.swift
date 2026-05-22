@@ -33,6 +33,53 @@ struct CiderCLIAgentSafetyTests {
         #expect(dict["artifactType"] == nil)
     }
 
+    @Test("item get JSON item summary exposes project artifact relation metadata")
+    func itemGetJSONItemSummaryExposesProjectArtifactRelationMetadata() throws {
+        let noteID = UUID(uuidString: "70EF7C58-E63E-40D8-9D38-FDB023E7FAEE")!
+        let noteOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cider")
+        let item = CiderItemSummary(
+            id: noteID,
+            type: .note,
+            title: "Cider Project Note",
+            relativePath: "Projects/Cider/Notes/Cider Project Note.md",
+            folderID: nil,
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+        let relation = SecondBrainRelation(
+            sourceOwner: noteOwner,
+            targetOwner: projectOwner,
+            relationType: "artifact_of",
+            evidence: "Project note belongs to Cider.",
+            source: "test",
+            actor: "agent",
+            confidence: 1,
+            metadata: ["artifactType": "note"]
+        )
+        let bundle = CiderItemContextBundle(
+            item: item,
+            owner: noteOwner,
+            sections: [],
+            chunks: [],
+            related: [],
+            ownerRelations: [relation],
+            backlinks: [],
+            spaceMemberships: [],
+            routingDecisions: [],
+            agentActions: [],
+            enrichmentOutputs: [],
+            captureProvenance: []
+        )
+
+        let dict = CiderCLI.itemContextBundleToDict(bundle)
+        let itemDict = try #require(dict["item"] as? [String: Any])
+
+        #expect(itemDict["isProjectArtifact"] as? Bool == true)
+        #expect(itemDict["projectID"] as? String == "cider")
+        #expect(itemDict["artifactType"] as? String == "note")
+    }
+
     @Test("reminder validation errors honor json output")
     func reminderValidationErrorsHonorJSONOutput() throws {
         let result = try runCLI(args: ["reminder", "complete", "todo", "--json"])

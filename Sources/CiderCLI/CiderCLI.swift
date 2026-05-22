@@ -10387,15 +10387,30 @@ struct CiderCLI {
     }
 
     static func itemSummaryToDict(_ item: CiderItemSummary) -> [String: Any] {
+        itemSummaryToDict(item, ownerRelations: [])
+    }
+
+    static func itemSummaryToDict(_ item: CiderItemSummary, ownerRelations: [SecondBrainRelation]) -> [String: Any] {
         var dict: [String: Any] = [
             "id": item.id.uuidString,
             "type": item.type.rawValue,
             "title": item.title,
             "createdAt": ISO8601DateFormatter().string(from: item.createdAt),
             "updatedAt": ISO8601DateFormatter().string(from: item.updatedAt),
+            "isProjectArtifact": false,
         ]
         if let relativePath = item.relativePath { dict["relativePath"] = relativePath }
         if let folderID = item.folderID { dict["folderID"] = folderID.uuidString }
+        if let projectRelation = ownerRelations.first(where: {
+            $0.relationType == "artifact_of" &&
+            $0.sourceOwner.ownerType == item.type.rawValue &&
+            $0.sourceOwner.ownerID.caseInsensitiveCompare(item.id.uuidString) == .orderedSame &&
+            $0.targetOwner.ownerType == "project"
+        }) {
+            dict["isProjectArtifact"] = true
+            dict["projectID"] = projectRelation.targetOwner.ownerID
+            dict["artifactType"] = projectRelation.metadata["artifactType"] ?? item.type.rawValue
+        }
         return dict
     }
 
@@ -10464,7 +10479,7 @@ struct CiderCLI {
 
     static func itemContextBundleToDict(_ bundle: CiderItemContextBundle) -> [String: Any] {
         [
-            "item": itemSummaryToDict(bundle.item),
+            "item": itemSummaryToDict(bundle.item, ownerRelations: bundle.ownerRelations),
             "owner": ownerToDict(bundle.owner),
             "sections": bundle.sections.map(secondBrainSectionToDict),
             "chunks": bundle.chunks.map(itemChunkToDict),
