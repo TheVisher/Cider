@@ -25,4 +25,22 @@ struct NoteEditorModeTests {
 
         #expect(config.noteEditorMode == .rich)
     }
+
+    @Test("Source editor initial content is applied before delegate is armed")
+    func sourceEditorInitialContentIsAppliedBeforeDelegateIsArmed() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let sourceURL = repoRoot.appendingPathComponent("Sources/Cider/Views/Notes/NativeMarkdownEditorView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        guard let stringRange = source.range(of: "textView.string = viewModel.editingContent"),
+              let delegateRange = source.range(of: "textView.delegate = context.coordinator") else {
+            Issue.record("NativeMarkdownEditorView should explicitly set initial text and delegate")
+            return
+        }
+
+        #expect(
+            stringRange.lowerBound < delegateRange.lowerBound,
+            "Arming NSTextView.delegate before applying initial content can publish sourceContentChanged during SwiftUI view creation/mode switch."
+        )
+    }
 }

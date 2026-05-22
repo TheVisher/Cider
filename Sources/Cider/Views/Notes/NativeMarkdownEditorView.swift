@@ -17,8 +17,12 @@ struct NativeMarkdownEditorView: NSViewRepresentable {
         scrollView.borderType = .noBorder
 
         let textView = NativeMarkdownTextView()
-        textView.delegate = context.coordinator
+        // Apply initial content before arming the delegate. Setting `string` after
+        // assigning NSTextView.delegate can synchronously call textDidChange during
+        // SwiftUI view creation, which publishes view-model changes from inside a
+        // render/update pass when switching from rich mode to source mode.
         textView.string = viewModel.editingContent
+        textView.delegate = context.coordinator
         textView.isRichText = false
         textView.importsGraphics = false
         textView.allowsUndo = true
