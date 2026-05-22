@@ -371,8 +371,12 @@ final class NotesStorage: ObservableObject {
         discoverVaultFolderNoteFiles()
 
         // 3. Pick up already-indexed vault folder notes (in case step 2 added
-        //    new index entries).
+        //    new index entries), plus file-backed project notes under project
+        //    containers. Project notes do not belong to generic VaultFolderService
+        //    folders, so they need an explicit scan path or startup reconcile will
+        //    drop their SQLite item rows as "removed" while leaving files behind.
         loadVaultFolderNotes()
+        discoverProjectNoteFiles()
 
         // 4. Hydrate scanned placeholders before duplicate repair. The scan
         // path deliberately avoids reading every file body until now; exact
@@ -503,6 +507,91 @@ final class NotesStorage: ObservableObject {
                 return a.createdAt > b.createdAt
             }
         }
+    }
+
+    private func discoverProjectNoteFiles() {
+        let fm = FileManager.default
+        let projectsRoot = vaultRoot.appendingPathComponent("Projects", isDirectory: true)
+        guard let projectDirs = try? fm.contentsOfDirectory(
+            at: projectsRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        var knownRelativePaths = Set(notes.map { Self.normalizedNoteRelativePath($0.relativePath) })
+        var addedAny = false
+        for projectDir in projectDirs {
+            guard (try? projectDir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            let notesDir = projectDir.appendingPathComponent("Notes", isDirectory: true)
+            guard let files = try? fm.contentsOfDirectory(
+                at: notesDir,
+                includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            let projectID = SecondBrainProjectGraphService.normalizedProjectID(projectDir.lastPathComponent)
+            guard !projectID.isEmpty else { continue }
+            for file in files where file.pathExtension.localizedCaseInsensitiveCompare("md") == .orderedSame {
+                let relativePath = "Projects/\(projectDir.lastPathComponent)/Notes/\(file.lastPathComponent)"
+                let normalizedPath = Self.normalizedNoteRelativePath(relativePath)
+                guard !knownRelativePaths.contains(normalizedPath) else { continue }
+
+                let attrs = try? fm.attributesOfItem(atPath: file.path)
+                let modDate = attrs?[.modificationDate] as? Date ?? Date()
+                let createDate = attrs?[.creationDate] as? Date ?? modDate
+                let uuid = projectNoteIDFromExistingRelation(relativePath: relativePath) ?? UUID()
+                index[uuid] = NoteIndexEntry(filename: file.lastPathComponent, folderID: nil, createdAt: createDate)
+                notes.append(Note(
+                    id: uuid,
+                    title: String(file.lastPathComponent.dropLast(3)),
+                    content: (try? String(contentsOf: file, encoding: .utf8)) ?? "",
+                    summary: nil,
+                    createdAt: createDate,
+                    modifiedAt: modDate,
+                    relativePath: relativePath,
+                    labelIDs: [],
+                    folderID: nil,
+                    isPinned: false,
+                    projectID: projectID,
+                    artifactType: "note"
+                ))
+                knownRelativePaths.insert(normalizedPath)
+                addedAny = true
+                logger.info("Rescan adopted project note: \(relativePath, privacy: .public)")
+            }
+        }
+
+        if addedAny {
+            saveIndex()
+            notes.sort { a, b in
+                if a.isPinned != b.isPinned { return a.isPinned }
+                return a.createdAt > b.createdAt
+            }
+        }
+    }
+
+    private func projectNoteIDFromExistingRelation(relativePath: String) -> UUID? {
+        guard let db = resolvedDatabase else { return nil }
+        do {
+            let stmt = try db.prepare("""
+                SELECT source_owner_id, metadata
+                FROM owner_relations
+                WHERE source_owner_type = 'note'
+                  AND target_owner_type = 'project'
+                  AND relation_type = 'artifact_of';
+                """)
+            let normalizedPath = Self.normalizedNoteRelativePath(relativePath)
+            while try stmt.step() {
+                let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 1)) ?? [:]
+                guard Self.normalizedNoteRelativePath(metadata["path"] ?? "") == normalizedPath else { continue }
+                if let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) {
+                    return id
+                }
+            }
+        } catch {
+            logger.error("Failed to inspect existing project note relations: \(error.localizedDescription)")
+        }
+        return nil
     }
 
     /// Loads notes that live in vault folders (not in the Notes/ directory).

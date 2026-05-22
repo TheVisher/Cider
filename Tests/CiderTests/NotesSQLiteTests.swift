@@ -992,12 +992,22 @@ struct NotesSQLiteTests {
         let second = service.ensureCiderProjectNoteSeedIfNeeded()
 
         #expect(first != nil)
-        #expect(second?.id == first?.id)
+        let firstID = try #require(first?.id)
+        #expect(second?.id == firstID)
         #expect(service.notes.filter { $0.projectID == "cider" && $0.artifactType == "note" }.count == 1)
         #expect(first?.relativePath == "Projects/Cider/Notes/Cider Project Notes.md")
         #expect(fm.fileExists(atPath: vault.appendingPathComponent("Projects/Cider/Notes/Cider Project Notes.md").path))
         #expect(fm.fileExists(atPath: vault.appendingPathComponent("Projects/Cider/Decisions").path))
         #expect(fm.fileExists(atPath: vault.appendingPathComponent("Projects/Cider/QA").path))
+        #expect(try itemRowCount(db, id: firstID, relativePath: "Projects/Cider/Notes/Cider Project Notes.md") == 1)
+        #expect(try noteRowCount(db, id: firstID) == 1)
+        #expect(try projectNoteRelationRowCount(db, id: firstID, relativePath: "Projects/Cider/Notes/Cider Project Notes.md") == 1)
+
+        service.rescan()
+        #expect(service.notes.filter { $0.projectID == "cider" && $0.artifactType == "note" }.count == 1)
+        #expect(try itemRowCount(db, id: firstID, relativePath: "Projects/Cider/Notes/Cider Project Notes.md") == 1)
+        #expect(try noteRowCount(db, id: firstID) == 1)
+        #expect(try projectNoteRelationRowCount(db, id: firstID, relativePath: "Projects/Cider/Notes/Cider Project Notes.md") == 1)
 
         let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
         let model = ProjectWorkspaceSurfaceProvider.model(
@@ -1005,11 +1015,44 @@ struct NotesSQLiteTests {
             surface: .notes,
             notes: service.notes
         )
-        #expect(model.notes.map(\.id) == [first?.id])
+        #expect(model.notes.map(\.id) == [firstID])
 
         let reloaded = makeService(db)
         reloaded.loadNotesFromDatabase(db)
         #expect(reloaded.notes.filter { $0.projectID == "cider" && $0.artifactType == "note" }.count == 1)
+    }
+
+    private func itemRowCount(_ db: CiderDatabase, id: UUID, relativePath: String) throws -> Int {
+        let stmt = try db.prepare("SELECT COUNT(*) FROM items WHERE id = ? AND type = 'note' AND title = 'Cider Project Notes' AND relative_path = ?;")
+        stmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(relativePath, at: 2)
+        guard try stmt.step() else { return 0 }
+        return Int(stmt.int64(at: 0))
+    }
+
+    private func noteRowCount(_ db: CiderDatabase, id: UUID) throws -> Int {
+        let stmt = try db.prepare("SELECT COUNT(*) FROM notes WHERE item_id = ?;")
+        stmt.bind(DatabaseHelpers.encode(id), at: 1)
+        guard try stmt.step() else { return 0 }
+        return Int(stmt.int64(at: 0))
+    }
+
+    private func projectNoteRelationRowCount(_ db: CiderDatabase, id: UUID, relativePath: String) throws -> Int {
+        let stmt = try db.prepare("""
+            SELECT source_owner_id, metadata FROM owner_relations
+            WHERE source_owner_type = 'note'
+              AND source_owner_id = ?
+              AND target_owner_type = 'project'
+              AND target_owner_id = 'cider'
+              AND relation_type = 'artifact_of';
+            """)
+        stmt.bind(DatabaseHelpers.encode(id), at: 1)
+        var count = 0
+        while try stmt.step() {
+            let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 1)) ?? [:]
+            if metadata["path"] == relativePath { count += 1 }
+        }
+        return count
     }
 
     // MARK: - Sort Order
