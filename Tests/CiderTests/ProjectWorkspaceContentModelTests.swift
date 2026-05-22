@@ -169,6 +169,7 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         let genericID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
         let otherProjectID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
         let decisionID = UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!
+        let handoffID = UUID(uuidString: "99999999-9999-9999-9999-999999999999")!
         let notes = [
             Note(
                 id: matchingID,
@@ -203,6 +204,15 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
                 relativePath: "Projects/Cider/Decisions/Cider decision.md",
                 projectID: "cider",
                 artifactType: "decision"
+            ),
+            Note(
+                id: handoffID,
+                title: "Cider handoff",
+                content: "Long agent handoff.",
+                modifiedAt: Date(timeIntervalSince1970: 8_000),
+                relativePath: "Projects/Cider/Handoffs/Cider handoff.md",
+                projectID: "cider",
+                artifactType: "handoff"
             )
         ]
 
@@ -215,6 +225,55 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(model.notes.map(\.id), [matchingID])
         XCTAssertEqual(model.notes.first?.path, "Projects/Cider/Notes/Cider project note.md")
         XCTAssertEqual(model.notes.first?.owner, SecondBrainOwnerRef(ownerType: "note", ownerID: matchingID.uuidString))
+    }
+
+    func testProjectPlansHandoffsSurfaceShowsPlansAndHandoffs() {
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+        let planID = UUID(uuidString: "77777777-7777-7777-7777-777777777777")!
+        let handoffID = UUID(uuidString: "88888888-8888-8888-8888-888888888888")!
+        let noteID = UUID(uuidString: "99999999-9999-9999-9999-999999999999")!
+        let notes = [
+            Note(
+                id: planID,
+                title: "Relationship graph plan",
+                content: "Plan body",
+                modifiedAt: Date(timeIntervalSince1970: 4_000),
+                relativePath: "Projects/Cider/Plans/Relationship graph plan.md",
+                projectID: "cider",
+                artifactType: "plan"
+            ),
+            Note(
+                id: handoffID,
+                title: "Cody final report",
+                content: "Full final report body longer than chat.",
+                modifiedAt: Date(timeIntervalSince1970: 5_000),
+                relativePath: "Projects/Cider/Handoffs/Cody final report.md",
+                projectID: "cider",
+                artifactType: "handoff"
+            ),
+            Note(
+                id: noteID,
+                title: "Regular project note",
+                content: "Note body",
+                modifiedAt: Date(timeIntervalSince1970: 6_000),
+                relativePath: "Projects/Cider/Notes/Regular project note.md",
+                projectID: "cider",
+                artifactType: "note"
+            )
+        ]
+
+        let model = ProjectWorkspaceSurfaceProvider.model(
+            for: ciderWorkspace,
+            surface: .plansHandoffs,
+            notes: notes
+        )
+
+        XCTAssertEqual(model.notes.map(\.id), [handoffID, planID])
+        XCTAssertEqual(model.notes.map(\.path), [
+            "Projects/Cider/Handoffs/Cody final report.md",
+            "Projects/Cider/Plans/Relationship graph plan.md"
+        ])
     }
 
     func testProjectArtifactRelationshipsConnectPlanningNotesToSpawnedCardsAndQA() {

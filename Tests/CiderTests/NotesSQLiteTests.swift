@@ -972,6 +972,56 @@ struct NotesSQLiteTests {
         #expect(reloaded.loadContent(for: reloaded.notes[0]) == "# Body\nFile-backed project note.")
     }
 
+    @Test("Project handoff artifacts are file-backed under project handoffs and reload explicit ownership")
+    func projectHandoffArtifactsAreFileBackedAndReloadOwnership() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let service = makeService(db)
+        let handoff = service.createProjectNote(
+            projectID: "cider",
+            title: "Cody Handoff 2c0a04",
+            content: "# Handoff\nA long handoff body that belongs in Cider, not Discord.",
+            artifactType: "handoff"
+        )
+
+        #expect(handoff.projectID == "cider")
+        #expect(handoff.artifactType == "handoff")
+        #expect(handoff.relativePath == "Projects/Cider/Handoffs/Cody Handoff 2c0a04.md")
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent(handoff.relativePath).path))
+
+        let relationStmt = try db.prepare("""
+            SELECT target_owner_type, target_owner_id, relation_type, metadata
+            FROM owner_relations
+            WHERE source_owner_type = 'note' AND source_owner_id = ?;
+            """)
+        relationStmt.bind(DatabaseHelpers.encode(handoff.id), at: 1)
+        #expect(try relationStmt.step())
+        #expect(relationStmt.string(at: 0) == "project")
+        #expect(relationStmt.string(at: 1) == "cider")
+        #expect(relationStmt.string(at: 2) == "artifact_of")
+        let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: relationStmt.optionalString(at: 3)) ?? [:]
+        #expect(metadata["artifactType"] == "handoff")
+        #expect(metadata["path"] == handoff.relativePath)
+
+        let reloaded = makeService(db)
+        reloaded.loadNotesFromDatabase(db)
+        let loaded = try #require(reloaded.notes.first(where: { $0.id == handoff.id }))
+        #expect(loaded.projectID == "cider")
+        #expect(loaded.artifactType == "handoff")
+        #expect(reloaded.loadContent(for: loaded).contains("not Discord"))
+    }
+
     @Test("Project note metadata is inferred from project note path when relation metadata is missing")
     func projectNoteMetadataFallsBackToProjectPath() throws {
         let (db, url) = try makeTestDB()

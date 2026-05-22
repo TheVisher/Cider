@@ -66,7 +66,7 @@ struct CiderCLI {
             }
             return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
         case "note":
-            if subcommand == "create" { return nil }
+            if subcommand == "create" || subcommand == "project-artifact" || subcommand == "artifact" { return nil }
             if subcommand == "move" {
                 return LegacyRemovedCommand(command: label, replacement: "cider-cli item move note <id> --folder <name|path> --json")
             }
@@ -2315,6 +2315,9 @@ struct CiderCLI {
                 print("Error: \(error.localizedDescription)")
             }
 
+        case "project-artifact", "artifact":
+            handleProjectArtifactNoteCommand(args: args, storage: storage)
+
         case "get", "show":
             guard let idPrefix = args.first else {
                 print("Error: ID prefix required.")
@@ -2553,6 +2556,189 @@ struct CiderCLI {
         default:
             printCLIError("Unknown note command: \(subcommand ?? "nil"). Commands: list, create, get, pin, move, delete, update, tag, untag, snapshots, restore-snapshot, attach-image")
         }
+    }
+
+    static func handleProjectArtifactNoteCommand(args: [String], storage: NotesStorage) {
+        let subcommand = args.first
+        let rest = Array(args.dropFirst())
+        switch subcommand {
+        case nil, "help", "--help", "-h":
+            print("""
+            Project artifact note commands:
+              cider-cli note project-artifact create --project <project-id-or-name> --type note|plan|handoff|decision|qa --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--json]
+              cider-cli note project-artifact append <note-id-prefix> (--stdin|--text-file <path>|--content <text>) [--json]
+              cider-cli note project-artifact list --project <project-id-or-name> [--type note|plan|handoff|decision|qa|plans-handoffs] [--json]
+              cider-cli note project-artifact get <note-id-prefix> [--json]
+            """)
+
+        case "create":
+            guard let project = parseFlag("--project", from: rest) ?? parseFlag("--project-id", from: rest) else {
+                printCLIError("Usage: cider-cli note project-artifact create --project <project-id-or-name> --type <type> --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--json]")
+                return
+            }
+            let type = parseFlag("--type", from: rest) ?? parseFlag("--artifact-type", from: rest) ?? "handoff"
+            let title = parseFlag("--title", from: rest)
+                ?? firstPositionalArgument(from: rest, valueFlags: projectArtifactValueFlags)
+                ?? "Untitled Project Artifact"
+            guard let content = projectArtifactContent(from: rest) else { return }
+            let note = storage.createProjectNote(
+                projectID: project,
+                title: title,
+                content: content,
+                artifactType: type
+            )
+            let linkedCards = recordProjectArtifactCardLinks(note: note, args: rest)
+            if jsonOutput {
+                var dict = noteToDict(note)
+                dict["ok"] = true
+                dict["command"] = "note.project-artifact.create"
+                dict["content"] = storage.loadContent(for: note)
+                dict["linkedCards"] = linkedCards.map(ownerToDict)
+                outputJSON(dict)
+            } else {
+                print("Created project \(note.artifactType ?? "artifact"): \(note.title) (\(note.id.uuidString.prefix(8)))")
+                print("  Path: \(note.relativePath)")
+                if !linkedCards.isEmpty {
+                    print("  Linked cards: \(linkedCards.map(\.canonicalRef).joined(separator: ", "))")
+                }
+            }
+
+        case "append":
+            let positional = leadingPositionalArgs(from: rest)
+            guard let idPrefix = positional.first, let note = findNote(idPrefix, in: storage) else {
+                printCLIError("Usage: cider-cli note project-artifact append <note-id-prefix> (--stdin|--text-file <path>|--content <text>) [--json]")
+                return
+            }
+            guard let addition = projectArtifactContent(from: rest) else { return }
+            var updated = note
+            let existing = storage.loadContent(for: note)
+            let separator = existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n"
+            updated.content = existing + separator + addition
+            storage.save(note: updated)
+            let current = storage.notes.first(where: { $0.id == note.id }) ?? updated
+            if jsonOutput {
+                var dict = noteToDict(current)
+                dict["ok"] = true
+                dict["command"] = "note.project-artifact.append"
+                dict["content"] = storage.loadContent(for: current)
+                outputJSON(dict)
+            } else {
+                print("Appended project artifact: \(current.title)")
+                print("  Path: \(current.relativePath)")
+            }
+
+        case "list", "ls":
+            guard let project = parseFlag("--project", from: rest) ?? parseFlag("--project-id", from: rest) else {
+                printCLIError("Usage: cider-cli note project-artifact list --project <project-id-or-name> [--type <type>] [--json]")
+                return
+            }
+            let projectID = SecondBrainProjectGraphService.normalizedProjectID(project)
+            let typeFilter = parseFlag("--type", from: rest) ?? parseFlag("--artifact-type", from: rest)
+            let allowedTypes: Set<String>? = typeFilter.map { filter in
+                let normalized = filter.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+                if normalized == "plans-handoffs" || normalized == "plans_handoffs" {
+                    return ["plan", "handoff"]
+                }
+                return [normalized]
+            }
+            let notes = storage.notes.filter { note in
+                guard SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID else { return false }
+                guard let allowedTypes else { return true }
+                return allowedTypes.contains(note.artifactType?.localizedLowercase ?? "note")
+            }.sorted { lhs, rhs in
+                if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            if jsonOutput {
+                outputJSON([
+                    "ok": true,
+                    "command": "note.project-artifact.list",
+                    "projectID": projectID,
+                    "count": notes.count,
+                    "notes": notes.map(noteToDict),
+                ])
+            } else {
+                print("Project artifacts for \(projectID) (\(notes.count)):")
+                for note in notes {
+                    print("  [\(note.id.uuidString.prefix(8))] \(note.artifactType ?? "note") — \(note.title) — \(note.relativePath)")
+                }
+            }
+
+        case "get", "show":
+            let positional = leadingPositionalArgs(from: rest)
+            guard let idPrefix = positional.first, let note = findNote(idPrefix, in: storage) else {
+                printCLIError("Usage: cider-cli note project-artifact get <note-id-prefix> [--json]")
+                return
+            }
+            if jsonOutput {
+                var dict = noteToDict(note)
+                dict["ok"] = true
+                dict["command"] = "note.project-artifact.get"
+                dict["content"] = storage.loadContent(for: note)
+                outputJSON(dict)
+            } else {
+                print("Project artifact: \(note.title)")
+                print("  ID:   \(note.id.uuidString)")
+                print("  Type: \(note.artifactType ?? "note")")
+                print("  Path: \(note.relativePath)")
+                print("  Content:")
+                let content = storage.loadContent(for: note)
+                print(content.isEmpty ? "(empty)" : content)
+            }
+
+        default:
+            printCLIError("Unknown project-artifact command: \(subcommand ?? "nil"). Commands: create, append, list, get")
+        }
+    }
+
+    static let projectArtifactValueFlags: Set<String> = [
+        "--project", "--project-id", "--type", "--artifact-type", "--title",
+        "--content", "--text-file", "--card", "--source-agent", "--target-agent",
+    ]
+
+    static func projectArtifactContent(from args: [String]) -> String? {
+        if let raw = parseFlag("--content", from: args) {
+            return raw
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\t", with: "\t")
+        }
+        do {
+            return try rawCaptureText(from: args)
+        } catch {
+            printCLIError(error.localizedDescription)
+            return nil
+        }
+    }
+
+    static func recordProjectArtifactCardLinks(note: Note, args: [String]) -> [SecondBrainOwnerRef] {
+        let cardRefs = parseFlagAll("--card", from: args) + parseFlagAll("--card-id", from: args)
+        guard !cardRefs.isEmpty else { return [] }
+        let noteOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString)
+        let store = SecondBrainStore(database: .shared)
+        var linked: [SecondBrainOwnerRef] = []
+        for cardRef in cardRefs {
+            let cardOwner = normalizedOwner(type: "kanban_card", ref: cardRef)
+            do {
+                try store.recordRelation(SecondBrainRelation(
+                    sourceOwner: noteOwner,
+                    targetOwner: cardOwner,
+                    relationType: "documents",
+                    evidence: "Project \(note.artifactType ?? "artifact") artifact links to Kanban card \(cardRef).",
+                    source: "note.project-artifact",
+                    actor: parseFlag("--source-agent", from: args) ?? "cider-cli",
+                    confidence: 1,
+                    metadata: [
+                        "artifactType": note.artifactType ?? "note",
+                        "path": note.relativePath,
+                        "title": note.title,
+                    ]
+                ))
+                linked.append(cardOwner)
+            } catch {
+                printCLIError("Failed to link card \(cardRef): \(error.localizedDescription)")
+            }
+        }
+        return linked
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

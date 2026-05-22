@@ -535,42 +535,44 @@ final class NotesStorage: ObservableObject {
         var addedAny = false
         for projectDir in projectDirs {
             guard (try? projectDir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-            let notesDir = projectDir.appendingPathComponent("Notes", isDirectory: true)
-            guard let files = try? fm.contentsOfDirectory(
-                at: notesDir,
-                includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey],
-                options: [.skipsHiddenFiles]
-            ) else { continue }
-
             let projectID = SecondBrainProjectGraphService.normalizedProjectID(projectDir.lastPathComponent)
             guard !projectID.isEmpty else { continue }
-            for file in files where file.pathExtension.localizedCaseInsensitiveCompare("md") == .orderedSame {
-                let relativePath = "Projects/\(projectDir.lastPathComponent)/Notes/\(file.lastPathComponent)"
-                let normalizedPath = Self.normalizedNoteRelativePath(relativePath)
-                guard !knownRelativePaths.contains(normalizedPath) else { continue }
+            for artifactDirectory in Self.projectArtifactDirectories {
+                let artifactDir = projectDir.appendingPathComponent(artifactDirectory.name, isDirectory: true)
+                guard let files = try? fm.contentsOfDirectory(
+                    at: artifactDir,
+                    includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey],
+                    options: [.skipsHiddenFiles]
+                ) else { continue }
 
-                let attrs = try? fm.attributesOfItem(atPath: file.path)
-                let modDate = attrs?[.modificationDate] as? Date ?? Date()
-                let createDate = attrs?[.creationDate] as? Date ?? modDate
-                let uuid = projectNoteIDFromExistingRelation(relativePath: relativePath) ?? UUID()
-                index[uuid] = NoteIndexEntry(filename: file.lastPathComponent, folderID: nil, createdAt: createDate)
-                notes.append(Note(
-                    id: uuid,
-                    title: String(file.lastPathComponent.dropLast(3)),
-                    content: (try? String(contentsOf: file, encoding: .utf8)) ?? "",
-                    summary: nil,
-                    createdAt: createDate,
-                    modifiedAt: modDate,
-                    relativePath: relativePath,
-                    labelIDs: [],
-                    folderID: nil,
-                    isPinned: false,
-                    projectID: projectID,
-                    artifactType: "note"
-                ))
-                knownRelativePaths.insert(normalizedPath)
-                addedAny = true
-                logger.info("Rescan adopted project note: \(relativePath, privacy: .public)")
+                for file in files where file.pathExtension.localizedCaseInsensitiveCompare("md") == .orderedSame {
+                    let relativePath = "Projects/\(projectDir.lastPathComponent)/\(artifactDirectory.name)/\(file.lastPathComponent)"
+                    let normalizedPath = Self.normalizedNoteRelativePath(relativePath)
+                    guard !knownRelativePaths.contains(normalizedPath) else { continue }
+
+                    let attrs = try? fm.attributesOfItem(atPath: file.path)
+                    let modDate = attrs?[.modificationDate] as? Date ?? Date()
+                    let createDate = attrs?[.creationDate] as? Date ?? modDate
+                    let uuid = projectNoteIDFromExistingRelation(relativePath: relativePath) ?? UUID()
+                    index[uuid] = NoteIndexEntry(filename: file.lastPathComponent, folderID: nil, createdAt: createDate)
+                    notes.append(Note(
+                        id: uuid,
+                        title: String(file.lastPathComponent.dropLast(3)),
+                        content: (try? String(contentsOf: file, encoding: .utf8)) ?? "",
+                        summary: nil,
+                        createdAt: createDate,
+                        modifiedAt: modDate,
+                        relativePath: relativePath,
+                        labelIDs: [],
+                        folderID: nil,
+                        isPinned: false,
+                        projectID: projectID,
+                        artifactType: artifactDirectory.artifactType
+                    ))
+                    knownRelativePaths.insert(normalizedPath)
+                    addedAny = true
+                    logger.info("Rescan adopted project artifact note: \(relativePath, privacy: .public)")
+                }
             }
         }
 
@@ -823,7 +825,7 @@ final class NotesStorage: ObservableObject {
         return note
     }
 
-    /// Create a Markdown-backed project note under `Projects/<Project>/Notes/` and
+    /// Create a Markdown-backed project artifact under `Projects/<Project>/<Artifact Folder>/` and
     /// register explicit project ownership in SQLite via owner_relations.
     func createProjectNote(
         projectID rawProjectID: String,
@@ -837,10 +839,11 @@ final class NotesStorage: ObservableObject {
             : rawArtifactType.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
         let baseTitle = sanitizedNoteTitle(rawTitle).isEmpty ? "Untitled" : sanitizedNoteTitle(rawTitle)
         let projectDirName = projectDirectoryName(for: projectID)
+        let artifactDirectoryName = Self.projectArtifactDirectoryName(for: artifactType)
         let notesDir = vaultRoot
             .appendingPathComponent("Projects", isDirectory: true)
             .appendingPathComponent(projectDirName, isDirectory: true)
-            .appendingPathComponent("Notes", isDirectory: true)
+            .appendingPathComponent(artifactDirectoryName, isDirectory: true)
         try? FileManager.default.createDirectory(at: notesDir, withIntermediateDirectories: true)
 
         let filename = uniqueFilename(baseTitle: baseTitle, in: notesDir)
@@ -849,7 +852,7 @@ final class NotesStorage: ObservableObject {
         let now = Date()
         try? content.write(to: fileURL, atomically: true, encoding: .utf8)
 
-        let relativePath = "Projects/\(projectDirName)/Notes/\(filename)"
+        let relativePath = "Projects/\(projectDirName)/\(artifactDirectoryName)/\(filename)"
         index[uuid] = NoteIndexEntry(filename: filename, folderID: nil, createdAt: now)
         saveIndex()
 
@@ -945,7 +948,7 @@ final class NotesStorage: ObservableObject {
         let root = vaultRoot
             .appendingPathComponent("Projects", isDirectory: true)
             .appendingPathComponent(projectDirName, isDirectory: true)
-        for child in ["Notes", "Decisions", "Assets", "QA", "Handoffs", "Plans"] {
+        for child in Self.projectArtifactDirectories.map(\.name) + ["Assets"] {
             try? FileManager.default.createDirectory(
                 at: root.appendingPathComponent(child, isDirectory: true),
                 withIntermediateDirectories: true
@@ -2644,15 +2647,35 @@ final class NotesStorage: ObservableObject {
         try replaceProjectArtifactRelationIfNeeded(db, note: note)
     }
 
+    private struct ProjectArtifactDirectory {
+        let name: String
+        let artifactType: String
+    }
+
+    private static let projectArtifactDirectories: [ProjectArtifactDirectory] = [
+        ProjectArtifactDirectory(name: "Notes", artifactType: "note"),
+        ProjectArtifactDirectory(name: "Plans", artifactType: "plan"),
+        ProjectArtifactDirectory(name: "Handoffs", artifactType: "handoff"),
+        ProjectArtifactDirectory(name: "Decisions", artifactType: "decision"),
+        ProjectArtifactDirectory(name: "QA", artifactType: "qa")
+    ]
+
+    private static func projectArtifactDirectoryName(for artifactType: String) -> String {
+        let normalized = artifactType.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+        return projectArtifactDirectories.first(where: { $0.artifactType == normalized })?.name ?? "Notes"
+    }
+
     private static func projectArtifactMetadata(forRelativePath relativePath: String) -> (projectID: String, artifactType: String)? {
         let components = relativePath.split(separator: "/").map(String.init)
         guard components.count >= 4,
-              components[0].localizedCaseInsensitiveCompare("Projects") == .orderedSame,
-              components[2].localizedCaseInsensitiveCompare("Notes") == .orderedSame
+              components[0].localizedCaseInsensitiveCompare("Projects") == .orderedSame
         else { return nil }
         let projectID = SecondBrainProjectGraphService.normalizedProjectID(components[1])
         guard !projectID.isEmpty else { return nil }
-        return (projectID, "note")
+        guard let artifact = projectArtifactDirectories.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(components[2]) == .orderedSame
+        }) else { return nil }
+        return (projectID, artifact.artifactType)
     }
 
     /// Delete a note from the database by ID. CASCADE handles detail + join tables.

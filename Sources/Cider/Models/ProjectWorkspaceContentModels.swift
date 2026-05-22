@@ -193,32 +193,61 @@ enum ProjectWorkspaceSurfaceProvider {
         notes: [Note]
     ) -> ProjectWorkspaceSurfaceModel {
         let rows: [ProjectWorkspaceNoteRow]
-        if surface == .notes {
+        switch surface {
+        case .notes:
+            rows = projectArtifactRows(
+                for: workspace,
+                notes: notes,
+                allowedArtifactTypes: ["note"],
+                includeNilArtifactType: true
+            )
             let projectID = SecondBrainProjectGraphService.normalizedProjectID(workspace.id)
             let candidateCount = notes.filter { note in
                 SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID
             }.count
-            rows = notes
-                .filter { note in
-                    guard note.artifactType?.localizedLowercase == "note" || note.artifactType == nil else { return false }
-                    return SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID
-                }
-                .sorted { lhs, rhs in
-                    if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
-                    return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-                }
-                .map { note in
-                    ProjectWorkspaceNoteRow(
-                        note: note,
-                        owner: SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString),
-                        path: note.relativePath
-                    )
-                }
             logger.info("Project notes surface model workspace=\(workspace.id, privacy: .public) candidateProjectNotes=\(candidateCount, privacy: .public) renderedNotes=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
-        } else {
+        case .plansHandoffs:
+            rows = projectArtifactRows(
+                for: workspace,
+                notes: notes,
+                allowedArtifactTypes: ["plan", "handoff"],
+                includeNilArtifactType: false
+            )
+            logger.info("Project plans/handoffs surface model workspace=\(workspace.id, privacy: .public) renderedArtifacts=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
+        default:
             rows = []
         }
         return ProjectWorkspaceSurfaceModel(workspace: workspace, surface: surface, notes: rows)
+    }
+
+    private static func projectArtifactRows(
+        for workspace: ProjectWorkspace,
+        notes: [Note],
+        allowedArtifactTypes: Set<String>,
+        includeNilArtifactType: Bool
+    ) -> [ProjectWorkspaceNoteRow] {
+        let projectID = SecondBrainProjectGraphService.normalizedProjectID(workspace.id)
+        return notes
+            .filter { note in
+                guard SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID else {
+                    return false
+                }
+                guard let artifactType = note.artifactType?.localizedLowercase else {
+                    return includeNilArtifactType
+                }
+                return allowedArtifactTypes.contains(artifactType)
+            }
+            .sorted { lhs, rhs in
+                if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            .map { note in
+                ProjectWorkspaceNoteRow(
+                    note: note,
+                    owner: SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString),
+                    path: note.relativePath
+                )
+            }
     }
 }
 
