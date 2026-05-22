@@ -646,6 +646,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func configureNotes() {
         notesViewModel = NotesViewModel()
+        NotesStorage.shared.ensureCiderProjectNoteSeedIfNeeded()
     }
 
     func startNotesHotkeyDetection() {

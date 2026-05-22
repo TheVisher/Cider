@@ -972,6 +972,46 @@ struct NotesSQLiteTests {
         #expect(reloaded.loadContent(for: reloaded.notes[0]) == "# Body\nFile-backed project note.")
     }
 
+    @Test("Cider project note seed creates a visible project note once")
+    func ciderProjectNoteSeedCreatesVisibleProjectNoteOnce() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let service = makeService(db)
+        let first = service.ensureCiderProjectNoteSeedIfNeeded()
+        let second = service.ensureCiderProjectNoteSeedIfNeeded()
+
+        #expect(first != nil)
+        #expect(second?.id == first?.id)
+        #expect(service.notes.filter { $0.projectID == "cider" && $0.artifactType == "note" }.count == 1)
+        #expect(first?.relativePath == "Projects/Cider/Notes/Cider Project Notes.md")
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Projects/Cider/Notes/Cider Project Notes.md").path))
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Projects/Cider/Decisions").path))
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Projects/Cider/QA").path))
+
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
+        let model = ProjectWorkspaceSurfaceProvider.model(
+            for: catalog.workspace(id: "cider")!,
+            surface: .notes,
+            notes: service.notes
+        )
+        #expect(model.notes.map(\.id) == [first?.id])
+
+        let reloaded = makeService(db)
+        reloaded.loadNotesFromDatabase(db)
+        #expect(reloaded.notes.filter { $0.projectID == "cider" && $0.artifactType == "note" }.count == 1)
+    }
+
     // MARK: - Sort Order
 
     @Test("Notes load sorted: pinned first, then by newest created")

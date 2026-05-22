@@ -744,6 +744,79 @@ final class NotesStorage: ObservableObject {
         return note
     }
 
+    /// Ensure the narrow MVP has one real, visible Cider project note to render.
+    /// Idempotent: if any `project:cider` note artifact already exists, returns it;
+    /// if the seed Markdown exists on disk but lacks DB ownership, registers it.
+    @discardableResult
+    func ensureCiderProjectNoteSeedIfNeeded() -> Note? {
+        let projectID = "cider"
+        ensureProjectContainerDirectories(projectID: projectID)
+
+        if let existing = notes.first(where: { note in
+            SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID
+                && (note.artifactType?.localizedLowercase == "note" || note.artifactType == nil)
+        }) {
+            return existing
+        }
+
+        let title = "Cider Project Notes"
+        let relativePath = "Projects/Cider/Notes/\(title).md"
+        if let existingIndex = notes.firstIndex(where: { Self.normalizedNoteRelativePath($0.relativePath) == Self.normalizedNoteRelativePath(relativePath) }) {
+            notes[existingIndex].projectID = projectID
+            notes[existingIndex].artifactType = "note"
+            persistNoteToDatabase(notes[existingIndex])
+            return notes[existingIndex]
+        }
+
+        let seedContent = """
+        # Cider Project Notes
+
+        This is Cider's first file-backed project note. It lives under `Projects/Cider/Notes` so project notes can be developed and dogfooded without polluting ordinary Library Notes.
+
+        SQLite records this file as a note artifact owned by `project:cider`; the Markdown file remains the canonical body.
+        """
+        let seedURL = vaultRoot.appendingPathComponent(relativePath)
+        if FileManager.default.fileExists(atPath: seedURL.path) {
+            let content = (try? String(contentsOf: seedURL, encoding: .utf8)) ?? seedContent
+            let now = Date()
+            let note = Note(
+                title: title,
+                content: content,
+                createdAt: now,
+                modifiedAt: now,
+                relativePath: relativePath,
+                projectID: projectID,
+                artifactType: "note"
+            )
+            index[note.id] = NoteIndexEntry(filename: "\(title).md", folderID: nil, createdAt: now)
+            notes.insert(note, at: 0)
+            persistNoteToDatabase(note)
+            MutationAuditService.shared.record(
+                action: "register",
+                itemType: "note",
+                itemID: note.id,
+                after: MutationAuditSnapshots.note(note),
+                metadata: ["projectID": projectID, "artifactType": "note", "seed": "cider-project-notes"]
+            )
+            return note
+        }
+
+        return createProjectNote(projectID: projectID, title: title, content: seedContent)
+    }
+
+    private func ensureProjectContainerDirectories(projectID: String) {
+        let projectDirName = projectDirectoryName(for: projectID)
+        let root = vaultRoot
+            .appendingPathComponent("Projects", isDirectory: true)
+            .appendingPathComponent(projectDirName, isDirectory: true)
+        for child in ["Notes", "Decisions", "Assets", "QA", "Handoffs", "Plans"] {
+            try? FileManager.default.createDirectory(
+                at: root.appendingPathComponent(child, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+    }
+
     /// Create a note from a screen capture, saving the screenshot to Attachments.
     /// - Parameters:
     ///   - title: Initial note title (derived from OCR text or a default).
