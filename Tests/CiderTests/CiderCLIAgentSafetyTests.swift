@@ -6,6 +6,33 @@ import Testing
 @Suite("Cider CLI Agent Safety Tests")
 @MainActor
 struct CiderCLIAgentSafetyTests {
+    @Test("note JSON exposes project artifact metadata")
+    func noteJSONExposesProjectArtifactMetadata() throws {
+        let note = Note(
+            title: "Cider Project Note",
+            relativePath: "Projects/Cider/Notes/Cider Project Note.md",
+            projectID: "cider",
+            artifactType: "note"
+        )
+
+        let dict = noteToDict(note)
+
+        #expect(dict["projectID"] as? String == "cider")
+        #expect(dict["artifactType"] as? String == "note")
+        #expect(dict["isProjectArtifact"] as? Bool == true)
+    }
+
+    @Test("regular note JSON marks non-project artifacts")
+    func regularNoteJSONMarksNonProjectArtifacts() throws {
+        let note = Note(title: "Inbox Note", relativePath: "Inbox/Notes/Inbox Note.md")
+
+        let dict = noteToDict(note)
+
+        #expect(dict["isProjectArtifact"] as? Bool == false)
+        #expect(dict["projectID"] == nil)
+        #expect(dict["artifactType"] == nil)
+    }
+
     @Test("reminder validation errors honor json output")
     func reminderValidationErrorsHonorJSONOutput() throws {
         let result = try runCLI(args: ["reminder", "complete", "todo", "--json"])

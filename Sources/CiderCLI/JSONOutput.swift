@@ -45,7 +45,7 @@ func outputJSON(_ value: Any) {
 }
 
 @MainActor func noteToDict(_ note: Note) -> [String: Any] {
-    [
+    var d: [String: Any] = [
         "id": note.id.uuidString,
         "title": note.title,
         "folder": note.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox",
@@ -56,7 +56,11 @@ func outputJSON(_ value: Any) {
         "created": ISO8601DateFormatter().string(from: note.createdAt),
         "modified": ISO8601DateFormatter().string(from: note.modifiedAt),
         "relativePath": note.relativePath,
+        "isProjectArtifact": note.isProjectArtifact,
     ]
+    if let projectID = note.projectID { d["projectID"] = projectID }
+    if let artifactType = note.artifactType { d["artifactType"] = artifactType }
+    return d
 }
 
 @MainActor func todoToDict(_ todo: TodoCard) -> [String: Any] {
