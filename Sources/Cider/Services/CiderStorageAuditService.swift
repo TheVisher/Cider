@@ -734,7 +734,7 @@ final class CiderStorageAuditService {
     private func bookmarkDriftFinding(for candidate: BookmarkDriftCandidate) throws -> CiderBookmarkDriftFinding? {
         guard candidate.relativePath.lowercased().hasSuffix(".webloc"),
               isSafeRelativePath(candidate.relativePath),
-              meaningfulBookmarkTitle(candidate.title) else {
+              meaningfulBookmarkTitle(candidate.title, urlString: candidate.url) else {
             return nil
         }
 
@@ -832,11 +832,15 @@ final class CiderStorageAuditService {
         return sawChunk == false ? false : false
     }
 
-    private func meaningfulBookmarkTitle(_ title: String) -> Bool {
+    private func meaningfulBookmarkTitle(_ title: String, urlString: String) -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 4 else { return false }
         let lower = trimmed.lowercased()
-        return !["untitled", "bookmark"].contains(lower)
+        guard !["untitled", "bookmark"].contains(lower) else { return false }
+
+        let titleBase = normalizedFilenameBase(stripDuplicateSuffix(trimmed))
+        guard !titleBase.isEmpty else { return false }
+        return !hostDerivedTitleCandidates(urlString: urlString).contains(titleBase)
     }
 
     private func likelyStaleBookmarkFilename(_ filenameBase: String, title: String, urlString: String) -> Bool {
@@ -866,6 +870,8 @@ final class CiderStorageAuditService {
 
     private func normalizedFilenameBase(_ value: String) -> String {
         value
+            .precomposedStringWithCanonicalMapping
+            .folding(options: [.diacriticInsensitive, .widthInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
             .lowercased()
             .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "", options: .regularExpression)
     }

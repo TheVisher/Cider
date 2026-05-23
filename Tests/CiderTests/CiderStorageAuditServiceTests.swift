@@ -349,7 +349,9 @@ struct CiderStorageAuditServiceTests {
         id: UUID,
         title: String = "GitHub - AndrewPrifer/liquid-dom",
         url: String = "https://github.com/AndrewPrifer/liquid-dom",
-        relativePath: String = "Inbox/Bookmarks/Github.Com (2).webloc"
+        relativePath: String = "Inbox/Bookmarks/Github.Com (2).webloc",
+        chunkTitle: String = "Github.Com",
+        chunkBody: String = "Title: Github.Com\nURL: https://github.com/AndrewPrifer/liquid-dom\nPath: Inbox/Bookmarks/Github.Com (2).webloc"
     ) throws {
         let now = DatabaseHelpers.encode(Date(timeIntervalSince1970: 10))
         let itemStmt = try db.prepare("""
@@ -376,15 +378,16 @@ struct CiderStorageAuditServiceTests {
                 id, item_id, owner_type, owner_id, source, title, body,
                 chunk_index, content_hash, metadata, created_at, updated_at
             )
-            VALUES (?, ?, 'bookmark', ?, 'bookmark:item', 'Github.Com',
-                    'Title: Github.Com\nURL: https://github.com/AndrewPrifer/liquid-dom\nPath: Inbox/Bookmarks/Github.Com (2).webloc',
+            VALUES (?, ?, 'bookmark', ?, 'bookmark:item', ?, ?,
                     0, 'stale-hash', '{}', ?, ?);
             """)
         chunkStmt.bind(DatabaseHelpers.encode(UUID()), at: 1)
             .bind(DatabaseHelpers.encode(id), at: 2)
             .bind(DatabaseHelpers.encode(id), at: 3)
-            .bind(now, at: 4)
-            .bind(now, at: 5)
+            .bind(chunkTitle, at: 4)
+            .bind(chunkBody, at: 5)
+            .bind(now, at: 6)
+            .bind(now, at: 7)
         try chunkStmt.step()
     }
 
@@ -910,6 +913,78 @@ struct CiderStorageAuditServiceTests {
         #expect(finding.chunkDrift == true)
         #expect(finding.repairCommand.contains("--execute"))
         #expect(finding.repairCommand.contains(bookmarkID.uuidString))
+    }
+
+    @Test("bookmark drift audit ignores host-only titles that would only add duplicate suffixes")
+    func bookmarkDriftAuditIgnoresHostOnlyTitles() throws {
+        let bookmarkID = UUID(uuidString: "EDE7C93D-4B82-4820-BB2B-C01D67DCCEB4")!
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try makeDirectories(["Inbox/Bookmarks"], under: vault)
+        try "url".write(
+            to: vault.appendingPathComponent("Inbox/Bookmarks/X.Com (3).webloc"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try insertBookmarkDriftFixture(
+            db,
+            id: bookmarkID,
+            title: "X.Com (3)",
+            url: "https://x.com/example/status/123",
+            relativePath: "Inbox/Bookmarks/X.Com (3).webloc",
+            chunkTitle: "X.Com (3)",
+            chunkBody: "Title: X.Com (3)"
+        )
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            doctorReportProvider: { VaultDoctor.Report(startedAt: Date(), finishedAt: Date(), findings: []) },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.bookmarkDriftAudit(limit: 10)
+
+        #expect(report.findings.isEmpty)
+    }
+
+    @Test("bookmark drift audit treats canonically equivalent accented filenames as current")
+    func bookmarkDriftAuditTreatsEquivalentAccentedFilenamesAsCurrent() throws {
+        let bookmarkID = UUID(uuidString: "1FBFD0AE-3A73-42FF-AC69-0681E6B4F522")!
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try makeDirectories(["Inbox/Bookmarks"], under: vault)
+        let title = "Erick: Claude ya no se rinde ante Cloudflare… ahora lo destroza sin pagar NI UNA API. Antes le decías scrapeame esto"
+        let decomposedRelativePath = "Inbox/Bookmarks/Erick- Claude ya no se rinde ante Cloudflare… ahora lo destroza sin pagar NI UNA API. Antes le deci\u{0301}as scrapeame esto.webloc"
+        try "url".write(
+            to: vault.appendingPathComponent(decomposedRelativePath),
+            atomically: true,
+            encoding: .utf8
+        )
+        try insertBookmarkDriftFixture(
+            db,
+            id: bookmarkID,
+            title: title,
+            url: "https://x.com/example/status/456",
+            relativePath: decomposedRelativePath,
+            chunkTitle: title,
+            chunkBody: "Title: \(title)"
+        )
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            doctorReportProvider: { VaultDoctor.Report(startedAt: Date(), finishedAt: Date(), findings: []) },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.bookmarkDriftAudit(limit: 10)
+
+        #expect(report.findings.isEmpty)
     }
 
     @Test("bookmark drift repair refuses without approval and repairs path and chunks with approval")
