@@ -321,9 +321,9 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
             artifactRelations: relations
         )
 
-        XCTAssertEqual(model.notes.first?.linkedCardLabels, ["documents 2c0a04", "validates 2c0a04"])
+        XCTAssertEqual(model.notes.first?.linkedCardLabels, ["2c0a04: documents, validates"])
         XCTAssertEqual(model.notes.first?.agentLabels, ["cider", "cody"])
-        XCTAssertEqual(model.notes.first?.relationSummary, "documents 2c0a04 · validates 2c0a04 · cider · cody")
+        XCTAssertEqual(model.notes.first?.relationSummary, "cards: 2c0a04 (documents, validates) · agents: cider, cody")
     }
 
     func testProjectDecisionAndQAAuditSurfacesShowMatchingArtifactsOnly() {

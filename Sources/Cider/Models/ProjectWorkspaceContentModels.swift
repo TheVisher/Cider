@@ -195,7 +195,20 @@ struct ProjectWorkspaceNoteRow: Identifiable, Equatable {
     }
 
     var relationSummary: String {
-        (linkedCardLabels + agentLabels).joined(separator: " · ")
+        var parts: [String] = []
+        if !linkedCardLabels.isEmpty {
+            let cardSummaries = linkedCardLabels.map { label in
+                guard let separatorRange = label.range(of: ": ") else { return label }
+                let cardID = String(label[..<separatorRange.lowerBound])
+                let relationNames = String(label[separatorRange.upperBound...])
+                return "\(cardID) (\(relationNames))"
+            }
+            parts.append("cards: \(cardSummaries.joined(separator: ", "))")
+        }
+        if !agentLabels.isEmpty {
+            parts.append("agents: \(agentLabels.joined(separator: ", "))")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -308,10 +321,27 @@ enum ProjectWorkspaceSurfaceProvider {
     }
 
     private static func linkedCardLabels(from relations: [SecondBrainRelation]) -> [String] {
-        relations.compactMap { relation in
-            guard relation.targetOwner.ownerType == "kanban_card" else { return nil }
+        var cardOrder: [String] = []
+        var relationNamesByCardID: [String: [String]] = [:]
+        var seenRelationNamesByCardID: [String: Set<String>] = [:]
+
+        for relation in relations where relation.targetOwner.ownerType == "kanban_card" {
             let cardID = relation.targetOwner.ownerID.split(separator: "/").last.map(String.init) ?? relation.targetOwner.ownerID
-            return "\(ProjectArtifactRelationType.displayName(for: relation.relationType)) \(cardID)"
+            if relationNamesByCardID[cardID] == nil {
+                cardOrder.append(cardID)
+                relationNamesByCardID[cardID] = []
+                seenRelationNamesByCardID[cardID] = []
+            }
+
+            let relationName = ProjectArtifactRelationType.displayName(for: relation.relationType)
+            guard seenRelationNamesByCardID[cardID]?.contains(relationName) != true else { continue }
+            seenRelationNamesByCardID[cardID]?.insert(relationName)
+            relationNamesByCardID[cardID]?.append(relationName)
+        }
+
+        return cardOrder.compactMap { cardID in
+            guard let relationNames = relationNamesByCardID[cardID], !relationNames.isEmpty else { return nil }
+            return "\(cardID): \(relationNames.joined(separator: ", "))"
         }
     }
 
