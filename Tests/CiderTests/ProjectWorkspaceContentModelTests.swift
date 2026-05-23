@@ -2,6 +2,14 @@ import XCTest
 @testable import Cider
 
 final class ProjectWorkspaceContentModelTests: XCTestCase {
+    func testProjectWorkspaceSurfaceDisplayModesOfferListAndGridOnly() {
+        XCTAssertEqual(ProjectWorkspaceSurfaceDisplayMode.allCases, [.list, .grid])
+        XCTAssertEqual(ProjectWorkspaceSurfaceDisplayMode.list.title, "List")
+        XCTAssertEqual(ProjectWorkspaceSurfaceDisplayMode.grid.title, "Grid")
+        XCTAssertEqual(ProjectWorkspaceSurfaceDisplayMode.list.systemImage, "list.bullet")
+        XCTAssertEqual(ProjectWorkspaceSurfaceDisplayMode.grid.systemImage, "square.grid.2x2")
+    }
+
     func testProjectReferencesIncludeLinkedAndTextMatchedItemsOnly() {
         let linkedID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let matchedID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!

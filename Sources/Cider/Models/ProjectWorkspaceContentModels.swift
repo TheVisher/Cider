@@ -218,6 +218,27 @@ struct ProjectWorkspaceSurfaceModel: Equatable {
     let notes: [ProjectWorkspaceNoteRow]
 }
 
+enum ProjectWorkspaceSurfaceDisplayMode: String, CaseIterable, Equatable, Identifiable {
+    case list
+    case grid
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .list: return "List"
+        case .grid: return "Grid"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .list: return "list.bullet"
+        case .grid: return "square.grid.2x2"
+        }
+    }
+}
+
 enum ProjectWorkspaceSurfaceProvider {
     private static let logger = Logger(subsystem: "com.cider.app", category: "ProjectWorkspaceSurface")
 

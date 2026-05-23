@@ -238,6 +238,8 @@ struct ProjectWorkspaceSurfaceView: View {
     let model: ProjectWorkspaceSurfaceModel
     var onOpenNote: (Note) -> Void
 
+    @State private var displayMode: ProjectWorkspaceSurfaceDisplayMode = .list
+
     var body: some View {
         if model.surface == .notes || model.surface == .plansHandoffs {
             artifactListBody
@@ -248,14 +250,7 @@ struct ProjectWorkspaceSurfaceView: View {
 
     private var artifactListBody: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Label(model.surface.title, systemImage: model.surface.systemImage)
-                    .font(CiderFont.headingSemibold)
-                    .foregroundColor(CiderColors.primary)
-                Text(surfaceSubtitle)
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.secondary)
-            }
+            header
 
             if model.notes.isEmpty {
                 EmptyStateView(
@@ -266,56 +261,173 @@ struct ProjectWorkspaceSurfaceView: View {
                 .frame(maxWidth: .infinity, minHeight: 260)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: Spacing.xs) {
-                        ForEach(model.notes) { row in
-                            Button {
-                                onOpenNote(row.note)
-                            } label: {
-                                HStack(spacing: Spacing.sm) {
-                                    Image(systemName: model.surface.systemImage)
-                                        .foregroundColor(CiderColors.tertiary)
-                                        .frame(width: 24)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(row.title)
-                                            .font(CiderFont.bodySemibold)
-                                            .foregroundColor(CiderColors.primary)
-                                            .lineLimit(1)
-                                        if !row.preview.isEmpty {
-                                            Text(row.preview)
-                                                .font(CiderFont.caption)
-                                                .foregroundColor(CiderColors.secondary)
-                                                .lineLimit(2)
-                                        }
-                                        Text(row.path)
-                                            .font(CiderFont.caption)
-                                            .foregroundColor(CiderColors.tertiary)
-                                            .lineLimit(1)
-                                        if !row.relationSummary.isEmpty {
-                                            Text(row.relationSummary)
-                                                .font(CiderFont.caption)
-                                                .foregroundColor(CiderColors.controlAccent)
-                                                .lineLimit(1)
-                                        }
-                                    }
-                                    Spacer(minLength: 0)
-                                    Text(row.owner.canonicalRef)
-                                        .font(CiderFont.caption)
-                                        .foregroundColor(CiderColors.tertiary)
-                                        .lineLimit(1)
-                                }
-                                .padding(Spacing.md)
-                                .sectionContainer(cornerRadius: Radius.sm)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.bottom, Spacing.lg)
+                    artifactContent
+                        .padding(.bottom, Spacing.lg)
                 }
                 .scrollIndicators(.hidden)
             }
         }
         .padding(Spacing.lg)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: Spacing.md) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Label(model.surface.title, systemImage: model.surface.systemImage)
+                    .font(CiderFont.headingSemibold)
+                    .foregroundColor(CiderColors.primary)
+                Text(surfaceSubtitle)
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.secondary)
+            }
+
+            Spacer(minLength: 0)
+
+            displayModeControls
+                .padding(.top, 2)
+        }
+    }
+
+    private var displayModeControls: some View {
+        HStack(spacing: Spacing.xs) {
+            ForEach(ProjectWorkspaceSurfaceDisplayMode.allCases) { mode in
+                displayModeChip(mode)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("View mode")
+    }
+
+    private func displayModeChip(_ mode: ProjectWorkspaceSurfaceDisplayMode) -> some View {
+        let isSelected = displayMode == mode
+        return Button {
+            displayMode = mode
+        } label: {
+            Label(mode.title, systemImage: mode.systemImage)
+                .font(CiderFont.captionMedium)
+                .foregroundColor(isSelected ? CiderColors.primary : CiderColors.tertiary)
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.hairline)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(isSelected ? CiderColors.separatorMedium : CiderColors.separatorLight)
+                )
+        }
+        .buttonStyle(.plain)
+        .help("Show \(model.surface.title) as \(mode.title.lowercased())")
+    }
+
+    @ViewBuilder
+    private var artifactContent: some View {
+        switch displayMode {
+        case .list:
+            LazyVStack(spacing: Spacing.xs) {
+                ForEach(model.notes) { row in
+                    noteListRow(row)
+                }
+            }
+        case .grid:
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Spacing.md)], spacing: Spacing.md) {
+                ForEach(model.notes) { row in
+                    noteGridCard(row)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func noteListRow(_ row: ProjectWorkspaceNoteRow) -> some View {
+        Button {
+            onOpenNote(row.note)
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: model.surface.systemImage)
+                    .foregroundColor(CiderColors.tertiary)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.title)
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+                    if !row.preview.isEmpty {
+                        Text(row.preview)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(2)
+                    }
+                    noteMetadata(row, pathLineLimit: 1, relationLineLimit: 1)
+                }
+                Spacer(minLength: 0)
+                Text(row.owner.canonicalRef)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(1)
+            }
+            .padding(Spacing.md)
+            .sectionContainer(cornerRadius: Radius.sm)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func noteGridCard(_ row: ProjectWorkspaceNoteRow) -> some View {
+        Button {
+            onOpenNote(row.note)
+        } label: {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    Image(systemName: model.surface.systemImage)
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.controlAccent)
+                        .frame(width: 28, height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                .fill(CiderColors.accentSubtle)
+                        )
+                    Spacer(minLength: 0)
+                    Text(row.owner.canonicalRef)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(1)
+                }
+
+                Text(row.title)
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+
+                if !row.preview.isEmpty {
+                    Text(row.preview)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.secondary)
+                        .lineLimit(4)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: 0)
+                noteMetadata(row, pathLineLimit: 2, relationLineLimit: 2)
+            }
+            .padding(Spacing.md)
+            .frame(maxWidth: .infinity, minHeight: 188, alignment: .topLeading)
+            .sectionContainer(cornerRadius: Radius.md)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func noteMetadata(_ row: ProjectWorkspaceNoteRow, pathLineLimit: Int, relationLineLimit: Int) -> some View {
+        Text(row.path)
+            .font(CiderFont.caption)
+            .foregroundColor(CiderColors.tertiary)
+            .lineLimit(pathLineLimit)
+        if !row.relationSummary.isEmpty {
+            Text(row.relationSummary)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.controlAccent)
+                .lineLimit(relationLineLimit)
+        }
     }
 
     private var surfaceSubtitle: String {
