@@ -204,7 +204,8 @@ extension CiderPanelView {
                         model: ProjectWorkspaceSurfaceProvider.model(
                             for: project,
                             surface: surface,
-                            notes: notesStorage.notes
+                            notes: notesStorage.notes,
+                            artifactRelations: ProjectWorkspaceSurfaceProvider.artifactRelations(for: notesStorage.notes)
                         ),
                         onOpenNote: { note in
                             openNoteDetail(note)

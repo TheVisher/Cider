@@ -290,6 +290,12 @@ struct ProjectWorkspaceSurfaceView: View {
                                             .font(CiderFont.caption)
                                             .foregroundColor(CiderColors.tertiary)
                                             .lineLimit(1)
+                                        if !row.relationSummary.isEmpty {
+                                            Text(row.relationSummary)
+                                                .font(CiderFont.caption)
+                                                .foregroundColor(CiderColors.controlAccent)
+                                                .lineLimit(1)
+                                        }
                                     }
                                     Spacer(minLength: 0)
                                     Text(row.owner.canonicalRef)

@@ -166,15 +166,36 @@ struct ProjectWorkspaceArtifactRow: Identifiable, Equatable {
 }
 
 struct ProjectWorkspaceNoteRow: Identifiable, Equatable {
+    let id: UUID
     let note: Note
     let owner: SecondBrainOwnerRef
     let path: String
+    let linkedCardLabels: [String]
+    let agentLabels: [String]
 
-    var id: UUID { note.id }
+    init(
+        note: Note,
+        owner: SecondBrainOwnerRef,
+        path: String,
+        linkedCardLabels: [String] = [],
+        agentLabels: [String] = []
+    ) {
+        self.id = note.id
+        self.note = note
+        self.owner = owner
+        self.path = path
+        self.linkedCardLabels = linkedCardLabels
+        self.agentLabels = agentLabels
+    }
+
     var title: String { note.title }
     var preview: String {
         let content = note.content.isEmpty ? note.resolvedContent : note.content
         return String(content.trimmingCharacters(in: .whitespacesAndNewlines).prefix(180))
+    }
+
+    var relationSummary: String {
+        (linkedCardLabels + agentLabels).joined(separator: " · ")
     }
 }
 
@@ -190,7 +211,8 @@ enum ProjectWorkspaceSurfaceProvider {
     static func model(
         for workspace: ProjectWorkspace,
         surface: ProjectWorkspaceSurface,
-        notes: [Note]
+        notes: [Note],
+        artifactRelations: [SecondBrainRelation] = []
     ) -> ProjectWorkspaceSurfaceModel {
         let rows: [ProjectWorkspaceNoteRow]
         switch surface {
@@ -199,7 +221,8 @@ enum ProjectWorkspaceSurfaceProvider {
                 for: workspace,
                 notes: notes,
                 allowedArtifactTypes: ["note"],
-                includeNilArtifactType: true
+                includeNilArtifactType: true,
+                artifactRelations: artifactRelations
             )
             let projectID = SecondBrainProjectGraphService.normalizedProjectID(workspace.id)
             let candidateCount = notes.filter { note in
@@ -211,7 +234,8 @@ enum ProjectWorkspaceSurfaceProvider {
                 for: workspace,
                 notes: notes,
                 allowedArtifactTypes: ["plan", "handoff"],
-                includeNilArtifactType: false
+                includeNilArtifactType: false,
+                artifactRelations: artifactRelations
             )
             logger.info("Project plans/handoffs surface model workspace=\(workspace.id, privacy: .public) renderedArtifacts=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
         case .decisions:
@@ -219,7 +243,8 @@ enum ProjectWorkspaceSurfaceProvider {
                 for: workspace,
                 notes: notes,
                 allowedArtifactTypes: ["decision"],
-                includeNilArtifactType: false
+                includeNilArtifactType: false,
+                artifactRelations: artifactRelations
             )
             logger.info("Project decisions surface model workspace=\(workspace.id, privacy: .public) renderedArtifacts=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
         case .qaAudits:
@@ -227,7 +252,8 @@ enum ProjectWorkspaceSurfaceProvider {
                 for: workspace,
                 notes: notes,
                 allowedArtifactTypes: ["qa", "audit"],
-                includeNilArtifactType: false
+                includeNilArtifactType: false,
+                artifactRelations: artifactRelations
             )
             logger.info("Project QA/Audits surface model workspace=\(workspace.id, privacy: .public) renderedArtifacts=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
         default:
@@ -236,13 +262,24 @@ enum ProjectWorkspaceSurfaceProvider {
         return ProjectWorkspaceSurfaceModel(workspace: workspace, surface: surface, notes: rows)
     }
 
+    @MainActor
+    static func artifactRelations(for notes: [Note], database: CiderDatabase = .shared) -> [SecondBrainRelation] {
+        let store = SecondBrainStore(database: database)
+        return notes.flatMap { note in
+            let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString)
+            return (try? store.relatedRelations(for: owner)) ?? []
+        }
+    }
+
     private static func projectArtifactRows(
         for workspace: ProjectWorkspace,
         notes: [Note],
         allowedArtifactTypes: Set<String>,
-        includeNilArtifactType: Bool
+        includeNilArtifactType: Bool,
+        artifactRelations: [SecondBrainRelation]
     ) -> [ProjectWorkspaceNoteRow] {
         let projectID = SecondBrainProjectGraphService.normalizedProjectID(workspace.id)
+        let relationsBySourceOwner = Dictionary(grouping: artifactRelations, by: \.sourceOwner)
         return notes
             .filter { note in
                 guard SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID else {
@@ -258,12 +295,36 @@ enum ProjectWorkspaceSurfaceProvider {
                 return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
             }
             .map { note in
-                ProjectWorkspaceNoteRow(
+                let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString)
+                let relations = relationsBySourceOwner[owner] ?? []
+                return ProjectWorkspaceNoteRow(
                     note: note,
-                    owner: SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString),
-                    path: note.relativePath
+                    owner: owner,
+                    path: note.relativePath,
+                    linkedCardLabels: linkedCardLabels(from: relations),
+                    agentLabels: agentLabels(from: relations)
                 )
             }
+    }
+
+    private static func linkedCardLabels(from relations: [SecondBrainRelation]) -> [String] {
+        relations.compactMap { relation in
+            guard relation.targetOwner.ownerType == "kanban_card" else { return nil }
+            let cardID = relation.targetOwner.ownerID.split(separator: "/").last.map(String.init) ?? relation.targetOwner.ownerID
+            return "\(ProjectArtifactRelationType.displayName(for: relation.relationType)) \(cardID)"
+        }
+    }
+
+    private static func agentLabels(from relations: [SecondBrainRelation]) -> [String] {
+        var seen: Set<String> = []
+        var labels: [String] = []
+        for actor in relations.map(\.actor) {
+            let label = actor.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty, !seen.contains(label) else { continue }
+            seen.insert(label)
+            labels.append(label)
+        }
+        return labels
     }
 }
 

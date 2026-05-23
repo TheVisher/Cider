@@ -276,6 +276,56 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         ])
     }
 
+    func testProjectPlansHandoffsSurfaceSummarizesLinkedCardsAndAgents() {
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+        let handoffID = UUID(uuidString: "88888888-8888-8888-8888-888888888888")!
+        let handoff = Note(
+            id: handoffID,
+            title: "Cider handoff thread",
+            content: "## Hermes Spec\nFull spec.\n\n## Cody Implementation\nFull report.",
+            modifiedAt: Date(timeIntervalSince1970: 5_000),
+            relativePath: "Projects/Cider/Handoffs/Cider handoff thread.md",
+            projectID: "cider",
+            artifactType: "handoff"
+        )
+        let handoffOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: handoffID.uuidString)
+        let cardOwner = SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "2afee0/2c0a04")
+        let relations = [
+            SecondBrainRelation(
+                sourceOwner: handoffOwner,
+                targetOwner: cardOwner,
+                relationType: ProjectArtifactRelationType.documents,
+                evidence: "Handoff documents the Plans/Handoffs card.",
+                source: "note.project-artifact",
+                actor: "cider",
+                confidence: 1,
+                metadata: ["card_title": "Make Plans/Handoffs surface usable for agent evidence"]
+            ),
+            SecondBrainRelation(
+                sourceOwner: handoffOwner,
+                targetOwner: cardOwner,
+                relationType: ProjectArtifactRelationType.validates,
+                evidence: "Cody verified the handoff flow.",
+                source: "note.project-artifact",
+                actor: "cody",
+                confidence: 1,
+                metadata: [:]
+            )
+        ]
+
+        let model = ProjectWorkspaceSurfaceProvider.model(
+            for: ciderWorkspace,
+            surface: .plansHandoffs,
+            notes: [handoff],
+            artifactRelations: relations
+        )
+
+        XCTAssertEqual(model.notes.first?.linkedCardLabels, ["documents 2c0a04", "validates 2c0a04"])
+        XCTAssertEqual(model.notes.first?.agentLabels, ["cider", "cody"])
+        XCTAssertEqual(model.notes.first?.relationSummary, "documents 2c0a04 · validates 2c0a04 · cider · cody")
+    }
+
     func testProjectDecisionAndQAAuditSurfacesShowMatchingArtifactsOnly() {
         let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
         let ciderWorkspace = catalog.workspace(id: "cider")!
