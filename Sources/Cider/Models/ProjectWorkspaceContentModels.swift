@@ -214,6 +214,22 @@ enum ProjectWorkspaceSurfaceProvider {
                 includeNilArtifactType: false
             )
             logger.info("Project plans/handoffs surface model workspace=\(workspace.id, privacy: .public) renderedArtifacts=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
+        case .decisions:
+            rows = projectArtifactRows(
+                for: workspace,
+                notes: notes,
+                allowedArtifactTypes: ["decision"],
+                includeNilArtifactType: false
+            )
+            logger.info("Project decisions surface model workspace=\(workspace.id, privacy: .public) renderedArtifacts=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
+        case .qaAudits:
+            rows = projectArtifactRows(
+                for: workspace,
+                notes: notes,
+                allowedArtifactTypes: ["qa", "audit"],
+                includeNilArtifactType: false
+            )
+            logger.info("Project QA/Audits surface model workspace=\(workspace.id, privacy: .public) renderedArtifacts=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
         default:
             rows = []
         }

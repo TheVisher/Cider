@@ -2565,15 +2565,15 @@ struct CiderCLI {
         case nil, "help", "--help", "-h":
             print("""
             Project artifact note commands:
-              cider-cli note project-artifact create --project <project-id-or-name> --type note|plan|handoff|decision|qa --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--decided-from-card <id>] [--validates-card <id>] [--found-bug-in-card <id>] [--json]
+              cider-cli note project-artifact create --project <project-id-or-name> --type note|plan|handoff|decision|qa --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--card-id <id>] [--decided-from-card <id>] [--decided-from-note <id>] [--source-card <id>] [--source-note <id>] [--validates-card <id>] [--validates-note <id>] [--found-bug-in-card <id>] [--found-bug-in-note <id>] [--json]
               cider-cli note project-artifact append <note-id-prefix> (--stdin|--text-file <path>|--content <text>) [--json]
-              cider-cli note project-artifact list --project <project-id-or-name> [--type note|plan|handoff|decision|qa|plans-handoffs] [--json]
+              cider-cli note project-artifact list --project <project-id-or-name> [--type note|plan|handoff|decision|decisions|qa|audit|qa-audits|plans-handoffs] [--json]
               cider-cli note project-artifact get <note-id-prefix> [--json]
             """)
 
         case "create":
             guard let project = parseFlag("--project", from: rest) ?? parseFlag("--project-id", from: rest) else {
-                printCLIError("Usage: cider-cli note project-artifact create --project <project-id-or-name> --type <type> --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--json]")
+                printCLIError("Usage: cider-cli note project-artifact create --project <project-id-or-name> --type <type> --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--decided-from-card <id>] [--validates-card <id>] [--found-bug-in-card <id>] [--json]")
                 return
             }
             let type = parseFlag("--type", from: rest) ?? parseFlag("--artifact-type", from: rest) ?? "handoff"
@@ -2602,7 +2602,7 @@ struct CiderCLI {
                 print("Created project \(note.artifactType ?? "artifact"): \(note.title) (\(note.id.uuidString.prefix(8)))")
                 print("  Path: \(note.relativePath)")
                 if !linkedRelations.isEmpty {
-                    print("  Linked relations: \(linkedRelations.map { "\($0.relationType):\($0.targetOwner.canonicalRef)" }.joined(separator: ", "))")
+                    print("  Linked relations: \(linkedRelations.map { "\(ProjectArtifactRelationType.displayName(for: $0.relationType)): \($0.targetOwner.canonicalRef)" }.joined(separator: ", "))")
                 }
             }
 
@@ -2641,6 +2641,10 @@ struct CiderCLI {
                 let normalized = filter.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
                 if normalized == "plans-handoffs" || normalized == "plans_handoffs" {
                     return ["plan", "handoff"]
+                }
+                if normalized == "decisions" { return ["decision"] }
+                if normalized == "qa-audits" || normalized == "qa_audits" || normalized == "audits" {
+                    return ["qa", "audit"]
                 }
                 return [normalized]
             }
@@ -2732,7 +2736,7 @@ struct CiderCLI {
             &targets,
             owners: parseFlagAll("--card", from: args) + parseFlagAll("--card-id", from: args),
             ownerType: "kanban_card",
-            relationType: "documents",
+            relationType: ProjectArtifactRelationType.documents,
             evidencePrefix: "Project artifact documents Kanban card"
         )
         appendRelationTargets(
@@ -2839,6 +2843,7 @@ struct CiderCLI {
         [
             "id": relation.id,
             "relationType": relation.relationType,
+            "relationLabel": ProjectArtifactRelationType.displayName(for: relation.relationType),
             "sourceOwner": ownerToDict(relation.sourceOwner),
             "targetOwner": ownerToDict(relation.targetOwner),
             "evidence": relation.evidence,

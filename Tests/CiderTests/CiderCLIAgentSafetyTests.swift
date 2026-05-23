@@ -33,6 +33,67 @@ struct CiderCLIAgentSafetyTests {
         #expect(dict["artifactType"] == nil)
     }
 
+    @Test("project artifact help documents typed relation flags")
+    func projectArtifactHelpDocumentsTypedRelationFlags() throws {
+        let result = try runCLI(args: ["note", "project-artifact", "help"])
+        let output = result.stdout
+
+        for snippet in [
+            "--card-id <id>",
+            "--decided-from-card <id>",
+            "--decided-from-note <id>",
+            "--source-card <id>",
+            "--source-note <id>",
+            "--validates-card <id>",
+            "--validates-note <id>",
+            "--found-bug-in-card <id>",
+            "--found-bug-in-note <id>",
+            "qa-audits",
+            "plans-handoffs"
+        ] {
+            #expect(output.contains(snippet), "Expected project-artifact help to include \(snippet)")
+        }
+    }
+
+    @Test("project artifact CLI relation targets use stable relation names")
+    func projectArtifactCLIRelationTargetsUseStableRelationNames() throws {
+        let targets = CiderCLI.projectArtifactRelationTargets(from: [
+            "--card", "2afee0/e60be2",
+            "--source-card", "2afee0/8b6f3c",
+            "--decided-from-note", "C1A9A0AA",
+            "--validates-card", "2afee0/2c0a04",
+            "--validates-note", "53A4BDEB",
+            "--found-bug-in-card", "2afee0/e60be2",
+            "--found-bug-in-note", "D992F5E5"
+        ])
+
+        #expect(targets.map(\.relationType) == [
+            ProjectArtifactRelationType.documents,
+            ProjectArtifactRelationType.decidedFrom,
+            ProjectArtifactRelationType.decidedFrom,
+            ProjectArtifactRelationType.validates,
+            ProjectArtifactRelationType.validates,
+            ProjectArtifactRelationType.foundBugIn,
+            ProjectArtifactRelationType.foundBugIn
+        ])
+        #expect(ProjectArtifactRelationType.displayName(for: ProjectArtifactRelationType.documents) == "documents")
+        #expect(ProjectArtifactRelationType.displayName(for: ProjectArtifactRelationType.decidedFrom) == "decided from")
+        #expect(ProjectArtifactRelationType.displayName(for: ProjectArtifactRelationType.foundBugIn) == "found bug in")
+
+        let dict = CiderCLI.relationToDict(SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: "A890C2F0"),
+            targetOwner: SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "2afee0/e60be2"),
+            relationType: ProjectArtifactRelationType.foundBugIn,
+            evidence: "QA found a bug.",
+            source: "test",
+            actor: "hermes",
+            confidence: 1,
+            metadata: [:]
+        ))
+        #expect(dict["relationType"] as? String == ProjectArtifactRelationType.foundBugIn)
+        #expect(dict["relationLabel"] as? String == "found bug in")
+    }
+
     @Test("item get JSON item summary exposes project artifact relation metadata")
     func itemGetJSONItemSummaryExposesProjectArtifactRelationMetadata() throws {
         let noteID = UUID(uuidString: "70EF7C58-E63E-40D8-9D38-FDB023E7FAEE")!

@@ -276,6 +276,82 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         ])
     }
 
+    func testProjectDecisionAndQAAuditSurfacesShowMatchingArtifactsOnly() {
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+        let decisionID = UUID(uuidString: "10101010-1010-1010-1010-101010101010")!
+        let qaID = UUID(uuidString: "20202020-2020-2020-2020-202020202020")!
+        let auditID = UUID(uuidString: "30303030-3030-3030-3030-303030303030")!
+        let handoffID = UUID(uuidString: "40404040-4040-4040-4040-404040404040")!
+        let otherDecisionID = UUID(uuidString: "50505050-5050-5050-5050-505050505050")!
+        let notes = [
+            Note(
+                id: decisionID,
+                title: "Use stable project relation names",
+                content: "Decision body",
+                modifiedAt: Date(timeIntervalSince1970: 4_000),
+                relativePath: "Projects/Cider/Decisions/Use stable project relation names.md",
+                projectID: "cider",
+                artifactType: "decision"
+            ),
+            Note(
+                id: qaID,
+                title: "Artifact relation QA",
+                content: "QA body",
+                modifiedAt: Date(timeIntervalSince1970: 6_000),
+                relativePath: "Projects/Cider/QA/Artifact relation QA.md",
+                projectID: "cider",
+                artifactType: "qa"
+            ),
+            Note(
+                id: auditID,
+                title: "Artifact relation audit",
+                content: "Audit body",
+                modifiedAt: Date(timeIntervalSince1970: 5_000),
+                relativePath: "Projects/Cider/QA/Artifact relation audit.md",
+                projectID: "cider",
+                artifactType: "audit"
+            ),
+            Note(
+                id: handoffID,
+                title: "Agent handoff",
+                content: "Handoff body",
+                modifiedAt: Date(timeIntervalSince1970: 7_000),
+                relativePath: "Projects/Cider/Handoffs/Agent handoff.md",
+                projectID: "cider",
+                artifactType: "handoff"
+            ),
+            Note(
+                id: otherDecisionID,
+                title: "iOS decision",
+                content: "Other project decision",
+                modifiedAt: Date(timeIntervalSince1970: 8_000),
+                relativePath: "Projects/Cider iOS/Decisions/iOS decision.md",
+                projectID: "cider-ios",
+                artifactType: "decision"
+            )
+        ]
+
+        let decisions = ProjectWorkspaceSurfaceProvider.model(
+            for: ciderWorkspace,
+            surface: .decisions,
+            notes: notes
+        )
+        let qaAudits = ProjectWorkspaceSurfaceProvider.model(
+            for: ciderWorkspace,
+            surface: .qaAudits,
+            notes: notes
+        )
+
+        XCTAssertEqual(decisions.notes.map(\.id), [decisionID])
+        XCTAssertEqual(decisions.notes.map(\.path), ["Projects/Cider/Decisions/Use stable project relation names.md"])
+        XCTAssertEqual(qaAudits.notes.map(\.id), [qaID, auditID])
+        XCTAssertEqual(qaAudits.notes.map(\.path), [
+            "Projects/Cider/QA/Artifact relation QA.md",
+            "Projects/Cider/QA/Artifact relation audit.md"
+        ])
+    }
+
     func testProjectArtifactRelationshipsConnectPlanningNotesToSpawnedCardsAndQA() {
         let noteID = UUID(uuidString: "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE")!
         let qaID = UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!
@@ -399,5 +475,7 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(model.sourceArtifacts.map(\.title), ["Workspace plan"])
         XCTAssertEqual(model.relatedDecisions.map(\.title), ["Use contextual panels"])
         XCTAssertEqual(model.qaFindings.map(\.title), ["Panels QA"])
+        XCTAssertEqual(model.relatedDecisions.first?.subtitle, "decided from · → note:34343434-3434-3434-3434-343434343434")
+        XCTAssertEqual(model.qaFindings.first?.subtitle, "validates · ← note:56565656-5656-5656-5656-565656565656")
     }
 }

@@ -34,6 +34,7 @@ struct ProjectArtifactRelationshipRow: Identifiable, Equatable {
 }
 
 enum ProjectArtifactRelationType {
+    static let documents = "documents"
     static let spawnedFrom = "spawned_from"
     static let derivesFrom = "derives_from"
     static let implements = "implements"
@@ -46,6 +47,29 @@ enum ProjectArtifactRelationType {
     static let derivedCardTypes: Set<String> = [spawnedFrom, derivesFrom, implements]
     static let qaTypes: Set<String> = [validates, foundBugIn]
     static let decisionTypes: Set<String> = [decidedFrom, "supports", "decides", "decided"]
+
+    static func displayName(for relationType: String) -> String {
+        switch relationType.localizedLowercase {
+        case documents:
+            return "documents"
+        case spawnedFrom:
+            return "spawned from"
+        case derivesFrom:
+            return "derives from"
+        case implements:
+            return "implements"
+        case validates:
+            return "validates"
+        case foundBugIn:
+            return "found bug in"
+        case decidedFrom:
+            return "decided from"
+        case supersedes:
+            return "supersedes"
+        default:
+            return relationType.replacingOccurrences(of: "_", with: " ")
+        }
+    }
 }
 
 enum ProjectArtifactRelationshipProvider {
@@ -164,7 +188,7 @@ enum ProjectArtifactRelationshipProvider {
         boards: [KanbanBoard]
     ) -> String {
         let arrow = direction == .outgoing ? "→" : "←"
-        var parts = [relation.relationType.replacingOccurrences(of: "_", with: " ")]
+        var parts = [ProjectArtifactRelationType.displayName(for: relation.relationType)]
         if let status = cardStatus(for: owner, boards: boards) {
             parts.append(status)
         }
