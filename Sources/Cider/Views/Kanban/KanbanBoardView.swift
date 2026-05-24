@@ -848,14 +848,6 @@ struct KanbanBoardView: View {
             }
 
             if !compact {
-                if let previewText = KanbanBoardLayout.previewText(for: card) {
-                    Text(previewText)
-                        .font(CiderFont.micro)
-                        .foregroundColor(CiderColors.tertiary.opacity(0.72))
-                        .lineLimit(KanbanDesign.cardPreviewBodyLineLimit)
-                        .padding(.top, KanbanDesign.cardPreviewSectionSpacing)
-                }
-
                 if hasCardContext(parentBadge: parentBadge, planIndicator: planIndicator) {
                     cardContextView(parentBadge: parentBadge, planIndicator: planIndicator)
                         .padding(.top, KanbanDesign.cardPreviewContextFooterSpacing)
@@ -946,10 +938,6 @@ struct KanbanBoardView: View {
 
                 Spacer(minLength: Spacing.xs)
 
-                if let priority = card.priority {
-                    priorityBadge(priority)
-                }
-
                 cardAvatarPlaceholder(card)
             }
 
@@ -987,9 +975,7 @@ struct KanbanBoardView: View {
 
     private func hasCardFooter(_ card: KanbanCard) -> Bool {
         KanbanBoardLayout.testingOwnerBadge(for: card) != nil
-            || card.priority != nil
-            || card.agent != nil
-            || !card.tags.isEmpty
+            || !KanbanBoardLayout.cardFaceSemanticChips(for: card).isEmpty
     }
 
     private func hasCardContext(parentBadge: KanbanParentBadge?, planIndicator: KanbanPlanIndicator?) -> Bool {
@@ -1017,28 +1003,15 @@ struct KanbanBoardView: View {
             if let badge = KanbanBoardLayout.testingOwnerBadge(for: card) {
                 testingOwnerBadgeView(badge)
             }
-            if let priority = card.priority {
-                priorityBadge(priority)
-            }
-            if let agent = card.agent {
-                HStack(spacing: Spacing.xxs) {
-                    Image(systemName: "cpu")
-                    Text(agent)
-                }
-                .font(CiderFont.micro)
-                .foregroundColor(CiderColors.controlAccent)
-            }
-            if !card.tags.isEmpty {
-                ForEach(card.tags.prefix(2), id: \.self) { tag in
-                    Text(tag)
-                        .font(CiderFont.micro)
-                        .foregroundColor(CiderColors.tertiary)
-                        .padding(.horizontal, Spacing.xxs)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(CiderColors.surfaceInput)
-                        )
-                }
+            ForEach(KanbanBoardLayout.cardFaceSemanticChips(for: card), id: \.self) { chip in
+                Text(chip)
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.horizontal, Spacing.xxs)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
             }
             Spacer()
         }

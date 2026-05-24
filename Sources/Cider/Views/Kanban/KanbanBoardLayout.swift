@@ -314,6 +314,37 @@ enum KanbanBoardLayout {
         return trimmedNonEmpty(card.notes)
     }
 
+    static func cardFacePreviewText(for card: KanbanCard) -> String? {
+        nil
+    }
+
+    static func cardFaceSemanticChips(for card: KanbanCard, limit: Int = 3) -> [String] {
+        guard limit > 0 else { return [] }
+        let priorityLabels = Set(KanbanPriority.allCases.map { $0.rawValue })
+        var seen: Set<String> = []
+        var chips: [String] = []
+
+        for tag in card.tags {
+            let normalized = KanbanCardTagTaxonomy.normalized(tag)
+            guard !normalized.isEmpty, !priorityLabels.contains(normalized), seen.insert(normalized).inserted else {
+                continue
+            }
+            chips.append(displayChipLabel(for: normalized))
+            if chips.count == limit { break }
+        }
+
+        return chips
+    }
+
+    private static func displayChipLabel(for tag: String) -> String {
+        tag.split(separator: "-")
+            .map { part in
+                guard let first = part.first else { return "" }
+                return first.uppercased() + part.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+
     private static func trimmedNonEmpty(_ text: String?) -> String? {
         let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed

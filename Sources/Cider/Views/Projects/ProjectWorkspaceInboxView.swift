@@ -73,12 +73,6 @@ struct ProjectWorkspaceInboxView: View {
                     }
                 }
 
-                if let preview = KanbanBoardLayout.previewText(for: entry.card) {
-                    Text(preview)
-                        .font(CiderFont.micro)
-                        .foregroundColor(CiderColors.tertiary.opacity(0.72))
-                        .lineLimit(KanbanDesign.cardPreviewBodyLineLimit)
-                }
             }
 
             Spacer(minLength: 0)

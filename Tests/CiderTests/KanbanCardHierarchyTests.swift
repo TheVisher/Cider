@@ -519,23 +519,21 @@ struct KanbanCardHierarchyTests {
         #expect(indicator?.accentColor == .green)
     }
 
-    @Test("card preview text prefers AI summary and falls back to notes")
-    func cardPreviewTextPrefersAISummaryAndFallsBackToNotes() {
-        let summarized = KanbanCard(
-            id: "summarized",
-            title: "Summarized card",
-            notes: "Problem:\n- Raw notes should not be first.",
-            aiSummary: "Generated summary for board scanning."
-        )
-        let unsummarized = KanbanCard(
-            id: "unsummarized",
-            title: "Unsummarized card",
-            notes: "Problem:\n- Fallback notes remain useful."
+    @Test("card face hides body previews and uses semantic chips instead of priority text")
+    func cardFaceHidesBodyPreviewsAndUsesSemanticChips() {
+        let card = KanbanCard(
+            id: "visual",
+            title: "Visual polish",
+            notes: "Problem:\n- Raw problem text belongs in the drawer.",
+            aiSummary: "Generated summary should also stay off the card face.",
+            priority: .high,
+            agent: "Cody",
+            tags: ["bug", "performance", "high"]
         )
 
-        #expect(KanbanBoardLayout.previewText(for: summarized) == "Generated summary for board scanning.")
-        #expect(KanbanBoardLayout.previewText(for: unsummarized) == "Problem:\n- Fallback notes remain useful.")
-        #expect(KanbanDesign.cardPreviewBodyLineLimit == 2)
+        #expect(KanbanBoardLayout.cardFacePreviewText(for: card) == nil)
+        #expect(KanbanBoardLayout.cardFaceSemanticChips(for: card) == ["Bug", "Performance"])
+        #expect(!KanbanBoardLayout.cardFaceSemanticChips(for: card).contains("High"))
     }
 
     @Test("plan indicator marks the first active child as next up")
