@@ -554,6 +554,22 @@ struct KanbanCardHierarchyTests {
         #expect(KanbanBoardLayout.cardFaceSemanticChips(for: card) == ["Sidebar", "Bug", "Testing"])
     }
 
+    @Test("card face overflow menu exposes a bounded semantic tag list")
+    func cardFaceOverflowMenuExposesBoundedSemanticTagList() {
+        let card = KanbanCard(
+            id: "overflow-tags",
+            title: "Overflow tag menu",
+            priority: .high,
+            tags: ["cider-web", "sidebar", "bug", "testing", "manual-qa", "blocked", "high", "cider-ios"]
+        )
+
+        let overflowTags = KanbanBoardLayout.cardFaceOverflowTags(for: card, limit: 5)
+
+        #expect(overflowTags.map(\.label) == ["Cider Web", "Sidebar", "Cider iOS", "Bug", "Testing"])
+        #expect(overflowTags.map(\.accessory) == [.featureIcon, .featureIcon, .featureIcon, .colorDot, .colorDot])
+        #expect(!overflowTags.map(\.label).contains("High"))
+    }
+
     @Test("plan indicator marks the first active child as next up")
     func planIndicatorMarksFirstActiveChildAsNextUp() {
         let completed = Date(timeIntervalSince1970: 1_777_737_600)

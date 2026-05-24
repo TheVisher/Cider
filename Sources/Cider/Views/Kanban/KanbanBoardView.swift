@@ -1014,13 +1014,25 @@ struct KanbanBoardView: View {
     private func cardFaceChipView(_ chip: KanbanCardFaceChip, card: KanbanCard) -> some View {
         switch chip.role {
         case .tagEdit:
-            Button {
-                onOpenCard(boardID, card.id)
+            Menu {
+                let tags = KanbanBoardLayout.cardFaceOverflowTags(for: card)
+                if tags.isEmpty {
+                    Text("No tags")
+                } else {
+                    ForEach(tags, id: \.label) { tag in
+                        Label {
+                            Text(tag.label)
+                        } icon: {
+                            cardFaceChipMenuIcon(for: tag)
+                        }
+                    }
+                }
             } label: {
                 cardFaceChipLabel(chip, color: CiderColors.tertiary, indicatorColor: CiderColors.controlAccent)
             }
+            .menuStyle(.borderlessButton)
             .buttonStyle(.plain)
-            .accessibilityLabel("Add or change tags for \(card.title)")
+            .accessibilityLabel("Show tags for \(card.title)")
         case .featureDomain, .typeStatus:
             let color = cardFaceChipColor(for: chip)
             cardFaceChipLabel(chip, color: CiderColors.secondary, indicatorColor: color)
@@ -1033,7 +1045,7 @@ struct KanbanBoardView: View {
             case .none:
                 EmptyView()
             case .featureIcon:
-                Image(systemName: "square.grid.2x2")
+                Image(systemName: "square.split.2x1")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundColor(indicatorColor.opacity(0.85))
             case .colorDot:
@@ -1056,6 +1068,23 @@ struct KanbanBoardView: View {
             Capsule(style: .continuous)
                 .strokeBorder(CiderColors.borderDefault, lineWidth: CiderBorder.hairlineStrokeWidth)
         )
+    }
+
+    @ViewBuilder
+    private func cardFaceChipMenuIcon(for chip: KanbanCardFaceChip) -> some View {
+        let indicatorColor = cardFaceChipColor(for: chip)
+        switch chip.accessory {
+        case .featureIcon:
+            Image(systemName: "square.split.2x1")
+                .foregroundColor(indicatorColor)
+        case .colorDot:
+            Circle()
+                .fill(indicatorColor)
+                .frame(width: 7, height: 7)
+        case .none:
+            Image(systemName: "tag")
+                .foregroundColor(CiderColors.tertiary)
+        }
     }
 
     private func cardFaceChipColor(for chip: KanbanCardFaceChip) -> Color {

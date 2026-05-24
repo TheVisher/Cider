@@ -351,6 +351,10 @@ enum KanbanBoardLayout {
         return [KanbanCardFaceChip(label: "…", role: .tagEdit, accessory: .none, surface: .muted)] + semanticChips
     }
 
+    static func cardFaceOverflowTags(for card: KanbanCard, limit: Int = 8) -> [KanbanCardFaceChip] {
+        cardFaceSemanticChipModels(for: card, limit: limit)
+    }
+
     private static func cardFaceSemanticChipModels(for card: KanbanCard, limit: Int = 3) -> [KanbanCardFaceChip] {
         guard limit > 0 else { return [] }
         let priorityLabels = Set(KanbanPriority.allCases.map { $0.rawValue })
@@ -409,6 +413,8 @@ enum KanbanBoardLayout {
         "qa",
         "review",
         "needs-qa",
+        "manual-qa",
+        "agent-can-verify",
         "agent-report",
         "new",
         "inbox",
@@ -420,6 +426,9 @@ enum KanbanBoardLayout {
     private static func displayChipLabel(for tag: String) -> String {
         tag.split(separator: "-")
             .map { part in
+                let lowercased = part.lowercased()
+                if lowercased == "ios" { return "iOS" }
+                if lowercased == "qa" { return "QA" }
                 guard let first = part.first else { return "" }
                 return first.uppercased() + part.dropFirst()
             }
