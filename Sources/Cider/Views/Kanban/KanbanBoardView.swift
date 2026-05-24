@@ -65,7 +65,7 @@ struct KanbanBoardView: View {
             VStack(spacing: 0) {
                 boardHeader(board)
                 Divider().background(CiderColors.separator)
-                featureScopedBoardArea(board)
+                columnsArea(board)
             }
             .onChange(of: boardID) { _, _ in
                 collapsedParentCardIDs.removeAll()
@@ -80,7 +80,9 @@ struct KanbanBoardView: View {
     // MARK: - Board Header
 
     private func boardHeader(_ board: KanbanBoard) -> some View {
-        HStack(spacing: Spacing.sm) {
+        let featureFilters = KanbanBoardLayout.featureDomainFilters(for: board)
+
+        return HStack(spacing: Spacing.sm) {
             if editingBoardName {
                 TextField("Board name", text: $boardNameDraft)
                     .textFieldStyle(.plain)
@@ -147,6 +149,10 @@ struct KanbanBoardView: View {
                 Capsule(style: .continuous)
                     .fill(CiderColors.surfaceInput)
             )
+
+            if !featureFilters.isEmpty {
+                featureFilterMenu(featureFilters)
+            }
 
             // Compact toggle
             Button {
@@ -238,109 +244,54 @@ struct KanbanBoardView: View {
 
     // MARK: - Columns
 
-    @ViewBuilder
-    private func featureScopedBoardArea(_ board: KanbanBoard) -> some View {
-        let filters = KanbanBoardLayout.featureDomainFilters(for: board)
-        if filters.isEmpty {
-            columnsArea(board)
-        } else {
-            HStack(alignment: .top, spacing: 0) {
-                featureFilterSidebar(filters)
-                Divider().background(CiderColors.separator)
-                columnsArea(board)
-            }
+    private func featureFilterMenu(_ filters: [KanbanFeatureDomainFilter]) -> some View {
+        let selected = selectedFeatureDomainFilter.flatMap { selectedID in
+            filters.first { $0.id == selectedID }
         }
-    }
 
-    private func featureFilterSidebar(_ filters: [KanbanFeatureDomainFilter]) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "cube.transparent")
-                    .font(CiderFont.caption)
-                Text("Features")
-                    .font(CiderFont.captionSemibold)
-                Spacer(minLength: 0)
+        return Menu {
+            Button {
+                selectedFeatureDomainFilter = nil
+            } label: {
+                Label("All Features", systemImage: selected == nil ? "checkmark" : "cube.transparent")
             }
-            .foregroundColor(CiderColors.secondary)
 
-            if let selectedFilter = selectedFeatureDomainFilter,
-               let selected = filters.first(where: { $0.id == selectedFilter }) {
-                HStack(spacing: Spacing.xxs) {
-                    Text(selected.label)
-                        .font(CiderFont.microSemibold)
-                        .foregroundColor(CiderColors.controlAccent)
-                        .lineLimit(1)
-                    Button {
-                        selectedFeatureDomainFilter = nil
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(CiderFont.micro)
-                            .foregroundColor(CiderColors.tertiary)
+            Divider()
+
+            ForEach(filters) { filter in
+                Button {
+                    withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
+                        selectedFeatureDomainFilter = filter.id
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Clear feature filter")
+                } label: {
+                    Label(
+                        "\(filter.label) (\(filter.cardCount))",
+                        systemImage: selectedFeatureDomainFilter == filter.id ? "checkmark" : "cube.transparent"
+                    )
                 }
-                .padding(.horizontal, Spacing.xs)
-                .padding(.vertical, Spacing.xxs)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(CiderColors.controlAccent.opacity(0.12))
-                )
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                ForEach(filters) { filter in
-                    featureFilterButton(filter)
-                }
-            }
-
-            if selectedFeatureDomainFilter != nil {
-                Button("Clear filter") {
-                    selectedFeatureDomainFilter = nil
-                }
-                .font(CiderFont.microSemibold)
-                .foregroundColor(CiderColors.tertiary)
-                .buttonStyle(.plain)
-                .padding(.top, Spacing.xxs)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(Spacing.sm)
-        .frame(width: 150)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(CiderColors.surfaceSubtle.opacity(0.38))
-    }
-
-    private func featureFilterButton(_ filter: KanbanFeatureDomainFilter) -> some View {
-        let isSelected = selectedFeatureDomainFilter == filter.id
-        return Button {
-            withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
-                selectedFeatureDomainFilter = isSelected ? nil : filter.id
             }
         } label: {
-            HStack(spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xxs) {
                 Image(systemName: "cube.transparent")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.tertiary)
-                Text(filter.label)
-                    .font(CiderFont.microSemibold)
-                    .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
+                    .font(CiderFont.caption)
+                Text(selected?.label ?? "Features")
                     .lineLimit(1)
-                Spacer(minLength: Spacing.xxs)
-                Text("\(filter.cardCount)")
+                Image(systemName: "chevron.down")
                     .font(CiderFont.micro)
                     .foregroundColor(CiderColors.tertiary)
             }
+            .font(CiderFont.captionMedium)
+            .foregroundColor(selected == nil ? CiderColors.tertiary : CiderColors.controlAccent)
             .padding(.horizontal, Spacing.xs)
-            .padding(.vertical, 5)
+            .padding(.vertical, Spacing.xxs)
             .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isSelected ? CiderColors.controlAccent.opacity(0.12) : Color.clear)
+                Capsule(style: .continuous)
+                    .fill(selected == nil ? CiderColors.surfaceInput : CiderColors.controlAccent.opacity(0.12))
             )
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Filter board by \(filter.label)")
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel(selected.map { "Feature filter: \($0.label)" } ?? "Feature filter")
     }
 
     private func filteredCardCount(for board: KanbanBoard) -> Int {

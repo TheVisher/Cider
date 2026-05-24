@@ -58,6 +58,16 @@ struct KanbanFeatureDomainFilter: Identifiable, Equatable {
     let cardCount: Int
 }
 
+private struct KanbanFeatureDomainDefinition: Equatable {
+    let id: String
+    let label: String
+    let aliases: Set<String>
+
+    func matches(_ tag: String) -> Bool {
+        id == tag || aliases.contains(tag)
+    }
+}
+
 enum KanbanLaneRole: String, CaseIterable {
     case workflow
     case qa
@@ -389,26 +399,21 @@ enum KanbanBoardLayout {
     }
 
     static func featureDomainFilters(for board: KanbanBoard) -> [KanbanFeatureDomainFilter] {
-        var order: [String] = []
         var cardIDsByFeature: [String: Set<String>] = [:]
 
         for column in board.columns {
             for card in column.cards {
                 for feature in featureDomainTags(for: card) {
-                    if cardIDsByFeature[feature] == nil {
-                        order.append(feature)
-                        cardIDsByFeature[feature] = []
-                    }
-                    cardIDsByFeature[feature]?.insert(card.id)
+                    cardIDsByFeature[feature, default: []].insert(card.id)
                 }
             }
         }
 
-        return order.compactMap { feature in
-            guard let cardIDs = cardIDsByFeature[feature], !cardIDs.isEmpty else { return nil }
+        return featureDomainDefinitions.compactMap { definition in
+            guard let cardIDs = cardIDsByFeature[definition.id], !cardIDs.isEmpty else { return nil }
             return KanbanFeatureDomainFilter(
-                id: feature,
-                label: displayChipLabel(for: feature),
+                id: definition.id,
+                label: definition.label,
                 cardCount: cardIDs.count
             )
         }
@@ -417,7 +422,8 @@ enum KanbanBoardLayout {
     static func cards(_ cards: [KanbanCard], matchingFeatureDomainFilter filter: String?) -> [KanbanCard] {
         let normalizedFilter = KanbanCardTagTaxonomy.normalized(filter ?? "")
         guard !normalizedFilter.isEmpty else { return cards }
-        return cards.filter { featureDomainTags(for: $0).contains(normalizedFilter) }
+        let canonicalFilter = canonicalFeatureDomain(for: normalizedFilter)?.id ?? normalizedFilter
+        return cards.filter { featureDomainTags(for: $0).contains(canonicalFilter) }
     }
 
     private static func cardFaceSemanticChipModels(for card: KanbanCard, limit: Int = 3) -> [KanbanCardFaceChip] {
@@ -429,12 +435,18 @@ enum KanbanBoardLayout {
 
         for tag in card.tags {
             let normalized = KanbanCardTagTaxonomy.normalized(tag)
-            guard !normalized.isEmpty, !priorityLabels.contains(normalized), seen.insert(normalized).inserted else {
+            guard !normalized.isEmpty, !priorityLabels.contains(normalized) else {
                 continue
             }
+            let feature = canonicalFeatureDomain(for: normalized)
+            guard feature != nil || typeStatusTags.contains(normalized) || KanbanCardTagTaxonomy.isCoreTag(normalized) else {
+                continue
+            }
+            let dedupeKey = feature?.id ?? normalized
+            guard seen.insert(dedupeKey).inserted else { continue }
             let role = cardFaceChipRole(for: normalized)
             let chip = KanbanCardFaceChip(
-                label: displayChipLabel(for: normalized),
+                label: feature?.label ?? displayChipLabel(for: normalized),
                 role: role,
                 accessory: cardFaceChipAccessory(for: role),
                 surface: .muted
@@ -461,21 +473,26 @@ enum KanbanBoardLayout {
             let normalized = KanbanCardTagTaxonomy.normalized(tag)
             guard !normalized.isEmpty,
                   !priorityLabels.contains(normalized),
-                  cardFaceChipRole(for: normalized) == .featureDomain,
-                  seen.insert(normalized).inserted else {
+                  let feature = canonicalFeatureDomain(for: normalized),
+                  seen.insert(feature.id).inserted else {
                 continue
             }
-            features.append(normalized)
+            features.append(feature.id)
         }
 
         return features
     }
 
     private static func cardFaceChipRole(for tag: String) -> KanbanCardFaceChip.Role {
-        if typeStatusTags.contains(tag) || KanbanCardTagTaxonomy.isCoreTag(tag) {
-            return .typeStatus
+        if canonicalFeatureDomain(for: tag) != nil {
+            return .featureDomain
         }
-        return .featureDomain
+        return .typeStatus
+    }
+
+    private static func canonicalFeatureDomain(for tag: String) -> KanbanFeatureDomainDefinition? {
+        guard !typeStatusTags.contains(tag), !KanbanCardTagTaxonomy.isCoreTag(tag) else { return nil }
+        return featureDomainDefinitions.first { $0.matches(tag) }
     }
 
     private static func cardFaceChipAccessory(for role: KanbanCardFaceChip.Role) -> KanbanCardFaceChip.Accessory {
@@ -488,6 +505,51 @@ enum KanbanBoardLayout {
             return .colorDot
         }
     }
+
+    private static let featureDomainDefinitions: [KanbanFeatureDomainDefinition] = [
+        KanbanFeatureDomainDefinition(id: "kanban", label: "Kanban", aliases: [
+            "board", "boards", "card", "cards", "parent-child", "swimlane", "swimlanes", "archive", "archived", "filters"
+        ]),
+        KanbanFeatureDomainDefinition(id: "cider-web", label: "Cider Web", aliases: [
+            "web", "app-parity"
+        ]),
+        KanbanFeatureDomainDefinition(id: "cider-ios", label: "Cider iOS", aliases: [
+            "ios"
+        ]),
+        KanbanFeatureDomainDefinition(id: "navigation", label: "Navigation", aliases: [
+            "sidebar", "tabs", "tab", "breadcrumbs", "information-architecture", "ia", "browse", "command-palette"
+        ]),
+        KanbanFeatureDomainDefinition(id: "dashboard", label: "Dashboard", aliases: [
+            "dashboards", "home", "agenda", "daily-brief", "inbox", "project-inbox"
+        ]),
+        KanbanFeatureDomainDefinition(id: "projects", label: "Projects", aliases: [
+            "project", "references", "reference", "inspiration", "plans", "handoffs", "notes", "decisions", "artifacts"
+        ]),
+        KanbanFeatureDomainDefinition(id: "capture-bookmarks", label: "Capture & Bookmarks", aliases: [
+            "capture", "bookmarks", "bookmark", "enrichment", "clipboard", "scanner", "web-clipping"
+        ]),
+        KanbanFeatureDomainDefinition(id: "library-spaces", label: "Library & Spaces", aliases: [
+            "library", "spaces", "space", "domains", "domain", "saved-views", "collections"
+        ]),
+        KanbanFeatureDomainDefinition(id: "media", label: "Media", aliases: [
+            "movies", "movie", "tv", "games", "game", "music", "books", "book"
+        ]),
+        KanbanFeatureDomainDefinition(id: "tasks-reminders", label: "Tasks & Reminders", aliases: [
+            "todos", "todo", "tasks", "task", "reminders", "reminder", "dates", "date-cards"
+        ]),
+        KanbanFeatureDomainDefinition(id: "ai-agents", label: "AI & Agents", aliases: [
+            "agents", "agent", "agent-memory", "agent-rules", "ai", "ai-routing", "hermes", "computer-use", "life-assistant", "automation"
+        ]),
+        KanbanFeatureDomainDefinition(id: "storage-cli", label: "Storage & CLI", aliases: [
+            "cli", "storage", "sqlite", "filesystem", "sync", "adoption", "reconciliation", "duplicates", "migration", "indexing"
+        ]),
+        KanbanFeatureDomainDefinition(id: "search-recall", label: "Search & Recall", aliases: [
+            "search", "recall", "backlinks", "trust"
+        ]),
+        KanbanFeatureDomainDefinition(id: "design-ui", label: "Design & UI", aliases: [
+            "ux", "design-system", "visual-hierarchy", "layout", "density", "color", "colors", "grid", "masonry", "thumbnails", "empty-state"
+        ]),
+    ]
 
     private static let typeStatusTags: Set<String> = [
         "idea",

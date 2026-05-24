@@ -561,7 +561,7 @@ struct KanbanCardHierarchyTests {
 
         let chips = KanbanBoardLayout.cardFaceChips(for: card)
 
-        #expect(chips.map(\.label) == ["…", "Sidebar", "Cider Web", "Cider iOS", "Bug", "Testing", "Manual QA", "Blocked"])
+        #expect(chips.map(\.label) == ["…", "Navigation", "Cider Web", "Cider iOS", "Bug", "Testing", "Manual QA", "Blocked"])
         #expect(chips.map(\.accessory) == [.none, .featureIcon, .featureIcon, .featureIcon, .colorDot, .colorDot, .colorDot, .colorDot])
         #expect(!chips.map(\.label).contains("High"))
     }
@@ -577,7 +577,7 @@ struct KanbanCardHierarchyTests {
 
         let chips = KanbanBoardLayout.cardFaceChips(for: card)
 
-        #expect(chips.map(\.label) == ["…", "Sidebar", "Bug", "Testing"])
+        #expect(chips.map(\.label) == ["…", "Navigation", "Bug", "Testing"])
         #expect(chips.map(\.role) == [.tagEdit, .featureDomain, .typeStatus, .typeStatus])
         #expect(chips.map(\.accessory) == [.none, .featureIcon, .colorDot, .colorDot])
         #expect(chips.map(\.surface) == [.muted, .muted, .muted, .muted])
@@ -585,7 +585,7 @@ struct KanbanCardHierarchyTests {
         #expect(chips[0].activation == .tagEditor)
         #expect(chips[1].iconSystemName == "cube.transparent")
         #expect(chips[2].iconSystemName == nil)
-        #expect(KanbanBoardLayout.cardFaceSemanticChips(for: card) == ["Sidebar", "Bug", "Testing"])
+        #expect(KanbanBoardLayout.cardFaceSemanticChips(for: card) == ["Navigation", "Bug", "Testing"])
     }
 
     @Test("card face overflow menu exposes a bounded semantic tag list")
@@ -599,11 +599,11 @@ struct KanbanCardHierarchyTests {
 
         let overflowTags = KanbanBoardLayout.cardFaceOverflowTags(for: card, limit: 5)
 
-        #expect(overflowTags.map(\.label) == ["Cider Web", "Sidebar", "Cider iOS", "Bug", "Testing"])
+        #expect(overflowTags.map(\.label) == ["Cider Web", "Navigation", "Cider iOS", "Bug", "Testing"])
         #expect(overflowTags.map(\.accessory) == [.featureIcon, .featureIcon, .featureIcon, .colorDot, .colorDot])
         #expect(overflowTags.map(\.activation) == [
             .featureDomainFilter("cider-web"),
-            .featureDomainFilter("sidebar"),
+            .featureDomainFilter("navigation"),
             .featureDomainFilter("cider-ios"),
             .none,
             .none,
@@ -611,8 +611,8 @@ struct KanbanCardHierarchyTests {
         #expect(!overflowTags.map(\.label).contains("High"))
     }
 
-    @Test("feature domain filters derive from feature chips and exclude type tags")
-    func featureDomainFiltersDeriveFromFeatureChipsAndExcludeTypeTags() {
+    @Test("feature domain filters use a curated canonical set and merge aliases")
+    func featureDomainFiltersUseCuratedCanonicalSetAndMergeAliases() {
         let board = KanbanBoard(name: "Feature filters", columns: [
             KanbanColumn(id: "todo", name: "Todo", cards: [
                 KanbanCard(id: "sidebar-bug", title: "Sidebar bug", tags: ["sidebar", "bug", "high"]),
@@ -626,9 +626,9 @@ struct KanbanCardHierarchyTests {
 
         let filters = KanbanBoardLayout.featureDomainFilters(for: board)
 
-        #expect(filters.map(\.id) == ["sidebar", "cider-web", "project-inbox"])
-        #expect(filters.map(\.label) == ["Sidebar", "Cider Web", "Project Inbox"])
-        #expect(filters.map(\.cardCount) == [2, 1, 1])
+        #expect(filters.map(\.id) == ["cider-web", "navigation", "dashboard"])
+        #expect(filters.map(\.label) == ["Cider Web", "Navigation", "Dashboard"])
+        #expect(filters.map(\.cardCount) == [1, 2, 1])
     }
 
     @Test("feature domain filter narrows cards and can be cleared")
@@ -639,7 +639,7 @@ struct KanbanCardHierarchyTests {
             KanbanCard(id: "untagged", title: "Untagged")
         ]
 
-        #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "sidebar").map(\.id) == ["sidebar-bug"])
+        #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "navigation").map(\.id) == ["sidebar-bug"])
         #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "Sidebar").map(\.id) == ["sidebar-bug"])
         #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: nil).map(\.id) == ["sidebar-bug", "web-qa", "untagged"])
         #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "bug").isEmpty)
