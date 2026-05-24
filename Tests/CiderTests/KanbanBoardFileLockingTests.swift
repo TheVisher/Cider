@@ -244,6 +244,42 @@ struct KanbanBoardFileLockingTests {
         #expect(refreshed.parentCardID == parent.id)
     }
 
+    @Test("tag editor save persists tags and reload derives visible chip semantics")
+    @MainActor
+    func tagEditorSavePersistsTagsAndReloadDerivesVisibleChipSemantics() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Tag Editor Persistence")
+        let card = try #require(storage.addCard(
+            boardID: board.id,
+            columnID: "backlog",
+            title: "Editable tags",
+            tags: ["bug"]
+        ))
+
+        storage.updateCardTags(boardID: board.id, cardID: card.id, tags: ["Sidebar", "Bug", "QA", "sidebar"])
+
+        let reloadedStorage = KanbanStorage()
+        let reloaded = try #require(reloadedStorage.findCard(id: card.id)?.card)
+        #expect(reloaded.tags == ["sidebar", "bug", "qa"])
+
+        let chips = KanbanBoardLayout.cardFaceChips(for: reloaded)
+        #expect(chips.map(\.label) == ["…", "Sidebar", "Bug", "QA"])
+        #expect(chips.map(\.role) == [.tagEdit, .featureDomain, .typeStatus, .typeStatus])
+        #expect(chips.map(\.accessory) == [.none, .featureIcon, .colorDot, .colorDot])
+        #expect(chips[1].iconSystemName == "cube.transparent")
+        #expect(chips[2].iconSystemName == nil)
+        #expect(chips[3].iconSystemName == nil)
+    }
+
     @Test("parallel CLI add-card operations preserve every card")
     func parallelCLIAddCardOperationsPreserveEveryCard() throws {
         let cli = try #require(Self.ciderCLIURL())

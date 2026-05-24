@@ -1166,9 +1166,7 @@ struct KanbanBoardView: View {
     }
 
     private func saveTagEditor(for card: KanbanCard) {
-        var updated = card
-        updated.tags = parsedTagEditorTags()
-        storage.updateCard(boardID: boardID, card: updated)
+        storage.updateCardTags(boardID: boardID, cardID: card.id, tags: parsedTagEditorTags())
         tagEditorCardID = nil
         tagEditorDraft = ""
     }

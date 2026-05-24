@@ -289,6 +289,26 @@ final class KanbanStorage: ObservableObject {
         return didAdd ? card : nil
     }
 
+    func updateCardTags(boardID: String, cardID: String, tags: [String]) {
+        let normalizedTags = KanbanCardTagTaxonomy.normalizedTags(from: tags)
+        var updatedCard: KanbanCard?
+        mutate(boardID: boardID) { board in
+            for colIdx in board.columns.indices {
+                if let cardIdx = board.columns[colIdx].cards.firstIndex(where: { $0.id == cardID }) {
+                    let current = board.columns[colIdx].cards[cardIdx]
+                    guard current.tags != normalizedTags else { return }
+                    board.columns[colIdx].cards[cardIdx].tags = normalizedTags
+                    board.columns[colIdx].cards[cardIdx].markActivity("updated")
+                    updatedCard = board.columns[colIdx].cards[cardIdx]
+                    return
+                }
+            }
+        }
+        if let updatedCard {
+            refreshSecondBrainProjectionIfAvailable(boardID: boardID, card: updatedCard)
+        }
+    }
+
     func updateCard(boardID: String, card: KanbanCard) {
         let baseline = boards.flatMap(\.allCards).first { $0.id == card.id }
         let shouldRefreshSummary = baseline.map {
