@@ -304,7 +304,8 @@ final class KanbanStorage: ObservableObject {
                         merged.aiSummary = nil
                     }
                     guard board.canAssignParent(cardID: merged.id, parentCardID: merged.parentCardID) else { return }
-                    if merged.updatedAt == current.updatedAt {
+                    guard merged != current else { return }
+                    if !isReviewOnlyChange(from: current, to: merged), merged.updatedAt == current.updatedAt {
                         merged.markActivity("updated")
                     }
                     board.columns[colIdx].cards[cardIdx] = merged
@@ -342,6 +343,12 @@ final class KanbanStorage: ObservableObject {
         if incoming.lastActivityKind != baseline.lastActivityKind { merged.lastActivityKind = incoming.lastActivityKind }
         if incoming.reviewedAt != baseline.reviewedAt { merged.reviewedAt = incoming.reviewedAt }
         return merged
+    }
+
+    private func isReviewOnlyChange(from current: KanbanCard, to merged: KanbanCard) -> Bool {
+        var normalized = merged
+        normalized.reviewedAt = current.reviewedAt
+        return normalized == current
     }
 
     private func schedulePreviewSummaryRefresh(boardID: String, cardID: String) {

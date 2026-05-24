@@ -107,6 +107,109 @@ struct KanbanBoardFileLockingTests {
         #expect(refreshed.priority == .high)
     }
 
+    @Test("reviewed inbox cards stay reviewed after no-op detail save and reload")
+    @MainActor
+    func reviewedInboxCardsStayReviewedAfterNoOpDetailSaveAndReload() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Inbox Persistence")
+        let workspace = ProjectWorkspace(
+            id: "inbox-persistence",
+            kind: .project,
+            title: "Inbox Persistence",
+            subtitle: "",
+            boardIDs: [board.id],
+            referenceSearchTerms: []
+        )
+        let card = try #require(storage.addCard(
+            boardID: board.id,
+            columnID: "backlog",
+            title: "Review me",
+            notes: "Agent handoff ready for QA",
+            priority: .high
+        ))
+
+        var inboxCandidate = card
+        inboxCandidate.agent = "Cody"
+        storage.updateCard(boardID: board.id, card: inboxCandidate)
+
+        #expect(ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: storage.boards) == 1)
+
+        storage.markCardReviewed(boardID: board.id, cardID: card.id)
+        let reviewed = try #require(KanbanStorage().findCard(id: card.id)?.card)
+
+        storage.updateCard(boardID: board.id, card: reviewed)
+
+        let reloadedStorage = KanbanStorage()
+        let reloadedBoard = try #require(reloadedStorage.boards.first { $0.id == board.id })
+        let reloadedCard = try #require(reloadedBoard.card(id: card.id))
+        #expect(reloadedCard.reviewedAt != nil)
+        #expect(reloadedBoard.columnID(containing: card.id) == "backlog")
+        #expect(ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: reloadedStorage.boards) == 0)
+        #expect(ProjectWorkspaceInboxProvider.entries(for: workspace, boards: reloadedStorage.boards).isEmpty)
+    }
+
+    @Test("reviewed inbox cards re-enter after persisted meaningful activity")
+    @MainActor
+    func reviewedInboxCardsReenterAfterPersistedMeaningfulActivity() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Inbox Reentry")
+        let workspace = ProjectWorkspace(
+            id: "inbox-reentry",
+            kind: .project,
+            title: "Inbox Reentry",
+            subtitle: "",
+            boardIDs: [board.id],
+            referenceSearchTerms: []
+        )
+        let card = try #require(storage.addCard(
+            boardID: board.id,
+            columnID: "backlog",
+            title: "Review me again",
+            notes: "Agent handoff ready for QA"
+        ))
+
+        var inboxCandidate = card
+        inboxCandidate.agent = "Cody"
+        storage.updateCard(boardID: board.id, card: inboxCandidate)
+
+        storage.markCardReviewed(boardID: board.id, cardID: card.id)
+        var reviewed = try #require(KanbanStorage().findCard(id: card.id)?.card)
+        let reviewedAt = try #require(reviewed.reviewedAt)
+        reviewed.historyEntries.append(KanbanCardHistoryEntry(
+            type: .implementation,
+            body: "Agent added a new follow-up after review.",
+            author: "Cody",
+            createdAt: reviewedAt.addingTimeInterval(60)
+        ))
+        storage.updateCard(boardID: board.id, card: reviewed)
+
+        let reloadedStorage = KanbanStorage()
+        let entries = ProjectWorkspaceInboxProvider.entries(for: workspace, boards: reloadedStorage.boards)
+        let reloadedCard = try #require(reloadedStorage.findCard(id: card.id)?.card)
+        #expect(entries.map { $0.card.id } == [card.id])
+        #expect(reloadedCard.reviewedAt != nil)
+        #expect(reloadedCard.updatedAt != nil)
+        #expect(reloadedStorage.findCard(id: card.id)?.column.id == "backlog")
+    }
+
     @Test("add card persists normalized metadata and parent")
     @MainActor
     func addCardPersistsNormalizedMetadataAndParent() throws {
