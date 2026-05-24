@@ -1,6 +1,17 @@
 import CoreGraphics
 import Foundation
 
+struct KanbanCardFaceChip: Equatable {
+    enum Role: Equatable {
+        case tagEdit
+        case featureDomain
+        case typeStatus
+    }
+
+    let label: String
+    let role: Role
+}
+
 enum KanbanLaneRole: String, CaseIterable {
     case workflow
     case qa
@@ -319,22 +330,64 @@ enum KanbanBoardLayout {
     }
 
     static func cardFaceSemanticChips(for card: KanbanCard, limit: Int = 3) -> [String] {
+        cardFaceSemanticChipModels(for: card, limit: limit).map(\.label)
+    }
+
+    static func cardFaceChips(for card: KanbanCard, limit: Int = 3) -> [KanbanCardFaceChip] {
+        let semanticChips = cardFaceSemanticChipModels(for: card, limit: limit)
+        guard !semanticChips.isEmpty else { return [] }
+        return [KanbanCardFaceChip(label: "…", role: .tagEdit)] + semanticChips
+    }
+
+    private static func cardFaceSemanticChipModels(for card: KanbanCard, limit: Int = 3) -> [KanbanCardFaceChip] {
         guard limit > 0 else { return [] }
         let priorityLabels = Set(KanbanPriority.allCases.map { $0.rawValue })
         var seen: Set<String> = []
-        var chips: [String] = []
+        var featureDomainChips: [KanbanCardFaceChip] = []
+        var typeStatusChips: [KanbanCardFaceChip] = []
 
         for tag in card.tags {
             let normalized = KanbanCardTagTaxonomy.normalized(tag)
             guard !normalized.isEmpty, !priorityLabels.contains(normalized), seen.insert(normalized).inserted else {
                 continue
             }
-            chips.append(displayChipLabel(for: normalized))
-            if chips.count == limit { break }
+            let role = cardFaceChipRole(for: normalized)
+            let chip = KanbanCardFaceChip(label: displayChipLabel(for: normalized), role: role)
+            switch role {
+            case .featureDomain:
+                featureDomainChips.append(chip)
+            case .typeStatus:
+                typeStatusChips.append(chip)
+            case .tagEdit:
+                break
+            }
         }
 
-        return chips
+        return Array((featureDomainChips + typeStatusChips).prefix(limit))
     }
+
+    private static func cardFaceChipRole(for tag: String) -> KanbanCardFaceChip.Role {
+        if typeStatusTags.contains(tag) || KanbanCardTagTaxonomy.isCoreTag(tag) {
+            return .typeStatus
+        }
+        return .featureDomain
+    }
+
+    private static let typeStatusTags: Set<String> = [
+        "idea",
+        "performance",
+        "test",
+        "testing",
+        "qa",
+        "review",
+        "needs-qa",
+        "agent-report",
+        "new",
+        "inbox",
+        "blocked",
+        "done",
+        "fixed",
+    ]
 
     private static func displayChipLabel(for tag: String) -> String {
         tag.split(separator: "-")

@@ -536,6 +536,22 @@ struct KanbanCardHierarchyTests {
         #expect(!KanbanBoardLayout.cardFaceSemanticChips(for: card).contains("High"))
     }
 
+    @Test("card face chips put feature or domain before type and expose emphasis roles")
+    func cardFaceChipsPutFeatureDomainBeforeTypeWithEmphasisRoles() {
+        let card = KanbanCard(
+            id: "sidebar-bug",
+            title: "Sidebar chip hierarchy",
+            priority: .medium,
+            tags: ["bug", "sidebar", "testing", "medium"]
+        )
+
+        let chips = KanbanBoardLayout.cardFaceChips(for: card)
+
+        #expect(chips.map(\.label) == ["…", "Sidebar", "Bug", "Testing"])
+        #expect(chips.map(\.role) == [.tagEdit, .featureDomain, .typeStatus, .typeStatus])
+        #expect(KanbanBoardLayout.cardFaceSemanticChips(for: card) == ["Sidebar", "Bug", "Testing"])
+    }
+
     @Test("plan indicator marks the first active child as next up")
     func planIndicatorMarksFirstActiveChildAsNextUp() {
         let completed = Date(timeIntervalSince1970: 1_777_737_600)

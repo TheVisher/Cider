@@ -1003,17 +1003,60 @@ struct KanbanBoardView: View {
             if let badge = KanbanBoardLayout.testingOwnerBadge(for: card) {
                 testingOwnerBadgeView(badge)
             }
-            ForEach(KanbanBoardLayout.cardFaceSemanticChips(for: card), id: \.self) { chip in
-                Text(chip)
-                    .font(CiderFont.micro)
-                    .foregroundColor(CiderColors.tertiary)
-                    .padding(.horizontal, Spacing.xxs)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(CiderColors.surfaceInput)
-                    )
+            ForEach(KanbanBoardLayout.cardFaceChips(for: card), id: \.label) { chip in
+                cardFaceChipView(chip, card: card)
             }
             Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private func cardFaceChipView(_ chip: KanbanCardFaceChip, card: KanbanCard) -> some View {
+        switch chip.role {
+        case .tagEdit:
+            Button {
+                onOpenCard(boardID, card.id)
+            } label: {
+                Text(chip.label)
+                    .font(CiderFont.microSemibold)
+                    .foregroundColor(CiderColors.controlAccent)
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(CiderColors.controlAccent.opacity(0.14))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(CiderColors.controlAccent.opacity(0.32), lineWidth: CiderBorder.hairlineStrokeWidth)
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Add or change tags for \(card.title)")
+        case .featureDomain, .typeStatus:
+            let color = cardFaceChipColor(for: chip.role)
+            Text(chip.label)
+                .font(CiderFont.microSemibold)
+                .foregroundColor(color)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(color.opacity(chip.role == .featureDomain ? 0.16 : 0.12))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(color.opacity(chip.role == .featureDomain ? 0.34 : 0.26), lineWidth: CiderBorder.hairlineStrokeWidth)
+                )
+        }
+    }
+
+    private func cardFaceChipColor(for role: KanbanCardFaceChip.Role) -> Color {
+        switch role {
+        case .tagEdit, .featureDomain:
+            CiderColors.controlAccent
+        case .typeStatus:
+            CiderColors.secondary
         }
     }
 
