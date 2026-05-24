@@ -355,6 +355,7 @@ struct CiderTabBar: View {
     private func isPersistentContextTab(_ tab: CiderTab) -> Bool {
         if case .domainDashboard = tab { return true }
         if case .projectOverview = tab { return true }
+        if case .projectInbox = tab { return true }
         if case .projectSurface = tab { return true }
         if case .projectReferences = tab { return true }
         return false
@@ -370,6 +371,7 @@ struct CiderTabBar: View {
         case .tag: return 0
         case .domainDashboard: return 0
         case .projectOverview: return 0
+        case .projectInbox: return 0
         case .projectSurface: return 0
         case .projectReferences: return 0
         case .spaceOverview: return 0

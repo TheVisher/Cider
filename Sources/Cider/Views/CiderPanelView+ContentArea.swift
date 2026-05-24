@@ -198,6 +198,25 @@ extension CiderPanelView {
                         title: "Project not found"
                     )
                 }
+            case .projectInbox(let projectID, _):
+                if let project = projectWorkspaceCatalog.workspace(id: projectID) {
+                    ProjectWorkspaceInboxView(
+                        workspace: project,
+                        entries: ProjectWorkspaceInboxProvider.entries(
+                            for: project,
+                            boards: kanbanStorage.boards
+                        ),
+                        onOpenCard: openKanbanCardDetail,
+                        onMarkReviewed: { boardID, cardID in
+                            kanbanStorage.markCardReviewed(boardID: boardID, cardID: cardID)
+                        }
+                    )
+                } else {
+                    EmptyStateView(
+                        icon: "tray",
+                        title: "Project Inbox not found"
+                    )
+                }
             case .projectSurface(let projectID, let surface, _):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
                     ProjectWorkspaceSurfaceView(

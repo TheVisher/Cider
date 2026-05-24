@@ -120,6 +120,36 @@ struct KanbanCardCodableTests {
         #expect(decoded.aiSummary == nil)
     }
 
+    @Test("card review timestamp round trips through codable storage")
+    func cardReviewTimestampRoundTripsThroughCodableStorage() throws {
+        let reviewedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let card = KanbanCard(
+            id: "reviewed-card",
+            title: "Reviewed",
+            reviewedAt: reviewedAt
+        )
+
+        let data = try JSONEncoder().encode(card)
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: data)
+
+        #expect(decoded.reviewedAt == reviewedAt)
+    }
+
+    @Test("legacy cards without review timestamp decode with nil review timestamp")
+    func legacyCardsWithoutReviewTimestampDecodeWithNilReviewTimestamp() throws {
+        let json = """
+        {
+          "id": "legacy-card",
+          "title": "Legacy Kanban Card",
+          "created": "2026-05-02"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: Data(json.utf8))
+
+        #expect(decoded.reviewedAt == nil)
+    }
+
     @Test("card history entries round trip through codable storage")
     func cardHistoryEntriesRoundTripThroughCodableStorage() throws {
         let createdAt = Date(timeIntervalSince1970: 1_700_000_000)

@@ -360,6 +360,8 @@ extension CiderPanelView {
         switch destination.kind {
         case .overview:
             selectedTab = .projectOverview(projectID: workspace.id, name: "Overview")
+        case .inbox:
+            selectedTab = .projectInbox(projectID: workspace.id, name: "Inbox")
         case .boardsGroup:
             break
         case .board(let boardID):

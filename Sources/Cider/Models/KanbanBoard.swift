@@ -112,6 +112,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
     var completed: Date?
     var updatedAt: Date?
     var lastActivityKind: String?
+    var reviewedAt: Date?
 
     init(
         id: String = KanbanID.generate(),
@@ -130,7 +131,8 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         created: Date = Date(),
         completed: Date? = nil,
         updatedAt: Date? = nil,
-        lastActivityKind: String? = nil
+        lastActivityKind: String? = nil,
+        reviewedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -149,6 +151,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         self.completed = completed
         self.updatedAt = updatedAt
         self.lastActivityKind = lastActivityKind
+        self.reviewedAt = reviewedAt
     }
 
     mutating func markActivity(_ kind: String, at date: Date = Date()) {
@@ -158,7 +161,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
 
     // Custom Codable for date format and backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, aiSummary, displayKey, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, historyEntries, created, completed, updatedAt, lastActivityKind
+        case id, title, notes, aiSummary, displayKey, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, historyEntries, created, completed, updatedAt, lastActivityKind, reviewedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -180,6 +183,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         completed = try c.decodeIfPresent(KanbanDate.self, forKey: .completed)?.date
         updatedAt = try c.decodeIfPresent(KanbanTimestamp.self, forKey: .updatedAt)?.date
         lastActivityKind = try c.decodeIfPresent(String.self, forKey: .lastActivityKind)
+        reviewedAt = try c.decodeIfPresent(KanbanTimestamp.self, forKey: .reviewedAt)?.date
     }
 
     func encode(to encoder: Encoder) throws {
@@ -201,6 +205,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         try c.encodeIfPresent(completed.map { KanbanDate(date: $0) }, forKey: .completed)
         try c.encodeIfPresent(updatedAt.map { KanbanTimestamp(date: $0) }, forKey: .updatedAt)
         try c.encodeIfPresent(lastActivityKind, forKey: .lastActivityKind)
+        try c.encodeIfPresent(reviewedAt.map { KanbanTimestamp(date: $0) }, forKey: .reviewedAt)
     }
 }
 

@@ -340,6 +340,7 @@ final class KanbanStorage: ObservableObject {
         if incoming.completed != baseline.completed { merged.completed = incoming.completed }
         if incoming.updatedAt != baseline.updatedAt { merged.updatedAt = incoming.updatedAt }
         if incoming.lastActivityKind != baseline.lastActivityKind { merged.lastActivityKind = incoming.lastActivityKind }
+        if incoming.reviewedAt != baseline.reviewedAt { merged.reviewedAt = incoming.reviewedAt }
         return merged
     }
 
@@ -405,6 +406,17 @@ final class KanbanStorage: ObservableObject {
             try SecondBrainStore().deleteProjections(ownerType: "kanban_card", ownerIDPrefix: "\(boardID)/")
         } catch {
             logger.error("Failed to delete item graph projections for board \(boardID): \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    func markCardReviewed(boardID: String, cardID: String, at date: Date = Date()) {
+        mutate(boardID: boardID) { board in
+            for colIdx in board.columns.indices {
+                if let cardIdx = board.columns[colIdx].cards.firstIndex(where: { $0.id == cardID }) {
+                    board.columns[colIdx].cards[cardIdx].reviewedAt = date
+                    return
+                }
+            }
         }
     }
 

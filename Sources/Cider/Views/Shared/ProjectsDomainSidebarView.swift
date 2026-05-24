@@ -83,7 +83,8 @@ struct ProjectsDomainSidebarView: View {
             WorkspaceSidebarNestedRowLabel(
                 title: destination.title,
                 systemImage: destination.systemImage,
-                isSelected: isSelected
+                isSelected: isSelected,
+                badge: destination.badge
             )
         }
         .buttonStyle(.plain)
@@ -95,6 +96,8 @@ struct ProjectsDomainSidebarView: View {
         switch selectedTab {
         case .projectOverview:
             return .overview
+        case .projectInbox:
+            return .inbox
         case .projectSurface(_, let surface, _):
             return .surface(surface)
         case .projectReferences:

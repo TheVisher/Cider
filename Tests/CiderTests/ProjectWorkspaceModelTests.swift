@@ -207,6 +207,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
 
         XCTAssertEqual(destinations.map(\.title), [
             "Overview",
+            "Inbox",
             "Boards",
             "Cider",
             "Notes",
@@ -217,6 +218,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         ])
         XCTAssertEqual(destinations.map(\.kind), [
             .overview,
+            .inbox,
             .boardsGroup,
             .board("2afee0"),
             .surface(.notes),
@@ -225,5 +227,76 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             .surface(.qaAudits),
             .surface(.plansHandoffs)
         ])
+    }
+
+    func testProjectInboxSurfacesUnreadAgentAndQACardsOnly() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let reviewedLater = Date(timeIntervalSince1970: 3_000)
+        let workspace = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0"],
+            referenceSearchTerms: ["cider"]
+        )
+        let agentCard = KanbanCard(
+            id: "agent",
+            title: "Agent report card",
+            agent: "Cody",
+            created: now
+        )
+        let reviewedQACard = KanbanCard(
+            id: "reviewed",
+            title: "Already reviewed QA",
+            created: now,
+            reviewedAt: reviewedLater
+        )
+        let backlogCard = KanbanCard(
+            id: "backlog",
+            title: "Plain backlog idea",
+            created: now
+        )
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog", cards: [backlogCard]),
+                KanbanColumn(id: "testing", name: "Testing", cards: [agentCard, reviewedQACard])
+            ]
+        )
+
+        let entries = ProjectWorkspaceInboxProvider.entries(for: workspace, boards: [board])
+
+        XCTAssertEqual(entries.map { $0.card.id }, ["agent"])
+        XCTAssertEqual(entries.first?.badges.map(\.title), ["New", "Agent report", "Needs QA"])
+        XCTAssertEqual(ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: [board]), 1)
+    }
+
+    func testProjectInboxSidebarDestinationShowsUnreadCountBadge() {
+        let workspace = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0"],
+            referenceSearchTerms: ["cider"]
+        )
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [
+                KanbanColumn(
+                    id: "testing",
+                    name: "Testing",
+                    cards: [KanbanCard(id: "agent", title: "Needs review", agent: "Cody")]
+                )
+            ]
+        )
+
+        let inbox = ProjectWorkspaceSidebarTree.destinations(for: workspace, boards: [board]).first { $0.kind == .inbox }
+
+        XCTAssertEqual(inbox?.title, "Inbox")
+        XCTAssertEqual(inbox?.badge, "1")
     }
 }

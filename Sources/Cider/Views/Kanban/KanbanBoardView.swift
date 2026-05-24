@@ -746,6 +746,7 @@ struct KanbanBoardView: View {
             parentBadge: KanbanBoardLayout.parentBadge(for: card, in: column, board: board),
             planIndicator: KanbanBoardLayout.planIndicator(for: card, in: board),
             accentColor: KanbanBoardLayout.cardAccentColor(for: card, in: board),
+            inboxBadges: inboxBadges(for: card, in: column),
             canCollapse: canCollapse,
             isCollapsed: isCollapsed
         )
@@ -809,6 +810,7 @@ struct KanbanBoardView: View {
         parentBadge: KanbanParentBadge? = nil,
         planIndicator: KanbanPlanIndicator? = nil,
         accentColor: KanbanCardColor? = nil,
+        inboxBadges: [ProjectWorkspaceInboxBadge] = [],
         canCollapse: Bool = false,
         isCollapsed: Bool = false
     ) -> some View {
@@ -826,6 +828,11 @@ struct KanbanBoardView: View {
                 canCollapse: canCollapse,
                 isCollapsed: isCollapsed
             )
+
+            if !inboxBadges.isEmpty {
+                cardInboxBadgesView(inboxBadges)
+                    .padding(.top, compact ? Spacing.xxs : KanbanDesign.cardPreviewSectionSpacing)
+            }
 
             if let childSummary {
                 Text(childSummary.compactText)
@@ -876,6 +883,36 @@ struct KanbanBoardView: View {
                     storage.deleteCard(boardID: boardID, cardID: card.id)
                 }
             }
+        }
+    }
+
+    private func inboxBadges(for card: KanbanCard, in column: KanbanColumn) -> [ProjectWorkspaceInboxBadge] {
+        guard ProjectWorkspaceInboxProvider.isUnread(card) else { return [] }
+        return ProjectWorkspaceInboxProvider.badges(for: card, column: column)
+    }
+
+    private func cardInboxBadgesView(_ badges: [ProjectWorkspaceInboxBadge]) -> some View {
+        HStack(spacing: Spacing.xxs) {
+            ForEach(badges.prefix(3)) { badge in
+                Label(badge.title, systemImage: badge.systemImage)
+                    .font(CiderFont.micro)
+                    .foregroundColor(inboxBadgeColor(for: badge.kind))
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, Spacing.xxs)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(inboxBadgeColor(for: badge.kind).opacity(0.12))
+                    )
+            }
+        }
+    }
+
+    private func inboxBadgeColor(for kind: ProjectWorkspaceInboxBadge.Kind) -> Color {
+        switch kind {
+        case .new: return CiderColors.controlAccent
+        case .agentReport: return CiderColors.secondary
+        case .needsQA: return CiderColors.warning
         }
     }
 

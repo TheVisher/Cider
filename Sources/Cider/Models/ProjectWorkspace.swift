@@ -293,6 +293,7 @@ enum ProjectWorkspaceSidebarModel {
 
 enum ProjectWorkspaceSidebarDestinationKind: Hashable {
     case overview
+    case inbox
     case boardsGroup
     case board(String)
     case surface(ProjectWorkspaceSurface)
@@ -304,6 +305,7 @@ struct ProjectWorkspaceSidebarDestination: Identifiable, Equatable {
     let systemImage: String
     let kind: ProjectWorkspaceSidebarDestinationKind
     let isSelectable: Bool
+    var badge: String? = nil
 }
 
 enum ProjectWorkspaceSidebarTree {
@@ -314,6 +316,7 @@ enum ProjectWorkspaceSidebarTree {
         guard workspace.kind == .project else { return [] }
 
         let boardsByID = Dictionary(uniqueKeysWithValues: boards.map { ($0.id, $0) })
+        let inboxCount = ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: boards)
         let boardDestinations = workspace.boardIDs.compactMap { boardID -> ProjectWorkspaceSidebarDestination? in
             guard let board = boardsByID[boardID] else { return nil }
             return ProjectWorkspaceSidebarDestination(
@@ -344,6 +347,14 @@ enum ProjectWorkspaceSidebarTree {
                 systemImage: "rectangle.3.group",
                 kind: .overview,
                 isSelectable: true
+            ),
+            ProjectWorkspaceSidebarDestination(
+                id: "inbox",
+                title: "Inbox",
+                systemImage: inboxCount > 0 ? "tray.full" : "tray",
+                kind: .inbox,
+                isSelectable: true,
+                badge: inboxCount > 0 ? "\(inboxCount)" : nil
             ),
             ProjectWorkspaceSidebarDestination(
                 id: "boards",

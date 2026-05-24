@@ -253,6 +253,14 @@ enum WorkspaceDomainDashboardProvider {
                 systemImage: tab.systemImage,
                 target: tab
             )
+        case .projectInbox(let projectID, let name):
+            return WorkspaceDomainDashboardItem(
+                id: tab.id,
+                title: name,
+                subtitle: "\(projectID) unread agent work and review queue",
+                systemImage: tab.systemImage,
+                target: tab
+            )
         case .projectSurface(let projectID, let surface, let name):
             return WorkspaceDomainDashboardItem(
                 id: tab.id,

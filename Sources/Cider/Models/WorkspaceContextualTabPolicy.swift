@@ -74,7 +74,8 @@ enum WorkspaceContextualTabPolicy {
             }
 
         var result: [CiderTab] = [
-            .projectOverview(projectID: project.id, name: "Overview")
+            .projectOverview(projectID: project.id, name: "Overview"),
+            .projectInbox(projectID: project.id, name: "Inbox")
         ] + boardTabs + surfaceTabs
 
         for tab in allTabs where isCompatibilityTab(tab) && !result.contains(tab) {
