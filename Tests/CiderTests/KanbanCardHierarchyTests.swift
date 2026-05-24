@@ -601,7 +601,48 @@ struct KanbanCardHierarchyTests {
 
         #expect(overflowTags.map(\.label) == ["Cider Web", "Sidebar", "Cider iOS", "Bug", "Testing"])
         #expect(overflowTags.map(\.accessory) == [.featureIcon, .featureIcon, .featureIcon, .colorDot, .colorDot])
+        #expect(overflowTags.map(\.activation) == [
+            .featureDomainFilter("cider-web"),
+            .featureDomainFilter("sidebar"),
+            .featureDomainFilter("cider-ios"),
+            .none,
+            .none,
+        ])
         #expect(!overflowTags.map(\.label).contains("High"))
+    }
+
+    @Test("feature domain filters derive from feature chips and exclude type tags")
+    func featureDomainFiltersDeriveFromFeatureChipsAndExcludeTypeTags() {
+        let board = KanbanBoard(name: "Feature filters", columns: [
+            KanbanColumn(id: "todo", name: "Todo", cards: [
+                KanbanCard(id: "sidebar-bug", title: "Sidebar bug", tags: ["sidebar", "bug", "high"]),
+                KanbanCard(id: "web-qa", title: "Web QA", tags: ["cider-web", "qa", "sidebar"]),
+                KanbanCard(id: "idea-only", title: "Idea only", tags: ["idea", "performance"]),
+            ]),
+            KanbanColumn(id: "done", name: "Done", cards: [
+                KanbanCard(id: "inbox", title: "Project Inbox", tags: ["project-inbox", "testing"]),
+            ]),
+        ])
+
+        let filters = KanbanBoardLayout.featureDomainFilters(for: board)
+
+        #expect(filters.map(\.id) == ["sidebar", "cider-web", "project-inbox"])
+        #expect(filters.map(\.label) == ["Sidebar", "Cider Web", "Project Inbox"])
+        #expect(filters.map(\.cardCount) == [2, 1, 1])
+    }
+
+    @Test("feature domain filter narrows cards and can be cleared")
+    func featureDomainFilterNarrowsCardsAndCanBeCleared() {
+        let cards = [
+            KanbanCard(id: "sidebar-bug", title: "Sidebar bug", tags: ["sidebar", "bug"]),
+            KanbanCard(id: "web-qa", title: "Web QA", tags: ["cider-web", "qa"]),
+            KanbanCard(id: "untagged", title: "Untagged")
+        ]
+
+        #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "sidebar").map(\.id) == ["sidebar-bug"])
+        #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "Sidebar").map(\.id) == ["sidebar-bug"])
+        #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: nil).map(\.id) == ["sidebar-bug", "web-qa", "untagged"])
+        #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "bug").isEmpty)
     }
 
     @Test("plan indicator marks the first active child as next up")

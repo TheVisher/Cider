@@ -5,6 +5,7 @@ struct KanbanCardFaceChip: Equatable {
     enum Activation: Equatable {
         case none
         case tagEditor
+        case featureDomainFilter(String)
     }
 
     enum Role: Equatable {
@@ -31,7 +32,14 @@ struct KanbanCardFaceChip: Equatable {
     var showsDisclosureIndicator: Bool { false }
 
     var activation: Activation {
-        role == .tagEdit ? .tagEditor : .none
+        switch role {
+        case .tagEdit:
+            return .tagEditor
+        case .featureDomain:
+            return .featureDomainFilter(KanbanCardTagTaxonomy.normalized(label))
+        case .typeStatus:
+            return .none
+        }
     }
 
     var iconSystemName: String? {
@@ -42,6 +50,12 @@ struct KanbanCardFaceChip: Equatable {
             return "cube.transparent"
         }
     }
+}
+
+struct KanbanFeatureDomainFilter: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let cardCount: Int
 }
 
 enum KanbanLaneRole: String, CaseIterable {
@@ -374,6 +388,38 @@ enum KanbanBoardLayout {
         cardFaceSemanticChipModels(for: card, limit: limit)
     }
 
+    static func featureDomainFilters(for board: KanbanBoard) -> [KanbanFeatureDomainFilter] {
+        var order: [String] = []
+        var cardIDsByFeature: [String: Set<String>] = [:]
+
+        for column in board.columns {
+            for card in column.cards {
+                for feature in featureDomainTags(for: card) {
+                    if cardIDsByFeature[feature] == nil {
+                        order.append(feature)
+                        cardIDsByFeature[feature] = []
+                    }
+                    cardIDsByFeature[feature]?.insert(card.id)
+                }
+            }
+        }
+
+        return order.compactMap { feature in
+            guard let cardIDs = cardIDsByFeature[feature], !cardIDs.isEmpty else { return nil }
+            return KanbanFeatureDomainFilter(
+                id: feature,
+                label: displayChipLabel(for: feature),
+                cardCount: cardIDs.count
+            )
+        }
+    }
+
+    static func cards(_ cards: [KanbanCard], matchingFeatureDomainFilter filter: String?) -> [KanbanCard] {
+        let normalizedFilter = KanbanCardTagTaxonomy.normalized(filter ?? "")
+        guard !normalizedFilter.isEmpty else { return cards }
+        return cards.filter { featureDomainTags(for: $0).contains(normalizedFilter) }
+    }
+
     private static func cardFaceSemanticChipModels(for card: KanbanCard, limit: Int = 3) -> [KanbanCardFaceChip] {
         guard limit > 0 else { return [] }
         let priorityLabels = Set(KanbanPriority.allCases.map { $0.rawValue })
@@ -404,6 +450,25 @@ enum KanbanBoardLayout {
         }
 
         return Array((featureDomainChips + typeStatusChips).prefix(limit))
+    }
+
+    private static func featureDomainTags(for card: KanbanCard) -> [String] {
+        let priorityLabels = Set(KanbanPriority.allCases.map { $0.rawValue })
+        var seen: Set<String> = []
+        var features: [String] = []
+
+        for tag in card.tags {
+            let normalized = KanbanCardTagTaxonomy.normalized(tag)
+            guard !normalized.isEmpty,
+                  !priorityLabels.contains(normalized),
+                  cardFaceChipRole(for: normalized) == .featureDomain,
+                  seen.insert(normalized).inserted else {
+                continue
+            }
+            features.append(normalized)
+        }
+
+        return features
     }
 
     private static func cardFaceChipRole(for tag: String) -> KanbanCardFaceChip.Role {
