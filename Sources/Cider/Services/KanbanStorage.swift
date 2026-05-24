@@ -65,7 +65,9 @@ final class KanbanStorage: ObservableObject {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         do {
             let decoder = YAMLDecoder()
-            return try decoder.decode(KanbanBoard.self, from: content)
+            var board = try decoder.decode(KanbanBoard.self, from: content)
+            board.assignMissingDisplayKeys()
+            return board
         } catch {
             logger.error("Failed to decode \(url.lastPathComponent): \(String(describing: error), privacy: .public)")
             return nil
@@ -84,9 +86,11 @@ final class KanbanStorage: ObservableObject {
 
     private func saveUnlocked(_ board: KanbanBoard) {
         do {
+            var boardToSave = board
+            boardToSave.assignMissingDisplayKeys()
             let encoder = YAMLEncoder()
-            let yaml = try encoder.encode(board)
-            let url = boardFileURL(for: board.id)
+            let yaml = try encoder.encode(boardToSave)
+            let url = boardFileURL(for: boardToSave.id)
             try yaml.write(to: url, atomically: true, encoding: .utf8)
         } catch {
             logger.error("Failed to save board \(board.id): \(error.localizedDescription, privacy: .public)")
@@ -132,6 +136,7 @@ final class KanbanStorage: ObservableObject {
                 return
             }
             body(&board)
+            board.assignMissingDisplayKeys()
             saveUnlocked(board)
             upsertInMemory(board)
             didMutate = true
@@ -252,7 +257,7 @@ final class KanbanStorage: ObservableObject {
         afterCardID: String? = nil
     ) -> KanbanCard? {
         let trimmedNotes = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let card = KanbanCard(
+        var card = KanbanCard(
             title: title,
             notes: trimmedNotes?.isEmpty == false ? trimmedNotes : nil,
             color: color,
@@ -262,6 +267,7 @@ final class KanbanStorage: ObservableObject {
         )
         var didAdd = false
         mutate(boardID: boardID) { board in
+            card.displayKey = board.nextDisplayKey()
             guard parentCardID == nil || board.card(id: parentCardID ?? "") != nil else { return }
             guard let colIdx = board.columns.firstIndex(where: { $0.id == columnID }) else { return }
             if let afterCardID {
@@ -322,6 +328,7 @@ final class KanbanStorage: ObservableObject {
         if incoming.title != baseline.title { merged.title = incoming.title }
         if incoming.notes != baseline.notes { merged.notes = incoming.notes }
         if incoming.aiSummary != baseline.aiSummary { merged.aiSummary = incoming.aiSummary }
+        if incoming.displayKey != baseline.displayKey { merged.displayKey = incoming.displayKey }
         if incoming.color != baseline.color { merged.color = incoming.color }
         if incoming.priority != baseline.priority { merged.priority = incoming.priority }
         if incoming.agent != baseline.agent { merged.agent = incoming.agent }

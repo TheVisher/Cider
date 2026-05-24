@@ -5877,7 +5877,7 @@ struct CiderCLI {
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
-            guard var parent = board.card(id: cardID) else {
+            guard var parent = board.card(matching: cardID) else {
                 printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
@@ -5940,7 +5940,7 @@ struct CiderCLI {
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
-            guard let card = board.card(id: cardID) else {
+            guard let card = board.card(matching: cardID) else {
                 printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
@@ -5971,7 +5971,7 @@ struct CiderCLI {
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
-            guard let parent = board.card(id: cardID) else {
+            guard let parent = board.card(matching: cardID) else {
                 print("Error: Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
@@ -6015,21 +6015,26 @@ struct CiderCLI {
                 if let col = board.columns.first(where: { $0.name.localizedCaseInsensitiveCompare(colName) == .orderedSame || $0.id == colName }) {
                     let parentCardID = parseFlag("--parent", from: args)
                     let afterCardID = parseFlag("--after", from: args)
-                    if let parentCardID, board.card(id: parentCardID) == nil {
-                        print("Error: Parent card '\(parentCardID)' not found in board '\(board.name)'")
+                    let resolvedParentCardID = parentCardID.flatMap { board.card(matching: $0)?.id }
+                    if parentCardID != nil, resolvedParentCardID == nil {
+                        print("Error: Parent card '\(parentCardID ?? "")' not found in board '\(board.name)'")
                         return
                     }
+                    let resolvedAfterCardID = afterCardID.flatMap { ref in
+                        col.cards.first { $0.id == ref || board.displayKey(for: $0).localizedCaseInsensitiveCompare(ref) == .orderedSame }?.id
+                    }
                     if let afterCardID {
-                        guard let afterCard = col.cards.first(where: { $0.id == afterCardID }) else {
+                        guard let resolvedAfterCardID,
+                              let afterCard = col.cards.first(where: { $0.id == resolvedAfterCardID }) else {
                             print("Error: After card '\(afterCardID)' not found in column '\(col.name)'")
                             return
                         }
-                        if let parentCardID, afterCard.parentCardID != parentCardID {
-                            print("Error: After card '\(afterCardID)' is not a child of parent '\(parentCardID)'")
+                        if let resolvedParentCardID, afterCard.parentCardID != resolvedParentCardID {
+                            print("Error: After card '\(afterCardID)' is not a child of parent '\(parentCardID ?? "")'")
                             return
                         }
                     }
-                    if let card = storage.addCard(boardID: board.id, columnID: col.id, title: title, parentCardID: parentCardID, afterCardID: afterCardID) {
+                    if let card = storage.addCard(boardID: board.id, columnID: col.id, title: title, parentCardID: resolvedParentCardID, afterCardID: resolvedAfterCardID) {
                         // Apply optional notes and priority via updateCard while preserving creation activity.
                         var updated = card
                         var changed = false
@@ -6068,7 +6073,7 @@ struct CiderCLI {
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
-            guard var card = board.columns.flatMap(\.cards).first(where: { $0.id == cardID }) else {
+            guard var card = board.card(matching: cardID) else {
                 print("Error: Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
@@ -6202,7 +6207,7 @@ struct CiderCLI {
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
-            guard var card = board.card(id: cardID) else {
+            guard var card = board.card(matching: cardID) else {
                 printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
@@ -6224,7 +6229,7 @@ struct CiderCLI {
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
-            guard var card = board.card(id: cardID) else {
+            guard var card = board.card(matching: cardID) else {
                 printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
@@ -6251,7 +6256,7 @@ struct CiderCLI {
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
-            guard var card = board.card(id: cardID) else {
+            guard var card = board.card(matching: cardID) else {
                 printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
@@ -6278,9 +6283,12 @@ struct CiderCLI {
             }
             if let board = storage.boards.first(where: { $0.name.localizedCaseInsensitiveCompare(boardName) == .orderedSame || $0.id == boardName }) {
                 if let destCol = board.columns.first(where: { $0.name.localizedCaseInsensitiveCompare(toCol) == .orderedSame || $0.id == toCol }) {
-                    storage.moveCard(boardID: board.id, cardID: cardID, toColumnID: destCol.id, toIndex: 0)
-                    let cardTitle = board.columns.flatMap(\.cards).first(where: { $0.id == cardID })?.title ?? cardID
-                    print("Moved '\(cardTitle)' → \(destCol.name)")
+                    guard let card = board.card(matching: cardID) else {
+                        print("Error: Card '\(cardID)' not found in board '\(board.name)'")
+                        return
+                    }
+                    storage.moveCard(boardID: board.id, cardID: card.id, toColumnID: destCol.id, toIndex: 0)
+                    print("Moved '\(card.title)' → \(destCol.name)")
                 } else {
                     print("Error: Column '\(toCol)' not found")
                 }
@@ -6295,8 +6303,12 @@ struct CiderCLI {
                 return
             }
             if let board = storage.boards.first(where: { $0.name.localizedCaseInsensitiveCompare(boardName) == .orderedSame || $0.id == boardName }) {
-                storage.deleteCard(boardID: board.id, cardID: cardID)
-                print("Deleted card: \(cardID)")
+                guard let card = board.card(matching: cardID) else {
+                    print("Error: Card '\(cardID)' not found in board '\(board.name)'")
+                    return
+                }
+                storage.deleteCard(boardID: board.id, cardID: card.id)
+                print("Deleted card: \(board.displayKey(for: card)) [\(card.id)]")
             } else {
                 print("Error: Board '\(boardName)' not found")
             }
@@ -9561,6 +9573,7 @@ struct CiderCLI {
 
         var cardDict: [String: Any] = [
             "id": card.id,
+            "displayKey": board.displayKey(for: card),
             "title": card.title,
             "notes": card.notes ?? "",
             "created": ISO8601DateFormatter().string(from: card.created),
@@ -9579,7 +9592,7 @@ struct CiderCLI {
         let parent = board.parentCard(for: card.id)
         var dict: [String: Any] = [
             "ok": true,
-            "board": ["id": board.id, "name": board.name],
+            "board": ["id": board.id, "name": board.name, "displayKeyPrefix": board.displayKeyPrefix],
             "card": cardDict,
             "owner": ownerToDict(owner),
             "dashboard": dashboardModelToDict(model, board: board.name, cardID: card.id),
@@ -9768,7 +9781,7 @@ struct CiderCLI {
             return KanbanStorage.shared.findCard(id: rawRef) != nil
                 || KanbanStorage.shared.boards.contains { board in
                     SecondBrainKanbanProjectionService.owner(boardID: board.id, cardID: rawRef) == owner
-                        && board.card(id: rawRef) != nil
+                        && board.card(matching: rawRef) != nil
                 }
         }
         if let entityType = try? ItemLinkService.entityType(from: rawType) {

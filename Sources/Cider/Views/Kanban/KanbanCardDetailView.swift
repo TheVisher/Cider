@@ -240,6 +240,14 @@ private struct KanbanCardDashboardView: View {
         return KanbanRoadmapNextUpProjection(board: board, parentID: cardID)
     }
 
+    private var displayKey: String {
+        guard let board = storage.boards.first(where: { $0.id == boardID || $0.name == boardName }),
+              let card = board.card(id: cardID) else {
+            return String(cardID.prefix(8)).uppercased()
+        }
+        return board.displayKey(for: card)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(spacing: Spacing.sm) {
@@ -254,6 +262,16 @@ private struct KanbanCardDashboardView: View {
                 Spacer(minLength: Spacing.sm)
 
                 KanbanDashboardBadge(text: model.hasStructuredContent ? "\(model.sections.count) sections" : "unstructured")
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                KanbanDashboardBadge(text: displayKey)
+                Text(title)
+                    .font(CiderFont.headingSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Spacing.sm)
             }
 
             ScrollView {

@@ -33,6 +33,8 @@ struct KanbanBoardView: View {
         let query = searchText.lowercased()
         return cards.filter { card in
             card.title.localizedStandardContains(query) ||
+            (board?.displayKey(for: card) ?? card.displayKey ?? "").localizedStandardContains(query) ||
+            card.id.localizedStandardContains(query) ||
             (card.notes ?? "").localizedStandardContains(query) ||
             (card.agent ?? "").localizedStandardContains(query) ||
             card.tags.contains { $0.localizedStandardContains(query) }
@@ -883,34 +885,67 @@ struct KanbanBoardView: View {
         canCollapse: Bool,
         isCollapsed: Bool
     ) -> some View {
-        HStack(alignment: .top, spacing: Spacing.xs) {
-            if canCollapse {
-                Button {
-                    toggleCollapse(cardID: card.id)
-                } label: {
-                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                        .font(CiderFont.micro)
-                        .foregroundColor(CiderColors.tertiary)
-                        .frame(width: 12, height: 12)
-                        .contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: compact ? Spacing.xxs : Spacing.xs) {
+            HStack(alignment: .center, spacing: Spacing.xs) {
+                if canCollapse {
+                    Button {
+                        toggleCollapse(cardID: card.id)
+                    } label: {
+                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                            .font(CiderFont.micro)
+                            .foregroundColor(CiderColors.tertiary)
+                            .frame(width: 12, height: 12)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isCollapsed ? "Expand child cards" : "Collapse child cards")
+                    .accessibilityHint("Toggles visible child cards in this column.")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(isCollapsed ? "Expand child cards" : "Collapse child cards")
-                .accessibilityHint("Toggles visible child cards in this column.")
-            }
 
-            Text(card.title)
-                .font(compact ? CiderFont.caption : CiderFont.label)
-                .foregroundColor(CiderColors.primary)
-                .lineLimit(compact ? 1 : 2)
+                Text(displayKey(for: card))
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(1)
 
-            if compact {
-                Spacer()
+                Spacer(minLength: Spacing.xs)
+
                 if let priority = card.priority {
                     priorityBadge(priority)
                 }
+
+                cardAvatarPlaceholder(card)
+            }
+
+            Text(card.title)
+                .font(compact ? CiderFont.captionSemibold : CiderFont.label)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(compact ? 2 : 2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func displayKey(for card: KanbanCard) -> String {
+        board?.displayKey(for: card) ?? card.displayKey ?? String(card.id.prefix(8)).uppercased()
+    }
+
+    private func cardAvatarPlaceholder(_ card: KanbanCard) -> some View {
+        let label = card.agent?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let initials = label?.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
+        return ZStack {
+            Circle()
+                .fill(label == nil ? CiderColors.surfaceInput : CiderColors.controlAccent.opacity(0.16))
+                .frame(width: 18, height: 18)
+            if let initials, !initials.isEmpty {
+                Text(initials)
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.controlAccent)
+            } else {
+                Image(systemName: "person.fill")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(CiderColors.tertiary)
             }
         }
+        .accessibilityLabel(label.map { "Assignee \($0)" } ?? "Unassigned")
     }
 
     private func hasCardFooter(_ card: KanbanCard) -> Bool {

@@ -160,6 +160,62 @@ struct KanbanBoardLayoutTests {
         #expect(KanbanDesign.kanbanPurpleAccentHueDegrees - KanbanDesign.kanbanBlueAccentHueDegrees >= 45)
     }
 
+    @Test("Kanban display keys use board prefix and preserve internal ids")
+    func kanbanDisplayKeysUseBoardPrefixAndPreserveInternalIDs() {
+        let first = KanbanCard(id: "abc123", title: "First card", displayKey: "CID-7")
+        let second = KanbanCard(id: "def456", title: "Second card")
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog", cards: [first, second]),
+            ]
+        )
+
+        #expect(board.displayKeyPrefix == "CID")
+        #expect(board.displayKey(for: first) == "CID-7")
+        #expect(board.displayKey(for: second) == "CID-2")
+        #expect(board.card(matching: "CID-7")?.id == "abc123")
+        #expect(board.card(matching: "def456")?.title == "Second card")
+    }
+
+    @Test("Kanban next display key skips existing stored and fallback keys")
+    func kanbanNextDisplayKeySkipsExistingStoredAndFallbackKeys() {
+        let board = KanbanBoard(
+            name: "Cider Web",
+            columns: [
+                KanbanColumn(id: "todo", name: "Todo", cards: [
+                    KanbanCard(id: "a", title: "Stored", displayKey: "CW-10"),
+                    KanbanCard(id: "b", title: "Fallback"),
+                ]),
+            ]
+        )
+
+        #expect(board.displayKeyPrefix == "CW")
+        #expect(board.nextDisplayKey() == "CW-11")
+    }
+
+    @Test("Kanban missing display keys are assigned once before persistence")
+    func kanbanMissingDisplayKeysAreAssignedOnceBeforePersistence() {
+        var board = KanbanBoard(
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "todo", name: "Todo", cards: [
+                    KanbanCard(id: "a", title: "Existing", displayKey: "CID-3"),
+                    KanbanCard(id: "b", title: "Missing"),
+                    KanbanCard(id: "c", title: "Also missing"),
+                ]),
+            ]
+        )
+
+        board.assignMissingDisplayKeys()
+
+        #expect(board.card(id: "a")?.displayKey == "CID-3")
+        #expect(board.card(id: "b")?.displayKey == "CID-1")
+        #expect(board.card(id: "c")?.displayKey == "CID-2")
+        #expect(board.nextDisplayKey() == "CID-4")
+    }
+
     @Test("testing owner badge is derived from card tags")
     func testingOwnerBadgeIsDerivedFromCardTags() {
         let erikCard = KanbanCard(

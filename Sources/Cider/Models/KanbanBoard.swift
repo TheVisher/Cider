@@ -98,6 +98,8 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
     var title: String
     var notes: String?
     var aiSummary: String?
+    /// Human-readable command-center key (for example, CID-42). Internal ids remain canonical.
+    var displayKey: String?
     var color: KanbanCardColor?
     var priority: KanbanPriority?
     var agent: String?
@@ -116,6 +118,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         title: String,
         notes: String? = nil,
         aiSummary: String? = nil,
+        displayKey: String? = nil,
         color: KanbanCardColor? = nil,
         priority: KanbanPriority? = nil,
         agent: String? = nil,
@@ -133,6 +136,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         self.title = title
         self.notes = notes
         self.aiSummary = aiSummary
+        self.displayKey = displayKey
         self.color = color
         self.priority = priority
         self.agent = agent
@@ -154,7 +158,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
 
     // Custom Codable for date format and backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, aiSummary, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, historyEntries, created, completed, updatedAt, lastActivityKind
+        case id, title, notes, aiSummary, displayKey, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, historyEntries, created, completed, updatedAt, lastActivityKind
     }
 
     init(from decoder: Decoder) throws {
@@ -163,6 +167,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         title = try c.decode(String.self, forKey: .title)
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
         aiSummary = try c.decodeIfPresent(String.self, forKey: .aiSummary)
+        displayKey = try c.decodeIfPresent(String.self, forKey: .displayKey)
         color = try c.decodeIfPresent(KanbanCardColor.self, forKey: .color)
         priority = try c.decodeIfPresent(KanbanPriority.self, forKey: .priority)
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
@@ -183,6 +188,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         try c.encode(title, forKey: .title)
         try c.encodeIfPresent(notes, forKey: .notes)
         try c.encodeIfPresent(aiSummary, forKey: .aiSummary)
+        try c.encodeIfPresent(displayKey, forKey: .displayKey)
         try c.encodeIfPresent(color, forKey: .color)
         try c.encodeIfPresent(priority, forKey: .priority)
         try c.encodeIfPresent(agent, forKey: .agent)
@@ -290,8 +296,73 @@ struct KanbanBoard: Codable, Identifiable, Equatable, Sendable {
         columns.flatMap(\.cards)
     }
 
+    /// Short board prefix for human-readable card keys. Kept separate from persisted board/card ids.
+    var displayKeyPrefix: String {
+        let normalized = name
+            .replacingOccurrences(of: "&", with: " ")
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+
+        if normalized.count >= 2 {
+            let initials = normalized.prefix(3).compactMap { $0.first }.map(String.init).joined()
+            if initials.count >= 2 { return initials.uppercased() }
+        }
+
+        let compact = normalized.first ?? id
+        let scalars = compact.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+        let prefix = String(String.UnicodeScalarView(scalars)).prefix(3).uppercased()
+        return prefix.isEmpty ? "CID" : prefix
+    }
+
+    func displayKey(for card: KanbanCard) -> String {
+        if let key = card.displayKey?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {
+            return key.uppercased()
+        }
+        let index = allCards.firstIndex { $0.id == card.id }.map { $0 + 1 } ?? 1
+        return "\(displayKeyPrefix)-\(index)"
+    }
+
+    func nextDisplayKey() -> String {
+        let prefix = displayKeyPrefix.uppercased()
+        let highest = allCards.compactMap { card -> Int? in
+            let key = displayKey(for: card).uppercased()
+            guard key.hasPrefix("\(prefix)-") else { return nil }
+            return Int(key.dropFirst(prefix.count + 1))
+        }.max() ?? 0
+        return "\(prefix)-\(highest + 1)"
+    }
+
+    mutating func assignMissingDisplayKeys() {
+        let prefix = displayKeyPrefix.uppercased()
+        var usedNumbers = Set<Int>()
+        for card in allCards {
+            guard let key = card.displayKey?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+                  key.hasPrefix("\(prefix)-"),
+                  let number = Int(key.dropFirst(prefix.count + 1)) else { continue }
+            usedNumbers.insert(number)
+        }
+
+        var nextNumber = 1
+        for columnIndex in columns.indices {
+            for cardIndex in columns[columnIndex].cards.indices {
+                let key = columns[columnIndex].cards[cardIndex].displayKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard key?.isEmpty != false else { continue }
+                while usedNumbers.contains(nextNumber) { nextNumber += 1 }
+                columns[columnIndex].cards[cardIndex].displayKey = "\(prefix)-\(nextNumber)"
+                usedNumbers.insert(nextNumber)
+            }
+        }
+    }
+
     func card(id cardID: String) -> KanbanCard? {
         allCards.first { $0.id == cardID }
+    }
+
+    func card(matching ref: String) -> KanbanCard? {
+        let trimmed = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let exact = card(id: trimmed) { return exact }
+        return allCards.first { displayKey(for: $0).localizedCaseInsensitiveCompare(trimmed) == .orderedSame }
     }
 
     func columnID(containing cardID: String) -> String? {
