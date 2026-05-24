@@ -230,8 +230,8 @@ final class ProjectWorkspaceModelTests: XCTestCase {
     }
 
     func testProjectInboxSurfacesUnreadAgentAndQACardsOnly() {
-        let now = Date(timeIntervalSince1970: 2_000)
-        let reviewedLater = Date(timeIntervalSince1970: 3_000)
+        let afterInboxLaunch = ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(60)
+        let reviewedLater = afterInboxLaunch.addingTimeInterval(60)
         let workspace = ProjectWorkspace(
             id: "cider",
             kind: .project,
@@ -244,18 +244,18 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             id: "agent",
             title: "Agent report card",
             agent: "Cody",
-            created: now
+            created: afterInboxLaunch
         )
         let reviewedQACard = KanbanCard(
             id: "reviewed",
             title: "Already reviewed QA",
-            created: now,
+            created: afterInboxLaunch,
             reviewedAt: reviewedLater
         )
         let backlogCard = KanbanCard(
             id: "backlog",
             title: "Plain backlog idea",
-            created: now
+            created: afterInboxLaunch
         )
         let board = KanbanBoard(
             id: "2afee0",
@@ -271,6 +271,104 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(entries.map { $0.card.id }, ["agent"])
         XCTAssertEqual(entries.first?.badges.map(\.title), ["New", "Agent report", "Needs QA"])
         XCTAssertEqual(ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: [board]), 1)
+    }
+
+    func testProjectInboxHidesLegacyActivityBeforeInboxLaunchBaseline() {
+        let oldActivity = ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(-60)
+        let workspace = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0"],
+            referenceSearchTerms: ["cider"]
+        )
+        let oldAgentCard = KanbanCard(
+            id: "old-agent",
+            title: "Old agent report card",
+            agent: "Cody",
+            historyEntries: [
+                KanbanCardHistoryEntry(
+                    type: .implementation,
+                    body: "Old implementation evidence",
+                    author: "Cody",
+                    createdAt: oldActivity
+                )
+            ],
+            created: oldActivity
+        )
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [KanbanColumn(id: "testing", name: "Testing", cards: [oldAgentCard])]
+        )
+
+        XCTAssertTrue(ProjectWorkspaceInboxProvider.entries(for: workspace, boards: [board]).isEmpty)
+        XCTAssertEqual(ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: [board]), 0)
+    }
+
+    func testProjectInboxReentersOnlyWhenActivityIsNewerThanReviewedTimestamp() {
+        let reviewedAt = ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(120)
+        let newerActivity = reviewedAt.addingTimeInterval(60)
+        let workspace = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0"],
+            referenceSearchTerms: ["cider"]
+        )
+        let quietReviewedCard = KanbanCard(
+            id: "quiet",
+            title: "Reviewed card",
+            agent: "Cody",
+            created: reviewedAt.addingTimeInterval(-120),
+            updatedAt: reviewedAt.addingTimeInterval(-30),
+            reviewedAt: reviewedAt
+        )
+        let reenteredCard = KanbanCard(
+            id: "reentered",
+            title: "New agent follow-up",
+            agent: "Cody",
+            created: reviewedAt.addingTimeInterval(-120),
+            updatedAt: newerActivity,
+            reviewedAt: reviewedAt
+        )
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [KanbanColumn(id: "testing", name: "Testing", cards: [quietReviewedCard, reenteredCard])]
+        )
+
+        let entries = ProjectWorkspaceInboxProvider.entries(for: workspace, boards: [board])
+
+        XCTAssertEqual(entries.map { $0.card.id }, ["reentered"])
+        XCTAssertEqual(ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: [board]), 1)
+    }
+
+    func testProjectInboxSortsByNewestUnreadActivity() {
+        let base = ProjectWorkspaceInboxProvider.inboxLaunchBaseline
+        let olderActivity = base.addingTimeInterval(60)
+        let newerActivity = base.addingTimeInterval(120)
+        let workspace = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0"],
+            referenceSearchTerms: ["cider"]
+        )
+        let older = KanbanCard(id: "older", title: "Older unread", agent: "Cody", created: olderActivity)
+        let newer = KanbanCard(id: "newer", title: "Newer unread", agent: "Cody", created: olderActivity, updatedAt: newerActivity)
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [KanbanColumn(id: "testing", name: "Testing", cards: [older, newer])]
+        )
+
+        let entries = ProjectWorkspaceInboxProvider.entries(for: workspace, boards: [board])
+
+        XCTAssertEqual(entries.map { $0.card.id }, ["newer", "older"])
     }
 
     func testProjectInboxSidebarDestinationShowsUnreadCountBadge() {
@@ -289,7 +387,21 @@ final class ProjectWorkspaceModelTests: XCTestCase {
                 KanbanColumn(
                     id: "testing",
                     name: "Testing",
-                    cards: [KanbanCard(id: "agent", title: "Needs review", agent: "Cody")]
+                    cards: [
+                        KanbanCard(
+                            id: "agent",
+                            title: "Needs review",
+                            agent: "Cody",
+                            created: ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(60)
+                        ),
+                        KanbanCard(
+                            id: "reviewed",
+                            title: "Reviewed already",
+                            agent: "Cody",
+                            created: ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(60),
+                            reviewedAt: ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(120)
+                        )
+                    ]
                 )
             ]
         )

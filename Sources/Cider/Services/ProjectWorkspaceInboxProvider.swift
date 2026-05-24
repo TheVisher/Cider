@@ -31,6 +31,11 @@ struct ProjectWorkspaceInboxEntry: Identifiable, Equatable {
 }
 
 enum ProjectWorkspaceInboxProvider {
+    /// Existing project boards predate the Inbox feature and do not have reviewedAt backfill.
+    /// Treat pre-launch activity as already reviewed so Inbox starts as an unread lens,
+    /// not a full historical activity board. New cards/activity after this point enter Inbox.
+    static let inboxLaunchBaseline = Date(timeIntervalSince1970: 1_779_580_800)
+
     static func entries(for workspace: ProjectWorkspace, boards: [KanbanBoard]) -> [ProjectWorkspaceInboxEntry] {
         boards
             .filter { workspace.boardIDs.contains($0.id) }
@@ -62,8 +67,8 @@ enum ProjectWorkspaceInboxProvider {
 
     static func isUnread(_ card: KanbanCard, latestActivityAt: Date? = nil) -> Bool {
         let latest = latestActivityAt ?? latestActivityDate(for: card)
-        guard let reviewedAt = card.reviewedAt else { return true }
-        return latest > reviewedAt
+        let reviewCutoff = card.reviewedAt ?? inboxLaunchBaseline
+        return latest > reviewCutoff
     }
 
     static func latestActivityDate(for card: KanbanCard) -> Date {

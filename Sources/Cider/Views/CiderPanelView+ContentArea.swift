@@ -206,7 +206,10 @@ extension CiderPanelView {
                             for: project,
                             boards: kanbanStorage.boards
                         ),
-                        onOpenCard: openKanbanCardDetail,
+                        onOpenCard: { boardID, cardID in
+                            kanbanStorage.markCardReviewed(boardID: boardID, cardID: cardID)
+                            openKanbanCardDetail(boardID: boardID, cardID: cardID)
+                        },
                         onMarkReviewed: { boardID, cardID in
                             kanbanStorage.markCardReviewed(boardID: boardID, cardID: cardID)
                         }
