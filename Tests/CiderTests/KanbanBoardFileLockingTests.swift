@@ -317,7 +317,7 @@ struct KanbanBoardFileLockingTests {
         #expect(reloaded.tags == ["sidebar", "bug", "qa"])
 
         let chips = KanbanBoardLayout.cardFaceChips(for: reloaded)
-        #expect(chips.map(\.label) == ["…", "Sidebar", "Bug", "QA"])
+        #expect(chips.map(\.label) == ["…", "Navigation", "Bug", "QA"])
         #expect(chips.map(\.role) == [.tagEdit, .featureDomain, .typeStatus, .typeStatus])
         #expect(chips.map(\.accessory) == [.none, .featureIcon, .colorDot, .colorDot])
         #expect(chips[1].iconSystemName == "cube.transparent")
