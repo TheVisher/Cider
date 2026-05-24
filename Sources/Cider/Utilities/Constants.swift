@@ -180,7 +180,7 @@ enum KanbanDesign {
     /// Extra vertical spacing before the metadata footer in expanded card previews.
     static let cardPreviewFooterTopSpacing: CGFloat = 8
     /// Maximum number of lines for generated/fallback preview text in expanded cards.
-    static let cardPreviewBodyLineLimit = 5
+    static let cardPreviewBodyLineLimit = 2
     /// Blue Kanban accent hue, separated from the system accent and purple family.
     static let kanbanBlueAccentHueDegrees: CGFloat = 204
     /// Purple Kanban accent hue, far enough from blue to remain distinct in dark UI.

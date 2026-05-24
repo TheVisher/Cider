@@ -67,17 +67,17 @@ struct ProjectWorkspaceInboxView: View {
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(2)
 
-                if let preview = KanbanBoardLayout.previewText(for: entry.card) {
-                    Text(preview)
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
-                        .lineLimit(2)
-                }
-
                 HStack(spacing: Spacing.xs) {
                     ForEach(entry.badges) { badge in
                         inboxBadge(badge)
                     }
+                }
+
+                if let preview = KanbanBoardLayout.previewText(for: entry.card) {
+                    Text(preview)
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.tertiary.opacity(0.72))
+                        .lineLimit(KanbanDesign.cardPreviewBodyLineLimit)
                 }
             }
 

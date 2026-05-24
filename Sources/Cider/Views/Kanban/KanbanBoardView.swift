@@ -850,8 +850,8 @@ struct KanbanBoardView: View {
             if !compact {
                 if let previewText = KanbanBoardLayout.previewText(for: card) {
                     Text(previewText)
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.tertiary.opacity(0.72))
                         .lineLimit(KanbanDesign.cardPreviewBodyLineLimit)
                         .padding(.top, KanbanDesign.cardPreviewSectionSpacing)
                 }
@@ -940,8 +940,8 @@ struct KanbanBoardView: View {
                 }
 
                 Text(displayKey(for: card))
-                    .font(CiderFont.micro)
-                    .foregroundColor(CiderColors.tertiary)
+                    .font(CiderFont.microMonospaced)
+                    .foregroundColor(CiderColors.controlAccent)
                     .lineLimit(1)
 
                 Spacer(minLength: Spacing.xs)
@@ -954,7 +954,7 @@ struct KanbanBoardView: View {
             }
 
             Text(card.title)
-                .font(compact ? CiderFont.captionSemibold : CiderFont.label)
+                .font(compact ? CiderFont.captionSemibold : CiderFont.labelSemibold)
                 .foregroundColor(CiderColors.primary)
                 .lineLimit(compact ? 2 : 2)
                 .fixedSize(horizontal: false, vertical: true)

@@ -535,6 +535,7 @@ struct KanbanCardHierarchyTests {
 
         #expect(KanbanBoardLayout.previewText(for: summarized) == "Generated summary for board scanning.")
         #expect(KanbanBoardLayout.previewText(for: unsummarized) == "Problem:\n- Fallback notes remain useful.")
+        #expect(KanbanDesign.cardPreviewBodyLineLimit == 2)
     }
 
     @Test("plan indicator marks the first active child as next up")
