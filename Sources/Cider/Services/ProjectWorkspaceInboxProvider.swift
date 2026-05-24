@@ -81,7 +81,7 @@ enum ProjectWorkspaceInboxProvider {
         board.columns.flatMap { column in
             column.cards.compactMap { card in
                 let badges = badges(for: card, column: column)
-                guard !badges.isEmpty else { return nil }
+                guard isInboxCandidate(badges) else { return nil }
                 return ProjectWorkspaceInboxEntry(
                     boardID: board.id,
                     boardName: board.name,
@@ -93,6 +93,10 @@ enum ProjectWorkspaceInboxProvider {
                 )
             }
         }
+    }
+
+    private static func isInboxCandidate(_ badges: [ProjectWorkspaceInboxBadge]) -> Bool {
+        badges.contains { $0.kind == .agentReport || $0.kind == .needsQA }
     }
 
     private static func isNewSignal(_ card: KanbanCard, column: KanbanColumn) -> Bool {

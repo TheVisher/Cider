@@ -273,6 +273,45 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: [board]), 1)
     }
 
+    func testProjectInboxProviderRebuildDoesNotPromotePlainQueuedCards() {
+        let afterInboxLaunch = ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(60)
+        let workspace = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0"],
+            referenceSearchTerms: ["cider"]
+        )
+        let reviewedAgentCard = KanbanCard(
+            id: "reviewed-agent",
+            title: "Opened and reviewed agent item",
+            agent: "Cody",
+            created: afterInboxLaunch,
+            updatedAt: afterInboxLaunch,
+            reviewedAt: afterInboxLaunch.addingTimeInterval(60)
+        )
+        let plainQueuedCard = KanbanCard(
+            id: "plain-queued",
+            title: "Plain queued roadmap item",
+            created: afterInboxLaunch,
+            updatedAt: afterInboxLaunch.addingTimeInterval(120)
+        )
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "testing", name: "Testing", cards: [reviewedAgentCard]),
+                KanbanColumn(id: "queued", name: "Queued", cards: [plainQueuedCard])
+            ]
+        )
+
+        let entries = ProjectWorkspaceInboxProvider.entries(for: workspace, boards: [board])
+
+        XCTAssertTrue(entries.isEmpty)
+        XCTAssertEqual(ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: [board]), 0)
+    }
+
     func testProjectInboxHidesLegacyActivityBeforeInboxLaunchBaseline() {
         let oldActivity = ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(-60)
         let workspace = ProjectWorkspace(
