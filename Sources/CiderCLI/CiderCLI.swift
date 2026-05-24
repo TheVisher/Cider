@@ -6216,6 +6216,93 @@ struct CiderCLI {
             refreshSecondBrainProjection(boardID: board.id, card: card)
             printBoardCardSectionResult(board: board, card: card)
 
+        case "comment":
+            guard args.first == "add" else {
+                printCLIError("Usage: cider-cli board comment add <board> --card <id> --kind <note|handoff|decision|evidence|qa|final-report> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--json]")
+                return
+            }
+            let commentArgs = Array(args.dropFirst())
+            guard let boardRef = commentArgs.first,
+                  let cardID = parseFlag("--card", from: commentArgs),
+                  let text = parseFlag("--text", from: commentArgs) else {
+                printCLIError("Usage: cider-cli board comment add <board> --card <id> --kind <note|handoff|decision|evidence|qa|final-report> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--json]")
+                return
+            }
+            let kindValue = parseFlag("--kind", from: commentArgs) ?? "note"
+            let kind: KanbanCardCommentKind?
+            switch kindValue.lowercased().replacingOccurrences(of: "_", with: "-") {
+            case "note": kind = .note
+            case "handoff": kind = .handoff
+            case "decision": kind = .decision
+            case "evidence": kind = .evidence
+            case "qa": kind = .qa
+            case "final-report", "final", "report": kind = .finalReport
+            default: kind = nil
+            }
+            guard let kind else {
+                printCLIError("Invalid comment kind '\(kindValue)'. Use note, handoff, decision, evidence, qa, or final-report.")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard board.card(matching: cardID) != nil else {
+                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+            let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedText.isEmpty else {
+                printCLIError("Comment text cannot be blank.")
+                return
+            }
+            let comment = KanbanCardComment(
+                kind: kind,
+                body: trimmedText,
+                author: parseFlag("--author", from: commentArgs),
+                source: parseFlag("--source", from: commentArgs),
+                parentCommentID: parseFlag("--parent", from: commentArgs)
+            )
+            guard let appended = storage.addComment(boardID: board.id, cardID: cardID, comment: comment) else {
+                printCLIError("Could not append comment. Check that the card and optional parent comment exist.")
+                return
+            }
+            if jsonOutput {
+                let formatter = ISO8601DateFormatter()
+                var commentDict: [String: Any] = [
+                    "id": appended.id,
+                    "permalinkID": appended.permalinkID,
+                    "kind": appended.kind.rawValue,
+                    "body": appended.body,
+                    "createdAt": formatter.string(from: appended.createdAt),
+                ]
+                if let author = appended.author, !author.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    commentDict["author"] = author
+                }
+                if let source = appended.source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    commentDict["source"] = source
+                }
+                if let parentCommentID = appended.parentCommentID, !parentCommentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    commentDict["parentCommentID"] = parentCommentID
+                }
+                commentDict["isResolved"] = appended.isResolved
+                if let resolvedAt = appended.resolvedAt {
+                    commentDict["resolvedAt"] = formatter.string(from: resolvedAt)
+                }
+                if let resolvedBy = appended.resolvedBy, !resolvedBy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    commentDict["resolvedBy"] = resolvedBy
+                }
+                var dict: [String: Any] = [
+                    "ok": true,
+                    "board": board.id,
+                    "card": cardID,
+                    "comment": commentDict,
+                ]
+                if let refreshed = storage.findCard(id: cardID)?.card {
+                    dict["commentCount"] = refreshed.comments.count
+                }
+                outputJSON(dict)
+            } else {
+                print("Added comment: \(appended.kind.displayName) [\(appended.id)]")
+            }
+
         case "evidence":
             guard args.first == "add" else {
                 printCLIError("Usage: cider-cli board evidence add <board> --card <id> --text <text> [--source <source>] [--json]")
@@ -6384,7 +6471,7 @@ struct CiderCLI {
             print("Deleted column: \(col.name)")
 
         default:
-            printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, show, tags, workflow, recent, testing-summary, parent-summary, card inspect, create, rename, delete, add-card, update-card, section update, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
+            printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, show, tags, workflow, recent, testing-summary, parent-summary, card inspect, create, rename, delete, add-card, update-card, section update, comment add, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -9898,6 +9985,7 @@ struct CiderCLI {
             "cider-cli item relations card \(detail.card.id) --json",
             "cider-cli item backlinks card \(detail.card.id) --json",
             "cider-cli board card inspect \(detail.board.name) --card \(detail.card.id) --json",
+            "cider-cli board comment add \(detail.board.name) --card \(detail.card.id) --kind note --text \"...\" --author \"...\" --source \"...\" --json",
         ]
 
         return [
@@ -9956,6 +10044,7 @@ struct CiderCLI {
         limit: Int,
         bodyLimit: Int
     ) -> [[String: Any]] {
+        let formatter = ISO8601DateFormatter()
         let explicitEntries: [[String: Any]] = card.historyEntries
             .sorted { lhs, rhs in
                 if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
@@ -9968,8 +10057,27 @@ struct CiderCLI {
                     "summary": clippedText(entry.body, limit: bodyLimit),
                     "source": entry.author ?? "kanban",
                     "status": "recorded",
-                    "createdAt": ISO8601DateFormatter().string(from: entry.createdAt),
+                    "createdAt": formatter.string(from: entry.createdAt),
                 ]
+            }
+        let commentEntries: [[String: Any]] = card.comments
+            .sorted { lhs, rhs in
+                if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+                return lhs.id < rhs.id
+            }
+            .map { comment in
+                var dict: [String: Any] = [
+                    "id": comment.id,
+                    "kind": "comment_\(comment.kind.rawValue)",
+                    "summary": clippedText(comment.body, limit: bodyLimit),
+                    "source": comment.source ?? comment.author ?? "kanban_comment",
+                    "status": comment.isResolved ? "resolved" : "recorded",
+                    "createdAt": formatter.string(from: comment.createdAt),
+                ]
+                if let parentCommentID = comment.parentCommentID {
+                    dict["parentCommentID"] = parentCommentID
+                }
+                return dict
             }
 
         let sectionHistoryKeys: [String: String] = [
@@ -9996,7 +10104,7 @@ struct CiderCLI {
                 "createdAt": ISO8601DateFormatter().string(from: section.updatedAt),
             ]
         }
-        return Array((explicitEntries + sectionEntries).prefix(max(0, limit)))
+        return Array((explicitEntries + commentEntries + sectionEntries).prefix(max(0, limit)))
     }
 
     static func kanbanCardProvenance(board: KanbanBoard, card: KanbanCard, sections: [SecondBrainSection]) -> [String] {

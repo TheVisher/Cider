@@ -725,6 +725,35 @@ private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
             return entryDict
         }
     }
+    if !card.comments.isEmpty {
+        dict["comments"] = card.comments.map { comment in
+            var commentDict: [String: Any] = [
+                "id": comment.id,
+                "permalinkID": comment.permalinkID,
+                "kind": comment.kind.rawValue,
+                "body": comment.body,
+                "createdAt": ISO8601DateFormatter().string(from: comment.createdAt),
+                "isResolved": comment.isResolved,
+            ]
+            if let author = comment.author, !author.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                commentDict["author"] = author
+            }
+            if let source = comment.source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                commentDict["source"] = source
+            }
+            if let parentCommentID = comment.parentCommentID, !parentCommentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                commentDict["parentCommentID"] = parentCommentID
+            }
+            if let resolvedAt = comment.resolvedAt {
+                commentDict["resolvedAt"] = ISO8601DateFormatter().string(from: resolvedAt)
+            }
+            if let resolvedBy = comment.resolvedBy, !resolvedBy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                commentDict["resolvedBy"] = resolvedBy
+            }
+            return commentDict
+        }
+        dict["commentCount"] = card.comments.count
+    }
 }
 
 @MainActor func kanbanAgentWorkflowSummaryToDict(_ summary: KanbanAgentWorkflowSummary) -> [String: Any] {

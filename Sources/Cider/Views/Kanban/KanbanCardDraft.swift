@@ -12,6 +12,7 @@ struct KanbanCardDraft: Equatable {
     var relatedCardIDs: [String]
     var parentCardID: String?
     var historyEntries: [KanbanCardHistoryEntry]
+    var comments: [KanbanCardComment]
 
     init(card: KanbanCard) {
         title = card.title
@@ -25,6 +26,7 @@ struct KanbanCardDraft: Equatable {
         relatedCardIDs = card.relatedCardIDs
         parentCardID = card.parentCardID
         historyEntries = card.historyEntries
+        comments = card.comments
     }
 
     func updatedCard(from original: KanbanCard) -> KanbanCard {
@@ -50,6 +52,7 @@ struct KanbanCardDraft: Equatable {
         updated.relatedCardIDs = relatedCardIDs
         updated.parentCardID = parentCardID
         updated.historyEntries = historyEntries
+        updated.comments = comments
 
         return updated
     }

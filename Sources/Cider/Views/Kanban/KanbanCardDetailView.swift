@@ -26,6 +26,8 @@ struct KanbanCardDetailView: View {
     @FocusState private var notesFocused: Bool
     @State private var newHistoryType: KanbanCardHistoryEntryType = .note
     @State private var newHistoryBody = ""
+    @State private var newCommentKind: KanbanCardCommentKind = .note
+    @State private var newCommentBody = ""
     @State private var mode: KanbanCardDetailMode = .overview
 
     init(
@@ -73,6 +75,12 @@ struct KanbanCardDetailView: View {
                             cardID: cardID,
                             title: draft.title,
                             notes: draft.notes,
+                            aiSummary: draft.aiSummary,
+                            priority: draft.priority,
+                            tagsText: draft.tagsText,
+                            comments: $draft.comments,
+                            newCommentKind: $newCommentKind,
+                            newCommentBody: $newCommentBody,
                             historyEntries: $draft.historyEntries,
                             newHistoryType: $newHistoryType,
                             newHistoryBody: $newHistoryBody
@@ -80,6 +88,9 @@ struct KanbanCardDetailView: View {
                     case .agentContext:
                         KanbanCardAgentContextView(
                             notes: $draft.notes,
+                            comments: $draft.comments,
+                            newCommentKind: $newCommentKind,
+                            newCommentBody: $newCommentBody,
                             historyEntries: $draft.historyEntries,
                             newHistoryType: $newHistoryType,
                             newHistoryBody: $newHistoryBody,
@@ -142,6 +153,9 @@ struct KanbanCardDetailView: View {
 
 private struct KanbanCardAgentContextView: View {
     @Binding var notes: String
+    @Binding var comments: [KanbanCardComment]
+    @Binding var newCommentKind: KanbanCardCommentKind
+    @Binding var newCommentBody: String
     @Binding var historyEntries: [KanbanCardHistoryEntry]
     @Binding var newHistoryType: KanbanCardHistoryEntryType
     @Binding var newHistoryBody: String
@@ -153,6 +167,12 @@ private struct KanbanCardAgentContextView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 KanbanCardQualityChecklistView(report: qualityReport)
+
+                KanbanCardCommentsSectionView(
+                    comments: $comments,
+                    newCommentKind: $newCommentKind,
+                    newCommentBody: $newCommentBody
+                )
 
                 KanbanCardHistorySectionView(
                     entries: $historyEntries,
@@ -216,11 +236,18 @@ private struct KanbanCardDashboardView: View {
     let cardID: String
     let title: String
     let notes: String
+    let aiSummary: String?
+    let priority: KanbanPriority?
+    let tagsText: String
+    @Binding var comments: [KanbanCardComment]
+    @Binding var newCommentKind: KanbanCardCommentKind
+    @Binding var newCommentBody: String
     @Binding var historyEntries: [KanbanCardHistoryEntry]
     @Binding var newHistoryType: KanbanCardHistoryEntryType
     @Binding var newHistoryBody: String
 
     @ObservedObject private var storage = KanbanStorage.shared
+    @State private var legacyContextExpanded = false
 
     private var model: KanbanCardDashboardModel {
         KanbanCardDashboardModel(title: title, notes: notes)
@@ -248,103 +275,181 @@ private struct KanbanCardDashboardView: View {
         return board.displayKey(for: card)
     }
 
+    private var tagList: [String] {
+        tagsText
+            .components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private var currentStatusLabel: String? {
+        guard let board = storage.boards.first(where: { $0.id == boardID || $0.name == boardName }) else {
+            return nil
+        }
+        return board.columns.first(where: { column in
+            column.cards.contains { $0.id == cardID }
+        })?.name
+    }
+
+    private var readablePolicy: KanbanCardDetailReadableLayoutPolicy {
+        KanbanCardDetailReadableLayoutPolicy(
+            card: KanbanCard(
+                id: cardID,
+                title: title,
+                notes: notes,
+                aiSummary: aiSummary,
+                priority: priority,
+                tags: tagList,
+                historyEntries: historyEntries,
+                comments: comments
+            ),
+            statusLabel: currentStatusLabel
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(spacing: Spacing.sm) {
-                Image(systemName: "brain.head.profile")
+                Image(systemName: "bubble.left.and.text.bubble.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(CiderColors.controlAccent)
 
-                Text("Second-Brain Dashboard")
+                Text("Command Thread")
                     .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.tertiary)
 
                 Spacer(minLength: Spacing.sm)
 
-                KanbanDashboardBadge(text: model.hasStructuredContent ? "\(model.sections.count) sections" : "unstructured")
+                KanbanDashboardBadge(text: displayKey)
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                KanbanDashboardBadge(text: displayKey)
+            VStack(alignment: .leading, spacing: Spacing.sm) {
                 Text(title)
                     .font(CiderFont.headingSemibold)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: Spacing.sm)
+
+                if !readablePolicy.headerBadges.isEmpty {
+                    HStack(spacing: Spacing.xs) {
+                        ForEach(readablePolicy.headerBadges.prefix(4), id: \.self) { badge in
+                            KanbanDashboardBadge(text: badge)
+                        }
+                    }
+                }
+
+                if !readablePolicy.shortSummary.isEmpty {
+                    Text(readablePolicy.shortSummary)
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.secondary)
+                        .lineSpacing(3)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.md) {
-                    KanbanDashboardCurrentStateView(model: model)
+                    KanbanCardCommentsSectionView(
+                        comments: $comments,
+                        newCommentKind: $newCommentKind,
+                        newCommentBody: $newCommentBody
+                    )
 
-                    if let childRollup {
-                        KanbanDashboardChildRollupView(
-                            rollup: childRollup,
-                            roadmapNextUp: roadmapNextUp
-                        )
+                    DisclosureGroup(isExpanded: $legacyContextExpanded) {
+                        VStack(alignment: .leading, spacing: Spacing.md) {
+                            KanbanDashboardCurrentStateView(model: model)
+
+                            if let childRollup {
+                                KanbanDashboardChildRollupView(
+                                    rollup: childRollup,
+                                    roadmapNextUp: roadmapNextUp
+                                )
+                            }
+
+                            if !model.testingGuidanceEntries.isEmpty {
+                                KanbanDashboardTestingGuidanceView(
+                                    boardID: boardID,
+                                    boardName: boardName,
+                                    cardID: cardID,
+                                    cardTitle: title,
+                                    entries: model.testingGuidanceEntries
+                                )
+                            }
+
+                            KanbanCardHistorySectionView(
+                                entries: $historyEntries,
+                                newEntryType: $newHistoryType,
+                                newEntryBody: $newHistoryBody
+                            )
+
+                            KanbanDashboardTripleSection(model: model)
+
+                            if !model.qaFindingsEntries.isEmpty {
+                                KanbanDashboardEntryGroup(
+                                    icon: "exclamationmark.triangle",
+                                    title: "QA Findings",
+                                    entries: model.qaFindingsEntries,
+                                    emptyText: "No failed QA findings recorded."
+                                )
+                            }
+
+                            KanbanDashboardEntryGroup(
+                                icon: "checklist",
+                                title: "Open Loops / Next Actions",
+                                entries: model.openLoops,
+                                emptyText: model.nextStep ?? "No open loops or next actions recorded."
+                            )
+
+                            KanbanDashboardEntryGroup(
+                                icon: "seal",
+                                title: "Decisions",
+                                entries: model.decisions,
+                                emptyText: "No decisions recorded yet."
+                            )
+
+                            KanbanDashboardEntryGroup(
+                                icon: "clock.badge.checkmark",
+                                title: "Evidence & Test History",
+                                entries: model.evidenceEntries,
+                                emptyText: "No test or QA evidence recorded."
+                            )
+
+                            KanbanDashboardEntryGroup(
+                                icon: "link",
+                                title: "Related Links / Cards / Items",
+                                entries: model.relatedItems,
+                                emptyText: "No related cards, docs backlinks, or linked items recorded."
+                            )
+
+                            KanbanDashboardAgentHandoffView(boardName: boardName, cardID: cardID, context: model.agentContext)
+
+                            if !model.missingCoreSections.isEmpty {
+                                KanbanDashboardMissingSectionsView(sections: model.missingCoreSections)
+                            }
+                        }
+                        .padding(.top, Spacing.sm)
+                    } label: {
+                        HStack(spacing: Spacing.sm) {
+                            Image(systemName: "archivebox")
+                            Text("Legacy notes, projected sections, history, and agent context")
+                            Spacer(minLength: Spacing.sm)
+                            Text("Collapsed by default")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.secondary)
                     }
-
-                    if !model.testingGuidanceEntries.isEmpty {
-                        KanbanDashboardTestingGuidanceView(
-                            boardID: boardID,
-                            boardName: boardName,
-                            cardID: cardID,
-                            cardTitle: title,
-                            entries: model.testingGuidanceEntries
-                        )
-                    }
-
-                    KanbanCardHistorySectionView(
-                        entries: $historyEntries,
-                        newEntryType: $newHistoryType,
-                        newEntryBody: $newHistoryBody
+                    .padding(Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(CiderColors.surfaceElevated.opacity(0.45))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                            )
                     )
-
-                    KanbanDashboardTripleSection(model: model)
-
-                    if !model.qaFindingsEntries.isEmpty {
-                        KanbanDashboardEntryGroup(
-                            icon: "exclamationmark.triangle",
-                            title: "QA Findings",
-                            entries: model.qaFindingsEntries,
-                            emptyText: "No failed QA findings recorded."
-                        )
-                    }
-
-                    KanbanDashboardEntryGroup(
-                        icon: "checklist",
-                        title: "Open Loops / Next Actions",
-                        entries: model.openLoops,
-                        emptyText: model.nextStep ?? "No open loops or next actions recorded."
-                    )
-
-                    KanbanDashboardEntryGroup(
-                        icon: "seal",
-                        title: "Decisions",
-                        entries: model.decisions,
-                        emptyText: "No decisions recorded yet."
-                    )
-
-                    KanbanDashboardEntryGroup(
-                        icon: "clock.badge.checkmark",
-                        title: "Evidence & Test History",
-                        entries: model.evidenceEntries,
-                        emptyText: "No test or QA evidence recorded."
-                    )
-
-                    KanbanDashboardEntryGroup(
-                        icon: "link",
-                        title: "Related Links / Cards / Items",
-                        entries: model.relatedItems,
-                        emptyText: "No related cards, docs backlinks, or linked items recorded."
-                    )
-
-                    KanbanDashboardAgentHandoffView(boardName: boardName, cardID: cardID, context: model.agentContext)
-
-                    if !model.missingCoreSections.isEmpty {
-                        KanbanDashboardMissingSectionsView(sections: model.missingCoreSections)
-                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -971,6 +1076,264 @@ private struct KanbanCardNotesOutlineView: View {
                         .stroke(CiderColors.borderSubtle, lineWidth: 1)
                 )
         )
+    }
+}
+
+private struct KanbanCardCommentsSectionView: View {
+    @Binding var comments: [KanbanCardComment]
+    @Binding var newCommentKind: KanbanCardCommentKind
+    @Binding var newCommentBody: String
+
+    private var rootComments: [KanbanCardComment] {
+        comments
+            .filter { ($0.parentCommentID ?? "").isEmpty }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private func replies(to comment: KanbanCardComment) -> [KanbanCardComment] {
+        comments
+            .filter { $0.parentCommentID == comment.id }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private var canAddComment: Bool {
+        !newCommentBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(alignment: .center, spacing: Spacing.sm) {
+                Text("Comments")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+
+                Text("\(comments.count)")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(CiderColors.surfaceInput))
+
+                Spacer(minLength: Spacing.sm)
+
+                Text("Handoffs, notes, decisions, QA")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+
+            if comments.isEmpty {
+                Text("No comments yet. Add human notes, agent handoffs, decisions, evidence, QA, or final reports without growing the source notes wall.")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: Spacing.sm) {
+                        ForEach(rootComments) { comment in
+                            KanbanCardCommentThreadRow(comment: comment, replies: replies(to: comment))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 260)
+            }
+
+            Divider()
+                .overlay(CiderColors.borderSubtle)
+
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(alignment: .center, spacing: Spacing.sm) {
+                    Picker("Kind", selection: $newCommentKind) {
+                        ForEach(KanbanCardCommentKind.allCases, id: \.self) { kind in
+                            Label(kind.displayName, systemImage: kind.symbolName).tag(kind)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 220)
+
+                    Spacer(minLength: Spacing.sm)
+
+                    Button("Add Comment") {
+                        addComment()
+                    }
+                    .buttonStyle(CiderAccentButtonStyle())
+                    .disabled(!canAddComment)
+                }
+
+                TextEditor(text: $newCommentBody)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.primary)
+                    .lineSpacing(3)
+                    .scrollContentBackground(.hidden)
+                    .padding(Spacing.xs)
+                    .frame(minHeight: 58, maxHeight: 96)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(CiderColors.surfaceInput.opacity(0.6))
+                    )
+                    .overlay(alignment: .topLeading) {
+                        if newCommentBody.isEmpty {
+                            Text("Add a focused comment…")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                                .padding(.horizontal, Spacing.sm)
+                                .padding(.vertical, Spacing.sm)
+                                .allowsHitTesting(false)
+                        }
+                    }
+            }
+        }
+        .padding(Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(CiderColors.surfaceElevated.opacity(0.75))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(CiderColors.borderDefault, lineWidth: 1)
+                )
+        )
+    }
+
+    private func addComment() {
+        let trimmedBody = newCommentBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBody.isEmpty else { return }
+        comments.append(
+            KanbanCardComment(
+                kind: newCommentKind,
+                body: trimmedBody,
+                author: "Human",
+                source: "cider-ui",
+                createdAt: Date()
+            )
+        )
+        newCommentBody = ""
+        newCommentKind = .note
+    }
+}
+
+private struct KanbanCardCommentThreadRow: View {
+    var comment: KanbanCardComment
+    var replies: [KanbanCardComment]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            KanbanCardCommentRow(comment: comment, indent: 0)
+            ForEach(replies) { reply in
+                KanbanCardCommentRow(comment: reply, indent: 22)
+            }
+        }
+    }
+}
+
+private struct KanbanCardCommentRow: View {
+    var comment: KanbanCardComment
+    var indent: CGFloat
+
+    private var timestamp: String {
+        comment.createdAt.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: comment.kind.symbolName)
+                .font(.caption)
+                .foregroundColor(CiderColors.controlAccent)
+                .frame(width: 18, height: 18)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                    Text(comment.kind.displayName)
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.primary)
+
+                    Text(timestamp)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+
+                    if let author = comment.author, !author.isEmpty {
+                        Text("• \(author)")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    if comment.isResolved {
+                        Text("Resolved")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.controlAccent)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(CiderColors.accentSubtle))
+                    }
+                }
+
+                if let source = comment.source, !source.isEmpty {
+                    Text("#\(comment.permalinkID) • \(source)")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                } else {
+                    Text("#\(comment.permalinkID)")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+
+                KanbanCommentBodyView(content: comment.body)
+            }
+        }
+        .padding(Spacing.sm)
+        .padding(.leading, indent)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(indent > 0 ? CiderColors.surfaceInput.opacity(0.45) : CiderColors.surfaceSubtle)
+        )
+    }
+}
+
+private struct KanbanCommentBodyView: View {
+    let content: String
+
+    var bodyViewLines: [String] {
+        content.components(separatedBy: .newlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(bodyViewLines.enumerated()), id: \.offset) { _, line in
+                if let checklist = KanbanMarkdownChecklistLine(line: line) {
+                    HStack(alignment: .top, spacing: Spacing.xs) {
+                        Image(systemName: checklist.isChecked ? "checkmark.square.fill" : "square")
+                            .font(CiderFont.caption)
+                            .foregroundColor(checklist.isChecked ? CiderColors.controlAccent : CiderColors.tertiary)
+                            .padding(.top, 1)
+                        Text(checklist.text)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.secondary)
+                            .strikethrough(checklist.isChecked, color: CiderColors.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    Text(line)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .lineSpacing(3)
+    }
+}
+
+private struct KanbanMarkdownChecklistLine {
+    let isChecked: Bool
+    let text: String
+
+    init?(line: String) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("- [ ] ") || trimmed.hasPrefix("- [x] ") || trimmed.hasPrefix("- [X] ") else {
+            return nil
+        }
+        isChecked = trimmed.hasPrefix("- [x] ") || trimmed.hasPrefix("- [X] ")
+        text = String(trimmed.dropFirst(6))
     }
 }
 

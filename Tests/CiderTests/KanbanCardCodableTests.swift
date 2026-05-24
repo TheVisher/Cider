@@ -206,6 +206,63 @@ struct KanbanCardCodableTests {
         #expect(decoded.historyEntries.isEmpty)
     }
 
+    @Test("card comments round trip with metadata, categories, and replies")
+    func cardCommentsRoundTripWithMetadataCategoriesAndReplies() throws {
+        let createdAt = Date(timeIntervalSince1970: 1_750_000_000)
+        let root = KanbanCardComment(
+            id: "comment-root",
+            kind: .handoff,
+            body: "Cody handoff for the next agent.",
+            author: "Cody",
+            source: "discord:cody-chat",
+            createdAt: createdAt
+        )
+        let reply = KanbanCardComment(
+            id: "comment-reply",
+            kind: .qa,
+            body: "- [x] QA verified the persisted handoff.",
+            author: "Erik",
+            source: "cider-ui",
+            createdAt: createdAt.addingTimeInterval(60),
+            parentCommentID: root.id,
+            resolvedAt: createdAt.addingTimeInterval(120),
+            resolvedBy: "Erik"
+        )
+        let card = KanbanCard(
+            id: "comment-card",
+            title: "Threaded comments",
+            comments: [root, reply]
+        )
+
+        let data = try JSONEncoder().encode(card)
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: data)
+
+        #expect(decoded.comments.map(\.id) == ["comment-root", "comment-reply"])
+        #expect(decoded.comments.map(\.kind) == [.handoff, .qa])
+        #expect(decoded.comments.first?.source == "discord:cody-chat")
+        #expect(decoded.comments.last?.parentCommentID == "comment-root")
+        #expect(decoded.comments.last?.body == "- [x] QA verified the persisted handoff.")
+        #expect(decoded.comments.last?.resolvedAt == createdAt.addingTimeInterval(120))
+        #expect(decoded.comments.last?.resolvedBy == "Erik")
+        #expect(decoded.comments.last?.isResolved == true)
+        #expect(decoded.comments.first?.permalinkID == "comment-root")
+    }
+
+    @Test("legacy cards without comments decode with empty comments")
+    func legacyCardsWithoutCommentsDecodeWithEmptyComments() throws {
+        let json = """
+        {
+          "id": "legacy-card",
+          "title": "Legacy Kanban Card",
+          "created": "2026-05-02"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: Data(json.utf8))
+
+        #expect(decoded.comments.isEmpty)
+    }
+
     @Test("date-only created values preserve local Pacific calendar day")
     func dateOnlyCreatedValuesPreserveLocalPacificCalendarDay() throws {
         let originalTimeZone = NSTimeZone.default

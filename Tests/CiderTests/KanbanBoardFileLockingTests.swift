@@ -244,6 +244,51 @@ struct KanbanBoardFileLockingTests {
         #expect(refreshed.parentCardID == parent.id)
     }
 
+    @Test("card comments persist and reload nested categories")
+    @MainActor
+    func cardCommentsPersistAndReloadNestedCategories() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Comment Persistence")
+        let card = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "Threaded card"))
+        let handoff = KanbanCardComment(
+            id: "comment-handoff",
+            kind: .handoff,
+            body: "Handoff for Cody.",
+            author: "Cider/Hermes",
+            source: "discord",
+            createdAt: Date(timeIntervalSince1970: 1_750_000_000)
+        )
+        let evidence = KanbanCardComment(
+            id: "comment-evidence",
+            kind: .evidence,
+            body: "Reload verified.",
+            author: "Cody",
+            source: "swift-test",
+            createdAt: Date(timeIntervalSince1970: 1_750_000_060),
+            parentCommentID: handoff.id
+        )
+
+        var updated = card
+        updated.comments = [handoff, evidence]
+        storage.updateCard(boardID: board.id, card: updated)
+
+        let reloaded = try #require(KanbanStorage().findCard(id: card.id)?.card)
+        #expect(reloaded.comments.map(\.id) == ["comment-handoff", "comment-evidence"])
+        #expect(reloaded.comments.map(\.kind) == [.handoff, .evidence])
+        #expect(reloaded.comments.last?.parentCommentID == "comment-handoff")
+        #expect(reloaded.updatedAt != nil)
+        #expect(reloaded.lastActivityKind == "updated")
+    }
+
     @Test("tag editor save persists tags and reload derives visible chip semantics")
     @MainActor
     func tagEditorSavePersistsTagsAndReloadDerivesVisibleChipSemantics() throws {

@@ -152,4 +152,40 @@ struct KanbanCardDraftTests {
         #expect(updated.historyEntries.last?.type == .finalSummary)
         #expect(updated.historyEntries.last?.body == "Final implementation summary")
     }
+
+    @Test("draft preserves and appends threaded comments separately from notes")
+    func draftPreservesAndAppendsThreadedCommentsSeparatelyFromNotes() {
+        let existing = KanbanCardComment(
+            id: "comment-1",
+            kind: .handoff,
+            body: "Agent handoff stays out of source notes.",
+            author: "Cody",
+            source: "discord",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let card = KanbanCard(
+            id: "comments-card",
+            title: "Comments Card",
+            notes: "Problem: keep this source spec intact.",
+            comments: [existing]
+        )
+
+        var draft = KanbanCardDraft(card: card)
+        draft.comments.append(KanbanCardComment(
+            id: "comment-2",
+            kind: .evidence,
+            body: "Focused persistence test passed.",
+            author: "Cody",
+            source: "cli",
+            createdAt: Date(timeIntervalSince1970: 1_700_100_000),
+            parentCommentID: "comment-1"
+        ))
+
+        let updated = draft.updatedCard(from: card)
+
+        #expect(updated.notes == "Problem: keep this source spec intact.")
+        #expect(updated.comments.map(\.id) == ["comment-1", "comment-2"])
+        #expect(updated.comments.last?.kind == .evidence)
+        #expect(updated.comments.last?.parentCommentID == "comment-1")
+    }
 }

@@ -1337,6 +1337,9 @@ struct SecondBrainFoundationTests {
         #expect(model.historyEntries.first?.source == "codex")
         #expect(model.agentContext.notes.contains("Future agents should append verification"))
         #expect(model.agentContext.commands(board: "Cider", cardID: "abc123").contains {
+            $0.contains("board comment add Cider --card abc123")
+        })
+        #expect(model.agentContext.commands(board: "Cider", cardID: "abc123").contains {
             $0.contains("board evidence add Cider --card abc123")
         })
         #expect(model.agentContext.commands(board: "Cider", cardID: "abc123").contains {

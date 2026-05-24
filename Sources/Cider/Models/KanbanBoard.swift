@@ -91,6 +91,106 @@ struct KanbanCardHistoryEntry: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+enum KanbanCardCommentKind: String, Codable, CaseIterable, Sendable {
+    case note
+    case handoff
+    case decision
+    case evidence
+    case qa
+    case finalReport = "final_report"
+
+    var displayName: String {
+        switch self {
+        case .note: "Note"
+        case .handoff: "Handoff"
+        case .decision: "Decision"
+        case .evidence: "Evidence"
+        case .qa: "QA"
+        case .finalReport: "Final Report"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .note: "text.bubble"
+        case .handoff: "person.2.wave.2"
+        case .decision: "checkmark.seal.fill"
+        case .evidence: "checkmark.seal"
+        case .qa: "list.clipboard"
+        case .finalReport: "flag.checkered"
+        }
+    }
+}
+
+struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
+    var id: String
+    var kind: KanbanCardCommentKind
+    var body: String
+    var author: String?
+    var source: String?
+    var createdAt: Date
+    var parentCommentID: String?
+    var resolvedAt: Date?
+    var resolvedBy: String?
+
+    var permalinkID: String { id }
+    var isResolved: Bool { resolvedAt != nil }
+
+    init(
+        id: String = KanbanID.generate(),
+        kind: KanbanCardCommentKind,
+        body: String,
+        author: String? = nil,
+        source: String? = nil,
+        createdAt: Date = Date(),
+        parentCommentID: String? = nil,
+        resolvedAt: Date? = nil,
+        resolvedBy: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.body = body
+        self.author = author
+        self.source = source
+        self.createdAt = createdAt
+        self.parentCommentID = parentCommentID
+        self.resolvedAt = resolvedAt
+        self.resolvedBy = resolvedBy
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, body, author, source, createdAt, parentCommentID, resolvedAt, resolvedBy
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        kind = try c.decode(KanbanCardCommentKind.self, forKey: .kind)
+        body = try c.decode(String.self, forKey: .body)
+        author = try c.decodeIfPresent(String.self, forKey: .author)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        createdAt = try c.decode(KanbanHistoryDate.self, forKey: .createdAt).date
+        parentCommentID = try c.decodeIfPresent(String.self, forKey: .parentCommentID)
+        resolvedAt = try c.decodeIfPresent(KanbanHistoryDate.self, forKey: .resolvedAt)?.date
+        resolvedBy = try c.decodeIfPresent(String.self, forKey: .resolvedBy)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(body, forKey: .body)
+        try c.encodeIfPresent(author, forKey: .author)
+        try c.encodeIfPresent(source, forKey: .source)
+        try c.encode(KanbanHistoryDate(date: createdAt), forKey: .createdAt)
+        try c.encodeIfPresent(parentCommentID, forKey: .parentCommentID)
+        if let resolvedAt {
+            try c.encode(KanbanHistoryDate(date: resolvedAt), forKey: .resolvedAt)
+        }
+        try c.encodeIfPresent(resolvedBy, forKey: .resolvedBy)
+    }
+}
+
 // MARK: - KanbanCard
 
 struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
@@ -108,6 +208,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
     var relatedCardIDs: [String]
     var parentCardID: String?
     var historyEntries: [KanbanCardHistoryEntry]
+    var comments: [KanbanCardComment]
     var created: Date
     var completed: Date?
     var updatedAt: Date?
@@ -128,6 +229,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         relatedCardIDs: [String] = [],
         parentCardID: String? = nil,
         historyEntries: [KanbanCardHistoryEntry] = [],
+        comments: [KanbanCardComment] = [],
         created: Date = Date(),
         completed: Date? = nil,
         updatedAt: Date? = nil,
@@ -147,6 +249,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         self.relatedCardIDs = relatedCardIDs
         self.parentCardID = parentCardID
         self.historyEntries = historyEntries
+        self.comments = comments
         self.created = created
         self.completed = completed
         self.updatedAt = updatedAt
@@ -161,7 +264,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
 
     // Custom Codable for date format and backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, aiSummary, displayKey, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, historyEntries, created, completed, updatedAt, lastActivityKind, reviewedAt
+        case id, title, notes, aiSummary, displayKey, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, historyEntries, comments, created, completed, updatedAt, lastActivityKind, reviewedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -179,6 +282,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         relatedCardIDs = (try c.decodeIfPresent([String].self, forKey: .relatedCardIDs)) ?? []
         parentCardID = try c.decodeIfPresent(String.self, forKey: .parentCardID)
         historyEntries = (try c.decodeIfPresent([KanbanCardHistoryEntry].self, forKey: .historyEntries)) ?? []
+        comments = (try c.decodeIfPresent([KanbanCardComment].self, forKey: .comments)) ?? []
         created = (try c.decodeIfPresent(KanbanDate.self, forKey: .created))?.date ?? Date()
         completed = try c.decodeIfPresent(KanbanDate.self, forKey: .completed)?.date
         updatedAt = try c.decodeIfPresent(KanbanTimestamp.self, forKey: .updatedAt)?.date
@@ -201,6 +305,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         if !relatedCardIDs.isEmpty { try c.encode(relatedCardIDs, forKey: .relatedCardIDs) }
         try c.encodeIfPresent(parentCardID, forKey: .parentCardID)
         if !historyEntries.isEmpty { try c.encode(historyEntries, forKey: .historyEntries) }
+        if !comments.isEmpty { try c.encode(comments, forKey: .comments) }
         try c.encode(KanbanDate(date: created), forKey: .created)
         try c.encodeIfPresent(completed.map { KanbanDate(date: $0) }, forKey: .completed)
         try c.encodeIfPresent(updatedAt.map { KanbanTimestamp(date: $0) }, forKey: .updatedAt)

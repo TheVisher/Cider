@@ -358,6 +358,7 @@ final class KanbanStorage: ObservableObject {
         if incoming.relatedCardIDs != baseline.relatedCardIDs { merged.relatedCardIDs = incoming.relatedCardIDs }
         if incoming.parentCardID != baseline.parentCardID { merged.parentCardID = incoming.parentCardID }
         if incoming.historyEntries != baseline.historyEntries { merged.historyEntries = incoming.historyEntries }
+        if incoming.comments != baseline.comments { merged.comments = incoming.comments }
         if incoming.completed != baseline.completed { merged.completed = incoming.completed }
         if incoming.updatedAt != baseline.updatedAt { merged.updatedAt = incoming.updatedAt }
         if incoming.lastActivityKind != baseline.lastActivityKind { merged.lastActivityKind = incoming.lastActivityKind }
@@ -445,6 +446,31 @@ final class KanbanStorage: ObservableObject {
                 }
             }
         }
+    }
+
+    @discardableResult
+    func addComment(boardID: String, cardID: String, comment: KanbanCardComment) -> KanbanCardComment? {
+        var appended: KanbanCardComment?
+        mutate(boardID: boardID) { board in
+            for colIdx in board.columns.indices {
+                if let cardIdx = board.columns[colIdx].cards.firstIndex(where: { $0.id == cardID }) {
+                    if let parentID = comment.parentCommentID,
+                       !board.columns[colIdx].cards[cardIdx].comments.contains(where: { $0.id == parentID }) {
+                        return
+                    }
+                    board.columns[colIdx].cards[cardIdx].comments.append(comment)
+                    board.columns[colIdx].cards[cardIdx].markActivity("comment", at: comment.createdAt)
+                    appended = comment
+                    return
+                }
+            }
+        }
+        if let appended,
+           let card = findCard(id: cardID)?.card {
+            refreshSecondBrainProjectionIfAvailable(boardID: boardID, card: card)
+            return appended
+        }
+        return nil
     }
 
     func deleteCard(boardID: String, cardID: String) {
