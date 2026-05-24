@@ -28,6 +28,9 @@ struct KanbanCardDetailView: View {
     @State private var newHistoryBody = ""
     @State private var newCommentKind: KanbanCardCommentKind = .note
     @State private var newCommentBody = ""
+    @State private var replyingToCommentID: String?
+    @State private var replyCommentBody = ""
+    @State private var collapsedThreadIDs: Set<String> = []
     @State private var mode: KanbanCardDetailMode = .overview
 
     init(
@@ -52,6 +55,14 @@ struct KanbanCardDetailView: View {
 
     private var notesOutline: KanbanCardNotesOutline {
         KanbanCardNotesOutline(notes: draft.notes)
+    }
+
+    private var currentCommentAuthorName: String {
+        KanbanCardCommentThreadPolicy.defaultAuthorName(
+            accountEmail: AuthService.shared.accountEmail,
+            fullUserName: NSFullUserName(),
+            userName: NSUserName()
+        )
     }
 
     var body: some View {
@@ -81,6 +92,11 @@ struct KanbanCardDetailView: View {
                             comments: $draft.comments,
                             newCommentKind: $newCommentKind,
                             newCommentBody: $newCommentBody,
+                            replyingToCommentID: $replyingToCommentID,
+                            replyCommentBody: $replyCommentBody,
+                            collapsedThreadIDs: $collapsedThreadIDs,
+                            currentAuthorName: currentCommentAuthorName,
+                            onCommentChanged: onSave,
                             historyEntries: $draft.historyEntries,
                             newHistoryType: $newHistoryType,
                             newHistoryBody: $newHistoryBody
@@ -91,6 +107,11 @@ struct KanbanCardDetailView: View {
                             comments: $draft.comments,
                             newCommentKind: $newCommentKind,
                             newCommentBody: $newCommentBody,
+                            replyingToCommentID: $replyingToCommentID,
+                            replyCommentBody: $replyCommentBody,
+                            collapsedThreadIDs: $collapsedThreadIDs,
+                            currentAuthorName: currentCommentAuthorName,
+                            onCommentChanged: onSave,
                             historyEntries: $draft.historyEntries,
                             newHistoryType: $newHistoryType,
                             newHistoryBody: $newHistoryBody,
@@ -156,6 +177,11 @@ private struct KanbanCardAgentContextView: View {
     @Binding var comments: [KanbanCardComment]
     @Binding var newCommentKind: KanbanCardCommentKind
     @Binding var newCommentBody: String
+    @Binding var replyingToCommentID: String?
+    @Binding var replyCommentBody: String
+    @Binding var collapsedThreadIDs: Set<String>
+    var currentAuthorName: String
+    var onCommentChanged: () -> Void
     @Binding var historyEntries: [KanbanCardHistoryEntry]
     @Binding var newHistoryType: KanbanCardHistoryEntryType
     @Binding var newHistoryBody: String
@@ -171,7 +197,12 @@ private struct KanbanCardAgentContextView: View {
                 KanbanCardCommentsSectionView(
                     comments: $comments,
                     newCommentKind: $newCommentKind,
-                    newCommentBody: $newCommentBody
+                    newCommentBody: $newCommentBody,
+                    replyingToCommentID: $replyingToCommentID,
+                    replyCommentBody: $replyCommentBody,
+                    collapsedThreadIDs: $collapsedThreadIDs,
+                    currentAuthorName: currentAuthorName,
+                    onCommentChanged: onCommentChanged
                 )
 
                 KanbanCardHistorySectionView(
@@ -242,6 +273,11 @@ private struct KanbanCardDashboardView: View {
     @Binding var comments: [KanbanCardComment]
     @Binding var newCommentKind: KanbanCardCommentKind
     @Binding var newCommentBody: String
+    @Binding var replyingToCommentID: String?
+    @Binding var replyCommentBody: String
+    @Binding var collapsedThreadIDs: Set<String>
+    var currentAuthorName: String
+    var onCommentChanged: () -> Void
     @Binding var historyEntries: [KanbanCardHistoryEntry]
     @Binding var newHistoryType: KanbanCardHistoryEntryType
     @Binding var newHistoryBody: String
@@ -353,7 +389,12 @@ private struct KanbanCardDashboardView: View {
                     KanbanCardCommentsSectionView(
                         comments: $comments,
                         newCommentKind: $newCommentKind,
-                        newCommentBody: $newCommentBody
+                        newCommentBody: $newCommentBody,
+                        replyingToCommentID: $replyingToCommentID,
+                        replyCommentBody: $replyCommentBody,
+                        collapsedThreadIDs: $collapsedThreadIDs,
+                        currentAuthorName: currentAuthorName,
+                        onCommentChanged: onCommentChanged
                     )
 
                     DisclosureGroup(isExpanded: $legacyContextExpanded) {
@@ -1083,21 +1124,22 @@ private struct KanbanCardCommentsSectionView: View {
     @Binding var comments: [KanbanCardComment]
     @Binding var newCommentKind: KanbanCardCommentKind
     @Binding var newCommentBody: String
+    @Binding var replyingToCommentID: String?
+    @Binding var replyCommentBody: String
+    @Binding var collapsedThreadIDs: Set<String>
+    var currentAuthorName: String
+    var onCommentChanged: () -> Void
 
-    private var rootComments: [KanbanCardComment] {
-        comments
-            .filter { ($0.parentCommentID ?? "").isEmpty }
-            .sorted { $0.createdAt < $1.createdAt }
-    }
-
-    private func replies(to comment: KanbanCardComment) -> [KanbanCardComment] {
-        comments
-            .filter { $0.parentCommentID == comment.id }
-            .sorted { $0.createdAt < $1.createdAt }
+    private var threads: [KanbanCardCommentThreadPolicy.Thread] {
+        KanbanCardCommentThreadPolicy.threads(from: comments)
     }
 
     private var canAddComment: Bool {
         !newCommentBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canAddReply: Bool {
+        !replyCommentBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
@@ -1129,8 +1171,19 @@ private struct KanbanCardCommentsSectionView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.sm) {
-                        ForEach(rootComments) { comment in
-                            KanbanCardCommentThreadRow(comment: comment, replies: replies(to: comment))
+                        ForEach(threads, id: \.root.id) { thread in
+                            KanbanCardCommentThreadRow(
+                                thread: thread,
+                                isCollapsed: collapsedThreadIDs.contains(thread.root.id),
+                                isReplying: replyingToCommentID == thread.root.id,
+                                replyBody: $replyCommentBody,
+                                canAddReply: canAddReply,
+                                onToggleCollapse: { toggleCollapse(for: thread.root) },
+                                onToggleResolved: { toggleResolved(thread.root) },
+                                onReply: { startReply(to: thread.root) },
+                                onCancelReply: { cancelReply() },
+                                onAddReply: { addReply(to: thread.root) }
+                            )
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1201,25 +1254,120 @@ private struct KanbanCardCommentsSectionView: View {
             KanbanCardComment(
                 kind: newCommentKind,
                 body: trimmedBody,
-                author: "Human",
+                author: currentAuthorName,
                 source: "cider-ui",
                 createdAt: Date()
             )
         )
         newCommentBody = ""
         newCommentKind = .note
+        persistCommentChange()
+    }
+
+    private func startReply(to comment: KanbanCardComment) {
+        replyingToCommentID = comment.id
+        replyCommentBody = ""
+        collapsedThreadIDs.remove(comment.id)
+    }
+
+    private func cancelReply() {
+        replyingToCommentID = nil
+        replyCommentBody = ""
+    }
+
+    private func addReply(to comment: KanbanCardComment) {
+        let trimmedBody = replyCommentBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBody.isEmpty else { return }
+        comments.append(
+            KanbanCardComment(
+                kind: .note,
+                body: trimmedBody,
+                author: currentAuthorName,
+                source: "cider-ui",
+                createdAt: Date(),
+                parentCommentID: comment.id
+            )
+        )
+        cancelReply()
+        persistCommentChange()
+    }
+
+    private func toggleResolved(_ comment: KanbanCardComment) {
+        guard let index = comments.firstIndex(where: { $0.id == comment.id }) else { return }
+        if comments[index].isResolved {
+            comments[index].resolvedAt = nil
+            comments[index].resolvedBy = nil
+            collapsedThreadIDs.remove(comment.id)
+        } else {
+            comments[index].resolvedAt = Date()
+            comments[index].resolvedBy = currentAuthorName
+            collapsedThreadIDs.insert(comment.id)
+        }
+        persistCommentChange()
+    }
+
+    private func toggleCollapse(for comment: KanbanCardComment) {
+        if collapsedThreadIDs.contains(comment.id) {
+            collapsedThreadIDs.remove(comment.id)
+        } else {
+            collapsedThreadIDs.insert(comment.id)
+        }
+    }
+
+    private func persistCommentChange() {
+        DispatchQueue.main.async {
+            onCommentChanged()
+        }
     }
 }
 
 private struct KanbanCardCommentThreadRow: View {
-    var comment: KanbanCardComment
-    var replies: [KanbanCardComment]
+    var thread: KanbanCardCommentThreadPolicy.Thread
+    var isCollapsed: Bool
+    var isReplying: Bool
+    @Binding var replyBody: String
+    var canAddReply: Bool
+    var onToggleCollapse: () -> Void
+    var onToggleResolved: () -> Void
+    var onReply: () -> Void
+    var onCancelReply: () -> Void
+    var onAddReply: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            KanbanCardCommentRow(comment: comment, indent: 0)
-            ForEach(replies) { reply in
-                KanbanCardCommentRow(comment: reply, indent: 22)
+            KanbanCardCommentRow(
+                comment: thread.root,
+                indent: 0,
+                replyCount: thread.replies.count,
+                isThreadCollapsed: isCollapsed,
+                onToggleResolved: onToggleResolved,
+                onToggleCollapse: onToggleCollapse,
+                onReply: onReply
+            )
+
+            if !isCollapsed {
+                if !thread.replies.isEmpty || isReplying {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ForEach(thread.replies) { reply in
+                            KanbanCardCommentRow(comment: reply, indent: 0)
+                        }
+                        if isReplying {
+                            KanbanCardReplyComposer(
+                                text: $replyBody,
+                                canSubmit: canAddReply,
+                                onCancel: onCancelReply,
+                                onSubmit: onAddReply
+                            )
+                        }
+                    }
+                    .padding(.leading, 28)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(CiderColors.borderSubtle)
+                            .frame(width: 2)
+                            .padding(.leading, 10)
+                    }
+                }
             }
         }
     }
@@ -1228,6 +1376,11 @@ private struct KanbanCardCommentThreadRow: View {
 private struct KanbanCardCommentRow: View {
     var comment: KanbanCardComment
     var indent: CGFloat
+    var replyCount: Int = 0
+    var isThreadCollapsed: Bool = false
+    var onToggleResolved: (() -> Void)? = nil
+    var onToggleCollapse: (() -> Void)? = nil
+    var onReply: (() -> Void)? = nil
 
     private var timestamp: String {
         comment.createdAt.formatted(date: .abbreviated, time: .shortened)
@@ -1277,6 +1430,34 @@ private struct KanbanCardCommentRow: View {
                 }
 
                 KanbanCommentBodyView(content: comment.body)
+
+                if onReply != nil || onToggleResolved != nil || replyCount > 0 {
+                    HStack(spacing: Spacing.sm) {
+                        if let onReply {
+                            Button("Reply", action: onReply)
+                                .buttonStyle(.plain)
+                                .font(CiderFont.captionSemibold)
+                                .foregroundColor(CiderColors.controlAccent)
+                        }
+
+                        if let onToggleResolved {
+                            Button(comment.isResolved ? "Reopen thread" : "Resolve thread", action: onToggleResolved)
+                                .buttonStyle(.plain)
+                                .font(CiderFont.caption)
+                                .foregroundColor(comment.isResolved ? CiderColors.controlAccent : CiderColors.tertiary)
+                        }
+
+                        if replyCount > 0, let onToggleCollapse {
+                            Button(isThreadCollapsed ? "Expand \(replyCount) repl\(replyCount == 1 ? "y" : "ies")" : "Collapse") {
+                                onToggleCollapse()
+                            }
+                            .buttonStyle(.plain)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
             }
         }
         .padding(Spacing.sm)
@@ -1289,15 +1470,65 @@ private struct KanbanCardCommentRow: View {
     }
 }
 
+private struct KanbanCardReplyComposer: View {
+    @Binding var text: String
+    var canSubmit: Bool
+    var onCancel: () -> Void
+    var onSubmit: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            TextEditor(text: $text)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.primary)
+                .lineSpacing(3)
+                .scrollContentBackground(.hidden)
+                .padding(Spacing.xs)
+                .frame(minHeight: 46, maxHeight: 80)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(CiderColors.surfaceInput.opacity(0.55))
+                )
+                .overlay(alignment: .topLeading) {
+                    if text.isEmpty {
+                        Text("Reply to this thread…")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                            .padding(.horizontal, Spacing.sm)
+                            .padding(.vertical, Spacing.sm)
+                            .allowsHitTesting(false)
+                    }
+                }
+
+            HStack(spacing: Spacing.sm) {
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.plain)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                Button("Reply", action: onSubmit)
+                    .buttonStyle(CiderAccentButtonStyle())
+                    .disabled(!canSubmit)
+            }
+        }
+        .padding(.top, Spacing.xs)
+    }
+}
+
 private struct KanbanCommentBodyView: View {
     let content: String
 
     var bodyViewLines: [String] {
-        content.components(separatedBy: .newlines)
+        KanbanCardCommentThreadPolicy.displayBodyLines(for: content)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
+            if bodyViewLines.isEmpty {
+                Text("No comment text captured.")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .italic()
+            }
             ForEach(Array(bodyViewLines.enumerated()), id: \.offset) { _, line in
                 if let checklist = KanbanMarkdownChecklistLine(line: line) {
                     HStack(alignment: .top, spacing: Spacing.xs) {

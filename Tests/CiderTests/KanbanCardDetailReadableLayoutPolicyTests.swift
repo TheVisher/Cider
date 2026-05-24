@@ -56,4 +56,37 @@ struct KanbanCardDetailReadableLayoutPolicyTests {
         #expect(policy.shortSummary == "Comments are visible; the top of the card needs a compact current-state summary.")
         #expect(policy.headerBadges.isEmpty)
     }
+
+    @Test("comment threads group replies under chronological roots")
+    func commentThreadsGroupRepliesUnderChronologicalRoots() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        let root = KanbanCardComment(id: "root", kind: .note, body: "Root", createdAt: start)
+        let secondRoot = KanbanCardComment(id: "second", kind: .qa, body: "Second", createdAt: start.addingTimeInterval(3))
+        let reply = KanbanCardComment(id: "reply", kind: .note, body: "Reply", createdAt: start.addingTimeInterval(2), parentCommentID: "root")
+
+        let threads = KanbanCardCommentThreadPolicy.threads(from: [secondRoot, reply, root])
+
+        #expect(threads.map(\.root.id) == ["root", "second"])
+        #expect(threads.first?.replies.map(\.id) == ["reply"])
+        #expect(threads.last?.replies.isEmpty == true)
+    }
+
+    @Test("comment composer uses account display name instead of generic human")
+    func commentComposerUsesAccountDisplayNameInsteadOfGenericHuman() {
+        let name = KanbanCardCommentThreadPolicy.defaultAuthorName(
+            accountEmail: "visher@example.com",
+            fullUserName: "Human",
+            userName: "human"
+        )
+
+        #expect(name == "Visher")
+    }
+
+    @Test("comment body display trims blank wrappers without hiding real text")
+    func commentBodyDisplayTrimsBlankWrappersWithoutHidingRealText() {
+        let lines = KanbanCardCommentThreadPolicy.displayBodyLines(for: "\n\nThis is the note I wrote.\n")
+
+        #expect(lines == ["This is the note I wrote."])
+        #expect(KanbanCardCommentThreadPolicy.displayBodyLines(for: "   ").isEmpty)
+    }
 }
