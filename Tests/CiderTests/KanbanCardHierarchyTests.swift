@@ -549,6 +549,8 @@ struct KanbanCardHierarchyTests {
 
         #expect(chips.map(\.label) == ["…", "Sidebar", "Bug", "Testing"])
         #expect(chips.map(\.role) == [.tagEdit, .featureDomain, .typeStatus, .typeStatus])
+        #expect(chips.map(\.accessory) == [.none, .featureIcon, .colorDot, .colorDot])
+        #expect(chips.map(\.surface) == [.muted, .muted, .muted, .muted])
         #expect(KanbanBoardLayout.cardFaceSemanticChips(for: card) == ["Sidebar", "Bug", "Testing"])
     }
 

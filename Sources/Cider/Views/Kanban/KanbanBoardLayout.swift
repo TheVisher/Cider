@@ -8,8 +8,20 @@ struct KanbanCardFaceChip: Equatable {
         case typeStatus
     }
 
+    enum Accessory: Equatable {
+        case none
+        case featureIcon
+        case colorDot
+    }
+
+    enum Surface: Equatable {
+        case muted
+    }
+
     let label: String
     let role: Role
+    let accessory: Accessory
+    let surface: Surface
 }
 
 enum KanbanLaneRole: String, CaseIterable {
@@ -336,7 +348,7 @@ enum KanbanBoardLayout {
     static func cardFaceChips(for card: KanbanCard, limit: Int = 3) -> [KanbanCardFaceChip] {
         let semanticChips = cardFaceSemanticChipModels(for: card, limit: limit)
         guard !semanticChips.isEmpty else { return [] }
-        return [KanbanCardFaceChip(label: "…", role: .tagEdit)] + semanticChips
+        return [KanbanCardFaceChip(label: "…", role: .tagEdit, accessory: .none, surface: .muted)] + semanticChips
     }
 
     private static func cardFaceSemanticChipModels(for card: KanbanCard, limit: Int = 3) -> [KanbanCardFaceChip] {
@@ -352,7 +364,12 @@ enum KanbanBoardLayout {
                 continue
             }
             let role = cardFaceChipRole(for: normalized)
-            let chip = KanbanCardFaceChip(label: displayChipLabel(for: normalized), role: role)
+            let chip = KanbanCardFaceChip(
+                label: displayChipLabel(for: normalized),
+                role: role,
+                accessory: cardFaceChipAccessory(for: role),
+                surface: .muted
+            )
             switch role {
             case .featureDomain:
                 featureDomainChips.append(chip)
@@ -371,6 +388,17 @@ enum KanbanBoardLayout {
             return .typeStatus
         }
         return .featureDomain
+    }
+
+    private static func cardFaceChipAccessory(for role: KanbanCardFaceChip.Role) -> KanbanCardFaceChip.Accessory {
+        switch role {
+        case .tagEdit:
+            return .none
+        case .featureDomain:
+            return .featureIcon
+        case .typeStatus:
+            return .colorDot
+        }
     }
 
     private static let typeStatusTags: Set<String> = [
