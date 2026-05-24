@@ -21,7 +21,21 @@ struct KanbanBoardView: View {
     @State private var archiveOpenGeneration = 0
     @State private var collapsedParentCardIDs: Set<String> = []
     @State private var projectLaneScrollIndexByID: [String: Int] = [:]
+    @State private var tagEditorCardID: String?
+    @State private var tagEditorDraft = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let cardFaceSuggestedTags = [
+        "sidebar",
+        "cider-web",
+        "cider-ios",
+        "bug",
+        "idea",
+        "testing",
+        "qa",
+        "performance",
+        "blocked",
+    ]
 
     private var board: KanbanBoard? {
         storage.boards.first { $0.id == boardID }
@@ -1015,16 +1029,148 @@ struct KanbanBoardView: View {
         switch chip.role {
         case .tagEdit:
             Button {
-                onOpenCard(boardID, card.id)
+                beginTagEditing(card)
             } label: {
                 cardFaceChipLabel(chip, color: CiderColors.tertiary, indicatorColor: CiderColors.controlAccent)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Add or change tags for \(card.title)")
+            .popover(
+                isPresented: Binding(
+                    get: { tagEditorCardID == card.id },
+                    set: { isPresented in
+                        if !isPresented {
+                            tagEditorCardID = nil
+                            tagEditorDraft = ""
+                        }
+                    }
+                ),
+                arrowEdge: .bottom
+            ) {
+                cardFaceTagEditorPopover(card)
+            }
         case .featureDomain, .typeStatus:
             let color = cardFaceChipColor(for: chip)
             cardFaceChipLabel(chip, color: CiderColors.secondary, indicatorColor: color)
         }
+    }
+
+    private func beginTagEditing(_ card: KanbanCard) {
+        tagEditorDraft = card.tags.joined(separator: ", ")
+        tagEditorCardID = card.id
+    }
+
+    private func cardFaceTagEditorPopover(_ card: KanbanCard) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "tag")
+                    .foregroundColor(CiderColors.tertiary)
+                Text("Edit tags")
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+                Spacer()
+            }
+
+            TextField("Tags, comma separated", text: $tagEditorDraft)
+                .textFieldStyle(.plain)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.primary)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
+                )
+                .onSubmit {
+                    saveTagEditor(for: card)
+                }
+
+            TagFlowLayout(spacing: Spacing.xs) {
+                ForEach(cardFaceSuggestedTags, id: \.self) { tag in
+                    Button {
+                        toggleTagEditorTag(tag)
+                    } label: {
+                        Text(KanbanCardTagTaxonomy.normalized(tag).split(separator: "-")
+                            .map { part in
+                                let lower = part.lowercased()
+                                if lower == "ios" { return "iOS" }
+                                if lower == "qa" { return "QA" }
+                                guard let first = part.first else { return "" }
+                                return first.uppercased() + part.dropFirst()
+                            }
+                            .joined(separator: " "))
+                            .font(CiderFont.microSemibold)
+                            .foregroundColor(tagEditorTags.contains(KanbanCardTagTaxonomy.normalized(tag)) ? CiderColors.controlAccent : CiderColors.secondary)
+                            .padding(.horizontal, Spacing.xs)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(tagEditorTags.contains(KanbanCardTagTaxonomy.normalized(tag)) ? CiderColors.controlAccent.opacity(0.14) : CiderColors.surfaceInput)
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(CiderColors.borderDefault, lineWidth: CiderBorder.hairlineStrokeWidth)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: Spacing.sm) {
+                Button("Save") {
+                    saveTagEditor(for: card)
+                }
+                .buttonStyle(CiderAccentButtonStyle())
+
+                Button("Cancel") {
+                    tagEditorCardID = nil
+                    tagEditorDraft = ""
+                }
+                .buttonStyle(.plain)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+            }
+        }
+        .padding(Spacing.md)
+        .frame(width: 300)
+    }
+
+    private var tagEditorTags: Set<String> {
+        Set(parsedTagEditorTags())
+    }
+
+    private func parsedTagEditorTags() -> [String] {
+        tagEditorDraft
+            .components(separatedBy: ",")
+            .map { KanbanCardTagTaxonomy.normalized($0) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func toggleTagEditorTag(_ tag: String) {
+        let normalized = KanbanCardTagTaxonomy.normalized(tag)
+        guard !normalized.isEmpty else { return }
+        var tags = parsedTagEditorTags()
+        if tags.contains(normalized) {
+            tags.removeAll { $0 == normalized }
+        } else {
+            tags.append(normalized)
+        }
+        tagEditorDraft = tags.joined(separator: ", ")
+    }
+
+    private func saveTagEditor(for card: KanbanCard) {
+        var updated = card
+        updated.tags = parsedTagEditorTags()
+        storage.updateCard(boardID: boardID, card: updated)
+        tagEditorCardID = nil
+        tagEditorDraft = ""
     }
 
     private func cardFaceChipLabel(_ chip: KanbanCardFaceChip, color: Color, indicatorColor: Color) -> some View {
@@ -1033,7 +1179,7 @@ struct KanbanBoardView: View {
             case .none:
                 EmptyView()
             case .featureIcon:
-                Image(systemName: chip.iconSystemName ?? "folder")
+                Image(systemName: chip.iconSystemName ?? "cube.transparent")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundColor(indicatorColor.opacity(0.85))
             case .colorDot:

@@ -2,6 +2,11 @@ import CoreGraphics
 import Foundation
 
 struct KanbanCardFaceChip: Equatable {
+    enum Activation: Equatable {
+        case none
+        case tagEditor
+    }
+
     enum Role: Equatable {
         case tagEdit
         case featureDomain
@@ -25,12 +30,16 @@ struct KanbanCardFaceChip: Equatable {
 
     var showsDisclosureIndicator: Bool { false }
 
+    var activation: Activation {
+        role == .tagEdit ? .tagEditor : .none
+    }
+
     var iconSystemName: String? {
         switch accessory {
         case .none, .colorDot:
             return nil
         case .featureIcon:
-            return "folder"
+            return "cube.transparent"
         }
     }
 }

@@ -552,7 +552,9 @@ struct KanbanCardHierarchyTests {
         #expect(chips.map(\.accessory) == [.none, .featureIcon, .colorDot, .colorDot])
         #expect(chips.map(\.surface) == [.muted, .muted, .muted, .muted])
         #expect(chips[0].showsDisclosureIndicator == false)
-        #expect(chips[1].iconSystemName == "folder")
+        #expect(chips[0].activation == .tagEditor)
+        #expect(chips[1].iconSystemName == "cube.transparent")
+        #expect(chips[2].iconSystemName == nil)
         #expect(KanbanBoardLayout.cardFaceSemanticChips(for: card) == ["Sidebar", "Bug", "Testing"])
     }
 
