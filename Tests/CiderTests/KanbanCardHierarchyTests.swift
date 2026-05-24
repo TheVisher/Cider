@@ -561,8 +561,8 @@ struct KanbanCardHierarchyTests {
 
         let chips = KanbanBoardLayout.cardFaceChips(for: card)
 
-        #expect(chips.map(\.label) == ["…", "Navigation", "Cider Web", "Cider iOS", "Bug", "Testing", "Manual QA", "Blocked"])
-        #expect(chips.map(\.accessory) == [.none, .featureIcon, .featureIcon, .featureIcon, .colorDot, .colorDot, .colorDot, .colorDot])
+        #expect(chips.map(\.label) == ["…", "Interface", "Apps", "Bug", "Testing", "Manual QA", "Blocked"])
+        #expect(chips.map(\.accessory) == [.none, .featureIcon, .featureIcon, .colorDot, .colorDot, .colorDot, .colorDot])
         #expect(!chips.map(\.label).contains("High"))
     }
 
@@ -577,7 +577,7 @@ struct KanbanCardHierarchyTests {
 
         let chips = KanbanBoardLayout.cardFaceChips(for: card)
 
-        #expect(chips.map(\.label) == ["…", "Navigation", "Bug", "Testing"])
+        #expect(chips.map(\.label) == ["…", "Interface", "Bug", "Testing"])
         #expect(chips.map(\.role) == [.tagEdit, .featureDomain, .typeStatus, .typeStatus])
         #expect(chips.map(\.accessory) == [.none, .featureIcon, .colorDot, .colorDot])
         #expect(chips.map(\.surface) == [.muted, .muted, .muted, .muted])
@@ -585,7 +585,7 @@ struct KanbanCardHierarchyTests {
         #expect(chips[0].activation == .tagEditor)
         #expect(chips[1].iconSystemName == "cube.transparent")
         #expect(chips[2].iconSystemName == nil)
-        #expect(KanbanBoardLayout.cardFaceSemanticChips(for: card) == ["Navigation", "Bug", "Testing"])
+        #expect(KanbanBoardLayout.cardFaceSemanticChips(for: card) == ["Interface", "Bug", "Testing"])
     }
 
     @Test("card face overflow menu exposes a bounded semantic tag list")
@@ -599,12 +599,12 @@ struct KanbanCardHierarchyTests {
 
         let overflowTags = KanbanBoardLayout.cardFaceOverflowTags(for: card, limit: 5)
 
-        #expect(overflowTags.map(\.label) == ["Cider Web", "Navigation", "Cider iOS", "Bug", "Testing"])
-        #expect(overflowTags.map(\.accessory) == [.featureIcon, .featureIcon, .featureIcon, .colorDot, .colorDot])
+        #expect(overflowTags.map(\.label) == ["Apps", "Interface", "Bug", "Testing", "Manual QA"])
+        #expect(overflowTags.map(\.accessory) == [.featureIcon, .featureIcon, .colorDot, .colorDot, .colorDot])
         #expect(overflowTags.map(\.activation) == [
-            .featureDomainFilter("cider-web"),
-            .featureDomainFilter("navigation"),
-            .featureDomainFilter("cider-ios"),
+            .featureDomainFilter("apps"),
+            .featureDomainFilter("interface"),
+            .none,
             .none,
             .none,
         ])
@@ -626,9 +626,9 @@ struct KanbanCardHierarchyTests {
 
         let filters = KanbanBoardLayout.featureDomainFilters(for: board)
 
-        #expect(filters.map(\.id) == ["cider-web", "navigation", "dashboard"])
-        #expect(filters.map(\.label) == ["Cider Web", "Navigation", "Dashboard"])
-        #expect(filters.map(\.cardCount) == [1, 2, 1])
+        #expect(filters.map(\.id) == ["second-brain", "apps", "interface"])
+        #expect(filters.map(\.label) == ["Second Brain", "Apps", "Interface"])
+        #expect(filters.map(\.cardCount) == [1, 1, 2])
     }
 
     @Test("feature domain filter narrows cards and can be cleared")
@@ -639,8 +639,9 @@ struct KanbanCardHierarchyTests {
             KanbanCard(id: "untagged", title: "Untagged")
         ]
 
-        #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "navigation").map(\.id) == ["sidebar-bug"])
+        #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "interface").map(\.id) == ["sidebar-bug"])
         #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "Sidebar").map(\.id) == ["sidebar-bug"])
+        #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "apps").map(\.id) == ["web-qa"])
         #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: nil).map(\.id) == ["sidebar-bug", "web-qa", "untagged"])
         #expect(KanbanBoardLayout.cards(cards, matchingFeatureDomainFilter: "bug").isEmpty)
     }

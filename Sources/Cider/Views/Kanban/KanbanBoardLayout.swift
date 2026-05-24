@@ -508,46 +508,28 @@ enum KanbanBoardLayout {
 
     private static let featureDomainDefinitions: [KanbanFeatureDomainDefinition] = [
         KanbanFeatureDomainDefinition(id: "kanban", label: "Kanban", aliases: [
-            "board", "boards", "card", "cards", "parent-child", "swimlane", "swimlanes", "archive", "archived", "filters"
+            "board", "boards", "card", "cards", "parent-child", "archive", "workflow"
         ]),
-        KanbanFeatureDomainDefinition(id: "cider-web", label: "Cider Web", aliases: [
-            "web", "app-parity"
+        KanbanFeatureDomainDefinition(id: "second-brain", label: "Second Brain", aliases: [
+            "dashboard", "home", "projects", "project-inbox", "agenda", "todos", "reminders"
         ]),
-        KanbanFeatureDomainDefinition(id: "cider-ios", label: "Cider iOS", aliases: [
-            "ios"
+        KanbanFeatureDomainDefinition(id: "capture", label: "Capture", aliases: [
+            "bookmarks", "bookmark", "enrichment", "clipboard", "scanner", "routing"
         ]),
-        KanbanFeatureDomainDefinition(id: "navigation", label: "Navigation", aliases: [
-            "sidebar", "tabs", "tab", "breadcrumbs", "information-architecture", "ia", "browse", "command-palette"
+        KanbanFeatureDomainDefinition(id: "library", label: "Library", aliases: [
+            "spaces", "space", "folders", "domains", "media", "references"
         ]),
-        KanbanFeatureDomainDefinition(id: "dashboard", label: "Dashboard", aliases: [
-            "dashboards", "home", "agenda", "daily-brief", "inbox", "project-inbox"
+        KanbanFeatureDomainDefinition(id: "ai-assistant", label: "AI Assistant", aliases: [
+            "agents", "agent", "ai", "hermes", "automation", "life-assistant"
         ]),
-        KanbanFeatureDomainDefinition(id: "projects", label: "Projects", aliases: [
-            "project", "references", "reference", "inspiration", "plans", "handoffs", "notes", "decisions", "artifacts"
+        KanbanFeatureDomainDefinition(id: "apps", label: "Apps", aliases: [
+            "cider-web", "web", "cider-ios", "ios", "app-parity"
         ]),
-        KanbanFeatureDomainDefinition(id: "capture-bookmarks", label: "Capture & Bookmarks", aliases: [
-            "capture", "bookmarks", "bookmark", "enrichment", "clipboard", "scanner", "web-clipping"
+        KanbanFeatureDomainDefinition(id: "interface", label: "Interface", aliases: [
+            "ux", "ui", "navigation", "sidebar", "tabs", "layout", "design-system"
         ]),
-        KanbanFeatureDomainDefinition(id: "library-spaces", label: "Library & Spaces", aliases: [
-            "library", "spaces", "space", "domains", "domain", "saved-views", "collections"
-        ]),
-        KanbanFeatureDomainDefinition(id: "media", label: "Media", aliases: [
-            "movies", "movie", "tv", "games", "game", "music", "books", "book"
-        ]),
-        KanbanFeatureDomainDefinition(id: "tasks-reminders", label: "Tasks & Reminders", aliases: [
-            "todos", "todo", "tasks", "task", "reminders", "reminder", "dates", "date-cards"
-        ]),
-        KanbanFeatureDomainDefinition(id: "ai-agents", label: "AI & Agents", aliases: [
-            "agents", "agent", "agent-memory", "agent-rules", "ai", "ai-routing", "hermes", "computer-use", "life-assistant", "automation"
-        ]),
-        KanbanFeatureDomainDefinition(id: "storage-cli", label: "Storage & CLI", aliases: [
-            "cli", "storage", "sqlite", "filesystem", "sync", "adoption", "reconciliation", "duplicates", "migration", "indexing"
-        ]),
-        KanbanFeatureDomainDefinition(id: "search-recall", label: "Search & Recall", aliases: [
-            "search", "recall", "backlinks", "trust"
-        ]),
-        KanbanFeatureDomainDefinition(id: "design-ui", label: "Design & UI", aliases: [
-            "ux", "design-system", "visual-hierarchy", "layout", "density", "color", "colors", "grid", "masonry", "thumbnails", "empty-state"
+        KanbanFeatureDomainDefinition(id: "infrastructure", label: "Infrastructure", aliases: [
+            "cli", "storage", "backend", "sqlite", "sync", "duplicates", "migration", "search", "recall"
         ]),
     ]
 
