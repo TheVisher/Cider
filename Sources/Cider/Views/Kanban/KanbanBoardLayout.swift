@@ -22,6 +22,17 @@ struct KanbanCardFaceChip: Equatable {
     let role: Role
     let accessory: Accessory
     let surface: Surface
+
+    var showsDisclosureIndicator: Bool { false }
+
+    var iconSystemName: String? {
+        switch accessory {
+        case .none, .colorDot:
+            return nil
+        case .featureIcon:
+            return "folder"
+        }
+    }
 }
 
 enum KanbanLaneRole: String, CaseIterable {
