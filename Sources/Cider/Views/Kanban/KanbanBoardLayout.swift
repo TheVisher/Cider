@@ -365,9 +365,8 @@ enum KanbanBoardLayout {
         cardFaceSemanticChipModels(for: card, limit: limit).map(\.label)
     }
 
-    static func cardFaceChips(for card: KanbanCard, limit: Int = 3) -> [KanbanCardFaceChip] {
+    static func cardFaceChips(for card: KanbanCard, limit: Int = Int.max) -> [KanbanCardFaceChip] {
         let semanticChips = cardFaceSemanticChipModels(for: card, limit: limit)
-        guard !semanticChips.isEmpty else { return [] }
         return [KanbanCardFaceChip(label: "…", role: .tagEdit, accessory: .none, surface: .muted)] + semanticChips
     }
 

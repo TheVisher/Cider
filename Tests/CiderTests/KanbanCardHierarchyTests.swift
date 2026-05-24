@@ -536,6 +536,36 @@ struct KanbanCardHierarchyTests {
         #expect(!KanbanBoardLayout.cardFaceSemanticChips(for: card).contains("High"))
     }
 
+    @Test("card face chips always expose tag editor affordance when tags are empty")
+    func cardFaceChipsAlwaysExposeTagEditorAffordanceWhenTagsAreEmpty() {
+        let card = KanbanCard(
+            id: "empty-tags",
+            title: "Empty tag card",
+            tags: []
+        )
+
+        let chips = KanbanBoardLayout.cardFaceChips(for: card)
+
+        #expect(chips.map(\.label) == ["…"])
+        #expect(chips.map(\.role) == [.tagEdit])
+        #expect(chips.first?.activation == .tagEditor)
+    }
+
+    @Test("card face chips expose all semantic tags so the footer can wrap rows")
+    func cardFaceChipsExposeAllSemanticTagsSoFooterCanWrapRows() {
+        let card = KanbanCard(
+            id: "many-tags",
+            title: "Many tag card",
+            tags: ["sidebar", "cider-web", "cider-ios", "bug", "testing", "manual-qa", "blocked", "high"]
+        )
+
+        let chips = KanbanBoardLayout.cardFaceChips(for: card)
+
+        #expect(chips.map(\.label) == ["…", "Sidebar", "Cider Web", "Cider iOS", "Bug", "Testing", "Manual QA", "Blocked"])
+        #expect(chips.map(\.accessory) == [.none, .featureIcon, .featureIcon, .featureIcon, .colorDot, .colorDot, .colorDot, .colorDot])
+        #expect(!chips.map(\.label).contains("High"))
+    }
+
     @Test("card face chips put feature or domain before type and expose emphasis roles")
     func cardFaceChipsPutFeatureDomainBeforeTypeWithEmphasisRoles() {
         let card = KanbanCard(

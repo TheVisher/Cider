@@ -989,7 +989,7 @@ struct KanbanBoardView: View {
 
     private func hasCardFooter(_ card: KanbanCard) -> Bool {
         KanbanBoardLayout.testingOwnerBadge(for: card) != nil
-            || !KanbanBoardLayout.cardFaceSemanticChips(for: card).isEmpty
+            || !KanbanBoardLayout.cardFaceChips(for: card).isEmpty
     }
 
     private func hasCardContext(parentBadge: KanbanParentBadge?, planIndicator: KanbanPlanIndicator?) -> Bool {
@@ -1013,15 +1013,15 @@ struct KanbanBoardView: View {
     }
 
     private func cardFooterView(_ card: KanbanCard) -> some View {
-        HStack(spacing: Spacing.xs) {
+        TagFlowLayout(spacing: Spacing.xs) {
             if let badge = KanbanBoardLayout.testingOwnerBadge(for: card) {
                 testingOwnerBadgeView(badge)
             }
             ForEach(KanbanBoardLayout.cardFaceChips(for: card), id: \.label) { chip in
                 cardFaceChipView(chip, card: card)
             }
-            Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
