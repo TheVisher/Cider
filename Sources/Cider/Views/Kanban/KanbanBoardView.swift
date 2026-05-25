@@ -317,6 +317,7 @@ struct KanbanBoardView: View {
                 }
             }
             .padding(Spacing.lg)
+            .background(horizontalPanSurface)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -379,6 +380,7 @@ struct KanbanBoardView: View {
                                     }
                                 }
                                 .padding(.bottom, Spacing.xs)
+                                .background(horizontalPanSurface)
                             }
                             .frame(maxWidth: .infinity)
                             .defaultScrollAnchor(shouldPushArchive ? .trailing : .leading)
@@ -620,8 +622,11 @@ struct KanbanBoardView: View {
         .frame(width: width)
         .frame(height: height)
         .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(CiderColors.surfaceSubtle)
+            ZStack {
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .fill(CiderColors.surfaceSubtle)
+                horizontalPanSurface
+            }
         )
         .dropDestination(for: String.self) { cardIDs, _ in
             guard let cardID = cardIDs.first else { return false }
@@ -639,6 +644,12 @@ struct KanbanBoardView: View {
                 )
             }
             return true
+        }
+    }
+
+    private var horizontalPanSurface: some View {
+        GeometryReader { _ in
+            KanbanHorizontalPanScrollSurface()
         }
     }
 
