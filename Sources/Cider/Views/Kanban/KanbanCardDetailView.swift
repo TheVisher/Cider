@@ -1593,6 +1593,10 @@ private struct KanbanCommentBodyView: View {
         KanbanCardCommentThreadPolicy.displayBodyLines(for: content)
     }
 
+    var referenceLinks: [KanbanCardCommentThreadPolicy.ReferenceLink] {
+        KanbanCardCommentThreadPolicy.referenceLinks(in: content)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             if bodyViewLines.isEmpty {
@@ -1621,8 +1625,56 @@ private struct KanbanCommentBodyView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+
+            if !referenceLinks.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(referenceLinks) { reference in
+                        KanbanCommentReferenceLinkRow(reference: reference)
+                    }
+                }
+                .padding(.top, Spacing.xs)
+            }
         }
         .lineSpacing(3)
+    }
+}
+
+private struct KanbanCommentReferenceLinkRow: View {
+    let reference: KanbanCardCommentThreadPolicy.ReferenceLink
+
+    var body: some View {
+        Link(destination: reference.url) {
+            HStack(alignment: .center, spacing: Spacing.xs) {
+                Image(systemName: reference.kind == .image ? "photo" : "link")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.controlAccent)
+                    .frame(width: 18, height: 18)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(reference.displayTitle)
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    Text(reference.displaySubtitle)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: Spacing.xs)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(CiderColors.tertiary)
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CiderColors.surfaceInput.opacity(0.42)))
+        }
+        .buttonStyle(.plain)
+        .help(reference.url.absoluteString)
     }
 }
 

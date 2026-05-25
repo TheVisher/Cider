@@ -1,6 +1,29 @@
 import Foundation
 
 struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
+    struct ReferenceLink: Equatable, Sendable, Identifiable {
+        enum Kind: String, Sendable {
+            case link
+            case image
+        }
+
+        var id: String { url.absoluteString }
+        var url: URL
+        var label: String?
+        var kind: Kind
+
+        var displayTitle: String {
+            if let label = cleanedDisplay(label) {
+                return label
+            }
+            return url.host(percentEncoded: false) ?? url.absoluteString
+        }
+
+        var displaySubtitle: String {
+            url.absoluteString
+        }
+    }
+
     struct Thread: Equatable, Sendable {
         var root: KanbanCardComment
         var replies: [KanbanCardComment]
@@ -62,7 +85,76 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
         return normalized.components(separatedBy: .newlines)
     }
 
+    static func referenceLinks(in body: String) -> [ReferenceLink] {
+        var links: [ReferenceLink] = []
+        var seen = Set<String>()
+
+        for match in markdownLinkMatches(in: body) {
+            appendReference(
+                urlString: match.urlString,
+                label: match.label,
+                kind: match.isImage ? .image : .link,
+                links: &links,
+                seen: &seen
+            )
+        }
+
+        for urlString in bareURLStrings(in: body) {
+            appendReference(urlString: urlString, label: nil, kind: .link, links: &links, seen: &seen)
+        }
+
+        return links
+    }
+
     private static let genericSystemNames: Set<String> = ["user", "unknown", "mac", "local"]
+
+    private static func appendReference(
+        urlString: String,
+        label: String?,
+        kind: ReferenceLink.Kind,
+        links: inout [ReferenceLink],
+        seen: inout Set<String>
+    ) {
+        let cleanedURLString = cleanURLString(urlString)
+        guard let url = URL(string: cleanedURLString), ["http", "https"].contains(url.scheme?.lowercased()) else { return }
+        guard seen.insert(url.absoluteString).inserted else { return }
+        links.append(ReferenceLink(url: url, label: label, kind: kind))
+    }
+
+    private static func markdownLinkMatches(in body: String) -> [(label: String?, urlString: String, isImage: Bool)] {
+        let pattern = "(!)?\\[([^\\]]*)\\]\\((https?://[^\\s)]+)\\)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(body.startIndex..<body.endIndex, in: body)
+        return regex.matches(in: body, range: range).compactMap { match in
+            guard
+                let urlRange = Range(match.range(at: 3), in: body)
+            else { return nil }
+            let labelRange = Range(match.range(at: 2), in: body)
+            return (
+                label: labelRange.map { String(body[$0]) },
+                urlString: String(body[urlRange]),
+                isImage: match.range(at: 1).location != NSNotFound
+            )
+        }
+    }
+
+    private static func bareURLStrings(in body: String) -> [String] {
+        let pattern = "https?://[^\\s<>)\\]]+"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(body.startIndex..<body.endIndex, in: body)
+        return regex.matches(in: body, range: range).compactMap { match in
+            Range(match.range, in: body).map { String(body[$0]) }
+        }
+    }
+
+    private static func cleanURLString(_ value: String) -> String {
+        value.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?)]}").union(.whitespacesAndNewlines))
+    }
+
+    private static func cleanedDisplay(_ value: String?) -> String? {
+        let cleaned = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned?.isEmpty == false ? cleaned : nil
+    }
 
     private static func displayName(fromAccountEmail email: String?) -> String? {
         guard let email = cleanedName(email) else { return nil }

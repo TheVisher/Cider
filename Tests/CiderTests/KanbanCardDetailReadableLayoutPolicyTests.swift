@@ -128,6 +128,27 @@ struct KanbanCardDetailReadableLayoutPolicyTests {
         #expect(KanbanCardCommentThreadPolicy.resolvedSummaryText(for: missingResolver) == "Someone resolved the thread")
     }
 
+    @Test("comment bodies expose URL and image references")
+    func commentBodiesExposeURLAndImageReferences() {
+        let links = KanbanCardCommentThreadPolicy.referenceLinks(
+            in: """
+            Research: [Linear docs](https://linear.app/docs/comments).
+            Inspiration: ![thread screenshot](https://example.com/thread.png)
+            Duplicate bare URL should not duplicate: https://linear.app/docs/comments
+            Trailing punctuation: https://example.com/ref?x=1.
+            """
+        )
+
+        #expect(links.map(\.url.absoluteString) == [
+            "https://linear.app/docs/comments",
+            "https://example.com/thread.png",
+            "https://example.com/ref?x=1"
+        ])
+        #expect(links.map(\.kind) == [.link, .image, .link])
+        #expect(links.first?.displayTitle == "Linear docs")
+        #expect(links[1].displayTitle == "thread screenshot")
+    }
+
     @Test("comment body display trims blank wrappers without hiding real text")
     func commentBodyDisplayTrimsBlankWrappersWithoutHidingRealText() {
         let lines = KanbanCardCommentThreadPolicy.displayBodyLines(for: "\n\nThis is the note I wrote.\n")
