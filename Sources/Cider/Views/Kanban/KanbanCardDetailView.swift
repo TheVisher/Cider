@@ -1464,14 +1464,15 @@ private struct KanbanCardThreadEventRow: View {
 }
 
 private struct KanbanCardCommentRow: View {
-    var comment: KanbanCardComment
-    var indent: CGFloat
+    let comment: KanbanCardComment
+    var indent: CGFloat = 0
     var replyCount: Int = 0
     var isThreadCollapsed: Bool = false
     var onToggleResolved: (() -> Void)? = nil
     var onToggleCollapse: (() -> Void)? = nil
     var onReply: (() -> Void)? = nil
     var usesOwnBackground: Bool = true
+    @State private var isThreadActionsHovered = false
 
     private var timestamp: String {
         comment.createdAt.formatted(date: .abbreviated, time: .shortened)
@@ -1521,8 +1522,12 @@ private struct KanbanCardCommentRow: View {
                         } label: {
                             Image(systemName: "ellipsis")
                                 .font(.caption.weight(.semibold))
-                                .foregroundColor(CiderColors.tertiary)
+                                .foregroundColor(isThreadActionsHovered ? CiderColors.primary : CiderColors.tertiary)
                                 .frame(width: 32, height: 28)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(isThreadActionsHovered ? CiderColors.surfaceInput.opacity(0.62) : Color.clear)
+                                )
                                 .contentShape(Rectangle())
                         }
                         .menuStyle(.button)
@@ -1530,6 +1535,7 @@ private struct KanbanCardCommentRow: View {
                         .frame(width: 32, height: 28)
                         .contentShape(Rectangle())
                         .help("Thread actions")
+                        .hoverState($isThreadActionsHovered, animation: .snappy)
                     }
                 }
 
@@ -1589,7 +1595,8 @@ private struct KanbanCardReplyComposer: View {
                             Text("Leave a reply…")
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
-                                .padding(Spacing.xs)
+                                .padding(.leading, Spacing.sm)
+                                .padding(.vertical, Spacing.xs)
                                 .allowsHitTesting(false)
                         }
                     }
@@ -1616,7 +1623,8 @@ private struct KanbanCardReplyComposer: View {
                         KanbanCardThreadToolButton(systemImage: "paperclip", label: "Attach reference")
                         KanbanCardThreadToolButton(systemImage: "face.smiling", label: "React")
                     }
-                    .padding(.horizontal, Spacing.sm)
+                    .padding(.leading, Spacing.md)
+                    .padding(.trailing, Spacing.sm)
                     .padding(.vertical, 7)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
