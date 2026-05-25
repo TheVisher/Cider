@@ -106,6 +106,28 @@ struct KanbanCardDetailReadableLayoutPolicyTests {
         #expect(name == "Visher")
     }
 
+    @Test("resolved thread summary names the resolver")
+    func resolvedThreadSummaryNamesTheResolver() {
+        let resolved = KanbanCardComment(
+            id: "resolved",
+            kind: .qa,
+            body: "Resolved QA",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            resolvedAt: Date(timeIntervalSince1970: 1_100),
+            resolvedBy: "brian"
+        )
+        let missingResolver = KanbanCardComment(
+            id: "missing-resolver",
+            kind: .note,
+            body: "Resolved without an actor",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            resolvedAt: Date(timeIntervalSince1970: 1_100)
+        )
+
+        #expect(KanbanCardCommentThreadPolicy.resolvedSummaryText(for: resolved) == "brian resolved the thread")
+        #expect(KanbanCardCommentThreadPolicy.resolvedSummaryText(for: missingResolver) == "Someone resolved the thread")
+    }
+
     @Test("comment body display trims blank wrappers without hiding real text")
     func commentBodyDisplayTrimsBlankWrappersWithoutHidingRealText() {
         let lines = KanbanCardCommentThreadPolicy.displayBodyLines(for: "\n\nThis is the note I wrote.\n")

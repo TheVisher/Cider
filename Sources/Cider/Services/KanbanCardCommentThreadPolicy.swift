@@ -34,6 +34,11 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
         return (threads.count - resolvedCount, resolvedCount)
     }
 
+    static func resolvedSummaryText(for comment: KanbanCardComment) -> String {
+        let resolver = cleanedName(comment.resolvedBy) ?? "Someone"
+        return "\(resolver) resolved the thread"
+    }
+
     static func defaultAuthorName(
         accountEmail: String?,
         fullUserName: String?,

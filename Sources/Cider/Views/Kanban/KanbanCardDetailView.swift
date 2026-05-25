@@ -1356,15 +1356,22 @@ private struct KanbanCardCommentThreadRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            KanbanCardCommentRow(
-                comment: thread.root,
-                indent: 0,
-                replyCount: thread.replies.count,
-                isThreadCollapsed: isCollapsed,
-                onToggleResolved: onToggleResolved,
-                onToggleCollapse: onToggleCollapse,
-                onReply: onReply
-            )
+            if thread.isResolved && isCollapsed {
+                KanbanCardResolvedThreadSummaryRow(
+                    comment: thread.root,
+                    onExpand: onToggleCollapse
+                )
+            } else {
+                KanbanCardCommentRow(
+                    comment: thread.root,
+                    indent: 0,
+                    replyCount: thread.replies.count,
+                    isThreadCollapsed: isCollapsed,
+                    onToggleResolved: onToggleResolved,
+                    onToggleCollapse: onToggleCollapse,
+                    onReply: onReply
+                )
+            }
 
             if !isCollapsed {
                 if !thread.replies.isEmpty || isReplying {
@@ -1391,6 +1398,47 @@ private struct KanbanCardCommentThreadRow: View {
                 }
             }
         }
+    }
+}
+
+private struct KanbanCardResolvedThreadSummaryRow: View {
+    var comment: KanbanCardComment
+    var onExpand: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Spacing.sm) {
+            Image(systemName: "checkmark")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(CiderColors.success)
+                .frame(width: 18, height: 18)
+
+            Text(KanbanCardCommentThreadPolicy.resolvedSummaryText(for: comment))
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: Spacing.sm)
+
+            Button(action: onExpand) {
+                HStack(spacing: 4) {
+                    Text("Expand")
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+            }
+            .buttonStyle(.plain)
+            .font(CiderFont.caption)
+            .foregroundColor(CiderColors.tertiary)
+        }
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(CiderColors.surfaceSubtle.opacity(0.72))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onExpand)
     }
 }
 
