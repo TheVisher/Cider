@@ -188,17 +188,12 @@ enum KanbanBoardLayout {
 
     static func lanes(for board: KanbanBoard) -> [KanbanBoardLane] {
         let activeColumns = board.columns.filter { !isArchiveColumn($0) }
-        let workflowColumns = activeColumns.filter { role(for: $0) == .workflow }
-        let qaColumns = activeColumns.filter { role(for: $0) == .qa }
 
-        guard !workflowColumns.isEmpty || !qaColumns.isEmpty else {
+        guard !activeColumns.isEmpty else {
             return []
         }
 
-        return [
-            KanbanBoardLane(role: .workflow, columns: workflowColumns),
-            KanbanBoardLane(role: .qa, columns: qaColumns)
-        ].filter { !$0.columns.isEmpty }
+        return [KanbanBoardLane(role: .workflow, columns: activeColumns)]
     }
 
     static func hasArchiveColumns(in board: KanbanBoard) -> Bool {
@@ -206,9 +201,23 @@ enum KanbanBoardLayout {
     }
 
     static func archiveColumns(for laneRole: KanbanLaneRole, in board: KanbanBoard) -> [KanbanColumn] {
-        board.columns.filter { column in
-            isArchiveColumn(column) && role(for: column) == laneRole
+        guard laneRole == .workflow else { return [] }
+        return board.columns.filter { column in
+            isArchiveColumn(column)
         }
+    }
+
+    static func projectColumnHeight(
+        availableBoardHeight: CGFloat,
+        showsScrollControls: Bool
+    ) -> CGFloat {
+        let reservedHeight =
+            (Spacing.lg * 2) +
+            (Spacing.sm * 2) +
+            22 +
+            Spacing.sm +
+            (showsScrollControls ? (Spacing.xs + KanbanDesign.projectHorizontalScrollControlHeight) : 0)
+        return max(availableBoardHeight - reservedHeight, 0)
     }
 
     static func cardNodes(

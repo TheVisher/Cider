@@ -323,18 +323,34 @@ struct KanbanBoardView: View {
     }
 
     private func projectRowsArea(_ board: KanbanBoard) -> some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                ForEach(KanbanBoardLayout.lanes(for: board)) { lane in
-                    projectLaneView(lane, board: board)
+        GeometryReader { geometry in
+            if let lane = KanbanBoardLayout.lanes(for: board).first {
+                projectLaneView(
+                    lane,
+                    board: board,
+                    availableBoardHeight: geometry.size.height
+                )
+                .padding(Spacing.lg)
+                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+            } else {
+                VStack {
+                    Spacer()
+                    Text("No columns")
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.tertiary)
+                    Spacer()
                 }
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
-            .padding(Spacing.lg)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func projectLaneView(_ lane: KanbanBoardLane, board: KanbanBoard) -> some View {
+    private func projectLaneView(
+        _ lane: KanbanBoardLane,
+        board: KanbanBoard,
+        availableBoardHeight: CGFloat
+    ) -> some View {
         let archiveColumns = archiveExpanded ? KanbanBoardLayout.archiveColumns(for: lane.role, in: board) : []
 
         return VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -363,6 +379,10 @@ struct KanbanBoardView: View {
                 )
                 let visibleColumnCount = projectLaneVisibleColumnCount(availableWidth: geometry.size.width)
                 let maxScrollIndex = max(lane.columns.count - visibleColumnCount, 0)
+                let columnHeight = KanbanBoardLayout.projectColumnHeight(
+                    availableBoardHeight: availableBoardHeight,
+                    showsScrollControls: maxScrollIndex > 0
+                )
 
                 ScrollViewReader { scrollProxy in
                     VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -374,7 +394,7 @@ struct KanbanBoardView: View {
                                             column,
                                             board: board,
                                             width: KanbanDesign.projectColumnWidth,
-                                            height: KanbanDesign.projectColumnHeight
+                                            height: columnHeight
                                         )
                                         .id(projectColumnScrollID(laneID: lane.id, columnID: column.id))
                                     }
@@ -387,7 +407,11 @@ struct KanbanBoardView: View {
                             .id(projectLaneScrollIdentity(for: lane, shouldPushArchive: shouldPushArchive))
 
                             if !archiveColumns.isEmpty {
-                                projectArchiveReveal(columns: archiveColumns, board: board)
+                                projectArchiveReveal(
+                                    columns: archiveColumns,
+                                    board: board,
+                                    columnHeight: columnHeight
+                                )
                                     .transition(.move(edge: .trailing).combined(with: .opacity))
                             }
                         }
@@ -403,10 +427,11 @@ struct KanbanBoardView: View {
                     }
                 }
             }
-            .frame(height: KanbanDesign.projectColumnHeight + Spacing.xs + KanbanDesign.projectHorizontalScrollControlHeight)
+            .frame(maxHeight: .infinity)
             .animation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86), value: archiveExpanded)
         }
         .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .fill(CiderColors.surfaceSubtle.opacity(0.55))
@@ -532,16 +557,20 @@ struct KanbanBoardView: View {
         .frame(height: KanbanDesign.projectHorizontalScrollControlHeight)
     }
 
-    private func projectArchiveReveal(columns archiveColumns: [KanbanColumn], board: KanbanBoard) -> some View {
+    private func projectArchiveReveal(
+        columns archiveColumns: [KanbanColumn],
+        board: KanbanBoard,
+        columnHeight: CGFloat
+    ) -> some View {
         HStack(alignment: .top, spacing: Spacing.md) {
-            archiveRevealDivider
+            archiveRevealDivider(height: columnHeight)
 
             ForEach(archiveColumns) { column in
                 columnView(
                     column,
                     board: board,
                     width: KanbanDesign.projectColumnWidth,
-                    height: KanbanDesign.projectColumnHeight
+                    height: columnHeight
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
@@ -551,7 +580,7 @@ struct KanbanBoardView: View {
         }
     }
 
-    private var archiveRevealDivider: some View {
+    private func archiveRevealDivider(height: CGFloat) -> some View {
         VStack(spacing: Spacing.xs) {
             Image(systemName: "chevron.right")
                 .font(CiderFont.captionSemibold)
@@ -566,7 +595,7 @@ struct KanbanBoardView: View {
             Spacer(minLength: 0)
         }
         .padding(.top, Spacing.lg)
-        .frame(width: 28, height: KanbanDesign.projectColumnHeight, alignment: .top)
+        .frame(width: 28, height: height, alignment: .top)
     }
 
     private func columnView(

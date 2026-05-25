@@ -37,8 +37,8 @@ struct KanbanBoardLayoutTests {
         #expect(lanes.first?.columns.map(\.id) == ["ideas", "next_up", "in_progress", "testing", "completed"])
     }
 
-    @Test("QA columns render as a lower project row")
-    func qaColumnsRenderAsLowerProjectRow() {
+    @Test("QA columns stay inline on the project board row")
+    func qaColumnsStayInlineOnProjectBoardRow() {
         let board = KanbanBoard(
             name: "Cider",
             columns: [
@@ -54,13 +54,20 @@ struct KanbanBoardLayoutTests {
 
         let lanes = KanbanBoardLayout.lanes(for: board)
 
-        #expect(lanes.map(\.role) == [.workflow, .qa])
-        #expect(lanes.first(where: { $0.role == .workflow })?.columns.map(\.id) == ["backlog", "in_progress", "done"])
-        #expect(lanes.first(where: { $0.role == .qa })?.columns.map(\.id) == ["investigating", "qa", "ready_to_test", "verified"])
+        #expect(lanes.map(\.role) == [.workflow])
+        #expect(lanes.first?.columns.map(\.id) == [
+            "backlog",
+            "in_progress",
+            "done",
+            "investigating",
+            "qa",
+            "ready_to_test",
+            "verified",
+        ])
     }
 
-    @Test("archive columns are kept out of active lanes and aligned to source lanes")
-    func archiveColumnsAlignToSourceLanes() {
+    @Test("archive columns are kept out of active project rows and revealed together")
+    func archiveColumnsRevealTogether() {
         let board = KanbanBoard(
             name: "Cider",
             columns: [
@@ -76,10 +83,10 @@ struct KanbanBoardLayoutTests {
 
         let lanes = KanbanBoardLayout.lanes(for: board)
 
-        #expect(lanes.first(where: { $0.role == .workflow })?.columns.map(\.id) == ["backlog", "testing", "done"])
-        #expect(lanes.first(where: { $0.role == .qa })?.columns.map(\.id) == ["needs_fix", "verified"])
-        #expect(KanbanBoardLayout.archiveColumns(for: .workflow, in: board).map(\.id) == ["workflow_archive"])
-        #expect(KanbanBoardLayout.archiveColumns(for: .qa, in: board).map(\.id) == ["qa_archive"])
+        #expect(lanes.map(\.role) == [.workflow])
+        #expect(lanes.first?.columns.map(\.id) == ["backlog", "testing", "done", "needs_fix", "verified"])
+        #expect(KanbanBoardLayout.archiveColumns(for: .workflow, in: board).map(\.id) == ["workflow_archive", "qa_archive"])
+        #expect(KanbanBoardLayout.archiveColumns(for: .qa, in: board).isEmpty)
     }
 
     @Test("small generic boards keep the existing flat column layout")
@@ -143,8 +150,32 @@ struct KanbanBoardLayoutTests {
     @Test("project board design tokens favor readable card scanning")
     func projectBoardDesignTokensFavorReadableCardScanning() {
         #expect(KanbanDesign.projectColumnWidth >= 368)
-        #expect(KanbanDesign.projectColumnHeight >= 1000)
+        #expect(KanbanDesign.projectMinimumColumnHeight >= 360)
         #expect(KanbanDesign.columnWidth >= 320)
+    }
+
+    @Test("project column height fits inside the board viewport")
+    func projectColumnHeightFitsInsideBoardViewport() {
+        let availableHeight: CGFloat = 760
+        let columnHeight = KanbanBoardLayout.projectColumnHeight(
+            availableBoardHeight: availableHeight,
+            showsScrollControls: true
+        )
+
+        #expect(columnHeight < availableHeight)
+        #expect(columnHeight >= KanbanDesign.projectMinimumColumnHeight)
+    }
+
+    @Test("project column height shrinks for short board viewports")
+    func projectColumnHeightShrinksForShortBoardViewports() {
+        let availableHeight: CGFloat = 280
+        let columnHeight = KanbanBoardLayout.projectColumnHeight(
+            availableBoardHeight: availableHeight,
+            showsScrollControls: true
+        )
+
+        #expect(columnHeight < availableHeight)
+        #expect(columnHeight < KanbanDesign.projectMinimumColumnHeight)
     }
 
     @Test("card preview design tokens separate header body and footer")
