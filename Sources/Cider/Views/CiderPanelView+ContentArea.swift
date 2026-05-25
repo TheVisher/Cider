@@ -315,7 +315,12 @@ extension CiderPanelView {
             case .savedView(let id, _):
                 if let savedView = savedViewStorage.savedView(for: id) {
                     if case .kanban(let boardID) = savedView.kind {
-                        KanbanBoardView(boardID: boardID, onOpenCard: openKanbanCardDetail)
+                        KanbanBoardView(
+                            boardID: boardID,
+                            projectHeaderTabs: projectHeaderTabs(for: boardID),
+                            onSelectProjectHeaderTab: selectProjectHeaderTab,
+                            onOpenCard: openKanbanCardDetail
+                        )
                     } else if case .dashboard = savedView.kind {
                         let reviewQueueService = CiderReviewQueueService()
                         let reviewQueueItems = (try? reviewQueueService.list(limit: 8).items) ?? []
@@ -742,6 +747,45 @@ extension CiderPanelView {
         let savedView = savedViewStorage.ensureKanbanView(name: board.name, boardID: board.id)
         selectedFolderID = nil
         selectedTab = .savedView(id: savedView.id, name: savedView.name)
+    }
+
+    func projectHeaderTabs(for boardID: String) -> [ProjectWorkspaceLocalTab] {
+        guard selectedNavigationDomain == .projects,
+              let project = selectedProjectWorkspace,
+              project.kind == .project,
+              project.boardIDs.contains(boardID) else {
+            return []
+        }
+
+        return ProjectWorkspaceLocalTabs.tabs(
+            for: project,
+            boards: kanbanStorage.boards,
+            selectedKind: .board(boardID)
+        )
+    }
+
+    func selectProjectHeaderTab(_ kind: ProjectWorkspaceLocalTabKind) {
+        guard let project = selectedProjectWorkspace else { return }
+        selectedFolderID = nil
+        selectedTagIDs.removeAll()
+        selectedItemIDs.removeAll()
+        focusedItemID = nil
+        selectionAnchorID = nil
+        closeAllDetails()
+        selectedProjectWorkspaceID = project.id
+        selectedNavigationDomain = .projects
+        selectedDomainRouteKind = .overview
+
+        switch kind {
+        case .overview:
+            selectedTab = .projectOverview(projectID: project.id, name: "Overview")
+        case .inbox:
+            selectedTab = .projectInbox(projectID: project.id, name: "Inbox")
+        case .board(let boardID):
+            openProjectBoard(boardID)
+        case .surface(let surface):
+            selectedTab = .projectSurface(projectID: project.id, surface: surface, name: surface.tabName)
+        }
     }
 
     func createProjectBoard(in project: ProjectWorkspace) {

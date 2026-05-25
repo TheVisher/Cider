@@ -3,6 +3,8 @@ import SwiftUI
 /// Renders a Kanban board as horizontal scrolling columns with draggable cards.
 struct KanbanBoardView: View {
     let boardID: String
+    var projectHeaderTabs: [ProjectWorkspaceLocalTab] = []
+    var onSelectProjectHeaderTab: (ProjectWorkspaceLocalTabKind) -> Void = { _ in }
     var onOpenCard: (String, String) -> Void = { _, _ in }
 
     @ObservedObject private var storage = KanbanStorage.shared
@@ -83,45 +85,13 @@ struct KanbanBoardView: View {
         let featureFilters = KanbanBoardLayout.featureDomainFilters(for: board)
 
         return HStack(spacing: Spacing.sm) {
-            if editingBoardName {
-                TextField("Board name", text: $boardNameDraft)
-                    .textFieldStyle(.plain)
-                    .font(CiderFont.headingSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .onSubmit {
-                        storage.renameBoard(id: boardID, name: boardNameDraft)
-                        editingBoardName = false
-                    }
+            if KanbanBoardLayout.usesProjectLayout(for: board), !projectHeaderTabs.isEmpty {
+                projectHeaderTabsView
             } else {
-                Text(board.name)
-                    .font(CiderFont.headingSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .onTapGesture(count: 2) {
-                        boardNameDraft = board.name
-                        editingBoardName = true
-                    }
+                boardTitleView(board)
             }
 
-            Text("\(filteredCardCount(for: board)) cards")
-                .font(CiderFont.caption)
-                .foregroundColor(CiderColors.tertiary)
-
-            if KanbanBoardLayout.usesProjectLayout(for: board) {
-                HStack(spacing: Spacing.xxs) {
-                    Image(systemName: "rectangle.split.3x1")
-                    Text("Project board")
-                }
-                .font(CiderFont.micro)
-                .foregroundColor(CiderColors.controlAccent)
-                .padding(.horizontal, Spacing.xs)
-                .padding(.vertical, Spacing.xxs)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(CiderColors.controlAccent.opacity(0.12))
-                )
-            }
-
-            Spacer()
+            Spacer(minLength: Spacing.md)
 
             // Search field
             HStack(spacing: Spacing.xxs) {
@@ -240,6 +210,95 @@ struct KanbanBoardView: View {
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
+    }
+
+    private func boardTitleView(_ board: KanbanBoard) -> some View {
+        HStack(spacing: Spacing.sm) {
+            if editingBoardName {
+                TextField("Board name", text: $boardNameDraft)
+                    .textFieldStyle(.plain)
+                    .font(CiderFont.headingSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .onSubmit {
+                        storage.renameBoard(id: boardID, name: boardNameDraft)
+                        editingBoardName = false
+                    }
+            } else {
+                Text(board.name)
+                    .font(CiderFont.headingSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .onTapGesture(count: 2) {
+                        boardNameDraft = board.name
+                        editingBoardName = true
+                    }
+            }
+
+            Text("\(filteredCardCount(for: board)) cards")
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+
+            if KanbanBoardLayout.usesProjectLayout(for: board) {
+                HStack(spacing: Spacing.xxs) {
+                    Image(systemName: "rectangle.split.3x1")
+                    Text("Project board")
+                }
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.controlAccent)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.xxs)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(CiderColors.controlAccent.opacity(0.12))
+                )
+            }
+        }
+    }
+
+    private var projectHeaderTabsView: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Spacing.xxs) {
+                ForEach(projectHeaderTabs) { tab in
+                    projectHeaderTabButton(tab)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func projectHeaderTabButton(_ tab: ProjectWorkspaceLocalTab) -> some View {
+        Button {
+            onSelectProjectHeaderTab(tab.kind)
+        } label: {
+            HStack(spacing: Spacing.xxs) {
+                Image(systemName: tab.systemImage)
+                    .font(CiderFont.caption)
+
+                Text(tab.title)
+                    .font(CiderFont.captionMedium)
+                    .lineLimit(1)
+
+                if let badge = tab.badge {
+                    Text(badge)
+                        .font(CiderFont.micro)
+                        .foregroundColor(tab.isSelected ? CiderColors.controlAccent : CiderColors.tertiary)
+                        .padding(.horizontal, Spacing.xxs)
+                        .padding(.vertical, 1)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(tab.isSelected ? CiderColors.controlAccent.opacity(0.16) : CiderColors.surfaceElevated)
+                        )
+                }
+            }
+            .foregroundColor(tab.isSelected ? CiderColors.controlAccent : CiderColors.secondary)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, Spacing.xxs)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(tab.isSelected ? CiderColors.controlAccent.opacity(0.13) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(tab.title)
     }
 
     // MARK: - Columns

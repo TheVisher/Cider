@@ -366,3 +366,111 @@ enum ProjectWorkspaceSidebarTree {
         ] + boardDestinations + surfaceDestinations
     }
 }
+
+enum ProjectWorkspaceLocalTabKind: Hashable {
+    case overview
+    case inbox
+    case board(String)
+    case surface(ProjectWorkspaceSurface)
+}
+
+struct ProjectWorkspaceLocalTab: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let systemImage: String
+    let kind: ProjectWorkspaceLocalTabKind
+    let isSelected: Bool
+    var badge: String? = nil
+}
+
+enum ProjectWorkspaceLocalTabs {
+    static func tabs(
+        for workspace: ProjectWorkspace,
+        boards: [KanbanBoard],
+        selectedKind: ProjectWorkspaceLocalTabKind?
+    ) -> [ProjectWorkspaceLocalTab] {
+        guard workspace.kind == .project else { return [] }
+
+        let boardsByID = Dictionary(uniqueKeysWithValues: boards.map { ($0.id, $0) })
+        let inboxCount = ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: boards)
+        let boardTabs = projectBoardTabs(
+            for: workspace,
+            boardsByID: boardsByID,
+            selectedKind: selectedKind
+        )
+
+        return [
+            ProjectWorkspaceLocalTab(
+                id: "overview",
+                title: "Overview",
+                systemImage: "rectangle.3.group",
+                kind: .overview,
+                isSelected: selectedKind == .overview
+            ),
+            ProjectWorkspaceLocalTab(
+                id: "inbox",
+                title: "Inbox",
+                systemImage: inboxCount > 0 ? "tray.full" : "tray",
+                kind: .inbox,
+                isSelected: selectedKind == .inbox,
+                badge: inboxCount > 0 ? "\(inboxCount)" : nil
+            ),
+        ] + boardTabs + surfaceTabs(for: workspace, selectedKind: selectedKind)
+    }
+
+    private static func projectBoardTabs(
+        for workspace: ProjectWorkspace,
+        boardsByID: [String: KanbanBoard],
+        selectedKind: ProjectWorkspaceLocalTabKind?
+    ) -> [ProjectWorkspaceLocalTab] {
+        guard let primaryBoardID = workspace.boardIDs.first else { return [] }
+
+        var visibleBoardIDs = [primaryBoardID]
+        if case let .board(selectedBoardID) = selectedKind,
+           selectedBoardID != primaryBoardID,
+           workspace.boardIDs.contains(selectedBoardID) {
+            visibleBoardIDs.append(selectedBoardID)
+        }
+
+        return visibleBoardIDs.compactMap { boardID -> ProjectWorkspaceLocalTab? in
+            guard let board = boardsByID[boardID] else { return nil }
+            let kind = ProjectWorkspaceLocalTabKind.board(boardID)
+            return ProjectWorkspaceLocalTab(
+                id: "board-\(boardID)",
+                title: boardID == primaryBoardID ? "Board" : board.name,
+                systemImage: "rectangle.split.3x1",
+                kind: kind,
+                isSelected: selectedKind == kind,
+                badge: "\(board.allCards.count)"
+            )
+        }
+    }
+
+    private static func surfaceTabs(
+        for workspace: ProjectWorkspace,
+        selectedKind: ProjectWorkspaceLocalTabKind?
+    ) -> [ProjectWorkspaceLocalTab] {
+        workspace.surfaces.compactMap { surface in
+            guard surface != .boards else { return nil }
+            let kind = ProjectWorkspaceLocalTabKind.surface(surface)
+            return ProjectWorkspaceLocalTab(
+                id: "surface-\(surface.id)",
+                title: localTitle(for: surface),
+                systemImage: surface.systemImage,
+                kind: kind,
+                isSelected: selectedKind == kind
+            )
+        }
+    }
+
+    private static func localTitle(for surface: ProjectWorkspaceSurface) -> String {
+        switch surface {
+        case .boards: "Board"
+        case .notes: "Docs"
+        case .decisions: "Decisions"
+        case .assets: "Assets"
+        case .qaAudits: "QA"
+        case .plansHandoffs: "Plans"
+        }
+    }
+}

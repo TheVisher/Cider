@@ -229,6 +229,81 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         ])
     }
 
+    func testProjectLocalTabsUseCompactProjectNavigationLabels() {
+        let cider = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0", "a1b2c3"],
+            referenceSearchTerms: ["cider"]
+        )
+
+        let tabs = ProjectWorkspaceLocalTabs.tabs(
+            for: cider,
+            boards: [
+                KanbanBoard(id: "2afee0", name: "Cider"),
+                KanbanBoard(id: "a1b2c3", name: "Cider Roadmap")
+            ],
+            selectedKind: .board("2afee0")
+        )
+
+        XCTAssertEqual(tabs.map(\.title), [
+            "Overview",
+            "Inbox",
+            "Board",
+            "Docs",
+            "Decisions",
+            "Assets",
+            "QA",
+            "Plans"
+        ])
+        XCTAssertEqual(tabs.map(\.kind), [
+            .overview,
+            .inbox,
+            .board("2afee0"),
+            .surface(.notes),
+            .surface(.decisions),
+            .surface(.assets),
+            .surface(.qaAudits),
+            .surface(.plansHandoffs)
+        ])
+        XCTAssertEqual(tabs.first(where: { $0.isSelected })?.title, "Board")
+    }
+
+    func testProjectLocalTabsIncludeSelectedSecondaryBoardOnlyWhenViewingIt() {
+        let cider = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0", "a1b2c3"],
+            referenceSearchTerms: ["cider"]
+        )
+
+        let tabs = ProjectWorkspaceLocalTabs.tabs(
+            for: cider,
+            boards: [
+                KanbanBoard(id: "2afee0", name: "Cider"),
+                KanbanBoard(id: "a1b2c3", name: "Cider Roadmap")
+            ],
+            selectedKind: .board("a1b2c3")
+        )
+
+        XCTAssertEqual(tabs.map(\.title), [
+            "Overview",
+            "Inbox",
+            "Board",
+            "Cider Roadmap",
+            "Docs",
+            "Decisions",
+            "Assets",
+            "QA",
+            "Plans"
+        ])
+        XCTAssertEqual(tabs.first(where: { $0.isSelected })?.title, "Cider Roadmap")
+    }
+
     func testProjectInboxSurfacesUnreadAgentAndQACardsOnly() {
         let afterInboxLaunch = ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(60)
         let reviewedLater = afterInboxLaunch.addingTimeInterval(60)
