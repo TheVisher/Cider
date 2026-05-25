@@ -611,9 +611,26 @@ struct KanbanCardHierarchyTests {
         #expect(!overflowTags.map(\.label).contains("High"))
     }
 
+    @Test("domain catalog stays small and Linear-style")
+    func domainCatalogStaysSmallAndLinearStyle() {
+        let domains = KanbanBoardLayout.featureDomainCatalog
+
+        #expect(domains.count <= 10)
+        #expect(domains.map(\.label) == [
+            "Kanban",
+            "Second Brain",
+            "Capture",
+            "Library",
+            "AI Assistant",
+            "Apps",
+            "Interface",
+            "Infrastructure",
+        ])
+    }
+
     @Test("feature domain filters use a curated canonical set and merge aliases")
     func featureDomainFiltersUseCuratedCanonicalSetAndMergeAliases() {
-        let board = KanbanBoard(name: "Feature filters", columns: [
+        let board = KanbanBoard(name: "Domain filters", columns: [
             KanbanColumn(id: "todo", name: "Todo", cards: [
                 KanbanCard(id: "sidebar-bug", title: "Sidebar bug", tags: ["sidebar", "bug", "high"]),
                 KanbanCard(id: "web-qa", title: "Web QA", tags: ["cider-web", "qa", "sidebar"]),

@@ -151,7 +151,7 @@ struct KanbanBoardView: View {
             )
 
             if !featureFilters.isEmpty {
-                featureFilterMenu(featureFilters)
+                domainFilterMenu(featureFilters)
             }
 
             // Compact toggle
@@ -244,7 +244,7 @@ struct KanbanBoardView: View {
 
     // MARK: - Columns
 
-    private func featureFilterMenu(_ filters: [KanbanFeatureDomainFilter]) -> some View {
+    private func domainFilterMenu(_ filters: [KanbanFeatureDomainFilter]) -> some View {
         let selected = selectedFeatureDomainFilter.flatMap { selectedID in
             filters.first { $0.id == selectedID }
         }
@@ -253,7 +253,7 @@ struct KanbanBoardView: View {
             Button {
                 selectedFeatureDomainFilter = nil
             } label: {
-                Label("All Features", systemImage: selected == nil ? "checkmark" : "cube.transparent")
+                Label("All Domains", systemImage: selected == nil ? "checkmark" : "cube.transparent")
             }
 
             Divider()
@@ -274,7 +274,7 @@ struct KanbanBoardView: View {
             HStack(spacing: Spacing.xxs) {
                 Image(systemName: "cube.transparent")
                     .font(CiderFont.caption)
-                Text(selected?.label ?? "Features")
+                Text(selected?.label ?? "Domains")
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
                     .font(CiderFont.micro)
@@ -291,7 +291,7 @@ struct KanbanBoardView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize(horizontal: true, vertical: false)
-        .accessibilityLabel(selected.map { "Feature filter: \($0.label)" } ?? "Feature filter")
+        .accessibilityLabel(selected.map { "Domain filter: \($0.label)" } ?? "Domain filter")
     }
 
     private func filteredCardCount(for board: KanbanBoard) -> Int {

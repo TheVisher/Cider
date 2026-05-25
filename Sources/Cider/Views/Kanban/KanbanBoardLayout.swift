@@ -167,6 +167,12 @@ struct KanbanTestingOwnerBadge: Equatable {
 enum KanbanBoardLayout {
     static let archiveDividerWidth: CGFloat = 28
 
+    static var featureDomainCatalog: [KanbanFeatureDomainFilter] {
+        featureDomainDefinitions.map { definition in
+            KanbanFeatureDomainFilter(id: definition.id, label: definition.label, cardCount: 0)
+        }
+    }
+
     static func usesProjectLayout(for board: KanbanBoard) -> Bool {
         let normalizedBoardName = normalize(board.name)
         if ["cider", "cider_web", "cider_ios"].contains(normalizedBoardName) {
@@ -506,9 +512,12 @@ enum KanbanBoardLayout {
         }
     }
 
+    // Linear-style board scoping: keep the visible filter surface to a few stable
+    // product domains. Card-local labels can be narrower, but they roll up here
+    // instead of becoming dozens of primary board filters.
     private static let featureDomainDefinitions: [KanbanFeatureDomainDefinition] = [
         KanbanFeatureDomainDefinition(id: "kanban", label: "Kanban", aliases: [
-            "board", "boards", "card", "cards", "parent-child", "archive", "workflow"
+            "board", "boards", "card", "cards", "comments", "parent-child", "archive", "workflow"
         ]),
         KanbanFeatureDomainDefinition(id: "second-brain", label: "Second Brain", aliases: [
             "dashboard", "home", "projects", "project-inbox", "agenda", "todos", "reminders"
@@ -520,7 +529,7 @@ enum KanbanBoardLayout {
             "spaces", "space", "folders", "domains", "media", "references"
         ]),
         KanbanFeatureDomainDefinition(id: "ai-assistant", label: "AI Assistant", aliases: [
-            "agents", "agent", "ai", "hermes", "automation", "life-assistant"
+            "agents", "agent", "ai", "hermes", "handoffs", "automation", "life-assistant"
         ]),
         KanbanFeatureDomainDefinition(id: "apps", label: "Apps", aliases: [
             "cider-web", "web", "cider-ios", "ios", "app-parity"
@@ -529,7 +538,7 @@ enum KanbanBoardLayout {
             "ux", "ui", "navigation", "sidebar", "tabs", "layout", "design-system"
         ]),
         KanbanFeatureDomainDefinition(id: "infrastructure", label: "Infrastructure", aliases: [
-            "cli", "storage", "backend", "sqlite", "sync", "duplicates", "migration", "search", "recall"
+            "cli", "storage", "backend", "sqlite", "sync", "duplicates", "vault-doctor", "migration", "indexing", "search", "recall"
         ]),
     ]
 
