@@ -304,6 +304,38 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(tabs.first(where: { $0.isSelected })?.title, "Cider Roadmap")
     }
 
+    func testProjectLocalTabsMarkNonBoardDestinationsSelected() {
+        let cider = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0"],
+            referenceSearchTerms: ["cider"]
+        )
+        let boards = [KanbanBoard(id: "2afee0", name: "Cider")]
+
+        let overviewTabs = ProjectWorkspaceLocalTabs.tabs(
+            for: cider,
+            boards: boards,
+            selectedKind: .overview
+        )
+        let inboxTabs = ProjectWorkspaceLocalTabs.tabs(
+            for: cider,
+            boards: boards,
+            selectedKind: .inbox
+        )
+        let qaTabs = ProjectWorkspaceLocalTabs.tabs(
+            for: cider,
+            boards: boards,
+            selectedKind: .surface(.qaAudits)
+        )
+
+        XCTAssertEqual(overviewTabs.first(where: { $0.isSelected })?.title, "Overview")
+        XCTAssertEqual(inboxTabs.first(where: { $0.isSelected })?.title, "Inbox")
+        XCTAssertEqual(qaTabs.first(where: { $0.isSelected })?.title, "QA")
+    }
+
     func testProjectInboxSurfacesUnreadAgentAndQACardsOnly() {
         let afterInboxLaunch = ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(60)
         let reviewedLater = afterInboxLaunch.addingTimeInterval(60)

@@ -177,21 +177,23 @@ extension CiderPanelView {
                 }
             case .projectOverview(let projectID, _):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
-                    ProjectWorkspaceOverviewView(
-                        model: ProjectWorkspaceOverviewProvider.model(
-                            for: project,
-                            catalog: projectWorkspaceCatalog,
-                            boards: kanbanStorage.boards,
-                            artifactRelations: projectArtifactRelations(for: project)
-                        ),
-                        onOpenProject: { _ in },
-                        onOpenBoard: { boardID in
-                            openProjectBoard(boardID)
-                        },
-                        onCreateBoard: {
-                            createProjectBoard(in: project)
-                        }
-                    )
+                    projectWorkspaceContent(for: project, selectedKind: .overview) {
+                        ProjectWorkspaceOverviewView(
+                            model: ProjectWorkspaceOverviewProvider.model(
+                                for: project,
+                                catalog: projectWorkspaceCatalog,
+                                boards: kanbanStorage.boards,
+                                artifactRelations: projectArtifactRelations(for: project)
+                            ),
+                            onOpenProject: { _ in },
+                            onOpenBoard: { boardID in
+                                openProjectBoard(boardID)
+                            },
+                            onCreateBoard: {
+                                createProjectBoard(in: project)
+                            }
+                        )
+                    }
                 } else {
                     EmptyStateView(
                         icon: "rectangle.3.group",
@@ -200,20 +202,22 @@ extension CiderPanelView {
                 }
             case .projectInbox(let projectID, _):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
-                    ProjectWorkspaceInboxView(
-                        workspace: project,
-                        entries: ProjectWorkspaceInboxProvider.entries(
-                            for: project,
-                            boards: kanbanStorage.boards
-                        ),
-                        onOpenCard: { boardID, cardID in
-                            kanbanStorage.markCardReviewed(boardID: boardID, cardID: cardID)
-                            openKanbanCardDetail(boardID: boardID, cardID: cardID)
-                        },
-                        onMarkReviewed: { boardID, cardID in
-                            kanbanStorage.markCardReviewed(boardID: boardID, cardID: cardID)
-                        }
-                    )
+                    projectWorkspaceContent(for: project, selectedKind: .inbox) {
+                        ProjectWorkspaceInboxView(
+                            workspace: project,
+                            entries: ProjectWorkspaceInboxProvider.entries(
+                                for: project,
+                                boards: kanbanStorage.boards
+                            ),
+                            onOpenCard: { boardID, cardID in
+                                kanbanStorage.markCardReviewed(boardID: boardID, cardID: cardID)
+                                openKanbanCardDetail(boardID: boardID, cardID: cardID)
+                            },
+                            onMarkReviewed: { boardID, cardID in
+                                kanbanStorage.markCardReviewed(boardID: boardID, cardID: cardID)
+                            }
+                        )
+                    }
                 } else {
                     EmptyStateView(
                         icon: "tray",
@@ -222,17 +226,19 @@ extension CiderPanelView {
                 }
             case .projectSurface(let projectID, let surface, _):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
-                    ProjectWorkspaceSurfaceView(
-                        model: ProjectWorkspaceSurfaceProvider.model(
-                            for: project,
-                            surface: surface,
-                            notes: notesStorage.notes,
-                            artifactRelations: ProjectWorkspaceSurfaceProvider.artifactRelations(for: notesStorage.notes)
-                        ),
-                        onOpenNote: { note in
-                            openNoteDetail(note)
-                        }
-                    )
+                    projectWorkspaceContent(for: project, selectedKind: .surface(surface)) {
+                        ProjectWorkspaceSurfaceView(
+                            model: ProjectWorkspaceSurfaceProvider.model(
+                                for: project,
+                                surface: surface,
+                                notes: notesStorage.notes,
+                                artifactRelations: ProjectWorkspaceSurfaceProvider.artifactRelations(for: notesStorage.notes)
+                            ),
+                            onOpenNote: { note in
+                                openNoteDetail(note)
+                            }
+                        )
+                    }
                 } else {
                     EmptyStateView(
                         icon: surface.systemImage,
@@ -762,6 +768,48 @@ extension CiderPanelView {
             boards: kanbanStorage.boards,
             selectedKind: .board(boardID)
         )
+    }
+
+    func projectHeaderTabs(
+        for project: ProjectWorkspace,
+        selectedKind: ProjectWorkspaceLocalTabKind
+    ) -> [ProjectWorkspaceLocalTab] {
+        guard project.kind == .project else { return [] }
+
+        return ProjectWorkspaceLocalTabs.tabs(
+            for: project,
+            boards: kanbanStorage.boards,
+            selectedKind: selectedKind
+        )
+    }
+
+    @ViewBuilder
+    func projectWorkspaceContent<Content: View>(
+        for project: ProjectWorkspace,
+        selectedKind: ProjectWorkspaceLocalTabKind,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let tabs = projectHeaderTabs(for: project, selectedKind: selectedKind)
+        if tabs.isEmpty {
+            content()
+        } else {
+            VStack(spacing: 0) {
+                ProjectWorkspaceLocalTabStrip(
+                    tabs: tabs,
+                    onSelect: selectProjectHeaderTab
+                )
+                .padding(.horizontal, Spacing.lg)
+                .padding(.vertical, Spacing.sm)
+                .background(CiderColors.opaqueBackground)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(CiderColors.separator)
+                        .frame(height: 1)
+                }
+
+                content()
+            }
+        }
     }
 
     func selectProjectHeaderTab(_ kind: ProjectWorkspaceLocalTabKind) {
