@@ -1170,10 +1170,6 @@ private struct KanbanCardCommentsSectionView: View {
                 }
 
                 Spacer(minLength: Spacing.sm)
-
-                Text("Handoffs, notes, decisions, QA")
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.tertiary)
             }
 
             if comments.isEmpty {
@@ -1344,7 +1340,7 @@ private struct KanbanCardCommentThreadRow: View {
     var onAddReply: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             if thread.isResolved && isCollapsed {
                 KanbanCardResolvedThreadSummaryRow(
                     comment: thread.root,
@@ -1358,7 +1354,8 @@ private struct KanbanCardCommentThreadRow: View {
                     isThreadCollapsed: isCollapsed,
                     onToggleResolved: onToggleResolved,
                     onToggleCollapse: onToggleCollapse,
-                    onReply: onReply
+                    onReply: onReply,
+                    usesOwnBackground: false
                 )
             }
 
@@ -1372,17 +1369,13 @@ private struct KanbanCardCommentThreadRow: View {
                     )
                 }
 
-                if !thread.replies.isEmpty || isReplying {
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                if !thread.replies.isEmpty {
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
                         ForEach(thread.replies) { reply in
-                            KanbanCardCommentRow(comment: reply, indent: 0)
-                        }
-                        if isReplying {
-                            KanbanCardReplyComposer(
-                                text: $replyBody,
-                                canSubmit: canAddReply,
-                                onCancel: onCancelReply,
-                                onSubmit: onAddReply
+                            KanbanCardCommentRow(
+                                comment: reply,
+                                indent: 0,
+                                usesOwnBackground: false
                             )
                         }
                     }
@@ -1394,8 +1387,27 @@ private struct KanbanCardCommentThreadRow: View {
                             .padding(.leading, 10)
                     }
                 }
+
+                KanbanCardReplyComposer(
+                    text: $replyBody,
+                    isActive: isReplying,
+                    canSubmit: canAddReply,
+                    onActivate: onReply,
+                    onCancel: onCancelReply,
+                    onSubmit: onAddReply
+                )
             }
         }
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(thread.isResolved && isCollapsed ? CiderColors.surfaceInput.opacity(0.28) : CiderColors.surfaceSubtle)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(CiderColors.borderSubtle.opacity(0.45), lineWidth: 1)
+        )
     }
 }
 
@@ -1447,7 +1459,6 @@ private struct KanbanCardThreadEventRow: View {
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CiderColors.surfaceInput.opacity(0.25)))
         .contentShape(Rectangle())
         .onTapGesture(perform: onAction)
     }
@@ -1461,6 +1472,7 @@ private struct KanbanCardCommentRow: View {
     var onToggleResolved: (() -> Void)? = nil
     var onToggleCollapse: (() -> Void)? = nil
     var onReply: (() -> Void)? = nil
+    var usesOwnBackground: Bool = true
 
     private var timestamp: String {
         comment.createdAt.formatted(date: .abbreviated, time: .shortened)
@@ -1535,54 +1547,98 @@ private struct KanbanCardCommentRow: View {
         .padding(Spacing.sm)
         .padding(.leading, indent)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
+        .background(rowBackground)
+    }
+
+    @ViewBuilder
+    private var rowBackground: some View {
+        if usesOwnBackground {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(indent > 0 ? CiderColors.surfaceInput.opacity(0.45) : CiderColors.surfaceSubtle)
-        )
+        }
     }
 }
 
 private struct KanbanCardReplyComposer: View {
     @Binding var text: String
+    var isActive: Bool
     var canSubmit: Bool
+    var onActivate: () -> Void
     var onCancel: () -> Void
     var onSubmit: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            TextEditor(text: $text)
-                .font(CiderFont.caption)
-                .foregroundColor(CiderColors.primary)
-                .lineSpacing(3)
-                .scrollContentBackground(.hidden)
-                .padding(Spacing.xs)
-                .frame(minHeight: 46, maxHeight: 80)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(CiderColors.surfaceInput.opacity(0.55))
-                )
-                .overlay(alignment: .topLeading) {
-                    if text.isEmpty {
-                        Text("Reply to this thread…")
+            if isActive {
+                TextEditor(text: $text)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.primary)
+                    .lineSpacing(3)
+                    .scrollContentBackground(.hidden)
+                    .padding(Spacing.xs)
+                    .frame(minHeight: 46, maxHeight: 80)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(CiderColors.surfaceInput.opacity(0.55))
+                    )
+                    .overlay(alignment: .topLeading) {
+                        if text.isEmpty {
+                            Text("Leave a reply…")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                                .padding(.horizontal, Spacing.sm)
+                                .padding(.vertical, Spacing.sm)
+                                .allowsHitTesting(false)
+                        }
+                    }
+
+                HStack(spacing: Spacing.sm) {
+                    KanbanCardThreadToolButton(systemImage: "paperclip", label: "Attach reference")
+                    KanbanCardThreadToolButton(systemImage: "face.smiling", label: "React")
+                    Spacer(minLength: Spacing.sm)
+                    Button("Cancel", action: onCancel)
+                        .buttonStyle(.plain)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                    Button("Reply", action: onSubmit)
+                        .buttonStyle(CiderAccentButtonStyle())
+                        .disabled(!canSubmit)
+                }
+            } else {
+                Button(action: onActivate) {
+                    HStack(spacing: Spacing.sm) {
+                        Text("Leave a reply…")
                             .font(CiderFont.caption)
                             .foregroundColor(CiderColors.tertiary)
-                            .padding(.horizontal, Spacing.sm)
-                            .padding(.vertical, Spacing.sm)
-                            .allowsHitTesting(false)
+                        Spacer(minLength: Spacing.sm)
+                        KanbanCardThreadToolButton(systemImage: "paperclip", label: "Attach reference")
+                        KanbanCardThreadToolButton(systemImage: "face.smiling", label: "React")
                     }
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(CiderColors.surfaceInput.opacity(0.38))
+                    )
                 }
-
-            HStack(spacing: Spacing.sm) {
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.plain)
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.tertiary)
-                Button("Reply", action: onSubmit)
-                    .buttonStyle(CiderAccentButtonStyle())
-                    .disabled(!canSubmit)
+                .buttonStyle(.plain)
             }
         }
         .padding(.top, Spacing.xs)
+    }
+}
+
+private struct KanbanCardThreadToolButton: View {
+    var systemImage: String
+    var label: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.caption.weight(.semibold))
+            .foregroundColor(CiderColors.tertiary)
+            .frame(width: 20, height: 18)
+            .help(label)
     }
 }
 
