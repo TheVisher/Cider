@@ -1247,14 +1247,6 @@ private struct KanbanCardCommentsSectionView: View {
             }
         }
         .padding(Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(CiderColors.surfaceElevated.opacity(0.75))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(CiderColors.borderDefault, lineWidth: 1)
-                )
-        )
         .onAppear(perform: applyResolvedThreadDefaults)
         .onChange(of: comments.map { "\($0.id):\($0.resolvedAt?.timeIntervalSince1970 ?? 0)" }) { _, _ in
             applyResolvedThreadDefaults()
@@ -1371,6 +1363,15 @@ private struct KanbanCardCommentThreadRow: View {
             }
 
             if !isCollapsed {
+                if thread.isResolved {
+                    KanbanCardThreadEventRow(
+                        comment: thread.root,
+                        actionLabel: "Collapse",
+                        systemImage: "chevron.up",
+                        onAction: onToggleCollapse
+                    )
+                }
+
                 if !thread.replies.isEmpty || isReplying {
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         ForEach(thread.replies) { reply in
@@ -1403,6 +1404,22 @@ private struct KanbanCardResolvedThreadSummaryRow: View {
     var onExpand: () -> Void
 
     var body: some View {
+        KanbanCardThreadEventRow(
+            comment: comment,
+            actionLabel: "Expand",
+            systemImage: "chevron.down",
+            onAction: onExpand
+        )
+    }
+}
+
+private struct KanbanCardThreadEventRow: View {
+    var comment: KanbanCardComment
+    var actionLabel: String
+    var systemImage: String
+    var onAction: () -> Void
+
+    var body: some View {
         HStack(alignment: .center, spacing: Spacing.sm) {
             Image(systemName: "checkmark")
                 .font(.caption.weight(.semibold))
@@ -1416,10 +1433,10 @@ private struct KanbanCardResolvedThreadSummaryRow: View {
 
             Spacer(minLength: Spacing.sm)
 
-            Button(action: onExpand) {
+            Button(action: onAction) {
                 HStack(spacing: 4) {
-                    Text("Expand")
-                    Image(systemName: "chevron.down")
+                    Text(actionLabel)
+                    Image(systemName: systemImage)
                         .font(.caption2.weight(.semibold))
                 }
             }
@@ -1430,12 +1447,9 @@ private struct KanbanCardResolvedThreadSummaryRow: View {
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(CiderColors.surfaceSubtle.opacity(0.72))
-        )
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CiderColors.surfaceInput.opacity(0.25)))
         .contentShape(Rectangle())
-        .onTapGesture(perform: onExpand)
+        .onTapGesture(perform: onAction)
     }
 }
 
@@ -1450,6 +1464,10 @@ private struct KanbanCardCommentRow: View {
 
     private var timestamp: String {
         comment.createdAt.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private var hasThreadActions: Bool {
+        onReply != nil || onToggleResolved != nil || (replyCount > 0 && onToggleCollapse != nil)
     }
 
     var body: some View {
@@ -1475,13 +1493,28 @@ private struct KanbanCardCommentRow: View {
                             .font(CiderFont.caption)
                             .foregroundColor(CiderColors.tertiary)
                     }
-                    if comment.isResolved {
-                        Text("Resolved")
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.controlAccent)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(CiderColors.accentSubtle))
+
+                    Spacer(minLength: Spacing.sm)
+
+                    if hasThreadActions {
+                        Menu {
+                            if let onReply {
+                                Button("Reply", systemImage: "arrowshape.turn.up.left", action: onReply)
+                            }
+                            if let onToggleResolved {
+                                Button(comment.isResolved ? "Reopen thread" : "Resolve thread", systemImage: comment.isResolved ? "arrow.uturn.backward" : "checkmark", action: onToggleResolved)
+                            }
+                            if replyCount > 0, let onToggleCollapse {
+                                Button(isThreadCollapsed ? "Expand replies" : "Collapse replies", systemImage: isThreadCollapsed ? "chevron.down" : "chevron.up", action: onToggleCollapse)
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(CiderColors.tertiary)
+                                .frame(width: 22, height: 18)
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.plain)
                     }
                 }
 
@@ -1497,33 +1530,6 @@ private struct KanbanCardCommentRow: View {
 
                 KanbanCommentBodyView(content: comment.body)
 
-                if onReply != nil || onToggleResolved != nil || replyCount > 0 {
-                    HStack(spacing: Spacing.sm) {
-                        if let onReply {
-                            Button("Reply", action: onReply)
-                                .buttonStyle(.plain)
-                                .font(CiderFont.captionSemibold)
-                                .foregroundColor(CiderColors.controlAccent)
-                        }
-
-                        if let onToggleResolved {
-                            Button(comment.isResolved ? "Reopen thread" : "Resolve thread", action: onToggleResolved)
-                                .buttonStyle(.plain)
-                                .font(CiderFont.caption)
-                                .foregroundColor(comment.isResolved ? CiderColors.controlAccent : CiderColors.tertiary)
-                        }
-
-                        if replyCount > 0, let onToggleCollapse {
-                            Button(isThreadCollapsed ? "Expand \(replyCount) repl\(replyCount == 1 ? "y" : "ies")" : "Collapse") {
-                                onToggleCollapse()
-                            }
-                            .buttonStyle(.plain)
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.tertiary)
-                        }
-                    }
-                    .padding(.top, 2)
-                }
             }
         }
         .padding(Spacing.sm)
