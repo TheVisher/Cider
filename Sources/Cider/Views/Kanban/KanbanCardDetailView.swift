@@ -1182,26 +1182,23 @@ private struct KanbanCardCommentsSectionView: View {
                     .foregroundColor(CiderColors.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: Spacing.sm) {
-                        ForEach(threads, id: \.root.id) { thread in
-                            KanbanCardCommentThreadRow(
-                                thread: thread,
-                                isCollapsed: collapsedThreadIDs.contains(thread.root.id),
-                                isReplying: replyingToCommentID == thread.root.id,
-                                replyBody: $replyCommentBody,
-                                canAddReply: canAddReply,
-                                onToggleCollapse: { toggleCollapse(for: thread.root) },
-                                onToggleResolved: { toggleResolved(thread.root) },
-                                onReply: { startReply(to: thread.root) },
-                                onCancelReply: { cancelReply() },
-                                onAddReply: { addReply(to: thread.root) }
-                            )
-                        }
+                LazyVStack(alignment: .leading, spacing: Spacing.sm) {
+                    ForEach(threads, id: \.root.id) { thread in
+                        KanbanCardCommentThreadRow(
+                            thread: thread,
+                            isCollapsed: collapsedThreadIDs.contains(thread.root.id),
+                            isReplying: replyingToCommentID == thread.root.id,
+                            replyBody: $replyCommentBody,
+                            canAddReply: canAddReply,
+                            onToggleCollapse: { toggleCollapse(for: thread.root) },
+                            onToggleResolved: { toggleResolved(thread.root) },
+                            onReply: { startReply(to: thread.root) },
+                            onCancelReply: { cancelReply() },
+                            onAddReply: { addReply(to: thread.root) }
+                        )
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 260)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Divider()
