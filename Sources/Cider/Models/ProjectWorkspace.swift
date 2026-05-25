@@ -316,8 +316,8 @@ enum ProjectWorkspaceSidebarTree {
         guard workspace.kind == .project else { return [] }
 
         let boardsByID = Dictionary(uniqueKeysWithValues: boards.map { ($0.id, $0) })
-        let inboxCount = ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: boards)
-        let boardDestinations = workspace.boardIDs.compactMap { boardID -> ProjectWorkspaceSidebarDestination? in
+        let secondaryBoardIDs = Array(workspace.boardIDs.dropFirst())
+        return secondaryBoardIDs.compactMap { boardID -> ProjectWorkspaceSidebarDestination? in
             guard let board = boardsByID[boardID] else { return nil }
             return ProjectWorkspaceSidebarDestination(
                 id: "board-\(board.id)",
@@ -327,43 +327,6 @@ enum ProjectWorkspaceSidebarTree {
                 isSelectable: true
             )
         }
-
-        let surfaceDestinations = workspace.surfaces
-            .filter { $0 != .boards }
-            .map { surface in
-                ProjectWorkspaceSidebarDestination(
-                    id: "surface-\(surface.id)",
-                    title: surface.title,
-                    systemImage: surface.systemImage,
-                    kind: .surface(surface),
-                    isSelectable: true
-                )
-            }
-
-        return [
-            ProjectWorkspaceSidebarDestination(
-                id: "overview",
-                title: "Overview",
-                systemImage: "rectangle.3.group",
-                kind: .overview,
-                isSelectable: true
-            ),
-            ProjectWorkspaceSidebarDestination(
-                id: "inbox",
-                title: "Inbox",
-                systemImage: inboxCount > 0 ? "tray.full" : "tray",
-                kind: .inbox,
-                isSelectable: true,
-                badge: inboxCount > 0 ? "\(inboxCount)" : nil
-            ),
-            ProjectWorkspaceSidebarDestination(
-                id: "boards",
-                title: "Boards",
-                systemImage: ProjectWorkspaceSurface.boards.systemImage,
-                kind: .boardsGroup,
-                isSelectable: false
-            )
-        ] + boardDestinations + surfaceDestinations
     }
 }
 

@@ -190,42 +190,32 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertTrue(catalog.home.surfaces.isEmpty)
     }
 
-    func testSidebarTreeBuildsProjectWorkspaceSurfaceDestinations() {
-        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [
-            KanbanBoard(id: "2afee0", name: "Cider"),
-            KanbanBoard(id: "08c899", name: "Cider Web")
-        ])
-        let cider = catalog.workspace(id: "cider")!
+    func testSidebarTreeLeavesProjectLocalDestinationsToHeaderTabs() {
+        let cider = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0", "3d45ca", "c0ffee"],
+            referenceSearchTerms: ["cider"]
+        )
 
         let destinations = ProjectWorkspaceSidebarTree.destinations(
             for: cider,
             boards: [
                 KanbanBoard(id: "2afee0", name: "Cider"),
-                KanbanBoard(id: "08c899", name: "Cider Web")
+                KanbanBoard(id: "3d45ca", name: "Second-Brain Roadmap v1"),
+                KanbanBoard(id: "c0ffee", name: "Cider Social")
             ]
         )
 
         XCTAssertEqual(destinations.map(\.title), [
-            "Overview",
-            "Inbox",
-            "Boards",
-            "Cider",
-            "Notes",
-            "Decisions",
-            "Assets",
-            "QA/Audits",
-            "Plans/Handoffs"
+            "Second-Brain Roadmap v1",
+            "Cider Social"
         ])
         XCTAssertEqual(destinations.map(\.kind), [
-            .overview,
-            .inbox,
-            .boardsGroup,
-            .board("2afee0"),
-            .surface(.notes),
-            .surface(.decisions),
-            .surface(.assets),
-            .surface(.qaAudits),
-            .surface(.plansHandoffs)
+            .board("3d45ca"),
+            .board("c0ffee")
         ])
     }
 
@@ -517,7 +507,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(entries.map { $0.card.id }, ["newer", "older"])
     }
 
-    func testProjectInboxSidebarDestinationShowsUnreadCountBadge() {
+    func testProjectInboxLocalTabShowsUnreadCountBadge() {
         let workspace = ProjectWorkspace(
             id: "cider",
             kind: .project,
@@ -552,7 +542,11 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             ]
         )
 
-        let inbox = ProjectWorkspaceSidebarTree.destinations(for: workspace, boards: [board]).first { $0.kind == .inbox }
+        let inbox = ProjectWorkspaceLocalTabs.tabs(
+            for: workspace,
+            boards: [board],
+            selectedKind: .overview
+        ).first { $0.kind == .inbox }
 
         XCTAssertEqual(inbox?.title, "Inbox")
         XCTAssertEqual(inbox?.badge, "1")

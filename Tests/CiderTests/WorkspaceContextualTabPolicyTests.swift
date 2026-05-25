@@ -78,6 +78,7 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
 
         XCTAssertEqual(result.map(\.id), [
             "project-overview-cider",
+            "project-inbox-cider",
             "saved-\(ciderID.uuidString)",
             "saved-\(webID.uuidString)",
             "saved-\(iosID.uuidString)",
