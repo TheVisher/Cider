@@ -1235,7 +1235,8 @@ private struct KanbanCardCommentsSectionView: View {
                             Text("Add a focused comment…")
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
-                                .padding(Spacing.xs)
+                                .padding(.leading, Spacing.sm)
+                                .padding(.vertical, Spacing.xs)
                                 .allowsHitTesting(false)
                         }
                     }
