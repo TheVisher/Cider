@@ -1131,7 +1131,11 @@ private struct KanbanCardCommentsSectionView: View {
     var onCommentChanged: () -> Void
 
     private var threads: [KanbanCardCommentThreadPolicy.Thread] {
-        KanbanCardCommentThreadPolicy.threads(from: comments)
+        KanbanCardCommentThreadPolicy.displayThreads(from: comments)
+    }
+
+    private var threadCounts: (active: Int, resolved: Int) {
+        KanbanCardCommentThreadPolicy.threadCounts(from: comments)
     }
 
     private var canAddComment: Bool {
@@ -1149,12 +1153,21 @@ private struct KanbanCardCommentsSectionView: View {
                     .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.tertiary)
 
-                Text("\(comments.count)")
+                Text("\(threadCounts.active) active")
                     .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.tertiary)
+                    .foregroundColor(CiderColors.controlAccent)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(CiderColors.surfaceInput))
+                    .background(Capsule().fill(CiderColors.controlAccent.opacity(0.12)))
+
+                if threadCounts.resolved > 0 {
+                    Text("\(threadCounts.resolved) resolved")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(CiderColors.surfaceInput))
+                }
 
                 Spacer(minLength: Spacing.sm)
 
@@ -1245,6 +1258,14 @@ private struct KanbanCardCommentsSectionView: View {
                         .stroke(CiderColors.borderDefault, lineWidth: 1)
                 )
         )
+        .onAppear(perform: applyResolvedThreadDefaults)
+        .onChange(of: comments.map { "\($0.id):\($0.resolvedAt?.timeIntervalSince1970 ?? 0)" }) { _, _ in
+            applyResolvedThreadDefaults()
+        }
+    }
+
+    private func applyResolvedThreadDefaults() {
+        collapsedThreadIDs.formUnion(KanbanCardCommentThreadPolicy.defaultCollapsedThreadIDs(from: comments))
     }
 
     private func addComment() {

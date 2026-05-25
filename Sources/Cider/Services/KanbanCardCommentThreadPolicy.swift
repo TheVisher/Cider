@@ -7,6 +7,9 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
 
         var isResolved: Bool { root.isResolved }
         var commentCount: Int { 1 + replies.count }
+        var lastActivityAt: Date {
+            ([root] + replies).map(\.createdAt).max() ?? root.createdAt
+        }
     }
 
     static func threads(from comments: [KanbanCardComment]) -> [Thread] {
@@ -18,6 +21,25 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
                 replies: sortedComments.filter { $0.parentCommentID == root.id }
             )
         }
+    }
+
+    static func displayThreads(from comments: [KanbanCardComment]) -> [Thread] {
+        threads(from: comments).sorted { lhs, rhs in
+            if lhs.isResolved != rhs.isResolved {
+                return !lhs.isResolved && rhs.isResolved
+            }
+            return lhs.lastActivityAt > rhs.lastActivityAt
+        }
+    }
+
+    static func defaultCollapsedThreadIDs(from comments: [KanbanCardComment]) -> Set<String> {
+        Set(threads(from: comments).filter { $0.isResolved }.map(\.root.id))
+    }
+
+    static func threadCounts(from comments: [KanbanCardComment]) -> (active: Int, resolved: Int) {
+        let threads = threads(from: comments)
+        let resolvedCount = threads.filter { $0.isResolved }.count
+        return (threads.count - resolvedCount, resolvedCount)
     }
 
     static func defaultAuthorName(
