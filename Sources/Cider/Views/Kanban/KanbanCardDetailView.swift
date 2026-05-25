@@ -1235,8 +1235,7 @@ private struct KanbanCardCommentsSectionView: View {
                             Text("Add a focused comment…")
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
-                                .padding(.horizontal, Spacing.sm)
-                                .padding(.vertical, Spacing.sm)
+                                .padding(Spacing.xs)
                                 .allowsHitTesting(false)
                         }
                     }
@@ -1523,10 +1522,14 @@ private struct KanbanCardCommentRow: View {
                             Image(systemName: "ellipsis")
                                 .font(.caption.weight(.semibold))
                                 .foregroundColor(CiderColors.tertiary)
-                                .frame(width: 22, height: 18)
+                                .frame(width: 32, height: 28)
+                                .contentShape(Rectangle())
                         }
                         .menuStyle(.button)
                         .buttonStyle(.plain)
+                        .frame(width: 32, height: 28)
+                        .contentShape(Rectangle())
+                        .help("Thread actions")
                     }
                 }
 
@@ -1586,8 +1589,7 @@ private struct KanbanCardReplyComposer: View {
                             Text("Leave a reply…")
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
-                                .padding(.horizontal, Spacing.sm)
-                                .padding(.vertical, Spacing.sm)
+                                .padding(Spacing.xs)
                                 .allowsHitTesting(false)
                         }
                     }
@@ -1833,8 +1835,7 @@ private struct KanbanCardHistorySectionView: View {
                             Text("Add a focused history entry…")
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
-                                .padding(.horizontal, Spacing.sm)
-                                .padding(.vertical, Spacing.sm)
+                                .padding(Spacing.xs)
                                 .allowsHitTesting(false)
                         }
                     }
