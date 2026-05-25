@@ -71,8 +71,8 @@ struct KanbanCardDetailReadableLayoutPolicyTests {
         #expect(threads.last?.replies.isEmpty == true)
     }
 
-    @Test("comment display threads keep active recent threads above resolved threads")
-    func commentDisplayThreadsKeepActiveRecentThreadsAboveResolvedThreads() {
+    @Test("comment display threads preserve root creation order while resolved threads collapse in place")
+    func commentDisplayThreadsPreserveRootCreationOrderWhileResolvedThreadsCollapseInPlace() {
         let start = Date(timeIntervalSince1970: 1_000)
         let oldActive = KanbanCardComment(id: "old-active", kind: .note, body: "Older active", createdAt: start)
         let resolved = KanbanCardComment(
@@ -84,12 +84,12 @@ struct KanbanCardDetailReadableLayoutPolicyTests {
             resolvedBy: "Erik"
         )
         let recentActive = KanbanCardComment(id: "recent-active", kind: .handoff, body: "Recent active", createdAt: start.addingTimeInterval(30))
-        let reply = KanbanCardComment(id: "reply", kind: .note, body: "Reply bumped old active", createdAt: start.addingTimeInterval(40), parentCommentID: "old-active")
+        let reply = KanbanCardComment(id: "reply", kind: .note, body: "Reply does not reorder the root thread", createdAt: start.addingTimeInterval(40), parentCommentID: "old-active")
 
         let threads = KanbanCardCommentThreadPolicy.displayThreads(from: [resolved, recentActive, oldActive, reply])
         let counts = KanbanCardCommentThreadPolicy.threadCounts(from: [resolved, recentActive, oldActive, reply])
 
-        #expect(threads.map(\.root.id) == ["old-active", "recent-active", "resolved"])
+        #expect(threads.map(\.root.id) == ["old-active", "resolved", "recent-active"])
         #expect(KanbanCardCommentThreadPolicy.defaultCollapsedThreadIDs(from: [resolved, recentActive, oldActive, reply]) == Set(["resolved"]))
         #expect(counts.active == 2)
         #expect(counts.resolved == 1)

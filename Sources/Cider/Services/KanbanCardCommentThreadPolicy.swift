@@ -7,9 +7,6 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
 
         var isResolved: Bool { root.isResolved }
         var commentCount: Int { 1 + replies.count }
-        var lastActivityAt: Date {
-            ([root] + replies).map(\.createdAt).max() ?? root.createdAt
-        }
     }
 
     static func threads(from comments: [KanbanCardComment]) -> [Thread] {
@@ -24,12 +21,7 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
     }
 
     static func displayThreads(from comments: [KanbanCardComment]) -> [Thread] {
-        threads(from: comments).sorted { lhs, rhs in
-            if lhs.isResolved != rhs.isResolved {
-                return !lhs.isResolved && rhs.isResolved
-            }
-            return lhs.lastActivityAt > rhs.lastActivityAt
-        }
+        threads(from: comments)
     }
 
     static func defaultCollapsedThreadIDs(from comments: [KanbanCardComment]) -> Set<String> {
