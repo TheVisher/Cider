@@ -368,55 +368,56 @@ struct KanbanBoardView: View {
             .padding(.horizontal, Spacing.xs)
 
             GeometryReader { geometry in
-                let railWidth = hiddenColumns.isEmpty ? 0 : KanbanDesign.hiddenColumnsRailWidth
-                let railGap = hiddenColumns.isEmpty ? 0 : Spacing.md
-                let activeAreaWidth = max(geometry.size.width - railWidth - railGap, KanbanDesign.projectColumnWidth)
-                let visibleColumnCount = projectLaneVisibleColumnCount(availableWidth: activeAreaWidth)
-                let maxScrollIndex = max(lane.columns.count - visibleColumnCount, 0)
+                let scrollItemCount = KanbanBoardLayout.projectScrollableItemCount(
+                    activeColumnCount: lane.columns.count,
+                    hiddenColumnCount: hiddenColumns.count
+                )
+                let visibleColumnCount = projectLaneVisibleColumnCount(availableWidth: geometry.size.width)
+                let maxScrollIndex = max(scrollItemCount - visibleColumnCount, 0)
                 let columnHeight = KanbanBoardLayout.projectColumnHeight(
                     availableBoardHeight: availableBoardHeight,
                     showsScrollControls: maxScrollIndex > 0
                 )
 
                 ScrollViewReader { scrollProxy in
-                    HStack(alignment: .top, spacing: Spacing.md) {
-                        VStack(alignment: .leading, spacing: Spacing.xs) {
-                            ScrollView(.horizontal, showsIndicators: true) {
-                                    HStack(alignment: .top, spacing: Spacing.md) {
-                                        ForEach(lane.columns) { column in
-                                            columnView(
-                                                column,
-                                                board: board,
-                                                width: KanbanDesign.projectColumnWidth,
-                                                height: columnHeight
-                                            )
-                                            .id(projectColumnScrollID(laneID: lane.id, columnID: column.id))
-                                        }
-                                    }
-                                    .padding(.bottom, Spacing.xs)
-                                    .background(horizontalPanSurface)
-                            }
-                            .frame(width: activeAreaWidth)
-                            .defaultScrollAnchor(.leading)
-                            .id(projectLaneScrollIdentity(for: lane))
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ScrollView(.horizontal, showsIndicators: true) {
+                            HStack(alignment: .top, spacing: Spacing.md) {
+                                ForEach(lane.columns) { column in
+                                    columnView(
+                                        column,
+                                        board: board,
+                                        width: KanbanDesign.projectColumnWidth,
+                                        height: columnHeight
+                                    )
+                                    .id(projectColumnScrollID(laneID: lane.id, columnID: column.id))
+                                }
 
-                            if maxScrollIndex > 0 {
-                                projectLaneScrollControls(
-                                    lane: lane,
-                                    visibleColumnCount: visibleColumnCount,
-                                    maxScrollIndex: maxScrollIndex,
-                                    scrollProxy: scrollProxy
-                                )
+                                if !hiddenColumns.isEmpty {
+                                    hiddenColumnsRail(
+                                        columns: hiddenColumns,
+                                        board: board,
+                                        height: columnHeight
+                                    )
+                                    .id(projectHiddenRailScrollID(laneID: lane.id))
+                                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                                }
                             }
+                            .padding(.bottom, Spacing.xs)
+                            .background(horizontalPanSurface)
                         }
+                        .frame(maxWidth: .infinity)
+                        .defaultScrollAnchor(.leading)
+                        .id(projectLaneScrollIdentity(for: lane))
 
-                        if !hiddenColumns.isEmpty {
-                            hiddenColumnsRail(
-                                columns: hiddenColumns,
-                                board: board,
-                                height: columnHeight
+                        if maxScrollIndex > 0 {
+                            projectLaneScrollControls(
+                                lane: lane,
+                                visibleColumnCount: visibleColumnCount,
+                                scrollItemCount: scrollItemCount,
+                                maxScrollIndex: maxScrollIndex,
+                                scrollProxy: scrollProxy
                             )
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
                         }
                     }
                 }
@@ -449,6 +450,10 @@ struct KanbanBoardView: View {
         "\(laneID)-column-\(columnID)"
     }
 
+    private func projectHiddenRailScrollID(laneID: String) -> String {
+        "\(laneID)-hidden-rail"
+    }
+
     private func projectLaneScrollIndex(for lane: KanbanBoardLane, maxScrollIndex: Int) -> Int {
         min(max(projectLaneScrollIndexByID[lane.id] ?? 0, 0), maxScrollIndex)
     }
@@ -456,18 +461,21 @@ struct KanbanBoardView: View {
     private func scrollProjectLane(
         _ lane: KanbanBoardLane,
         to index: Int,
+        scrollItemCount: Int,
         maxScrollIndex: Int,
         scrollProxy: ScrollViewProxy
     ) {
         let nextIndex = min(max(index, 0), maxScrollIndex)
         projectLaneScrollIndexByID[lane.id] = nextIndex
 
-        guard lane.columns.indices.contains(nextIndex) else { return }
+        guard nextIndex < scrollItemCount else { return }
 
-        let targetColumn = lane.columns[nextIndex]
+        let targetID = lane.columns.indices.contains(nextIndex)
+            ? projectColumnScrollID(laneID: lane.id, columnID: lane.columns[nextIndex].id)
+            : projectHiddenRailScrollID(laneID: lane.id)
         withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.22)) {
             scrollProxy.scrollTo(
-                projectColumnScrollID(laneID: lane.id, columnID: targetColumn.id),
+                targetID,
                 anchor: .leading
             )
         }
@@ -476,17 +484,19 @@ struct KanbanBoardView: View {
     private func projectLaneScrollControls(
         lane: KanbanBoardLane,
         visibleColumnCount: Int,
+        scrollItemCount: Int,
         maxScrollIndex: Int,
         scrollProxy: ScrollViewProxy
     ) -> some View {
         let currentIndex = projectLaneScrollIndex(for: lane, maxScrollIndex: maxScrollIndex)
-        let visibleRange = currentIndex..<(min(currentIndex + visibleColumnCount, lane.columns.count))
+        let visibleRange = currentIndex..<(min(currentIndex + visibleColumnCount, scrollItemCount))
 
         return HStack(spacing: Spacing.xs) {
             Button {
                 scrollProjectLane(
                     lane,
                     to: currentIndex - 1,
+                    scrollItemCount: scrollItemCount,
                     maxScrollIndex: maxScrollIndex,
                     scrollProxy: scrollProxy
                 )
@@ -501,7 +511,7 @@ struct KanbanBoardView: View {
             .help("Scroll columns left")
 
             HStack(spacing: Spacing.xxs) {
-                ForEach(lane.columns.indices, id: \.self) { index in
+                ForEach(0..<scrollItemCount, id: \.self) { index in
                     Capsule(style: .continuous)
                         .fill(visibleRange.contains(index) ? CiderColors.controlAccent.opacity(0.78) : CiderColors.borderSubtle.opacity(0.65))
                         .frame(width: visibleRange.contains(index) ? 18 : 10, height: 3)
@@ -514,6 +524,7 @@ struct KanbanBoardView: View {
                 scrollProjectLane(
                     lane,
                     to: currentIndex + 1,
+                    scrollItemCount: scrollItemCount,
                     maxScrollIndex: maxScrollIndex,
                     scrollProxy: scrollProxy
                 )

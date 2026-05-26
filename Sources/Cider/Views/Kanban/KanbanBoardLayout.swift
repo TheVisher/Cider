@@ -219,6 +219,10 @@ enum KanbanBoardLayout {
         board.columns.filter { isHiddenColumn($0) }
     }
 
+    static func projectScrollableItemCount(activeColumnCount: Int, hiddenColumnCount: Int) -> Int {
+        activeColumnCount + (hiddenColumnCount > 0 ? 1 : 0)
+    }
+
     static func projectColumnHeight(
         availableBoardHeight: CGFloat,
         showsScrollControls: Bool

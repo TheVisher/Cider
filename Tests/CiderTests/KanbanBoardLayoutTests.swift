@@ -108,6 +108,12 @@ struct KanbanBoardLayoutTests {
         #expect(KanbanBoardLayout.hiddenColumns(in: board).map(\.id) == ["canceled", "duplicate"])
     }
 
+    @Test("hidden columns rail counts as one final horizontal scroll item")
+    func hiddenColumnsRailCountsAsFinalScrollItem() {
+        #expect(KanbanBoardLayout.projectScrollableItemCount(activeColumnCount: 5, hiddenColumnCount: 0) == 5)
+        #expect(KanbanBoardLayout.projectScrollableItemCount(activeColumnCount: 5, hiddenColumnCount: 3) == 6)
+    }
+
     @Test("legacy archive columns are treated as hidden columns")
     func archiveColumnsAreHiddenCompatible() {
         let board = KanbanBoard(
