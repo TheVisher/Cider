@@ -314,19 +314,7 @@ enum ProjectWorkspaceSidebarTree {
         boards: [KanbanBoard]
     ) -> [ProjectWorkspaceSidebarDestination] {
         guard workspace.kind == .project else { return [] }
-
-        let boardsByID = Dictionary(uniqueKeysWithValues: boards.map { ($0.id, $0) })
-        let secondaryBoardIDs = Array(workspace.boardIDs.dropFirst())
-        return secondaryBoardIDs.compactMap { boardID -> ProjectWorkspaceSidebarDestination? in
-            guard let board = boardsByID[boardID] else { return nil }
-            return ProjectWorkspaceSidebarDestination(
-                id: "board-\(board.id)",
-                title: board.name,
-                systemImage: "square.split.2x1",
-                kind: .board(board.id),
-                isSelectable: true
-            )
-        }
+        return []
     }
 }
 

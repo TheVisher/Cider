@@ -190,7 +190,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertTrue(catalog.home.surfaces.isEmpty)
     }
 
-    func testSidebarTreeLeavesProjectLocalDestinationsToHeaderTabs() {
+    func testSidebarTreeHidesLegacyProjectBoardsFromProjectChildren() {
         let cider = ProjectWorkspace(
             id: "cider",
             kind: .project,
@@ -209,14 +209,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             ]
         )
 
-        XCTAssertEqual(destinations.map(\.title), [
-            "Second-Brain Roadmap v1",
-            "Cider Social"
-        ])
-        XCTAssertEqual(destinations.map(\.kind), [
-            .board("3d45ca"),
-            .board("c0ffee")
-        ])
+        XCTAssertTrue(destinations.isEmpty)
     }
 
     func testProjectLocalTabsUseCompactProjectNavigationLabels() {
