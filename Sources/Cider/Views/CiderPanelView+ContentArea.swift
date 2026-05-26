@@ -800,7 +800,6 @@ extension CiderPanelView {
                 )
                 .padding(.horizontal, Spacing.lg)
                 .padding(.vertical, Spacing.sm)
-                .background(CiderColors.opaqueBackground)
                 .overlay(alignment: .bottom) {
                     Rectangle()
                         .fill(CiderColors.separator)
