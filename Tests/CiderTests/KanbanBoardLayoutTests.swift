@@ -367,4 +367,25 @@ struct KanbanBoardLayoutTests {
         #expect(KanbanBoardLayout.cards(done.cards, in: done, board: board, matchingProjectBoardViewID: "active").isEmpty)
         #expect(KanbanBoardLayout.cards(done.cards, in: done, board: board, matchingProjectBoardViewID: "all").map(\.id) == ["done"])
     }
+
+    @Test("active project board view excludes done-like columns even when legacy data lacks done flag")
+    func activeProjectBoardViewExcludesDoneLikeLegacyColumns() {
+        let done = KanbanColumn(id: "done", name: "Done", cards: [
+            KanbanCard(id: "done-card", title: "Already shipped", tags: ["Interface"]),
+        ])
+        let completed = KanbanColumn(id: "completed", name: "Completed", cards: [
+            KanbanCard(id: "completed-card", title: "Also shipped", tags: ["Interface"]),
+        ])
+        let active = KanbanColumn(id: "in_progress", name: "In Progress", cards: [
+            KanbanCard(id: "active-card", title: "Still moving", tags: ["Interface"]),
+        ])
+        let board = KanbanBoard(
+            name: "Cider",
+            columns: [done, completed, active]
+        )
+
+        #expect(KanbanBoardLayout.cards(done.cards, in: done, board: board, matchingProjectBoardViewID: "active").isEmpty)
+        #expect(KanbanBoardLayout.cards(completed.cards, in: completed, board: board, matchingProjectBoardViewID: "active").isEmpty)
+        #expect(KanbanBoardLayout.cards(active.cards, in: active, board: board, matchingProjectBoardViewID: "active").map(\.id) == ["active-card"])
+    }
 }

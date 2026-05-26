@@ -590,7 +590,7 @@ enum KanbanBoardLayout {
     ) -> Bool {
         switch viewID {
         case "active":
-            return !column.isDoneColumn && !isArchiveColumn(column)
+            return !isDoneLikeColumn(column) && !isArchiveColumn(column)
         case "backlog":
             return isBacklogColumn(column)
         case "bugs":
@@ -843,6 +843,13 @@ enum KanbanBoardLayout {
     private static func isBacklogColumn(_ column: KanbanColumn) -> Bool {
         let normalized = normalize("\(column.id) \(column.name)")
         return containsAny(normalized, ["backlog"])
+    }
+
+    private static func isDoneLikeColumn(_ column: KanbanColumn) -> Bool {
+        guard !isArchiveColumn(column) else { return true }
+        if column.isDoneColumn { return true }
+        let normalized = normalize("\(column.id) \(column.name)")
+        return containsAny(normalized, ["done", "complete", "completed"])
     }
 
     private static func isHiddenColumn(_ column: KanbanColumn) -> Bool {
