@@ -5742,6 +5742,30 @@ struct CiderCLI {
                 print("  [\(board.id)] \(board.name) — \(cols)")
             }
 
+        case "audit":
+            let report = boardAuditReport(boards: storage.boards)
+            if !(report["ok"] as? Bool ?? false) {
+                processExitCode = 1
+            }
+            if jsonOutput {
+                outputJSON(report)
+            } else {
+                print("Board audit: \(report["boardCount"] ?? 0) board(s), \(report["cardCount"] ?? 0) card(s)")
+                print("Issues: \(report["issueCount"] ?? 0)  Warnings: \(report["warningCount"] ?? 0)")
+                if let issues = report["issues"] as? [[String: Any]], !issues.isEmpty {
+                    print("\nIssues:")
+                    for issue in issues {
+                        print("  - \(issue["message"] ?? issue)")
+                    }
+                }
+                if let warnings = report["warnings"] as? [[String: Any]], !warnings.isEmpty {
+                    print("\nWarnings:")
+                    for warning in warnings {
+                        print("  - \(warning["message"] ?? warning)")
+                    }
+                }
+            }
+
         case "show", "cards":
             guard let name = args.first else {
                 print("Error: Board name required.")
@@ -6471,7 +6495,7 @@ struct CiderCLI {
             print("Deleted column: \(col.name)")
 
         default:
-            printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, show, tags, workflow, recent, testing-summary, parent-summary, card inspect, create, rename, delete, add-card, update-card, section update, comment add, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
+            printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, audit, show, tags, workflow, recent, testing-summary, parent-summary, card inspect, create, rename, delete, add-card, update-card, section update, comment add, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -9593,6 +9617,143 @@ struct CiderCLI {
         }
         if let parent = entry.parent {
             dict["parent"] = minimalCardToDict(parent)
+        }
+        return dict
+    }
+
+    static func boardAuditReport(boards: [KanbanBoard]) -> [String: Any] {
+        var issues: [[String: Any]] = []
+        var warnings: [[String: Any]] = []
+        var columnCount = 0
+        var cardCount = 0
+
+        for board in boards {
+            columnCount += board.columns.count
+            var cardLocations: [String: [(column: KanbanColumn, card: KanbanCard)]] = [:]
+            var parentByCardID: [String: String] = [:]
+
+            for column in board.columns {
+                let archiveLike = [column.id, column.name]
+                    .contains { $0.localizedCaseInsensitiveContains("archive") }
+                if archiveLike && !column.isHiddenColumn {
+                    warnings.append(boardAuditFinding(
+                        type: "archive_column_not_hidden",
+                        severity: "warning",
+                        board: board,
+                        column: column,
+                        card: nil,
+                        message: "Archive-like column '\(column.name)' is not explicitly marked hidden; layout compatibility may still hide it."
+                    ))
+                }
+
+                for card in column.cards {
+                    cardCount += 1
+                    cardLocations[card.id, default: []].append((column, card))
+                    if let parentCardID = card.parentCardID,
+                       !parentCardID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        parentByCardID[card.id] = parentCardID
+                    }
+                }
+            }
+
+            for (cardID, locations) in cardLocations where locations.count > 1 {
+                issues.append(boardAuditFinding(
+                    type: "duplicate_card_id",
+                    severity: "error",
+                    board: board,
+                    column: locations[0].column,
+                    card: locations[0].card,
+                    message: "Card id '\(cardID)' appears in \(locations.count) columns on board '\(board.name)'."
+                ))
+            }
+
+            for (cardID, parentCardID) in parentByCardID {
+                guard let location = cardLocations[cardID]?.first else { continue }
+                if cardID == parentCardID {
+                    issues.append(boardAuditFinding(
+                        type: "self_parent",
+                        severity: "error",
+                        board: board,
+                        column: location.column,
+                        card: location.card,
+                        parentCardID: parentCardID,
+                        message: "Card '\(location.card.title)' points to itself as parent."
+                    ))
+                } else if cardLocations[parentCardID] == nil {
+                    issues.append(boardAuditFinding(
+                        type: "missing_parent",
+                        severity: "error",
+                        board: board,
+                        column: location.column,
+                        card: location.card,
+                        parentCardID: parentCardID,
+                        message: "Card '\(location.card.title)' references missing parent '\(parentCardID)' on board '\(board.name)'."
+                    ))
+                }
+            }
+
+            for cardID in parentByCardID.keys {
+                var seen: Set<String> = []
+                var cursor: String? = cardID
+                while let current = cursor, let nextParent = parentByCardID[current] {
+                    if seen.contains(current) {
+                        if let location = cardLocations[cardID]?.first {
+                            issues.append(boardAuditFinding(
+                                type: "parent_cycle",
+                                severity: "error",
+                                board: board,
+                                column: location.column,
+                                card: location.card,
+                                message: "Card '\(location.card.title)' participates in a parent cycle on board '\(board.name)'."
+                            ))
+                        }
+                        break
+                    }
+                    seen.insert(current)
+                    cursor = nextParent
+                }
+            }
+        }
+
+        return [
+            "ok": issues.isEmpty,
+            "boardCount": boards.count,
+            "columnCount": columnCount,
+            "cardCount": cardCount,
+            "issueCount": issues.count,
+            "warningCount": warnings.count,
+            "issues": issues,
+            "warnings": warnings,
+        ]
+    }
+
+    static func boardAuditFinding(
+        type: String,
+        severity: String,
+        board: KanbanBoard,
+        column: KanbanColumn?,
+        card: KanbanCard?,
+        parentCardID: String? = nil,
+        message: String
+    ) -> [String: Any] {
+        var dict: [String: Any] = [
+            "type": type,
+            "severity": severity,
+            "boardID": board.id,
+            "boardName": board.name,
+            "message": message,
+        ]
+        if let column {
+            dict["columnID"] = column.id
+            dict["columnName"] = column.name
+        }
+        if let card {
+            dict["cardID"] = card.id
+            dict["cardTitle"] = card.title
+            dict["created"] = ISO8601DateFormatter().string(from: card.created)
+        }
+        if let parentCardID {
+            dict["parentCardID"] = parentCardID
         }
         return dict
     }

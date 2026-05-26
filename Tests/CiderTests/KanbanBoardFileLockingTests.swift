@@ -419,6 +419,132 @@ struct KanbanBoardFileLockingTests {
         #expect(output.contains("Usage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]"))
     }
 
+    @Test("board audit reports missing parent references")
+    func boardAuditReportsMissingParentReferences() throws {
+        let cli = try #require(Self.ciderCLIURL())
+        let vault = try Self.makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let boardsDirectory = vault.appendingPathComponent(".cider/boards", isDirectory: true)
+        try FileManager.default.createDirectory(at: boardsDirectory, withIntermediateDirectories: true)
+        try """
+        id: auditbad
+        board: Audit Bad
+        created: '2026-05-26'
+        columns:
+          - id: backlog
+            name: Backlog
+            cards:
+              - id: child
+                title: Orphan child
+                parentCardID: missing-parent
+                created: '2026-05-26'
+        """.write(
+            to: boardsDirectory.appendingPathComponent("auditbad.yaml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let result = try Self.runCLIResult(cli, vault: vault, args: ["board", "audit", "--json"])
+        let root = try #require(try JSONSerialization.jsonObject(with: result.output) as? [String: Any])
+        let issues = try #require(root["issues"] as? [[String: Any]])
+        let firstIssue = try #require(issues.first)
+
+        #expect(result.status == 1)
+        #expect(root["ok"] as? Bool == false)
+        #expect(root["issueCount"] as? Int == 1)
+        #expect(firstIssue["type"] as? String == "missing_parent")
+        #expect(firstIssue["boardID"] as? String == "auditbad")
+        #expect(firstIssue["cardID"] as? String == "child")
+        #expect(firstIssue["parentCardID"] as? String == "missing-parent")
+    }
+
+    @Test("board audit passes clean board relationships")
+    func boardAuditPassesCleanBoardRelationships() throws {
+        let cli = try #require(Self.ciderCLIURL())
+        let vault = try Self.makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let boardsDirectory = vault.appendingPathComponent(".cider/boards", isDirectory: true)
+        try FileManager.default.createDirectory(at: boardsDirectory, withIntermediateDirectories: true)
+        try """
+        id: auditclean
+        board: Audit Clean
+        created: '2026-05-26'
+        columns:
+          - id: backlog
+            name: Backlog
+            cards:
+              - id: parent
+                title: Parent
+                created: '2026-05-26'
+              - id: child
+                title: Child
+                parentCardID: parent
+                created: '2026-05-26'
+        """.write(
+            to: boardsDirectory.appendingPathComponent("auditclean.yaml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let result = try Self.runCLIResult(cli, vault: vault, args: ["board", "audit", "--json"])
+        let root = try #require(try JSONSerialization.jsonObject(with: result.output) as? [String: Any])
+
+        #expect(result.status == 0)
+        #expect(root["ok"] as? Bool == true)
+        #expect(root["issueCount"] as? Int == 0)
+        #expect(root["boardCount"] as? Int == 1)
+        #expect(root["cardCount"] as? Int == 2)
+    }
+
+    @Test("board audit reports duplicate ids and parent cycles")
+    func boardAuditReportsDuplicateIDsAndParentCycles() throws {
+        let cli = try #require(Self.ciderCLIURL())
+        let vault = try Self.makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let boardsDirectory = vault.appendingPathComponent(".cider/boards", isDirectory: true)
+        try FileManager.default.createDirectory(at: boardsDirectory, withIntermediateDirectories: true)
+        try """
+        id: auditcycle
+        board: Audit Cycle
+        created: '2026-05-26'
+        columns:
+          - id: backlog
+            name: Backlog
+            cards:
+              - id: duplicate
+                title: First duplicate
+                created: '2026-05-26'
+              - id: alpha
+                title: Alpha
+                parentCardID: beta
+                created: '2026-05-26'
+          - id: queued
+            name: Queued
+            cards:
+              - id: duplicate
+                title: Second duplicate
+                created: '2026-05-26'
+              - id: beta
+                title: Beta
+                parentCardID: alpha
+                created: '2026-05-26'
+        """.write(
+            to: boardsDirectory.appendingPathComponent("auditcycle.yaml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let result = try Self.runCLIResult(cli, vault: vault, args: ["board", "audit", "--json"])
+        let root = try #require(try JSONSerialization.jsonObject(with: result.output) as? [String: Any])
+        let issues = try #require(root["issues"] as? [[String: Any]])
+        let issueTypes = Set(issues.compactMap { $0["type"] as? String })
+
+        #expect(result.status == 1)
+        #expect(root["ok"] as? Bool == false)
+        #expect(issueTypes.contains("duplicate_card_id"))
+        #expect(issueTypes.contains("parent_cycle"))
+    }
+
     private static func ciderCLIURL() -> URL? {
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let candidates = [
@@ -452,6 +578,18 @@ struct KanbanBoardFileLockingTests {
         }
         #expect(process.process.terminationStatus == 0)
         return output
+    }
+
+    private static func runCLIResult(
+        _ cli: URL,
+        vault: URL,
+        args: [String]
+    ) throws -> (status: Int32, output: Data, error: Data) {
+        let process = try startCLI(cli, vault: vault, args: args)
+        process.process.waitUntilExit()
+        let output = process.output.fileHandleForReading.readDataToEndOfFile()
+        let error = process.error.fileHandleForReading.readDataToEndOfFile()
+        return (process.process.terminationStatus, output, error)
     }
 
     private static func startCLI(
