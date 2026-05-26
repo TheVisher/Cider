@@ -126,10 +126,10 @@ struct ProjectWorkspaceOverviewModel: Equatable {
     let totals: ProjectWorkspaceCardTotals
     let boardSummaries: [ProjectWorkspaceBoardSummary]
     let projectRows: [ProjectWorkspaceProjectRow]
-    let resources: [ProjectWorkspaceArtifactRow]
+    let resources: [ProjectWorkspaceResourceRow]
     let latestUpdate: ProjectWorkspaceLatestUpdate?
     let milestoneRows: [ProjectWorkspaceMilestoneRow]
-    let recentArtifacts: [ProjectWorkspaceArtifactRow]
+    let recentArtifacts: [ProjectWorkspaceCoreDocRow]
     let artifacts: [ProjectWorkspaceArtifactRow]
     let boardCreationActionTitle: String?
 }
@@ -157,6 +157,24 @@ struct ProjectWorkspaceProjectRow: Identifiable, Equatable {
     let totals: ProjectWorkspaceCardTotals
 
     var id: String { projectID }
+}
+
+struct ProjectWorkspaceResourceRow: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let url: URL
+}
+
+struct ProjectWorkspaceCoreDocRow: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let relativePath: String
+    let modifiedAt: Date
+    let lineCount: Int
+    let wordCount: Int
+    let fileURL: URL
 }
 
 struct ProjectWorkspaceArtifactRow: Identifiable, Equatable {
@@ -418,10 +436,13 @@ enum ProjectWorkspaceOverviewProvider {
         for workspace: ProjectWorkspace,
         catalog: ProjectWorkspaceCatalog,
         boards: [KanbanBoard],
-        artifactRelations: [SecondBrainRelation] = []
+        artifactRelations: [SecondBrainRelation] = [],
+        coreDocsRoot: URL? = nil
     ) -> ProjectWorkspaceOverviewModel {
         let workspaceBoards = scopedBoards(for: workspace, boards: boards)
         let artifacts = artifactRows(from: artifactRelations, projectID: workspace.id)
+        let resources = resourceRows(for: workspace)
+        let coreDocs = coreDocRows(root: coreDocsRoot)
         let boardSummaries = workspaceBoards
             .map { board in
                 ProjectWorkspaceBoardSummary(
@@ -452,10 +473,10 @@ enum ProjectWorkspaceOverviewProvider {
             totals: aggregate(boardSummaries.map(\.totals)),
             boardSummaries: boardSummaries,
             projectRows: projectRows,
-            resources: Array(artifacts.prefix(4)),
+            resources: resources,
             latestUpdate: latestUpdate(from: workspaceBoards),
             milestoneRows: milestoneRows(from: workspaceBoards),
-            recentArtifacts: Array(artifacts.prefix(5)),
+            recentArtifacts: Array(coreDocs.prefix(9)),
             artifacts: artifacts,
             boardCreationActionTitle: workspace.kind == .project ? "New Board" : nil
         )
@@ -604,6 +625,83 @@ enum ProjectWorkspaceOverviewProvider {
         case .testing: return 2
         case .other: return 3
         }
+    }
+
+    private static func resourceRows(for workspace: ProjectWorkspace) -> [ProjectWorkspaceResourceRow] {
+        guard workspace.id == "cider" else { return [] }
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return [
+            ProjectWorkspaceResourceRow(
+                id: "github",
+                title: "GitHub Repository",
+                subtitle: "TheVisher/Cider",
+                systemImage: "chevron.left.forwardslash.chevron.right",
+                url: URL(string: "https://github.com/TheVisher/Cider")!
+            ),
+            ProjectWorkspaceResourceRow(
+                id: "local-repo",
+                title: "Local Repository",
+                subtitle: "~/Cider",
+                systemImage: "folder",
+                url: home.appendingPathComponent("Cider", isDirectory: true)
+            ),
+            ProjectWorkspaceResourceRow(
+                id: "vault",
+                title: "Cider Vault",
+                subtitle: "~/CiderVault",
+                systemImage: "externaldrive",
+                url: home.appendingPathComponent("CiderVault", isDirectory: true)
+            )
+        ]
+    }
+
+    private static func coreDocRows(root explicitRoot: URL?) -> [ProjectWorkspaceCoreDocRow] {
+        guard let docsRoot = explicitRoot ?? defaultDocsRoot() else { return [] }
+        let docs = [
+            "PRODUCT.md",
+            "FEATURES.md",
+            "ARCHITECTURE.md",
+            "STORAGE.md",
+            "AGENT.md",
+            "CLI.md",
+            "QA.md",
+            "DESIGN.md",
+            "CONVENTIONS.md",
+        ]
+
+        return docs.compactMap { filename in
+            let url = docsRoot.appendingPathComponent(filename)
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            let modifiedAt = ((try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date) ?? .distantPast
+            let lines = content.split(separator: "\n", omittingEmptySubsequences: false).count
+            let words = content.split { $0.isWhitespace || $0.isNewline }.count
+            return ProjectWorkspaceCoreDocRow(
+                id: filename,
+                title: filename.replacingOccurrences(of: ".md", with: ""),
+                relativePath: "Docs/\(filename)",
+                modifiedAt: modifiedAt,
+                lineCount: lines,
+                wordCount: words,
+                fileURL: url
+            )
+        }
+    }
+
+    private static func defaultDocsRoot() -> URL? {
+        let fileManager = FileManager.default
+        let home = fileManager.homeDirectoryForCurrentUser
+        let candidates = [
+            ProcessInfo.processInfo.environment["CIDER_REPO_PATH"].map { URL(fileURLWithPath: $0, isDirectory: true) },
+            URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent(),
+            home.appendingPathComponent("Cider", isDirectory: true),
+        ].compactMap { $0 }
+
+        return candidates
+            .map { $0.appendingPathComponent("Docs", isDirectory: true) }
+            .first { fileManager.fileExists(atPath: $0.appendingPathComponent("INDEX.md").path) }
     }
 
     private static func artifactRows(

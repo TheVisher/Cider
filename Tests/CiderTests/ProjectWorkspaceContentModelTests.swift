@@ -234,11 +234,16 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
             for: ciderWorkspace,
             catalog: catalog,
             boards: [board],
-            artifactRelations: relations
+            artifactRelations: relations,
+            coreDocsRoot: makeCoreDocsRoot()
         )
 
-        XCTAssertEqual(model.resources.map(\.title), ["Resource 1", "Resource 2", "Resource 3", "Resource 4"])
-        XCTAssertEqual(model.recentArtifacts.map(\.title), ["Resource 1", "Resource 2", "Resource 3", "Resource 4", "Resource 5"])
+        XCTAssertEqual(model.resources.map(\.title), ["GitHub Repository", "Local Repository", "Cider Vault"])
+        XCTAssertEqual(model.recentArtifacts.map(\.title), ["PRODUCT", "FEATURES", "ARCHITECTURE"])
+        XCTAssertEqual(model.recentArtifacts.first?.relativePath, "Docs/PRODUCT.md")
+        XCTAssertEqual(model.recentArtifacts.first?.lineCount, 2)
+        XCTAssertEqual(model.recentArtifacts.first?.wordCount, 5)
+        XCTAssertEqual(model.artifacts.map(\.title).prefix(2), ["Resource 1", "Resource 2"])
         XCTAssertEqual(model.latestUpdate?.cardID, "active")
         XCTAssertEqual(model.latestUpdate?.cardDisplayKey, "CID-201")
         XCTAssertEqual(model.latestUpdate?.typeLabel, "Decision")
@@ -246,6 +251,16 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(model.milestoneRows.map(\.cardID), ["parent"])
         XCTAssertEqual(model.milestoneRows.first?.progressText, "1/2")
         XCTAssertEqual(model.milestoneRows.first?.status, "In Progress")
+    }
+
+    private func makeCoreDocsRoot() -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProjectWorkspaceContentModelTests-\(UUID().uuidString)", isDirectory: true)
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try! "One two three\nfour five".write(to: root.appendingPathComponent("PRODUCT.md"), atomically: true, encoding: .utf8)
+        try! "Feature words\n".write(to: root.appendingPathComponent("FEATURES.md"), atomically: true, encoding: .utf8)
+        try! "Architecture words\n".write(to: root.appendingPathComponent("ARCHITECTURE.md"), atomically: true, encoding: .utf8)
+        return root
     }
 
     func testProjectNotesSurfaceShowsOnlyMatchingFileBackedProjectNotes() {

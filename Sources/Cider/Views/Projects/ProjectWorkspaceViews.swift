@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ProjectWorkspaceOverviewView: View {
@@ -81,13 +82,53 @@ struct ProjectWorkspaceOverviewView: View {
     }
 
     private var resourcesSection: some View {
-        overviewSection("Resources") {
-            LazyVStack(spacing: Spacing.xs) {
+        HStack(alignment: .center, spacing: Spacing.sm) {
+            Text("Resources")
+                .font(CiderFont.body)
+                .foregroundColor(CiderColors.secondary)
+                .frame(width: 86, alignment: .leading)
+
+            HStack(spacing: Spacing.xs) {
                 ForEach(model.resources) { resource in
-                    artifactRow(resource)
+                    resourceLink(resource)
                 }
+
+                Button {
+                } label: {
+                    Image(systemName: "plus")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help("Add resource")
             }
+
+            Spacer(minLength: 0)
         }
+    }
+
+    private func resourceLink(_ resource: ProjectWorkspaceResourceRow) -> some View {
+        Button {
+            NSWorkspace.shared.open(resource.url)
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: resource.systemImage)
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                Text(resource.title)
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+                Image(systemName: "arrow.up.right")
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(resource.url.absoluteString)
     }
 
     private var latestUpdateSection: some View {
@@ -182,38 +223,65 @@ struct ProjectWorkspaceOverviewView: View {
     }
 
     private var recentArtifactsSection: some View {
-        overviewSection("Recent Artifacts") {
-            LazyVStack(spacing: Spacing.xs) {
+        overviewSection("Artifacts") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: Spacing.sm)], spacing: Spacing.sm) {
                 ForEach(model.recentArtifacts) { artifact in
-                    artifactRow(artifact)
+                    coreDocCard(artifact)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private func artifactRow(_ artifact: ProjectWorkspaceArtifactRow) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: symbol(forArtifactOwner: artifact.owner))
-                .foregroundColor(CiderColors.tertiary)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(artifact.title)
-                    .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(1)
-                Text(artifact.evidence.isEmpty ? artifact.relationType : artifact.evidence)
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.secondary)
-                    .lineLimit(2)
+    private func coreDocCard(_ artifact: ProjectWorkspaceCoreDocRow) -> some View {
+        Button {
+            NSWorkspace.shared.activateFileViewerSelecting([artifact.fileURL])
+        } label: {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    Image(systemName: "doc.text")
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.tertiary)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(artifact.title)
+                            .font(CiderFont.bodySemibold)
+                            .foregroundColor(CiderColors.primary)
+                            .lineLimit(1)
+                        Text(artifact.relativePath)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.up.right")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+
+                HStack(spacing: Spacing.xs) {
+                    metadataPill(Self.shortDateFormatter.string(from: artifact.modifiedAt))
+                    metadataPill("\(artifact.lineCount) lines")
+                    metadataPill("\(artifact.wordCount) words")
+                }
             }
-            Spacer(minLength: 0)
-            Text(artifact.owner.canonicalRef)
-                .font(CiderFont.caption)
-                .foregroundColor(CiderColors.tertiary)
-                .lineLimit(1)
+            .overviewRow()
         }
-        .overviewRow()
-        .help(artifact.safeCommand)
+        .buttonStyle(.plain)
+        .help(artifact.fileURL.path)
+    }
+
+    private func metadataPill(_ text: String) -> some View {
+        Text(text)
+            .font(CiderFont.micro)
+            .foregroundColor(CiderColors.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, 2)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(CiderColors.surfaceInput.opacity(0.78))
+            )
     }
 
     private var projectSection: some View {
@@ -321,23 +389,17 @@ struct ProjectWorkspaceOverviewView: View {
         }
     }
 
-    private func symbol(forArtifactOwner owner: SecondBrainOwnerRef) -> String {
-        switch owner.ownerType {
-        case "note":
-            return "note.text"
-        case "kanban_card":
-            return "rectangle.and.pencil.and.ellipsis"
-        case "vaultFile":
-            return "doc"
-        default:
-            return "link"
-        }
-    }
-
     private static let updateDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
+        return formatter
+    }()
+
+    private static let shortDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
         return formatter
     }()
 }
