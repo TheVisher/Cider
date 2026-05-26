@@ -314,7 +314,10 @@ extension CiderPanelView {
                     cardID: detail.card.id,
                     draft: draftBinding,
                     sourceNotesVisible: sourceNotesBinding,
-                    onSave: saveKanbanCardDraft
+                    onSave: saveKanbanCardDraft,
+                    onOpenKanbanCard: { cardID in
+                        openKanbanCardDetail(boardID: detail.board.id, cardID: cardID)
+                    }
                 )
             }
         }

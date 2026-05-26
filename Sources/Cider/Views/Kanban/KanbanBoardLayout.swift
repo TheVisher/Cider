@@ -145,6 +145,11 @@ struct KanbanParentBadge: Equatable {
     let accentColor: KanbanCardColor?
 }
 
+struct KanbanBoardCardContext: Equatable {
+    let parentBadge: KanbanParentBadge?
+    let planIndicator: KanbanPlanIndicator?
+}
+
 struct KanbanPlanIndicator: Equatable {
     let parentID: String
     let title: String
@@ -375,6 +380,17 @@ enum KanbanBoardLayout {
             displayKey: board.displayKey(for: parent),
             title: parent.title,
             accentColor: cardAccentColor(for: parent, in: board)
+        )
+    }
+
+    static func boardCardContext(
+        for card: KanbanCard,
+        in column: KanbanColumn,
+        board: KanbanBoard
+    ) -> KanbanBoardCardContext {
+        KanbanBoardCardContext(
+            parentBadge: nil,
+            planIndicator: nil
         )
     }
 

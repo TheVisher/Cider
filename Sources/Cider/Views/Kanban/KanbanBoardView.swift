@@ -821,12 +821,14 @@ struct KanbanBoardView: View {
         toIndex: Int,
         childSummary: KanbanParentChildSummary? = nil
     ) -> some View {
-        cardView(
+        let context = KanbanBoardLayout.boardCardContext(for: card, in: column, board: board)
+
+        return cardView(
             card,
             compact: compactCards,
             childSummary: childSummary,
-            parentBadge: KanbanBoardLayout.parentBadge(for: card, in: column, board: board),
-            planIndicator: KanbanBoardLayout.planIndicator(for: card, in: board),
+            parentBadge: context.parentBadge,
+            planIndicator: context.planIndicator,
             accentColor: KanbanBoardLayout.cardAccentColor(for: card, in: board),
             inboxBadges: inboxBadges(for: card, in: column)
         )

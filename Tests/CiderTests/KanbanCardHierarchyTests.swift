@@ -464,6 +464,69 @@ struct KanbanCardHierarchyTests {
         #expect(KanbanBoardLayout.inheritedParentAccentColor(for: backlog.cards[1], in: board) == .green)
     }
 
+    @Test("board card face omits child parent context")
+    func boardCardFaceOmitsChildParentContext() {
+        let backlog = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "parent", title: "Parent Plan", displayKey: "HIER-1", color: .green),
+                KanbanCard(id: "child", title: "Child Step", parentCardID: "parent"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [backlog])
+
+        let context = KanbanBoardLayout.boardCardContext(
+            for: backlog.cards[1],
+            in: backlog,
+            board: board
+        )
+
+        #expect(context.parentBadge == nil)
+        #expect(context.planIndicator == nil)
+        #expect(KanbanBoardLayout.childSummary(for: "parent", in: board)?.progressText == "0/1")
+    }
+
+    @Test("detail hierarchy context exposes parent and child navigation targets")
+    func detailHierarchyContextExposesParentAndChildNavigationTargets() {
+        let board = KanbanBoard(
+            name: "Hierarchy",
+            columns: [
+                KanbanColumn(
+                    id: "backlog",
+                    name: "Backlog",
+                    cards: [
+                        KanbanCard(id: "parent", title: "Parent Plan", displayKey: "HIER-1"),
+                        KanbanCard(id: "child-a", title: "First Child", displayKey: "HIER-2", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "done",
+                    name: "Done",
+                    isDoneColumn: true,
+                    cards: [
+                        KanbanCard(id: "child-b", title: "Done Child", displayKey: "HIER-3", parentCardID: "parent"),
+                    ]
+                ),
+            ]
+        )
+
+        let parentContext = KanbanDetailHierarchyContext(board: board, cardID: "parent")
+        let childContext = KanbanDetailHierarchyContext(board: board, cardID: "child-a")
+
+        #expect(parentContext.parent == nil)
+        #expect(parentContext.progressText == "1/2")
+        #expect(parentContext.children.map(\.id) == ["child-a", "child-b"])
+        #expect(parentContext.children.map(\.displayKey) == ["HIER-2", "HIER-3"])
+        #expect(parentContext.children.map(\.columnName) == ["Backlog", "Done"])
+
+        #expect(childContext.parent?.id == "parent")
+        #expect(childContext.parent?.displayKey == "HIER-1")
+        #expect(childContext.parent?.title == "Parent Plan")
+        #expect(childContext.parentProgressText == "1/2")
+        #expect(childContext.children.isEmpty)
+    }
+
     @Test("parent accent falls back to stable color when parent has no explicit color")
     func parentAccentFallsBackToStableColor() {
         let backlog = KanbanColumn(

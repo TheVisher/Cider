@@ -22,6 +22,7 @@ struct KanbanCardDetailView: View {
     @Binding var draft: KanbanCardDraft
     @Binding var sourceNotesVisible: Bool
     var onSave: () -> Void
+    var onOpenKanbanCard: (String) -> Void
 
     @FocusState private var notesFocused: Bool
     @State private var newHistoryType: KanbanCardHistoryEntryType = .note
@@ -39,7 +40,8 @@ struct KanbanCardDetailView: View {
         cardID: String,
         draft: Binding<KanbanCardDraft>,
         sourceNotesVisible: Binding<Bool>,
-        onSave: @escaping () -> Void
+        onSave: @escaping () -> Void,
+        onOpenKanbanCard: @escaping (String) -> Void = { _ in }
     ) {
         self.boardID = boardID
         self.boardName = boardName
@@ -47,6 +49,7 @@ struct KanbanCardDetailView: View {
         _draft = draft
         _sourceNotesVisible = sourceNotesVisible
         self.onSave = onSave
+        self.onOpenKanbanCard = onOpenKanbanCard
     }
 
     private var qualityReport: KanbanCardQualityReport {
@@ -97,6 +100,7 @@ struct KanbanCardDetailView: View {
                             collapsedThreadIDs: $collapsedThreadIDs,
                             currentAuthorName: currentCommentAuthorName,
                             onCommentChanged: onSave,
+                            onOpenKanbanCard: onOpenKanbanCard,
                             historyEntries: $draft.historyEntries,
                             newHistoryType: $newHistoryType,
                             newHistoryBody: $newHistoryBody
@@ -278,6 +282,7 @@ private struct KanbanCardDashboardView: View {
     @Binding var collapsedThreadIDs: Set<String>
     var currentAuthorName: String
     var onCommentChanged: () -> Void
+    var onOpenKanbanCard: (String) -> Void
     @Binding var historyEntries: [KanbanCardHistoryEntry]
     @Binding var newHistoryType: KanbanCardHistoryEntryType
     @Binding var newHistoryBody: String
@@ -290,22 +295,27 @@ private struct KanbanCardDashboardView: View {
     }
 
     private var childRollup: KanbanParentChildRollup? {
-        guard let board = storage.boards.first(where: { $0.id == boardID || $0.name == boardName }) else {
-            return nil
-        }
+        guard let board else { return nil }
         return KanbanParentChildRollup(board: board, parentID: cardID)
     }
 
     private var roadmapNextUp: KanbanRoadmapNextUpProjection? {
-        guard let board = storage.boards.first(where: { $0.id == boardID || $0.name == boardName }) else {
-            return nil
-        }
+        guard let board else { return nil }
         return KanbanRoadmapNextUpProjection(board: board, parentID: cardID)
     }
 
+    private var board: KanbanBoard? {
+        storage.boards.first(where: { $0.id == boardID || $0.name == boardName })
+    }
+
+    private var hierarchyContext: KanbanDetailHierarchyContext? {
+        guard let board else { return nil }
+        let context = KanbanDetailHierarchyContext(board: board, cardID: cardID)
+        return context.hasHierarchy ? context : nil
+    }
+
     private var displayKey: String {
-        guard let board = storage.boards.first(where: { $0.id == boardID || $0.name == boardName }),
-              let card = board.card(id: cardID) else {
+        guard let board, let card = board.card(id: cardID) else {
             return String(cardID.prefix(8)).uppercased()
         }
         return board.displayKey(for: card)
@@ -319,9 +329,7 @@ private struct KanbanCardDashboardView: View {
     }
 
     private var currentStatusLabel: String? {
-        guard let board = storage.boards.first(where: { $0.id == boardID || $0.name == boardName }) else {
-            return nil
-        }
+        guard let board else { return nil }
         return board.columns.first(where: { column in
             column.cards.contains { $0.id == cardID }
         })?.name
@@ -386,6 +394,13 @@ private struct KanbanCardDashboardView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.md) {
+                    if let hierarchyContext {
+                        KanbanCardDetailHierarchyView(
+                            context: hierarchyContext,
+                            onOpenKanbanCard: onOpenKanbanCard
+                        )
+                    }
+
                     KanbanCardCommentsSectionView(
                         comments: $comments,
                         newCommentKind: $newCommentKind,
@@ -708,6 +723,176 @@ private struct KanbanDashboardChildRollupRow: View {
         case .other:
             return "circle"
         }
+    }
+}
+
+private struct KanbanCardDetailHierarchyView: View {
+    let context: KanbanDetailHierarchyContext
+    var onOpenKanbanCard: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            if let parent = context.parent {
+                HStack(alignment: .center, spacing: Spacing.xs) {
+                    Text("Sub-issue of")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+
+                    Button {
+                        onOpenKanbanCard(parent.id)
+                    } label: {
+                        HStack(spacing: Spacing.xs) {
+                            KanbanHierarchyStatusRing(progressText: context.parentProgressText, isComplete: false)
+
+                            Text(parent.displayKey)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+
+                            Text(parent.title)
+                                .font(CiderFont.captionSemibold)
+                                .foregroundColor(CiderColors.primary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        .padding(.horizontal, Spacing.sm)
+                        .padding(.vertical, 4)
+                        .background(Capsule(style: .continuous).fill(CiderColors.surfaceInput.opacity(0.56)))
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open parent card")
+
+                    if let progressText = context.parentProgressText {
+                        KanbanHierarchyProgressChip(progressText: progressText, isComplete: false)
+                    }
+                }
+            }
+
+            if !context.children.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(CiderColors.tertiary)
+
+                        Text("Sub-issues")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.secondary)
+
+                        if let progressText = context.progressText {
+                            KanbanHierarchyProgressChip(
+                                progressText: progressText,
+                                isComplete: context.children.allSatisfy(\.isComplete)
+                            )
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ForEach(context.children) { child in
+                            Button {
+                                onOpenKanbanCard(child.id)
+                            } label: {
+                                KanbanCardDetailChildRow(child: child)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open sub-issue")
+                        }
+                    }
+                    .padding(.leading, Spacing.lg)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, Spacing.xs)
+    }
+}
+
+private struct KanbanCardDetailChildRow: View {
+    let child: KanbanDetailHierarchyContext.Child
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+            KanbanHierarchyStatusRing(progressText: nil, isComplete: child.isComplete)
+
+            Text(child.displayKey)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+
+            Text(child.title)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: Spacing.sm)
+
+            Text(child.columnName)
+                .font(CiderFont.microMedium)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 4)
+    }
+}
+
+private struct KanbanHierarchyProgressChip: View {
+    let progressText: String
+    let isComplete: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            KanbanHierarchyStatusRing(progressText: progressText, isComplete: isComplete)
+
+            Text(progressText)
+                .font(CiderFont.microMedium)
+                .foregroundColor(CiderColors.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule(style: .continuous).fill(CiderColors.surfaceInput.opacity(0.48)))
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(CiderColors.borderSubtle, lineWidth: 1)
+        )
+    }
+}
+
+private struct KanbanHierarchyStatusRing: View {
+    let progressText: String?
+    let isComplete: Bool
+
+    private var progress: Double {
+        guard let progressText else {
+            return isComplete ? 1 : 0
+        }
+
+        let parts = progressText.split(separator: "/").compactMap { Double($0) }
+        guard parts.count == 2, parts[1] > 0 else {
+            return isComplete ? 1 : 0
+        }
+        return min(max(parts[0] / parts[1], 0), 1)
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(CiderColors.borderSubtle, lineWidth: 1.3)
+
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(
+                    isComplete ? CiderColors.success : CiderColors.controlAccent,
+                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 12, height: 12)
     }
 }
 
