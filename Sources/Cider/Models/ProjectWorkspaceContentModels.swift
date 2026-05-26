@@ -126,6 +126,10 @@ struct ProjectWorkspaceOverviewModel: Equatable {
     let totals: ProjectWorkspaceCardTotals
     let boardSummaries: [ProjectWorkspaceBoardSummary]
     let projectRows: [ProjectWorkspaceProjectRow]
+    let resources: [ProjectWorkspaceArtifactRow]
+    let latestUpdate: ProjectWorkspaceLatestUpdate?
+    let milestoneRows: [ProjectWorkspaceMilestoneRow]
+    let recentArtifacts: [ProjectWorkspaceArtifactRow]
     let artifacts: [ProjectWorkspaceArtifactRow]
     let boardCreationActionTitle: String?
 }
@@ -163,6 +167,36 @@ struct ProjectWorkspaceArtifactRow: Identifiable, Equatable {
     let safeCommand: String
 
     var id: String { "\(owner.canonicalRef):\(relationType)" }
+}
+
+struct ProjectWorkspaceLatestUpdate: Identifiable, Equatable {
+    let boardID: String
+    let boardName: String
+    let cardID: String
+    let cardDisplayKey: String
+    let cardTitle: String
+    let entryID: String
+    let typeLabel: String
+    let body: String
+    let author: String?
+    let createdAt: Date
+    let symbolName: String
+
+    var id: String { "\(boardID):\(cardID):\(entryID)" }
+}
+
+struct ProjectWorkspaceMilestoneRow: Identifiable, Equatable {
+    let boardID: String
+    let boardName: String
+    let cardID: String
+    let cardDisplayKey: String
+    let title: String
+    let status: String
+    let progressText: String?
+    let childCount: Int
+    let updatedAt: Date
+
+    var id: String { "\(boardID):\(cardID)" }
 }
 
 struct ProjectWorkspaceNoteRow: Identifiable, Equatable {
@@ -386,7 +420,9 @@ enum ProjectWorkspaceOverviewProvider {
         boards: [KanbanBoard],
         artifactRelations: [SecondBrainRelation] = []
     ) -> ProjectWorkspaceOverviewModel {
-        let boardSummaries = scopedBoards(for: workspace, boards: boards)
+        let workspaceBoards = scopedBoards(for: workspace, boards: boards)
+        let artifacts = artifactRows(from: artifactRelations, projectID: workspace.id)
+        let boardSummaries = workspaceBoards
             .map { board in
                 ProjectWorkspaceBoardSummary(
                     boardID: board.id,
@@ -416,7 +452,11 @@ enum ProjectWorkspaceOverviewProvider {
             totals: aggregate(boardSummaries.map(\.totals)),
             boardSummaries: boardSummaries,
             projectRows: projectRows,
-            artifacts: artifactRows(from: artifactRelations, projectID: workspace.id),
+            resources: Array(artifacts.prefix(4)),
+            latestUpdate: latestUpdate(from: workspaceBoards),
+            milestoneRows: milestoneRows(from: workspaceBoards),
+            recentArtifacts: Array(artifacts.prefix(5)),
+            artifacts: artifacts,
             boardCreationActionTitle: workspace.kind == .project ? "New Board" : nil
         )
     }
@@ -486,6 +526,84 @@ enum ProjectWorkspaceOverviewProvider {
         let text = [card.title, card.notes ?? "", card.aiSummary ?? ""].joined(separator: " ")
         return text.localizedCaseInsensitiveContains("blocked")
             || text.localizedCaseInsensitiveContains("blocker")
+    }
+
+    private static func latestUpdate(from boards: [KanbanBoard]) -> ProjectWorkspaceLatestUpdate? {
+        let candidates = boards.flatMap { board in
+            board.allCards.flatMap { card in
+                card.historyEntries.compactMap { entry -> ProjectWorkspaceLatestUpdate? in
+                    let body = entry.body.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !body.isEmpty else { return nil }
+                    return ProjectWorkspaceLatestUpdate(
+                        boardID: board.id,
+                        boardName: board.name,
+                        cardID: card.id,
+                        cardDisplayKey: board.displayKey(for: card),
+                        cardTitle: card.title,
+                        entryID: entry.id,
+                        typeLabel: entry.type.displayName,
+                        body: body,
+                        author: entry.author,
+                        createdAt: entry.createdAt,
+                        symbolName: entry.type.symbolName
+                    )
+                }
+            }
+        }
+
+        return candidates.sorted { lhs, rhs in
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+            return lhs.id < rhs.id
+        }.first
+    }
+
+    private static func milestoneRows(from boards: [KanbanBoard]) -> [ProjectWorkspaceMilestoneRow] {
+        let candidates = boards.flatMap { board in
+            board.columns.flatMap { column in
+                column.cards.compactMap { card -> (row: ProjectWorkspaceMilestoneRow, rank: Int)? in
+                    guard let summary = KanbanBoardLayout.childSummary(for: card.id, in: board),
+                          summary.totalCount > 0 else {
+                        return nil
+                    }
+
+                    let latestActivityAt = ([card.updatedAt, card.completed, Optional(card.created)] + card.historyEntries.map { Optional($0.createdAt) })
+                        .compactMap { $0 }
+                        .max() ?? card.created
+                    return (
+                        ProjectWorkspaceMilestoneRow(
+                            boardID: board.id,
+                            boardName: board.name,
+                            cardID: card.id,
+                            cardDisplayKey: board.displayKey(for: card),
+                            title: card.title,
+                            status: column.name,
+                            progressText: summary.progressText,
+                            childCount: summary.totalCount,
+                            updatedAt: latestActivityAt
+                        ),
+                        statusRank(for: column)
+                    )
+                }
+            }
+        }
+
+        return candidates.sorted { lhs, rhs in
+            if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+            if lhs.row.updatedAt != rhs.row.updatedAt { return lhs.row.updatedAt > rhs.row.updatedAt }
+            return lhs.row.id < rhs.row.id
+        }
+        .prefix(5)
+        .map(\.row)
+    }
+
+    private static func statusRank(for column: KanbanColumn) -> Int {
+        if column.isDoneColumn { return 4 }
+        switch columnKind(for: column) {
+        case .inProgress: return 0
+        case .queued: return 1
+        case .testing: return 2
+        case .other: return 3
+        }
     }
 
     private static func artifactRows(

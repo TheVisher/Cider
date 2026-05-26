@@ -8,11 +8,20 @@ struct ProjectWorkspaceOverviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
                 header
-                totalsGrid
-                if !model.artifacts.isEmpty {
-                    artifactSection
+                statusStrip
+                if !model.resources.isEmpty {
+                    resourcesSection
+                }
+                if model.latestUpdate != nil {
+                    latestUpdateSection
+                }
+                if !model.milestoneRows.isEmpty {
+                    milestoneSection
+                }
+                if !model.recentArtifacts.isEmpty {
+                    recentArtifactsSection
                 }
                 if !model.projectRows.isEmpty {
                     projectSection
@@ -20,7 +29,8 @@ struct ProjectWorkspaceOverviewView: View {
                 boardSection
             }
             .padding(Spacing.lg)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 980, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .scrollIndicators(.hidden)
     }
@@ -36,66 +46,174 @@ struct ProjectWorkspaceOverviewView: View {
         }
     }
 
-    private var artifactSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            sectionTitle("Project Docs & Artifacts")
+    private var statusStrip: some View {
+        HStack(spacing: Spacing.sm) {
+            metricChip("Queued", value: model.totals.queued, symbol: "tray")
+            metricChip("In Progress", value: model.totals.inProgress, symbol: "hammer")
+            metricChip("Testing", value: model.totals.testing, symbol: "checklist")
+            metricChip("Blocked", value: model.totals.blocked, symbol: "exclamationmark.triangle")
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func metricChip(_ title: String, value: Int, symbol: String) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: symbol)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.tertiary)
+            Text("\(value)")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.primary)
+            Text(title)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.secondary)
+        }
+        .padding(.vertical, Spacing.xs)
+        .padding(.horizontal, Spacing.sm)
+        .background(
+            Capsule(style: .continuous)
+                .fill(CiderColors.surfaceSubtle)
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(CiderColors.borderSubtle, lineWidth: Spacing.hairline)
+        )
+    }
+
+    private var resourcesSection: some View {
+        overviewSection("Resources") {
             LazyVStack(spacing: Spacing.xs) {
-                ForEach(model.artifacts) { artifact in
-                    HStack(spacing: Spacing.sm) {
-                        Image(systemName: symbol(forArtifactOwner: artifact.owner))
-                            .foregroundColor(CiderColors.tertiary)
-                            .frame(width: 24)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(artifact.title)
-                                .font(CiderFont.bodySemibold)
-                                .foregroundColor(CiderColors.primary)
-                                .lineLimit(1)
-                            Text(artifact.evidence.isEmpty ? artifact.relationType : artifact.evidence)
-                                .font(CiderFont.caption)
-                                .foregroundColor(CiderColors.secondary)
-                                .lineLimit(2)
-                        }
-                        Spacer(minLength: 0)
-                        Text(artifact.owner.canonicalRef)
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.tertiary)
-                            .lineLimit(1)
-                    }
-                    .padding(Spacing.md)
-                    .sectionContainer(cornerRadius: Radius.sm)
-                    .help(artifact.safeCommand)
+                ForEach(model.resources) { resource in
+                    artifactRow(resource)
                 }
             }
         }
     }
 
-    private var totalsGrid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: Spacing.sm)], spacing: Spacing.sm) {
-            metric("Queued", value: model.totals.queued, symbol: "tray")
-            metric("In Progress", value: model.totals.inProgress, symbol: "hammer")
-            metric("Testing", value: model.totals.testing, symbol: "checklist")
-            metric("Blocked", value: model.totals.blocked, symbol: "exclamationmark.triangle")
+    private var latestUpdateSection: some View {
+        overviewSection("Latest Update") {
+            if let update = model.latestUpdate {
+                Button {
+                    onOpenBoard(update.boardID)
+                } label: {
+                    HStack(alignment: .top, spacing: Spacing.sm) {
+                        Image(systemName: update.symbolName)
+                            .font(CiderFont.bodySemibold)
+                            .foregroundColor(CiderColors.controlAccent)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            HStack(spacing: Spacing.xs) {
+                                Text(update.typeLabel)
+                                    .font(CiderFont.captionSemibold)
+                                    .foregroundColor(CiderColors.primary)
+                                Text(update.cardDisplayKey)
+                                    .font(CiderFont.captionSemibold)
+                                    .foregroundColor(CiderColors.controlAccent)
+                                Text(Self.updateDateFormatter.string(from: update.createdAt))
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(CiderColors.tertiary)
+                            }
+                            Text(update.cardTitle)
+                                .font(CiderFont.bodySemibold)
+                                .foregroundColor(CiderColors.primary)
+                                .lineLimit(1)
+                            Text(update.body)
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.secondary)
+                                .lineLimit(3)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    .overviewRow()
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
-    private func metric(_ title: String, value: Int, symbol: String) -> some View {
+    private var milestoneSection: some View {
+        overviewSection("Milestones") {
+            LazyVStack(spacing: Spacing.xs) {
+                ForEach(model.milestoneRows) { row in
+                    Button {
+                        onOpenBoard(row.boardID)
+                    } label: {
+                        HStack(spacing: Spacing.sm) {
+                            Image(systemName: "scope")
+                                .font(CiderFont.bodySemibold)
+                                .foregroundColor(CiderColors.tertiary)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: Spacing.xs) {
+                                    Text(row.cardDisplayKey)
+                                        .font(CiderFont.captionSemibold)
+                                        .foregroundColor(CiderColors.controlAccent)
+                                    Text(row.status)
+                                        .font(CiderFont.caption)
+                                        .foregroundColor(CiderColors.secondary)
+                                    if let progressText = row.progressText {
+                                        Text(progressText)
+                                            .font(CiderFont.captionSemibold)
+                                            .foregroundColor(CiderColors.secondary)
+                                            .padding(.horizontal, Spacing.xs)
+                                            .padding(.vertical, 1)
+                                            .background(Capsule(style: .continuous).fill(CiderColors.surfaceInput))
+                                    }
+                                }
+                                Text(row.title)
+                                    .font(CiderFont.bodySemibold)
+                                    .foregroundColor(CiderColors.primary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(CiderFont.captionSemibold)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+                        .overviewRow()
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var recentArtifactsSection: some View {
+        overviewSection("Recent Artifacts") {
+            LazyVStack(spacing: Spacing.xs) {
+                ForEach(model.recentArtifacts) { artifact in
+                    artifactRow(artifact)
+                }
+            }
+        }
+    }
+
+    private func artifactRow(_ artifact: ProjectWorkspaceArtifactRow) -> some View {
         HStack(spacing: Spacing.sm) {
-            Image(systemName: symbol)
-                .font(CiderFont.bodySemibold)
+            Image(systemName: symbol(forArtifactOwner: artifact.owner))
                 .foregroundColor(CiderColors.tertiary)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(value)")
-                    .font(CiderFont.headingSemibold)
+                Text(artifact.title)
+                    .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.primary)
-                Text(title)
+                    .lineLimit(1)
+                Text(artifact.evidence.isEmpty ? artifact.relationType : artifact.evidence)
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.secondary)
+                    .lineLimit(2)
             }
             Spacer(minLength: 0)
+            Text(artifact.owner.canonicalRef)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
         }
-        .padding(Spacing.md)
-        .sectionContainer(cornerRadius: Radius.sm)
+        .overviewRow()
+        .help(artifact.safeCommand)
     }
 
     private var projectSection: some View {
@@ -193,6 +311,16 @@ struct ProjectWorkspaceOverviewView: View {
             .foregroundColor(CiderColors.tertiary)
     }
 
+    private func overviewSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            sectionTitle(title)
+            content()
+        }
+    }
+
     private func symbol(forArtifactOwner owner: SecondBrainOwnerRef) -> String {
         switch owner.ownerType {
         case "note":
@@ -204,6 +332,28 @@ struct ProjectWorkspaceOverviewView: View {
         default:
             return "link"
         }
+    }
+
+    private static let updateDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
+
+private extension View {
+    func overviewRow() -> some View {
+        self
+            .padding(Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(CiderColors.surfaceSubtle)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .stroke(CiderColors.borderSubtle, lineWidth: Spacing.hairline)
+            )
     }
 }
 

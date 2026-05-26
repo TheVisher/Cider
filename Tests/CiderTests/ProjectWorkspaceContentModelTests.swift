@@ -170,6 +170,84 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(model.artifacts.map(\.safeCommand), ["cider-cli item context note CF06DD4E --json"])
     }
 
+    func testProjectOverviewBuildsCommandCenterSectionsFromExistingData() {
+        let olderUpdate = Date(timeIntervalSince1970: 1_000)
+        let latestUpdate = Date(timeIntervalSince1970: 2_000)
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "in_progress", name: "In Progress", cards: [
+                    KanbanCard(
+                        id: "parent",
+                        title: "Project workspace MVP",
+                        displayKey: "CID-80",
+                        historyEntries: [
+                            KanbanCardHistoryEntry(
+                                id: "older",
+                                type: .implementation,
+                                body: "Older project implementation note.",
+                                author: "cody",
+                                createdAt: olderUpdate
+                            )
+                        ]
+                    ),
+                    KanbanCard(
+                        id: "active",
+                        title: "Overview command center",
+                        displayKey: "CID-201",
+                        historyEntries: [
+                            KanbanCardHistoryEntry(
+                                id: "latest",
+                                type: .decision,
+                                body: "Keep the overview calm: resources, latest update, roadmap, and recent artifacts.",
+                                author: "codex",
+                                createdAt: latestUpdate
+                            )
+                        ]
+                    )
+                ]),
+                KanbanColumn(id: "queued", name: "Queued", cards: [
+                    KanbanCard(id: "queued-child", title: "Queued child", parentCardID: "parent")
+                ]),
+                KanbanColumn(id: "done", name: "Done", isDoneColumn: true, cards: [
+                    KanbanCard(id: "done-child", title: "Done child", parentCardID: "parent", completed: latestUpdate)
+                ])
+            ]
+        )
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [board])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+        let relations = (1...6).map { index in
+            SecondBrainRelation(
+                sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: "NOTE-\(index)"),
+                targetOwner: SecondBrainOwnerRef(ownerType: "project", ownerID: "cider"),
+                relationType: index == 1 ? "repository" : "artifact_of",
+                evidence: "Resource \(index)",
+                source: "test",
+                actor: "agent",
+                confidence: 1,
+                metadata: ["title": "Resource \(index)"]
+            )
+        }
+
+        let model = ProjectWorkspaceOverviewProvider.model(
+            for: ciderWorkspace,
+            catalog: catalog,
+            boards: [board],
+            artifactRelations: relations
+        )
+
+        XCTAssertEqual(model.resources.map(\.title), ["Resource 1", "Resource 2", "Resource 3", "Resource 4"])
+        XCTAssertEqual(model.recentArtifacts.map(\.title), ["Resource 1", "Resource 2", "Resource 3", "Resource 4", "Resource 5"])
+        XCTAssertEqual(model.latestUpdate?.cardID, "active")
+        XCTAssertEqual(model.latestUpdate?.cardDisplayKey, "CID-201")
+        XCTAssertEqual(model.latestUpdate?.typeLabel, "Decision")
+        XCTAssertEqual(model.latestUpdate?.body, "Keep the overview calm: resources, latest update, roadmap, and recent artifacts.")
+        XCTAssertEqual(model.milestoneRows.map(\.cardID), ["parent"])
+        XCTAssertEqual(model.milestoneRows.first?.progressText, "1/2")
+        XCTAssertEqual(model.milestoneRows.first?.status, "In Progress")
+    }
+
     func testProjectNotesSurfaceShowsOnlyMatchingFileBackedProjectNotes() {
         let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
         let ciderWorkspace = catalog.workspace(id: "cider")!
