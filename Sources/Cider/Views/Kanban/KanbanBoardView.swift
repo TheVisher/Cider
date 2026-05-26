@@ -19,7 +19,6 @@ struct KanbanBoardView: View {
     @State private var showDeleteConfirmation = false
     @State private var searchText = ""
     @State private var compactCards = false
-    @State private var collapsedParentCardIDs: Set<String> = []
     @State private var projectLaneScrollIndexByID: [String: Int] = [:]
     @State private var tagEditorCardID: String?
     @State private var tagEditorDraft = ""
@@ -68,7 +67,6 @@ struct KanbanBoardView: View {
                 columnsArea(board)
             }
             .onChange(of: boardID) { _, _ in
-                collapsedParentCardIDs.removeAll()
                 projectLaneScrollIndexByID.removeAll()
                 selectedFeatureDomainFilter = nil
             }
@@ -637,15 +635,20 @@ struct KanbanBoardView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: Spacing.sm) {
                     let cards = filteredCards(column.cards)
-                    let groups = KanbanBoardLayout.cardGroups(
+                    let nodes = KanbanBoardLayout.cardNodes(
                         for: column,
                         in: board,
-                        visibleCards: cards,
-                        collapsedParentIDs: collapsedParentCardIDs
+                        visibleCards: cards
                     )
-                    ForEach(groups) { group in
-                        cardGroupView(group, column: column, board: board)
-                            .id(group.renderID)
+                    ForEach(nodes) { node in
+                        interactiveCard(
+                            node.card,
+                            column: column,
+                            board: board,
+                            toIndex: node.visualIndex,
+                            childSummary: KanbanBoardLayout.childSummary(for: node.card.id, in: board)
+                        )
+                        .id(node.id)
                     }
 
                     // Add card button or inline field — also a drop target for appending
@@ -811,87 +814,12 @@ struct KanbanBoardView: View {
 
     // MARK: - Cards
 
-    private func cardGroupView(
-        _ group: KanbanColumnCardGroup,
-        column: KanbanColumn,
-        board: KanbanBoard
-    ) -> some View {
-        let summary = KanbanBoardLayout.childSummary(for: group.parent.card.id, in: board)
-        let isCollapsed = collapsedParentCardIDs.contains(group.parent.card.id)
-        let canCollapse = group.sameColumnChildCount > 0
-
-        return VStack(alignment: .leading, spacing: Spacing.xs) {
-            interactiveCard(
-                group.parent.card,
-                column: column,
-                board: board,
-                toIndex: group.parent.visualIndex,
-                childSummary: summary,
-                canCollapse: canCollapse,
-                isCollapsed: isCollapsed
-            )
-
-            if !group.children.isEmpty {
-                childRailView(group: group, column: column, board: board)
-            }
-        }
-    }
-
-    private func childRailView(
-        group: KanbanColumnCardGroup,
-        column: KanbanColumn,
-        board: KanbanBoard
-    ) -> some View {
-        let lineColor = hierarchyLineColor(for: group.parent.card, in: board)
-        let children = group.children
-
-        return VStack(spacing: Spacing.sm) {
-            ForEach(Array(children.enumerated()), id: \.element.id) { index, child in
-                childBranchRow(
-                    child,
-                    column: column,
-                    board: board,
-                    lineColor: lineColor,
-                    isFirst: index == 0,
-                    isLast: index == children.count - 1
-                )
-            }
-        }
-    }
-
-    private func childBranchRow(
-        _ node: KanbanColumnCardNode,
-        column: KanbanColumn,
-        board: KanbanBoard,
-        lineColor: Color,
-        isFirst: Bool,
-        isLast: Bool
-    ) -> some View {
-        HStack(alignment: .top, spacing: Spacing.xs) {
-            KanbanChildConnector(
-                lineColor: lineColor,
-                isFirst: isFirst,
-                isLast: isLast
-            )
-
-            interactiveCard(node.card, column: column, board: board, toIndex: node.visualIndex)
-                .padding(.leading, nestedChildIndent(for: node))
-        }
-        .padding(.leading, KanbanDesign.childIndent)
-    }
-
-    private func nestedChildIndent(for node: KanbanColumnCardNode) -> CGFloat {
-        CGFloat(max(0, min(node.depth, 3) - 1)) * (KanbanDesign.childIndent * 0.72)
-    }
-
     private func interactiveCard(
         _ card: KanbanCard,
         column: KanbanColumn,
         board: KanbanBoard,
         toIndex: Int,
-        childSummary: KanbanParentChildSummary? = nil,
-        canCollapse: Bool = false,
-        isCollapsed: Bool = false
+        childSummary: KanbanParentChildSummary? = nil
     ) -> some View {
         cardView(
             card,
@@ -900,9 +828,7 @@ struct KanbanBoardView: View {
             parentBadge: KanbanBoardLayout.parentBadge(for: card, in: column, board: board),
             planIndicator: KanbanBoardLayout.planIndicator(for: card, in: board),
             accentColor: KanbanBoardLayout.cardAccentColor(for: card, in: board),
-            inboxBadges: inboxBadges(for: card, in: column),
-            canCollapse: canCollapse,
-            isCollapsed: isCollapsed
+            inboxBadges: inboxBadges(for: card, in: column)
         )
             .frame(maxWidth: .infinity, alignment: .leading)
             .onTapGesture {
@@ -930,24 +856,6 @@ struct KanbanBoardView: View {
             }
     }
 
-    private func toggleCollapse(cardID: String) {
-        withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
-            if collapsedParentCardIDs.contains(cardID) {
-                collapsedParentCardIDs.remove(cardID)
-            } else {
-                collapsedParentCardIDs.insert(cardID)
-            }
-        }
-    }
-
-    private func hierarchyLineColor(for parent: KanbanCard, in board: KanbanBoard) -> Color {
-        if let color = KanbanBoardLayout.hierarchyConnectorAccentColor(for: parent, in: board) {
-            return kanbanColor(color).opacity(0.82)
-        }
-
-        return CiderColors.borderSubtle.opacity(0.95)
-    }
-
     private func shouldMoveDescendants(cardID: String, to column: KanbanColumn, board: KanbanBoard) -> Bool {
         isQueuedColumn(column) && !board.childCards(of: cardID).isEmpty
     }
@@ -964,9 +872,7 @@ struct KanbanBoardView: View {
         parentBadge: KanbanParentBadge? = nil,
         planIndicator: KanbanPlanIndicator? = nil,
         accentColor: KanbanCardColor? = nil,
-        inboxBadges: [ProjectWorkspaceInboxBadge] = [],
-        canCollapse: Bool = false,
-        isCollapsed: Bool = false
+        inboxBadges: [ProjectWorkspaceInboxBadge] = []
     ) -> some View {
         VStack(alignment: .leading, spacing: compact ? Spacing.xxs : 0) {
             if let color = accentColor {
@@ -979,20 +885,11 @@ struct KanbanBoardView: View {
             cardHeaderView(
                 card,
                 compact: compact,
-                canCollapse: canCollapse,
-                isCollapsed: isCollapsed
+                childSummary: childSummary
             )
 
             if !inboxBadges.isEmpty {
                 cardInboxBadgesView(inboxBadges)
-                    .padding(.top, compact ? Spacing.xxs : KanbanDesign.cardPreviewSectionSpacing)
-            }
-
-            if let childSummary {
-                Text(childSummary.compactText)
-                    .font(CiderFont.micro)
-                    .foregroundColor(CiderColors.tertiary)
-                    .lineLimit(1)
                     .padding(.top, compact ? Spacing.xxs : KanbanDesign.cardPreviewSectionSpacing)
             }
 
@@ -1065,30 +962,18 @@ struct KanbanBoardView: View {
     private func cardHeaderView(
         _ card: KanbanCard,
         compact: Bool,
-        canCollapse: Bool,
-        isCollapsed: Bool
+        childSummary: KanbanParentChildSummary?
     ) -> some View {
         VStack(alignment: .leading, spacing: compact ? Spacing.xxs : Spacing.xs) {
             HStack(alignment: .center, spacing: Spacing.xs) {
-                if canCollapse {
-                    Button {
-                        toggleCollapse(cardID: card.id)
-                    } label: {
-                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                            .font(CiderFont.micro)
-                            .foregroundColor(CiderColors.tertiary)
-                            .frame(width: 12, height: 12)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(isCollapsed ? "Expand child cards" : "Collapse child cards")
-                    .accessibilityHint("Toggles visible child cards in this column.")
-                }
-
                 Text(displayKey(for: card))
                     .font(CiderFont.microMonospaced)
                     .foregroundColor(CiderColors.controlAccent)
                     .lineLimit(1)
+
+                if let childSummary {
+                    childProgressChip(childSummary)
+                }
 
                 Spacer(minLength: Spacing.xs)
 
@@ -1101,6 +986,34 @@ struct KanbanBoardView: View {
                 .lineLimit(compact ? 2 : 2)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func childProgressChip(_ summary: KanbanParentChildSummary) -> some View {
+        HStack(spacing: Spacing.xxs) {
+            ZStack {
+                Circle()
+                    .stroke(CiderColors.borderDefault, lineWidth: CiderBorder.hairlineStrokeWidth)
+                    .frame(width: 12, height: 12)
+
+                Circle()
+                    .trim(from: 0, to: summary.totalCount == 0 ? 0 : CGFloat(summary.doneCount) / CGFloat(summary.totalCount))
+                    .stroke(CiderColors.controlAccent, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 12, height: 12)
+            }
+
+            Text(summary.progressText)
+                .font(CiderFont.microMonospaced)
+                .foregroundColor(CiderColors.secondary)
+        }
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, 2)
+        .background(
+            Capsule(style: .continuous)
+                .fill(CiderColors.surfaceInput.opacity(0.82))
+        )
+        .help(summary.compactText)
+        .accessibilityLabel("Sub-issues \(summary.progressText), \(summary.compactText)")
     }
 
     private func displayKey(for card: KanbanCard) -> String {
@@ -1142,11 +1055,7 @@ struct KanbanBoardView: View {
         planIndicator: KanbanPlanIndicator?
     ) -> some View {
         if let parentBadge {
-            if let planIndicator {
-                planIndicatorView(planIndicator)
-            } else {
-                parentBadgeView(parentBadge)
-            }
+            parentBadgeView(parentBadge)
         } else if let planIndicator {
             planIndicatorView(planIndicator)
         }
@@ -1419,8 +1328,12 @@ struct KanbanBoardView: View {
                         .frame(width: 5, height: 5)
                 }
 
-                Text("Parent")
+                Text(badge.displayKey)
+                    .font(CiderFont.microMonospaced)
                     .foregroundColor(CiderColors.tertiary)
+
+                Text("›")
+                    .foregroundColor(CiderColors.quaternary)
 
                 Text(badge.title)
                     .foregroundColor(CiderColors.secondary)
@@ -1789,32 +1702,5 @@ struct KanbanBoardView: View {
                 .foregroundColor(CiderColors.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private struct KanbanChildConnector: View {
-    let lineColor: Color
-    let isFirst: Bool
-    let isLast: Bool
-
-    var body: some View {
-        GeometryReader { proxy in
-            Path { path in
-                let startY = isFirst ? -Spacing.xs : -Spacing.sm
-                let endY = isLast
-                    ? KanbanDesign.childConnectorTopInset
-                    : proxy.size.height + Spacing.sm
-
-                path.move(to: CGPoint(x: 0, y: startY))
-                path.addLine(to: CGPoint(x: 0, y: endY))
-                path.move(to: CGPoint(x: 0, y: KanbanDesign.childConnectorTopInset))
-                path.addLine(to: CGPoint(
-                    x: KanbanDesign.childConnectorWidth,
-                    y: KanbanDesign.childConnectorTopInset
-                ))
-            }
-            .stroke(lineColor, lineWidth: CiderBorder.hairlineStrokeWidth)
-        }
-        .frame(width: KanbanDesign.childConnectorWidth)
     }
 }

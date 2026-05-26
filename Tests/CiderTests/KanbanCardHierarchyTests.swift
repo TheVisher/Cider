@@ -403,6 +403,7 @@ struct KanbanCardHierarchyTests {
 
         #expect(summary?.totalCount == 3)
         #expect(summary?.doneCount == 1)
+        #expect(summary?.progressText == "1/3")
         #expect(summary?.columnCounts.map(\.columnName) == ["Backlog", "Testing", "Done"])
         #expect(summary?.columnCounts.map(\.count) == [1, 1, 1])
         #expect(summary?.compactText == "3 children · 1 Backlog · 1 Testing · 1 Done · 1/3 done")
@@ -414,7 +415,7 @@ struct KanbanCardHierarchyTests {
             id: "backlog",
             name: "Backlog",
             cards: [
-                KanbanCard(id: "parent", title: "Parent Plan", color: .purple),
+                KanbanCard(id: "parent", title: "Parent Plan", displayKey: "HIER-1", color: .purple),
             ]
         )
         let testing = KanbanColumn(
@@ -433,18 +434,19 @@ struct KanbanCardHierarchyTests {
         )
 
         #expect(badge?.parentID == "parent")
+        #expect(badge?.displayKey == "HIER-1")
         #expect(badge?.title == "Parent Plan")
         #expect(badge?.accentColor == .purple)
         #expect(KanbanBoardLayout.inheritedParentAccentColor(for: testing.cards[0], in: board) == .purple)
     }
 
-    @Test("same-column child inherits parent accent without parent badge")
-    func sameColumnChildInheritsParentAccentWithoutParentBadge() {
+    @Test("same-column child exposes restrained parent breadcrumb")
+    func sameColumnChildExposesRestrainedParentBreadcrumb() {
         let backlog = KanbanColumn(
             id: "backlog",
             name: "Backlog",
             cards: [
-                KanbanCard(id: "parent", title: "Parent Plan", color: .green),
+                KanbanCard(id: "parent", title: "Parent Plan", displayKey: "HIER-1", color: .green),
                 KanbanCard(id: "child", title: "Child Step", parentCardID: "parent"),
             ]
         )
@@ -456,7 +458,9 @@ struct KanbanCardHierarchyTests {
             board: board
         )
 
-        #expect(badge == nil)
+        #expect(badge?.parentID == "parent")
+        #expect(badge?.displayKey == "HIER-1")
+        #expect(badge?.title == "Parent Plan")
         #expect(KanbanBoardLayout.inheritedParentAccentColor(for: backlog.cards[1], in: board) == .green)
     }
 

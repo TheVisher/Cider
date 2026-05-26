@@ -122,6 +122,10 @@ struct KanbanParentChildSummary: Equatable {
     let doneCount: Int
     let columnCounts: [KanbanColumnChildCount]
 
+    var progressText: String {
+        "\(doneCount)/\(totalCount)"
+    }
+
     var compactText: String {
         var pieces = [
             "\(totalCount) \(totalCount == 1 ? "child" : "children")"
@@ -136,6 +140,7 @@ struct KanbanParentChildSummary: Equatable {
 
 struct KanbanParentBadge: Equatable {
     let parentID: String
+    let displayKey: String
     let title: String
     let accentColor: KanbanCardColor?
 }
@@ -364,11 +369,10 @@ enum KanbanBoardLayout {
         board: KanbanBoard
     ) -> KanbanParentBadge? {
         guard let parent = board.parentCard(for: card.id) else { return nil }
-        let parentIsInSameColumn = column.cards.contains { $0.id == parent.id }
-        guard !parentIsInSameColumn else { return nil }
 
         return KanbanParentBadge(
             parentID: parent.id,
+            displayKey: board.displayKey(for: parent),
             title: parent.title,
             accentColor: cardAccentColor(for: parent, in: board)
         )
