@@ -30,7 +30,7 @@ struct ProjectWorkspaceOverviewView: View {
             }
             .padding(Spacing.lg)
             .frame(maxWidth: 980, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
         .scrollIndicators(.hidden)
     }
