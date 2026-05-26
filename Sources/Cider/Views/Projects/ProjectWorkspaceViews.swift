@@ -7,6 +7,8 @@ struct ProjectWorkspaceOverviewView: View {
     var onOpenBoard: (String) -> Void
     var onCreateBoard: () -> Void
 
+    @State private var selectedCoreDoc: ProjectWorkspaceCoreDocRow?
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
@@ -34,6 +36,9 @@ struct ProjectWorkspaceOverviewView: View {
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .scrollIndicators(.hidden)
+        .sheet(item: $selectedCoreDoc) { artifact in
+            ProjectWorkspaceCoreDocPreview(artifact: artifact)
+        }
     }
 
     private var header: some View {
@@ -235,7 +240,7 @@ struct ProjectWorkspaceOverviewView: View {
 
     private func coreDocCard(_ artifact: ProjectWorkspaceCoreDocRow) -> some View {
         Button {
-            NSWorkspace.shared.activateFileViewerSelecting([artifact.fileURL])
+            selectedCoreDoc = artifact
         } label: {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 HStack(alignment: .top, spacing: Spacing.sm) {
@@ -443,6 +448,107 @@ struct ProjectWorkspaceSurfacePlaceholderView: View {
         }
         .padding(Spacing.lg)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+private struct ProjectWorkspaceCoreDocPreview: View {
+    let artifact: ProjectWorkspaceCoreDocRow
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var content: String = ""
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+                .padding(.horizontal, Spacing.lg)
+                .padding(.vertical, Spacing.md)
+                .background(CiderColors.surfaceElevated)
+
+            Divider()
+                .overlay(CiderColors.borderSubtle)
+
+            Group {
+                if let errorMessage {
+                    EmptyStateView(
+                        icon: "exclamationmark.triangle",
+                        title: "Could not open doc",
+                        subtitle: errorMessage
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        Text(content)
+                            .font(CiderFont.monospacedBody)
+                            .foregroundColor(CiderColors.primary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(Spacing.lg)
+                    }
+                    .scrollIndicators(.visible)
+                    .background(CiderColors.opaqueBackground)
+                }
+            }
+        }
+        .frame(minWidth: 760, idealWidth: 860, minHeight: 520, idealHeight: 640)
+        .task(id: artifact.id) {
+            loadContent()
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: Spacing.sm) {
+            Image(systemName: "doc.text")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.tertiary)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(artifact.title)
+                    .font(CiderFont.subheadingSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+                Text("\(artifact.relativePath) · \(artifact.lineCount) lines · \(artifact.wordCount) words")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: Spacing.md)
+
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([artifact.fileURL])
+            } label: {
+                Image(systemName: "folder")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .help("Reveal in Finder")
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .help("Close")
+        }
+    }
+
+    private func loadContent() {
+        do {
+            content = try String(contentsOf: artifact.fileURL, encoding: .utf8)
+            errorMessage = nil
+        } catch {
+            content = ""
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
