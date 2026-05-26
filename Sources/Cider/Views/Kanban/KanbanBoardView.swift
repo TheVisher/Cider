@@ -23,6 +23,7 @@ struct KanbanBoardView: View {
     @State private var tagEditorCardID: String?
     @State private var tagEditorDraft = ""
     @State private var selectedFeatureDomainFilter: String?
+    @State private var selectedProjectBoardViewID = "all"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let cardFaceSuggestedTags = [
@@ -42,16 +43,22 @@ struct KanbanBoardView: View {
     }
 
     /// Filter cards by search text across title, notes, agent, and tags.
-    private func filteredCards(_ cards: [KanbanCard]) -> [KanbanCard] {
-        let featureFilteredCards = KanbanBoardLayout.cards(
+    private func filteredCards(_ cards: [KanbanCard], in column: KanbanColumn, board: KanbanBoard) -> [KanbanCard] {
+        let viewFilteredCards = KanbanBoardLayout.cards(
             cards,
+            in: column,
+            board: board,
+            matchingProjectBoardViewID: selectedProjectBoardViewID
+        )
+        let featureFilteredCards = KanbanBoardLayout.cards(
+            viewFilteredCards,
             matchingFeatureDomainFilter: selectedFeatureDomainFilter
         )
         guard !searchText.isEmpty else { return featureFilteredCards }
         let query = searchText.lowercased()
         return featureFilteredCards.filter { card in
             card.title.localizedStandardContains(query) ||
-            (board?.displayKey(for: card) ?? card.displayKey ?? "").localizedStandardContains(query) ||
+            board.displayKey(for: card).localizedStandardContains(query) ||
             card.id.localizedStandardContains(query) ||
             (card.notes ?? "").localizedStandardContains(query) ||
             (card.agent ?? "").localizedStandardContains(query) ||
@@ -69,6 +76,7 @@ struct KanbanBoardView: View {
             .onChange(of: boardID) { _, _ in
                 projectLaneScrollIndexByID.removeAll()
                 selectedFeatureDomainFilter = nil
+                selectedProjectBoardViewID = "all"
             }
         } else {
             emptyState
@@ -284,7 +292,7 @@ struct KanbanBoardView: View {
 
     private func filteredCardCount(for board: KanbanBoard) -> Int {
         board.columns.reduce(0) { partial, column in
-            partial + filteredCards(column.cards).count
+            partial + filteredCards(column.cards, in: column, board: board).count
         }
     }
 
@@ -340,30 +348,10 @@ struct KanbanBoardView: View {
         availableBoardHeight: CGFloat
     ) -> some View {
         let hiddenColumns = KanbanBoardLayout.hiddenColumns(in: board)
+        let viewFilters = KanbanBoardLayout.projectBoardViewFilters(for: board)
 
         return VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: Spacing.sm) {
-                Text(lane.title)
-                    .font(CiderFont.labelSemibold)
-                    .foregroundColor(CiderColors.primary)
-
-                Text("\(lane.columns.count) columns")
-                    .font(CiderFont.micro)
-                    .foregroundColor(CiderColors.tertiary)
-
-                Text("\(lane.cardCount) cards")
-                    .font(CiderFont.micro)
-                    .foregroundColor(CiderColors.tertiary)
-
-                if !hiddenColumns.isEmpty {
-                    Text("\(hiddenColumns.count) hidden")
-                        .font(CiderFont.micro)
-                        .foregroundColor(CiderColors.tertiary)
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, Spacing.xs)
+            projectBoardViewPills(viewFilters, hiddenColumnCount: hiddenColumns.count)
 
             GeometryReader { geometry in
                 let scrollItemCount = KanbanBoardLayout.projectScrollableItemCount(
@@ -433,6 +421,64 @@ struct KanbanBoardView: View {
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
         )
+    }
+
+    private func projectBoardViewPills(
+        _ filters: [KanbanProjectBoardViewFilter],
+        hiddenColumnCount: Int
+    ) -> some View {
+        HStack(spacing: Spacing.sm) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Spacing.xs) {
+                    ForEach(filters) { filter in
+                        projectBoardViewPill(filter)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if hiddenColumnCount > 0 {
+                Text("\(hiddenColumnCount) hidden")
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+                    .fixedSize()
+            }
+        }
+        .padding(.horizontal, Spacing.xs)
+    }
+
+    private func projectBoardViewPill(_ filter: KanbanProjectBoardViewFilter) -> some View {
+        let isSelected = selectedProjectBoardViewID == filter.id
+        return Button {
+            withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
+                selectedProjectBoardViewID = filter.id
+                projectLaneScrollIndexByID.removeAll()
+            }
+        } label: {
+            HStack(spacing: Spacing.xxs) {
+                Text(filter.label)
+                    .lineLimit(1)
+
+                Text("\(filter.cardCount)")
+                    .font(CiderFont.micro)
+                    .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.tertiary)
+            }
+            .font(CiderFont.captionMedium)
+            .foregroundColor(isSelected ? CiderColors.primary : CiderColors.secondary)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isSelected ? CiderColors.surfaceInput.opacity(0.94) : CiderColors.surfaceSubtle.opacity(0.48))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(isSelected ? CiderColors.borderSubtle : CiderColors.borderSubtle.opacity(0.58), lineWidth: CiderBorder.hairlineStrokeWidth)
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(filter.label) board view, \(filter.cardCount) cards")
     }
 
     private func projectLaneVisibleColumnCount(availableWidth: CGFloat) -> Int {
@@ -602,7 +648,7 @@ struct KanbanBoardView: View {
 
                 Spacer(minLength: Spacing.xs)
 
-                Text("\(filteredCards(column.cards).count)")
+                Text("\(filteredCards(column.cards, in: column, board: board).count)")
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
             }
@@ -634,7 +680,7 @@ struct KanbanBoardView: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: Spacing.sm) {
-                    let cards = filteredCards(column.cards)
+                    let cards = filteredCards(column.cards, in: column, board: board)
                     let nodes = KanbanBoardLayout.cardNodes(
                         for: column,
                         in: board,
@@ -736,7 +782,7 @@ struct KanbanBoardView: View {
                     }
             }
 
-            Text("\(filteredCards(column.cards).count)")
+            Text("\(filteredCards(column.cards, in: column, board: board).count)")
                 .font(CiderFont.captionSemibold)
                 .foregroundColor(CiderColors.tertiary)
                 .padding(.horizontal, Spacing.xs)

@@ -306,4 +306,65 @@ struct KanbanBoardLayoutTests {
         #expect(KanbanBoardLayout.testingOwnerBadge(for: agentCard)?.text == "Agent can verify")
         #expect(KanbanBoardLayout.testingOwnerBadge(for: untaggedCard) == nil)
     }
+
+    @Test("project board view pills expose useful default slices")
+    func projectBoardViewPillsExposeUsefulDefaultSlices() {
+        let board = KanbanBoard(
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog", cards: [
+                    KanbanCard(id: "backlog-bug", title: "Backlog bug", tags: ["Bug"]),
+                ]),
+                KanbanColumn(id: "in_progress", name: "In Progress", cards: [
+                    KanbanCard(id: "capture", title: "Capture", tags: ["Capture"]),
+                    KanbanCard(id: "qa", title: "QA", tags: ["Needs QA"]),
+                ]),
+                KanbanColumn(id: "done", name: "Done", isDoneColumn: true, cards: [
+                    KanbanCard(id: "done-bug", title: "Done bug", tags: ["Bug"]),
+                ]),
+            ]
+        )
+
+        let views = KanbanBoardLayout.projectBoardViewFilters(for: board)
+
+        #expect(views.map(\.id) == ["all", "active", "backlog", "bugs", "second-brain", "capture", "qa"])
+        #expect(views.first(where: { $0.id == "all" })?.cardCount == 4)
+        #expect(views.first(where: { $0.id == "active" })?.cardCount == 3)
+        #expect(views.first(where: { $0.id == "backlog" })?.cardCount == 1)
+        #expect(views.first(where: { $0.id == "bugs" })?.cardCount == 2)
+        #expect(views.first(where: { $0.id == "capture" })?.cardCount == 1)
+        #expect(views.first(where: { $0.id == "qa" })?.cardCount == 1)
+    }
+
+    @Test("project board view filters apply by workflow and semantic tags")
+    func projectBoardViewFiltersApplyByWorkflowAndSemanticTags() {
+        let board = KanbanBoard(
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog", cards: [
+                    KanbanCard(id: "backlog", title: "Backlog", tags: ["Follow Up"]),
+                ]),
+                KanbanColumn(id: "in_progress", name: "In Progress", cards: [
+                    KanbanCard(id: "bug", title: "Bug", tags: ["Bug"]),
+                    KanbanCard(id: "second-brain", title: "Second Brain", tags: ["Second Brain"]),
+                    KanbanCard(id: "capture", title: "Capture", tags: ["Capture"]),
+                    KanbanCard(id: "qa", title: "QA", tags: ["Needs QA"]),
+                ]),
+                KanbanColumn(id: "done", name: "Done", isDoneColumn: true, cards: [
+                    KanbanCard(id: "done", title: "Done", tags: ["Bug"]),
+                ]),
+            ]
+        )
+        let backlog = board.columns[0]
+        let inProgress = board.columns[1]
+        let done = board.columns[2]
+
+        #expect(KanbanBoardLayout.cards(backlog.cards, in: backlog, board: board, matchingProjectBoardViewID: "backlog").map(\.id) == ["backlog"])
+        #expect(KanbanBoardLayout.cards(inProgress.cards, in: inProgress, board: board, matchingProjectBoardViewID: "bugs").map(\.id) == ["bug"])
+        #expect(KanbanBoardLayout.cards(inProgress.cards, in: inProgress, board: board, matchingProjectBoardViewID: "second_brain").map(\.id) == ["second-brain"])
+        #expect(KanbanBoardLayout.cards(inProgress.cards, in: inProgress, board: board, matchingProjectBoardViewID: "capture").map(\.id) == ["capture"])
+        #expect(KanbanBoardLayout.cards(inProgress.cards, in: inProgress, board: board, matchingProjectBoardViewID: "qa").map(\.id) == ["qa"])
+        #expect(KanbanBoardLayout.cards(done.cards, in: done, board: board, matchingProjectBoardViewID: "active").isEmpty)
+        #expect(KanbanBoardLayout.cards(done.cards, in: done, board: board, matchingProjectBoardViewID: "all").map(\.id) == ["done"])
+    }
 }

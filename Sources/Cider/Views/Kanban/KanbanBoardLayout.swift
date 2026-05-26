@@ -58,6 +58,13 @@ struct KanbanFeatureDomainFilter: Identifiable, Equatable {
     let cardCount: Int
 }
 
+struct KanbanProjectBoardViewFilter: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let cardCount: Int
+    let isSystem: Bool
+}
+
 private struct KanbanFeatureDomainDefinition: Equatable {
     let id: String
     let label: String
@@ -470,11 +477,41 @@ enum KanbanBoardLayout {
         }
     }
 
+    static func projectBoardViewFilters(for board: KanbanBoard) -> [KanbanProjectBoardViewFilter] {
+        defaultProjectBoardViewDefinitions.map { definition in
+            KanbanProjectBoardViewFilter(
+                id: definition.id,
+                label: definition.label,
+                cardCount: projectBoardViewCardCount(for: definition.id, in: board),
+                isSystem: true
+            )
+        }
+    }
+
     static func cards(_ cards: [KanbanCard], matchingFeatureDomainFilter filter: String?) -> [KanbanCard] {
         let normalizedFilter = KanbanCardTagTaxonomy.normalized(filter ?? "")
         guard !normalizedFilter.isEmpty else { return cards }
         let canonicalFilter = canonicalFeatureDomain(for: normalizedFilter)?.id ?? normalizedFilter
         return cards.filter { featureDomainTags(for: $0).contains(canonicalFilter) }
+    }
+
+    static func cards(
+        _ cards: [KanbanCard],
+        in column: KanbanColumn,
+        board: KanbanBoard,
+        matchingProjectBoardViewID viewID: String?
+    ) -> [KanbanCard] {
+        let normalizedViewID = KanbanCardTagTaxonomy.normalized(viewID ?? "all")
+        guard normalizedViewID != "all", !normalizedViewID.isEmpty else { return cards }
+
+        return cards.filter { card in
+            projectBoardViewMatches(
+                card: card,
+                column: column,
+                board: board,
+                viewID: normalizedViewID
+            )
+        }
     }
 
     private static func cardFaceSemanticChipModels(for card: KanbanCard, limit: Int = 3) -> [KanbanCardFaceChip] {
@@ -532,6 +569,46 @@ enum KanbanBoardLayout {
         }
 
         return features
+    }
+
+    private static func projectBoardViewCardCount(for viewID: String, in board: KanbanBoard) -> Int {
+        board.columns.reduce(0) { partial, column in
+            partial + cards(
+                column.cards,
+                in: column,
+                board: board,
+                matchingProjectBoardViewID: viewID
+            ).count
+        }
+    }
+
+    private static func projectBoardViewMatches(
+        card: KanbanCard,
+        column: KanbanColumn,
+        board: KanbanBoard,
+        viewID: String
+    ) -> Bool {
+        switch viewID {
+        case "active":
+            return !column.isDoneColumn && !isArchiveColumn(column)
+        case "backlog":
+            return isBacklogColumn(column)
+        case "bugs":
+            return cardHasAnyTag(card, ["bug", "fix", "needs-fix"])
+        case "second-brain":
+            return featureDomainTags(for: card).contains("second-brain")
+        case "capture":
+            return featureDomainTags(for: card).contains("capture")
+        case "qa":
+            return cardHasAnyTag(card, ["qa", "testing", "test", "needs-qa", "manual-qa", "agent-can-verify"])
+        default:
+            return true
+        }
+    }
+
+    private static func cardHasAnyTag(_ card: KanbanCard, _ tags: [String]) -> Bool {
+        let normalizedTags = Set(KanbanCardTagTaxonomy.normalizedTags(from: card.tags))
+        return tags.contains { normalizedTags.contains(KanbanCardTagTaxonomy.normalized($0)) }
     }
 
     private static func cardFaceChipRole(for tag: String) -> KanbanCardFaceChip.Role {
@@ -603,6 +680,16 @@ enum KanbanBoardLayout {
         "blocked",
         "done",
         "fixed",
+    ]
+
+    private static let defaultProjectBoardViewDefinitions: [(id: String, label: String)] = [
+        ("all", "All"),
+        ("active", "Active"),
+        ("backlog", "Backlog"),
+        ("bugs", "Bugs"),
+        ("second-brain", "Second Brain"),
+        ("capture", "Capture"),
+        ("qa", "QA"),
     ]
 
     private static func displayChipLabel(for tag: String) -> String {
@@ -751,6 +838,11 @@ enum KanbanBoardLayout {
     private static func isArchiveColumn(_ column: KanbanColumn) -> Bool {
         let normalized = normalize("\(column.id) \(column.name)")
         return containsAny(normalized, ["archive", "archived"])
+    }
+
+    private static func isBacklogColumn(_ column: KanbanColumn) -> Bool {
+        let normalized = normalize("\(column.id) \(column.name)")
+        return containsAny(normalized, ["backlog"])
     }
 
     private static func isHiddenColumn(_ column: KanbanColumn) -> Bool {
