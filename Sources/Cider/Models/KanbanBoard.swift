@@ -320,23 +320,31 @@ struct KanbanColumn: Codable, Identifiable, Equatable, Sendable {
     var id: String
     var name: String
     var isDoneColumn: Bool
+    var hiddenColumnState: Bool?
     var cards: [KanbanCard]
+
+    var isHiddenColumn: Bool {
+        hiddenColumnState ?? false
+    }
 
     init(
         id: String,
         name: String,
         isDoneColumn: Bool = false,
+        isHiddenColumn: Bool? = nil,
         cards: [KanbanCard] = []
     ) {
         self.id = id
         self.name = name
         self.isDoneColumn = isDoneColumn
+        self.hiddenColumnState = isHiddenColumn
         self.cards = cards
     }
 
     enum CodingKeys: String, CodingKey {
         case id, name, cards
         case isDoneColumn = "is_done_column"
+        case isHiddenColumn = "is_hidden_column"
     }
 
     init(from decoder: Decoder) throws {
@@ -344,7 +352,17 @@ struct KanbanColumn: Codable, Identifiable, Equatable, Sendable {
         id = try c.decode(String.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         isDoneColumn = (try c.decodeIfPresent(Bool.self, forKey: .isDoneColumn)) ?? false
+        hiddenColumnState = try c.decodeIfPresent(Bool.self, forKey: .isHiddenColumn)
         cards = (try c.decodeIfPresent([KanbanCard].self, forKey: .cards)) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(cards, forKey: .cards)
+        try c.encode(isDoneColumn, forKey: .isDoneColumn)
+        try c.encodeIfPresent(hiddenColumnState, forKey: .isHiddenColumn)
     }
 }
 

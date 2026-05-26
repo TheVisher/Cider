@@ -183,17 +183,21 @@ enum KanbanBoardLayout {
             return true
         }
 
-        return board.columns.contains { isArchiveColumn($0) }
+        return board.columns.contains { isHiddenColumn($0) }
     }
 
     static func lanes(for board: KanbanBoard) -> [KanbanBoardLane] {
-        let activeColumns = board.columns.filter { !isArchiveColumn($0) }
+        let activeColumns = board.columns.filter { !isHiddenColumn($0) }
 
         guard !activeColumns.isEmpty else {
             return []
         }
 
         return [KanbanBoardLane(role: .workflow, columns: activeColumns)]
+    }
+
+    static func visibleColumns(in board: KanbanBoard) -> [KanbanColumn] {
+        board.columns.filter { !isHiddenColumn($0) }
     }
 
     static func hasArchiveColumns(in board: KanbanBoard) -> Bool {
@@ -205,6 +209,14 @@ enum KanbanBoardLayout {
         return board.columns.filter { column in
             isArchiveColumn(column)
         }
+    }
+
+    static func hasHiddenColumns(in board: KanbanBoard) -> Bool {
+        board.columns.contains { isHiddenColumn($0) }
+    }
+
+    static func hiddenColumns(in board: KanbanBoard) -> [KanbanColumn] {
+        board.columns.filter { isHiddenColumn($0) }
     }
 
     static func projectColumnHeight(
@@ -715,6 +727,10 @@ enum KanbanBoardLayout {
     private static func isArchiveColumn(_ column: KanbanColumn) -> Bool {
         let normalized = normalize("\(column.id) \(column.name)")
         return containsAny(normalized, ["archive", "archived"])
+    }
+
+    private static func isHiddenColumn(_ column: KanbanColumn) -> Bool {
+        column.hiddenColumnState ?? isArchiveColumn(column)
     }
 
     private static func normalize(_ value: String) -> String {

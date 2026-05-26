@@ -19,8 +19,6 @@ struct KanbanBoardView: View {
     @State private var showDeleteConfirmation = false
     @State private var searchText = ""
     @State private var compactCards = false
-    @State private var archiveExpanded = false
-    @State private var archiveOpenGeneration = 0
     @State private var collapsedParentCardIDs: Set<String> = []
     @State private var projectLaneScrollIndexByID: [String: Int] = [:]
     @State private var tagEditorCardID: String?
@@ -136,33 +134,6 @@ struct KanbanBoardView: View {
             }
             .buttonStyle(.plain)
             .help(compactCards ? "Expanded view" : "Compact view")
-
-            if KanbanBoardLayout.usesProjectLayout(for: board),
-               KanbanBoardLayout.hasArchiveColumns(in: board) {
-                Button {
-                    withAnimation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86)) {
-                        if !archiveExpanded {
-                            archiveOpenGeneration += 1
-                        }
-                        archiveExpanded.toggle()
-                    }
-                } label: {
-                    HStack(spacing: Spacing.xxs) {
-                        Image(systemName: archiveExpanded ? "archivebox.fill" : "archivebox")
-                        Text("Archive")
-                    }
-                    .font(CiderFont.captionMedium)
-                    .foregroundColor(archiveExpanded ? CiderColors.controlAccent : CiderColors.tertiary)
-                    .padding(.horizontal, Spacing.xs)
-                    .padding(.vertical, Spacing.xxs)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(archiveExpanded ? CiderColors.controlAccent.opacity(0.12) : CiderColors.surfaceInput)
-                    )
-                }
-                .buttonStyle(.plain)
-                .help(archiveExpanded ? "Hide archive columns" : "Reveal archive columns")
-            }
 
             Button {
                 withAnimation(reduceMotion ? .none : .spring) {
@@ -331,7 +302,7 @@ struct KanbanBoardView: View {
     private func standardColumnsArea(_ board: KanbanBoard) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: Spacing.md) {
-                ForEach(board.columns) { column in
+                ForEach(KanbanBoardLayout.visibleColumns(in: board)) { column in
                     columnView(column, board: board, width: KanbanDesign.columnWidth)
                 }
             }
@@ -370,7 +341,7 @@ struct KanbanBoardView: View {
         board: KanbanBoard,
         availableBoardHeight: CGFloat
     ) -> some View {
-        let archiveColumns = archiveExpanded ? KanbanBoardLayout.archiveColumns(for: lane.role, in: board) : []
+        let hiddenColumns = KanbanBoardLayout.hiddenColumns(in: board)
 
         return VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
@@ -386,17 +357,21 @@ struct KanbanBoardView: View {
                     .font(CiderFont.micro)
                     .foregroundColor(CiderColors.tertiary)
 
+                if !hiddenColumns.isEmpty {
+                    Text("\(hiddenColumns.count) hidden")
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+
                 Spacer()
             }
             .padding(.horizontal, Spacing.xs)
 
             GeometryReader { geometry in
-                let shouldPushArchive = projectLaneNeedsArchivePush(
-                    lane: lane,
-                    archiveColumns: archiveColumns,
-                    availableWidth: geometry.size.width
-                )
-                let visibleColumnCount = projectLaneVisibleColumnCount(availableWidth: geometry.size.width)
+                let railWidth = hiddenColumns.isEmpty ? 0 : KanbanDesign.hiddenColumnsRailWidth
+                let railGap = hiddenColumns.isEmpty ? 0 : Spacing.md
+                let activeAreaWidth = max(geometry.size.width - railWidth - railGap, KanbanDesign.projectColumnWidth)
+                let visibleColumnCount = projectLaneVisibleColumnCount(availableWidth: activeAreaWidth)
                 let maxScrollIndex = max(lane.columns.count - visibleColumnCount, 0)
                 let columnHeight = KanbanBoardLayout.projectColumnHeight(
                     availableBoardHeight: availableBoardHeight,
@@ -404,50 +379,50 @@ struct KanbanBoardView: View {
                 )
 
                 ScrollViewReader { scrollProxy in
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        HStack(alignment: .top, spacing: Spacing.md) {
+                    HStack(alignment: .top, spacing: Spacing.md) {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
                             ScrollView(.horizontal, showsIndicators: true) {
-                                HStack(alignment: .top, spacing: Spacing.md) {
-                                    ForEach(lane.columns) { column in
-                                        columnView(
-                                            column,
-                                            board: board,
-                                            width: KanbanDesign.projectColumnWidth,
-                                            height: columnHeight
-                                        )
-                                        .id(projectColumnScrollID(laneID: lane.id, columnID: column.id))
+                                    HStack(alignment: .top, spacing: Spacing.md) {
+                                        ForEach(lane.columns) { column in
+                                            columnView(
+                                                column,
+                                                board: board,
+                                                width: KanbanDesign.projectColumnWidth,
+                                                height: columnHeight
+                                            )
+                                            .id(projectColumnScrollID(laneID: lane.id, columnID: column.id))
+                                        }
                                     }
-                                }
-                                .padding(.bottom, Spacing.xs)
-                                .background(horizontalPanSurface)
+                                    .padding(.bottom, Spacing.xs)
+                                    .background(horizontalPanSurface)
                             }
-                            .frame(maxWidth: .infinity)
-                            .defaultScrollAnchor(shouldPushArchive ? .trailing : .leading)
-                            .id(projectLaneScrollIdentity(for: lane, shouldPushArchive: shouldPushArchive))
+                            .frame(width: activeAreaWidth)
+                            .defaultScrollAnchor(.leading)
+                            .id(projectLaneScrollIdentity(for: lane))
 
-                            if !archiveColumns.isEmpty {
-                                projectArchiveReveal(
-                                    columns: archiveColumns,
-                                    board: board,
-                                    columnHeight: columnHeight
+                            if maxScrollIndex > 0 {
+                                projectLaneScrollControls(
+                                    lane: lane,
+                                    visibleColumnCount: visibleColumnCount,
+                                    maxScrollIndex: maxScrollIndex,
+                                    scrollProxy: scrollProxy
                                 )
-                                    .transition(.move(edge: .trailing).combined(with: .opacity))
                             }
                         }
 
-                        if maxScrollIndex > 0 {
-                            projectLaneScrollControls(
-                                lane: lane,
-                                visibleColumnCount: visibleColumnCount,
-                                maxScrollIndex: maxScrollIndex,
-                                scrollProxy: scrollProxy
+                        if !hiddenColumns.isEmpty {
+                            hiddenColumnsRail(
+                                columns: hiddenColumns,
+                                board: board,
+                                height: columnHeight
                             )
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
                         }
                     }
                 }
             }
             .frame(maxHeight: .infinity)
-            .animation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86), value: archiveExpanded)
+            .animation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86), value: hiddenColumns.map(\.id))
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -461,31 +436,12 @@ struct KanbanBoardView: View {
         )
     }
 
-    private func projectLaneNeedsArchivePush(
-        lane: KanbanBoardLane,
-        archiveColumns: [KanbanColumn],
-        availableWidth: CGFloat
-    ) -> Bool {
-        KanbanBoardLayout.shouldPushArchive(
-            activeColumnCount: lane.columns.count,
-            archiveColumnCount: archiveColumns.count,
-            availableWidth: availableWidth,
-            columnWidth: KanbanDesign.projectColumnWidth,
-            spacing: Spacing.md,
-            archiveExpanded: archiveExpanded
-        )
-    }
-
     private func projectLaneVisibleColumnCount(availableWidth: CGFloat) -> Int {
         let columnStride = KanbanDesign.projectColumnWidth + Spacing.md
         return max(1, Int(floor((availableWidth + Spacing.md) / columnStride)))
     }
 
-    private func projectLaneScrollIdentity(for lane: KanbanBoardLane, shouldPushArchive: Bool) -> String {
-        if archiveExpanded {
-            return "\(lane.id)-archive-\(archiveOpenGeneration)-push-\(shouldPushArchive)"
-        }
-
+    private func projectLaneScrollIdentity(for lane: KanbanBoardLane) -> String {
         return "\(lane.id)-active"
     }
 
@@ -576,45 +532,86 @@ struct KanbanBoardView: View {
         .frame(height: KanbanDesign.projectHorizontalScrollControlHeight)
     }
 
-    private func projectArchiveReveal(
-        columns archiveColumns: [KanbanColumn],
+    private func hiddenColumnsRail(
+        columns hiddenColumns: [KanbanColumn],
         board: KanbanBoard,
-        columnHeight: CGFloat
+        height: CGFloat
     ) -> some View {
-        HStack(alignment: .top, spacing: Spacing.md) {
-            archiveRevealDivider(height: columnHeight)
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "chevron.down")
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
 
-            ForEach(archiveColumns) { column in
-                columnView(
-                    column,
-                    board: board,
-                    width: KanbanDesign.projectColumnWidth,
-                    height: columnHeight
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .strokeBorder(CiderColors.controlAccent.opacity(0.35), lineWidth: CiderBorder.hairlineStrokeWidth)
-                )
+                Text("Hidden columns")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.primary)
+
+                Spacer(minLength: Spacing.xs)
+
+                Text("\(hiddenColumns.count)")
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
             }
-        }
-    }
 
-    private func archiveRevealDivider(height: CGFloat) -> some View {
-        VStack(spacing: Spacing.xs) {
-            Image(systemName: "chevron.right")
-                .font(CiderFont.captionSemibold)
-                .foregroundColor(CiderColors.controlAccent)
-
-            Text("Archive")
-                .font(CiderFont.micro)
-                .foregroundColor(CiderColors.tertiary)
-                .rotationEffect(.degrees(-90))
-                .fixedSize()
+            VStack(spacing: Spacing.xs) {
+                ForEach(hiddenColumns) { column in
+                    hiddenColumnRow(column, board: board)
+                }
+            }
 
             Spacer(minLength: 0)
         }
-        .padding(.top, Spacing.lg)
-        .frame(width: 28, height: height, alignment: .top)
+        .padding(Spacing.sm)
+        .frame(width: KanbanDesign.hiddenColumnsRailWidth, height: height, alignment: .top)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(CiderColors.surfaceSubtle.opacity(0.62))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
+        )
+    }
+
+    private func hiddenColumnRow(_ column: KanbanColumn, board: KanbanBoard) -> some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
+                storage.setColumnHidden(boardID: board.id, columnID: column.id, isHidden: false)
+            }
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: column.isDoneColumn ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .frame(width: 18, alignment: .center)
+
+                Text(column.name)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+
+                Spacer(minLength: Spacing.xs)
+
+                Text("\(filteredCards(column.cards).count)")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(CiderColors.surfaceInput.opacity(0.86))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help("Show \(column.name)")
+        .contextMenu {
+            Button("Show Column") {
+                storage.setColumnHidden(boardID: board.id, columnID: column.id, isHidden: false)
+            }
+        }
     }
 
     private func columnView(
@@ -775,6 +772,11 @@ struct KanbanBoardView: View {
                 } else {
                     Button("Unmark as Done column") {
                         storage.setColumnDone(boardID: boardID, columnID: column.id, isDone: false)
+                    }
+                }
+                Button("Hide Column") {
+                    withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
+                        storage.setColumnHidden(boardID: boardID, columnID: column.id, isHidden: true)
                     }
                 }
                 Divider()

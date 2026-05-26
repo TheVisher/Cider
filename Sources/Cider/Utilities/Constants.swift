@@ -169,6 +169,8 @@ enum KanbanDesign {
     static let columnWidth: CGFloat = 320
     /// Width for project-board columns, which need extra room for hierarchy and plan badges.
     static let projectColumnWidth: CGFloat = 368
+    /// Width for the fixed hidden-column rail beside wide project boards.
+    static let hiddenColumnsRailWidth: CGFloat = 260
     /// Minimum comfortable height for project-board columns before the board itself needs more room.
     static let projectMinimumColumnHeight: CGFloat = 360
     /// Height reserved for explicit horizontal scroll controls in project-board swimlanes.

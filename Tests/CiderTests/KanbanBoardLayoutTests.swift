@@ -89,6 +89,40 @@ struct KanbanBoardLayoutTests {
         #expect(KanbanBoardLayout.archiveColumns(for: .qa, in: board).isEmpty)
     }
 
+    @Test("hidden columns stay out of active project rows and appear in the hidden rail")
+    func hiddenColumnsStayOutOfActiveProjectRows() {
+        let board = KanbanBoard(
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog"),
+                KanbanColumn(id: "in_progress", name: "In Progress"),
+                KanbanColumn(id: "done", name: "Done", isDoneColumn: true),
+                KanbanColumn(id: "canceled", name: "Canceled", isHiddenColumn: true),
+                KanbanColumn(id: "duplicate", name: "Duplicate", isHiddenColumn: true),
+            ]
+        )
+
+        let lanes = KanbanBoardLayout.lanes(for: board)
+
+        #expect(lanes.first?.columns.map(\.id) == ["backlog", "in_progress", "done"])
+        #expect(KanbanBoardLayout.hiddenColumns(in: board).map(\.id) == ["canceled", "duplicate"])
+    }
+
+    @Test("legacy archive columns are treated as hidden columns")
+    func archiveColumnsAreHiddenCompatible() {
+        let board = KanbanBoard(
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog"),
+                KanbanColumn(id: "done", name: "Done", isDoneColumn: true),
+                KanbanColumn(id: "workflow_archive", name: "Workflow Archive", isDoneColumn: true),
+            ]
+        )
+
+        #expect(KanbanBoardLayout.lanes(for: board).first?.columns.map(\.id) == ["backlog", "done"])
+        #expect(KanbanBoardLayout.hiddenColumns(in: board).map(\.id) == ["workflow_archive"])
+    }
+
     @Test("small generic boards keep the existing flat column layout")
     func smallGenericBoardsUseFlatLayout() {
         let board = KanbanBoard(

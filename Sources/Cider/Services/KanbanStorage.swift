@@ -195,7 +195,7 @@ final class KanbanStorage: ObservableObject {
     // MARK: - Column Operations
 
     @discardableResult
-    func addColumn(boardID: String, name: String, isDoneColumn: Bool = false) -> KanbanColumn? {
+    func addColumn(boardID: String, name: String, isDoneColumn: Bool = false, isHiddenColumn: Bool = false) -> KanbanColumn? {
         var createdColumn: KanbanColumn?
         mutate(boardID: boardID) { board in
             var columnID = KanbanID.slug(from: name)
@@ -208,7 +208,8 @@ final class KanbanStorage: ObservableObject {
             let column = KanbanColumn(
                 id: columnID,
                 name: name,
-                isDoneColumn: isDoneColumn
+                isDoneColumn: isDoneColumn,
+                isHiddenColumn: isHiddenColumn
             )
             board.columns.append(column)
             createdColumn = column
@@ -239,6 +240,13 @@ final class KanbanStorage: ObservableObject {
         mutate(boardID: boardID) { board in
             guard let i = board.columns.firstIndex(where: { $0.id == columnID }) else { return }
             board.columns[i].isDoneColumn = isDone
+        }
+    }
+
+    func setColumnHidden(boardID: String, columnID: String, isHidden: Bool) {
+        mutate(boardID: boardID) { board in
+            guard let i = board.columns.firstIndex(where: { $0.id == columnID }) else { return }
+            board.columns[i].hiddenColumnState = isHidden
         }
     }
 
