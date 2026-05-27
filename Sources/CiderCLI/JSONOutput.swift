@@ -674,6 +674,7 @@ private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
                 "id": col.id,
                 "name": col.name,
                 "isDoneColumn": col.isDoneColumn,
+                "isDoneLikeColumn": col.isDoneLikeColumn,
                 "cards": col.cards.map { card in
                     var d: [String: Any] = [
                         "id": card.id,

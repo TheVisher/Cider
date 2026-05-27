@@ -46,7 +46,7 @@ struct KanbanDetailHierarchyContext: Equatable {
                     title: childCard.title,
                     columnID: column.id,
                     columnName: column.name,
-                    isComplete: column.isDoneColumn || childCard.completed != nil
+                    isComplete: column.isDoneLikeColumn || childCard.completed != nil
                 )
             }
         }

@@ -618,7 +618,7 @@ struct KanbanRoadmapNextUpProjection: Equatable, Sendable {
     ) -> SuggestedInsertion {
         let targetChild = rollup.nextActionableChild ?? rollup.nextQueuedChild ?? rollup.backlogChild ?? rollup.children.first
         let queuedColumn = board.columns.first { KanbanParentChildRole(column: $0) == .queued }
-        let fallbackColumn = board.columns.first(where: { !$0.isDoneColumn }) ?? board.columns.first
+        let fallbackColumn = board.columns.first(where: { !$0.isDoneLikeColumn }) ?? board.columns.first
         let columnID = queuedColumn?.id ?? targetChild?.columnID ?? fallbackColumn?.id ?? "backlog"
         let columnName = queuedColumn?.name ?? targetChild?.columnName ?? fallbackColumn?.name ?? "Backlog"
         let afterChildID = sequence.last { $0.columnID == columnID }?.id
@@ -658,7 +658,7 @@ enum KanbanParentChildRole: String, Codable, CaseIterable, Sendable {
     case other
 
     init(column: KanbanColumn) {
-        if column.isDoneColumn {
+        if column.isDoneLikeColumn {
             self = .done
             return
         }
@@ -708,7 +708,7 @@ enum KanbanAgentWorkflowRole: String, Codable, CaseIterable, Sendable {
     case done = "done"
 
     init?(column: KanbanColumn) {
-        if column.isDoneColumn {
+        if column.isDoneLikeColumn {
             self = .done
             return
         }

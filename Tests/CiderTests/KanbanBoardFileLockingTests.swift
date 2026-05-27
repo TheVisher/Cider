@@ -76,6 +76,37 @@ struct KanbanBoardFileLockingTests {
         #expect(inProgress.cards.first?.parentCardID == parent.id)
     }
 
+    @Test("moving to legacy done column stamps completion")
+    @MainActor
+    func movingToLegacyDoneColumnStampsCompletion() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Legacy Done Move")
+        storage.setColumnDone(boardID: board.id, columnID: "done", isDone: false)
+        let card = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "Ready to ship"))
+
+        storage.moveCard(
+            boardID: board.id,
+            cardID: card.id,
+            toColumnID: "done",
+            toIndex: 0
+        )
+
+        let refreshed = try #require(KanbanStorage().boards.first { $0.id == board.id })
+        let moved = try #require(refreshed.card(id: card.id))
+        #expect(refreshed.columns.first { $0.id == "done" }?.isDoneColumn == false)
+        #expect(moved.completed != nil)
+        #expect(moved.lastActivityKind == "completed")
+    }
+
     @Test("stale whole-card updates merge changed fields")
     @MainActor
     func staleWholeCardUpdatesMergeChangedFields() throws {

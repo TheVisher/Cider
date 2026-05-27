@@ -340,6 +340,39 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(model.milestoneRows.first?.artifactLinks.map(\.title), ["One Board Per Project Plan", "One Board Per Project QA"])
     }
 
+    func testProjectOverviewMilestoneProgressCountsLegacyDoneColumns() {
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "queued", name: "Queued", cards: [
+                    KanbanCard(
+                        id: "milestone",
+                        title: "Milestone: One Board Per Project",
+                        displayKey: "CID-201",
+                        tags: ["milestone"]
+                    ),
+                    KanbanCard(id: "active-child", title: "Active milestone child", parentCardID: "milestone")
+                ]),
+                KanbanColumn(id: "done", name: "Done", cards: [
+                    KanbanCard(id: "done-child", title: "Done milestone child", parentCardID: "milestone")
+                ])
+            ]
+        )
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [board])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+
+        let model = ProjectWorkspaceOverviewProvider.model(
+            for: ciderWorkspace,
+            catalog: catalog,
+            boards: [board]
+        )
+
+        XCTAssertEqual(model.milestoneRows.first?.progressText, "1/2")
+        XCTAssertEqual(model.milestoneRows.first?.completedChildCount, 1)
+        XCTAssertEqual(model.milestoneRows.first?.progressFraction, 0.5)
+    }
+
     private func makeCoreDocsRoot() -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ProjectWorkspaceContentModelTests-\(UUID().uuidString)", isDirectory: true)

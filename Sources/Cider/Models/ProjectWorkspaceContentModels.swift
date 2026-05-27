@@ -714,7 +714,7 @@ enum ProjectWorkspaceOverviewProvider {
     }
 
     private static func statusRank(for column: KanbanColumn) -> Int {
-        if column.isDoneColumn { return 4 }
+        if column.isDoneLikeColumn { return 4 }
         switch columnKind(for: column) {
         case .inProgress: return 0
         case .queued: return 1

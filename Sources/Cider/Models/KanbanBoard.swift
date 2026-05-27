@@ -327,6 +327,25 @@ struct KanbanColumn: Codable, Identifiable, Equatable, Sendable {
         hiddenColumnState ?? false
     }
 
+    var isArchiveLikeColumn: Bool {
+        normalizedIdentityWords.contains { word in
+            word == "archive" || word == "archived"
+        }
+    }
+
+    var isDoneLikeColumn: Bool {
+        isDoneColumn || isArchiveLikeColumn || normalizedIdentityWords.contains { word in
+            word == "done" || word == "complete" || word == "completed"
+        }
+    }
+
+    private var normalizedIdentityWords: [String] {
+        "\(id) \(name)"
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+    }
+
     init(
         id: String,
         name: String,

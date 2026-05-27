@@ -544,10 +544,10 @@ final class KanbanStorage: ObservableObject {
             let movedCards = cardsToMove.map { card in
                 var movedCard = card
                 // Auto-set completed date when moving to a done column
-                if board.columns[destIdx].isDoneColumn && movedCard.completed == nil {
+                if board.columns[destIdx].isDoneLikeColumn && movedCard.completed == nil {
                     movedCard.completed = Date()
                     movedCard.markActivity("completed")
-                } else if !board.columns[destIdx].isDoneColumn {
+                } else if !board.columns[destIdx].isDoneLikeColumn {
                     movedCard.completed = nil
                     movedCard.markActivity("moved")
                 } else {

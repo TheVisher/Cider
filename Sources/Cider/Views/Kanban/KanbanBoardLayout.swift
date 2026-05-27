@@ -342,7 +342,7 @@ enum KanbanBoardLayout {
             guard !children.isEmpty else { continue }
 
             totalCount += children.count
-            if column.isDoneColumn {
+            if column.isDoneLikeColumn {
                 doneCount += children.count
             } else {
                 doneCount += children.filter { $0.completed != nil }.count
@@ -719,7 +719,7 @@ enum KanbanBoardLayout {
             return false
         }
 
-        return column.isDoneColumn
+        return column.isDoneLikeColumn
     }
 
     private static func familyAccentColor(for card: KanbanCard, in board: KanbanBoard) -> KanbanCardColor {
@@ -836,8 +836,7 @@ enum KanbanBoardLayout {
     }
 
     private static func isArchiveColumn(_ column: KanbanColumn) -> Bool {
-        let normalized = normalize("\(column.id) \(column.name)")
-        return containsAny(normalized, ["archive", "archived"])
+        column.isArchiveLikeColumn
     }
 
     private static func isBacklogColumn(_ column: KanbanColumn) -> Bool {
@@ -846,10 +845,7 @@ enum KanbanBoardLayout {
     }
 
     private static func isDoneLikeColumn(_ column: KanbanColumn) -> Bool {
-        guard !isArchiveColumn(column) else { return true }
-        if column.isDoneColumn { return true }
-        let normalized = normalize("\(column.id) \(column.name)")
-        return containsAny(normalized, ["done", "complete", "completed"])
+        column.isDoneLikeColumn
     }
 
     private static func isHiddenColumn(_ column: KanbanColumn) -> Bool {

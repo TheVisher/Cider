@@ -6474,6 +6474,38 @@ struct CiderCLI {
                 print("Error: Could not add column")
             }
 
+        case "set-column-done":
+            guard let boardRef = args.first,
+                  let colRef = parseFlag("--column", from: args) else {
+                print("Error: Usage: cider-cli board set-column-done <board> --column <col> (--done|--not-done)")
+                return
+            }
+            let wantsDone = args.contains("--done")
+            let wantsNotDone = args.contains("--not-done")
+            guard wantsDone != wantsNotDone else {
+                print("Error: Pass exactly one of --done or --not-done")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let col = findColumn(colRef, in: board) else { return }
+            storage.setColumnDone(boardID: board.id, columnID: col.id, isDone: wantsDone)
+            if jsonOutput {
+                let refreshed = storage.boards.first { $0.id == board.id }
+                let refreshedColumn = refreshed?.columns.first { $0.id == col.id } ?? col
+                outputJSON([
+                    "ok": true,
+                    "board": ["id": board.id, "name": board.name],
+                    "column": [
+                        "id": refreshedColumn.id,
+                        "name": refreshedColumn.name,
+                        "isDoneColumn": refreshedColumn.isDoneColumn,
+                        "isDoneLikeColumn": refreshedColumn.isDoneLikeColumn,
+                    ],
+                ])
+            } else {
+                print("Updated column: \(col.name) \(wantsDone ? "[done column]" : "[not done column]")")
+            }
+
         case "rename-column":
             guard let boardRef = args.first,
                   let colRef = parseFlag("--column", from: args),
@@ -6498,7 +6530,7 @@ struct CiderCLI {
             print("Deleted column: \(col.name)")
 
         default:
-            printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, audit, show, tags, workflow, recent, testing-summary, parent-summary, milestone create/list/inspect/attach-card, card inspect, create, rename, delete, add-card, update-card, section update, comment add, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
+            printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, audit, show, tags, workflow, recent, testing-summary, parent-summary, milestone create/list/inspect/attach-card, card inspect, create, rename, delete, add-card, update-card, section update, comment add, evidence add, history add, move-card, delete-card, children, add-column, set-column-done, rename-column, delete-column")
         }
     }
 
@@ -9598,7 +9630,16 @@ struct CiderCLI {
     }
 
     static func milestoneToDict(board: KanbanBoard, milestone: KanbanCard) -> [String: Any] {
-        milestoneToDict(boardID: board.id, milestone: milestone, children: board.childCards(of: milestone.id))
+        var dict = milestoneToDict(boardID: board.id, milestone: milestone, children: board.childCards(of: milestone.id))
+        let doneCount = board.columns.reduce(0) { count, column in
+            let children = column.cards.filter { $0.parentCardID == milestone.id }
+            return count + (column.isDoneLikeColumn ? children.count : children.filter { $0.completed != nil }.count)
+        }
+        let childCount = board.childCards(of: milestone.id).count
+        dict["childCount"] = childCount
+        dict["completedChildCount"] = doneCount
+        dict["progressFraction"] = childCount == 0 ? 0 : Double(doneCount) / Double(childCount)
+        return dict
     }
 
     static func milestoneToDict(boardID: String, milestone: KanbanCard, children: [KanbanCard]) -> [String: Any] {
@@ -9806,7 +9847,7 @@ struct CiderCLI {
             "id": entry.card.id,
             "title": entry.card.title,
             "board": ["id": entry.board.id, "name": entry.board.name],
-            "column": ["id": entry.column.id, "name": entry.column.name, "isDoneColumn": entry.column.isDoneColumn],
+            "column": ["id": entry.column.id, "name": entry.column.name, "isDoneColumn": entry.column.isDoneColumn, "isDoneLikeColumn": entry.column.isDoneLikeColumn],
             "created": ISO8601DateFormatter().string(from: entry.card.created),
             "activityAt": ISO8601DateFormatter().string(from: entry.activityAt),
             "activityKind": entry.activityKind,
@@ -10004,7 +10045,7 @@ struct CiderCLI {
             "id": entry.card.id,
             "title": entry.card.title,
             "board": ["id": entry.board.id, "name": entry.board.name],
-            "column": ["id": entry.column.id, "name": entry.column.name, "isDoneColumn": entry.column.isDoneColumn],
+            "column": ["id": entry.column.id, "name": entry.column.name, "isDoneColumn": entry.column.isDoneColumn, "isDoneLikeColumn": entry.column.isDoneLikeColumn],
             "created": ISO8601DateFormatter().string(from: entry.card.created),
             "activityAt": ISO8601DateFormatter().string(from: entry.activityAt),
             "reason": entry.reason,
@@ -10082,7 +10123,7 @@ struct CiderCLI {
             "agentActions": actions.map(agentActionToDict),
         ]
         if let column {
-            dict["column"] = ["id": column.id, "name": column.name, "isDoneColumn": column.isDoneColumn]
+            dict["column"] = ["id": column.id, "name": column.name, "isDoneColumn": column.isDoneColumn, "isDoneLikeColumn": column.isDoneLikeColumn]
         }
         dict["hasFailedQA"] = model.hasFailedQA
         let failedSteps = failedQASteps(in: card.notes)
@@ -10392,10 +10433,10 @@ struct CiderCLI {
             "backlinks": backlinks.map(ownerRelationToDict),
             "surfacing": [
                 "reason": summary,
-                "urgency": detail.column.isDoneColumn ? "done" : "normal",
+                "urgency": detail.column.isDoneLikeColumn ? "done" : "normal",
                 "sourceSignal": "kanban_context",
                 "reviewState": detail.column.name.localizedCaseInsensitiveContains("testing") ? "needs_review" : "ok",
-                "suggestedAction": detail.column.isDoneColumn ? "Archive or reference" : "Open card",
+                "suggestedAction": detail.column.isDoneLikeColumn ? "Archive or reference" : "Open card",
             ],
             "recentHistory": recentHistory,
             "safeCommands": safeCommands,
