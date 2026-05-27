@@ -5952,6 +5952,9 @@ struct CiderCLI {
                 }
             }
 
+        case "milestone":
+            handleBoardMilestone(subcommand: args.first, args: Array(args.dropFirst()), storage: storage)
+
         case "card":
             guard args.first == "inspect" else {
                 printCLIError("Usage: cider-cli board card inspect <board> --card <id> [--json]")
@@ -6495,7 +6498,7 @@ struct CiderCLI {
             print("Deleted column: \(col.name)")
 
         default:
-            printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, audit, show, tags, workflow, recent, testing-summary, parent-summary, card inspect, create, rename, delete, add-card, update-card, section update, comment add, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
+            printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, audit, show, tags, workflow, recent, testing-summary, parent-summary, milestone create/list/inspect/attach-card, card inspect, create, rename, delete, add-card, update-card, section update, comment add, evidence add, history add, move-card, delete-card, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -9399,6 +9402,229 @@ struct CiderCLI {
         }
         printCLIError("Column '\(nameOrID)' not found in board '\(board.name)'. Available: \(board.columns.map(\.name).joined(separator: ", "))")
         return nil
+    }
+
+    static func handleBoardMilestone(subcommand: String?, args: [String], storage: KanbanStorage) {
+        switch subcommand {
+        case "create":
+            guard let boardRef = args.first,
+                  let title = parseFlag("--title", from: args) else {
+                printCLIError("Usage: cider-cli board milestone create <board> --title <title> [--description <text>] [--column <column>] [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            let columnRef = parseFlag("--column", from: args)
+            guard let column = columnRef.flatMap({ findColumn($0, in: board) }) ?? defaultMilestoneColumn(in: board) else {
+                printCLIError("Board '\(board.name)' has no column for milestone creation.")
+                return
+            }
+            let milestoneTitle = normalizedMilestoneTitle(title)
+            guard let created = storage.addCard(boardID: board.id, columnID: column.id, title: milestoneTitle) else {
+                printCLIError("Could not create milestone card on board '\(board.name)'.")
+                return
+            }
+            var milestone = created
+            milestone.tags = normalizedTags(created.tags + ["milestone", "milestone-object"])
+            milestone.color = .purple
+            if let description = parseFlag("--description", from: args) {
+                let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    milestone.notes = KanbanCardSectionParser.updatingSection(in: milestone.notes, title: "Goal", body: trimmed)
+                }
+            }
+            milestone.markActivity("created", at: created.created)
+            storage.updateCard(boardID: board.id, card: milestone)
+            refreshSecondBrainProjection(boardID: board.id, card: milestone)
+            printMilestoneResult(boardID: board.id, boardName: board.name, milestone: milestone, children: [], action: "created")
+
+        case "list", "ls":
+            guard let boardRef = args.first else {
+                printCLIError("Usage: cider-cli board milestone list <board> [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            let milestones = boardMilestoneCards(in: board)
+            if jsonOutput {
+                outputJSON([
+                    "ok": true,
+                    "board": ["id": board.id, "name": board.name],
+                    "milestones": milestones.map { milestoneToDict(board: board, milestone: $0) },
+                ])
+            } else if milestones.isEmpty {
+                print("No milestones found on board: \(board.name)")
+            } else {
+                print("Milestones for \(board.name):")
+                for milestone in milestones {
+                    let children = board.childCards(of: milestone.id)
+                    print("  [\(milestone.id)] \(milestone.title) — \(children.count) card(s)")
+                }
+            }
+
+        case "inspect":
+            guard let boardRef = args.first,
+                  let milestoneRef = parseFlag("--milestone", from: args) else {
+                printCLIError("Usage: cider-cli board milestone inspect <board> --milestone <id|display-key|title> [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let milestone = resolveMilestone(milestoneRef, in: board) else { return }
+            let children = board.childCards(of: milestone.id)
+            printMilestoneResult(boardID: board.id, boardName: board.name, milestone: milestone, children: children, action: "inspected")
+
+        case "attach-card", "attach":
+            guard let boardRef = args.first,
+                  let milestoneRef = parseFlag("--milestone", from: args),
+                  let cardRef = parseFlag("--card", from: args) else {
+                printCLIError("Usage: cider-cli board milestone attach-card <board> --milestone <id|display-key|title> --card <id|display-key> [--json]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let milestone = resolveMilestone(milestoneRef, in: board) else { return }
+            guard var card = board.card(matching: cardRef) else {
+                printCLIError("Card '\(cardRef)' not found in board '\(board.name)'")
+                return
+            }
+            guard card.id != milestone.id else {
+                printCLIError("A milestone cannot be attached to itself.")
+                return
+            }
+            guard board.canAssignParent(cardID: card.id, parentCardID: milestone.id) else {
+                printCLIError("Cannot attach card '\(card.id)' to milestone '\(milestone.id)'. The milestone must be in the same board and cannot create a cycle.")
+                return
+            }
+            let previousParentID = card.parentCardID
+            card.parentCardID = milestone.id
+            let text: String
+            if let previousParentID, previousParentID != milestone.id {
+                text = "Moved from parent/milestone \(previousParentID) to milestone \(milestone.title) [\(milestone.id)]."
+            } else if previousParentID == milestone.id {
+                text = "Confirmed card is attached to milestone \(milestone.title) [\(milestone.id)]."
+            } else {
+                text = "Attached to milestone \(milestone.title) [\(milestone.id)]."
+            }
+            card.notes = KanbanCardSectionParser.appendingHistory(
+                to: card.notes,
+                type: "decision",
+                text: text,
+                source: parseFlag("--source", from: args) ?? "cider-cli milestone"
+            )
+            card.markActivity("milestone_attached")
+            storage.updateCard(boardID: board.id, card: card)
+            refreshSecondBrainProjection(boardID: board.id, card: card)
+            let refreshedBoard = findBoard(board.id, in: storage) ?? board
+            let refreshedMilestone = refreshedBoard.card(matching: milestone.id) ?? milestone
+            let children = refreshedBoard.childCards(of: refreshedMilestone.id)
+            if jsonOutput {
+                outputJSON([
+                    "ok": true,
+                    "action": "attached",
+                    "board": ["id": refreshedBoard.id, "name": refreshedBoard.name],
+                    "milestone": milestoneToDict(board: refreshedBoard, milestone: refreshedMilestone),
+                    "card": milestoneAttachedCardToDict(card),
+                    "children": children.map(minimalCardToDict),
+                ])
+            } else {
+                print("Attached '\(card.title)' to milestone '\(refreshedMilestone.title)'")
+            }
+
+        default:
+            printCLIError("Unknown board milestone command: \(subcommand ?? "nil"). Commands: create, list, inspect, attach-card")
+        }
+    }
+
+    static func normalizedMilestoneTitle(_ title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.localizedCaseInsensitiveContains("milestone:") else { return trimmed }
+        return "Milestone: \(trimmed)"
+    }
+
+    static func normalizedTags(_ tags: [String]) -> [String] {
+        var seen: Set<String> = []
+        return tags.compactMap { raw in
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let key = trimmed.lowercased()
+            guard seen.insert(key).inserted else { return nil }
+            return trimmed
+        }
+    }
+
+    static func defaultMilestoneColumn(in board: KanbanBoard) -> KanbanColumn? {
+        board.columns.first { $0.name.localizedCaseInsensitiveCompare("Backlog") == .orderedSame }
+            ?? board.columns.first { !$0.isDoneColumn }
+            ?? board.columns.first
+    }
+
+    static func boardMilestoneCards(in board: KanbanBoard) -> [KanbanCard] {
+        board.allCards.filter(isMilestoneCard)
+    }
+
+    static func isMilestoneCard(_ card: KanbanCard) -> Bool {
+        card.tags.contains { $0.localizedCaseInsensitiveCompare("milestone-object") == .orderedSame }
+            || card.title.localizedCaseInsensitiveContains("milestone:")
+    }
+
+    static func resolveMilestone(_ ref: String, in board: KanbanBoard) -> KanbanCard? {
+        let milestones = boardMilestoneCards(in: board)
+        if let milestone = milestones.first(where: {
+            $0.id == ref
+                || board.displayKey(for: $0).localizedCaseInsensitiveCompare(ref) == .orderedSame
+                || $0.title.localizedCaseInsensitiveCompare(ref) == .orderedSame
+        }) {
+            return milestone
+        }
+        printCLIError("Milestone '\(ref)' not found in board '\(board.name)'")
+        return nil
+    }
+
+    static func printMilestoneResult(
+        boardID: String,
+        boardName: String,
+        milestone: KanbanCard,
+        children: [KanbanCard],
+        action: String
+    ) {
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "action": action,
+                "board": ["id": boardID, "name": boardName],
+                "milestone": milestoneToDict(boardID: boardID, milestone: milestone, children: children),
+                "children": children.map(minimalCardToDict),
+            ])
+        } else {
+            print("\(action.capitalized) milestone: \(milestone.title) [\(milestone.id)] — \(children.count) card(s)")
+        }
+    }
+
+    static func milestoneToDict(board: KanbanBoard, milestone: KanbanCard) -> [String: Any] {
+        milestoneToDict(boardID: board.id, milestone: milestone, children: board.childCards(of: milestone.id))
+    }
+
+    static func milestoneToDict(boardID: String, milestone: KanbanCard, children: [KanbanCard]) -> [String: Any] {
+        let doneCount = children.filter { $0.completed != nil }.count
+        var dict: [String: Any] = [
+            "id": milestone.id,
+            "boardID": boardID,
+            "title": milestone.title,
+            "tags": milestone.tags,
+            "childCount": children.count,
+            "completedChildCount": doneCount,
+            "progressFraction": children.isEmpty ? 0 : Double(doneCount) / Double(children.count),
+            "created": ISO8601DateFormatter().string(from: milestone.created),
+        ]
+        if let displayKey = milestone.displayKey { dict["displayKey"] = displayKey }
+        if let color = milestone.color { dict["color"] = color.rawValue }
+        if let notes = milestone.notes { dict["notes"] = notes }
+        if let updatedAt = milestone.updatedAt { dict["updatedAt"] = ISO8601DateFormatter().string(from: updatedAt) }
+        return dict
+    }
+
+    static func milestoneAttachedCardToDict(_ card: KanbanCard) -> [String: Any] {
+        var dict = minimalCardToDict(card)
+        if let parentCardID = card.parentCardID { dict["parentCardID"] = parentCardID }
+        if let notes = card.notes { dict["notes"] = notes }
+        return dict
     }
 
     static func refreshSecondBrainProjection(boardID: String, card: KanbanCard) {

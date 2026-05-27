@@ -2313,6 +2313,64 @@ struct SecondBrainFoundationTests {
         ])
     }
 
+    @Test("process CLI creates and attaches milestone cards safely")
+    func processCLICreatesAndAttachesMilestoneCardsSafely() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-milestone-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Milestone CLI Smoke"], vaultURL: vaultURL)
+
+        let created = try jsonObject(from: runCLI([
+            "board", "milestone", "create", "Milestone CLI Smoke",
+            "--title", "Project Board UX MVP",
+            "--description", "Make Cider's project board calm, filterable, and controllable.",
+            "--json",
+        ], vaultURL: vaultURL))
+        #expect(created["ok"] as? Bool == true)
+        let milestone = try #require(created["milestone"] as? [String: Any])
+        let milestoneID = try #require(milestone["id"] as? String)
+        #expect(milestone["title"] as? String == "Milestone: Project Board UX MVP")
+        #expect((milestone["tags"] as? [String])?.contains("milestone") == true)
+        #expect((milestone["tags"] as? [String])?.contains("milestone-object") == true)
+        #expect(milestone["childCount"] as? Int == 0)
+
+        let list = try jsonObject(from: runCLI([
+            "board", "milestone", "list", "Milestone CLI Smoke",
+            "--json",
+        ], vaultURL: vaultURL))
+        let milestones = try #require(list["milestones"] as? [[String: Any]])
+        #expect(milestones.map { $0["id"] as? String }.contains(milestoneID))
+
+        let childOutput = try runCLI([
+            "board", "add-card", "Milestone CLI Smoke",
+            "--column", "Backlog",
+            "--title", "Add global Kanban display options popover",
+        ], vaultURL: vaultURL)
+        let childID = String(try #require(childOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let attached = try jsonObject(from: runCLI([
+            "board", "milestone", "attach-card", "Milestone CLI Smoke",
+            "--milestone", milestoneID,
+            "--card", childID,
+            "--json",
+        ], vaultURL: vaultURL))
+        #expect(attached["ok"] as? Bool == true)
+        let attachedCard = try #require(attached["card"] as? [String: Any])
+        #expect(attachedCard["parentCardID"] as? String == milestoneID)
+        #expect((attachedCard["notes"] as? String)?.contains("Attached to milestone") == true)
+
+        let inspected = try jsonObject(from: runCLI([
+            "board", "milestone", "inspect", "Milestone CLI Smoke",
+            "--milestone", milestoneID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let inspectedMilestone = try #require(inspected["milestone"] as? [String: Any])
+        #expect(inspectedMilestone["childCount"] as? Int == 1)
+        let children = try #require(inspected["children"] as? [[String: Any]])
+        #expect(children.map { $0["id"] as? String } == [childID])
+    }
+
     @Test("Kanban testing guide panel payload keeps QA steps portable")
     func kanbanTestingGuidePanelPayloadKeepsQAStepsPortable() {
         let dashboard = KanbanCardDashboardModel(

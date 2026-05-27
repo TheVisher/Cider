@@ -638,9 +638,8 @@ enum ProjectWorkspaceOverviewProvider {
     }
 
     private static func isExplicitMilestone(_ row: ProjectWorkspaceMilestoneRow) -> Bool {
-        row.tags.contains { $0.localizedCaseInsensitiveCompare("milestone") == .orderedSame }
+        row.tags.contains { $0.localizedCaseInsensitiveCompare("milestone-object") == .orderedSame }
             || row.title.localizedCaseInsensitiveContains("milestone:")
-            || row.title.localizedCaseInsensitiveContains("milestone ")
     }
 
     private static func milestoneDescription(for card: KanbanCard) -> String {
