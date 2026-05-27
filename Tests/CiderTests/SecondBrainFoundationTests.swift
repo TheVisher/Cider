@@ -1666,6 +1666,16 @@ struct SecondBrainFoundationTests {
         ], vaultURL: vaultURL)
         let childCardID = String(try #require(childOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
 
+        _ = try jsonObject(from: runCLI([
+            "board", "comment", "add", "Agent Workflow Smoke",
+            "--card", cardRef,
+            "--kind", "qa",
+            "--text", "Human QA note should be readable by any future agent.",
+            "--author", "Erik",
+            "--source", "cider-ui",
+            "--json",
+        ], vaultURL: vaultURL))
+
         let inspected = try jsonObject(from: runCLI([
             "board", "card", "inspect", "Agent Workflow Smoke",
             "--card", cardRef,
@@ -1673,6 +1683,15 @@ struct SecondBrainFoundationTests {
         ], vaultURL: vaultURL))
         let dashboard = try #require(inspected["dashboard"] as? [String: Any])
         #expect(dashboard["currentState"] as? String == "Created through process-level CLI smoke.")
+        let inspectedCard = try #require(inspected["card"] as? [String: Any])
+        #expect(inspectedCard["commentCount"] as? Int == 1)
+        let inspectedComments = try #require(inspectedCard["comments"] as? [[String: Any]])
+        #expect(inspectedComments.contains {
+            $0["kind"] as? String == "qa"
+                && $0["body"] as? String == "Human QA note should be readable by any future agent."
+                && $0["author"] as? String == "Erik"
+                && $0["source"] as? String == "cider-ui"
+        })
 
         let updated = try jsonObject(from: runCLI([
             "board", "section", "update", "Agent Workflow Smoke",
@@ -1787,6 +1806,14 @@ struct SecondBrainFoundationTests {
         #expect(unifiedItem["boardName"] as? String == "Agent Workflow Smoke")
         #expect(unifiedItem["columnName"] as? String == "Backlog")
         #expect(unifiedItem["relativePath"] as? String == "Agent Workflow Smoke/\(cardRef)")
+        #expect(unifiedItem["commentCount"] as? Int == 1)
+        let unifiedComments = try #require(unifiedItem["comments"] as? [[String: Any]])
+        #expect(unifiedComments.contains {
+            $0["kind"] as? String == "qa"
+                && $0["body"] as? String == "Human QA note should be readable by any future agent."
+                && $0["author"] as? String == "Erik"
+                && $0["source"] as? String == "cider-ui"
+        })
 
         let unifiedSections = try #require(unifiedCard["sections"] as? [[String: Any]])
         #expect(unifiedSections.contains { $0["sectionKey"] as? String == "current_state" })
