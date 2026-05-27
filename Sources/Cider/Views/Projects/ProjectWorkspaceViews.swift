@@ -812,7 +812,7 @@ struct ProjectReferencesView: View {
                 EmptyStateView(
                     icon: "photo.on.rectangle",
                     title: "No scoped references yet",
-                    subtitle: "Cider-related bookmarks, images, notes, files, and linked card references will appear here. Browse still has everything."
+                    subtitle: "Items placed in Projects/\(project.title)/Assets will appear here. Library and Browse still have everything else."
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

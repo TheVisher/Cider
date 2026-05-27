@@ -19,30 +19,22 @@ enum ProjectReferenceProvider {
     ) -> [ProjectReferenceItem] {
         let projectBoards = boards.filter { project.boardIDs.contains($0.id) }
         let linkedCounts = linkedReferenceCounts(in: projectBoards)
-        let terms = project.referenceSearchTerms
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let assetsPrefix = projectAssetPrefix(for: project)
 
         return items.compactMap { item -> ProjectReferenceItem? in
-            let ref = item.entityRef
-            let linkedCardCount = linkedCounts[ref.id] ?? 0
-            if linkedCardCount > 0 {
-                return ProjectReferenceItem(
-                    item: item,
-                    ref: ref,
-                    reason: "Linked to \(linkedCardCount) \(linkedCardCount == 1 ? "card" : "cards")",
-                    linkedCardCount: linkedCardCount,
-                    isLinkedToProjectCard: true
-                )
+            guard let relativePath = relativePath(for: item),
+                  isPath(relativePath, inFolder: assetsPrefix) else {
+                return nil
             }
 
-            guard let matchedTerm = terms.first(where: { matches($0, item: item) }) else { return nil }
+            let ref = item.entityRef
+            let linkedCardCount = linkedCounts[ref.id] ?? 0
             return ProjectReferenceItem(
                 item: item,
                 ref: ref,
-                reason: "Matches \(displayTerm(matchedTerm))",
-                linkedCardCount: 0,
-                isLinkedToProjectCard: false
+                reason: assetsPrefix,
+                linkedCardCount: linkedCardCount,
+                isLinkedToProjectCard: linkedCardCount > 0
             )
         }
         .sorted { lhs, rhs in
@@ -71,54 +63,27 @@ enum ProjectReferenceProvider {
         return counts
     }
 
-    private static func matches(_ term: String, item: LibraryItemV2) -> Bool {
-        let normalizedTerm = normalizeSearch(term)
-        return searchableText(for: item).contains { field in
-            normalizeSearch(field).localizedStandardContains(normalizedTerm)
-        }
+    private static func projectAssetPrefix(for project: ProjectWorkspace) -> String {
+        "Projects/\(project.title)/Assets"
     }
 
-    private static func searchableText(for item: LibraryItemV2) -> [String] {
+    private static func relativePath(for item: LibraryItemV2) -> String? {
         switch item {
         case .bookmark(let bookmark):
-            var fields = [bookmark.title, bookmark.urlString, bookmark.notes, bookmark.relativePath ?? ""]
-            fields.append(contentsOf: bookmark.tags)
-            if let ocr = bookmark.ocrText { fields.append(ocr) }
-            return fields
+            bookmark.relativePath
         case .note(let note):
-            return [note.title, note.content, note.summary ?? "", note.relativePath] + note.tags
-        case .dateCard(let dateCard):
-            return [dateCard.title, dateCard.details, dateCard.location]
-        case .contact(let contact):
-            return [contact.displayName, contact.relationshipLabel, contact.notes]
-        case .todo(let todo):
-            return [todo.title, todo.details] + todo.checklist.map(\.title)
+            note.relativePath
         case .vaultFile(let file):
-            var fields = [file.filename, file.displayTitle, file.relativePath, file.notes]
-            fields.append(contentsOf: file.tags)
-            if let ocr = file.ocrText { fields.append(ocr) }
-            return fields
+            file.relativePath
+        case .dateCard, .contact, .todo:
+            nil
         }
     }
 
-    private static func displayTerm(_ term: String) -> String {
-        term
-            .split(separator: " ")
-            .map { word in
-                if word.localizedCaseInsensitiveCompare("ios") == .orderedSame {
-                    return "iOS"
-                }
-                guard let first = word.first else { return "" }
-                return String(first).uppercased() + String(word.dropFirst())
-            }
-            .joined(separator: " ")
+    private static func isPath(_ path: String, inFolder folder: String) -> Bool {
+        path == folder || path.hasPrefix("\(folder)/")
     }
 
-    private static func normalizeSearch(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "_", with: " ")
-    }
 }
 
 struct ProjectWorkspaceOverviewModel: Equatable {
@@ -308,6 +273,7 @@ enum ProjectWorkspaceSurfaceProvider {
                 notes: notes,
                 allowedArtifactTypes: ["note"],
                 includeNilArtifactType: true,
+                requiredFolderName: "Notes",
                 artifactRelations: artifactRelations
             )
             let projectID = SecondBrainProjectGraphService.normalizedProjectID(workspace.id)
@@ -319,8 +285,9 @@ enum ProjectWorkspaceSurfaceProvider {
             rows = projectArtifactRows(
                 for: workspace,
                 notes: notes,
-                allowedArtifactTypes: ["plan", "handoff"],
+                allowedArtifactTypes: ["plan"],
                 includeNilArtifactType: false,
+                requiredFolderName: "Plans",
                 artifactRelations: artifactRelations
             )
             logger.info("Project plans/handoffs surface model workspace=\(workspace.id, privacy: .public) renderedArtifacts=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
@@ -330,6 +297,7 @@ enum ProjectWorkspaceSurfaceProvider {
                 notes: notes,
                 allowedArtifactTypes: ["decision"],
                 includeNilArtifactType: false,
+                requiredFolderName: "Decisions",
                 artifactRelations: artifactRelations
             )
             logger.info("Project decisions surface model workspace=\(workspace.id, privacy: .public) renderedArtifacts=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
@@ -339,6 +307,7 @@ enum ProjectWorkspaceSurfaceProvider {
                 notes: notes,
                 allowedArtifactTypes: ["qa", "audit"],
                 includeNilArtifactType: false,
+                requiredFolderName: "QA",
                 artifactRelations: artifactRelations
             )
             logger.info("Project QA/Audits surface model workspace=\(workspace.id, privacy: .public) renderedArtifacts=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
@@ -362,6 +331,7 @@ enum ProjectWorkspaceSurfaceProvider {
         notes: [Note],
         allowedArtifactTypes: Set<String>,
         includeNilArtifactType: Bool,
+        requiredFolderName: String? = nil,
         artifactRelations: [SecondBrainRelation]
     ) -> [ProjectWorkspaceNoteRow] {
         let projectID = SecondBrainProjectGraphService.normalizedProjectID(workspace.id)
@@ -370,6 +340,12 @@ enum ProjectWorkspaceSurfaceProvider {
             .filter { note in
                 guard SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID else {
                     return false
+                }
+                if let requiredFolderName {
+                    let folder = "Projects/\(workspace.title)/\(requiredFolderName)"
+                    guard note.relativePath == folder || note.relativePath.hasPrefix("\(folder)/") else {
+                        return false
+                    }
                 }
                 guard let artifactType = note.artifactType?.localizedLowercase else {
                     return includeNilArtifactType

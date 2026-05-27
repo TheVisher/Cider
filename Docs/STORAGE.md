@@ -99,7 +99,7 @@ Project work surfaces use vault folders for user-visible Markdown and reference 
 - `Projects/<Project>/QA/` stores project audit outputs and QA reports until actionable findings are promoted into cleanup milestones/cards.
 - `Projects/<Project>/Assets/` stores project reference material such as screenshots, inspiration, app links, and local files.
 
-These folders are Cider workspace artifacts, not repo docs. Completed plans and QA reports should be archived, marked extracted, or deleted after their durable decisions and active work have moved into core docs and Kanban cards.
+These folders are Cider workspace artifacts, not repo docs. Project tabs should show artifacts deliberately placed in their matching project folder or represented by matching project artifact metadata; they must not silently mine the Library for fuzzy text matches. Moving a Library item into a project should preserve the item identity and backlinks while changing its placement. Completed plans and QA reports should be archived, marked extracted, or deleted after their durable decisions and active work have moved into core docs and Kanban cards.
 
 Routing rules:
 

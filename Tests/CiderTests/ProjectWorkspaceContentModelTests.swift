@@ -10,9 +10,9 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(ProjectWorkspaceSurfaceDisplayMode.grid.systemImage, "square.grid.2x2")
     }
 
-    func testProjectReferencesIncludeLinkedAndTextMatchedItemsOnly() {
+    func testProjectReferencesIncludeProjectAssetFolderItemsOnly() {
         let linkedID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
-        let matchedID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let placedID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
         let unrelatedID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
         let linkedRef = LibraryEntityRef(type: .bookmark, entityID: linkedID)
         let project = ProjectWorkspace(
@@ -40,19 +40,24 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         ]
         let items: [LibraryItemV2] = [
             .bookmark(Bookmark(id: linkedID, title: "Linear inspiration", urlString: "https://linear.app")),
-            .note(Note(id: matchedID, title: "Cider sidebar notes", content: "Reference IA")),
+            .bookmark(Bookmark(
+                id: placedID,
+                title: "Cider design inspiration",
+                urlString: "https://example.com/inspiration",
+                relativePath: "Projects/Cider/Assets/Cider design inspiration.webloc"
+            )),
             .bookmark(Bookmark(id: unrelatedID, title: "Garden planning", urlString: "https://example.com/garden"))
         ]
 
         let references = ProjectReferenceProvider.references(for: project, items: items, boards: boards)
 
-        XCTAssertEqual(references.map(\.item.title), ["Linear inspiration", "Cider sidebar notes"])
-        XCTAssertEqual(references.first?.linkedCardCount, 1)
-        XCTAssertTrue(references.first?.isLinkedToProjectCard == true)
-        XCTAssertEqual(references.first?.reason, "Linked to 1 card")
+        XCTAssertEqual(references.map(\.item.title), ["Cider design inspiration"])
+        XCTAssertEqual(references.first?.linkedCardCount, 0)
+        XCTAssertFalse(references.first?.isLinkedToProjectCard == true)
+        XCTAssertEqual(references.first?.reason, "Projects/Cider/Assets")
     }
 
-    func testProjectReferencesSearchFilePathsTagsAndBookmarkURLs() {
+    func testProjectReferencesIgnoreLibrarySearchTermMatches() {
         let fileID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
         let bookmarkID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
         let project = ProjectWorkspace(
@@ -67,7 +72,7 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
             .vaultFile(VaultFile(
                 id: fileID,
                 filename: "dashboard.png",
-                relativePath: "Projects/Cider iOS/Screenshots/dashboard.png",
+                relativePath: "Projects/Cider iOS/Assets/dashboard.png",
                 fileType: .image,
                 fileSize: 128,
                 createdAt: Date(timeIntervalSince1970: 10),
@@ -84,8 +89,8 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
 
         let references = ProjectReferenceProvider.references(for: project, items: items, boards: [])
 
-        XCTAssertEqual(references.map(\.item.title), ["Mobile navigation pattern", "dashboard.png"])
-        XCTAssertEqual(references.map(\.reason), ["Matches Cider Mobile", "Matches Cider iOS"])
+        XCTAssertEqual(references.map(\.item.title), ["dashboard.png"])
+        XCTAssertEqual(references.map(\.reason), ["Projects/Cider iOS/Assets"])
     }
 
     func testProjectOverviewSummarizesScopedBoardsAndHomeCommandCenter() {
@@ -328,7 +333,7 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(model.notes.first?.owner, SecondBrainOwnerRef(ownerType: "note", ownerID: matchingID.uuidString))
     }
 
-    func testProjectPlansHandoffsSurfaceShowsPlansAndHandoffs() {
+    func testProjectPlansSurfaceShowsDedicatedPlansOnly() {
         let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
         let ciderWorkspace = catalog.workspace(id: "cider")!
         let planID = UUID(uuidString: "77777777-7777-7777-7777-777777777777")!
@@ -370,9 +375,8 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
             notes: notes
         )
 
-        XCTAssertEqual(model.notes.map(\.id), [handoffID, planID])
+        XCTAssertEqual(model.notes.map(\.id), [planID])
         XCTAssertEqual(model.notes.map(\.path), [
-            "Projects/Cider/Handoffs/Cody final report.md",
             "Projects/Cider/Plans/Relationship graph plan.md"
         ])
     }
@@ -380,34 +384,34 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
     func testProjectPlansHandoffsSurfaceSummarizesLinkedCardsAndAgents() {
         let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
         let ciderWorkspace = catalog.workspace(id: "cider")!
-        let handoffID = UUID(uuidString: "88888888-8888-8888-8888-888888888888")!
-        let handoff = Note(
-            id: handoffID,
-            title: "Cider handoff thread",
+        let planID = UUID(uuidString: "88888888-8888-8888-8888-888888888888")!
+        let plan = Note(
+            id: planID,
+            title: "Cider implementation plan",
             content: "## Hermes Spec\nFull spec.\n\n## Cody Implementation\nFull report.",
             modifiedAt: Date(timeIntervalSince1970: 5_000),
-            relativePath: "Projects/Cider/Handoffs/Cider handoff thread.md",
+            relativePath: "Projects/Cider/Plans/Cider implementation plan.md",
             projectID: "cider",
-            artifactType: "handoff"
+            artifactType: "plan"
         )
-        let handoffOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: handoffID.uuidString)
+        let planOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: planID.uuidString)
         let cardOwner = SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "2afee0/2c0a04")
         let relations = [
             SecondBrainRelation(
-                sourceOwner: handoffOwner,
+                sourceOwner: planOwner,
                 targetOwner: cardOwner,
                 relationType: ProjectArtifactRelationType.documents,
-                evidence: "Handoff documents the Plans/Handoffs card.",
+                evidence: "Plan documents the Plans card.",
                 source: "note.project-artifact",
                 actor: "cider",
                 confidence: 1,
                 metadata: ["card_title": "Make Plans/Handoffs surface usable for agent evidence"]
             ),
             SecondBrainRelation(
-                sourceOwner: handoffOwner,
+                sourceOwner: planOwner,
                 targetOwner: cardOwner,
                 relationType: ProjectArtifactRelationType.validates,
-                evidence: "Cody verified the handoff flow.",
+                evidence: "Cody verified the plan flow.",
                 source: "note.project-artifact",
                 actor: "cody",
                 confidence: 1,
@@ -418,7 +422,7 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         let model = ProjectWorkspaceSurfaceProvider.model(
             for: ciderWorkspace,
             surface: .plansHandoffs,
-            notes: [handoff],
+            notes: [plan],
             artifactRelations: relations
         )
 
