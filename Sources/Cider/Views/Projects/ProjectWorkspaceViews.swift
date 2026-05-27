@@ -5,6 +5,8 @@ struct ProjectWorkspaceOverviewView: View {
     let model: ProjectWorkspaceOverviewModel
     var onOpenProject: (ProjectWorkspaceProjectRow) -> Void
     var onOpenBoard: (String) -> Void
+    var onOpenMilestoneBoard: (ProjectWorkspaceMilestoneRow) -> Void = { _ in }
+    var onOpenMilestoneArtifact: (ProjectWorkspaceMilestoneArtifactLink) -> Void = { _ in }
     var onCreateBoard: () -> Void
 
     @State private var selectedCoreDoc: ProjectWorkspaceCoreDocRow?
@@ -182,48 +184,107 @@ struct ProjectWorkspaceOverviewView: View {
 
     private var milestoneSection: some View {
         overviewSection("Milestones") {
-            LazyVStack(spacing: Spacing.xs) {
+            LazyVStack(spacing: Spacing.sm) {
                 ForEach(model.milestoneRows) { row in
-                    Button {
-                        onOpenBoard(row.boardID)
-                    } label: {
-                        HStack(spacing: Spacing.sm) {
-                            Image(systemName: "scope")
-                                .font(CiderFont.bodySemibold)
-                                .foregroundColor(CiderColors.tertiary)
-                                .frame(width: 24)
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: Spacing.xs) {
-                                    Text(row.cardDisplayKey)
-                                        .font(CiderFont.captionSemibold)
-                                        .foregroundColor(CiderColors.controlAccent)
-                                    Text(row.status)
-                                        .font(CiderFont.caption)
-                                        .foregroundColor(CiderColors.secondary)
-                                    if let progressText = row.progressText {
-                                        Text(progressText)
-                                            .font(CiderFont.captionSemibold)
-                                            .foregroundColor(CiderColors.secondary)
-                                            .padding(.horizontal, Spacing.xs)
-                                            .padding(.vertical, 1)
-                                            .background(Capsule(style: .continuous).fill(CiderColors.surfaceInput))
-                                    }
-                                }
-                                Text(row.title)
-                                    .font(CiderFont.bodySemibold)
-                                    .foregroundColor(CiderColors.primary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
-                                .font(CiderFont.captionSemibold)
-                                .foregroundColor(CiderColors.tertiary)
-                        }
-                        .overviewRow()
-                    }
-                    .buttonStyle(.plain)
+                    milestoneRow(row)
                 }
             }
+        }
+    }
+
+    private func milestoneRow(_ row: ProjectWorkspaceMilestoneRow) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Image(systemName: "diamond")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.controlAccent)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack(spacing: Spacing.xs) {
+                        Text(row.cardDisplayKey)
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.controlAccent)
+                        Text(row.status)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.secondary)
+                        Text("\(row.childCount) \(row.childCount == 1 ? "card" : "cards")")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+
+                    Text(row.title.replacingOccurrences(of: "Milestone: ", with: ""))
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    if !row.description.isEmpty {
+                        Text(row.description)
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: Spacing.sm)
+
+                VStack(alignment: .trailing, spacing: Spacing.xs) {
+                    Text("\(row.completedChildCount)/\(row.childCount)")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Text("\(Int((row.progressFraction * 100).rounded()))%")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                .frame(width: 48, alignment: .trailing)
+            }
+
+            ProgressView(value: row.progressFraction)
+                .progressViewStyle(.linear)
+                .controlSize(.small)
+
+            HStack(spacing: Spacing.xs) {
+                ForEach(row.artifactLinks.prefix(3)) { link in
+                    Button {
+                        onOpenMilestoneArtifact(link)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: link.artifactType.localizedLowercase == "plan" ? "doc.text" : "checklist")
+                                .font(CiderFont.micro)
+                            Text(link.displayType)
+                                .font(CiderFont.captionSemibold)
+                        }
+                        .foregroundColor(CiderColors.secondary)
+                        .padding(.horizontal, Spacing.xs)
+                        .padding(.vertical, 2)
+                        .background(Capsule(style: .continuous).fill(CiderColors.surfaceInput))
+                    }
+                    .buttonStyle(.plain)
+                    .help(link.title)
+                }
+
+                Spacer(minLength: 0)
+
+                Button {
+                    onOpenMilestoneBoard(row)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Show cards")
+                            .font(CiderFont.captionSemibold)
+                        Image(systemName: "arrow.right")
+                            .font(CiderFont.micro)
+                    }
+                    .foregroundColor(CiderColors.controlAccent)
+                }
+                .buttonStyle(.plain)
+                .help("Open \(row.boardName) filtered to this milestone")
+            }
+
+        }
+        .overviewRow()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onOpenMilestoneBoard(row)
         }
     }
 

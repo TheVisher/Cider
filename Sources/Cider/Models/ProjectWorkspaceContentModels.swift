@@ -174,12 +174,44 @@ struct ProjectWorkspaceMilestoneRow: Identifiable, Equatable {
     let cardID: String
     let cardDisplayKey: String
     let title: String
+    let tags: [String]
+    let description: String
     let status: String
     let progressText: String?
+    let completedChildCount: Int
     let childCount: Int
+    let progressFraction: Double
+    let artifactLinks: [ProjectWorkspaceMilestoneArtifactLink]
     let updatedAt: Date
 
     var id: String { "\(boardID):\(cardID)" }
+}
+
+struct ProjectWorkspaceMilestoneArtifactLink: Identifiable, Equatable {
+    let owner: SecondBrainOwnerRef
+    let title: String
+    let artifactType: String
+    let relationType: String
+
+    var id: String { "\(owner.canonicalRef):\(relationType)" }
+
+    var displayType: String {
+        switch artifactType.localizedLowercase {
+        case "qa", "audit":
+            return "QA"
+        case "plan":
+            return "Plan"
+        case "decision":
+            return "Decision"
+        default:
+            return artifactType.split(separator: "-")
+                .map { part in
+                    guard let first = part.first else { return "" }
+                    return first.uppercased() + part.dropFirst()
+                }
+                .joined(separator: " ")
+        }
+    }
 }
 
 struct ProjectWorkspaceNoteRow: Identifiable, Equatable {
@@ -451,7 +483,7 @@ enum ProjectWorkspaceOverviewProvider {
             projectRows: projectRows,
             resources: resources,
             latestUpdate: latestUpdate(from: workspaceBoards),
-            milestoneRows: milestoneRows(from: workspaceBoards),
+            milestoneRows: milestoneRows(from: workspaceBoards, artifactRelations: artifactRelations),
             recentArtifacts: Array(coreDocs.prefix(9)),
             artifacts: artifacts,
             boardCreationActionTitle: workspace.kind == .project ? "New Board" : nil
@@ -554,7 +586,11 @@ enum ProjectWorkspaceOverviewProvider {
         }.first
     }
 
-    private static func milestoneRows(from boards: [KanbanBoard]) -> [ProjectWorkspaceMilestoneRow] {
+    private static func milestoneRows(
+        from boards: [KanbanBoard],
+        artifactRelations: [SecondBrainRelation]
+    ) -> [ProjectWorkspaceMilestoneRow] {
+        let artifactLinksByCardRef = milestoneArtifactLinksByCardRef(from: artifactRelations)
         let candidates = boards.flatMap { board in
             board.columns.flatMap { column in
                 column.cards.compactMap { card -> (row: ProjectWorkspaceMilestoneRow, rank: Int)? in
@@ -573,9 +609,14 @@ enum ProjectWorkspaceOverviewProvider {
                             cardID: card.id,
                             cardDisplayKey: board.displayKey(for: card),
                             title: card.title,
+                            tags: card.tags,
+                            description: milestoneDescription(for: card),
                             status: column.name,
                             progressText: summary.progressText,
+                            completedChildCount: summary.doneCount,
                             childCount: summary.totalCount,
+                            progressFraction: Double(summary.doneCount) / Double(summary.totalCount),
+                            artifactLinks: artifactLinksByCardRef["\(board.id)/\(card.id)"] ?? [],
                             updatedAt: latestActivityAt
                         ),
                         statusRank(for: column)
@@ -584,13 +625,93 @@ enum ProjectWorkspaceOverviewProvider {
             }
         }
 
-        return candidates.sorted { lhs, rhs in
+        let explicitMilestones = candidates.filter { isExplicitMilestone($0.row) }
+        let source = explicitMilestones.isEmpty ? candidates : explicitMilestones
+
+        return source.sorted { lhs, rhs in
             if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
             if lhs.row.updatedAt != rhs.row.updatedAt { return lhs.row.updatedAt > rhs.row.updatedAt }
             return lhs.row.id < rhs.row.id
         }
         .prefix(5)
         .map(\.row)
+    }
+
+    private static func isExplicitMilestone(_ row: ProjectWorkspaceMilestoneRow) -> Bool {
+        row.tags.contains { $0.localizedCaseInsensitiveCompare("milestone") == .orderedSame }
+            || row.title.localizedCaseInsensitiveContains("milestone:")
+            || row.title.localizedCaseInsensitiveContains("milestone ")
+    }
+
+    private static func milestoneDescription(for card: KanbanCard) -> String {
+        let text = (card.notes ?? card.aiSummary ?? "")
+            .replacingOccurrences(of: "\\n", with: "\n")
+        let sections = KanbanCardSectionParser.sections(from: text)
+        let preferredKeys = ["goal", "problem", "mvp_scope", "scope"]
+        for key in preferredKeys {
+            if let section = sections.first(where: { $0.key == key }) {
+                let cleaned = cleanedMilestoneDescription(section.body)
+                if !cleaned.isEmpty { return cleaned }
+            }
+        }
+        return cleanedMilestoneDescription(text)
+    }
+
+    private static func cleanedMilestoneDescription(_ raw: String) -> String {
+        let lines = raw
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { line in
+                !line.isEmpty
+                    && !line.hasPrefix("#")
+                    && !line.hasPrefix("-")
+                    && !line.localizedCaseInsensitiveContains("non-goals")
+                    && !line.localizedCaseInsensitiveContains("acceptance criteria")
+            }
+        let joined = lines.joined(separator: " ")
+        return String(joined.prefix(220)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func milestoneArtifactLinksByCardRef(
+        from relations: [SecondBrainRelation]
+    ) -> [String: [ProjectWorkspaceMilestoneArtifactLink]] {
+        var linksByCardRef: [String: [ProjectWorkspaceMilestoneArtifactLink]] = [:]
+        for relation in relations {
+            let pair: (note: SecondBrainOwnerRef, card: SecondBrainOwnerRef)?
+            if relation.sourceOwner.ownerType == "note", relation.targetOwner.ownerType == "kanban_card" {
+                pair = (relation.sourceOwner, relation.targetOwner)
+            } else if relation.targetOwner.ownerType == "note", relation.sourceOwner.ownerType == "kanban_card" {
+                pair = (relation.targetOwner, relation.sourceOwner)
+            } else {
+                pair = nil
+            }
+            guard let pair else { continue }
+
+            let artifactType = relation.metadata["artifactType"] ?? relation.metadata["artifact_type"] ?? "note"
+            guard ["plan", "qa", "audit", "decision"].contains(artifactType.localizedLowercase) else {
+                continue
+            }
+            let link = ProjectWorkspaceMilestoneArtifactLink(
+                owner: pair.note,
+                title: artifactTitle(for: pair.note, relation: relation),
+                artifactType: artifactType,
+                relationType: relation.relationType
+            )
+            linksByCardRef[pair.card.ownerID, default: []].append(link)
+        }
+
+        return linksByCardRef.mapValues { links in
+            var seen: Set<String> = []
+            return links.filter { link in
+                seen.insert(link.id).inserted
+            }
+            .sorted { lhs, rhs in
+                if lhs.artifactType != rhs.artifactType {
+                    return lhs.artifactType < rhs.artifactType
+                }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+        }
     }
 
     private static func statusRank(for column: KanbanColumn) -> Int {

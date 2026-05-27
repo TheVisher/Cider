@@ -155,6 +155,12 @@ extension CiderPanelView {
                         onOpenBoard: { boardID in
                             openProjectBoard(boardID)
                         },
+                        onOpenMilestoneBoard: { milestone in
+                            openProjectBoard(milestone.boardID, milestoneCardID: milestone.cardID)
+                        },
+                        onOpenMilestoneArtifact: { link in
+                            openMilestoneArtifact(link)
+                        },
                         onCreateBoard: {
                         }
                     )
@@ -188,6 +194,12 @@ extension CiderPanelView {
                             onOpenProject: { _ in },
                             onOpenBoard: { boardID in
                                 openProjectBoard(boardID)
+                            },
+                            onOpenMilestoneBoard: { milestone in
+                                openProjectBoard(milestone.boardID, milestoneCardID: milestone.cardID)
+                            },
+                            onOpenMilestoneArtifact: { link in
+                                openMilestoneArtifact(link)
                             },
                             onCreateBoard: {
                                 createProjectBoard(in: project)
@@ -349,6 +361,7 @@ extension CiderPanelView {
                     if case .kanban(let boardID) = savedView.kind {
                         KanbanBoardView(
                             boardID: boardID,
+                            milestoneFilterCardID: kanbanMilestoneFilterByBoardID[boardID],
                             projectHeaderTabs: projectHeaderTabs(for: boardID),
                             onSelectProjectHeaderTab: selectProjectHeaderTab,
                             onOpenCard: openKanbanCardDetail
@@ -774,11 +787,24 @@ extension CiderPanelView {
         }
     }
 
-    func openProjectBoard(_ boardID: String) {
+    func openProjectBoard(_ boardID: String, milestoneCardID: String? = nil) {
         guard let board = kanbanStorage.boards.first(where: { $0.id == boardID }) else { return }
+        if let milestoneCardID {
+            kanbanMilestoneFilterByBoardID[boardID] = milestoneCardID
+        } else {
+            kanbanMilestoneFilterByBoardID[boardID] = nil
+        }
         let savedView = savedViewStorage.ensureKanbanView(name: board.name, boardID: board.id)
         selectedFolderID = nil
         selectedTab = .savedView(id: savedView.id, name: savedView.name)
+    }
+
+    func openMilestoneArtifact(_ link: ProjectWorkspaceMilestoneArtifactLink) {
+        guard link.owner.ownerType == "note",
+              let noteID = UUID(uuidString: link.owner.ownerID),
+              let note = notesStorage.notes.first(where: { $0.id == noteID })
+        else { return }
+        openNoteDetail(note)
     }
 
     func projectHeaderTabs(for boardID: String) -> [ProjectWorkspaceLocalTab] {

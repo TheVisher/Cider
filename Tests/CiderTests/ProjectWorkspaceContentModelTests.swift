@@ -187,6 +187,7 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
                         id: "parent",
                         title: "Project workspace MVP",
                         displayKey: "CID-80",
+                        tags: ["milestone"],
                         historyEntries: [
                             KanbanCardHistoryEntry(
                                 id: "older",
@@ -256,6 +257,87 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(model.milestoneRows.map(\.cardID), ["parent"])
         XCTAssertEqual(model.milestoneRows.first?.progressText, "1/2")
         XCTAssertEqual(model.milestoneRows.first?.status, "In Progress")
+        XCTAssertEqual(model.milestoneRows.first?.completedChildCount, 1)
+        XCTAssertEqual(model.milestoneRows.first?.childCount, 2)
+        XCTAssertEqual(model.milestoneRows.first?.progressFraction, 0.5)
+    }
+
+    func testProjectOverviewMilestonesPreferExplicitMilestoneCardsAndLinkArtifacts() {
+        let planID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let qaID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "queued", name: "Queued", cards: [
+                    KanbanCard(
+                        id: "milestone",
+                        title: "Milestone: One Board Per Project",
+                        notes: "Goal:\nMake Cider use one canonical board with milestones and drilldown filters.",
+                        displayKey: "CID-201",
+                        tags: ["milestone"]
+                    ),
+                    KanbanCard(
+                        id: "regular-parent",
+                        title: "Regular parent card"
+                    ),
+                    KanbanCard(
+                        id: "active-child",
+                        title: "Active milestone child",
+                        parentCardID: "milestone"
+                    ),
+                    KanbanCard(
+                        id: "regular-child",
+                        title: "Regular child",
+                        parentCardID: "regular-parent"
+                    )
+                ]),
+                KanbanColumn(id: "done", name: "Done", isDoneColumn: true, cards: [
+                    KanbanCard(
+                        id: "done-child",
+                        title: "Done milestone child",
+                        parentCardID: "milestone"
+                    )
+                ])
+            ]
+        )
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [board])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+        let planRelation = SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: planID.uuidString),
+            targetOwner: SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "2afee0/milestone"),
+            relationType: "documents",
+            evidence: "Plan documents milestone.",
+            source: "test",
+            actor: "codex",
+            confidence: 1,
+            metadata: ["artifactType": "plan", "title": "One Board Per Project Plan"]
+        )
+        let qaRelation = SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: qaID.uuidString),
+            targetOwner: SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "2afee0/milestone"),
+            relationType: "validates",
+            evidence: "QA validates milestone.",
+            source: "test",
+            actor: "codex",
+            confidence: 1,
+            metadata: ["artifactType": "qa", "title": "One Board Per Project QA"]
+        )
+
+        let model = ProjectWorkspaceOverviewProvider.model(
+            for: ciderWorkspace,
+            catalog: catalog,
+            boards: [board],
+            artifactRelations: [planRelation, qaRelation]
+        )
+
+        XCTAssertEqual(model.milestoneRows.map(\.cardID), ["milestone"])
+        XCTAssertEqual(model.milestoneRows.first?.description, "Make Cider use one canonical board with milestones and drilldown filters.")
+        XCTAssertEqual(model.milestoneRows.first?.progressText, "1/2")
+        XCTAssertEqual(model.milestoneRows.first?.completedChildCount, 1)
+        XCTAssertEqual(model.milestoneRows.first?.childCount, 2)
+        XCTAssertEqual(model.milestoneRows.first?.artifactLinks.map(\.displayType), ["Plan", "QA"])
+        XCTAssertEqual(model.milestoneRows.first?.artifactLinks.map(\.title), ["One Board Per Project Plan", "One Board Per Project QA"])
     }
 
     private func makeCoreDocsRoot() -> URL {

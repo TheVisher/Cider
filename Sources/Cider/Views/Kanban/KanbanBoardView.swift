@@ -3,6 +3,7 @@ import SwiftUI
 /// Renders a Kanban board as horizontal scrolling columns with draggable cards.
 struct KanbanBoardView: View {
     let boardID: String
+    var milestoneFilterCardID: String?
     var projectHeaderTabs: [ProjectWorkspaceLocalTab] = []
     var onSelectProjectHeaderTab: (ProjectWorkspaceLocalTabKind) -> Void = { _ in }
     var onOpenCard: (String, String) -> Void = { _, _ in }
@@ -24,6 +25,7 @@ struct KanbanBoardView: View {
     @State private var tagEditorDraft = ""
     @State private var selectedFeatureDomainFilter: String?
     @State private var selectedProjectBoardViewID = "all"
+    @State private var selectedMilestoneFilterCardID: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let cardFaceSuggestedTags = [
@@ -54,9 +56,10 @@ struct KanbanBoardView: View {
             viewFilteredCards,
             matchingFeatureDomainFilter: selectedFeatureDomainFilter
         )
-        guard !searchText.isEmpty else { return featureFilteredCards }
+        let milestoneFilteredCards = milestoneFilteredCards(featureFilteredCards, board: board)
+        guard !searchText.isEmpty else { return milestoneFilteredCards }
         let query = searchText.lowercased()
-        return featureFilteredCards.filter { card in
+        return milestoneFilteredCards.filter { card in
             card.title.localizedStandardContains(query) ||
             board.displayKey(for: card).localizedStandardContains(query) ||
             card.id.localizedStandardContains(query) ||
@@ -77,9 +80,35 @@ struct KanbanBoardView: View {
                 projectLaneScrollIndexByID.removeAll()
                 selectedFeatureDomainFilter = nil
                 selectedProjectBoardViewID = "all"
+                selectedMilestoneFilterCardID = milestoneFilterCardID
+            }
+            .onAppear {
+                selectedMilestoneFilterCardID = milestoneFilterCardID
+            }
+            .onChange(of: milestoneFilterCardID) { _, newValue in
+                selectedMilestoneFilterCardID = newValue
             }
         } else {
             emptyState
+        }
+    }
+
+    private func milestoneFilteredCards(_ cards: [KanbanCard], board: KanbanBoard) -> [KanbanCard] {
+        guard let milestoneID = selectedMilestoneFilterCardID,
+              board.allCards.contains(where: { $0.id == milestoneID }) else {
+            return cards
+        }
+        let cardsByParentID = Dictionary(grouping: board.allCards) { $0.parentCardID ?? "" }
+        var includedCardIDs: Set<String> = [milestoneID]
+        var pendingCardIDs = [milestoneID]
+        while let parentID = pendingCardIDs.popLast() {
+            for child in cardsByParentID[parentID, default: []] where !includedCardIDs.contains(child.id) {
+                includedCardIDs.insert(child.id)
+                pendingCardIDs.append(child.id)
+            }
+        }
+        return cards.filter { card in
+            includedCardIDs.contains(card.id)
         }
     }
 
@@ -349,8 +378,14 @@ struct KanbanBoardView: View {
     ) -> some View {
         let hiddenColumns = KanbanBoardLayout.hiddenColumns(in: board)
         let viewFilters = KanbanBoardLayout.projectBoardViewFilters(for: board)
+        let milestoneFilterCard = selectedMilestoneFilterCardID.flatMap { milestoneID in
+            board.allCards.first { $0.id == milestoneID }
+        }
 
         return VStack(alignment: .leading, spacing: Spacing.sm) {
+            if let milestoneFilterCard {
+                milestoneFilterBanner(milestoneFilterCard, board: board)
+            }
             projectBoardViewPills(viewFilters, hiddenColumnCount: hiddenColumns.count)
 
             GeometryReader { geometry in
@@ -523,6 +558,40 @@ struct KanbanBoardView: View {
                 anchor: .leading
             )
         }
+    }
+
+    private func milestoneFilterBanner(_ milestone: KanbanCard, board: KanbanBoard) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: "diamond")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.controlAccent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(milestone.title.replacingOccurrences(of: "Milestone: ", with: ""))
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+                if let summary = KanbanBoardLayout.childSummary(for: milestone.id, in: board) {
+                    Text("\(summary.progressText) · milestone filter")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+            Button {
+                selectedMilestoneFilterCardID = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .help("Clear milestone filter")
+        }
+        .padding(.vertical, Spacing.xs)
+        .padding(.horizontal, Spacing.sm)
+        .background(RoundedRectangle(cornerRadius: 8).fill(CiderColors.surfaceSubtle))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(CiderColors.borderSubtle, lineWidth: Spacing.hairline))
     }
 
     private func projectLaneScrollControls(
