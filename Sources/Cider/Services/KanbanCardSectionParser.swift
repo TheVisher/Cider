@@ -10,7 +10,7 @@ struct KanbanCardSection: Identifiable, Equatable {
 
 enum KanbanCardSectionParser {
     static func sections(from notes: String?) -> [KanbanCardSection] {
-        let text = notes ?? ""
+        let text = normalizedLineBreaks(in: notes ?? "")
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
 
         let lines = text.components(separatedBy: .newlines)
@@ -74,7 +74,7 @@ enum KanbanCardSectionParser {
     }
 
     static func updatingSection(in notes: String?, title: String, body: String) -> String {
-        let original = notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let original = normalizedLineBreaks(in: notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let targetKey = normalizedKey(for: title)
         let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -219,7 +219,7 @@ enum KanbanCardSectionParser {
     }
 
     private static func sectionRange(in text: String, matching targetKey: String) -> SectionRange? {
-        let lines = text.components(separatedBy: .newlines)
+        let lines = normalizedLineBreaks(in: text).components(separatedBy: .newlines)
         var ranges: [SectionRange] = []
         var current: (title: String, key: String, startLine: Int, kind: SectionRangeKind)?
         var isInsideFence = false
@@ -256,6 +256,13 @@ enum KanbanCardSectionParser {
         return ranges.first { range in
             normalizedKey(for: range.title) == targetKey
         }
+    }
+
+    private static func normalizedLineBreaks(in text: String) -> String {
+        text
+            .replacingOccurrences(of: "\\r\\n", with: "\n")
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\r", with: "\n")
     }
 
     private static func historySection(for rawType: String) -> (key: String, title: String)? {

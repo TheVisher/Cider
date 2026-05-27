@@ -1131,6 +1131,17 @@ struct SecondBrainFoundationTests {
         #expect(sections[2].body == "2026-05-14")
     }
 
+    @Test("Kanban parser normalizes escaped newline sequences from legacy card notes")
+    func kanbanParserNormalizesEscapedNewlineSequencesFromLegacyCardNotes() {
+        let notes = #"Problem:\nMilestones should render as readable text.\n\nGoal:\nDo not show literal escape characters."#
+
+        let sections = KanbanCardSectionParser.sections(from: notes)
+
+        #expect(sections.map(\.key) == ["problem", "goal"])
+        #expect(sections[0].body == "Milestones should render as readable text.")
+        #expect(sections[1].body == "Do not show literal escape characters.")
+    }
+
     @Test("Kanban parser keeps explicit handoff heading when body starts with status")
     func kanbanParserKeepsExplicitHandoffHeadingWhenBodyStartsWithStatus() {
         let notes = """
