@@ -10,8 +10,9 @@ Docs and Kanban have different jobs:
 - Kanban is Cider's active work surface: roadmap ideas, bugs, follow-up ideas, implementation tasks, testing tasks, QA evidence, code review findings, failed attempts, completed plan history, and handoff records.
 - Active docs should stay limited to the core docs listed in `Docs/INDEX.md`.
 - Promote important Kanban outcomes into core docs only when they become lasting product, architecture, UX, data-model, routing, QA, CLI, storage, or agent-behavior decisions.
-- Do not create stray Markdown docs for tasks. Use Kanban cards for specs, plans, notes, QA evidence, and handoffs unless the user explicitly asks for a standalone doc.
-- Plans/specs are temporary. When work is complete, harvest durable facts into the core docs, put implementation/test history on the Kanban card, then delete the plan/spec doc. Git history is the archive.
+- Do not create stray Markdown docs in the Cider repo for tasks. Use Kanban cards for implementation notes, test evidence, failed attempts, and handoffs unless the user explicitly asks for a standalone repo doc.
+- Project-scoped plan and QA/audit Markdown files belong in the Cider vault, not the repo: `~/CiderVault/Projects/<Project>/Plans/` and `~/CiderVault/Projects/<Project>/QA/`. These are visual Cider work surfaces for shaping ideas and audit findings before they become milestones/cards.
+- Plans/specs are temporary. When work is complete, harvest durable facts into the core docs, put implementation/test history on the Kanban card, then archive/delete the vault plan or QA artifact once its milestone/cards carry the work. Git history is the repo archive.
 - During the docs diet migration, process old Markdown files one by one: harvest durable facts into core docs, convert active work into Kanban cards if needed, then delete the old doc.
 - `Docs/AGENT.md` is the canonical detailed agent workflow for docs hygiene and Cider development.
 
@@ -28,6 +29,8 @@ For Cider development work, agents should use the boards in `~/CiderVault/.cider
 - Put implementation notes, test evidence, blockers, failed attempts, and follow-up context on the card instead of scattering one-off Markdown files.
 - When auditing old Roadmap/Bugs cards, move relevant Cider work into the dedicated project boards instead of deleting it; preserve old cards until their value is clear.
 - Use `Docs/QA.md` for reusable audit procedures and release/regression plans. Historical QA reports should be harvested into cards or `Docs/QA.md`, then deleted.
+- Use `Projects/<Project>/Plans/` for draft feature plans that are still being shaped. Once accepted, promote the plan into a milestone plus scoped Kanban cards linked back to the source plan, then mark the plan extracted, archived, or delete it.
+- Use `Projects/<Project>/QA/` for project audit outputs and QA reports. Once triaged, promote actionable findings into a cleanup milestone plus scoped Kanban cards, then mark/archive/delete the QA artifact after the cards hold the work.
 - When a Kanban card grows into multiple deliverables, create child cards linked to the parent instead of expanding one forever-card. Parent cards should summarize direction; child cards should carry scoped implementation notes, test evidence, commits, and status.
 - When splitting a parent/done card into child or follow-up cards, make each new card agent-ready instead of title-only. Include: Problem, Goal, MVP scope, non-goals/deferred scope, acceptance criteria, parent/source card or docs backlink, tags, priority, and a `created: 'YYYY-MM-DD'` field.
 - Create follow-up cards sequentially unless you are using a workflow with board file locking; avoid parallel YAML writes to the same board.

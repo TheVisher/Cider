@@ -22,8 +22,8 @@ enum ProjectWorkspaceSurface: String, CaseIterable, Codable, Hashable, Identifia
         case .notes: "Notes"
         case .decisions: "Decisions"
         case .assets: "Assets"
-        case .qaAudits: "QA/Audits"
-        case .plansHandoffs: "Plans/Handoffs"
+        case .qaAudits: "QA"
+        case .plansHandoffs: "Plans"
         }
     }
 
@@ -51,9 +51,9 @@ enum ProjectWorkspaceSurface: String, CaseIterable, Codable, Hashable, Identifia
         case .assets:
             "Screenshots, files, references, and design inspiration will collect here."
         case .qaAudits:
-            "QA evidence, audit results, and verification trails will collect here."
+            "Project audit results and QA reports collect here before they become cleanup milestones and cards."
         case .plansHandoffs:
-            "Implementation plans, agent handoffs, and commit traces will collect here."
+            "Draft feature plans collect here while ideas are shaped before milestone and card extraction."
         }
     }
 }

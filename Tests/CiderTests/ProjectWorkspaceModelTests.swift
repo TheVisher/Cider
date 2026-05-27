@@ -183,8 +183,8 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             "Notes",
             "Decisions",
             "Assets",
-            "QA/Audits",
-            "Plans/Handoffs"
+            "QA",
+            "Plans"
         ])
         XCTAssertEqual(cider.surfaces.first?.tabName, "Boards")
         XCTAssertTrue(catalog.home.surfaces.isEmpty)

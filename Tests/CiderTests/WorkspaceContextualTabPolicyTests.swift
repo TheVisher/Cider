@@ -89,7 +89,7 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
             "project-surface-cider-plans-handoffs"
         ])
         XCTAssertEqual(result.first?.displayName, "Overview")
-        XCTAssertEqual(result.last?.displayName, "Plans/Handoffs")
+        XCTAssertEqual(result.last?.displayName, "Plans")
     }
 
     func testProjectsHomeUsesProjectsDashboardWhenNoProjectIsSelected() {

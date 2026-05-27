@@ -227,17 +227,41 @@ extension CiderPanelView {
             case .projectSurface(let projectID, let surface, _):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
                     projectWorkspaceContent(for: project, selectedKind: .surface(surface)) {
-                        ProjectWorkspaceSurfaceView(
-                            model: ProjectWorkspaceSurfaceProvider.model(
-                                for: project,
-                                surface: surface,
-                                notes: notesStorage.notes,
-                                artifactRelations: ProjectWorkspaceSurfaceProvider.artifactRelations(for: notesStorage.notes)
-                            ),
-                            onOpenNote: { note in
-                                openNoteDetail(note)
-                            }
-                        )
+                        if surface == .assets {
+                            ProjectReferencesView(
+                                project: project,
+                                references: ProjectReferenceProvider.references(
+                                    for: project,
+                                    items: libraryViewModel.items,
+                                    boards: kanbanStorage.boards
+                                ),
+                                boards: kanbanStorage.boards,
+                                onOpenItem: { item in
+                                    openDashboardItem(item)
+                                },
+                                onOpenCard: { boardID, cardID in
+                                    openKanbanCardDetail(boardID: boardID, cardID: cardID)
+                                },
+                                onLinkReferenceToCard: { ref, boardID, cardID in
+                                    linkProjectReference(ref, toCardID: cardID, boardID: boardID)
+                                },
+                                onPromoteReference: { reference in
+                                    promoteProjectReference(reference, in: project)
+                                }
+                            )
+                        } else {
+                            ProjectWorkspaceSurfaceView(
+                                model: ProjectWorkspaceSurfaceProvider.model(
+                                    for: project,
+                                    surface: surface,
+                                    notes: notesStorage.notes,
+                                    artifactRelations: ProjectWorkspaceSurfaceProvider.artifactRelations(for: notesStorage.notes)
+                                ),
+                                onOpenNote: { note in
+                                    openNoteDetail(note)
+                                }
+                            )
+                        }
                     }
                 } else {
                     EmptyStateView(
@@ -247,27 +271,29 @@ extension CiderPanelView {
                 }
             case .projectReferences(let projectID, _):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
-                    ProjectReferencesView(
-                        project: project,
-                        references: ProjectReferenceProvider.references(
-                            for: project,
-                            items: libraryViewModel.items,
-                            boards: kanbanStorage.boards
-                        ),
-                        boards: kanbanStorage.boards,
-                        onOpenItem: { item in
-                            openDashboardItem(item)
-                        },
-                        onOpenCard: { boardID, cardID in
-                            openKanbanCardDetail(boardID: boardID, cardID: cardID)
-                        },
-                        onLinkReferenceToCard: { ref, boardID, cardID in
-                            linkProjectReference(ref, toCardID: cardID, boardID: boardID)
-                        },
-                        onPromoteReference: { reference in
-                            promoteProjectReference(reference, in: project)
-                        }
-                    )
+                    projectWorkspaceContent(for: project, selectedKind: .surface(.assets)) {
+                        ProjectReferencesView(
+                            project: project,
+                            references: ProjectReferenceProvider.references(
+                                for: project,
+                                items: libraryViewModel.items,
+                                boards: kanbanStorage.boards
+                            ),
+                            boards: kanbanStorage.boards,
+                            onOpenItem: { item in
+                                openDashboardItem(item)
+                            },
+                            onOpenCard: { boardID, cardID in
+                                openKanbanCardDetail(boardID: boardID, cardID: cardID)
+                            },
+                            onLinkReferenceToCard: { ref, boardID, cardID in
+                                linkProjectReference(ref, toCardID: cardID, boardID: boardID)
+                            },
+                            onPromoteReference: { reference in
+                                promoteProjectReference(reference, in: project)
+                            }
+                        )
+                    }
                 } else {
                     EmptyStateView(
                         icon: "photo.on.rectangle",

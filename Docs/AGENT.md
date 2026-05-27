@@ -70,15 +70,25 @@ Agents should be conservative operators over real Cider data:
 
 ## Plans And Specs
 
-Plans and specs are temporary work products.
+Plans and specs are temporary work products. Repo docs are not a scratchpad.
+
+Project-scoped feature plans may live as Markdown artifacts inside the Cider vault while they are being shaped:
+
+- `~/CiderVault/Projects/<Project>/Plans/`
+
+Project-scoped QA and audit reports may live as Markdown artifacts inside the Cider vault while they are being triaged:
+
+- `~/CiderVault/Projects/<Project>/QA/`
+
+These vault artifacts are visual Cider work surfaces, not permanent repo docs. Use them to turn discussions, references, and audits into a clear milestone plus scoped Kanban cards. Link generated cards back to the source plan or QA artifact when possible.
 
 When a feature or fix is complete:
 
 1. Promote durable product, architecture, storage, agent, CLI, QA, design, or convention changes into the relevant core doc.
 2. Put implementation notes, test evidence, failures, and handoff details on the Kanban card.
-3. Delete the completed plan/spec doc.
+3. Archive, mark extracted, or delete the completed vault plan/QA artifact after its milestone/cards carry the work.
 
-Do not keep completed plan/spec files in the docs tree just in case. If old context is ever needed, use git history.
+Do not keep completed plan/spec files in the docs tree just in case. If old repo context is ever needed, use git history.
 
 ## Docs Diet Audit Workflow
 

@@ -93,6 +93,14 @@ The vault stores user-readable artifacts in folders such as Inbox, Bookmarks, No
 
 Spaces are surfaces over shared SQLite/vault state. A Space may correspond to folders, saved views, dashboard panels, routing hints, or domain-specific UI, but it must not become a separate authority for item identity or memory.
 
+Project work surfaces use vault folders for user-visible Markdown and reference material:
+
+- `Projects/<Project>/Plans/` stores draft feature plans and implementation shaping notes until they are promoted into milestones/cards.
+- `Projects/<Project>/QA/` stores project audit outputs and QA reports until actionable findings are promoted into cleanup milestones/cards.
+- `Projects/<Project>/Assets/` stores project reference material such as screenshots, inspiration, app links, and local files.
+
+These folders are Cider workspace artifacts, not repo docs. Completed plans and QA reports should be archived, marked extracted, or deleted after their durable decisions and active work have moved into core docs and Kanban cards.
+
 Routing rules:
 
 - Choose one obvious destination when confidence is high.

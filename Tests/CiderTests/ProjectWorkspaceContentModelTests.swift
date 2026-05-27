@@ -503,6 +503,15 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         ])
     }
 
+    func testProjectSurfaceTitlesMatchVaultPlanningAndQASurfaces() {
+        XCTAssertEqual(ProjectWorkspaceSurface.plansHandoffs.title, "Plans")
+        XCTAssertEqual(ProjectWorkspaceSurface.plansHandoffs.tabName, "Plans")
+        XCTAssertEqual(ProjectWorkspaceSurface.qaAudits.title, "QA")
+        XCTAssertEqual(ProjectWorkspaceSurface.qaAudits.tabName, "QA")
+        XCTAssertTrue(ProjectWorkspaceSurface.plansHandoffs.placeholderSubtitle.contains("Draft feature plans"))
+        XCTAssertTrue(ProjectWorkspaceSurface.qaAudits.placeholderSubtitle.contains("cleanup milestones"))
+    }
+
     func testProjectArtifactRelationshipsConnectPlanningNotesToSpawnedCardsAndQA() {
         let noteID = UUID(uuidString: "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE")!
         let qaID = UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!

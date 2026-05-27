@@ -559,7 +559,7 @@ struct ProjectWorkspaceSurfaceView: View {
     @State private var displayMode: ProjectWorkspaceSurfaceDisplayMode = .list
 
     var body: some View {
-        if model.surface == .notes || model.surface == .plansHandoffs {
+        if model.surface == .notes || model.surface == .plansHandoffs || model.surface == .qaAudits {
             artifactListBody
         } else {
             ProjectWorkspaceSurfacePlaceholderView(project: model.workspace, surface: model.surface)
@@ -753,7 +753,9 @@ struct ProjectWorkspaceSurfaceView: View {
         case .notes:
             return "Markdown-backed notes stored under Projects/\(model.workspace.title)/Notes"
         case .plansHandoffs:
-            return "Long-form plans and agent handoffs stored under Projects/\(model.workspace.title)/Plans and Handoffs"
+            return "Draft feature plans stored under Projects/\(model.workspace.title)/Plans until they become milestones and cards"
+        case .qaAudits:
+            return "Audit results and QA reports stored under Projects/\(model.workspace.title)/QA until they become cleanup milestones and cards"
         default:
             return model.surface.placeholderSubtitle
         }
@@ -764,7 +766,9 @@ struct ProjectWorkspaceSurfaceView: View {
         case .notes:
             return "No project notes yet"
         case .plansHandoffs:
-            return "No plans or handoffs yet"
+            return "No plans yet"
+        case .qaAudits:
+            return "No QA audits yet"
         default:
             return "No project artifacts yet"
         }
