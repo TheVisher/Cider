@@ -68,9 +68,11 @@ struct KanbanCardQualityReport: Equatable, Sendable {
 }
 
 enum KanbanCardQualitySection: String, CaseIterable, Sendable {
+    case currentState
     case problem
     case goal
     case mvpScope
+    case nextStep
     case acceptanceCriteria
     case testEvidence
     case manualQAGuidance
@@ -78,9 +80,11 @@ enum KanbanCardQualitySection: String, CaseIterable, Sendable {
 
     var displayName: String {
         switch self {
+        case .currentState: "Current State"
         case .problem: "Problem"
         case .goal: "Goal"
         case .mvpScope: "MVP scope"
+        case .nextStep: "Next Step"
         case .acceptanceCriteria: "Acceptance criteria"
         case .testEvidence: "Test evidence"
         case .manualQAGuidance: "Manual QA guidance"
@@ -90,21 +94,25 @@ enum KanbanCardQualitySection: String, CaseIterable, Sendable {
 
     var isEssential: Bool {
         switch self {
-        case .problem, .goal, .acceptanceCriteria:
+        case .currentState, .problem, .goal, .mvpScope, .nextStep, .acceptanceCriteria:
             return true
-        case .mvpScope, .testEvidence, .manualQAGuidance, .followUp:
+        case .testEvidence, .manualQAGuidance, .followUp:
             return false
         }
     }
 
     private var aliases: [String] {
         switch self {
+        case .currentState:
+            ["current state", "status", "state", "where things stand"]
         case .problem:
             ["problem", "issue", "bug", "context", "why"]
         case .goal:
             ["goal", "desired outcome", "outcome", "objective"]
         case .mvpScope:
             ["mvp scope", "scope", "implementation scope", "mvp"]
+        case .nextStep:
+            ["next step", "next steps", "next action", "handoff", "agent handoff"]
         case .acceptanceCriteria:
             ["acceptance criteria", "acceptance", "done when", "definition of done"]
         case .testEvidence:
