@@ -1856,8 +1856,12 @@ struct SecondBrainFoundationTests {
                 && ($0["summary"] as? String)?.contains("raw YAML scraping") == true
         })
         let safeCommands = try #require(cardContext["safeCommands"] as? [String])
+        let contextBoardID = try #require(contextItem["boardID"] as? String)
         #expect(safeCommands.contains("cider-cli item get card \(cardRef) --json"))
-        #expect(safeCommands.contains("cider-cli board card inspect Agent Workflow Smoke --card \(cardRef) --json"))
+        #expect(safeCommands.contains("cider-cli board card inspect \(contextBoardID) --card \(cardRef) --json"))
+        #expect(safeCommands.contains("cider-cli board section update \(contextBoardID) --card \(cardRef) --section \"Current State\" --value \"...\" --json"))
+        #expect(safeCommands.contains("cider-cli board evidence add \(contextBoardID) --card \(cardRef) --text \"...\" --source \"...\" --json"))
+        #expect(safeCommands.contains("cider-cli board history add \(contextBoardID) --card \(cardRef) --type implementation --text \"...\" --source \"...\" --json"))
 
         let whySurfaced = try jsonObject(from: runCLI([
             "item", "why-surfaced", "card", cardRef,
@@ -1921,6 +1925,95 @@ struct SecondBrainFoundationTests {
         #expect(failedQAChild["title"] as? String == "Failed QA child")
         #expect(nextActionableChild["title"] as? String == "Failed QA child")
         #expect(rollup["nextActionLine"] as? String == "Fix failed QA on Failed QA child.")
+    }
+
+    @Test("process CLI update-card accepts parent display keys")
+    func processCLIUpdateCardAcceptsParentDisplayKeys() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-parent-display-key-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Parent Key Smoke"], vaultURL: vaultURL)
+        let parentOutput = try runCLI([
+            "board", "add-card", "Parent Key Smoke",
+            "--column", "Backlog",
+            "--title", "Parent roadmap",
+        ], vaultURL: vaultURL)
+        let parentID = String(try #require(parentOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let childOutput = try runCLI([
+            "board", "add-card", "Parent Key Smoke",
+            "--column", "Backlog",
+            "--title", "Child task",
+        ], vaultURL: vaultURL)
+        let childID = String(try #require(childOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let parentInspect = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Parent Key Smoke",
+            "--card", parentID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let parentCard = try #require(parentInspect["card"] as? [String: Any])
+        let parentDisplayKey = try #require(parentCard["displayKey"] as? String)
+
+        _ = try runCLI([
+            "board", "update-card", "Parent Key Smoke",
+            "--card", childID,
+            "--parent", parentDisplayKey,
+        ], vaultURL: vaultURL)
+
+        let childInspect = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Parent Key Smoke",
+            "--card", childID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let childCard = try #require(childInspect["card"] as? [String: Any])
+        #expect(childCard["parentCardID"] as? String == parentID)
+    }
+
+    @Test("process CLI comment add accepts card display keys")
+    func processCLICommentAddAcceptsCardDisplayKeys() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-comment-display-key-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Comment Key Smoke"], vaultURL: vaultURL)
+        let cardOutput = try runCLI([
+            "board", "add-card", "Comment Key Smoke",
+            "--column", "Backlog",
+            "--title", "Needs QA note",
+        ], vaultURL: vaultURL)
+        let cardID = String(try #require(cardOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let cardInspect = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Comment Key Smoke",
+            "--card", cardID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let card = try #require(cardInspect["card"] as? [String: Any])
+        let displayKey = try #require(card["displayKey"] as? String)
+
+        let commentResult = try jsonObject(from: runCLI([
+            "board", "comment", "add", "Comment Key Smoke",
+            "--card", displayKey,
+            "--kind", "qa",
+            "--text", "Display-key comment should land on the resolved card.",
+            "--json",
+        ], vaultURL: vaultURL))
+        #expect(commentResult["card"] as? String == cardID)
+        #expect(commentResult["commentCount"] as? Int == 1)
+
+        let updatedInspect = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Comment Key Smoke",
+            "--card", cardID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let updatedCard = try #require(updatedInspect["card"] as? [String: Any])
+        let comments = try #require(updatedCard["comments"] as? [[String: Any]])
+        #expect(comments.contains {
+            $0["kind"] as? String == "qa"
+                && $0["body"] as? String == "Display-key comment should land on the resolved card."
+        })
     }
 
     @Test("process CLI exposes second brain capability map for agents")

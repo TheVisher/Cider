@@ -6201,12 +6201,16 @@ struct CiderCLI {
                     changed = true
                 }
             } else if let parentCardID = parseFlag("--parent", from: args) {
-                guard board.canAssignParent(cardID: card.id, parentCardID: parentCardID) else {
-                    print("Error: Cannot assign parent '\(parentCardID)' to card '\(card.id)'. Parent must exist in the same board and cannot create a cycle.")
+                guard let resolvedParent = board.card(matching: parentCardID) else {
+                    printCLIError("Parent card '\(parentCardID)' not found in board '\(board.name)'")
                     return
                 }
-                if card.parentCardID != parentCardID {
-                    card.parentCardID = parentCardID
+                guard board.canAssignParent(cardID: card.id, parentCardID: resolvedParent.id) else {
+                    printCLIError("Cannot assign parent '\(parentCardID)' to card '\(card.id)'. Parent must exist in the same board and cannot create a cycle.")
+                    return
+                }
+                if card.parentCardID != resolvedParent.id {
+                    card.parentCardID = resolvedParent.id
                     changed = true
                 }
             }
@@ -6271,7 +6275,7 @@ struct CiderCLI {
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
-            guard board.card(matching: cardID) != nil else {
+            guard let resolvedCard = board.card(matching: cardID) else {
                 printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
@@ -6287,7 +6291,7 @@ struct CiderCLI {
                 source: parseFlag("--source", from: commentArgs),
                 parentCommentID: parseFlag("--parent", from: commentArgs)
             )
-            guard let appended = storage.addComment(boardID: board.id, cardID: cardID, comment: comment) else {
+            guard let appended = storage.addComment(boardID: board.id, cardID: resolvedCard.id, comment: comment) else {
                 printCLIError("Could not append comment. Check that the card and optional parent comment exist.")
                 return
             }
@@ -6319,10 +6323,10 @@ struct CiderCLI {
                 var dict: [String: Any] = [
                     "ok": true,
                     "board": board.id,
-                    "card": cardID,
+                    "card": resolvedCard.id,
                     "comment": commentDict,
                 ]
-                if let refreshed = storage.findCard(id: cardID)?.card {
+                if let refreshed = storage.findCard(id: resolvedCard.id)?.card {
                     dict["commentCount"] = refreshed.comments.count
                 }
                 outputJSON(dict)
@@ -10111,7 +10115,7 @@ struct CiderCLI {
             "board": ["id": board.id, "name": board.name, "displayKeyPrefix": board.displayKeyPrefix],
             "card": cardDict,
             "owner": ownerToDict(owner),
-            "dashboard": dashboardModelToDict(model, board: board.name, cardID: card.id),
+            "dashboard": dashboardModelToDict(model, board: board.id, cardID: card.id),
             "sections": model.sections.map(kanbanSectionToDict),
             "projectedSections": projectedSections.map(secondBrainSectionToDict),
             "children": board.childCards(of: card.id).map(minimalCardToDict),
@@ -10413,8 +10417,11 @@ struct CiderCLI {
             "cider-cli item related card \(detail.card.id) --json",
             "cider-cli item relations card \(detail.card.id) --json",
             "cider-cli item backlinks card \(detail.card.id) --json",
-            "cider-cli board card inspect \(detail.board.name) --card \(detail.card.id) --json",
-            "cider-cli board comment add \(detail.board.name) --card \(detail.card.id) --kind note --text \"...\" --author \"...\" --source \"...\" --json",
+            "cider-cli board card inspect \(detail.board.id) --card \(detail.card.id) --json",
+            "cider-cli board section update \(detail.board.id) --card \(detail.card.id) --section \"Current State\" --value \"...\" --json",
+            "cider-cli board comment add \(detail.board.id) --card \(detail.card.id) --kind note --text \"...\" --author \"...\" --source \"...\" --json",
+            "cider-cli board history add \(detail.board.id) --card \(detail.card.id) --type implementation --text \"...\" --source \"...\" --json",
+            "cider-cli board evidence add \(detail.board.id) --card \(detail.card.id) --text \"...\" --source \"...\" --json",
         ]
 
         return [
