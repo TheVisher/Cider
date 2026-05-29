@@ -15,10 +15,10 @@ struct VaultFileDetailView: View {
     var body: some View {
         previewArea
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(Spacing.lg)
-        .task {
-            await loadPreview()
-        }
+            .padding(Spacing.lg)
+            .task {
+                await loadPreview()
+            }
     }
 
     // MARK: - Preview
@@ -28,11 +28,13 @@ struct VaultFileDetailView: View {
         switch file.fileType {
         case .image:
             if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+                GeometryReader { proxy in
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+                }
             } else {
                 iconPlaceholder
             }
@@ -40,8 +42,7 @@ struct VaultFileDetailView: View {
         case .pdf:
             if let pdfDocument {
                 PDFKitView(document: pdfDocument)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: VaultFileDesign.detailPreviewMinHeight, maxHeight: VaultFileDesign.detailPreviewMaxHeight)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             } else {
                 iconPlaceholder
@@ -60,8 +61,7 @@ struct VaultFileDetailView: View {
 
         case .document, .archive, .unknown:
             QuickLookPreview(url: file.absoluteURL)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: VaultFileDesign.detailPreviewMinHeight, maxHeight: VaultFileDesign.detailPreviewMaxHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
         }
     }
