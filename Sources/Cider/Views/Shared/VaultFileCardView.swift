@@ -9,18 +9,28 @@ import SwiftUI
 @MainActor
 final class VaultFileThumbnailCache {
     static let shared = VaultFileThumbnailCache()
-    private let cache = NSCache<NSString, NSImage>()
+    final class Entry {
+        let image: NSImage
+        let aspectRatio: CGFloat?
+
+        init(image: NSImage, aspectRatio: CGFloat?) {
+            self.image = image
+            self.aspectRatio = aspectRatio
+        }
+    }
+
+    private let cache = NSCache<NSString, Entry>()
 
     init() { cache.countLimit = 200 }
 
-    func get(_ relativePath: String, modifiedAt: Date) -> NSImage? {
+    func get(_ relativePath: String, modifiedAt: Date) -> Entry? {
         let key = "\(relativePath):\(modifiedAt.timeIntervalSince1970)" as NSString
         return cache.object(forKey: key)
     }
 
-    func set(_ image: NSImage, for relativePath: String, modifiedAt: Date) {
+    func set(_ image: NSImage, aspectRatio: CGFloat? = nil, for relativePath: String, modifiedAt: Date) {
         let key = "\(relativePath):\(modifiedAt.timeIntervalSince1970)" as NSString
-        cache.setObject(image, forKey: key)
+        cache.setObject(Entry(image: image, aspectRatio: aspectRatio), forKey: key)
     }
 }
 
@@ -158,14 +168,13 @@ struct VaultFileCardView: View {
             if let width = masonryThumbnailWidth {
                 Image(nsImage: thumbnail)
                     .resizable()
-                    .scaledToFit()
+                    .scaledToFill()
                     .frame(width: width, height: masonryThumbnailHeight(for: width, ratio: ratio))
-                    .background(CiderColors.surfaceInput)
                     .clipped()
             } else {
                 Image(nsImage: thumbnail)
                     .resizable()
-                    .scaledToFit()
+                    .scaledToFill()
                     .frame(maxWidth: .infinity)
                     .aspectRatio(1 / ratio, contentMode: .fit)
                     .clipped()
@@ -334,7 +343,8 @@ struct VaultFileCardView: View {
     private func loadThumbnail() async {
         // Check shared cache first — avoids re-decoding on scan/tag/rebuild
         if let cached = VaultFileThumbnailCache.shared.get(file.relativePath, modifiedAt: file.modifiedAt) {
-            thumbnail = cached
+            thumbnail = cached.image
+            thumbnailAspectRatio = cached.aspectRatio
             return
         }
 
@@ -349,13 +359,13 @@ struct VaultFileCardView: View {
                     kCGImageSourceShouldCacheImmediately: true,
                 ]
                 guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-                let w = CGFloat(cgImage.width)
-                let h = CGFloat(cgImage.height)
-                let aspectRatio = h / w
-                return (NSImage(cgImage: cgImage, size: NSSize(width: w, height: h)), aspectRatio)
+                let width = CGFloat(cgImage.width)
+                let height = CGFloat(cgImage.height)
+                let aspectRatio = Self.displayAspectRatio(for: source, fallbackWidth: width, fallbackHeight: height)
+                return (NSImage(cgImage: cgImage, size: NSSize(width: width, height: height)), aspectRatio)
             }.value
             if let (image, ratio) = result {
-                VaultFileThumbnailCache.shared.set(image, for: file.relativePath, modifiedAt: file.modifiedAt)
+                VaultFileThumbnailCache.shared.set(image, aspectRatio: ratio, for: file.relativePath, modifiedAt: file.modifiedAt)
                 thumbnail = image
                 thumbnailAspectRatio = ratio
             }
@@ -392,6 +402,43 @@ struct VaultFileCardView: View {
             if let qlLoaded { VaultFileThumbnailCache.shared.set(qlLoaded, for: file.relativePath, modifiedAt: file.modifiedAt) }
             thumbnail = qlLoaded
         }
+    }
+
+    nonisolated private static func displayAspectRatio(
+        for source: CGImageSource,
+        fallbackWidth: CGFloat,
+        fallbackHeight: CGFloat
+    ) -> CGFloat {
+        guard fallbackWidth > 0, fallbackHeight > 0 else { return 1 }
+
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let pixelWidth = Self.cgFloatProperty(properties?[kCGImagePropertyPixelWidth]) ?? fallbackWidth
+        let pixelHeight = Self.cgFloatProperty(properties?[kCGImagePropertyPixelHeight]) ?? fallbackHeight
+        let orientationRaw = Self.uint32Property(properties?[kCGImagePropertyOrientation])
+
+        let shouldSwapAxes = orientationRaw == 5 || orientationRaw == 6 || orientationRaw == 7 || orientationRaw == 8
+        let displayWidth = shouldSwapAxes ? pixelHeight : pixelWidth
+        let displayHeight = shouldSwapAxes ? pixelWidth : pixelHeight
+
+        guard displayWidth.isFinite, displayHeight.isFinite, displayWidth > 0, displayHeight > 0 else {
+            return fallbackHeight / fallbackWidth
+        }
+
+        return displayHeight / displayWidth
+    }
+
+    nonisolated private static func cgFloatProperty(_ value: Any?) -> CGFloat? {
+        if let number = value as? NSNumber {
+            return CGFloat(truncating: number)
+        }
+        return value as? CGFloat
+    }
+
+    nonisolated private static func uint32Property(_ value: Any?) -> UInt32? {
+        if let number = value as? NSNumber {
+            return number.uint32Value
+        }
+        return value as? UInt32
     }
 }
 
