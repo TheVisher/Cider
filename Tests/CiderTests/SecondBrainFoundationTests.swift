@@ -2444,6 +2444,56 @@ struct SecondBrainFoundationTests {
         ])
     }
 
+    @Test("process CLI refreshes projected sections on card inspect")
+    func processCLIRefreshesProjectedSectionsOnCardInspect() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-projected-sections-inspect-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vaultURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Projected Inspect Smoke"], vaultURL: vaultURL)
+        let addOutput = try runCLI([
+            "board", "add-card", "Projected Inspect Smoke",
+            "--column", "Backlog",
+            "--title", "Projection freshness",
+            "--notes", """
+            ## Current State
+            Old projected state.
+
+            ## Next Step
+            Inspect the card.
+            """,
+        ], vaultURL: vaultURL)
+        let cardID = String(try #require(addOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let firstInspect = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Projected Inspect Smoke",
+            "--card", cardID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let board = try #require(firstInspect["board"] as? [String: Any])
+        let boardID = try #require(board["id"] as? String)
+        let boardFile = vaultURL
+            .appendingPathComponent(".cider/boards", isDirectory: true)
+            .appendingPathComponent("\(boardID).yaml")
+
+        let staleYAML = try String(contentsOf: boardFile, encoding: .utf8)
+        #expect(staleYAML.contains("Old projected state."))
+        let freshYAML = staleYAML.replacingOccurrences(of: "Old projected state.", with: "Fresh projected state.")
+        try freshYAML.write(to: boardFile, atomically: true, encoding: .utf8)
+
+        let inspected = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Projected Inspect Smoke",
+            "--card", cardID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let dashboard = try #require(inspected["dashboard"] as? [String: Any])
+        #expect(dashboard["currentState"] as? String == "Fresh projected state.")
+        let projectedSections = try #require(inspected["projectedSections"] as? [[String: Any]])
+        let currentState = try #require(projectedSections.first { $0["sectionKey"] as? String == "current_state" })
+        #expect(currentState["body"] as? String == "Fresh projected state.")
+    }
+
     @Test("process CLI creates and attaches milestone cards safely")
     func processCLICreatesAndAttachesMilestoneCardsSafely() throws {
         let vaultURL = FileManager.default.temporaryDirectory

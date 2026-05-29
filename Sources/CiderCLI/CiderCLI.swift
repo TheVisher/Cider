@@ -10094,6 +10094,7 @@ struct CiderCLI {
         let owner = SecondBrainKanbanProjectionService.owner(boardID: board.id, cardID: card.id)
         let model = KanbanCardDashboardModel(title: card.title, notes: card.notes)
         let store = SecondBrainStore(database: .shared)
+        try? SecondBrainKanbanProjectionService(store: store).refreshCard(boardID: board.id, card: card)
         let projectedSections = (try? store.sections(for: owner)) ?? []
         let routes = (try? store.routingDecisions(for: owner)) ?? []
         let actions = (try? store.agentActions(for: owner)) ?? []
