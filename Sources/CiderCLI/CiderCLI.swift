@@ -5743,7 +5743,7 @@ struct CiderCLI {
             }
 
         case "audit":
-            let report = boardAuditReport(boards: storage.boards)
+            let report = boardAuditReport(boards: storage.boards, loadIssues: storage.loadIssues())
             if !(report["ok"] as? Bool ?? false) {
                 processExitCode = 1
             }
@@ -9898,11 +9898,24 @@ struct CiderCLI {
         return dict
     }
 
-    static func boardAuditReport(boards: [KanbanBoard]) -> [String: Any] {
+    static func boardAuditReport(
+        boards: [KanbanBoard],
+        loadIssues: [KanbanBoardLoadIssue] = []
+    ) -> [String: Any] {
         var issues: [[String: Any]] = []
         var warnings: [[String: Any]] = []
         var columnCount = 0
         var cardCount = 0
+
+        for loadIssue in loadIssues {
+            issues.append([
+                "type": "board_yaml_decode_failed",
+                "severity": "error",
+                "boardID": loadIssue.boardID,
+                "fileName": loadIssue.fileName,
+                "message": loadIssue.message,
+            ])
+        }
 
         for board in boards {
             columnCount += board.columns.count

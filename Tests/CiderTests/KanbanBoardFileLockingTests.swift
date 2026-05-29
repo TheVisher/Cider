@@ -566,6 +566,42 @@ struct KanbanBoardFileLockingTests {
         #expect(root["cardCount"] as? Int == 2)
     }
 
+    @Test("board audit reports YAML decode failures")
+    func boardAuditReportsYAMLDecodeFailures() throws {
+        let cli = try #require(Self.ciderCLIURL())
+        let vault = try Self.makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let boardsDirectory = vault.appendingPathComponent(".cider/boards", isDirectory: true)
+        try FileManager.default.createDirectory(at: boardsDirectory, withIntermediateDirectories: true)
+        try """
+        id: broken
+        board: Broken YAML
+        columns:
+          - id: backlog
+            name: Backlog
+            cards:
+              - id: card
+                title: Missing closing quote
+                notes: "this never closes
+        """.write(
+            to: boardsDirectory.appendingPathComponent("broken.yaml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let result = try Self.runCLIResult(cli, vault: vault, args: ["board", "audit", "--json"])
+        let root = try #require(try JSONSerialization.jsonObject(with: result.output) as? [String: Any])
+        let issues = try #require(root["issues"] as? [[String: Any]])
+        let decodeIssue = try #require(issues.first { $0["type"] as? String == "board_yaml_decode_failed" })
+
+        #expect(result.status == 1)
+        #expect(root["ok"] as? Bool == false)
+        #expect(root["issueCount"] as? Int == 1)
+        #expect(root["boardCount"] as? Int == 0)
+        #expect(decodeIssue["boardID"] as? String == "broken")
+        #expect(decodeIssue["fileName"] as? String == "broken.yaml")
+    }
+
     @Test("board audit reports duplicate ids and parent cycles")
     func boardAuditReportsDuplicateIDsAndParentCycles() throws {
         let cli = try #require(Self.ciderCLIURL())

@@ -3,6 +3,12 @@ import Yams
 import Darwin
 import os.log
 
+struct KanbanBoardLoadIssue {
+    var fileName: String
+    var boardID: String
+    var message: String
+}
+
 /// Manages YAML-backed Kanban boards stored in the vault.
 /// Both the Cider UI and AI agents can read/write to the same YAML files.
 @MainActor
@@ -59,6 +65,39 @@ final class KanbanStorage: ObservableObject {
         }
 
         boards = loaded.sorted { $0.created > $1.created }
+    }
+
+    func loadIssues() -> [KanbanBoardLoadIssue] {
+        ensureDirectory()
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: boardsDir,
+            includingPropertiesForKeys: nil,
+            options: .skipsHiddenFiles
+        ) else {
+            return []
+        }
+
+        return files
+            .filter { $0.pathExtension == "yaml" }
+            .compactMap { file in
+                guard let content = try? String(contentsOf: file, encoding: .utf8) else {
+                    return KanbanBoardLoadIssue(
+                        fileName: file.lastPathComponent,
+                        boardID: file.deletingPathExtension().lastPathComponent,
+                        message: "Could not read board YAML file '\(file.lastPathComponent)'."
+                    )
+                }
+                do {
+                    _ = try YAMLDecoder().decode(KanbanBoard.self, from: content)
+                    return nil
+                } catch {
+                    return KanbanBoardLoadIssue(
+                        fileName: file.lastPathComponent,
+                        boardID: file.deletingPathExtension().lastPathComponent,
+                        message: "Could not decode board YAML file '\(file.lastPathComponent)': \(error.localizedDescription)"
+                    )
+                }
+            }
     }
 
     private func load(from url: URL) -> KanbanBoard? {
