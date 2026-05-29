@@ -623,12 +623,55 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
     }
 
     func testProjectSurfaceTitlesMatchVaultPlanningAndQASurfaces() {
+        XCTAssertEqual(ProjectWorkspaceSurface.milestones.title, "Milestones")
+        XCTAssertEqual(ProjectWorkspaceSurface.milestones.tabName, "Milestones")
         XCTAssertEqual(ProjectWorkspaceSurface.plansHandoffs.title, "Plans")
         XCTAssertEqual(ProjectWorkspaceSurface.plansHandoffs.tabName, "Plans")
         XCTAssertEqual(ProjectWorkspaceSurface.qaAudits.title, "QA")
         XCTAssertEqual(ProjectWorkspaceSurface.qaAudits.tabName, "QA")
+        XCTAssertTrue(ProjectWorkspaceSurface.milestones.placeholderSubtitle.contains("Milestone goals"))
         XCTAssertTrue(ProjectWorkspaceSurface.plansHandoffs.placeholderSubtitle.contains("Draft feature plans"))
         XCTAssertTrue(ProjectWorkspaceSurface.qaAudits.placeholderSubtitle.contains("cleanup milestones"))
+    }
+
+    func testProjectMilestoneRowsCanReturnFullListForMilestonesTab() {
+        let milestones = (0..<7).map { index in
+            KanbanCard(
+                id: "milestone-\(index)",
+                title: "Milestone: Goal \(index)",
+                displayKey: "CID-\(index + 1)",
+                tags: ["milestone-object"],
+                updatedAt: Date(timeIntervalSince1970: Double(index))
+            )
+        }
+        let children = milestones.flatMap { milestone in
+            [
+                KanbanCard(id: "\(milestone.id)-child-a", title: "Child A", parentCardID: milestone.id),
+                KanbanCard(id: "\(milestone.id)-child-b", title: "Child B", parentCardID: milestone.id),
+            ]
+        }
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog", cards: milestones + children)
+            ]
+        )
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [board])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+
+        let overviewModel = ProjectWorkspaceOverviewProvider.model(
+            for: ciderWorkspace,
+            catalog: catalog,
+            boards: [board]
+        )
+        let fullRows = ProjectWorkspaceOverviewProvider.milestoneRows(
+            for: ciderWorkspace,
+            boards: [board]
+        )
+
+        XCTAssertEqual(overviewModel.milestoneRows.count, 5)
+        XCTAssertEqual(fullRows.count, 7)
     }
 
     func testProjectArtifactRelationshipsConnectPlanningNotesToSpawnedCardsAndQA() {

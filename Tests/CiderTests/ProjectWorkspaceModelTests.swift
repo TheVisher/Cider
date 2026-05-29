@@ -172,6 +172,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
 
         XCTAssertEqual(cider.surfaces.map(\.id), [
             "boards",
+            "milestones",
             "notes",
             "decisions",
             "assets",
@@ -180,6 +181,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         ])
         XCTAssertEqual(cider.surfaces.map(\.title), [
             "Boards",
+            "Milestones",
             "Notes",
             "Decisions",
             "Assets",
@@ -235,6 +237,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             "Overview",
             "Inbox",
             "Board",
+            "Milestones",
             "Docs",
             "Decisions",
             "Assets",
@@ -245,6 +248,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             .overview,
             .inbox,
             .board("2afee0"),
+            .surface(.milestones),
             .surface(.notes),
             .surface(.decisions),
             .surface(.assets),
@@ -278,6 +282,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             "Inbox",
             "Board",
             "Cider Roadmap",
+            "Milestones",
             "Docs",
             "Decisions",
             "Assets",
@@ -313,10 +318,16 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             boards: boards,
             selectedKind: .surface(.qaAudits)
         )
+        let milestoneTabs = ProjectWorkspaceLocalTabs.tabs(
+            for: cider,
+            boards: boards,
+            selectedKind: .surface(.milestones)
+        )
 
         XCTAssertEqual(overviewTabs.first(where: { $0.isSelected })?.title, "Overview")
         XCTAssertEqual(inboxTabs.first(where: { $0.isSelected })?.title, "Inbox")
         XCTAssertEqual(qaTabs.first(where: { $0.isSelected })?.title, "QA")
+        XCTAssertEqual(milestoneTabs.first(where: { $0.isSelected })?.title, "Milestones")
     }
 
     func testProjectInboxSurfacesUnreadAgentAndQACardsOnly() {

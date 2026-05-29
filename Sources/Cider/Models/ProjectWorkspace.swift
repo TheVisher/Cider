@@ -8,6 +8,7 @@ enum ProjectWorkspaceKind: String, Codable, Hashable {
 
 enum ProjectWorkspaceSurface: String, CaseIterable, Codable, Hashable, Identifiable {
     case boards
+    case milestones
     case notes
     case decisions
     case assets
@@ -19,6 +20,7 @@ enum ProjectWorkspaceSurface: String, CaseIterable, Codable, Hashable, Identifia
     var title: String {
         switch self {
         case .boards: "Boards"
+        case .milestones: "Milestones"
         case .notes: "Notes"
         case .decisions: "Decisions"
         case .assets: "Assets"
@@ -32,6 +34,7 @@ enum ProjectWorkspaceSurface: String, CaseIterable, Codable, Hashable, Identifia
     var systemImage: String {
         switch self {
         case .boards: "rectangle.split.3x1"
+        case .milestones: "diamond"
         case .notes: "note.text"
         case .decisions: "checkmark.seal"
         case .assets: "photo.on.rectangle"
@@ -44,6 +47,8 @@ enum ProjectWorkspaceSurface: String, CaseIterable, Codable, Hashable, Identifia
         switch self {
         case .boards:
             "Kanban boards linked to this project workspace."
+        case .milestones:
+            "Milestone goals and their child-card progress collect here."
         case .notes:
             "Full project discussions, notes, and captured context will collect here."
         case .decisions:
@@ -417,6 +422,7 @@ enum ProjectWorkspaceLocalTabs {
     private static func localTitle(for surface: ProjectWorkspaceSurface) -> String {
         switch surface {
         case .boards: "Board"
+        case .milestones: "Milestones"
         case .notes: "Docs"
         case .decisions: "Decisions"
         case .assets: "Assets"

@@ -239,7 +239,22 @@ extension CiderPanelView {
             case .projectSurface(let projectID, let surface, _):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
                     projectWorkspaceContent(for: project, selectedKind: .surface(surface)) {
-                        if surface == .assets {
+                        if surface == .milestones {
+                            ProjectWorkspaceMilestonesView(
+                                workspace: project,
+                                milestones: ProjectWorkspaceOverviewProvider.milestoneRows(
+                                    for: project,
+                                    boards: kanbanStorage.boards,
+                                    artifactRelations: projectArtifactRelations(for: project)
+                                ),
+                                onOpenMilestoneBoard: { milestone in
+                                    openProjectBoard(milestone.boardID, milestoneCardID: milestone.cardID)
+                                },
+                                onOpenMilestoneArtifact: { link in
+                                    openMilestoneArtifact(link)
+                                }
+                            )
+                        } else if surface == .assets {
                             ProjectReferencesView(
                                 project: project,
                                 references: ProjectReferenceProvider.references(

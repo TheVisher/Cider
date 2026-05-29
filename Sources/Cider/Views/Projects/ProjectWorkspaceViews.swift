@@ -613,6 +613,143 @@ private struct ProjectWorkspaceCoreDocPreview: View {
     }
 }
 
+struct ProjectWorkspaceMilestonesView: View {
+    let workspace: ProjectWorkspace
+    let milestones: [ProjectWorkspaceMilestoneRow]
+    var onOpenMilestoneBoard: (ProjectWorkspaceMilestoneRow) -> Void
+    var onOpenMilestoneArtifact: (ProjectWorkspaceMilestoneArtifactLink) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            header
+
+            if milestones.isEmpty {
+                EmptyStateView(
+                    icon: ProjectWorkspaceSurface.milestones.systemImage,
+                    title: "No milestones yet",
+                    subtitle: ProjectWorkspaceSurface.milestones.placeholderSubtitle
+                )
+                .frame(maxWidth: .infinity, minHeight: 260)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: Spacing.sm) {
+                        ForEach(milestones) { milestone in
+                            milestoneRow(milestone)
+                        }
+                    }
+                    .padding(.bottom, Spacing.lg)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+        .padding(Spacing.lg)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Label("Milestones", systemImage: ProjectWorkspaceSurface.milestones.systemImage)
+                    .font(CiderFont.headingSemibold)
+                    .foregroundColor(CiderColors.primary)
+                Text("Overarching goals for \(workspace.title), with child-card progress and linked planning/QA artifacts.")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.secondary)
+            }
+            Spacer(minLength: 0)
+            Text("\(milestones.count)")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+        }
+    }
+
+    private func milestoneRow(_ row: ProjectWorkspaceMilestoneRow) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Image(systemName: "diamond")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.controlAccent)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack(spacing: Spacing.xs) {
+                        Text(row.cardDisplayKey)
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.controlAccent)
+                        Text(row.status)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.secondary)
+                        Text("\(row.childCount) \(row.childCount == 1 ? "card" : "cards")")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+
+                    Text(row.title.replacingOccurrences(of: "Milestone: ", with: ""))
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    if !row.description.isEmpty {
+                        Text(row.description)
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: Spacing.sm)
+
+                VStack(alignment: .trailing, spacing: Spacing.xs) {
+                    Text("\(row.completedChildCount)/\(row.childCount)")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Text("\(Int((row.progressFraction * 100).rounded()))%")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                .frame(width: 56, alignment: .trailing)
+            }
+
+            ProgressView(value: row.progressFraction)
+                .progressViewStyle(.linear)
+                .controlSize(.small)
+
+            HStack(spacing: Spacing.xs) {
+                ForEach(row.artifactLinks.prefix(4)) { link in
+                    Button {
+                        onOpenMilestoneArtifact(link)
+                    } label: {
+                        Label(link.displayType, systemImage: link.artifactType.localizedLowercase == "plan" ? "doc.text" : "checklist")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.secondary)
+                            .labelStyle(.titleAndIcon)
+                            .padding(.horizontal, Spacing.xs)
+                            .padding(.vertical, 2)
+                            .background(Capsule(style: .continuous).fill(CiderColors.surfaceInput))
+                    }
+                    .buttonStyle(.plain)
+                    .help(link.title)
+                }
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 4) {
+                    Text("Show cards")
+                        .font(CiderFont.captionSemibold)
+                    Image(systemName: "arrow.right")
+                        .font(CiderFont.micro)
+                }
+                .foregroundColor(CiderColors.controlAccent)
+            }
+        }
+        .overviewRow()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onOpenMilestoneBoard(row)
+        }
+    }
+}
+
 struct ProjectWorkspaceSurfaceView: View {
     let model: ProjectWorkspaceSurfaceModel
     var onOpenNote: (Note) -> Void

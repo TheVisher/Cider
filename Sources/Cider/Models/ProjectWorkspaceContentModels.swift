@@ -299,6 +299,8 @@ enum ProjectWorkspaceSurfaceProvider {
     ) -> ProjectWorkspaceSurfaceModel {
         let rows: [ProjectWorkspaceNoteRow]
         switch surface {
+        case .milestones:
+            rows = []
         case .notes:
             rows = projectArtifactRows(
                 for: workspace,
@@ -483,7 +485,7 @@ enum ProjectWorkspaceOverviewProvider {
             projectRows: projectRows,
             resources: resources,
             latestUpdate: latestUpdate(from: workspaceBoards),
-            milestoneRows: milestoneRows(from: workspaceBoards, artifactRelations: artifactRelations),
+            milestoneRows: milestoneRows(from: workspaceBoards, artifactRelations: artifactRelations, limit: 5),
             recentArtifacts: Array(coreDocs.prefix(9)),
             artifacts: artifacts,
             boardCreationActionTitle: workspace.kind == .project ? "New Board" : nil
@@ -493,6 +495,18 @@ enum ProjectWorkspaceOverviewProvider {
     private static func scopedBoards(for workspace: ProjectWorkspace, boards: [KanbanBoard]) -> [KanbanBoard] {
         let scopedIDs = Set(workspace.boardIDs)
         return boards.filter { scopedIDs.contains($0.id) }
+    }
+
+    static func milestoneRows(
+        for workspace: ProjectWorkspace,
+        boards: [KanbanBoard],
+        artifactRelations: [SecondBrainRelation] = []
+    ) -> [ProjectWorkspaceMilestoneRow] {
+        milestoneRows(
+            from: scopedBoards(for: workspace, boards: boards),
+            artifactRelations: artifactRelations,
+            limit: nil
+        )
     }
 
     private static func totals(for board: KanbanBoard) -> ProjectWorkspaceCardTotals {
@@ -588,7 +602,8 @@ enum ProjectWorkspaceOverviewProvider {
 
     private static func milestoneRows(
         from boards: [KanbanBoard],
-        artifactRelations: [SecondBrainRelation]
+        artifactRelations: [SecondBrainRelation],
+        limit: Int?
     ) -> [ProjectWorkspaceMilestoneRow] {
         let artifactLinksByCardRef = milestoneArtifactLinksByCardRef(from: artifactRelations)
         let candidates = boards.flatMap { board in
@@ -628,13 +643,17 @@ enum ProjectWorkspaceOverviewProvider {
         let explicitMilestones = candidates.filter { isExplicitMilestone($0.row) }
         let source = explicitMilestones.isEmpty ? candidates : explicitMilestones
 
-        return source.sorted { lhs, rhs in
+        let sortedRows = source.sorted { lhs, rhs in
             if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
             if lhs.row.updatedAt != rhs.row.updatedAt { return lhs.row.updatedAt > rhs.row.updatedAt }
             return lhs.row.id < rhs.row.id
         }
-        .prefix(5)
         .map(\.row)
+
+        if let limit {
+            return Array(sortedRows.prefix(limit))
+        }
+        return sortedRows
     }
 
     private static func isExplicitMilestone(_ row: ProjectWorkspaceMilestoneRow) -> Bool {
