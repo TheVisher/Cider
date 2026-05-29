@@ -6053,6 +6053,19 @@ struct CiderCLI {
             let resolvedAfterCardID = afterCardID.flatMap { ref in
                 col.cards.first { $0.id == ref || board.displayKey(for: $0).localizedCaseInsensitiveCompare(ref) == .orderedSame }?.id
             }
+            let requestedPriority: KanbanPriority?
+            if let priorityStr = parseFlag("--priority", from: args) {
+                switch priorityStr.lowercased() {
+                case "high": requestedPriority = .high
+                case "medium": requestedPriority = .medium
+                case "low": requestedPriority = .low
+                default:
+                    printCLIError("Invalid priority '\(priorityStr)'. Use low, medium, or high.")
+                    return
+                }
+            } else {
+                requestedPriority = nil
+            }
             if let afterCardID {
                 guard let resolvedAfterCardID,
                       let afterCard = col.cards.first(where: { $0.id == resolvedAfterCardID }) else {
@@ -6072,13 +6085,9 @@ struct CiderCLI {
                     updated.notes = notes
                     changed = true
                 }
-                if let priorityStr = parseFlag("--priority", from: args) {
-                    switch priorityStr.lowercased() {
-                    case "high": updated.priority = .high; changed = true
-                    case "medium": updated.priority = .medium; changed = true
-                    case "low": updated.priority = .low; changed = true
-                    default: break
-                    }
+                if let requestedPriority {
+                    updated.priority = requestedPriority
+                    changed = true
                 }
                 if changed {
                     updated.markActivity("created", at: card.created)
@@ -12048,8 +12057,7 @@ struct CiderCLI {
                 continue
             }
             guard i + 1 < args.count, !args[i + 1].hasPrefix("--") else {
-                print("Error: \(token) requires a tag value.")
-                print("Usage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]")
+                printCLIError("\(token) requires a tag value.\nUsage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]")
                 return nil
             }
             values.append(args[i + 1])

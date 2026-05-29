@@ -483,9 +483,12 @@ struct KanbanBoardFileLockingTests {
 
         try Self.runCLI(cli, vault: vault, args: ["board", "create", "Tag Validation"])
 
-        let output = try Self.runCLI(cli, vault: vault, args: ["board", "show", "Tag Validation", "--tag", "--json"])
+        let result = try Self.runCLIResult(cli, vault: vault, args: ["board", "show", "Tag Validation", "--tag", "--json"])
+        let output = String(data: result.output, encoding: .utf8) ?? ""
+        let payload = try #require(try JSONSerialization.jsonObject(with: result.output) as? [String: Any])
 
-        #expect(output.contains("Error: --tag requires a tag value."))
+        #expect(result.status == 1)
+        #expect(payload["ok"] as? Bool == false)
         #expect(output.contains("Usage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]"))
     }
 
@@ -506,6 +509,7 @@ struct KanbanBoardFileLockingTests {
         let invalidCommands: [[String]] = [
             ["board", "add-card", "Mutation Validation", "--column", "Backlog"],
             ["board", "add-card", "Mutation Validation", "--column", "Missing", "--title", "Nope"],
+            ["board", "add-card", "Mutation Validation", "--column", "Backlog", "--title", "Bad priority", "--priority", "urgent"],
             ["board", "update-card", "Mutation Validation", "--card", cardID, "--priority", "urgent"],
             ["board", "move-card", "Mutation Validation", "--card", cardID, "--to", "Missing"],
             ["board", "delete-card", "Mutation Validation", "--card", "missing-card"],
@@ -521,6 +525,12 @@ struct KanbanBoardFileLockingTests {
             #expect(result.status == 1, "Expected nonzero exit for cider-cli \(args.joined(separator: " "))")
             #expect(output.contains("Error:"), "Expected error output for cider-cli \(args.joined(separator: " "))")
         }
+
+        let boardData = try Self.runCLIData(cli, vault: vault, args: ["board", "show", "Mutation Validation", "--json"])
+        let boardJSON = try #require(try JSONSerialization.jsonObject(with: boardData) as? [String: Any])
+        let columns = try #require(boardJSON["columns"] as? [[String: Any]])
+        let cards = columns.flatMap { ($0["cards"] as? [[String: Any]]) ?? [] }
+        #expect(!cards.contains { $0["title"] as? String == "Bad priority" })
     }
 
     @Test("board audit reports missing parent references")
