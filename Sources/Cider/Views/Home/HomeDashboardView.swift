@@ -459,6 +459,7 @@ struct HomeDashboardView: View {
         case .vaultFile(let vaultFile):
             VaultFileCardView(
                 file: vaultFile,
+                masonryCardWidth: masonryCardWidth,
                 onOpen: { handleNormalAction { onOpenVaultFile(vaultFile) } },
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in

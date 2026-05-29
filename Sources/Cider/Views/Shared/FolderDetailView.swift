@@ -1039,6 +1039,7 @@ struct FolderDetailView: View {
         case .vaultFile(let file):
             VaultFileCardView(
                 file: file,
+                masonryCardWidth: masonryCardWidth,
                 onOpen: { onOpenVaultFile?(file) },
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in

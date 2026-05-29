@@ -28,6 +28,7 @@ final class VaultFileThumbnailCache {
 
 struct VaultFileCardView: View {
     let file: VaultFile
+    var masonryCardWidth: CGFloat? = nil
     var onOpen: (() -> Void)? = nil
     var folders: [Folder] = []
     var onMoveToFolder: ((UUID?) -> Void)? = nil
@@ -74,6 +75,8 @@ struct VaultFileCardView: View {
             }
         }
         .hoverState($isHovered, animation: .snappy)
+        .frame(width: masonryCardWidth, alignment: .topLeading)
+        .clipped()
         .contextMenu {
             Button("Open in Finder") { openInFinder() }
             Button("Open with Default App") { openWithDefaultApp() }
@@ -152,15 +155,24 @@ struct VaultFileCardView: View {
     private var imageThumbnailArea: some View {
         if let thumbnail {
             let ratio = thumbnailAspectRatio ?? 1.0
-            Image(nsImage: thumbnail)
-                .resizable()
-                .scaledToFill()
-                .frame(maxWidth: .infinity)
-                .aspectRatio(1 / ratio, contentMode: .fit)
-                .clipped()
+            if let width = masonryThumbnailWidth {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: width, height: masonryThumbnailHeight(for: width, ratio: ratio))
+                    .clipped()
+            } else {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(1 / ratio, contentMode: .fit)
+                    .clipped()
+            }
         } else {
             RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
                 .fill(CiderColors.surfaceInput)
+                .frame(width: masonryThumbnailWidth)
                 .frame(maxWidth: .infinity)
                 .frame(height: VaultFileDesign.imageFallbackHeight)
                 .overlay(
@@ -294,6 +306,20 @@ struct VaultFileCardView: View {
 
     private var formattedSize: String {
         ByteCountFormatter.string(fromByteCount: file.fileSize, countStyle: .file)
+    }
+
+    private var masonryThumbnailWidth: CGFloat? {
+        guard let masonryCardWidth, masonryCardWidth.isFinite, masonryCardWidth > 0 else { return nil }
+        return max(1, masonryCardWidth - (Spacing.sm * 2))
+    }
+
+    private func masonryThumbnailHeight(for width: CGFloat, ratio: CGFloat) -> CGFloat {
+        let safeRatio = ratio.isFinite && ratio > 0 ? ratio : 1
+        let rawHeight = width * safeRatio
+        return min(
+            max(rawHeight, VaultFileDesign.imageMasonryThumbnailMinHeight),
+            VaultFileDesign.imageMasonryThumbnailMaxHeight
+        )
     }
 
     private func openInFinder() {
