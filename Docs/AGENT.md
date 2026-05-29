@@ -82,6 +82,16 @@ Project-scoped QA and audit reports may live as Markdown artifacts inside the Ci
 
 These vault artifacts are visual Cider work surfaces, not permanent repo docs. Use them to turn discussions, references, and audits into a clear milestone plus scoped Kanban cards. Link generated cards back to the source plan or QA artifact when possible.
 
+For audits, QA passes, feature plans, and larger implementation planning:
+
+1. Write the findings, evidence, open questions, and proposed direction in the appropriate Project artifact first: `Projects/<Project>/Plans/` for plans/specs, or `Projects/<Project>/QA/` for audits and QA reports.
+2. Refine that artifact until it is solid enough to drive work. Do not skip straight from a broad audit or brainstorm into a pile of unrelated cards.
+3. Create a milestone from the accepted artifact. The milestone is the overarching goal and should link back to the source plan or QA artifact.
+4. Extract small, agent-ready Kanban cards under that milestone. Cards should be bite-sized fixes or verification tasks, not massive codebase-wide changes.
+5. Work the cards one by one through `Queued`, `In Progress`, `Testing`, and `Done`, recording implementation history, failed attempts, verification evidence, and commits on each card.
+
+If a proposed card cannot be implemented, tested, and committed as a reasonably scoped unit, split it before work begins. The project artifact and milestone hold the big picture; cards hold the execution trail.
+
 When a feature or fix is complete:
 
 1. Promote durable product, architecture, storage, agent, CLI, QA, design, or convention changes into the relevant core doc.
