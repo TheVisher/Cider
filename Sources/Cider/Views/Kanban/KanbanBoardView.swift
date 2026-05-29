@@ -1,5 +1,56 @@
 import SwiftUI
 
+enum KanbanBoardHeaderControl: String, CaseIterable, Identifiable {
+    case filter
+    case displayOptions
+    case properties
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .filter: "Filter"
+        case .displayOptions: "Display Options"
+        case .properties: "Properties"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .filter: "line.3.horizontal.decrease.circle"
+        case .displayOptions: "slider.horizontal.3"
+        case .properties: "sidebar.right"
+        }
+    }
+
+    var helpText: String {
+        switch self {
+        case .filter: "Filter board"
+        case .displayOptions: "Display options"
+        case .properties: "Show board properties"
+        }
+    }
+
+    var placeholderTitle: String {
+        switch self {
+        case .filter: "Filter controls are coming next."
+        case .displayOptions: "Display options are coming next."
+        case .properties: "Board properties are coming next."
+        }
+    }
+
+    var placeholderBody: String {
+        switch self {
+        case .filter:
+            "This shell will hold filter categories like status, labels, dates, and project milestones."
+        case .displayOptions:
+            "This shell will hold board layout, ordering, column visibility, and card property options."
+        case .properties:
+            "This inspector shell will hold board properties, milestones, progress, and activity."
+        }
+    }
+}
+
 /// Renders a Kanban board as horizontal scrolling columns with draggable cards.
 struct KanbanBoardView: View {
     let boardID: String
@@ -26,6 +77,8 @@ struct KanbanBoardView: View {
     @State private var selectedFeatureDomainFilter: String?
     @State private var selectedProjectBoardViewID = "all"
     @State private var selectedMilestoneFilterCardID: String?
+    @State private var activeHeaderPopover: KanbanBoardHeaderControl?
+    @State private var isBoardInspectorVisible = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let cardFaceSuggestedTags = [
@@ -71,16 +124,26 @@ struct KanbanBoardView: View {
 
     var body: some View {
         if let board {
-            VStack(spacing: 0) {
-                boardHeader(board)
-                Divider().background(CiderColors.separator)
-                columnsArea(board)
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    boardHeader(board)
+                    Divider().background(CiderColors.separator)
+                    columnsArea(board)
+                }
+
+                if isBoardInspectorVisible {
+                    boardInspectorShell(board)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
+            .animation(reduceMotion ? .none : .spring(response: 0.28, dampingFraction: 0.88), value: isBoardInspectorVisible)
             .onChange(of: boardID) { _, _ in
                 projectLaneScrollIndexByID.removeAll()
                 selectedFeatureDomainFilter = nil
                 selectedProjectBoardViewID = "all"
                 selectedMilestoneFilterCardID = milestoneFilterCardID
+                activeHeaderPopover = nil
+                isBoardInspectorVisible = false
             }
             .onAppear {
                 selectedMilestoneFilterCardID = milestoneFilterCardID
@@ -155,6 +218,12 @@ struct KanbanBoardView: View {
 
             if !featureFilters.isEmpty {
                 domainFilterMenu(featureFilters)
+            }
+
+            HStack(spacing: Spacing.xxs) {
+                ForEach(KanbanBoardHeaderControl.allCases) { control in
+                    boardHeaderControlButton(control)
+                }
             }
 
             // Compact toggle
@@ -317,6 +386,125 @@ struct KanbanBoardView: View {
         .menuStyle(.borderlessButton)
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityLabel(selected.map { "Domain filter: \($0.label)" } ?? "Domain filter")
+    }
+
+    private func boardHeaderControlButton(_ control: KanbanBoardHeaderControl) -> some View {
+        let isActive = activeHeaderPopover == control || (control == .properties && isBoardInspectorVisible)
+
+        return Button {
+            switch control {
+            case .filter, .displayOptions:
+                activeHeaderPopover = activeHeaderPopover == control ? nil : control
+            case .properties:
+                withAnimation(reduceMotion ? .none : .spring(response: 0.28, dampingFraction: 0.88)) {
+                    isBoardInspectorVisible.toggle()
+                }
+                activeHeaderPopover = nil
+            }
+        } label: {
+            Image(systemName: control.systemImage)
+                .font(CiderFont.caption)
+                .foregroundColor(isActive ? CiderColors.controlAccent : CiderColors.tertiary)
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(isActive ? CiderColors.controlAccent.opacity(0.12) : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .strokeBorder(isActive ? CiderColors.controlAccent.opacity(0.26) : Color.clear, lineWidth: CiderBorder.hairlineStrokeWidth)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(control.helpText)
+        .accessibilityLabel(control.title)
+        .popover(
+            isPresented: Binding(
+                get: { activeHeaderPopover == control },
+                set: { isPresented in
+                    if !isPresented, activeHeaderPopover == control {
+                        activeHeaderPopover = nil
+                    }
+                }
+            ),
+            arrowEdge: .bottom
+        ) {
+            boardHeaderControlPopover(control)
+        }
+    }
+
+    private func boardHeaderControlPopover(_ control: KanbanBoardHeaderControl) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Label(control.title, systemImage: control.systemImage)
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.primary)
+
+            Text(control.placeholderTitle)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.secondary)
+
+            Text(control.placeholderBody)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Spacing.md)
+        .frame(width: 260, alignment: .leading)
+    }
+
+    private func boardInspectorShell(_ board: KanbanBoard) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: Spacing.sm) {
+                Label(KanbanBoardHeaderControl.properties.title, systemImage: KanbanBoardHeaderControl.properties.systemImage)
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    withAnimation(reduceMotion ? .none : .spring(response: 0.28, dampingFraction: 0.88)) {
+                        isBoardInspectorVisible = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Hide board properties")
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
+
+            Divider().background(CiderColors.separator)
+
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Text(board.name)
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(2)
+
+                Text(KanbanBoardHeaderControl.properties.placeholderTitle)
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.secondary)
+
+                Text(KanbanBoardHeaderControl.properties.placeholderBody)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(Spacing.md)
+
+            Spacer(minLength: 0)
+        }
+        .frame(width: 280)
+        .background(CiderColors.surfaceInput)
+        .overlay(alignment: .leading) {
+            CiderColors.separator
+                .frame(width: Spacing.hairline)
+        }
     }
 
     private func filteredCardCount(for board: KanbanBoard) -> Int {
