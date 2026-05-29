@@ -158,13 +158,14 @@ struct VaultFileCardView: View {
             if let width = masonryThumbnailWidth {
                 Image(nsImage: thumbnail)
                     .resizable()
-                    .scaledToFill()
+                    .scaledToFit()
                     .frame(width: width, height: masonryThumbnailHeight(for: width, ratio: ratio))
+                    .background(CiderColors.surfaceInput)
                     .clipped()
             } else {
                 Image(nsImage: thumbnail)
                     .resizable()
-                    .scaledToFill()
+                    .scaledToFit()
                     .frame(maxWidth: .infinity)
                     .aspectRatio(1 / ratio, contentMode: .fit)
                     .clipped()
