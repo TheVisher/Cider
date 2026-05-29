@@ -138,6 +138,45 @@ struct KanbanBoardFileLockingTests {
         #expect(refreshed.priority == .high)
     }
 
+    @Test("stale note appends merge against latest board file")
+    @MainActor
+    func staleNoteAppendsMergeAgainstLatestBoardFile() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Notes Merge Smoke")
+        let card = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "Race card"))
+        let secondWriterStorage = KanbanStorage()
+
+        storage.appendCardEvidence(
+            boardID: board.id,
+            cardID: card.id,
+            text: "First writer verification survived.",
+            source: "first"
+        )
+        secondWriterStorage.appendCardHistory(
+            boardID: board.id,
+            cardID: card.id,
+            type: "implementation",
+            text: "Second writer implementation survived.",
+            source: "second"
+        )
+
+        let refreshed = try #require(KanbanStorage().findCard(id: card.id)?.card)
+        let notes = try #require(refreshed.notes)
+        #expect(notes.contains("First writer verification survived."))
+        #expect(notes.contains("Second writer implementation survived."))
+        #expect(notes.contains("## Test Evidence"))
+        #expect(notes.contains("## Implementation History"))
+    }
+
     @Test("reviewed inbox cards stay reviewed after no-op detail save and reload")
     @MainActor
     func reviewedInboxCardsStayReviewedAfterNoOpDetailSaveAndReload() throws {

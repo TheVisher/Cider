@@ -350,6 +350,68 @@ final class KanbanStorage: ObservableObject {
         }
     }
 
+    @discardableResult
+    func updateCardSection(boardID: String, cardID: String, title: String, body: String) -> KanbanCard? {
+        mutateCardNotes(boardID: boardID, cardID: cardID) { notes in
+            KanbanCardSectionParser.updatingSection(in: notes, title: title, body: body)
+        }
+    }
+
+    @discardableResult
+    func appendCardEvidence(boardID: String, cardID: String, text: String, source: String?) -> KanbanCard? {
+        mutateCardNotes(boardID: boardID, cardID: cardID) { notes in
+            KanbanCardSectionParser.appendingEvidence(to: notes, text: text, source: source)
+        }
+    }
+
+    @discardableResult
+    func appendCardHistory(boardID: String, cardID: String, type: String, text: String, source: String?) -> KanbanCard? {
+        var wasInvalidType = false
+        let updatedCard = mutateCardNotes(boardID: boardID, cardID: cardID) { notes in
+            guard let nextNotes = KanbanCardSectionParser.appendingHistory(
+                to: notes,
+                type: type,
+                text: text,
+                source: source
+            ) else {
+                wasInvalidType = true
+                return notes
+            }
+            return nextNotes
+        }
+        return wasInvalidType ? nil : updatedCard
+    }
+
+    private func mutateCardNotes(
+        boardID: String,
+        cardID: String,
+        transform: (String?) -> String?
+    ) -> KanbanCard? {
+        var updatedCard: KanbanCard?
+        mutate(boardID: boardID) { board in
+            for colIdx in board.columns.indices {
+                if let cardIdx = board.columns[colIdx].cards.firstIndex(where: { $0.id == cardID }) {
+                    let current = board.columns[colIdx].cards[cardIdx]
+                    let nextNotes = transform(current.notes)
+                    guard nextNotes != current.notes else {
+                        updatedCard = current
+                        return
+                    }
+                    board.columns[colIdx].cards[cardIdx].notes = nextNotes
+                    board.columns[colIdx].cards[cardIdx].aiSummary = nil
+                    board.columns[colIdx].cards[cardIdx].markActivity("updated")
+                    updatedCard = board.columns[colIdx].cards[cardIdx]
+                    return
+                }
+            }
+        }
+        if let updatedCard {
+            schedulePreviewSummaryRefresh(boardID: boardID, cardID: cardID)
+            refreshSecondBrainProjectionIfAvailable(boardID: boardID, card: updatedCard)
+        }
+        return updatedCard
+    }
+
     private func mergeCardUpdate(_ incoming: KanbanCard, baseline: KanbanCard?, into current: KanbanCard) -> KanbanCard {
         guard let baseline else { return incoming }
 

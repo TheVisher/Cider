@@ -6238,14 +6238,20 @@ struct CiderCLI {
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
-            guard var card = board.card(matching: cardID) else {
+            guard let card = board.card(matching: cardID) else {
                 printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
-            card.notes = KanbanCardSectionParser.updatingSection(in: card.notes, title: section, body: value)
-            storage.updateCard(boardID: board.id, card: card)
-            refreshSecondBrainProjection(boardID: board.id, card: card)
-            printBoardCardSectionResult(board: board, card: card)
+            guard let updatedCard = storage.updateCardSection(
+                boardID: board.id,
+                cardID: card.id,
+                title: section,
+                body: value
+            ) else {
+                printCLIError("Could not update section '\(section)' on card '\(cardID)'.")
+                return
+            }
+            printBoardCardSectionResult(board: board, card: updatedCard)
 
         case "comment":
             guard args.first == "add" else {
@@ -6347,18 +6353,20 @@ struct CiderCLI {
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
-            guard var card = board.card(matching: cardID) else {
+            guard let card = board.card(matching: cardID) else {
                 printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
-            card.notes = KanbanCardSectionParser.appendingEvidence(
-                to: card.notes,
+            guard let updatedCard = storage.appendCardEvidence(
+                boardID: board.id,
+                cardID: card.id,
                 text: text,
                 source: parseFlag("--source", from: evidenceArgs)
-            )
-            storage.updateCard(boardID: board.id, card: card)
-            refreshSecondBrainProjection(boardID: board.id, card: card)
-            printBoardCardSectionResult(board: board, card: card)
+            ) else {
+                printCLIError("Could not append evidence to card '\(cardID)'.")
+                return
+            }
+            printBoardCardSectionResult(board: board, card: updatedCard)
 
         case "history":
             guard args.first == "add" else {
@@ -6374,12 +6382,13 @@ struct CiderCLI {
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
-            guard var card = board.card(matching: cardID) else {
+            guard let card = board.card(matching: cardID) else {
                 printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
-            guard let nextNotes = KanbanCardSectionParser.appendingHistory(
-                to: card.notes,
+            guard let updatedCard = storage.appendCardHistory(
+                boardID: board.id,
+                cardID: card.id,
                 type: type,
                 text: text,
                 source: parseFlag("--source", from: historyArgs)
@@ -6387,10 +6396,7 @@ struct CiderCLI {
                 printCLIError("Invalid history type '\(type)'. Use \(KanbanCardSectionParser.supportedHistoryTypes.joined(separator: ", ")).")
                 return
             }
-            card.notes = nextNotes
-            storage.updateCard(boardID: board.id, card: card)
-            refreshSecondBrainProjection(boardID: board.id, card: card)
-            printBoardCardSectionResult(board: board, card: card)
+            printBoardCardSectionResult(board: board, card: updatedCard)
 
         case "move-card":
             guard let boardName = args.first,
