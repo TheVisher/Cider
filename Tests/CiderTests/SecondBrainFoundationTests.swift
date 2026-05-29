@@ -2552,6 +2552,119 @@ struct SecondBrainFoundationTests {
         #expect(children.map { $0["id"] as? String } == [childID])
     }
 
+    @Test("process CLI links existing project artifacts to milestones")
+    func processCLILinksExistingProjectArtifactsToMilestones() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-artifact-link-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Artifact Link Smoke"], vaultURL: vaultURL)
+        let artifact = try jsonObject(from: runCLI([
+            "note", "project-artifact", "create",
+            "--project", "cider",
+            "--type", "qa",
+            "--title", "Artifact Link QA",
+            "--content", "Findings first.",
+            "--json",
+        ], vaultURL: vaultURL))
+        let artifactID = try #require(artifact["id"] as? String)
+
+        let created = try jsonObject(from: runCLI([
+            "board", "milestone", "create", "Artifact Link Smoke",
+            "--title", "Artifact Link Milestone",
+            "--json",
+        ], vaultURL: vaultURL))
+        let board = try #require(created["board"] as? [String: Any])
+        let boardID = try #require(board["id"] as? String)
+        let milestone = try #require(created["milestone"] as? [String: Any])
+        let milestoneID = try #require(milestone["id"] as? String)
+
+        let linked = try jsonObject(from: runCLI([
+            "note", "project-artifact", "link", artifactID,
+            "--card", milestoneID,
+            "--relation", "documents",
+            "--json",
+        ], vaultURL: vaultURL))
+        #expect(linked["ok"] as? Bool == true)
+        let relation = try #require(linked["relation"] as? [String: Any])
+        #expect(relation["relationType"] as? String == "documents")
+        let targetOwner = try #require(relation["targetOwner"] as? [String: Any])
+        #expect(targetOwner["ownerID"] as? String == "\(boardID)/\(milestoneID)")
+        let metadata = try #require(relation["metadata"] as? [String: String])
+        #expect(metadata["artifactType"] == "qa")
+
+        let inspected = try jsonObject(from: runCLI([
+            "board", "milestone", "inspect", "Artifact Link Smoke",
+            "--milestone", milestoneID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let inspectedMilestone = try #require(inspected["milestone"] as? [String: Any])
+        let artifactLinks = try #require(inspectedMilestone["artifactLinks"] as? [[String: Any]])
+        #expect(artifactLinks.map { $0["title"] as? String }.contains("Artifact Link QA"))
+
+        let invalid = try runCLIResult([
+            "note", "project-artifact", "link", artifactID,
+            "--card", "missing-card",
+            "--relation", "documents",
+            "--json",
+        ], vaultURL: vaultURL)
+        #expect(invalid.status == 1)
+        let invalidPayload = try jsonObject(from: invalid.stdout)
+        #expect(invalidPayload["ok"] as? Bool == false)
+    }
+
+    @Test("process CLI creates milestones from source artifacts")
+    func processCLICreatesMilestonesFromSourceArtifacts() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-milestone-source-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Milestone Source Smoke"], vaultURL: vaultURL)
+        let artifact = try jsonObject(from: runCLI([
+            "note", "project-artifact", "create",
+            "--project", "cider",
+            "--type", "plan",
+            "--title", "Milestone Source Plan",
+            "--content", "Plan first.",
+            "--json",
+        ], vaultURL: vaultURL))
+        let artifactID = try #require(artifact["id"] as? String)
+
+        let created = try jsonObject(from: runCLI([
+            "board", "milestone", "create", "Milestone Source Smoke",
+            "--title", "Milestone From Artifact",
+            "--source-artifact", artifactID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let milestone = try #require(created["milestone"] as? [String: Any])
+        let artifactLinks = try #require(milestone["artifactLinks"] as? [[String: Any]])
+        #expect(artifactLinks.map { $0["title"] as? String } == ["Milestone Source Plan"])
+        #expect(artifactLinks.map { $0["displayType"] as? String } == ["Plan"])
+    }
+
+    @Test("process CLI add card supports JSON output")
+    func processCLIAddCardSupportsJSONOutput() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-add-card-json-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Add Card JSON Smoke"], vaultURL: vaultURL)
+        let payload = try jsonObject(from: runCLI([
+            "board", "add-card", "Add Card JSON Smoke",
+            "--column", "Backlog",
+            "--title", "Structured card",
+            "--priority", "high",
+            "--json",
+        ], vaultURL: vaultURL))
+
+        #expect(payload["ok"] as? Bool == true)
+        let card = try #require(payload["card"] as? [String: Any])
+        #expect(card["title"] as? String == "Structured card")
+        #expect(card["priority"] as? String == "high")
+        #expect((card["id"] as? String)?.isEmpty == false)
+        #expect((card["displayKey"] as? String)?.hasPrefix("ACJ-") == true)
+    }
+
     @Test("Kanban testing guide panel payload keeps QA steps portable")
     func kanbanTestingGuidePanelPayloadKeepsQAStepsPortable() {
         let dashboard = KanbanCardDashboardModel(

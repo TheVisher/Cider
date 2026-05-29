@@ -2566,6 +2566,7 @@ struct CiderCLI {
             print("""
             Project artifact note commands:
               cider-cli note project-artifact create --project <project-id-or-name> --type note|plan|handoff|decision|qa --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--card-id <id>] [--decided-from-card <id>] [--decided-from-note <id>] [--source-card <id>] [--source-note <id>] [--validates-card <id>] [--validates-note <id>] [--found-bug-in-card <id>] [--found-bug-in-note <id>] [--json]
+              cider-cli note project-artifact link <note-id-prefix> --card <id|display-key|board/card> [--board <board>] [--relation documents|validates|found-bug-in|decided-from] [--json]
               cider-cli note project-artifact append <note-id-prefix> (--stdin|--text-file <path>|--content <text>) [--json]
               cider-cli note project-artifact list --project <project-id-or-name> [--type note|plan|handoff|decision|decisions|qa|audit|qa-audits|plans-handoffs] [--json]
               cider-cli note project-artifact get <note-id-prefix> [--json]
@@ -2604,6 +2605,47 @@ struct CiderCLI {
                 if !linkedRelations.isEmpty {
                     print("  Linked relations: \(linkedRelations.map { "\(ProjectArtifactRelationType.displayName(for: $0.relationType)): \($0.targetOwner.canonicalRef)" }.joined(separator: ", "))")
                 }
+            }
+
+        case "link":
+            let positional = leadingPositionalArgs(from: rest)
+            guard let idPrefix = positional.first,
+                  let note = findNote(idPrefix, in: storage),
+                  let cardRef = parseFlag("--card", from: rest) ?? parseFlag("--card-id", from: rest) else {
+                printCLIError("Usage: cider-cli note project-artifact link <note-id-prefix> --card <id|display-key|board/card> [--board <board>] [--relation documents|validates|found-bug-in|decided-from] [--json]")
+                return
+            }
+            guard let resolvedCard = resolveKanbanCardRef(cardRef, boardRef: parseFlag("--board", from: rest)) else { return }
+            guard let relationType = parseProjectArtifactRelationType(parseFlag("--relation", from: rest) ?? "documents") else { return }
+            let target = ProjectArtifactRelationService.ArtifactRelationTarget(
+                owner: SecondBrainKanbanProjectionService.owner(boardID: resolvedCard.board.id, cardID: resolvedCard.card.id),
+                relationType: relationType,
+                title: resolvedCard.card.title,
+                evidence: "Project artifact \(note.title) \(ProjectArtifactRelationType.displayName(for: relationType)) Kanban card \(resolvedCard.card.title) [\(resolvedCard.card.id)]."
+            )
+            let linkedRelations = ProjectArtifactRelationService.recordArtifactRelations(
+                note: note,
+                targets: [target],
+                actor: parseFlag("--source-agent", from: rest) ?? "cider-cli",
+                source: ProjectArtifactRelationService.cliSource
+            )
+            guard let relation = linkedRelations.first else {
+                printCLIError("Could not record artifact relation.")
+                return
+            }
+            if jsonOutput {
+                outputJSON([
+                    "ok": true,
+                    "command": "note.project-artifact.link",
+                    "artifact": noteToDict(note),
+                    "target": [
+                        "board": ["id": resolvedCard.board.id, "name": resolvedCard.board.name],
+                        "card": boardCardSummaryToDict(board: resolvedCard.board, card: resolvedCard.card),
+                    ],
+                    "relation": relationToDict(relation),
+                ])
+            } else {
+                print("Linked project artifact '\(note.title)' to card \(resolvedCard.board.displayKey(for: resolvedCard.card))")
             }
 
         case "append":
@@ -2695,7 +2737,7 @@ struct CiderCLI {
             }
 
         default:
-            printCLIError("Unknown project-artifact command: \(subcommand ?? "nil"). Commands: create, append, list, get")
+            printCLIError("Unknown project-artifact command: \(subcommand ?? "nil"). Commands: create, link, append, list, get")
         }
     }
 
@@ -2704,6 +2746,7 @@ struct CiderCLI {
         "--content", "--text-file", "--card", "--card-id", "--source-agent", "--target-agent",
         "--decided-from-card", "--decided-from-note", "--source-card", "--source-note",
         "--validates-card", "--validates-note", "--found-bug-in-card", "--found-bug-in-note",
+        "--relation", "--board",
     ]
 
     static func projectArtifactContent(from args: [String]) -> String? {
@@ -2728,6 +2771,77 @@ struct CiderCLI {
             actor: parseFlag("--source-agent", from: args) ?? "cider-cli",
             source: ProjectArtifactRelationService.cliSource
         )
+    }
+
+    static func parseProjectArtifactRelationType(_ raw: String) -> String? {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+            .replacingOccurrences(of: "-", with: "_") {
+        case ProjectArtifactRelationType.documents:
+            return ProjectArtifactRelationType.documents
+        case ProjectArtifactRelationType.validates:
+            return ProjectArtifactRelationType.validates
+        case ProjectArtifactRelationType.foundBugIn:
+            return ProjectArtifactRelationType.foundBugIn
+        case ProjectArtifactRelationType.decidedFrom:
+            return ProjectArtifactRelationType.decidedFrom
+        case ProjectArtifactRelationType.spawnedFrom:
+            return ProjectArtifactRelationType.spawnedFrom
+        case ProjectArtifactRelationType.derivesFrom:
+            return ProjectArtifactRelationType.derivesFrom
+        case ProjectArtifactRelationType.implements:
+            return ProjectArtifactRelationType.implements
+        case ProjectArtifactRelationType.supersedes:
+            return ProjectArtifactRelationType.supersedes
+        default:
+            printCLIError("Invalid project artifact relation '\(raw)'. Use documents, validates, found-bug-in, decided-from, spawned-from, derives-from, implements, or supersedes.")
+            return nil
+        }
+    }
+
+    static func resolveKanbanCardRef(_ rawRef: String, boardRef: String? = nil) -> (board: KanbanBoard, card: KanbanCard)? {
+        let trimmed = rawRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            printCLIError("Card reference cannot be empty.")
+            return nil
+        }
+
+        if let boardRef, !boardRef.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            guard let board = findBoard(boardRef, in: KanbanStorage.shared) else { return nil }
+            guard let card = board.card(matching: trimmed) else {
+                printCLIError("Card '\(trimmed)' not found in board '\(board.name)'")
+                return nil
+            }
+            return (board, card)
+        }
+
+        if let slash = trimmed.firstIndex(of: "/") {
+            let boardPart = String(trimmed[..<slash])
+            let cardPart = String(trimmed[trimmed.index(after: slash)...])
+            guard let board = findBoard(boardPart, in: KanbanStorage.shared) else { return nil }
+            guard let card = board.card(matching: cardPart) else {
+                printCLIError("Card '\(cardPart)' not found in board '\(board.name)'")
+                return nil
+            }
+            return (board, card)
+        }
+
+        if let detail = KanbanStorage.shared.findCard(id: trimmed) {
+            return (detail.board, detail.card)
+        }
+
+        let matches = KanbanStorage.shared.boards.compactMap { board -> (board: KanbanBoard, card: KanbanCard)? in
+            guard let card = board.card(matching: trimmed) else { return nil }
+            return (board, card)
+        }
+        if matches.count == 1 {
+            return matches[0]
+        }
+        if matches.count > 1 {
+            printCLIError("Card reference '\(trimmed)' is ambiguous. Pass --board <board> or use board/card.")
+        } else {
+            printCLIError("Card '\(trimmed)' not found.")
+        }
+        return nil
     }
 
     static func projectArtifactRelationTargets(from args: [String]) -> [ProjectArtifactRelationService.ArtifactRelationTarget] {
@@ -6094,7 +6208,17 @@ struct CiderCLI {
                     storage.updateCard(boardID: board.id, card: updated)
                 }
                 refreshSecondBrainProjection(boardID: board.id, card: updated)
-                print("Added card: \(updated.title) [\(updated.id)] to \(col.name)")
+                if jsonOutput {
+                    outputJSON([
+                        "ok": true,
+                        "action": "created",
+                        "board": ["id": board.id, "name": board.name, "displayKeyPrefix": board.displayKeyPrefix],
+                        "column": ["id": col.id, "name": col.name],
+                        "card": boardCardSummaryToDict(board: board, card: updated),
+                    ])
+                } else {
+                    print("Added card: \(updated.title) [\(updated.id)] to \(col.name)")
+                }
             } else {
                 printCLIError("Could not add card")
             }
@@ -9451,10 +9575,18 @@ struct CiderCLI {
         case "create":
             guard let boardRef = args.first,
                   let title = parseFlag("--title", from: args) else {
-                printCLIError("Usage: cider-cli board milestone create <board> --title <title> [--description <text>] [--column <column>] [--json]")
+                printCLIError("Usage: cider-cli board milestone create <board> --title <title> [--description <text>] [--column <column>] [--source-artifact <note-id>] [--json]")
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
+            let sourceArtifactRef = parseFlag("--source-artifact", from: args) ?? parseFlag("--source-note", from: args)
+            let sourceArtifact: Note?
+            if let sourceArtifactRef {
+                guard let note = findNote(sourceArtifactRef, in: NotesStorage.shared) else { return }
+                sourceArtifact = note
+            } else {
+                sourceArtifact = nil
+            }
             let columnRef = parseFlag("--column", from: args)
             guard let column = columnRef.flatMap({ findColumn($0, in: board) }) ?? defaultMilestoneColumn(in: board) else {
                 printCLIError("Board '\(board.name)' has no column for milestone creation.")
@@ -9477,6 +9609,21 @@ struct CiderCLI {
             milestone.markActivity("created", at: created.created)
             storage.updateCard(boardID: board.id, card: milestone)
             refreshSecondBrainProjection(boardID: board.id, card: milestone)
+            if let sourceArtifact {
+                _ = ProjectArtifactRelationService.recordArtifactRelations(
+                    note: sourceArtifact,
+                    targets: [
+                        ProjectArtifactRelationService.ArtifactRelationTarget(
+                            owner: SecondBrainKanbanProjectionService.owner(boardID: board.id, cardID: milestone.id),
+                            relationType: ProjectArtifactRelationType.documents,
+                            title: milestone.title,
+                            evidence: "Project artifact \(sourceArtifact.title) documents milestone \(milestone.title) [\(milestone.id)]."
+                        ),
+                    ],
+                    actor: parseFlag("--source-agent", from: args) ?? "cider-cli",
+                    source: ProjectArtifactRelationService.cliSource
+                )
+            }
             printMilestoneResult(boardID: board.id, boardName: board.name, milestone: milestone, children: [], action: "created")
 
         case "list", "ls":
@@ -9668,7 +9815,51 @@ struct CiderCLI {
         if let color = milestone.color { dict["color"] = color.rawValue }
         if let notes = milestone.notes { dict["notes"] = notes }
         if let updatedAt = milestone.updatedAt { dict["updatedAt"] = ISO8601DateFormatter().string(from: updatedAt) }
+        dict["artifactLinks"] = milestoneArtifactLinks(boardID: boardID, milestoneID: milestone.id)
         return dict
+    }
+
+    static func milestoneArtifactLinks(boardID: String, milestoneID: String) -> [[String: Any]] {
+        let owner = SecondBrainKanbanProjectionService.owner(boardID: boardID, cardID: milestoneID)
+        let relations = (try? SecondBrainStore(database: .shared).relatedRelations(for: owner)) ?? []
+        let notesByID = Dictionary(uniqueKeysWithValues: NotesStorage.shared.notes.map { ($0.id.uuidString, $0) })
+        let allowedArtifactTypes: Set<String> = ["plan", "qa", "audit", "decision", "handoff", "note"]
+        return relations.compactMap { relation -> [String: Any]? in
+            guard relation.sourceOwner.ownerType == "note" || relation.targetOwner.ownerType == "note" else { return nil }
+            guard relation.sourceOwner == owner || relation.targetOwner == owner else { return nil }
+            let noteOwner = relation.sourceOwner.ownerType == "note" ? relation.sourceOwner : relation.targetOwner
+            let note = notesByID[noteOwner.ownerID]
+            let artifactType = (relation.metadata["artifactType"] ?? note?.artifactType ?? "note").localizedLowercase
+            guard allowedArtifactTypes.contains(artifactType) else { return nil }
+            let title = relation.metadata["title"] ?? note?.title ?? noteOwner.ownerID
+            var dict: [String: Any] = [
+                "owner": ownerToDict(noteOwner),
+                "title": title,
+                "artifactType": artifactType,
+                "displayType": projectArtifactDisplayType(artifactType),
+                "relationType": relation.relationType,
+                "relationLabel": ProjectArtifactRelationType.displayName(for: relation.relationType),
+            ]
+            if let path = relation.metadata["path"] ?? note?.relativePath {
+                dict["path"] = path
+            }
+            return dict
+        }
+    }
+
+    static func projectArtifactDisplayType(_ artifactType: String) -> String {
+        switch artifactType.localizedLowercase {
+        case "qa", "audit":
+            return "QA"
+        case "plan":
+            return "Plan"
+        case "decision":
+            return "Decision"
+        case "handoff":
+            return "Handoff"
+        default:
+            return "Note"
+        }
     }
 
     static func milestoneAttachedCardToDict(_ card: KanbanCard) -> [String: Any] {
@@ -11255,6 +11446,20 @@ struct CiderCLI {
         ]
         if let priority = card.priority { dict["priority"] = priority.rawValue }
         if let completed = card.completed { dict["completed"] = ISO8601DateFormatter().string(from: completed) }
+        return dict
+    }
+
+    static func boardCardSummaryToDict(board: KanbanBoard, card: KanbanCard) -> [String: Any] {
+        var dict = minimalCardToDict(card)
+        dict["displayKey"] = board.displayKey(for: card)
+        dict["tags"] = card.tags
+        dict["linkedEntities"] = card.linkedEntities.map(libraryEntityRefToDict)
+        dict["relatedCardIDs"] = card.relatedCardIDs
+        if let parentCardID = card.parentCardID { dict["parentCardID"] = parentCardID }
+        if let notes = card.notes { dict["notes"] = notes }
+        if let agent = card.agent { dict["agent"] = agent }
+        if let color = card.color { dict["color"] = color.rawValue }
+        if let updatedAt = card.updatedAt { dict["updatedAt"] = ISO8601DateFormatter().string(from: updatedAt) }
         return dict
     }
 
