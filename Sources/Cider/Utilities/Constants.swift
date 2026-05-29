@@ -552,10 +552,6 @@ enum VaultFileDesign {
     static let cardThumbnailHeight: CGFloat = 120
     /// Fallback height for image cards before thumbnail loads
     static let imageFallbackHeight: CGFloat = 160
-    /// Bounds for image file cards in masonry layout so unusual source images
-    /// cannot force a card outside its column during async thumbnail loading.
-    static let imageMasonryThumbnailMinHeight: CGFloat = 120
-    static let imageMasonryThumbnailMaxHeight: CGFloat = 420
     /// Height of the placeholder area in the detail panel
     static let detailPlaceholderHeight: CGFloat = 180
     /// Min/max preview heights for PDF and video in detail view

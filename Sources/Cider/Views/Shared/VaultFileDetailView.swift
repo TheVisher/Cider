@@ -28,16 +28,11 @@ struct VaultFileDetailView: View {
         switch file.fileType {
         case .image:
             if let image {
-                GeometryReader { proxy in
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .background(CiderColors.surfaceInput)
-                        .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-                }
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: VaultFileDesign.detailPreviewMinHeight, maxHeight: VaultFileDesign.detailPreviewMaxHeight)
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             } else {
                 iconPlaceholder
             }
