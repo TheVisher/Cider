@@ -51,6 +51,81 @@ enum KanbanBoardHeaderControl: String, CaseIterable, Identifiable {
     }
 }
 
+enum KanbanBoardFilterCategory: String, CaseIterable, Identifiable {
+    case aiFilter
+    case advancedFilter
+    case status
+    case priority
+    case labels
+    case relations
+    case dates
+    case projectMilestone
+    case content
+    case links
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .aiFilter: "AI filter"
+        case .advancedFilter: "Advanced filter"
+        case .status: "Status"
+        case .priority: "Priority"
+        case .labels: "Labels"
+        case .relations: "Relations"
+        case .dates: "Dates"
+        case .projectMilestone: "Project milestone"
+        case .content: "Content"
+        case .links: "Links"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .aiFilter: "sparkles"
+        case .advancedFilter: "line.3.horizontal.decrease.circle"
+        case .status: "circle.dashed"
+        case .priority: "flag"
+        case .labels: "tag"
+        case .relations: "link"
+        case .dates: "calendar"
+        case .projectMilestone: "diamond"
+        case .content: "doc.text.magnifyingglass"
+        case .links: "link.circle"
+        }
+    }
+
+    var detailText: String {
+        switch self {
+        case .aiFilter: "Natural language filters"
+        case .advancedFilter: "Nested rule builder"
+        case .status: "Column and state filters"
+        case .priority: "Priority tags and markers"
+        case .labels: "Card tags and domains"
+        case .relations: "Parent, child, and related cards"
+        case .dates: "Created, updated, and reviewed dates"
+        case .projectMilestone: "Milestone card scope"
+        case .content: "Title, notes, and summaries"
+        case .links: "URLs and linked entities"
+        }
+    }
+
+    var stateLabel: String {
+        switch self {
+        case .aiFilter, .advancedFilter:
+            "Placeholder"
+        case .projectMilestone:
+            "Next"
+        case .status, .priority, .labels, .relations, .dates, .content, .links:
+            "Coming later"
+        }
+    }
+
+    var isNextWiringTarget: Bool {
+        self == .projectMilestone
+    }
+}
+
 /// Renders a Kanban board as horizontal scrolling columns with draggable cards.
 struct KanbanBoardView: View {
     let boardID: String
@@ -435,6 +510,81 @@ struct KanbanBoardView: View {
     }
 
     private func boardHeaderControlPopover(_ control: KanbanBoardHeaderControl) -> some View {
+        Group {
+            if control == .filter {
+                filterCategoriesPopover
+            } else {
+                genericBoardHeaderControlPopover(control)
+            }
+        }
+    }
+
+    private var filterCategoriesPopover: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Label(KanbanBoardHeaderControl.filter.title, systemImage: KanbanBoardHeaderControl.filter.systemImage)
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.primary)
+
+            Text("Filter categories")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.secondary)
+
+            VStack(spacing: Spacing.xxs) {
+                ForEach(KanbanBoardFilterCategory.allCases) { category in
+                    filterCategoryRow(category)
+                }
+            }
+        }
+        .padding(Spacing.md)
+        .frame(width: 300, alignment: .leading)
+    }
+
+    private func filterCategoryRow(_ category: KanbanBoardFilterCategory) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: category.systemImage)
+                .font(CiderFont.caption)
+                .foregroundColor(category.isNextWiringTarget ? CiderColors.controlAccent : CiderColors.tertiary)
+                .frame(width: 18, alignment: .center)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(category.title)
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+
+                Text(category.detailText)
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: Spacing.xs)
+
+            Text(category.stateLabel)
+                .font(CiderFont.micro)
+                .foregroundColor(category.isNextWiringTarget ? CiderColors.controlAccent : CiderColors.tertiary)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(category.isNextWiringTarget ? CiderColors.controlAccent.opacity(0.12) : CiderColors.surfaceSubtle.opacity(0.72))
+                )
+        }
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(category.isNextWiringTarget ? CiderColors.controlAccent.opacity(0.07) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .strokeBorder(category.isNextWiringTarget ? CiderColors.controlAccent.opacity(0.18) : Color.clear, lineWidth: CiderBorder.hairlineStrokeWidth)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(category.title), \(category.detailText), \(category.stateLabel)")
+    }
+
+    private func genericBoardHeaderControlPopover(_ control: KanbanBoardHeaderControl) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Label(control.title, systemImage: control.systemImage)
                 .font(CiderFont.bodySemibold)

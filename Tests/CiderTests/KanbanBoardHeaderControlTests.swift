@@ -29,4 +29,33 @@ struct KanbanBoardHeaderControlTests {
         #expect(KanbanBoardHeaderControl.displayOptions.placeholderTitle == "Display options are coming next.")
         #expect(KanbanBoardHeaderControl.properties.placeholderTitle == "Board properties are coming next.")
     }
+
+    @Test("Kanban filter popover exposes ordered seed categories")
+    func filterPopoverExposesOrderedSeedCategories() {
+        #expect(KanbanBoardFilterCategory.allCases.map(\.title) == [
+            "AI filter",
+            "Advanced filter",
+            "Status",
+            "Priority",
+            "Labels",
+            "Relations",
+            "Dates",
+            "Project milestone",
+            "Content",
+            "Links",
+        ])
+
+        #expect(KanbanBoardFilterCategory.allCases.map(\.stateLabel) == [
+            "Placeholder",
+            "Placeholder",
+            "Coming later",
+            "Coming later",
+            "Coming later",
+            "Coming later",
+            "Coming later",
+            "Next",
+            "Coming later",
+            "Coming later",
+        ])
+    }
 }
