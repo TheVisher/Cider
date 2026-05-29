@@ -5994,12 +5994,12 @@ struct CiderCLI {
         case "children":
             guard let boardRef = args.first,
                   let cardID = parseFlag("--card", from: args) else {
-                print("Error: Usage: cider-cli board children <board> --card <id>")
+                printCLIError("Usage: cider-cli board children <board> --card <id>")
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
             guard let parent = board.card(matching: cardID) else {
-                print("Error: Card '\(cardID)' not found in board '\(board.name)'")
+                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
             let children = board.childCards(of: parent.id)
@@ -6030,78 +6030,75 @@ struct CiderCLI {
 
         case "add-card":
             guard let boardName = args.first else {
-                print("Error: Usage: cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>] [--after <sibling-id>]")
+                printCLIError("Usage: cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>] [--after <sibling-id>]")
                 return
             }
             guard let colName = parseFlag("--column", from: args),
                   let title = parseFlag("--title", from: args) else {
-                print("Error: --column and --title required")
+                printCLIError("--column and --title required")
                 return
             }
-            if let board = storage.boards.first(where: { $0.name.localizedCaseInsensitiveCompare(boardName) == .orderedSame || $0.id == boardName }) {
-                if let col = board.columns.first(where: { $0.name.localizedCaseInsensitiveCompare(colName) == .orderedSame || $0.id == colName }) {
-                    let parentCardID = parseFlag("--parent", from: args)
-                    let afterCardID = parseFlag("--after", from: args)
-                    let resolvedParentCardID = parentCardID.flatMap { board.card(matching: $0)?.id }
-                    if parentCardID != nil, resolvedParentCardID == nil {
-                        print("Error: Parent card '\(parentCardID ?? "")' not found in board '\(board.name)'")
-                        return
-                    }
-                    let resolvedAfterCardID = afterCardID.flatMap { ref in
-                        col.cards.first { $0.id == ref || board.displayKey(for: $0).localizedCaseInsensitiveCompare(ref) == .orderedSame }?.id
-                    }
-                    if let afterCardID {
-                        guard let resolvedAfterCardID,
-                              let afterCard = col.cards.first(where: { $0.id == resolvedAfterCardID }) else {
-                            print("Error: After card '\(afterCardID)' not found in column '\(col.name)'")
-                            return
-                        }
-                        if let resolvedParentCardID, afterCard.parentCardID != resolvedParentCardID {
-                            print("Error: After card '\(afterCardID)' is not a child of parent '\(parentCardID ?? "")'")
-                            return
-                        }
-                    }
-                    if let card = storage.addCard(boardID: board.id, columnID: col.id, title: title, parentCardID: resolvedParentCardID, afterCardID: resolvedAfterCardID) {
-                        // Apply optional notes and priority via updateCard while preserving creation activity.
-                        var updated = card
-                        var changed = false
-                        if let notes = parseFlag("--notes", from: args) {
-                            updated.notes = notes
-                            changed = true
-                        }
-                        if let priorityStr = parseFlag("--priority", from: args) {
-                            switch priorityStr.lowercased() {
-                            case "high": updated.priority = .high; changed = true
-                            case "medium": updated.priority = .medium; changed = true
-                            case "low": updated.priority = .low; changed = true
-                            default: break
-                            }
-                        }
-                        if changed {
-                            updated.markActivity("created", at: card.created)
-                            storage.updateCard(boardID: board.id, card: updated)
-                        }
-                        refreshSecondBrainProjection(boardID: board.id, card: updated)
-                        print("Added card: \(updated.title) [\(updated.id)] to \(col.name)")
-                    } else {
-                        print("Error: Could not add card")
-                    }
-                } else {
-                    print("Error: Column '\(colName)' not found. Available: \(board.columns.map(\.name).joined(separator: ", "))")
+            guard let board = findBoard(boardName, in: storage) else { return }
+            guard let col = board.columns.first(where: { $0.name.localizedCaseInsensitiveCompare(colName) == .orderedSame || $0.id == colName }) else {
+                printCLIError("Column '\(colName)' not found. Available: \(board.columns.map(\.name).joined(separator: ", "))")
+                return
+            }
+            let parentCardID = parseFlag("--parent", from: args)
+            let afterCardID = parseFlag("--after", from: args)
+            let resolvedParentCardID = parentCardID.flatMap { board.card(matching: $0)?.id }
+            if parentCardID != nil, resolvedParentCardID == nil {
+                printCLIError("Parent card '\(parentCardID ?? "")' not found in board '\(board.name)'")
+                return
+            }
+            let resolvedAfterCardID = afterCardID.flatMap { ref in
+                col.cards.first { $0.id == ref || board.displayKey(for: $0).localizedCaseInsensitiveCompare(ref) == .orderedSame }?.id
+            }
+            if let afterCardID {
+                guard let resolvedAfterCardID,
+                      let afterCard = col.cards.first(where: { $0.id == resolvedAfterCardID }) else {
+                    printCLIError("After card '\(afterCardID)' not found in column '\(col.name)'")
+                    return
                 }
+                if let resolvedParentCardID, afterCard.parentCardID != resolvedParentCardID {
+                    printCLIError("After card '\(afterCardID)' is not a child of parent '\(parentCardID ?? "")'")
+                    return
+                }
+            }
+            if let card = storage.addCard(boardID: board.id, columnID: col.id, title: title, parentCardID: resolvedParentCardID, afterCardID: resolvedAfterCardID) {
+                // Apply optional notes and priority via updateCard while preserving creation activity.
+                var updated = card
+                var changed = false
+                if let notes = parseFlag("--notes", from: args) {
+                    updated.notes = notes
+                    changed = true
+                }
+                if let priorityStr = parseFlag("--priority", from: args) {
+                    switch priorityStr.lowercased() {
+                    case "high": updated.priority = .high; changed = true
+                    case "medium": updated.priority = .medium; changed = true
+                    case "low": updated.priority = .low; changed = true
+                    default: break
+                    }
+                }
+                if changed {
+                    updated.markActivity("created", at: card.created)
+                    storage.updateCard(boardID: board.id, card: updated)
+                }
+                refreshSecondBrainProjection(boardID: board.id, card: updated)
+                print("Added card: \(updated.title) [\(updated.id)] to \(col.name)")
             } else {
-                print("Error: Board '\(boardName)' not found")
+                printCLIError("Could not add card")
             }
 
         case "update-card":
             guard let boardRef = args.first,
                   let cardID = parseFlag("--card", from: args) else {
-                print("Error: Usage: cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes] [--priority low|medium|high|none] [--agent <name>] [--clear-agent] [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none] [--parent <card-id>] [--clear-parent]")
+                printCLIError("Usage: cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes] [--priority low|medium|high|none] [--agent <name>] [--clear-agent] [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none] [--parent <card-id>] [--clear-parent]")
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
             guard var card = board.card(matching: cardID) else {
-                print("Error: Card '\(cardID)' not found in board '\(board.name)'")
+                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
 
@@ -6137,7 +6134,7 @@ struct CiderCLI {
                 case "low": nextPriority = .low
                 case "none", "clear": nextPriority = nil
                 default:
-                    print("Error: Invalid priority '\(priorityValue)'. Use low, medium, high, or none.")
+                    printCLIError("Invalid priority '\(priorityValue)'. Use low, medium, high, or none.")
                     return
                 }
                 if nextPriority != card.priority {
@@ -6186,7 +6183,7 @@ struct CiderCLI {
                 case "purple": nextColor = .purple
                 case "none", "clear": nextColor = nil
                 default:
-                    print("Error: Invalid color '\(colorValue)'. Use blue, green, orange, red, purple, or none.")
+                    printCLIError("Invalid color '\(colorValue)'. Use blue, green, orange, red, purple, or none.")
                     return
                 }
                 if nextColor != card.color {
@@ -6402,40 +6399,34 @@ struct CiderCLI {
             guard let boardName = args.first,
                   let cardID = parseFlag("--card", from: args),
                   let toCol = parseFlag("--to", from: args) else {
-                print("Error: Usage: cider-cli board move-card <board> --card <id> --to <column>")
+                printCLIError("Usage: cider-cli board move-card <board> --card <id> --to <column>")
                 return
             }
-            if let board = storage.boards.first(where: { $0.name.localizedCaseInsensitiveCompare(boardName) == .orderedSame || $0.id == boardName }) {
-                if let destCol = board.columns.first(where: { $0.name.localizedCaseInsensitiveCompare(toCol) == .orderedSame || $0.id == toCol }) {
-                    guard let card = board.card(matching: cardID) else {
-                        print("Error: Card '\(cardID)' not found in board '\(board.name)'")
-                        return
-                    }
-                    storage.moveCard(boardID: board.id, cardID: card.id, toColumnID: destCol.id, toIndex: 0)
-                    print("Moved '\(card.title)' → \(destCol.name)")
-                } else {
-                    print("Error: Column '\(toCol)' not found")
-                }
-            } else {
-                print("Error: Board '\(boardName)' not found")
+            guard let board = findBoard(boardName, in: storage) else { return }
+            guard let destCol = board.columns.first(where: { $0.name.localizedCaseInsensitiveCompare(toCol) == .orderedSame || $0.id == toCol }) else {
+                printCLIError("Column '\(toCol)' not found")
+                return
             }
+            guard let card = board.card(matching: cardID) else {
+                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+            storage.moveCard(boardID: board.id, cardID: card.id, toColumnID: destCol.id, toIndex: 0)
+            print("Moved '\(card.title)' → \(destCol.name)")
 
         case "delete-card":
             guard let boardName = args.first,
                   let cardID = parseFlag("--card", from: args) else {
-                print("Error: Usage: cider-cli board delete-card <board> --card <id>")
+                printCLIError("Usage: cider-cli board delete-card <board> --card <id>")
                 return
             }
-            if let board = storage.boards.first(where: { $0.name.localizedCaseInsensitiveCompare(boardName) == .orderedSame || $0.id == boardName }) {
-                guard let card = board.card(matching: cardID) else {
-                    print("Error: Card '\(cardID)' not found in board '\(board.name)'")
-                    return
-                }
-                storage.deleteCard(boardID: board.id, cardID: card.id)
-                print("Deleted card: \(board.displayKey(for: card)) [\(card.id)]")
-            } else {
-                print("Error: Board '\(boardName)' not found")
+            guard let board = findBoard(boardName, in: storage) else { return }
+            guard let card = board.card(matching: cardID) else {
+                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                return
             }
+            storage.deleteCard(boardID: board.id, cardID: card.id)
+            print("Deleted card: \(board.displayKey(for: card)) [\(card.id)]")
 
         case "create":
             let name = args.first ?? "New Board"
@@ -6450,7 +6441,7 @@ struct CiderCLI {
 
         case "rename":
             guard let nameOrID = args.first, let newName = parseFlag("--to", from: args) else {
-                print("Error: Usage: cider-cli board rename <name|id> --to <new-name>")
+                printCLIError("Usage: cider-cli board rename <name|id> --to <new-name>")
                 return
             }
             guard let board = findBoard(nameOrID, in: storage) else { return }
@@ -6459,7 +6450,7 @@ struct CiderCLI {
 
         case "delete", "rm":
             guard let nameOrID = args.first else {
-                print("Error: Board name or ID required.")
+                printCLIError("Board name or ID required.")
                 return
             }
             guard let board = findBoard(nameOrID, in: storage) else { return }
@@ -6467,13 +6458,13 @@ struct CiderCLI {
                 CiderUndoManager.shared.record(.deletedToTrash(itemType: .kanbanBoard, trashItem: trashItem))
                 print("Deleted board: \(board.name) (moved to trash)")
             } else {
-                print("Error: Could not delete board")
+                printCLIError("Could not delete board")
             }
 
         case "add-column":
             guard let boardRef = args.first,
                   let colName = parseFlag("--name", from: args) else {
-                print("Error: Usage: cider-cli board add-column <board> --name <column-name> [--done]")
+                printCLIError("Usage: cider-cli board add-column <board> --name <column-name> [--done]")
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
@@ -6481,19 +6472,19 @@ struct CiderCLI {
             if let col = storage.addColumn(boardID: board.id, name: colName, isDoneColumn: isDone) {
                 print("Added column: \(col.name) (\(col.id))\(isDone ? " [done column]" : "")")
             } else {
-                print("Error: Could not add column")
+                printCLIError("Could not add column")
             }
 
         case "set-column-done":
             guard let boardRef = args.first,
                   let colRef = parseFlag("--column", from: args) else {
-                print("Error: Usage: cider-cli board set-column-done <board> --column <col> (--done|--not-done)")
+                printCLIError("Usage: cider-cli board set-column-done <board> --column <col> (--done|--not-done)")
                 return
             }
             let wantsDone = args.contains("--done")
             let wantsNotDone = args.contains("--not-done")
             guard wantsDone != wantsNotDone else {
-                print("Error: Pass exactly one of --done or --not-done")
+                printCLIError("Pass exactly one of --done or --not-done")
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
@@ -6520,7 +6511,7 @@ struct CiderCLI {
             guard let boardRef = args.first,
                   let colRef = parseFlag("--column", from: args),
                   let newName = parseFlag("--to", from: args) else {
-                print("Error: Usage: cider-cli board rename-column <board> --column <col> --to <new-name>")
+                printCLIError("Usage: cider-cli board rename-column <board> --column <col> --to <new-name>")
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
@@ -6531,7 +6522,7 @@ struct CiderCLI {
         case "delete-column":
             guard let boardRef = args.first,
                   let colRef = parseFlag("--column", from: args) else {
-                print("Error: Usage: cider-cli board delete-column <board> --column <col>")
+                printCLIError("Usage: cider-cli board delete-column <board> --column <col>")
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }

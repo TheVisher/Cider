@@ -489,6 +489,40 @@ struct KanbanBoardFileLockingTests {
         #expect(output.contains("Usage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]"))
     }
 
+    @Test("board mutation validation failures exit nonzero")
+    func boardMutationValidationFailuresExitNonzero() throws {
+        let cli = try #require(Self.ciderCLIURL())
+        let vault = try Self.makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        try Self.runCLI(cli, vault: vault, args: ["board", "create", "Mutation Validation"])
+        let cardOutput = try Self.runCLI(cli, vault: vault, args: [
+            "board", "add-card", "Mutation Validation",
+            "--column", "Backlog",
+            "--title", "Existing card",
+        ])
+        let cardID = String(try #require(cardOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let invalidCommands: [[String]] = [
+            ["board", "add-card", "Mutation Validation", "--column", "Backlog"],
+            ["board", "add-card", "Mutation Validation", "--column", "Missing", "--title", "Nope"],
+            ["board", "update-card", "Mutation Validation", "--card", cardID, "--priority", "urgent"],
+            ["board", "move-card", "Mutation Validation", "--card", cardID, "--to", "Missing"],
+            ["board", "delete-card", "Mutation Validation", "--card", "missing-card"],
+            ["board", "add-column", "Mutation Validation"],
+            ["board", "set-column-done", "Mutation Validation", "--column", "Backlog"],
+            ["board", "rename-column", "Mutation Validation", "--column", "Backlog"],
+            ["board", "delete-column", "Mutation Validation"],
+        ]
+
+        for args in invalidCommands {
+            let result = try Self.runCLIResult(cli, vault: vault, args: args)
+            let output = String(data: result.output, encoding: .utf8) ?? ""
+            #expect(result.status == 1, "Expected nonzero exit for cider-cli \(args.joined(separator: " "))")
+            #expect(output.contains("Error:"), "Expected error output for cider-cli \(args.joined(separator: " "))")
+        }
+    }
+
     @Test("board audit reports missing parent references")
     func boardAuditReportsMissingParentReferences() throws {
         let cli = try #require(Self.ciderCLIURL())
