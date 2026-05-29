@@ -659,6 +659,7 @@ private struct FloatingVaultFileDetail: View {
             title: file.filename,
             detailViewMode: .slideOut,
             showDragHandle: false,
+            scrollsContent: false,
             metadataVisible: $isMetadataVisible,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },

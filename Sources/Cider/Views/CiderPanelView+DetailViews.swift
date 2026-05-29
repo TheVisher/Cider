@@ -195,6 +195,7 @@ extension CiderPanelView {
                 detailViewMode: detailViewMode,
                 width: min(detailSlideOutWidth, maxSlideOutWidth),
                 maxWidth: maxSlideOutWidth,
+                scrollsContent: false,
                 metadataVisible: $genericMetadataVisible,
                 onResize: { newWidth in
                     let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
@@ -395,6 +396,7 @@ extension CiderPanelView {
                 title: vaultFile.filename,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                scrollsContent: false,
                 metadataVisible: $genericMetadataVisible,
                 onFloat: floatVaultFileDetail,
                 onClose: closeGenericDetail,
@@ -606,6 +608,7 @@ extension CiderPanelView {
                 title: vaultFile.filename,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                scrollsContent: false,
                 metadataVisible: $genericMetadataVisible,
                 onFloat: floatVaultFileDetail,
                 onClose: closeGenericDetail,
