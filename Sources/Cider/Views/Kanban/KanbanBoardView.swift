@@ -492,7 +492,7 @@ enum KanbanBoardDisplayOrderingOption: String, CaseIterable, Identifiable {
     }
 }
 
-enum KanbanBoardDisplayPropertyOption: String, CaseIterable, Identifiable {
+enum KanbanBoardDisplayPropertyOption: String, CaseIterable, Identifiable, Codable {
     case id
     case status
     case priority
@@ -517,6 +517,53 @@ enum KanbanBoardDisplayPropertyOption: String, CaseIterable, Identifiable {
         case .created: "Created"
         case .updated: "Updated"
         }
+    }
+}
+
+struct KanbanBoardViewPreferences: Codable, Equatable {
+    var selectedDisplayProperties: Set<KanbanBoardDisplayPropertyOption>
+    var showEmptyColumns: Bool
+    var showSubIssues: Bool
+    var isInspectorVisible: Bool
+
+    static let `default` = KanbanBoardViewPreferences(
+        selectedDisplayProperties: KanbanBoardDisplayPropertyOption.defaultVisibleOptions,
+        showEmptyColumns: true,
+        showSubIssues: true,
+        isInspectorVisible: false
+    )
+}
+
+final class KanbanBoardViewPreferenceStore: @unchecked Sendable {
+    static let shared = KanbanBoardViewPreferenceStore()
+
+    private let defaults: UserDefaults
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func preferences(for boardID: String) -> KanbanBoardViewPreferences {
+        guard let data = defaults.data(forKey: key(for: boardID)),
+              let preferences = try? decoder.decode(KanbanBoardViewPreferences.self, from: data) else {
+            return .default
+        }
+        return preferences
+    }
+
+    func setPreferences(_ preferences: KanbanBoardViewPreferences, for boardID: String) {
+        guard let data = try? encoder.encode(preferences) else { return }
+        defaults.set(data, forKey: key(for: boardID))
+    }
+
+    func resetPreferences(for boardID: String) {
+        defaults.removeObject(forKey: key(for: boardID))
+    }
+
+    private func key(for boardID: String) -> String {
+        "cider.kanban.boardViewPreferences.\(boardID)"
     }
 }
 
@@ -661,6 +708,8 @@ struct KanbanBoardView: View {
     @State private var expandedFilterCategory: KanbanBoardFilterCategory?
     @State private var isBoardInspectorVisible = false
     @State private var selectedDisplayProperties = KanbanBoardDisplayPropertyOption.defaultVisibleOptions
+    @State private var showEmptyColumns = true
+    @State private var showSubIssues = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let cardFaceSuggestedTags = [
@@ -726,9 +775,10 @@ struct KanbanBoardView: View {
                 selectedMilestoneFilterCardID = milestoneFilterCardID
                 activeHeaderPopover = nil
                 expandedFilterCategory = nil
-                isBoardInspectorVisible = false
+                loadBoardViewPreferences()
             }
             .onAppear {
+                loadBoardViewPreferences()
                 selectedMilestoneFilterCardID = milestoneFilterCardID
                 expandedFilterCategory = selectedMilestoneFilterCardID == nil ? nil : .projectMilestone
             }
@@ -758,6 +808,31 @@ struct KanbanBoardView: View {
         return cards.filter { card in
             includedCardIDs.contains(card.id)
         }
+    }
+
+    private func loadBoardViewPreferences() {
+        let preferences = KanbanBoardViewPreferenceStore.shared.preferences(for: boardID)
+        selectedDisplayProperties = preferences.selectedDisplayProperties
+        showEmptyColumns = preferences.showEmptyColumns
+        showSubIssues = preferences.showSubIssues
+        isBoardInspectorVisible = preferences.isInspectorVisible
+    }
+
+    private func persistBoardViewPreferences() {
+        KanbanBoardViewPreferenceStore.shared.setPreferences(
+            KanbanBoardViewPreferences(
+                selectedDisplayProperties: selectedDisplayProperties,
+                showEmptyColumns: showEmptyColumns,
+                showSubIssues: showSubIssues,
+                isInspectorVisible: isBoardInspectorVisible
+            ),
+            for: boardID
+        )
+    }
+
+    private func resetBoardViewPreferences() {
+        KanbanBoardViewPreferenceStore.shared.resetPreferences(for: boardID)
+        loadBoardViewPreferences()
     }
 
     // MARK: - Board Header
@@ -983,6 +1058,7 @@ struct KanbanBoardView: View {
             case .properties:
                 withAnimation(reduceMotion ? .none : .spring(response: 0.28, dampingFraction: 0.88)) {
                     isBoardInspectorVisible.toggle()
+                    persistBoardViewPreferences()
                 }
                 activeHeaderPopover = nil
             }
@@ -1231,8 +1307,15 @@ struct KanbanBoardView: View {
 
             displayOptionsSection("Visibility") {
                 VStack(spacing: Spacing.xxs) {
-                    displayDisabledToggleRow(title: "Show empty columns", isOn: true)
-                    displayDisabledToggleRow(title: "Show sub-issues", isOn: true)
+                    displayToggleRow(title: "Show empty columns", isOn: showEmptyColumns) {
+                        showEmptyColumns.toggle()
+                        projectLaneScrollIndexByID.removeAll()
+                        persistBoardViewPreferences()
+                    }
+                    displayToggleRow(title: "Show sub-issues", isOn: showSubIssues) {
+                        showSubIssues.toggle()
+                        persistBoardViewPreferences()
+                    }
                 }
             }
 
@@ -1245,6 +1328,21 @@ struct KanbanBoardView: View {
                     }
                 }
             }
+
+            Divider().background(CiderColors.separator)
+
+            Button {
+                withAnimation(reduceMotion ? .none : .spring(response: 0.22, dampingFraction: 0.86)) {
+                    resetBoardViewPreferences()
+                    projectLaneScrollIndexByID.removeAll()
+                }
+            } label: {
+                Label("Reset view preferences", systemImage: "arrow.counterclockwise")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Reset Kanban board view preferences")
         }
         .padding(Spacing.md)
         .frame(width: 320, alignment: .leading)
@@ -1303,23 +1401,31 @@ struct KanbanBoardView: View {
         .accessibilityLabel("\(title), \(detail)")
     }
 
-    private func displayDisabledToggleRow(title: String, isOn: Bool) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: isOn ? "checkmark.square.fill" : "square")
-                .font(CiderFont.caption)
-                .foregroundColor(isOn ? CiderColors.controlAccent : CiderColors.tertiary)
-                .frame(width: 16)
-            Text(title)
-                .font(CiderFont.captionMedium)
-                .foregroundColor(CiderColors.secondary)
-            Spacer(minLength: 0)
-            Text("Preview")
-                .font(CiderFont.micro)
-                .foregroundColor(CiderColors.tertiary)
+    private func displayToggleRow(title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .spring(response: 0.2, dampingFraction: 0.88)) {
+                action()
+            }
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                    .font(CiderFont.caption)
+                    .foregroundColor(isOn ? CiderColors.controlAccent : CiderColors.tertiary)
+                    .frame(width: 16)
+                Text(title)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.secondary)
+                Spacer(minLength: 0)
+                Text(isOn ? "Shown" : "Hidden")
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+            }
         }
+        .buttonStyle(.plain)
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title), preview toggle")
+        .accessibilityLabel(title)
+        .accessibilityValue(isOn ? "Shown" : "Hidden")
     }
 
     private func displayPropertyChip(_ option: KanbanBoardDisplayPropertyOption, isSelected: Bool) -> some View {
@@ -1361,6 +1467,7 @@ struct KanbanBoardView: View {
         } else {
             selectedDisplayProperties.insert(option)
         }
+        persistBoardViewPreferences()
     }
 
     private func genericBoardHeaderControlPopover(_ control: KanbanBoardHeaderControl) -> some View {
@@ -1394,6 +1501,7 @@ struct KanbanBoardView: View {
                 Button {
                     withAnimation(reduceMotion ? .none : .spring(response: 0.28, dampingFraction: 0.88)) {
                         isBoardInspectorVisible = false
+                        persistBoardViewPreferences()
                     }
                 } label: {
                     Image(systemName: "xmark")
@@ -1667,10 +1775,19 @@ struct KanbanBoardView: View {
         }
     }
 
+    private func displayColumns(_ columns: [KanbanColumn], board: KanbanBoard) -> [KanbanColumn] {
+        guard !showEmptyColumns else { return columns }
+        return columns.filter { column in
+            let cards = filteredCards(column.cards, in: column, board: board)
+            let displayCards = showSubIssues ? cards : cards.filter { $0.parentCardID == nil }
+            return !displayCards.isEmpty
+        }
+    }
+
     private func standardColumnsArea(_ board: KanbanBoard) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: Spacing.md) {
-                ForEach(KanbanBoardLayout.visibleColumns(in: board)) { column in
+                ForEach(displayColumns(KanbanBoardLayout.visibleColumns(in: board), board: board)) { column in
                     columnView(column, board: board, width: KanbanDesign.columnWidth)
                 }
             }
@@ -1709,6 +1826,7 @@ struct KanbanBoardView: View {
         board: KanbanBoard,
         availableBoardHeight: CGFloat
     ) -> some View {
+        let laneColumns = displayColumns(lane.columns, board: board)
         let hiddenColumns = KanbanBoardLayout.hiddenColumns(in: board)
         let viewFilters = KanbanBoardLayout.projectBoardViewFilters(for: board)
         let milestoneFilterCard = selectedMilestoneFilterCardID.flatMap { milestoneID in
@@ -1723,7 +1841,7 @@ struct KanbanBoardView: View {
 
             GeometryReader { geometry in
                 let scrollItemCount = KanbanBoardLayout.projectScrollableItemCount(
-                    activeColumnCount: lane.columns.count,
+                    activeColumnCount: laneColumns.count,
                     hiddenColumnCount: hiddenColumns.count
                 )
                 let visibleColumnCount = projectLaneVisibleColumnCount(availableWidth: geometry.size.width)
@@ -1737,7 +1855,7 @@ struct KanbanBoardView: View {
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         ScrollView(.horizontal, showsIndicators: true) {
                             HStack(alignment: .top, spacing: Spacing.md) {
-                                ForEach(lane.columns) { column in
+                                ForEach(laneColumns) { column in
                                     columnView(
                                         column,
                                         board: board,
@@ -2083,10 +2201,11 @@ struct KanbanBoardView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: Spacing.sm) {
                     let cards = filteredCards(column.cards, in: column, board: board)
+                    let displayCards = showSubIssues ? cards : cards.filter { $0.parentCardID == nil }
                     let nodes = KanbanBoardLayout.cardNodes(
                         for: column,
                         in: board,
-                        visibleCards: cards
+                        visibleCards: displayCards
                     )
                     ForEach(nodes) { node in
                         interactiveCard(

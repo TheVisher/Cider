@@ -3,6 +3,49 @@ import Testing
 @testable import Cider
 
 struct KanbanBoardHeaderControlTests {
+    @Test("Kanban board view preferences persist per board")
+    func boardViewPreferencesPersistPerBoard() {
+        let suiteName = "KanbanBoardViewPreferenceStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = KanbanBoardViewPreferenceStore(defaults: defaults)
+        let preferences = KanbanBoardViewPreferences(
+            selectedDisplayProperties: [.id, .status, .updated],
+            showEmptyColumns: false,
+            showSubIssues: false,
+            isInspectorVisible: true
+        )
+
+        first.setPreferences(preferences, for: "cider")
+
+        let second = KanbanBoardViewPreferenceStore(defaults: defaults)
+        #expect(second.preferences(for: "cider") == preferences)
+        #expect(second.preferences(for: "other") == .default)
+    }
+
+    @Test("Kanban board view preferences can reset to defaults")
+    func boardViewPreferencesCanResetToDefaults() {
+        let suiteName = "KanbanBoardViewPreferenceStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = KanbanBoardViewPreferenceStore(defaults: defaults)
+        store.setPreferences(
+            KanbanBoardViewPreferences(
+                selectedDisplayProperties: [.priority],
+                showEmptyColumns: false,
+                showSubIssues: false,
+                isInspectorVisible: true
+            ),
+            for: "cider"
+        )
+
+        store.resetPreferences(for: "cider")
+
+        #expect(store.preferences(for: "cider") == .default)
+    }
+
     @Test("Kanban board header exposes the three control entry points")
     func exposesBoardControlEntryPoints() {
         #expect(KanbanBoardHeaderControl.allCases.map(\.title) == [
