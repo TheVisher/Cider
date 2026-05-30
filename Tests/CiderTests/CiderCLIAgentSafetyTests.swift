@@ -260,6 +260,16 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("Usage: cider-cli capture add") == true)
     }
 
+    @Test("capture add help prints usage before source validation")
+    func captureAddHelpPrintsUsageBeforeSourceValidation() throws {
+        let result = try runCLI(args: ["capture", "add", "--help"])
+
+        #expect(result.status == 0)
+        #expect(result.stdout.contains("Usage: cider-cli capture add"))
+        #expect(result.stdout.contains("--kind note|todo|bookmark|file|event|contact"))
+        #expect(!result.stderr.contains("Source required"))
+    }
+
     @Test("capture add event and contact reject missing required fields")
     func captureAddEventAndContactRejectMissingRequiredFields() throws {
         let eventResult = try runCLI(args: [

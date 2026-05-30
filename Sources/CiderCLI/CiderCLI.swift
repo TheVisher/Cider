@@ -1099,6 +1099,11 @@ struct CiderCLI {
     static func handleCapture(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) async {
         switch subcommand {
         case "add":
+            if isHelpRequested(in: args) {
+                printCaptureUsage()
+                return
+            }
+
             let source: CaptureAddSource
             do {
                 source = try resolveCaptureAddSource(from: args)
@@ -1256,13 +1261,21 @@ struct CiderCLI {
             }
 
         case nil, "help", "--help", "-h":
-            print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
-            print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
+            printCaptureUsage()
 
         default:
             print("Unknown capture command: \(subcommand ?? "nil")")
             print("Commands: add, archive-artifacts")
         }
+    }
+
+    static func isHelpRequested(in args: [String]) -> Bool {
+        args.contains("help") || args.contains("--help") || args.contains("-h")
+    }
+
+    static func printCaptureUsage() {
+        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+        print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
     }
 
     static func handleReview(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) async {
