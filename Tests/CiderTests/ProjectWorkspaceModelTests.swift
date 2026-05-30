@@ -413,6 +413,43 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: [board]), 0)
     }
 
+    func testProjectInboxRecognizesAgentEvidenceWrittenToCardNotes() {
+        let afterInboxLaunch = ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(60)
+        let workspace = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0"],
+            referenceSearchTerms: ["cider"]
+        )
+        let notes = """
+        ## Implementation History
+        - 2026-05-30 09:00 - Fixed the inbox refresh issue. (source: codex)
+
+        ## Test Evidence
+        - 2026-05-30 09:05 - swift test passed. (source: codex)
+        """
+        let card = KanbanCard(
+            id: "notes-agent",
+            title: "Agent evidence in notes",
+            notes: notes,
+            created: afterInboxLaunch.addingTimeInterval(-30),
+            updatedAt: afterInboxLaunch
+        )
+        let board = KanbanBoard(
+            id: "2afee0",
+            name: "Cider",
+            columns: [KanbanColumn(id: "testing", name: "Testing", cards: [card])]
+        )
+
+        let entries = ProjectWorkspaceInboxProvider.entries(for: workspace, boards: [board])
+
+        XCTAssertEqual(entries.map { $0.card.id }, ["notes-agent"])
+        XCTAssertEqual(entries.first?.badges.map(\.title), ["New", "Agent report", "Needs QA"])
+        XCTAssertEqual(ProjectWorkspaceInboxProvider.unreadCount(for: workspace, boards: [board]), 1)
+    }
+
     func testProjectInboxHidesLegacyActivityBeforeInboxLaunchBaseline() {
         let oldActivity = ProjectWorkspaceInboxProvider.inboxLaunchBaseline.addingTimeInterval(-60)
         let workspace = ProjectWorkspace(

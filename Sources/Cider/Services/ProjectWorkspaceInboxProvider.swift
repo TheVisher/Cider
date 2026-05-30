@@ -106,7 +106,20 @@ enum ProjectWorkspaceInboxProvider {
     private static func hasAgentReportSignal(_ card: KanbanCard) -> Bool {
         if card.agent?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false { return true }
         let agentEntryTypes: Set<KanbanCardHistoryEntryType> = [.implementation, .handoff, .finalSummary, .testEvidence, .commit]
-        return card.historyEntries.contains { agentEntryTypes.contains($0.type) }
+        if card.historyEntries.contains(where: { agentEntryTypes.contains($0.type) }) { return true }
+
+        let agentSectionKeys: Set<String> = [
+            "implementation_history",
+            "test_evidence",
+            "agent_handoff",
+            "handoff",
+            "commits",
+            "commit",
+            "final_summary",
+        ]
+        return KanbanCardSectionParser.sections(from: card.notes).contains { section in
+            agentSectionKeys.contains(section.key)
+        }
     }
 
     private static func needsQASignal(_ card: KanbanCard, column: KanbanColumn) -> Bool {
