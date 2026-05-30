@@ -31,6 +31,30 @@ struct KanbanBoardHeaderControlTests {
         #expect(KanbanBoardHeaderControl.properties.placeholderTitle == "Board properties are coming next.")
     }
 
+    @Test("Kanban properties inspector shell exposes ordered placeholder sections")
+    func propertiesInspectorShellExposesOrderedPlaceholderSections() {
+        #expect(KanbanBoardInspectorSection.allCases.map(\.title) == [
+            "Properties",
+            "Milestones",
+            "Progress",
+            "Activity",
+        ])
+
+        #expect(KanbanBoardInspectorSection.allCases.map(\.systemImage) == [
+            "list.bullet.rectangle",
+            "diamond",
+            "chart.bar.xaxis",
+            "clock.arrow.circlepath",
+        ])
+
+        #expect(KanbanBoardInspectorSection.allCases.map(\.placeholderText) == [
+            "Board status, priority, ownership, labels, dates, and counts will appear here.",
+            "Milestone rows with child counts and quick filter actions will appear here.",
+            "Completed, active, blocked, and testing breakdowns will appear here.",
+            "Recent board changes, card history, and test evidence will appear here.",
+        ])
+    }
+
     @Test("Kanban filter popover exposes ordered seed categories")
     func filterPopoverExposesOrderedSeedCategories() {
         #expect(KanbanBoardFilterCategory.allCases.map(\.title) == [

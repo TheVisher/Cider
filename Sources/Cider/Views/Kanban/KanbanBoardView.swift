@@ -126,6 +126,46 @@ enum KanbanBoardFilterCategory: String, CaseIterable, Identifiable {
     }
 }
 
+enum KanbanBoardInspectorSection: String, CaseIterable, Identifiable {
+    case properties
+    case milestones
+    case progress
+    case activity
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .properties: "Properties"
+        case .milestones: "Milestones"
+        case .progress: "Progress"
+        case .activity: "Activity"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .properties: "list.bullet.rectangle"
+        case .milestones: "diamond"
+        case .progress: "chart.bar.xaxis"
+        case .activity: "clock.arrow.circlepath"
+        }
+    }
+
+    var placeholderText: String {
+        switch self {
+        case .properties:
+            "Board status, priority, ownership, labels, dates, and counts will appear here."
+        case .milestones:
+            "Milestone rows with child counts and quick filter actions will appear here."
+        case .progress:
+            "Completed, active, blocked, and testing breakdowns will appear here."
+        case .activity:
+            "Recent board changes, card history, and test evidence will appear here."
+        }
+    }
+}
+
 struct KanbanBoardMilestoneFilterOption: Identifiable, Equatable {
     let id: String
     let title: String
@@ -1108,37 +1148,88 @@ struct KanbanBoardView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Hide board properties")
+                .accessibilityLabel("Close properties inspector")
             }
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm)
 
             Divider().background(CiderColors.separator)
 
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                Text(board.name)
-                    .font(CiderFont.labelSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(2)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text(board.name)
+                            .font(CiderFont.labelSemibold)
+                            .foregroundColor(CiderColors.primary)
+                            .lineLimit(2)
 
-                Text(KanbanBoardHeaderControl.properties.placeholderTitle)
-                    .font(CiderFont.captionSemibold)
-                    .foregroundColor(CiderColors.secondary)
+                        Text("\(board.allCards.count) cards")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                            .fill(CiderColors.surfaceSubtle.opacity(0.72))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                            .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
+                    )
 
-                Text(KanbanBoardHeaderControl.properties.placeholderBody)
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    ForEach(KanbanBoardInspectorSection.allCases) { section in
+                        boardInspectorSectionView(section)
+                    }
+                }
+                .padding(Spacing.md)
             }
-            .padding(Spacing.md)
-
-            Spacer(minLength: 0)
         }
-        .frame(width: 280)
+        .frame(minWidth: 280, idealWidth: 300, maxWidth: 340)
         .background(CiderColors.surfaceInput)
         .overlay(alignment: .leading) {
             CiderColors.separator
                 .frame(width: Spacing.hairline)
         }
+    }
+
+    private func boardInspectorSectionView(_ section: KanbanBoardInspectorSection) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                Label(section.title, systemImage: section.systemImage)
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.primary)
+
+                Spacer(minLength: 0)
+
+                Text("Shell")
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+            }
+
+            Text(section.placeholderText)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(CiderColors.surfaceSubtle.opacity(0.72))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(section.title): \(section.placeholderText)")
     }
 
     private func filteredCardCount(for board: KanbanBoard) -> Int {
