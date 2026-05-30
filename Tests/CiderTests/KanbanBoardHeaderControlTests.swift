@@ -123,6 +123,66 @@ struct KanbanBoardHeaderControlTests {
         #expect(summary.completedPercentText == "20%")
     }
 
+    @Test("Kanban inspector activity entries prefer meaningful recent card events")
+    func inspectorActivityEntriesPreferMeaningfulRecentCardEvents() {
+        let older = Date(timeIntervalSince1970: 100)
+        let newest = Date(timeIntervalSince1970: 300)
+        let middle = Date(timeIntervalSince1970: 200)
+        let milestone = KanbanCard(
+            id: "milestone",
+            title: "Milestone: Inspector work",
+            displayKey: "CID-10",
+            tags: ["milestone-object"],
+            historyEntries: [
+                KanbanCardHistoryEntry(
+                    id: "implementation",
+                    type: .implementation,
+                    body: "Implemented the inspector activity rows.\nExtra detail should be summarized.",
+                    author: "codex",
+                    createdAt: newest
+                ),
+            ],
+            updatedAt: older,
+            lastActivityKind: "updated"
+        )
+        let child = KanbanCard(
+            id: "child",
+            title: "QA inspector polish",
+            displayKey: "CID-11",
+            comments: [
+                KanbanCardComment(
+                    id: "qa",
+                    kind: .qa,
+                    body: "Visual QA passed for the activity section.",
+                    author: "tester",
+                    source: "computer-use",
+                    createdAt: middle
+                ),
+            ],
+            updatedAt: older
+        )
+        let board = KanbanBoard(
+            id: "cider",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog", cards: [milestone, child]),
+            ]
+        )
+
+        let entries = KanbanBoardInspectorActivityEntry.entries(in: board, limit: 3)
+
+        #expect(entries.map(\.id) == ["history-implementation", "comment-qa", "updated-milestone"])
+        #expect(entries.map(\.cardID) == ["milestone", "child", "milestone"])
+        #expect(entries.map(\.displayKey) == ["CID-10", "CID-11", "CID-10"])
+        #expect(entries.map(\.title) == ["Inspector work", "QA inspector polish", "Inspector work"])
+        #expect(entries.map(\.kind) == ["Implementation", "QA", "Updated"])
+        #expect(entries.map(\.body) == [
+            "Implemented the inspector activity rows.",
+            "Visual QA passed for the activity section.",
+            "Card updated",
+        ])
+    }
+
     @Test("Kanban filter popover exposes ordered seed categories")
     func filterPopoverExposesOrderedSeedCategories() {
         #expect(KanbanBoardFilterCategory.allCases.map(\.title) == [

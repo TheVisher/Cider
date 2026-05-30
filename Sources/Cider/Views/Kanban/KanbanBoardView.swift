@@ -307,6 +307,120 @@ struct KanbanBoardInspectorProgressSummary: Equatable {
     }
 }
 
+struct KanbanBoardInspectorActivityEntry: Identifiable, Equatable {
+    let id: String
+    let cardID: String
+    let displayKey: String
+    let title: String
+    let kind: String
+    let body: String
+    let timestamp: Date
+    let systemImage: String
+
+    var timestampText: String {
+        timestamp.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    static func entries(in board: KanbanBoard, limit: Int = 6) -> [KanbanBoardInspectorActivityEntry] {
+        let gatheredEntries = board.columns.flatMap { column in
+            column.cards.flatMap { card in
+                entries(for: card, in: board, column: column)
+            }
+        }
+
+        return Array(
+            gatheredEntries.sorted { lhs, rhs in
+                if lhs.timestamp != rhs.timestamp { return lhs.timestamp > rhs.timestamp }
+                return lhs.displayKey.localizedStandardCompare(rhs.displayKey) == .orderedAscending
+            }
+            .prefix(limit)
+        )
+    }
+
+    private static func entries(
+        for card: KanbanCard,
+        in board: KanbanBoard,
+        column: KanbanColumn
+    ) -> [KanbanBoardInspectorActivityEntry] {
+        var entries: [KanbanBoardInspectorActivityEntry] = []
+        let title = normalizedCardTitle(card.title)
+        let displayKey = board.displayKey(for: card)
+
+        entries.append(contentsOf: card.historyEntries.map { history in
+            KanbanBoardInspectorActivityEntry(
+                id: "history-\(history.id)",
+                cardID: card.id,
+                displayKey: displayKey,
+                title: title,
+                kind: history.type.displayName,
+                body: summaryText(history.body),
+                timestamp: history.createdAt,
+                systemImage: history.type.symbolName
+            )
+        })
+
+        entries.append(contentsOf: card.comments.filter { !$0.isResolved }.map { comment in
+            KanbanBoardInspectorActivityEntry(
+                id: "comment-\(comment.id)",
+                cardID: card.id,
+                displayKey: displayKey,
+                title: title,
+                kind: comment.kind.displayName,
+                body: summaryText(comment.body),
+                timestamp: comment.createdAt,
+                systemImage: comment.kind.symbolName
+            )
+        })
+
+        if let completed = card.completed {
+            entries.append(
+                KanbanBoardInspectorActivityEntry(
+                    id: "completed-\(card.id)",
+                    cardID: card.id,
+                    displayKey: displayKey,
+                    title: title,
+                    kind: "Completed",
+                    body: "Moved to \(column.name)",
+                    timestamp: completed,
+                    systemImage: "checkmark.circle.fill"
+                )
+            )
+        }
+
+        if let updatedAt = card.updatedAt {
+            entries.append(
+                KanbanBoardInspectorActivityEntry(
+                    id: "updated-\(card.id)",
+                    cardID: card.id,
+                    displayKey: displayKey,
+                    title: title,
+                    kind: "Updated",
+                    body: "Card updated",
+                    timestamp: updatedAt,
+                    systemImage: "clock.arrow.circlepath"
+                )
+            )
+        }
+
+        return entries
+    }
+
+    private static func normalizedCardTitle(_ title: String) -> String {
+        title.replacingOccurrences(of: "Milestone: ", with: "")
+    }
+
+    private static func summaryText(_ body: String) -> String {
+        let collapsed = body
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? body.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard collapsed.count > 96 else { return collapsed }
+        let endIndex = collapsed.index(collapsed.startIndex, offsetBy: 95)
+        return String(collapsed[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+    }
+}
+
 struct KanbanBoardMilestoneFilterOption: Identifiable, Equatable {
     let id: String
     let title: String
@@ -1343,7 +1457,7 @@ struct KanbanBoardView: View {
 
                 Spacer(minLength: 0)
 
-                Text("Shell")
+                Text(section == .properties ? "Shell" : "Live")
                     .font(CiderFont.micro)
                     .foregroundColor(CiderColors.tertiary)
                     .padding(.horizontal, Spacing.xs)
@@ -1359,7 +1473,9 @@ struct KanbanBoardView: View {
                 boardInspectorMilestonesView(board)
             case .progress:
                 boardInspectorProgressView(board)
-            case .properties, .activity:
+            case .activity:
+                boardInspectorActivityView(board)
+            case .properties:
                 Text(section.placeholderText)
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.secondary)
@@ -1473,6 +1589,64 @@ struct KanbanBoardView: View {
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    private func boardInspectorActivityView(_ board: KanbanBoard) -> some View {
+        let entries = KanbanBoardInspectorActivityEntry.entries(in: board)
+        return VStack(alignment: .leading, spacing: Spacing.xs) {
+            if entries.isEmpty {
+                Text("No recent board activity yet.")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(entries) { entry in
+                    Button {
+                        onOpenCard(board.id, entry.cardID)
+                    } label: {
+                        HStack(alignment: .top, spacing: Spacing.xs) {
+                            Image(systemName: entry.systemImage)
+                                .font(CiderFont.micro)
+                                .foregroundColor(CiderColors.controlAccent)
+                                .frame(width: 14, alignment: .center)
+
+                            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                                    Text(entry.displayKey)
+                                        .font(CiderFont.microMonospaced)
+                                        .foregroundColor(CiderColors.tertiary)
+
+                                    Text(entry.kind)
+                                        .font(CiderFont.micro)
+                                        .foregroundColor(CiderColors.secondary)
+
+                                    Spacer(minLength: 0)
+
+                                    Text(entry.timestampText)
+                                        .font(CiderFont.micro)
+                                        .foregroundColor(CiderColors.tertiary)
+                                        .lineLimit(1)
+                                }
+
+                                Text(entry.title)
+                                    .font(CiderFont.captionSemibold)
+                                    .foregroundColor(CiderColors.primary)
+                                    .lineLimit(1)
+
+                                Text(entry.body)
+                                    .font(CiderFont.micro)
+                                    .foregroundColor(CiderColors.secondary)
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(.vertical, Spacing.xxs)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(entry.kind) on \(entry.displayKey), \(entry.title), \(entry.body)")
                 }
             }
         }
