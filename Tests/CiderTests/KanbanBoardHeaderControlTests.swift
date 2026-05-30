@@ -143,4 +143,70 @@ struct KanbanBoardHeaderControlTests {
             "Updated",
         ])
     }
+
+    @Test("Kanban display property values expose selected card metadata with fallbacks")
+    func displayPropertyValuesExposeSelectedCardMetadataWithFallbacks() {
+        let created = Date(timeIntervalSince1970: 1_704_067_200) // 2024-01-01
+        let updated = Date(timeIntervalSince1970: 1_704_153_600) // 2024-01-02
+        let milestone = KanbanCard(
+            id: "milestone",
+            title: "Milestone: Launch board controls",
+            displayKey: "CID-100",
+            tags: ["milestone-object"]
+        )
+        let card = KanbanCard(
+            id: "card",
+            title: "Wire properties",
+            displayKey: "CID-101",
+            priority: .high,
+            tags: ["cider-web", "needs-qa"],
+            linkedEntities: [LibraryEntityRef(type: .bookmark, entityID: UUID())],
+            parentCardID: milestone.id,
+            created: created,
+            updatedAt: updated
+        )
+        let board = KanbanBoard(
+            id: "cider",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog", cards: [milestone]),
+                KanbanColumn(id: "in_progress", name: "In Progress", cards: [card]),
+            ]
+        )
+
+        let values = KanbanBoardDisplayPropertyValue.values(
+            for: card,
+            in: board,
+            column: board.columns[1],
+            options: KanbanBoardDisplayPropertyOption.allCases
+        )
+
+        #expect(values.map(\.value) == [
+            "CID-101",
+            "In Progress",
+            "High",
+            "Launch board controls",
+            "Cider Web, Needs QA",
+            "1 link",
+            "Jan 1, 2024",
+            "Jan 2, 2024",
+        ])
+
+        let sparse = KanbanCard(id: "sparse", title: "Sparse", created: created)
+        let sparseValues = KanbanBoardDisplayPropertyValue.values(
+            for: sparse,
+            in: board,
+            column: board.columns[0],
+            options: [.priority, .milestone, .labels, .links, .updated]
+        )
+
+        #expect(sparseValues.map(\.value) == [
+            "No priority",
+            "No milestone",
+            "No labels",
+            "No links",
+            "No updates",
+        ])
+        #expect(sparseValues.map(\.isFallback) == [true, true, true, true, true])
+    }
 }

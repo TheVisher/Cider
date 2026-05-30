@@ -209,6 +209,8 @@ enum KanbanBoardDisplayPropertyOption: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    static let defaultVisibleOptions: Set<KanbanBoardDisplayPropertyOption> = [.id, .labels]
+
     var title: String {
         switch self {
         case .id: "ID"
@@ -220,6 +222,117 @@ enum KanbanBoardDisplayPropertyOption: String, CaseIterable, Identifiable {
         case .created: "Created"
         case .updated: "Updated"
         }
+    }
+}
+
+struct KanbanBoardDisplayPropertyValue: Identifiable, Equatable {
+    let option: KanbanBoardDisplayPropertyOption
+    let title: String
+    let value: String
+    let isFallback: Bool
+
+    var id: String { option.id }
+
+    static func values(
+        for card: KanbanCard,
+        in board: KanbanBoard,
+        column: KanbanColumn,
+        options: [KanbanBoardDisplayPropertyOption]
+    ) -> [KanbanBoardDisplayPropertyValue] {
+        options.map { option in
+            value(for: option, card: card, board: board, column: column)
+        }
+    }
+
+    private static func value(
+        for option: KanbanBoardDisplayPropertyOption,
+        card: KanbanCard,
+        board: KanbanBoard,
+        column: KanbanColumn
+    ) -> KanbanBoardDisplayPropertyValue {
+        switch option {
+        case .id:
+            return present(option, board.displayKey(for: card))
+        case .status:
+            return present(option, column.name)
+        case .priority:
+            return card.priority.map { present(option, priorityTitle($0)) } ?? fallback(option, "No priority")
+        case .milestone:
+            return milestoneTitle(for: card, in: board)
+                .map { present(option, $0) } ?? fallback(option, "No milestone")
+        case .labels:
+            let labels = card.tags.map(displayTagLabel).filter { !$0.isEmpty }
+            return labels.isEmpty ? fallback(option, "No labels") : present(option, labels.joined(separator: ", "))
+        case .links:
+            let count = card.linkedEntities.count + card.relatedCardIDs.count
+            return count > 0 ? present(option, "\(count) \(count == 1 ? "link" : "links")") : fallback(option, "No links")
+        case .created:
+            return present(option, formattedDate(card.created))
+        case .updated:
+            return card.updatedAt.map { present(option, formattedDate($0)) } ?? fallback(option, "No updates")
+        }
+    }
+
+    private static func present(_ option: KanbanBoardDisplayPropertyOption, _ value: String) -> KanbanBoardDisplayPropertyValue {
+        KanbanBoardDisplayPropertyValue(option: option, title: option.title, value: value, isFallback: false)
+    }
+
+    private static func fallback(_ option: KanbanBoardDisplayPropertyOption, _ value: String) -> KanbanBoardDisplayPropertyValue {
+        KanbanBoardDisplayPropertyValue(option: option, title: option.title, value: value, isFallback: true)
+    }
+
+    private static func priorityTitle(_ priority: KanbanPriority) -> String {
+        switch priority {
+        case .high: "High"
+        case .medium: "Medium"
+        case .low: "Low"
+        }
+    }
+
+    private static func milestoneTitle(for card: KanbanCard, in board: KanbanBoard) -> String? {
+        var parentID = card.parentCardID
+        var visited: Set<String> = []
+        while let id = parentID, visited.insert(id).inserted {
+            guard let parent = board.allCards.first(where: { $0.id == id }) else { return nil }
+            if isMilestoneCard(parent) {
+                return normalizedMilestoneTitle(parent.title)
+            }
+            parentID = parent.parentCardID
+        }
+        return nil
+    }
+
+    private static func isMilestoneCard(_ card: KanbanCard) -> Bool {
+        card.tags.contains { tag in
+            tag.localizedCaseInsensitiveCompare("milestone") == .orderedSame ||
+                tag.localizedCaseInsensitiveCompare("milestone-object") == .orderedSame
+        } || card.title.localizedCaseInsensitiveContains("milestone:")
+    }
+
+    private static func normalizedMilestoneTitle(_ title: String) -> String {
+        title.replacingOccurrences(of: "Milestone: ", with: "")
+    }
+
+    private static func displayTagLabel(_ tag: String) -> String {
+        KanbanCardTagTaxonomy.normalized(tag)
+            .split(separator: "-")
+            .map { part in
+                let lower = part.lowercased()
+                if lower == "ios" { return "iOS" }
+                if lower == "qa" { return "QA" }
+                guard let first = part.first else { return "" }
+                return first.uppercased() + part.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+
+    private static func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.setLocalizedDateFormatFromTemplate("MMM d, yyyy")
+        return formatter.string(from: date)
     }
 }
 
@@ -252,6 +365,7 @@ struct KanbanBoardView: View {
     @State private var activeHeaderPopover: KanbanBoardHeaderControl?
     @State private var expandedFilterCategory: KanbanBoardFilterCategory?
     @State private var isBoardInspectorVisible = false
+    @State private var selectedDisplayProperties = KanbanBoardDisplayPropertyOption.defaultVisibleOptions
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let cardFaceSuggestedTags = [
@@ -832,7 +946,7 @@ struct KanbanBoardView: View {
                     GridItem(.adaptive(minimum: 72), spacing: Spacing.xs)
                 ], alignment: .leading, spacing: Spacing.xs) {
                     ForEach(KanbanBoardDisplayPropertyOption.allCases) { option in
-                        displayPropertyChip(option)
+                        displayPropertyChip(option, isSelected: selectedDisplayProperties.contains(option))
                     }
                 }
             }
@@ -913,23 +1027,45 @@ struct KanbanBoardView: View {
         .accessibilityLabel("\(title), preview toggle")
     }
 
-    private func displayPropertyChip(_ option: KanbanBoardDisplayPropertyOption) -> some View {
-        Text(option.title)
+    private func displayPropertyChip(_ option: KanbanBoardDisplayPropertyOption, isSelected: Bool) -> some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .spring(response: 0.2, dampingFraction: 0.88)) {
+                toggleDisplayProperty(option)
+            }
+        } label: {
+            HStack(spacing: 3) {
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(CiderFont.micro)
+                }
+                Text(option.title)
+                    .lineLimit(1)
+            }
             .font(CiderFont.micro)
-            .foregroundColor(CiderColors.secondary)
-            .lineLimit(1)
+            .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, Spacing.xs)
             .padding(.vertical, Spacing.xxs)
             .background(
                 Capsule(style: .continuous)
-                    .fill(CiderColors.surfaceSubtle.opacity(0.72))
+                    .fill(isSelected ? CiderColors.controlAccent.opacity(0.12) : CiderColors.surfaceSubtle.opacity(0.72))
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
+                    .strokeBorder(isSelected ? CiderColors.controlAccent.opacity(0.24) : CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
             )
-            .accessibilityLabel("\(option.title) display property placeholder")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(option.title) display property")
+        .accessibilityValue(isSelected ? "Shown" : "Hidden")
+    }
+
+    private func toggleDisplayProperty(_ option: KanbanBoardDisplayPropertyOption) {
+        if selectedDisplayProperties.contains(option) {
+            selectedDisplayProperties.remove(option)
+        } else {
+            selectedDisplayProperties.insert(option)
+        }
     }
 
     private func genericBoardHeaderControlPopover(_ control: KanbanBoardHeaderControl) -> some View {
@@ -1626,6 +1762,8 @@ struct KanbanBoardView: View {
 
         return cardView(
             card,
+            column: column,
+            board: board,
             compact: compactCards,
             childSummary: childSummary,
             parentBadge: context.parentBadge,
@@ -1670,6 +1808,8 @@ struct KanbanBoardView: View {
 
     private func cardView(
         _ card: KanbanCard,
+        column: KanbanColumn,
+        board: KanbanBoard,
         compact: Bool = false,
         childSummary: KanbanParentChildSummary? = nil,
         parentBadge: KanbanParentBadge? = nil,
@@ -1688,8 +1828,15 @@ struct KanbanBoardView: View {
             cardHeaderView(
                 card,
                 compact: compact,
-                childSummary: childSummary
+                childSummary: childSummary,
+                showsDisplayKey: selectedDisplayProperties.contains(.id)
             )
+
+            let displayValues = selectedCardDisplayPropertyValues(for: card, in: board, column: column)
+            if !displayValues.isEmpty {
+                cardDisplayPropertiesView(displayValues)
+                    .padding(.top, compact ? Spacing.xxs : KanbanDesign.cardPreviewSectionSpacing)
+            }
 
             if !inboxBadges.isEmpty {
                 cardInboxBadgesView(inboxBadges)
@@ -1765,14 +1912,17 @@ struct KanbanBoardView: View {
     private func cardHeaderView(
         _ card: KanbanCard,
         compact: Bool,
-        childSummary: KanbanParentChildSummary?
+        childSummary: KanbanParentChildSummary?,
+        showsDisplayKey: Bool
     ) -> some View {
         VStack(alignment: .leading, spacing: compact ? Spacing.xxs : Spacing.xs) {
             HStack(alignment: .center, spacing: Spacing.xs) {
-                Text(displayKey(for: card))
-                    .font(CiderFont.microMonospaced)
-                    .foregroundColor(CiderColors.controlAccent)
-                    .lineLimit(1)
+                if showsDisplayKey {
+                    Text(displayKey(for: card))
+                        .font(CiderFont.microMonospaced)
+                        .foregroundColor(CiderColors.controlAccent)
+                        .lineLimit(1)
+                }
 
                 if let childSummary {
                     childProgressChip(childSummary)
@@ -1789,6 +1939,47 @@ struct KanbanBoardView: View {
                 .lineLimit(compact ? 2 : 2)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func selectedCardDisplayPropertyValues(
+        for card: KanbanCard,
+        in board: KanbanBoard,
+        column: KanbanColumn
+    ) -> [KanbanBoardDisplayPropertyValue] {
+        let options = KanbanBoardDisplayPropertyOption.allCases.filter { option in
+            guard selectedDisplayProperties.contains(option) else { return false }
+            if option == .id { return false }
+            if option == .labels, !card.tags.isEmpty { return false }
+            return true
+        }
+        return KanbanBoardDisplayPropertyValue.values(for: card, in: board, column: column, options: options)
+    }
+
+    private func cardDisplayPropertiesView(_ values: [KanbanBoardDisplayPropertyValue]) -> some View {
+        TagFlowLayout(spacing: Spacing.xs) {
+            ForEach(values) { value in
+                HStack(spacing: 3) {
+                    Text(value.title)
+                        .foregroundColor(CiderColors.tertiary)
+                    Text(value.value)
+                        .foregroundColor(value.isFallback ? CiderColors.tertiary : CiderColors.secondary)
+                }
+                .font(CiderFont.micro)
+                .lineLimit(1)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(value.isFallback ? CiderColors.surfaceInput.opacity(0.62) : CiderColors.surfaceInput)
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
+                )
+                .accessibilityLabel("\(value.title): \(value.value)")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func childProgressChip(_ summary: KanbanParentChildSummary) -> some View {
@@ -1845,7 +2036,7 @@ struct KanbanBoardView: View {
 
     private func hasCardFooter(_ card: KanbanCard) -> Bool {
         KanbanBoardLayout.testingOwnerBadge(for: card) != nil
-            || !KanbanBoardLayout.cardFaceChips(for: card).isEmpty
+            || (selectedDisplayProperties.contains(.labels) && !KanbanBoardLayout.cardFaceChips(for: card).isEmpty)
     }
 
     private func hasCardContext(parentBadge: KanbanParentBadge?, planIndicator: KanbanPlanIndicator?) -> Bool {
@@ -1869,8 +2060,10 @@ struct KanbanBoardView: View {
             if let badge = KanbanBoardLayout.testingOwnerBadge(for: card) {
                 testingOwnerBadgeView(badge)
             }
-            ForEach(KanbanBoardLayout.cardFaceChips(for: card), id: \.label) { chip in
-                cardFaceChipView(chip, card: card)
+            if selectedDisplayProperties.contains(.labels) {
+                ForEach(KanbanBoardLayout.cardFaceChips(for: card), id: \.label) { chip in
+                    cardFaceChipView(chip, card: card)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
