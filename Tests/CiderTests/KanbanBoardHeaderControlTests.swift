@@ -113,4 +113,34 @@ struct KanbanBoardHeaderControlTests {
         #expect(options.map(\.progressText) == ["1/2", nil])
         #expect(options.map(\.isSelected) == [true, false])
     }
+
+    @Test("Kanban display options shell exposes expected layout ordering and property controls")
+    func displayOptionsShellExposesExpectedControls() {
+        #expect(KanbanBoardDisplayModeOption.allCases.map(\.title) == [
+            "Board",
+            "List",
+        ])
+        #expect(KanbanBoardDisplayModeOption.allCases.map(\.stateLabel) == [
+            "Active",
+            "Later",
+        ])
+
+        #expect(KanbanBoardDisplayOrderingOption.allCases.map(\.title) == [
+            "Manual lane order",
+            "Priority",
+            "Created",
+            "Updated",
+        ])
+
+        #expect(KanbanBoardDisplayPropertyOption.allCases.map(\.title) == [
+            "ID",
+            "Status",
+            "Priority",
+            "Milestone",
+            "Labels",
+            "Links",
+            "Created",
+            "Updated",
+        ])
+    }
 }

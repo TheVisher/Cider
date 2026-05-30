@@ -158,6 +158,71 @@ struct KanbanBoardMilestoneFilterOption: Identifiable, Equatable {
     }
 }
 
+enum KanbanBoardDisplayModeOption: String, CaseIterable, Identifiable {
+    case board
+    case list
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .board: "Board"
+        case .list: "List"
+        }
+    }
+
+    var stateLabel: String {
+        switch self {
+        case .board: "Active"
+        case .list: "Later"
+        }
+    }
+}
+
+enum KanbanBoardDisplayOrderingOption: String, CaseIterable, Identifiable {
+    case manualLaneOrder
+    case priority
+    case created
+    case updated
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .manualLaneOrder: "Manual lane order"
+        case .priority: "Priority"
+        case .created: "Created"
+        case .updated: "Updated"
+        }
+    }
+}
+
+enum KanbanBoardDisplayPropertyOption: String, CaseIterable, Identifiable {
+    case id
+    case status
+    case priority
+    case milestone
+    case labels
+    case links
+    case created
+    case updated
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .id: "ID"
+        case .status: "Status"
+        case .priority: "Priority"
+        case .milestone: "Milestone"
+        case .labels: "Labels"
+        case .links: "Links"
+        case .created: "Created"
+        case .updated: "Updated"
+        }
+    }
+}
+
 /// Renders a Kanban board as horizontal scrolling columns with draggable cards.
 struct KanbanBoardView: View {
     let boardID: String
@@ -549,6 +614,8 @@ struct KanbanBoardView: View {
         Group {
             if control == .filter {
                 filterCategoriesPopover
+            } else if control == .displayOptions {
+                displayOptionsPopover
             } else {
                 genericBoardHeaderControlPopover(control)
             }
@@ -722,6 +789,147 @@ struct KanbanBoardView: View {
                 .fill(isSelected ? CiderColors.controlAccent.opacity(0.08) : Color.clear)
         )
         .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+    }
+
+    private var displayOptionsPopover: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            Label(KanbanBoardHeaderControl.displayOptions.title, systemImage: KanbanBoardHeaderControl.displayOptions.systemImage)
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.primary)
+
+            displayOptionsSection("Layout") {
+                HStack(spacing: Spacing.xs) {
+                    ForEach(KanbanBoardDisplayModeOption.allCases) { option in
+                        displayModeSegment(option)
+                    }
+                }
+            }
+
+            displayOptionsSection("Grouping") {
+                displayDisabledOptionRow(title: "No grouping", detail: "Grouping controls come later.")
+            }
+
+            displayOptionsSection("Ordering") {
+                VStack(spacing: Spacing.xxs) {
+                    ForEach(KanbanBoardDisplayOrderingOption.allCases) { option in
+                        displayDisabledOptionRow(
+                            title: option.title,
+                            detail: option == .manualLaneOrder ? "Current order" : "Candidate"
+                        )
+                    }
+                }
+            }
+
+            displayOptionsSection("Visibility") {
+                VStack(spacing: Spacing.xxs) {
+                    displayDisabledToggleRow(title: "Show empty columns", isOn: true)
+                    displayDisabledToggleRow(title: "Show sub-issues", isOn: true)
+                }
+            }
+
+            displayOptionsSection("Display properties") {
+                LazyVGrid(columns: [
+                    GridItem(.adaptive(minimum: 72), spacing: Spacing.xs)
+                ], alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(KanbanBoardDisplayPropertyOption.allCases) { option in
+                        displayPropertyChip(option)
+                    }
+                }
+            }
+        }
+        .padding(Spacing.md)
+        .frame(width: 320, alignment: .leading)
+    }
+
+    private func displayOptionsSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(title)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.secondary)
+            content()
+        }
+    }
+
+    private func displayModeSegment(_ option: KanbanBoardDisplayModeOption) -> some View {
+        let isActive = option == .board
+        return HStack(spacing: Spacing.xxs) {
+            Text(option.title)
+            Text(option.stateLabel)
+                .font(CiderFont.micro)
+                .foregroundColor(isActive ? CiderColors.controlAccent : CiderColors.tertiary)
+        }
+        .font(CiderFont.captionMedium)
+        .foregroundColor(isActive ? CiderColors.primary : CiderColors.secondary)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(isActive ? CiderColors.controlAccent.opacity(0.10) : CiderColors.surfaceSubtle.opacity(0.62))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .strokeBorder(isActive ? CiderColors.controlAccent.opacity(0.22) : CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
+        )
+    }
+
+    private func displayDisabledOptionRow(title: String, detail: String) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: "circle")
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.tertiary)
+                .frame(width: 14)
+            Text(title)
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.secondary)
+            Spacer(minLength: Spacing.xs)
+            Text(detail)
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.tertiary)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(detail)")
+    }
+
+    private func displayDisabledToggleRow(title: String, isOn: Bool) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                .font(CiderFont.caption)
+                .foregroundColor(isOn ? CiderColors.controlAccent : CiderColors.tertiary)
+                .frame(width: 16)
+            Text(title)
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.secondary)
+            Spacer(minLength: 0)
+            Text("Preview")
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.tertiary)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), preview toggle")
+    }
+
+    private func displayPropertyChip(_ option: KanbanBoardDisplayPropertyOption) -> some View {
+        Text(option.title)
+            .font(CiderFont.micro)
+            .foregroundColor(CiderColors.secondary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, Spacing.xxs)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(CiderColors.surfaceSubtle.opacity(0.72))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
+            )
+            .accessibilityLabel("\(option.title) display property placeholder")
     }
 
     private func genericBoardHeaderControlPopover(_ control: KanbanBoardHeaderControl) -> some View {
