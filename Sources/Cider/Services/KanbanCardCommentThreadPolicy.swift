@@ -1,6 +1,17 @@
 import Foundation
 
 struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
+    struct ChecklistItem: Equatable, Sendable, Identifiable {
+        var commentID: String
+        var lineIndex: Int
+        var text: String
+        var isChecked: Bool
+
+        var id: String { anchorID }
+        var anchorID: String { "\(commentID)#checklist-\(lineIndex + 1)" }
+        var markdownQuote: String { "- [\(isChecked ? "x" : " ")] \(text)" }
+    }
+
     struct ReferenceLink: Equatable, Sendable, Identifiable {
         enum Kind: String, Sendable {
             case link
@@ -85,6 +96,60 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
         return normalized.components(separatedBy: .newlines)
     }
 
+    static func checklistItems(in comment: KanbanCardComment) -> [ChecklistItem] {
+        displayBodyLines(for: comment.body).enumerated().compactMap { index, line in
+            checklistLine(line).map { item in
+                ChecklistItem(
+                    commentID: comment.id,
+                    lineIndex: index,
+                    text: item.text,
+                    isChecked: item.isChecked
+                )
+            }
+        }
+    }
+
+    static func toggledChecklistBody(_ body: String, lineIndex: Int) -> String? {
+        var lines = displayBodyLines(for: body)
+        guard lines.indices.contains(lineIndex),
+              let checklist = checklistLine(lines[lineIndex])
+        else { return nil }
+
+        let original = lines[lineIndex]
+        guard let markerRange = original.range(of: checklist.marker) else { return nil }
+        let replacement = checklist.isChecked ? "[ ]" : "[x]"
+        lines[lineIndex].replaceSubrange(markerRange, with: replacement)
+        return lines.joined(separator: "\n")
+    }
+
+    static func canResolveTestingChecklist(_ comment: KanbanCardComment) -> Bool {
+        guard comment.kind == .qa else { return false }
+        let items = checklistItems(in: comment)
+        return !items.isEmpty && items.allSatisfy(\.isChecked)
+    }
+
+    static func failureReply(
+        to comment: KanbanCardComment,
+        checklistItem: ChecklistItem,
+        author: String?,
+        createdAt: Date = Date()
+    ) -> KanbanCardComment {
+        KanbanCardComment(
+            kind: .qa,
+            body: """
+            > \(checklistItem.markdownQuote)
+
+            Failed because:
+            """,
+            author: author,
+            source: "cider-ui",
+            createdAt: createdAt,
+            parentCommentID: comment.id,
+            parentChecklistItemAnchor: checklistItem.anchorID,
+            quotedChecklistItem: checklistItem.text
+        )
+    }
+
     static func referenceLinks(in body: String) -> [ReferenceLink] {
         var links: [ReferenceLink] = []
         var seen = Set<String>()
@@ -107,6 +172,25 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
     }
 
     private static let genericSystemNames: Set<String> = ["user", "unknown", "mac", "local"]
+
+    private static func checklistLine(_ line: String) -> (isChecked: Bool, text: String, marker: String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let marker: String
+        let isChecked: Bool
+        if trimmed.hasPrefix("- [ ] ") {
+            marker = "[ ]"
+            isChecked = false
+        } else if trimmed.hasPrefix("- [x] ") {
+            marker = "[x]"
+            isChecked = true
+        } else if trimmed.hasPrefix("- [X] ") {
+            marker = "[X]"
+            isChecked = true
+        } else {
+            return nil
+        }
+        return (isChecked, String(trimmed.dropFirst(6)), marker)
+    }
 
     private static func appendReference(
         urlString: String,

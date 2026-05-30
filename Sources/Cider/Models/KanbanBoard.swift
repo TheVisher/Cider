@@ -130,6 +130,8 @@ struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
     var source: String?
     var createdAt: Date
     var parentCommentID: String?
+    var parentChecklistItemAnchor: String?
+    var quotedChecklistItem: String?
     var resolvedAt: Date?
     var resolvedBy: String?
 
@@ -144,6 +146,8 @@ struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
         source: String? = nil,
         createdAt: Date = Date(),
         parentCommentID: String? = nil,
+        parentChecklistItemAnchor: String? = nil,
+        quotedChecklistItem: String? = nil,
         resolvedAt: Date? = nil,
         resolvedBy: String? = nil
     ) {
@@ -154,12 +158,14 @@ struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
         self.source = source
         self.createdAt = createdAt
         self.parentCommentID = parentCommentID
+        self.parentChecklistItemAnchor = parentChecklistItemAnchor
+        self.quotedChecklistItem = quotedChecklistItem
         self.resolvedAt = resolvedAt
         self.resolvedBy = resolvedBy
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, body, author, source, createdAt, parentCommentID, resolvedAt, resolvedBy
+        case id, kind, body, author, source, createdAt, parentCommentID, parentChecklistItemAnchor, quotedChecklistItem, resolvedAt, resolvedBy
     }
 
     init(from decoder: Decoder) throws {
@@ -171,6 +177,8 @@ struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
         source = try c.decodeIfPresent(String.self, forKey: .source)
         createdAt = try c.decode(KanbanHistoryDate.self, forKey: .createdAt).date
         parentCommentID = try c.decodeIfPresent(String.self, forKey: .parentCommentID)
+        parentChecklistItemAnchor = try c.decodeIfPresent(String.self, forKey: .parentChecklistItemAnchor)
+        quotedChecklistItem = try c.decodeIfPresent(String.self, forKey: .quotedChecklistItem)
         resolvedAt = try c.decodeIfPresent(KanbanHistoryDate.self, forKey: .resolvedAt)?.date
         resolvedBy = try c.decodeIfPresent(String.self, forKey: .resolvedBy)
     }
@@ -184,6 +192,8 @@ struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
         try c.encodeIfPresent(source, forKey: .source)
         try c.encode(KanbanHistoryDate(date: createdAt), forKey: .createdAt)
         try c.encodeIfPresent(parentCommentID, forKey: .parentCommentID)
+        try c.encodeIfPresent(parentChecklistItemAnchor, forKey: .parentChecklistItemAnchor)
+        try c.encodeIfPresent(quotedChecklistItem, forKey: .quotedChecklistItem)
         if let resolvedAt {
             try c.encode(KanbanHistoryDate(date: resolvedAt), forKey: .resolvedAt)
         }

@@ -225,6 +225,8 @@ struct KanbanCardCodableTests {
             source: "cider-ui",
             createdAt: createdAt.addingTimeInterval(60),
             parentCommentID: root.id,
+            parentChecklistItemAnchor: "\(root.id)#checklist-1",
+            quotedChecklistItem: "QA verified the persisted handoff.",
             resolvedAt: createdAt.addingTimeInterval(120),
             resolvedBy: "Erik"
         )
@@ -241,6 +243,8 @@ struct KanbanCardCodableTests {
         #expect(decoded.comments.map(\.kind) == [.handoff, .qa])
         #expect(decoded.comments.first?.source == "discord:cody-chat")
         #expect(decoded.comments.last?.parentCommentID == "comment-root")
+        #expect(decoded.comments.last?.parentChecklistItemAnchor == "comment-root#checklist-1")
+        #expect(decoded.comments.last?.quotedChecklistItem == "QA verified the persisted handoff.")
         #expect(decoded.comments.last?.body == "- [x] QA verified the persisted handoff.")
         #expect(decoded.comments.last?.resolvedAt == createdAt.addingTimeInterval(120))
         #expect(decoded.comments.last?.resolvedBy == "Erik")

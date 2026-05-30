@@ -156,4 +156,72 @@ struct KanbanCardDetailReadableLayoutPolicyTests {
         #expect(lines == ["This is the note I wrote."])
         #expect(KanbanCardCommentThreadPolicy.displayBodyLines(for: "   ").isEmpty)
     }
+
+    @Test("comment checklist lines toggle by visible line while preserving text")
+    func commentChecklistLinesToggleByVisibleLineWhilePreservingText() throws {
+        let body = """
+        Testing:
+        - [ ] Verify narrow header
+        - [x] Confirm inspector still opens
+        """
+
+        let checked = try #require(KanbanCardCommentThreadPolicy.toggledChecklistBody(body, lineIndex: 1))
+        #expect(checked.contains("- [x] Verify narrow header"))
+        #expect(checked.contains("- [x] Confirm inspector still opens"))
+
+        let unchecked = try #require(KanbanCardCommentThreadPolicy.toggledChecklistBody(checked, lineIndex: 2))
+        #expect(unchecked.contains("- [x] Verify narrow header"))
+        #expect(unchecked.contains("- [ ] Confirm inspector still opens"))
+        #expect(KanbanCardCommentThreadPolicy.toggledChecklistBody(body, lineIndex: 0) == nil)
+    }
+
+    @Test("testing checklist comments resolve only after every item is checked")
+    func testingChecklistCommentsResolveOnlyAfterEveryItemIsChecked() {
+        let incomplete = KanbanCardComment(
+            id: "qa-comment",
+            kind: .qa,
+            body: """
+            - [x] Build passes
+            - [ ] Visual QA passes
+            """
+        )
+        let complete = KanbanCardComment(
+            id: "qa-comment",
+            kind: .qa,
+            body: """
+            - [x] Build passes
+            - [x] Visual QA passes
+            """
+        )
+        let note = KanbanCardComment(kind: .note, body: "- [x] A normal note is not a testing checklist")
+
+        #expect(KanbanCardCommentThreadPolicy.canResolveTestingChecklist(incomplete) == false)
+        #expect(KanbanCardCommentThreadPolicy.canResolveTestingChecklist(complete) == true)
+        #expect(KanbanCardCommentThreadPolicy.canResolveTestingChecklist(note) == false)
+    }
+
+    @Test("checklist failure replies carry an item anchor and quote")
+    func checklistFailureRepliesCarryAnItemAnchorAndQuote() throws {
+        let comment = KanbanCardComment(
+            id: "qa-comment",
+            kind: .qa,
+            body: """
+            - [x] Build passes
+            - [ ] Visual QA passes
+            """
+        )
+        let item = try #require(KanbanCardCommentThreadPolicy.checklistItems(in: comment).last)
+
+        let reply = KanbanCardCommentThreadPolicy.failureReply(
+            to: comment,
+            checklistItem: item,
+            author: "Visher",
+            createdAt: Date(timeIntervalSince1970: 1_000)
+        )
+
+        #expect(reply.parentCommentID == "qa-comment")
+        #expect(reply.parentChecklistItemAnchor == "qa-comment#checklist-2")
+        #expect(reply.quotedChecklistItem == "Visual QA passes")
+        #expect(reply.body.hasPrefix("> - [ ] Visual QA passes"))
+    }
 }

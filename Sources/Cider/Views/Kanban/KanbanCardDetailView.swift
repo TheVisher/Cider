@@ -1314,6 +1314,7 @@ private struct KanbanCardCommentsSectionView: View {
     @Binding var collapsedThreadIDs: Set<String>
     var currentAuthorName: String
     var onCommentChanged: () -> Void
+    @State private var replyingToChecklistItem: KanbanCardCommentThreadPolicy.ChecklistItem?
 
     private var threads: [KanbanCardCommentThreadPolicy.Thread] {
         KanbanCardCommentThreadPolicy.displayThreads(from: comments)
@@ -1373,7 +1374,10 @@ private struct KanbanCardCommentsSectionView: View {
                             canAddReply: canAddReply,
                             onToggleCollapse: { toggleCollapse(for: thread.root) },
                             onToggleResolved: { toggleResolved(thread.root) },
+                            canResolveThread: canResolveThread(thread.root),
                             onReply: { startReply(to: thread.root) },
+                            onReplyToChecklistItem: { item in startReply(to: thread.root, checklistItem: item) },
+                            onToggleChecklistItem: { lineIndex in toggleChecklistItem(in: thread.root, lineIndex: lineIndex) },
                             onCancelReply: { cancelReply() },
                             onAddReply: { addReply(to: thread.root) }
                         )
@@ -1457,12 +1461,25 @@ private struct KanbanCardCommentsSectionView: View {
 
     private func startReply(to comment: KanbanCardComment) {
         replyingToCommentID = comment.id
+        replyingToChecklistItem = nil
         replyCommentBody = ""
+        collapsedThreadIDs.remove(comment.id)
+    }
+
+    private func startReply(to comment: KanbanCardComment, checklistItem: KanbanCardCommentThreadPolicy.ChecklistItem) {
+        replyingToCommentID = comment.id
+        replyingToChecklistItem = checklistItem
+        replyCommentBody = KanbanCardCommentThreadPolicy.failureReply(
+            to: comment,
+            checklistItem: checklistItem,
+            author: currentAuthorName
+        ).body
         collapsedThreadIDs.remove(comment.id)
     }
 
     private func cancelReply() {
         replyingToCommentID = nil
+        replyingToChecklistItem = nil
         replyCommentBody = ""
     }
 
@@ -1476,7 +1493,9 @@ private struct KanbanCardCommentsSectionView: View {
                 author: currentAuthorName,
                 source: "cider-ui",
                 createdAt: Date(),
-                parentCommentID: comment.id
+                parentCommentID: comment.id,
+                parentChecklistItemAnchor: replyingToChecklistItem?.anchorID,
+                quotedChecklistItem: replyingToChecklistItem?.text
             )
         )
         cancelReply()
@@ -1490,9 +1509,29 @@ private struct KanbanCardCommentsSectionView: View {
             comments[index].resolvedBy = nil
             collapsedThreadIDs.remove(comment.id)
         } else {
+            guard canResolveThread(comment) else { return }
             comments[index].resolvedAt = Date()
             comments[index].resolvedBy = currentAuthorName
             collapsedThreadIDs.insert(comment.id)
+        }
+        persistCommentChange()
+    }
+
+    private func canResolveThread(_ comment: KanbanCardComment) -> Bool {
+        let checklistItems = KanbanCardCommentThreadPolicy.checklistItems(in: comment)
+        guard comment.kind == .qa, !checklistItems.isEmpty else { return true }
+        return KanbanCardCommentThreadPolicy.canResolveTestingChecklist(comment)
+    }
+
+    private func toggleChecklistItem(in comment: KanbanCardComment, lineIndex: Int) {
+        guard let index = comments.firstIndex(where: { $0.id == comment.id }),
+              let updatedBody = KanbanCardCommentThreadPolicy.toggledChecklistBody(comments[index].body, lineIndex: lineIndex)
+        else { return }
+        comments[index].body = updatedBody
+        if comments[index].isResolved && !canResolveThread(comments[index]) {
+            comments[index].resolvedAt = nil
+            comments[index].resolvedBy = nil
+            collapsedThreadIDs.remove(comment.id)
         }
         persistCommentChange()
     }
@@ -1520,7 +1559,10 @@ private struct KanbanCardCommentThreadRow: View {
     var canAddReply: Bool
     var onToggleCollapse: () -> Void
     var onToggleResolved: () -> Void
+    var canResolveThread: Bool
     var onReply: () -> Void
+    var onReplyToChecklistItem: (KanbanCardCommentThreadPolicy.ChecklistItem) -> Void
+    var onToggleChecklistItem: (Int) -> Void
     var onCancelReply: () -> Void
     var onAddReply: () -> Void
 
@@ -1540,6 +1582,9 @@ private struct KanbanCardCommentThreadRow: View {
                     onToggleResolved: onToggleResolved,
                     onToggleCollapse: onToggleCollapse,
                     onReply: onReply,
+                    onReplyToChecklistItem: onReplyToChecklistItem,
+                    onToggleChecklistItem: onToggleChecklistItem,
+                    canResolveThread: canResolveThread,
                     usesOwnBackground: false
                 )
             }
@@ -1657,6 +1702,9 @@ private struct KanbanCardCommentRow: View {
     var onToggleResolved: (() -> Void)? = nil
     var onToggleCollapse: (() -> Void)? = nil
     var onReply: (() -> Void)? = nil
+    var onReplyToChecklistItem: ((KanbanCardCommentThreadPolicy.ChecklistItem) -> Void)? = nil
+    var onToggleChecklistItem: ((Int) -> Void)? = nil
+    var canResolveThread = true
     var usesOwnBackground: Bool = true
     @State private var isThreadActionsHovered = false
 
@@ -1701,6 +1749,7 @@ private struct KanbanCardCommentRow: View {
                             }
                             if let onToggleResolved {
                                 Button(comment.isResolved ? "Reopen thread" : "Resolve thread", systemImage: comment.isResolved ? "arrow.uturn.backward" : "checkmark", action: onToggleResolved)
+                                    .disabled(!comment.isResolved && !canResolveThread)
                             }
                             if replyCount > 0, let onToggleCollapse {
                                 Button(isThreadCollapsed ? "Expand replies" : "Collapse replies", systemImage: isThreadCollapsed ? "chevron.down" : "chevron.up", action: onToggleCollapse)
@@ -1735,7 +1784,11 @@ private struct KanbanCardCommentRow: View {
                         .foregroundColor(CiderColors.tertiary)
                 }
 
-                KanbanCommentBodyView(content: comment.body)
+                KanbanCommentBodyView(
+                    comment: comment,
+                    onToggleChecklistItem: onToggleChecklistItem,
+                    onReplyToChecklistItem: onReplyToChecklistItem
+                )
 
             }
         }
@@ -1839,14 +1892,24 @@ private struct KanbanCardThreadToolButton: View {
 }
 
 private struct KanbanCommentBodyView: View {
-    let content: String
+    let comment: KanbanCardComment
+    var onToggleChecklistItem: ((Int) -> Void)? = nil
+    var onReplyToChecklistItem: ((KanbanCardCommentThreadPolicy.ChecklistItem) -> Void)? = nil
 
     var bodyViewLines: [String] {
-        KanbanCardCommentThreadPolicy.displayBodyLines(for: content)
+        KanbanCardCommentThreadPolicy.displayBodyLines(for: comment.body)
     }
 
     var referenceLinks: [KanbanCardCommentThreadPolicy.ReferenceLink] {
-        KanbanCardCommentThreadPolicy.referenceLinks(in: content)
+        KanbanCardCommentThreadPolicy.referenceLinks(in: comment.body)
+    }
+
+    var checklistItemsByLine: [Int: KanbanCardCommentThreadPolicy.ChecklistItem] {
+        Dictionary(
+            uniqueKeysWithValues: KanbanCardCommentThreadPolicy
+                .checklistItems(in: comment)
+                .map { ($0.lineIndex, $0) }
+        )
     }
 
     var body: some View {
@@ -1857,18 +1920,44 @@ private struct KanbanCommentBodyView: View {
                     .foregroundColor(CiderColors.tertiary)
                     .italic()
             }
-            ForEach(Array(bodyViewLines.enumerated()), id: \.offset) { _, line in
-                if let checklist = KanbanMarkdownChecklistLine(line: line) {
+            ForEach(Array(bodyViewLines.enumerated()), id: \.offset) { lineIndex, line in
+                if let checklist = checklistItemsByLine[lineIndex] {
                     HStack(alignment: .top, spacing: Spacing.xs) {
-                        Image(systemName: checklist.isChecked ? "checkmark.square.fill" : "square")
-                            .font(CiderFont.caption)
-                            .foregroundColor(checklist.isChecked ? CiderColors.controlAccent : CiderColors.tertiary)
-                            .padding(.top, 1)
+                        Button {
+                            onToggleChecklistItem?(lineIndex)
+                        } label: {
+                            Image(systemName: checklist.isChecked ? "checkmark.square.fill" : "square")
+                                .font(CiderFont.caption)
+                                .foregroundColor(checklist.isChecked ? CiderColors.controlAccent : CiderColors.tertiary)
+                                .frame(width: 18, height: 18)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(onToggleChecklistItem == nil)
+                        .help(checklist.isChecked ? "Mark checklist item incomplete" : "Mark checklist item complete")
+                        .accessibilityLabel(checklist.isChecked ? "Mark \(checklist.text) incomplete" : "Mark \(checklist.text) complete")
+
                         Text(checklist.text)
                             .font(CiderFont.caption)
                             .foregroundColor(CiderColors.secondary)
                             .strikethrough(checklist.isChecked, color: CiderColors.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
+
+                        Spacer(minLength: Spacing.xs)
+
+                        if let onReplyToChecklistItem {
+                            Button {
+                                onReplyToChecklistItem(checklist)
+                            } label: {
+                                Image(systemName: "quote.bubble")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundColor(CiderColors.tertiary)
+                                    .frame(width: 20, height: 18)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Reply to checklist item")
+                            .accessibilityLabel("Reply to \(checklist.text)")
+                        }
                     }
                 } else {
                     Text(line)
@@ -1927,20 +2016,6 @@ private struct KanbanCommentReferenceLinkRow: View {
         }
         .buttonStyle(.plain)
         .help(reference.url.absoluteString)
-    }
-}
-
-private struct KanbanMarkdownChecklistLine {
-    let isChecked: Bool
-    let text: String
-
-    init?(line: String) {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("- [ ] ") || trimmed.hasPrefix("- [x] ") || trimmed.hasPrefix("- [X] ") else {
-            return nil
-        }
-        isChecked = trimmed.hasPrefix("- [x] ") || trimmed.hasPrefix("- [X] ")
-        text = String(trimmed.dropFirst(6))
     }
 }
 
