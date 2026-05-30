@@ -102,6 +102,8 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
+stop_app
+
 if [[ "$STREAM_LOGS" -eq 1 ]]; then
   LOG_DIR="${CIDER_DIAGNOSTICS_DIR:-$HOME/Library/Logs/Cider/dev-session-$(date -u +"%Y%m%dT%H%M%SZ")}"
   mkdir -p "$LOG_DIR"
@@ -122,14 +124,14 @@ fi
 
 if [[ "$VERIFY" -eq 1 || "$STREAM_LOGS" -eq 1 ]]; then
   for _ in {1..20}; do
-    if pgrep -x "$APP_NAME" >/dev/null; then
+    if pgrep -f "$APP_PATH/Contents/MacOS/$APP_NAME" >/dev/null; then
       echo "$APP_NAME is running from $APP_PATH"
       break
     fi
     sleep 0.25
   done
 
-  if ! pgrep -x "$APP_NAME" >/dev/null; then
+  if ! pgrep -f "$APP_PATH/Contents/MacOS/$APP_NAME" >/dev/null; then
     echo "$APP_NAME did not start after launch." >&2
     exit 1
   fi
