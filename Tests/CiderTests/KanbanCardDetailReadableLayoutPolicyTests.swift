@@ -223,5 +223,11 @@ struct KanbanCardDetailReadableLayoutPolicyTests {
         #expect(reply.parentChecklistItemAnchor == "qa-comment#checklist-2")
         #expect(reply.quotedChecklistItem == "Visual QA passes")
         #expect(reply.body.hasPrefix("> - [ ] Visual QA passes"))
+        #expect(reply.body.hasSuffix("Failed because:\n"))
+
+        let quote = try #require(KanbanCardCommentThreadPolicy.quotedLine("> - [ ] Visual QA passes"))
+        let quotedChecklist = try #require(KanbanCardCommentThreadPolicy.checklistLineContent(quote.content))
+        #expect(quotedChecklist.text == "Visual QA passes")
+        #expect(quotedChecklist.isChecked == false)
     }
 }

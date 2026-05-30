@@ -1488,7 +1488,7 @@ private struct KanbanCardCommentsSectionView: View {
         guard !trimmedBody.isEmpty else { return }
         comments.append(
             KanbanCardComment(
-                kind: .note,
+                kind: replyingToChecklistItem == nil ? .note : .qa,
                 body: trimmedBody,
                 author: currentAuthorName,
                 source: "cider-ui",
@@ -1922,43 +1922,13 @@ private struct KanbanCommentBodyView: View {
             }
             ForEach(Array(bodyViewLines.enumerated()), id: \.offset) { lineIndex, line in
                 if let checklist = checklistItemsByLine[lineIndex] {
-                    HStack(alignment: .top, spacing: Spacing.xs) {
-                        Button {
-                            onToggleChecklistItem?(lineIndex)
-                        } label: {
-                            Image(systemName: checklist.isChecked ? "checkmark.square.fill" : "square")
-                                .font(CiderFont.caption)
-                                .foregroundColor(checklist.isChecked ? CiderColors.controlAccent : CiderColors.tertiary)
-                                .frame(width: 18, height: 18)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(onToggleChecklistItem == nil)
-                        .help(checklist.isChecked ? "Mark checklist item incomplete" : "Mark checklist item complete")
-                        .accessibilityLabel(checklist.isChecked ? "Mark \(checklist.text) incomplete" : "Mark \(checklist.text) complete")
-
-                        Text(checklist.text)
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.secondary)
-                            .strikethrough(checklist.isChecked, color: CiderColors.tertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Spacer(minLength: Spacing.xs)
-
-                        if let onReplyToChecklistItem {
-                            Button {
-                                onReplyToChecklistItem(checklist)
-                            } label: {
-                                Image(systemName: "quote.bubble")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundColor(CiderColors.tertiary)
-                                    .frame(width: 20, height: 18)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Reply to checklist item")
-                            .accessibilityLabel("Reply to \(checklist.text)")
-                        }
-                    }
+                    KanbanCommentChecklistLineView(
+                        checklist: checklist,
+                        onToggleChecklistItem: onToggleChecklistItem.map { toggle in { toggle(lineIndex) } },
+                        onReplyToChecklistItem: onReplyToChecklistItem
+                    )
+                } else if let quote = KanbanCardCommentThreadPolicy.quotedLine(line) {
+                    KanbanCommentQuoteLineView(quote: quote)
                 } else {
                     Text(line)
                         .font(CiderFont.caption)
@@ -1977,6 +1947,91 @@ private struct KanbanCommentBodyView: View {
             }
         }
         .lineSpacing(3)
+    }
+}
+
+private struct KanbanCommentChecklistLineView: View {
+    let checklist: KanbanCardCommentThreadPolicy.ChecklistItem
+    var onToggleChecklistItem: (() -> Void)?
+    var onReplyToChecklistItem: ((KanbanCardCommentThreadPolicy.ChecklistItem) -> Void)?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Spacing.xs) {
+            Button {
+                onToggleChecklistItem?()
+            } label: {
+                Image(systemName: checklist.isChecked ? "checkmark.square.fill" : "square")
+                    .font(CiderFont.caption)
+                    .foregroundColor(checklist.isChecked ? CiderColors.controlAccent : CiderColors.tertiary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(onToggleChecklistItem == nil)
+            .help(checklist.isChecked ? "Mark checklist item incomplete" : "Mark checklist item complete")
+            .accessibilityLabel(checklist.isChecked ? "Mark \(checklist.text) incomplete" : "Mark \(checklist.text) complete")
+
+            Text(checklist.text)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.secondary)
+                .strikethrough(checklist.isChecked, color: CiderColors.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: Spacing.xs)
+
+            if let onReplyToChecklistItem {
+                Button {
+                    onReplyToChecklistItem(checklist)
+                } label: {
+                    Image(systemName: "exclamationmark.bubble")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(CiderColors.tertiary)
+                        .frame(width: 20, height: 18)
+                }
+                .buttonStyle(.plain)
+                .help("Report failed checklist item")
+                .accessibilityLabel("Report failure for \(checklist.text)")
+            }
+        }
+    }
+}
+
+private struct KanbanCommentQuoteLineView: View {
+    let quote: KanbanCardCommentThreadPolicy.QuotedLine
+
+    var checklist: KanbanCardCommentThreadPolicy.ChecklistLine? {
+        KanbanCardCommentThreadPolicy.checklistLineContent(quote.content)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Rectangle()
+                .fill(CiderColors.borderStrong)
+                .frame(width: 2)
+                .frame(minHeight: 20)
+                .clipShape(Capsule())
+
+            if let checklist {
+                HStack(alignment: .top, spacing: Spacing.xs) {
+                    Image(systemName: checklist.isChecked ? "checkmark.square.fill" : "square")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .frame(width: 18, height: 18)
+
+                    Text(checklist.text)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .strikethrough(checklist.isChecked, color: CiderColors.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Text(quote.content)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 

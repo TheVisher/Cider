@@ -12,6 +12,16 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
         var markdownQuote: String { "- [\(isChecked ? "x" : " ")] \(text)" }
     }
 
+    struct ChecklistLine: Equatable, Sendable {
+        var text: String
+        var isChecked: Bool
+        var marker: String
+    }
+
+    struct QuotedLine: Equatable, Sendable {
+        var content: String
+    }
+
     struct ReferenceLink: Equatable, Sendable, Identifiable {
         enum Kind: String, Sendable {
             case link
@@ -96,9 +106,21 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
         return normalized.components(separatedBy: .newlines)
     }
 
+    static func quotedLine(_ line: String) -> QuotedLine? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix(">") else { return nil }
+        let content = trimmed.dropFirst().trimmingCharacters(in: .whitespaces)
+        guard !content.isEmpty else { return nil }
+        return QuotedLine(content: content)
+    }
+
+    static func checklistLineContent(_ line: String) -> ChecklistLine? {
+        checklistLine(line)
+    }
+
     static func checklistItems(in comment: KanbanCardComment) -> [ChecklistItem] {
         displayBodyLines(for: comment.body).enumerated().compactMap { index, line in
-            checklistLine(line).map { item in
+            checklistLineContent(line).map { item in
                 ChecklistItem(
                     commentID: comment.id,
                     lineIndex: index,
@@ -140,6 +162,7 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
             > \(checklistItem.markdownQuote)
 
             Failed because:
+
             """,
             author: author,
             source: "cider-ui",
@@ -173,7 +196,7 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
 
     private static let genericSystemNames: Set<String> = ["user", "unknown", "mac", "local"]
 
-    private static func checklistLine(_ line: String) -> (isChecked: Bool, text: String, marker: String)? {
+    private static func checklistLine(_ line: String) -> ChecklistLine? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         let marker: String
         let isChecked: Bool
@@ -189,7 +212,7 @@ struct KanbanCardCommentThreadPolicy: Equatable, Sendable {
         } else {
             return nil
         }
-        return (isChecked, String(trimmed.dropFirst(6)), marker)
+        return ChecklistLine(text: String(trimmed.dropFirst(6)), isChecked: isChecked, marker: marker)
     }
 
     private static func appendReference(
