@@ -142,6 +142,43 @@ struct SecondBrainItemContentIndexingTests {
         }
     }
 
+    @Test("bookmark folder assignment rebuilds searchable chunks")
+    func bookmarkFolderAssignmentRebuildsSearchableChunks() throws {
+        try withIsolatedVault { db, _ in
+            let folderID = UUID()
+            try insertFolder(id: folderID.uuidString, relativePath: "Projects/Research", into: db)
+
+            let sourceDirectory = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("Projects/Research")
+            try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+            let sourceFile = sourceDirectory.appendingPathComponent("Mutable Bookmark.webloc")
+            let plist: [String: String] = ["URL": "https://example.com/original"]
+            let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            try data.write(to: sourceFile, options: .atomic)
+
+            let bookmark = Bookmark(
+                title: "Mutable Bookmark",
+                urlString: "https://example.com/original",
+                notes: "bookmark-move-index-token",
+                folderID: folderID,
+                relativePath: "Projects/Research/Mutable Bookmark.webloc"
+            )
+            let seed = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            seed.persistBookmarkToDatabase(db, bookmark: bookmark)
+
+            let service = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            service.loadBookmarksFromDatabase(db)
+
+            let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmark.id.uuidString)
+            _ = try SecondBrainItemContentIndexingService(database: db).rebuild(owner: owner)
+
+            #expect(service.assignBookmark(bookmark.id, toFolder: nil) == true)
+
+            let store = SecondBrainStore(database: db)
+            #expect(try store.searchChunks(query: "Research", limit: 5).isEmpty)
+            #expect(try store.searchChunks(query: "Inbox", limit: 5).first?.owner == owner)
+        }
+    }
+
     private func insertItem(id: String, type: String, title: String, into db: CiderDatabase) throws {
         let stmt = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
@@ -168,6 +205,18 @@ struct SecondBrainItemContentIndexingTests {
         let stmt = try db.prepare("UPDATE notes SET content = ? WHERE item_id = ?;")
         stmt.bind(content, at: 1)
             .bind(id, at: 2)
+        try stmt.step()
+    }
+
+    private func insertFolder(id: String, relativePath: String, into db: CiderDatabase) throws {
+        let stmt = try db.prepare("""
+            INSERT INTO folders (id, relative_path, created_at, updated_at)
+            VALUES (?, ?, ?, ?);
+            """)
+        stmt.bind(id, at: 1)
+            .bind(relativePath, at: 2)
+            .bind(DatabaseHelpers.encode(Date()), at: 3)
+            .bind(DatabaseHelpers.encode(Date()), at: 4)
         try stmt.step()
     }
 

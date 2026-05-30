@@ -978,6 +978,11 @@ final class VaultBookmarkService: ObservableObject {
                 "routingSource": "none",
             ]
         )
+        SecondBrainItemMutationIndexer.rebuildAfterMutation(
+            database: resolvedDatabase,
+            ownerType: "bookmark",
+            ownerID: bookmarkID
+        )
         return true
     }
 
