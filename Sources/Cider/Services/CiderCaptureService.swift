@@ -419,15 +419,16 @@ struct CiderCaptureResult {
     }
 
     private static func bookmarkThumbnailStatus(_ bookmark: Bookmark) -> String {
-        if let carouselImagePaths = bookmark.carouselImagePaths, !carouselImagePaths.isEmpty {
+        if let carouselImagePaths = bookmark.carouselImagePaths,
+           carouselImagePaths.contains(where: localCaptureAssetExists(relativePath:)) {
             return "local_carousel"
         }
         if let thumbnailRelativePath = bookmark.thumbnailRelativePath,
-           !thumbnailRelativePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+           localCaptureAssetExists(relativePath: thumbnailRelativePath) {
             return "local"
         }
         if let originalImageRelativePath = bookmark.originalImageRelativePath,
-           !originalImageRelativePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+           localCaptureAssetExists(relativePath: originalImageRelativePath) {
             return "local_original"
         }
         if let thumbnailRemoteURLString = bookmark.thumbnailRemoteURLString,
@@ -435,6 +436,13 @@ struct CiderCaptureResult {
             return "remote"
         }
         return "missing"
+    }
+
+    private static func localCaptureAssetExists(relativePath: String) -> Bool {
+        let trimmed = relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let url = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(trimmed)
+        return FileManager.default.fileExists(atPath: url.path)
     }
 
     @MainActor

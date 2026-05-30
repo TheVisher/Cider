@@ -425,6 +425,35 @@ struct CiderCaptureServiceTests {
             #expect(stalePathQuality["visibleCardCurrent"] as? Bool == false)
             #expect(stalePathReasons.contains("path_stale_or_generic"))
 
+            let missingThumbnailBookmark = Bookmark(
+                id: result.item.id,
+                title: "GitHub - nodes-app/swift-markdown-engine",
+                urlString: "https://github.com/nodes-app/swift-markdown-engine",
+                createdAt: Date(timeIntervalSince1970: 1_774_999_000),
+                updatedAt: Date(timeIntervalSince1970: 1_774_999_500),
+                thumbnailRelativePath: ".thumbnails/missing-swift-markdown-engine.jpg",
+                metadataUpdatedAt: enrichedAt,
+                relativePath: "Inbox/Bookmarks/GitHub - nodes-app-swift-markdown-engine.webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: enrichedAt
+            )
+            let missingThumbnailDict = result.toDictionary(finalBookmark: missingThumbnailBookmark)
+            let missingThumbnailQuality = try #require(missingThumbnailDict["captureQuality"] as? [String: Any])
+            let missingThumbnailReasons = try #require(missingThumbnailQuality["degradedReasons"] as? [String])
+
+            #expect(missingThumbnailQuality["semanticStatus"] as? String == "degraded")
+            #expect(missingThumbnailQuality["thumbnailStatus"] as? String == "missing")
+            #expect(missingThumbnailQuality["visibleCardCurrent"] as? Bool == false)
+            #expect(missingThumbnailReasons.contains("card_image_missing"))
+
+            let thumbnailURL = StoragePaths.cachedVaultDirectoryURL
+                .appendingPathComponent(".thumbnails/swift-markdown-engine.jpg")
+            try FileManager.default.createDirectory(
+                at: thumbnailURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data("thumbnail".utf8).write(to: thumbnailURL)
+
             let richBookmark = Bookmark(
                 id: result.item.id,
                 title: "GitHub - nodes-app/swift-markdown-engine",
