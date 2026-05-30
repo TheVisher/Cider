@@ -126,6 +126,38 @@ enum KanbanBoardFilterCategory: String, CaseIterable, Identifiable {
     }
 }
 
+struct KanbanBoardMilestoneFilterOption: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let displayKey: String
+    let progressText: String?
+    let isSelected: Bool
+
+    static func options(in board: KanbanBoard, selectedID: String?) -> [KanbanBoardMilestoneFilterOption] {
+        board.allCards.compactMap { card in
+            guard isMilestoneCard(card) else { return nil }
+            return KanbanBoardMilestoneFilterOption(
+                id: card.id,
+                title: normalizedMilestoneTitle(card.title),
+                displayKey: board.displayKey(for: card),
+                progressText: KanbanBoardLayout.childSummary(for: card.id, in: board)?.progressText,
+                isSelected: card.id == selectedID
+            )
+        }
+    }
+
+    private static func isMilestoneCard(_ card: KanbanCard) -> Bool {
+        card.tags.contains { tag in
+            tag.localizedCaseInsensitiveCompare("milestone") == .orderedSame ||
+                tag.localizedCaseInsensitiveCompare("milestone-object") == .orderedSame
+        } || card.title.localizedCaseInsensitiveContains("milestone:")
+    }
+
+    private static func normalizedMilestoneTitle(_ title: String) -> String {
+        title.replacingOccurrences(of: "Milestone: ", with: "")
+    }
+}
+
 /// Renders a Kanban board as horizontal scrolling columns with draggable cards.
 struct KanbanBoardView: View {
     let boardID: String
@@ -153,6 +185,7 @@ struct KanbanBoardView: View {
     @State private var selectedProjectBoardViewID = "all"
     @State private var selectedMilestoneFilterCardID: String?
     @State private var activeHeaderPopover: KanbanBoardHeaderControl?
+    @State private var expandedFilterCategory: KanbanBoardFilterCategory?
     @State private var isBoardInspectorVisible = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -218,13 +251,16 @@ struct KanbanBoardView: View {
                 selectedProjectBoardViewID = "all"
                 selectedMilestoneFilterCardID = milestoneFilterCardID
                 activeHeaderPopover = nil
+                expandedFilterCategory = nil
                 isBoardInspectorVisible = false
             }
             .onAppear {
                 selectedMilestoneFilterCardID = milestoneFilterCardID
+                expandedFilterCategory = selectedMilestoneFilterCardID == nil ? nil : .projectMilestone
             }
             .onChange(of: milestoneFilterCardID) { _, newValue in
                 selectedMilestoneFilterCardID = newValue
+                expandedFilterCategory = newValue == nil ? expandedFilterCategory : .projectMilestone
             }
         } else {
             emptyState
@@ -532,44 +568,64 @@ struct KanbanBoardView: View {
             VStack(spacing: Spacing.xxs) {
                 ForEach(KanbanBoardFilterCategory.allCases) { category in
                     filterCategoryRow(category)
+                    if category == .projectMilestone,
+                       expandedFilterCategory == .projectMilestone,
+                       let board {
+                        milestoneFilterOptionsList(board)
+                    }
                 }
             }
         }
         .padding(Spacing.md)
-        .frame(width: 300, alignment: .leading)
+        .frame(width: 340, alignment: .leading)
     }
 
     private func filterCategoryRow(_ category: KanbanBoardFilterCategory) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: category.systemImage)
-                .font(CiderFont.caption)
-                .foregroundColor(category.isNextWiringTarget ? CiderColors.controlAccent : CiderColors.tertiary)
-                .frame(width: 18, alignment: .center)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(category.title)
-                    .font(CiderFont.captionSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(1)
-
-                Text(category.detailText)
-                    .font(CiderFont.micro)
-                    .foregroundColor(CiderColors.tertiary)
-                    .lineLimit(1)
+        Button {
+            guard category == .projectMilestone else { return }
+            withAnimation(reduceMotion ? .none : .spring(response: 0.22, dampingFraction: 0.86)) {
+                expandedFilterCategory = expandedFilterCategory == category ? nil : category
             }
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: category.systemImage)
+                    .font(CiderFont.caption)
+                    .foregroundColor(category.isNextWiringTarget ? CiderColors.controlAccent : CiderColors.tertiary)
+                    .frame(width: 18, alignment: .center)
 
-            Spacer(minLength: Spacing.xs)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(category.title)
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
 
-            Text(category.stateLabel)
-                .font(CiderFont.micro)
-                .foregroundColor(category.isNextWiringTarget ? CiderColors.controlAccent : CiderColors.tertiary)
-                .padding(.horizontal, Spacing.xs)
-                .padding(.vertical, 2)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(category.isNextWiringTarget ? CiderColors.controlAccent.opacity(0.12) : CiderColors.surfaceSubtle.opacity(0.72))
-                )
+                    Text(category.detailText)
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: Spacing.xs)
+
+                if category == .projectMilestone {
+                    Image(systemName: expandedFilterCategory == category ? "chevron.down" : "chevron.right")
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.controlAccent)
+                } else {
+                    Text(category.stateLabel)
+                        .font(CiderFont.micro)
+                        .foregroundColor(category.isNextWiringTarget ? CiderColors.controlAccent : CiderColors.tertiary)
+                        .padding(.horizontal, Spacing.xs)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(category.isNextWiringTarget ? CiderColors.controlAccent.opacity(0.12) : CiderColors.surfaceSubtle.opacity(0.72))
+                        )
+                }
+            }
         }
+        .buttonStyle(.plain)
+        .disabled(category != .projectMilestone)
         .padding(.horizontal, Spacing.xs)
         .padding(.vertical, Spacing.xs)
         .background(
@@ -582,6 +638,90 @@ struct KanbanBoardView: View {
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(category.title), \(category.detailText), \(category.stateLabel)")
+    }
+
+    private func milestoneFilterOptionsList(_ board: KanbanBoard) -> some View {
+        let options = KanbanBoardMilestoneFilterOption.options(in: board, selectedID: selectedMilestoneFilterCardID)
+
+        return VStack(alignment: .leading, spacing: Spacing.xxs) {
+            Button {
+                withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
+                    selectedMilestoneFilterCardID = nil
+                    projectLaneScrollIndexByID.removeAll()
+                    activeHeaderPopover = nil
+                }
+            } label: {
+                milestoneFilterOptionRow(
+                    title: "All milestones",
+                    detail: "Clear milestone filter",
+                    systemImage: selectedMilestoneFilterCardID == nil ? "checkmark.circle.fill" : "circle",
+                    isSelected: selectedMilestoneFilterCardID == nil
+                )
+            }
+            .buttonStyle(.plain)
+
+            if options.isEmpty {
+                Text("No milestone cards on this board.")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
+            } else {
+                ForEach(options) { option in
+                    Button {
+                        withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
+                            selectedMilestoneFilterCardID = option.id
+                            projectLaneScrollIndexByID.removeAll()
+                            activeHeaderPopover = nil
+                        }
+                    } label: {
+                        milestoneFilterOptionRow(
+                            title: option.title,
+                            detail: option.progressText.map { "\(option.displayKey) · \($0)" } ?? option.displayKey,
+                            systemImage: option.isSelected ? "checkmark.circle.fill" : "circle",
+                            isSelected: option.isSelected
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.leading, 26)
+        .padding(.vertical, Spacing.xxs)
+    }
+
+    private func milestoneFilterOptionRow(
+        title: String,
+        detail: String,
+        systemImage: String,
+        isSelected: Bool
+    ) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: systemImage)
+                .font(CiderFont.caption)
+                .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.tertiary)
+                .frame(width: 18, alignment: .center)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+                Text(detail)
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(isSelected ? CiderColors.controlAccent.opacity(0.08) : Color.clear)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
     }
 
     private func genericBoardHeaderControlPopover(_ control: KanbanBoardHeaderControl) -> some View {

@@ -36,18 +36,20 @@ for arg in "$@"; do
 done
 
 stop_app() {
+  local repo_app_pattern="$ROOT_DIR/.*/$APP_NAME.app/Contents/MacOS/$APP_NAME"
+
   if pgrep -x "$APP_NAME" >/dev/null; then
     osascript -e "tell application \"$APP_NAME\" to quit" >/dev/null 2>&1 || true
     sleep 1
   fi
 
-  if pgrep -x "$APP_NAME" >/dev/null; then
-    pkill -x "$APP_NAME" || true
+  if pgrep -f "$repo_app_pattern" >/dev/null; then
+    pkill -f "$repo_app_pattern" || true
     sleep 1
   fi
 
-  if pgrep -x "$APP_NAME" >/dev/null; then
-    pkill -9 -x "$APP_NAME" || true
+  if pgrep -f "$repo_app_pattern" >/dev/null; then
+    pkill -9 -f "$repo_app_pattern" || true
   fi
 }
 
