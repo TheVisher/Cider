@@ -166,6 +166,147 @@ enum KanbanBoardInspectorSection: String, CaseIterable, Identifiable {
     }
 }
 
+struct KanbanBoardInspectorMilestoneRow: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let displayKey: String
+    let status: String
+    let progressText: String
+    let completedChildCount: Int
+    let childCount: Int
+    let progressFraction: Double
+    let isSelected: Bool
+
+    var progressPercentText: String {
+        "\(Int((progressFraction * 100).rounded()))%"
+    }
+
+    static func rows(in board: KanbanBoard, selectedID: String?) -> [KanbanBoardInspectorMilestoneRow] {
+        let candidates = board.columns.flatMap { column in
+            column.cards.compactMap { card -> KanbanBoardInspectorMilestoneRow? in
+                guard isMilestoneCard(card),
+                      let summary = KanbanBoardLayout.childSummary(for: card.id, in: board),
+                      summary.totalCount > 0 else {
+                    return nil
+                }
+
+                return KanbanBoardInspectorMilestoneRow(
+                    id: card.id,
+                    title: normalizedMilestoneTitle(card.title),
+                    displayKey: board.displayKey(for: card),
+                    status: column.name,
+                    progressText: summary.progressText,
+                    completedChildCount: summary.doneCount,
+                    childCount: summary.totalCount,
+                    progressFraction: Double(summary.doneCount) / Double(summary.totalCount),
+                    isSelected: card.id == selectedID
+                )
+            }
+        }
+
+        return candidates.sorted { lhs, rhs in
+            if lhs.isSelected != rhs.isSelected { return lhs.isSelected }
+            if lhs.progressFraction != rhs.progressFraction { return lhs.progressFraction < rhs.progressFraction }
+            return lhs.displayKey.localizedStandardCompare(rhs.displayKey) == .orderedAscending
+        }
+    }
+
+    private static func isMilestoneCard(_ card: KanbanCard) -> Bool {
+        card.tags.contains { tag in
+            tag.localizedCaseInsensitiveCompare("milestone") == .orderedSame ||
+                tag.localizedCaseInsensitiveCompare("milestone-object") == .orderedSame
+        } || card.title.localizedCaseInsensitiveContains("milestone:")
+    }
+
+    private static func normalizedMilestoneTitle(_ title: String) -> String {
+        title.replacingOccurrences(of: "Milestone: ", with: "")
+    }
+}
+
+struct KanbanBoardInspectorProgressSummary: Equatable {
+    let total: Int
+    let completed: Int
+    let backlog: Int
+    let inProgress: Int
+    let testing: Int
+    let blocked: Int
+
+    var completedFraction: Double {
+        guard total > 0 else { return 0 }
+        return Double(completed) / Double(total)
+    }
+
+    var completedPercentText: String {
+        "\(Int((completedFraction * 100).rounded()))%"
+    }
+
+    static func summary(in board: KanbanBoard) -> KanbanBoardInspectorProgressSummary {
+        var total = 0
+        var completed = 0
+        var backlog = 0
+        var inProgress = 0
+        var testing = 0
+        var blocked = 0
+
+        for column in board.columns {
+            let cards = column.cards
+            total += cards.count
+            completed += cards.filter { column.isDoneLikeColumn || $0.completed != nil }.count
+            blocked += cards.filter(isBlocked).count
+
+            switch columnKind(for: column) {
+            case .backlog:
+                backlog += cards.count
+            case .inProgress:
+                inProgress += cards.count
+            case .testing:
+                testing += cards.count
+            case .other:
+                break
+            }
+        }
+
+        return KanbanBoardInspectorProgressSummary(
+            total: total,
+            completed: completed,
+            backlog: backlog,
+            inProgress: inProgress,
+            testing: testing,
+            blocked: blocked
+        )
+    }
+
+    private enum ColumnKind {
+        case backlog
+        case inProgress
+        case testing
+        case other
+    }
+
+    private static func columnKind(for column: KanbanColumn) -> ColumnKind {
+        let text = "\(column.id) \(column.name)".localizedLowercase
+        if text.contains("test") || text.contains("qa") || text.contains("review") {
+            return .testing
+        }
+        if text.contains("progress") || text.contains("doing") || text.contains("active") {
+            return .inProgress
+        }
+        if text.contains("queued") || text.contains("backlog") || text.contains("ready") || text.contains("next") {
+            return .backlog
+        }
+        return .other
+    }
+
+    private static func isBlocked(_ card: KanbanCard) -> Bool {
+        if card.tags.contains(where: { $0.localizedCaseInsensitiveContains("blocked") }) {
+            return true
+        }
+        let text = [card.title, card.notes ?? "", card.aiSummary ?? ""].joined(separator: " ")
+        return text.localizedCaseInsensitiveContains("blocked")
+            || text.localizedCaseInsensitiveContains("blocker")
+    }
+}
+
 struct KanbanBoardMilestoneFilterOption: Identifiable, Equatable {
     let id: String
     let title: String
@@ -1179,7 +1320,7 @@ struct KanbanBoardView: View {
                     )
 
                     ForEach(KanbanBoardInspectorSection.allCases) { section in
-                        boardInspectorSectionView(section)
+                        boardInspectorSectionView(section, board: board)
                     }
                 }
                 .padding(Spacing.md)
@@ -1193,7 +1334,7 @@ struct KanbanBoardView: View {
         }
     }
 
-    private func boardInspectorSectionView(_ section: KanbanBoardInspectorSection) -> some View {
+    private func boardInspectorSectionView(_ section: KanbanBoardInspectorSection, board: KanbanBoard) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: Spacing.xs) {
                 Label(section.title, systemImage: section.systemImage)
@@ -1213,10 +1354,17 @@ struct KanbanBoardView: View {
                     )
             }
 
-            Text(section.placeholderText)
-                .font(CiderFont.caption)
-                .foregroundColor(CiderColors.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            switch section {
+            case .milestones:
+                boardInspectorMilestonesView(board)
+            case .progress:
+                boardInspectorProgressView(board)
+            case .properties, .activity:
+                Text(section.placeholderText)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1228,8 +1376,106 @@ struct KanbanBoardView: View {
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
         )
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(section.title): \(section.placeholderText)")
+    }
+
+    private func boardInspectorMilestonesView(_ board: KanbanBoard) -> some View {
+        let rows = KanbanBoardInspectorMilestoneRow.rows(in: board, selectedID: selectedMilestoneFilterCardID)
+        return VStack(alignment: .leading, spacing: Spacing.xs) {
+            if rows.isEmpty {
+                Text("No milestone cards with child progress yet.")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(rows.prefix(6)) { row in
+                    Button {
+                        withAnimation(reduceMotion ? .none : .spring(response: 0.2, dampingFraction: 0.88)) {
+                            selectedMilestoneFilterCardID = row.id
+                            expandedFilterCategory = .projectMilestone
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                                Text(row.displayKey)
+                                    .font(CiderFont.microMonospaced)
+                                    .foregroundColor(row.isSelected ? CiderColors.controlAccent : CiderColors.tertiary)
+
+                                Text(row.title)
+                                    .font(CiderFont.captionSemibold)
+                                    .foregroundColor(CiderColors.primary)
+                                    .lineLimit(1)
+
+                                Spacer(minLength: 0)
+
+                                Text(row.progressPercentText)
+                                    .font(CiderFont.micro)
+                                    .foregroundColor(CiderColors.secondary)
+                            }
+
+                            HStack(spacing: Spacing.xs) {
+                                ProgressView(value: row.progressFraction)
+                                    .progressViewStyle(.linear)
+                                Text("\(row.progressText) · \(row.status)")
+                                    .font(CiderFont.micro)
+                                    .foregroundColor(CiderColors.tertiary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .padding(.vertical, Spacing.xxs)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(row.title), \(row.progressText), \(row.progressPercentText), filter milestone")
+                }
+            }
+        }
+    }
+
+    private func boardInspectorProgressView(_ board: KanbanBoard) -> some View {
+        let summary = KanbanBoardInspectorProgressSummary.summary(in: board)
+        let metrics: [(String, Int)] = [
+            ("Total", summary.total),
+            ("Completed", summary.completed),
+            ("Backlog", summary.backlog),
+            ("In Progress", summary.inProgress),
+            ("Testing", summary.testing),
+            ("Blocked", summary.blocked),
+        ]
+
+        return VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                Text(summary.completedPercentText)
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+                Text("complete")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                Spacer(minLength: 0)
+                Text("\(summary.completed)/\(summary.total)")
+                    .font(CiderFont.microMonospaced)
+                    .foregroundColor(CiderColors.secondary)
+            }
+
+            ProgressView(value: summary.completedFraction)
+                .progressViewStyle(.linear)
+
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: Spacing.xs),
+                GridItem(.flexible(), spacing: Spacing.xs),
+            ], alignment: .leading, spacing: Spacing.xs) {
+                ForEach(metrics, id: \.0) { label, value in
+                    HStack(spacing: Spacing.xs) {
+                        Text("\(value)")
+                            .font(CiderFont.microMonospaced)
+                            .foregroundColor(CiderColors.primary)
+                        Text(label)
+                            .font(CiderFont.micro)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
     }
 
     private func filteredCardCount(for board: KanbanBoard) -> Int {

@@ -55,6 +55,74 @@ struct KanbanBoardHeaderControlTests {
         ])
     }
 
+    @Test("Kanban inspector milestone rows expose progress and selected state")
+    func inspectorMilestoneRowsExposeProgressAndSelectedState() {
+        let milestone = KanbanCard(
+            id: "milestone",
+            title: "Milestone: Inspector work",
+            displayKey: "CID-10",
+            tags: ["milestone-object"]
+        )
+        let queued = KanbanCard(id: "queued", title: "Queued child", parentCardID: milestone.id)
+        let testing = KanbanCard(id: "testing", title: "Testing child", parentCardID: milestone.id)
+        let done = KanbanCard(id: "done", title: "Done child", parentCardID: milestone.id)
+        let board = KanbanBoard(
+            id: "cider",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog", cards: [milestone, queued]),
+                KanbanColumn(id: "testing", name: "Testing", cards: [testing]),
+                KanbanColumn(id: "done", name: "Done", isDoneColumn: true, cards: [done]),
+            ]
+        )
+
+        let rows = KanbanBoardInspectorMilestoneRow.rows(in: board, selectedID: milestone.id)
+
+        #expect(rows.map(\.id) == ["milestone"])
+        #expect(rows.map(\.title) == ["Inspector work"])
+        #expect(rows.map(\.displayKey) == ["CID-10"])
+        #expect(rows.map(\.status) == ["Backlog"])
+        #expect(rows.map(\.progressText) == ["1/3"])
+        #expect(rows.map(\.completedChildCount) == [1])
+        #expect(rows.map(\.childCount) == [3])
+        #expect(rows.map(\.progressPercentText) == ["33%"])
+        #expect(rows.map(\.isSelected) == [true])
+    }
+
+    @Test("Kanban inspector progress summary counts board workflow states")
+    func inspectorProgressSummaryCountsBoardWorkflowStates() {
+        let completedAt = Date(timeIntervalSince1970: 1)
+        let board = KanbanBoard(
+            id: "cider",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog", cards: [
+                    KanbanCard(id: "queued", title: "Queued"),
+                    KanbanCard(id: "blocked", title: "Blocked by design", tags: ["blocked"]),
+                ]),
+                KanbanColumn(id: "in_progress", name: "In Progress", cards: [
+                    KanbanCard(id: "active", title: "Active"),
+                ]),
+                KanbanColumn(id: "testing", name: "Testing", cards: [
+                    KanbanCard(id: "testing", title: "Testing"),
+                ]),
+                KanbanColumn(id: "done", name: "Done", isDoneColumn: true, cards: [
+                    KanbanCard(id: "done", title: "Done", completed: completedAt),
+                ]),
+            ]
+        )
+
+        let summary = KanbanBoardInspectorProgressSummary.summary(in: board)
+
+        #expect(summary.total == 5)
+        #expect(summary.completed == 1)
+        #expect(summary.backlog == 2)
+        #expect(summary.inProgress == 1)
+        #expect(summary.testing == 1)
+        #expect(summary.blocked == 1)
+        #expect(summary.completedPercentText == "20%")
+    }
+
     @Test("Kanban filter popover exposes ordered seed categories")
     func filterPopoverExposesOrderedSeedCategories() {
         #expect(KanbanBoardFilterCategory.allCases.map(\.title) == [
