@@ -8,6 +8,7 @@ CONFIGURATION="Debug"
 DERIVED_DATA_PATH="$ROOT_DIR/.deriveddata/CiderCodex"
 APP_NAME="Cider"
 APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/$APP_NAME.app"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 VERIFY=0
 STREAM_LOGS=0
@@ -38,11 +39,6 @@ done
 stop_app() {
   local repo_app_pattern="$ROOT_DIR/.*/$APP_NAME.app/Contents/MacOS/$APP_NAME"
 
-  if pgrep -x "$APP_NAME" >/dev/null; then
-    osascript -e "tell application \"$APP_NAME\" to quit" >/dev/null 2>&1 || true
-    sleep 1
-  fi
-
   if pgrep -f "$repo_app_pattern" >/dev/null; then
     pkill -f "$repo_app_pattern" || true
     sleep 1
@@ -51,6 +47,21 @@ stop_app() {
   if pgrep -f "$repo_app_pattern" >/dev/null; then
     pkill -9 -f "$repo_app_pattern" || true
   fi
+}
+
+remove_stale_app_bundles() {
+  local stale_app
+
+  while IFS= read -r -d '' stale_app; do
+    if [[ "$stale_app" == "$APP_PATH" ]]; then
+      continue
+    fi
+
+    if [[ -x "$LSREGISTER" ]]; then
+      "$LSREGISTER" -u "$stale_app" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$stale_app"
+  done < <(find "$ROOT_DIR" -path "*/$APP_NAME.app" -type d -prune -print0)
 }
 
 start_watchdog() {
@@ -88,6 +99,7 @@ cleanup() {
 }
 
 stop_app
+remove_stale_app_bundles
 
 xcodebuild \
   -project "$PROJECT_PATH" \
@@ -103,6 +115,7 @@ if [[ ! -d "$APP_PATH" ]]; then
 fi
 
 stop_app
+remove_stale_app_bundles
 
 if [[ "$STREAM_LOGS" -eq 1 ]]; then
   LOG_DIR="${CIDER_DIAGNOSTICS_DIR:-$HOME/Library/Logs/Cider/dev-session-$(date -u +"%Y%m%dT%H%M%SZ")}"
@@ -139,7 +152,7 @@ fi
 
 if [[ "$STREAM_LOGS" -eq 1 ]]; then
   trap cleanup EXIT INT TERM
-  APP_PID="$(pgrep -x "$APP_NAME" | tail -1)"
+  APP_PID="$(pgrep -f "$APP_PATH/Contents/MacOS/$APP_NAME" | tail -1)"
   echo "$APP_NAME pid: $APP_PID"
 
   if [[ "$TELEMETRY" -eq 1 ]]; then
