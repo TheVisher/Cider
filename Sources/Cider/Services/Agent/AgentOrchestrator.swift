@@ -673,6 +673,14 @@ actor AgentOrchestrator {
             hints.append("- Only add extra AI-owned enrichment after the item already exists and only through backend-backed review or item commands.")
         }
 
+        if asksToCaptureOrSave && taskReminderSignals && !asksToCreateEvent {
+            route = "todo-create"
+            detail = "todo capture"
+            hints.append("- This looks like a todo/task capture. Use the shortest safe path: send the exact task text on stdin to `cider-cli capture add --kind todo --stdin --json`.")
+            hints.append("- For image or screenshot sources, read the image once, extract the intended task text, then use one capture command plus item get verification.")
+            hints.append("- Do not run exploratory shell, raw filesystem, legacy todo, or approval-gated commands for an ordinary capture/verify flow unless the direct capture path fails.")
+        }
+
         if asksToCreateEvent {
             if taskReminderSignals && !calendarEventSignals {
                 route = "todo-create"

@@ -102,6 +102,17 @@ struct AgentRoutingInstructionsTests {
         #expect(eventPrompt.contains("cider-cli capture add --kind event --title \"<title>\" --date yyyy-MM-dd --time \"<time>\" --location \"<place>\" --stdin --json"))
         #expect(!eventPrompt.contains("cider-cli capture add \"<event text>\" --json"))
         #expect(!eventPrompt.contains("cider-cli event create"))
+
+        _ = try await orchestrator.handleMessage(.uiPanel(
+            text: "save this image as a todo",
+            threadID: UUID(),
+            context: .empty
+        ))
+        let imageTodoPrompt = try #require(runtime.lastSystemPrompt)
+        #expect(imageTodoPrompt.contains("cider-cli capture add --kind todo --stdin --json"))
+        #expect(imageTodoPrompt.contains("read the image once"))
+        #expect(imageTodoPrompt.contains("one capture command plus item get verification"))
+        #expect(!imageTodoPrompt.contains("cider-cli todo create"))
     }
 }
 
