@@ -51,6 +51,15 @@ enum KanbanBoardHeaderControl: String, CaseIterable, Identifiable {
     }
 }
 
+enum KanbanBoardHeaderLayoutMode: Equatable {
+    case regular
+    case compact
+
+    static func mode(availableWidth: CGFloat, inspectorVisible: Bool) -> KanbanBoardHeaderLayoutMode {
+        inspectorVisible && availableWidth < 1_240 ? .compact : .regular
+    }
+}
+
 enum KanbanBoardFilterCategory: String, CaseIterable, Identifiable {
     case aiFilter
     case advancedFilter
@@ -840,44 +849,41 @@ struct KanbanBoardView: View {
     private func boardHeader(_ board: KanbanBoard) -> some View {
         let featureFilters = KanbanBoardLayout.featureDomainFilters(for: board)
 
+        return GeometryReader { proxy in
+            boardHeaderRow(
+                board,
+                featureFilters: featureFilters,
+                mode: KanbanBoardHeaderLayoutMode.mode(
+                    availableWidth: proxy.size.width,
+                    inspectorVisible: isBoardInspectorVisible
+                )
+            )
+        }
+        .frame(height: 44)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.sm)
+    }
+
+    private func boardHeaderRow(
+        _ board: KanbanBoard,
+        featureFilters: [KanbanFeatureDomainFilter],
+        mode: KanbanBoardHeaderLayoutMode
+    ) -> some View {
+        let isCompact = mode == .compact
+
         return HStack(spacing: Spacing.sm) {
-            if KanbanBoardLayout.usesProjectLayout(for: board), !projectHeaderTabs.isEmpty {
+            if !isCompact, KanbanBoardLayout.usesProjectLayout(for: board), !projectHeaderTabs.isEmpty {
                 projectHeaderTabsView
             } else {
-                boardTitleView(board)
+                boardTitleView(board, mode: mode)
             }
 
             Spacer(minLength: Spacing.md)
 
-            // Search field
-            HStack(spacing: Spacing.xxs) {
-                Image(systemName: "magnifyingglass")
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.tertiary)
-                TextField("Filter cards...", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(CiderFont.caption)
-                    .frame(width: 100)
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.tertiary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, Spacing.xs)
-            .padding(.vertical, Spacing.xxs)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(CiderColors.surfaceInput)
-            )
+            boardSearchField(width: isCompact ? 82 : 100)
 
             if !featureFilters.isEmpty {
-                domainFilterMenu(featureFilters)
+                domainFilterMenu(featureFilters, mode: mode)
             }
 
             HStack(spacing: Spacing.xxs) {
@@ -899,20 +905,7 @@ struct KanbanBoardView: View {
             .buttonStyle(.plain)
             .help(compactCards ? "Expanded view" : "Compact view")
 
-            Button {
-                withAnimation(reduceMotion ? .none : .spring) {
-                    let name = "New Column"
-                    storage.addColumn(boardID: boardID, name: name)
-                }
-            } label: {
-                HStack(spacing: Spacing.xxs) {
-                    Image(systemName: "plus")
-                    Text("Column")
-                }
-                .font(CiderFont.captionMedium)
-                .foregroundColor(CiderColors.controlAccent)
-            }
-            .buttonStyle(.plain)
+            addColumnButton(compact: isCompact)
 
             Menu {
                 Button {
@@ -943,12 +936,62 @@ struct KanbanBoardView: View {
                 Text("This will permanently delete the board and all its cards. This can't be undone.")
             }
         }
-        .padding(.horizontal, Spacing.lg)
-        .padding(.vertical, Spacing.sm)
     }
 
-    private func boardTitleView(_ board: KanbanBoard) -> some View {
-        HStack(spacing: Spacing.sm) {
+    private func boardSearchField(width: CGFloat) -> some View {
+        HStack(spacing: Spacing.xxs) {
+            Image(systemName: "magnifyingglass")
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+            TextField("Filter cards...", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(CiderFont.caption)
+                .frame(width: width)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, Spacing.xxs)
+        .background(
+            Capsule(style: .continuous)
+                .fill(CiderColors.surfaceInput)
+        )
+    }
+
+    private func addColumnButton(compact: Bool) -> some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .spring) {
+                let name = "New Column"
+                storage.addColumn(boardID: boardID, name: name)
+            }
+        } label: {
+            HStack(spacing: Spacing.xxs) {
+                Image(systemName: "plus")
+                if !compact {
+                    Text("Column")
+                }
+            }
+            .font(CiderFont.captionMedium)
+            .foregroundColor(CiderColors.controlAccent)
+            .frame(minWidth: compact ? 24 : 0, minHeight: 24)
+        }
+        .buttonStyle(.plain)
+        .help("Add column")
+        .accessibilityLabel("Add column")
+    }
+
+    private func boardTitleView(_ board: KanbanBoard, mode: KanbanBoardHeaderLayoutMode = .regular) -> some View {
+        let isCompact = mode == .compact
+
+        return HStack(spacing: Spacing.sm) {
             if editingBoardName {
                 TextField("Board name", text: $boardNameDraft)
                     .textFieldStyle(.plain)
@@ -962,20 +1005,27 @@ struct KanbanBoardView: View {
                 Text(board.name)
                     .font(CiderFont.headingSemibold)
                     .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .onTapGesture(count: 2) {
                         boardNameDraft = board.name
                         editingBoardName = true
                     }
             }
 
-            Text("\(filteredCardCount(for: board)) cards")
-                .font(CiderFont.caption)
-                .foregroundColor(CiderColors.tertiary)
+            if !isCompact {
+                Text("\(filteredCardCount(for: board)) cards")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
 
             if KanbanBoardLayout.usesProjectLayout(for: board) {
                 HStack(spacing: Spacing.xxs) {
                     Image(systemName: "rectangle.split.3x1")
-                    Text("Project board")
+                    if !isCompact {
+                        Text("Project board")
+                    }
                 }
                 .font(CiderFont.micro)
                 .foregroundColor(CiderColors.controlAccent)
@@ -985,8 +1035,12 @@ struct KanbanBoardView: View {
                     Capsule(style: .continuous)
                         .fill(CiderColors.controlAccent.opacity(0.12))
                 )
+                .help("Project board")
+                .accessibilityLabel("Project board")
             }
         }
+        .frame(minWidth: 0, maxWidth: isCompact ? 210 : nil, alignment: .leading)
+        .layoutPriority(isCompact ? 0 : 1)
     }
 
     private var projectHeaderTabsView: some View {
@@ -998,10 +1052,14 @@ struct KanbanBoardView: View {
 
     // MARK: - Columns
 
-    private func domainFilterMenu(_ filters: [KanbanFeatureDomainFilter]) -> some View {
+    private func domainFilterMenu(
+        _ filters: [KanbanFeatureDomainFilter],
+        mode: KanbanBoardHeaderLayoutMode = .regular
+    ) -> some View {
         let selected = selectedFeatureDomainFilter.flatMap { selectedID in
             filters.first { $0.id == selectedID }
         }
+        let isCompact = mode == .compact
 
         return Menu {
             Button {
@@ -1028,16 +1086,19 @@ struct KanbanBoardView: View {
             HStack(spacing: Spacing.xxs) {
                 Image(systemName: "cube.transparent")
                     .font(CiderFont.caption)
-                Text(selected?.label ?? "Domains")
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(CiderFont.micro)
-                    .foregroundColor(CiderColors.tertiary)
+                if !isCompact {
+                    Text(selected?.label ?? "Domains")
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.tertiary)
+                }
             }
             .font(CiderFont.captionMedium)
             .foregroundColor(selected == nil ? CiderColors.tertiary : CiderColors.controlAccent)
             .padding(.horizontal, Spacing.xs)
             .padding(.vertical, Spacing.xxs)
+            .frame(minWidth: isCompact ? 24 : 0, minHeight: 24)
             .background(
                 Capsule(style: .continuous)
                     .fill(selected == nil ? CiderColors.surfaceInput : CiderColors.controlAccent.opacity(0.12))
@@ -1045,6 +1106,7 @@ struct KanbanBoardView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize(horizontal: true, vertical: false)
+        .help(selected.map { "Domain filter: \($0.label)" } ?? "Domain filter")
         .accessibilityLabel(selected.map { "Domain filter: \($0.label)" } ?? "Domain filter")
     }
 

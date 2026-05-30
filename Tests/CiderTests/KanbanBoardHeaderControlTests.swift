@@ -3,6 +3,13 @@ import Testing
 @testable import Cider
 
 struct KanbanBoardHeaderControlTests {
+    @Test("Kanban board header uses compact chrome when inspector narrows the board")
+    func headerUsesCompactChromeWhenInspectorNarrowsBoard() {
+        #expect(KanbanBoardHeaderLayoutMode.mode(availableWidth: 1180, inspectorVisible: true) == .compact)
+        #expect(KanbanBoardHeaderLayoutMode.mode(availableWidth: 1180, inspectorVisible: false) == .regular)
+        #expect(KanbanBoardHeaderLayoutMode.mode(availableWidth: 1440, inspectorVisible: true) == .regular)
+    }
+
     @Test("Kanban board view preferences persist per board")
     func boardViewPreferencesPersistPerBoard() {
         let suiteName = "KanbanBoardViewPreferenceStoreTests.\(UUID().uuidString)"
