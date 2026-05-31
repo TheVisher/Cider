@@ -127,6 +127,29 @@ struct CaptureParitySafetyTests {
         #expect(violations.isEmpty, "Quick-create paths must use the canonical capture door:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("CLI event and contact create paths cannot bypass canonical capture")
+    func cliEventAndContactCreatePathsCannotBypassCanonicalCapture() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let cliURL = repoRoot.appendingPathComponent("Sources/CiderCLI/CiderCLI.swift")
+        let source = try String(contentsOf: cliURL, encoding: .utf8)
+        var violations: [String] = []
+
+        if source.contains("source: \"event.create\"") {
+            violations.append("Sources/CiderCLI/CiderCLI.swift: event create branch still records direct create provenance")
+        }
+        if source.contains("source: \"contact.create\"") {
+            violations.append("Sources/CiderCLI/CiderCLI.swift: contact create branch still records direct create provenance")
+        }
+        if source.contains("storage.createDateCard(title:") {
+            violations.append("Sources/CiderCLI/CiderCLI.swift: event create path still calls DateCardStorage directly")
+        }
+        if source.contains("storage.createContact(displayName: name)") {
+            violations.append("Sources/CiderCLI/CiderCLI.swift: contact create path still calls ContactStorage directly")
+        }
+
+        #expect(violations.isEmpty, "Removed CLI event/contact create paths must not retain direct storage implementations:\n\(violations.joined(separator: "\n"))")
+    }
+
     @Test("screen capture notes and visual intake text file saves use canonical capture service")
     func visualIntakeUsesCanonicalCaptureService() throws {
         let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)

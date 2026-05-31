@@ -3534,96 +3534,11 @@ struct CiderCLI {
             }
 
         case "create":
-            let targetFolder: VaultFolder?
-            switch resolveFolderArg(from: args) {
-            case .unspecified: targetFolder = nil
-            case .resolved(let f): targetFolder = f
-            case .failed: return
-            }
-            let title = args.first ?? "Untitled Event"
-            let dateString = parseFlag("--date", from: args) ?? localDateFormatter.string(from: Date())
-            let timeString = parseFlag("--time", from: args)
-            guard let startAt = resolveEventStartAt(dateString: dateString, timeString: timeString) else {
-                print("Error: Invalid event date/time. Use --date yyyy-MM-dd and optional --time \"h:mm a\" or \"HH:mm\".")
-                return
-            }
-            var card = storage.createDateCard(title: title, startAt: startAt)
-            guard storage.dateCards.contains(where: { $0.id == card.id }) else {
-                print("Error: Failed to create event (disk write failed)")
-                return
-            }
-            // Recurrence rule
-            var needsUpdate = false
-            if args.contains("--all-day") {
-                card.allDay = true
-                card.startAt = Calendar.autoupdatingCurrent.startOfDay(for: startAt)
-                needsUpdate = true
-            } else if timeString != nil || args.contains("--timed") {
-                card.allDay = false
-                needsUpdate = true
-            } else {
-                card.allDay = true
-                card.startAt = Calendar.autoupdatingCurrent.startOfDay(for: startAt)
-                needsUpdate = true
-            }
-            if let loc = parseFlag("--location", from: args) {
-                card.location = loc
-                needsUpdate = true
-            }
-            if let details = parseFlag("--details", from: args) {
-                card.details = details
-                needsUpdate = true
-            }
-            if let freqStr = parseFlag("--frequency", from: args) {
-                let freq: DateCardRecurrenceFrequency
-                switch freqStr.lowercased() {
-                case "daily": freq = .daily
-                case "weekly": freq = .weekly
-                case "monthly": freq = .monthly
-                case "yearly": freq = .yearly
-                default:
-                    print("Error: Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly.")
-                    return
-                }
-                let interval = parseFlag("--interval", from: args).flatMap(Int.init) ?? 1
-                let endDate = parseFlag("--end-date", from: args).flatMap { dateFormatter.date(from: $0) }
-                card.recurrenceRule = DateCardRecurrenceRule(frequency: freq, interval: interval, endDate: endDate)
-                needsUpdate = true
-            }
-            // Reminder rules (multiple --remind flags)
-            let remindValues = parseFlagAll("--remind", from: args)
-            for value in remindValues {
-                guard let minutes = Int(value) else {
-                    print("Error: --remind requires an integer (minutes before event). Got: '\(value)'")
-                    return
-                }
-                card.rules.append(SurfacingRule(
-                    type: .remindBeforeMinutes,
-                    integerValue: minutes
-                ))
-                needsUpdate = true
-            }
-            if let targetFolder {
-                card.folderID = targetFolder.id
-                needsUpdate = true
-            }
-            if needsUpdate { _ = storage.updateDateCard(card) }
-            let routing = try? CiderRoutingDecisionService().recordCreateProvenance(
-                itemID: card.id,
-                source: "event.create",
-                reviewReason: "Cider created an event and kept it in Inbox for review.",
-                acceptedReason: "Cider created an event in the selected folder."
+            printRemovedLegacyCommand(
+                command: "event create",
+                replacement: "cider-cli capture add --kind event --title \"<title>\" --date yyyy-MM-dd --stdin --json",
+                reason: "event create was removed so event intake always goes through CiderCaptureService."
             )
-            if jsonOutput {
-                var dict = eventToDict(storage.dateCard(for: card.id) ?? card)
-                dict["command"] = "event.create"
-                if let routing {
-                    dict["routing"] = routing.toDictionary()
-                }
-                outputJSON(dict)
-            } else {
-                print("Created event: \(card.title) (\(card.id.uuidString.prefix(8)))")
-            }
 
         case "delete", "rm":
             guard let idPrefix = args.first else {
@@ -3778,71 +3693,11 @@ struct CiderCLI {
             handleContactField(subcommand: args.first, args: Array(args.dropFirst()), storage: storage)
 
         case "create":
-            let targetFolder: VaultFolder?
-            switch resolveFolderArg(from: args) {
-            case .unspecified: targetFolder = nil
-            case .resolved(let f): targetFolder = f
-            case .failed: return
-            }
-            let name = args.first ?? "New Contact"
-            let email = parseFlag("--email", from: args)
-            let phone = parseFlag("--phone", from: args)
-            let address = parseFlag("--address", from: args)
-            let notes = parseFlag("--notes", from: args)
-            let relationship = parseFlag("--relationship", from: args)
-            let birthdayStr = parseFlag("--birthday", from: args)
-            var birthdayDate: Date?
-            var contact = storage.createContact(displayName: name)
-            guard storage.contacts.contains(where: { $0.id == contact.id }) else {
-                print("Error: Failed to create contact (disk write failed)")
-                return
-            }
-            var needsUpdate = false
-            if let email { contact.email = email; needsUpdate = true }
-            if let phone { contact.phone = phone; needsUpdate = true }
-            if let address { contact.address = address; needsUpdate = true }
-            if let notes { contact.notes = notes; needsUpdate = true }
-            if let relationship { contact.relationshipLabel = relationship; needsUpdate = true }
-            if let birthdayStr {
-                let localDF = DateFormatter()
-                localDF.dateFormat = "yyyy-MM-dd"
-                localDF.timeZone = .current
-                if let birthday = localDF.date(from: birthdayStr) {
-                    contact.birthday = birthday; needsUpdate = true
-                    birthdayDate = birthday
-                }
-            }
-            if let targetFolder {
-                contact.folderID = targetFolder.id; needsUpdate = true
-            }
-            if needsUpdate { _ = storage.updateContact(contact) }
-            let birthdayDateCard = birthdayDate.flatMap {
-                LibraryItemEditor.createOrUpdateBirthdayDateCard(for: storage.contact(for: contact.id) ?? contact, birthday: $0)
-            }
-            let refreshedContact = storage.contact(for: contact.id) ?? contact
-            let routing = try? CiderRoutingDecisionService().recordCreateProvenance(
-                itemID: refreshedContact.id,
-                source: "contact.create",
-                reviewReason: "Cider created a contact and kept it in Inbox for review.",
-                acceptedReason: "Cider created a contact in the selected folder."
+            printRemovedLegacyCommand(
+                command: "contact create",
+                replacement: "cider-cli capture add --kind contact --name \"<name>\" --stdin --json",
+                reason: "contact create was removed so contact intake always goes through CiderCaptureService."
             )
-            if jsonOutput {
-                var dict = contactToDict(refreshedContact)
-                dict["command"] = "contact.create"
-                if let routing {
-                    dict["routing"] = routing.toDictionary()
-                }
-                if let birthdayDateCard {
-                    var birthdayDict = eventToDict(birthdayDateCard)
-                    if let birthdayRouting = try? CiderRoutingDecisionService().explain(itemID: birthdayDateCard.id) {
-                        birthdayDict["routing"] = birthdayRouting.toDictionary()
-                    }
-                    dict["birthdayDateCard"] = birthdayDict
-                }
-                outputJSON(dict)
-            } else {
-                print("Created contact: \(refreshedContact.displayName) (\(refreshedContact.id.uuidString.prefix(8)))")
-            }
 
         case "delete", "rm":
             guard let idPrefix = args.first else {
