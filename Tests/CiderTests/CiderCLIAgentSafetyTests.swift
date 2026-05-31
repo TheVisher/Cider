@@ -1203,6 +1203,88 @@ struct CiderCLIAgentSafetyTests {
         #expect(deletePayload["changed"] as? Bool == true)
     }
 
+    @Test("board mutation commands return strict process json")
+    func boardMutationCommandsReturnStrictProcessJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-board-mutation-json-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let create = try runCLI(args: ["board", "create", "Agent Contract Board", "--json"], vault: vault)
+        let createPayload = try parseJSONObject(create.stdout)
+        #expect(create.status == 0)
+        #expect(create.stdout.first == "{")
+        #expect(createPayload["ok"] as? Bool == true)
+        #expect(createPayload["command"] as? String == "board.create")
+        let board = try #require(createPayload["board"] as? [String: Any])
+        let boardID = try #require(board["id"] as? String)
+
+        let addColumn = try runCLI(args: ["board", "add-column", boardID, "--name", "Review", "--json"], vault: vault)
+        let addColumnPayload = try parseJSONObject(addColumn.stdout)
+        #expect(addColumn.status == 0)
+        #expect(addColumnPayload["command"] as? String == "board.add-column")
+
+        let addCard = try runCLI(args: ["board", "add-card", boardID, "--column", "Backlog", "--title", "Board JSON card", "--json"], vault: vault)
+        let addCardPayload = try parseJSONObject(addCard.stdout)
+        #expect(addCard.status == 0)
+        #expect(addCardPayload["command"] as? String == "board.add-card")
+        let card = try #require(addCardPayload["card"] as? [String: Any])
+        let cardID = try #require(card["id"] as? String)
+
+        let updateCard = try runCLI(args: ["board", "update-card", boardID, "--card", cardID, "--title", "Board JSON card updated", "--json"], vault: vault)
+        let updateCardPayload = try parseJSONObject(updateCard.stdout)
+        #expect(updateCard.status == 0)
+        #expect(updateCardPayload["command"] as? String == "board.update-card")
+        #expect(updateCardPayload["changed"] as? Bool == true)
+        #expect(updateCardPayload["projectionRefreshed"] as? Bool == true)
+
+        let moveCard = try runCLI(args: ["board", "move-card", boardID, "--card", cardID, "--to", "Review", "--json"], vault: vault)
+        let moveCardPayload = try parseJSONObject(moveCard.stdout)
+        #expect(moveCard.status == 0)
+        #expect(moveCardPayload["command"] as? String == "board.move-card")
+        #expect(moveCardPayload["changed"] as? Bool == true)
+        let toColumn = try #require(moveCardPayload["toColumn"] as? [String: Any])
+        #expect(toColumn["name"] as? String == "Review")
+
+        let setDone = try runCLI(args: ["board", "set-column-done", boardID, "--column", "Review", "--done", "--json"], vault: vault)
+        let setDonePayload = try parseJSONObject(setDone.stdout)
+        #expect(setDone.status == 0)
+        #expect(setDonePayload["command"] as? String == "board.set-column-done")
+        #expect(setDonePayload["changed"] as? Bool == true)
+
+        let renameColumn = try runCLI(args: ["board", "rename-column", boardID, "--column", "Review", "--to", "Ready", "--json"], vault: vault)
+        let renameColumnPayload = try parseJSONObject(renameColumn.stdout)
+        #expect(renameColumn.status == 0)
+        #expect(renameColumnPayload["command"] as? String == "board.rename-column")
+
+        let deleteCard = try runCLI(args: ["board", "delete-card", boardID, "--card", cardID, "--json"], vault: vault)
+        let deleteCardPayload = try parseJSONObject(deleteCard.stdout)
+        #expect(deleteCard.status == 0)
+        #expect(deleteCardPayload["command"] as? String == "board.delete-card")
+        #expect(deleteCardPayload["changed"] as? Bool == true)
+
+        let deleteColumn = try runCLI(args: ["board", "delete-column", boardID, "--column", "Ready", "--json"], vault: vault)
+        let deleteColumnPayload = try parseJSONObject(deleteColumn.stdout)
+        #expect(deleteColumn.status == 0)
+        #expect(deleteColumnPayload["command"] as? String == "board.delete-column")
+
+        let renameBoard = try runCLI(args: ["board", "rename", boardID, "--to", "Agent Contract Board Renamed", "--json"], vault: vault)
+        let renameBoardPayload = try parseJSONObject(renameBoard.stdout)
+        #expect(renameBoard.status == 0)
+        #expect(renameBoardPayload["command"] as? String == "board.rename")
+
+        let badMove = try runCLI(args: ["board", "move-card", boardID, "--card", cardID, "--to", "Missing", "--json"], vault: vault)
+        let badMovePayload = try parseJSONObject(badMove.stdout)
+        #expect(badMove.status == 1)
+        #expect(badMovePayload["ok"] as? Bool == false)
+
+        let deleteBoard = try runCLI(args: ["board", "delete", boardID, "--json"], vault: vault)
+        let deleteBoardPayload = try parseJSONObject(deleteBoard.stdout)
+        #expect(deleteBoard.status == 0)
+        #expect(deleteBoardPayload["command"] as? String == "board.delete")
+        #expect(deleteBoardPayload["changed"] as? Bool == true)
+    }
+
     @Test("project context summary bounds relation-heavy output")
     func projectContextSummaryBoundsRelationHeavyOutput() throws {
         let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cider")

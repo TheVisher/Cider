@@ -6275,13 +6275,15 @@ struct CiderCLI {
                 }
                 refreshSecondBrainProjection(boardID: board.id, card: updated)
                 if jsonOutput {
-                    outputJSON([
-                        "ok": true,
-                        "action": "created",
-                        "board": ["id": board.id, "name": board.name, "displayKeyPrefix": board.displayKeyPrefix],
-                        "column": ["id": col.id, "name": col.name],
-                        "card": boardCardSummaryToDict(board: board, card: updated),
-                    ])
+                    var dict = boardMutationEnvelope(
+                        command: "board.add-card",
+                        action: "created",
+                        board: board,
+                        card: updated,
+                        column: col
+                    )
+                    dict["projectionRefreshed"] = true
+                    outputJSON(dict)
                 } else {
                     print("Added card: \(updated.title) [\(updated.id)] to \(col.name)")
                 }
@@ -6412,13 +6414,34 @@ struct CiderCLI {
             }
 
             guard changed else {
-                print("No card changes requested.")
+                if jsonOutput {
+                    outputJSON(boardMutationEnvelope(
+                        command: "board.update-card",
+                        action: "noop",
+                        board: board,
+                        changed: false,
+                        card: card
+                    ))
+                } else {
+                    print("No card changes requested.")
+                }
                 return
             }
 
             storage.updateCard(boardID: board.id, card: card)
             refreshSecondBrainProjection(boardID: board.id, card: card)
-            print("Updated card: \(card.title) [\(card.id)]")
+            if jsonOutput {
+                var dict = boardMutationEnvelope(
+                    command: "board.update-card",
+                    action: "updated",
+                    board: board,
+                    card: card
+                )
+                dict["projectionRefreshed"] = true
+                outputJSON(dict)
+            } else {
+                print("Updated card: \(card.title) [\(card.id)]")
+            }
 
         case "section":
             guard args.first == "update" else {
@@ -6610,8 +6633,25 @@ struct CiderCLI {
                 printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
                 return
             }
+            let sourceCol = board.columns.first { column in
+                column.cards.contains { $0.id == card.id }
+            }
             storage.moveCard(boardID: board.id, cardID: card.id, toColumnID: destCol.id, toIndex: 0)
-            print("Moved '\(card.title)' → \(destCol.name)")
+            if jsonOutput {
+                var dict = boardMutationEnvelope(
+                    command: "board.move-card",
+                    action: "moved",
+                    board: board,
+                    card: card
+                )
+                if let sourceCol {
+                    dict["fromColumn"] = boardColumnSummaryToDict(sourceCol)
+                }
+                dict["toColumn"] = boardColumnSummaryToDict(destCol)
+                outputJSON(dict)
+            } else {
+                print("Moved '\(card.title)' → \(destCol.name)")
+            }
 
         case "delete-card":
             guard let boardName = args.first,
@@ -6625,17 +6665,38 @@ struct CiderCLI {
                 return
             }
             storage.deleteCard(boardID: board.id, cardID: card.id)
-            print("Deleted card: \(board.displayKey(for: card)) [\(card.id)]")
+            if jsonOutput {
+                outputJSON(boardMutationEnvelope(
+                    command: "board.delete-card",
+                    action: "deleted",
+                    board: board,
+                    card: card
+                ))
+            } else {
+                print("Deleted card: \(board.displayKey(for: card)) [\(card.id)]")
+            }
 
         case "create":
             let name = args.first ?? "New Board"
             let board = storage.createBoard(name: name)
             let projectID = ProjectBoardRegistrationService.normalizedProjectID(parseFlag("--project", from: args))
             let savedView = ProjectBoardRegistrationService.register(board: board, projectID: projectID)
-            print("Created board: \(board.name) (\(board.id))")
-            print("Registered kanban view: \(savedView.name) (\(savedView.id.uuidString.prefix(8)))")
-            if let projectID {
-                print("Added to project: \(projectID)")
+            if jsonOutput {
+                var dict = boardMutationEnvelope(command: "board.create", action: "created", board: board)
+                dict["savedView"] = [
+                    "id": savedView.id.uuidString,
+                    "name": savedView.name
+                ]
+                if let projectID {
+                    dict["projectID"] = projectID
+                }
+                outputJSON(dict)
+            } else {
+                print("Created board: \(board.name) (\(board.id))")
+                print("Registered kanban view: \(savedView.name) (\(savedView.id.uuidString.prefix(8)))")
+                if let projectID {
+                    print("Added to project: \(projectID)")
+                }
             }
 
         case "rename":
@@ -6645,7 +6706,15 @@ struct CiderCLI {
             }
             guard let board = findBoard(nameOrID, in: storage) else { return }
             storage.renameBoard(id: board.id, name: newName)
-            print("Renamed: \(board.name) → \(newName)")
+            var renamedBoard = board
+            renamedBoard.name = newName
+            if jsonOutput {
+                var dict = boardMutationEnvelope(command: "board.rename", action: "renamed", board: renamedBoard)
+                dict["previousName"] = board.name
+                outputJSON(dict)
+            } else {
+                print("Renamed: \(board.name) → \(newName)")
+            }
 
         case "delete", "rm":
             guard let nameOrID = args.first else {
@@ -6655,7 +6724,13 @@ struct CiderCLI {
             guard let board = findBoard(nameOrID, in: storage) else { return }
             if let trashItem = storage.deleteBoard(id: board.id) {
                 CiderUndoManager.shared.record(.deletedToTrash(itemType: .kanbanBoard, trashItem: trashItem))
-                print("Deleted board: \(board.name) (moved to trash)")
+                if jsonOutput {
+                    var dict = boardMutationEnvelope(command: "board.delete", action: "deleted", board: board)
+                    dict["trashItemID"] = trashItem.id.uuidString
+                    outputJSON(dict)
+                } else {
+                    print("Deleted board: \(board.name) (moved to trash)")
+                }
             } else {
                 printCLIError("Could not delete board")
             }
@@ -6669,7 +6744,16 @@ struct CiderCLI {
             guard let board = findBoard(boardRef, in: storage) else { return }
             let isDone = args.contains("--done")
             if let col = storage.addColumn(boardID: board.id, name: colName, isDoneColumn: isDone) {
-                print("Added column: \(col.name) (\(col.id))\(isDone ? " [done column]" : "")")
+                if jsonOutput {
+                    outputJSON(boardMutationEnvelope(
+                        command: "board.add-column",
+                        action: "created",
+                        board: board,
+                        column: col
+                    ))
+                } else {
+                    print("Added column: \(col.name) (\(col.id))\(isDone ? " [done column]" : "")")
+                }
             } else {
                 printCLIError("Could not add column")
             }
@@ -6692,16 +6776,12 @@ struct CiderCLI {
             if jsonOutput {
                 let refreshed = storage.boards.first { $0.id == board.id }
                 let refreshedColumn = refreshed?.columns.first { $0.id == col.id } ?? col
-                outputJSON([
-                    "ok": true,
-                    "board": ["id": board.id, "name": board.name],
-                    "column": [
-                        "id": refreshedColumn.id,
-                        "name": refreshedColumn.name,
-                        "isDoneColumn": refreshedColumn.isDoneColumn,
-                        "isDoneLikeColumn": refreshedColumn.isDoneLikeColumn,
-                    ],
-                ])
+                outputJSON(boardMutationEnvelope(
+                    command: "board.set-column-done",
+                    action: "updated",
+                    board: refreshed ?? board,
+                    column: refreshedColumn
+                ))
             } else {
                 print("Updated column: \(col.name) \(wantsDone ? "[done column]" : "[not done column]")")
             }
@@ -6716,7 +6796,20 @@ struct CiderCLI {
             guard let board = findBoard(boardRef, in: storage) else { return }
             guard let col = findColumn(colRef, in: board) else { return }
             storage.renameColumn(boardID: board.id, columnID: col.id, name: newName)
-            print("Renamed column: \(col.name) → \(newName)")
+            var renamedColumn = col
+            renamedColumn.name = newName
+            if jsonOutput {
+                var dict = boardMutationEnvelope(
+                    command: "board.rename-column",
+                    action: "renamed",
+                    board: board,
+                    column: renamedColumn
+                )
+                dict["previousName"] = col.name
+                outputJSON(dict)
+            } else {
+                print("Renamed column: \(col.name) → \(newName)")
+            }
 
         case "delete-column":
             guard let boardRef = args.first,
@@ -6727,7 +6820,16 @@ struct CiderCLI {
             guard let board = findBoard(boardRef, in: storage) else { return }
             guard let col = findColumn(colRef, in: board) else { return }
             storage.deleteColumn(boardID: board.id, columnID: col.id)
-            print("Deleted column: \(col.name)")
+            if jsonOutput {
+                outputJSON(boardMutationEnvelope(
+                    command: "board.delete-column",
+                    action: "deleted",
+                    board: board,
+                    column: col
+                ))
+            } else {
+                print("Deleted column: \(col.name)")
+            }
 
         default:
             printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, audit, show, tags, workflow, recent, testing-summary, parent-summary, milestone create/list/inspect/attach-card, card inspect, create, rename, delete, add-card, update-card, section update, comment add, evidence add, history add, move-card, delete-card, children, add-column, set-column-done, rename-column, delete-column")
@@ -11705,6 +11807,59 @@ struct CiderCLI {
         if let agent = card.agent { dict["agent"] = agent }
         if let color = card.color { dict["color"] = color.rawValue }
         if let updatedAt = card.updatedAt { dict["updatedAt"] = ISO8601DateFormatter().string(from: updatedAt) }
+        return dict
+    }
+
+    static func boardIdentityDict(_ board: KanbanBoard) -> [String: Any] {
+        [
+            "id": board.id,
+            "name": board.name,
+            "displayKeyPrefix": board.displayKeyPrefix
+        ]
+    }
+
+    static func boardColumnSummaryToDict(_ column: KanbanColumn) -> [String: Any] {
+        [
+            "id": column.id,
+            "name": column.name,
+            "isDoneColumn": column.isDoneColumn,
+            "isDoneLikeColumn": column.isDoneLikeColumn
+        ]
+    }
+
+    static func boardVerificationCommands(board: KanbanBoard, card: KanbanCard? = nil) -> [String] {
+        var commands = [
+            "cider-cli board show \(board.id) --json"
+        ]
+        if let card {
+            commands.append("cider-cli board card inspect \(board.id) --card \(card.id) --json")
+        }
+        return commands
+    }
+
+    static func boardMutationEnvelope(
+        command: String,
+        action: String,
+        board: KanbanBoard,
+        changed: Bool = true,
+        card: KanbanCard? = nil,
+        column: KanbanColumn? = nil
+    ) -> [String: Any] {
+        var dict: [String: Any] = [
+            "ok": true,
+            "command": command,
+            "action": action,
+            "board": boardIdentityDict(board),
+            "readOnly": false,
+            "changed": changed,
+            "safeVerificationCommands": boardVerificationCommands(board: board, card: card)
+        ]
+        if let card {
+            dict["card"] = boardCardSummaryToDict(board: board, card: card)
+        }
+        if let column {
+            dict["column"] = boardColumnSummaryToDict(column)
+        }
         return dict
     }
 
