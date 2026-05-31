@@ -601,6 +601,17 @@ struct CiderCLIAgentSafetyTests {
             (["tag", "list", "--json"], "tag list", "cider-cli item search <query> --json"),
             (["dashboard", "topic", "list", "--json"], "dashboard topic", "cider-cli item graph-health --json"),
             (["link", "add", "note", "a", "note", "b", "--json"], "link add", "cider-cli item link"),
+            (["view", "list", "--json"], "view list", "cider-cli item project-context <project-id-or-name> --json"),
+            (["saved-view", "list", "--json"], "saved-view list", "cider-cli item project-context <project-id-or-name> --json"),
+            (["trash", "list", "--json"], "trash list", "cider-cli storage audit --json"),
+            (["clipboard", "import", "--json"], "clipboard import", "cider-cli capture add --kind note --stdin --json"),
+            (["recall", "list", "--json"], "recall list", "cider-cli item search <query> --json"),
+            (["duplicate-check", "run", "--json"], "duplicate-check run", "cider-cli item search <url-or-query> --json"),
+            (["media", "scan", "--json"], "media scan", "cider-cli item search <query> --json"),
+            (["bookmark", "move", "abc", "--json"], "bookmark move", "cider-cli item move bookmark <id> --folder <name|path> --json"),
+            (["note", "move", "abc", "--json"], "note move", "cider-cli item move note <id> --folder <name|path> --json"),
+            (["todo", "move", "abc", "--json"], "todo move", "cider-cli item move todo <id> --folder <name|path> --json"),
+            (["file", "move", "abc", "--json"], "file move", "cider-cli item move file <id> --folder <name|path> --json"),
         ]
 
         for testCase in cases {
