@@ -7513,7 +7513,11 @@ struct CiderCLI {
     static func handleDatabase(subcommand: String?, args: [String]) {
         let database = CiderDatabase.shared
         guard let databaseURL = database.databaseURL else {
-            print("Error: SQLite database is not open.")
+            printDatabaseError(
+                command: databaseCommandName(subcommand),
+                message: "SQLite database is not open.",
+                readOnly: !isDatabaseMutationSubcommand(subcommand)
+            )
             return
         }
 
@@ -7523,9 +7527,17 @@ struct CiderCLI {
         case "backups", "list":
             let backups = safety.listRollingBackups(databaseURL: databaseURL)
             if jsonOutput {
-                outputJSON(backups.enumerated().map { index, backup in
-                    databaseBackupToDict(backup, index: index)
-                })
+                outputJSON(databaseEnvelope(
+                    command: "db.backups",
+                    readOnly: true,
+                    changed: false,
+                    payload: [
+                        "count": backups.count,
+                        "backups": backups.enumerated().map { index, backup in
+                            databaseBackupToDict(backup, index: index)
+                        },
+                    ]
+                ))
             } else if backups.isEmpty {
                 print("No rolling SQLite backups found.")
             } else {
@@ -7541,19 +7553,37 @@ struct CiderCLI {
         case "backup", "create":
             do {
                 let backupURL = try safety.createManualBackup(database: database)
-                print("Created SQLite backup at \(backupURL.path)")
+                if jsonOutput {
+                    outputJSON(databaseEnvelope(
+                        command: "db.backup",
+                        readOnly: false,
+                        changed: true,
+                        payload: [
+                            "backup": databaseBackupURLToDict(backupURL),
+                            "verification": databaseBackupVerificationDict(backupURL),
+                        ]
+                    ))
+                } else {
+                    print("Created SQLite backup at \(backupURL.path)")
+                }
             } catch {
-                print("Error creating SQLite backup: \(error.localizedDescription)")
+                printDatabaseError(
+                    command: "db.backup",
+                    message: "Error creating SQLite backup: \(error.localizedDescription)",
+                    readOnly: false
+                )
             }
 
         case "integrity", "check":
             do {
                 let status = try database.integrityCheck()
                 if jsonOutput {
-                    outputJSON([
-                        "healthy": status.isHealthy,
-                        "messages": status.messages,
-                    ])
+                    outputJSON(databaseEnvelope(
+                        command: "db.integrity",
+                        readOnly: true,
+                        changed: false,
+                        payload: ["integrity": databaseIntegrityToDict(status)]
+                    ))
                 } else if status.isHealthy {
                     print("SQLite integrity check passed.")
                 } else {
@@ -7563,7 +7593,11 @@ struct CiderCLI {
                     }
                 }
             } catch {
-                print("Error running SQLite integrity check: \(error.localizedDescription)")
+                printDatabaseError(
+                    command: "db.integrity",
+                    message: "Error running SQLite integrity check: \(error.localizedDescription)",
+                    readOnly: true
+                )
             }
 
         case "audit", "log":
@@ -7576,7 +7610,11 @@ struct CiderCLI {
             let auditService = MutationAuditService.shared
             let sourceSet = Set(MutationAuditSource.allCases.map(\.rawValue))
             if let sourceFilter, !sourceSet.contains(sourceFilter) {
-                print("Error: Unknown source '\(sourceFilter)'. Valid sources: \(MutationAuditSource.allCases.map(\.rawValue).joined(separator: ", "))")
+                printDatabaseError(
+                    command: "db.audit",
+                    message: "Unknown source '\(sourceFilter)'. Valid sources: \(MutationAuditSource.allCases.map(\.rawValue).joined(separator: ", "))",
+                    readOnly: true
+                )
                 return
             }
 
@@ -7598,7 +7636,17 @@ struct CiderCLI {
 
             let limitedEntries = limit > 0 ? Array(entries.prefix(limit)) : entries
             if jsonOutput {
-                outputJSON(limitedEntries.map(mutationAuditEntryToDict))
+                outputJSON(databaseEnvelope(
+                    command: "db.audit",
+                    readOnly: true,
+                    changed: false,
+                    payload: [
+                        "limit": limit,
+                        "count": limitedEntries.count,
+                        "totalMatching": entries.count,
+                        "entries": limitedEntries.map(mutationAuditEntryToDict),
+                    ]
+                ))
             } else if limitedEntries.isEmpty {
                 print("No mutation audit entries found.")
             } else {
@@ -7621,28 +7669,88 @@ struct CiderCLI {
 
         case "restore":
             guard let selector = args.first else {
-                print("Error: Usage: cider-cli db restore <index|filename|latest> [--yes]")
+                printDatabaseError(
+                    command: "db.restore",
+                    message: "Usage: cider-cli db restore <index|filename|latest> [--dry-run|--yes]",
+                    readOnly: true,
+                    payload: ["requiresConfirmation": true]
+                )
                 return
             }
 
-            if isCiderAppRunning() {
-                print("Error: Quit Cider before restoring the SQLite database.")
-                return
-            }
+            let ciderRunning = isCiderAppRunning()
+            let dryRun = args.contains("--dry-run")
 
             let backups = safety.listRollingBackups(databaseURL: databaseURL)
             guard !backups.isEmpty else {
-                print("Error: No rolling SQLite backups are available to restore.")
+                printDatabaseError(
+                    command: "db.restore",
+                    message: "No rolling SQLite backups are available to restore.",
+                    readOnly: true,
+                    payload: ["selector": selector, "requiresConfirmation": true]
+                )
                 return
             }
 
             guard let backup = resolveDatabaseBackup(selector, in: backups) else {
-                print("Error: Could not find a backup matching '\(selector)'. Run 'cider-cli db backups' first.")
+                printDatabaseError(
+                    command: "db.restore",
+                    message: "Could not find a backup matching '\(selector)'. Run 'cider-cli db backups' first.",
+                    readOnly: true,
+                    payload: [
+                        "selector": selector,
+                        "requiresConfirmation": true,
+                        "safeNextCommands": ["cider-cli db backups --json"],
+                    ]
+                )
+                return
+            }
+            let backupIndex = backups.firstIndex { candidate in
+                candidate.url.standardizedFileURL == backup.url.standardizedFileURL
+            } ?? 0
+
+            if dryRun {
+                outputJSON(databaseEnvelope(
+                    command: "db.restore",
+                    readOnly: true,
+                    changed: false,
+                    payload: databaseRestorePlanPayload(
+                        selector: selector,
+                        backup: backup,
+                        databaseURL: databaseURL,
+                        ciderRunning: ciderRunning
+                    )
+                ))
+                return
+            }
+
+            if ciderRunning {
+                printDatabaseError(
+                    command: "db.restore",
+                    message: "Quit Cider before restoring the SQLite database.",
+                    readOnly: false,
+                    payload: databaseRestorePlanPayload(
+                        selector: selector,
+                        backup: backup,
+                        databaseURL: databaseURL,
+                        ciderRunning: true
+                    )
+                )
                 return
             }
 
             guard args.contains("--yes") else {
-                print("Refusing to restore without --yes. This will replace \(databaseURL.path) with \(backup.url.lastPathComponent).")
+                printDatabaseError(
+                    command: "db.restore",
+                    message: "Refusing to restore without --yes. This will replace \(databaseURL.path) with \(backup.url.lastPathComponent).",
+                    readOnly: true,
+                    payload: databaseRestorePlanPayload(
+                        selector: selector,
+                        backup: backup,
+                        databaseURL: databaseURL,
+                        ciderRunning: false
+                    )
+                )
                 return
             }
 
@@ -7655,12 +7763,22 @@ struct CiderCLI {
                 )
                 let status = try database.integrityCheck()
                 if jsonOutput {
-                    outputJSON([
-                        "restoredBackup": result.restoredBackup.url.lastPathComponent,
-                        "preRestoreSnapshot": result.preRestoreSnapshotURL?.path as Any,
-                        "healthy": status.isHealthy,
-                        "messages": status.messages,
-                    ])
+                    var payload: [String: Any] = [
+                        "selector": selector,
+                        "restoredBackup": databaseBackupToDict(result.restoredBackup, index: backupIndex),
+                        "integrity": databaseIntegrityToDict(status),
+                        "partialFailure": false,
+                        "rollbackGuidance": "If restore results are wrong, run cider-cli db restore <pre-restore-snapshot-name> --dry-run --json, then confirm with --yes only after review.",
+                    ]
+                    if let snapshotURL = result.preRestoreSnapshotURL {
+                        payload["preRestoreSnapshot"] = databaseBackupURLToDict(snapshotURL)
+                    }
+                    outputJSON(databaseEnvelope(
+                        command: "db.restore",
+                        readOnly: false,
+                        changed: true,
+                        payload: payload
+                    ))
                 } else {
                     print("Restored SQLite database from \(result.restoredBackup.url.lastPathComponent)")
                     if let snapshotURL = result.preRestoreSnapshotURL {
@@ -7674,11 +7792,27 @@ struct CiderCLI {
                     }
                 }
             } catch {
-                print("Error restoring SQLite backup: \(error.localizedDescription)")
+                printDatabaseError(
+                    command: "db.restore",
+                    message: "Error restoring SQLite backup: \(error.localizedDescription)",
+                    readOnly: false,
+                    payload: [
+                        "selector": selector,
+                        "partialFailure": true,
+                        "safeNextCommands": [
+                            "cider-cli db backups --json",
+                            "cider-cli db integrity --json",
+                        ],
+                    ]
+                )
             }
 
         default:
-            print("Commands: backups, backup, integrity, audit, restore")
+            printDatabaseError(
+                command: databaseCommandName(subcommand),
+                message: "Unknown db command: \(subcommand ?? "nil"). Commands: backups, backup, integrity, audit, restore",
+                readOnly: true
+            )
         }
     }
 
@@ -9104,6 +9238,125 @@ struct CiderCLI {
             "createdAt": backup.createdAt.timeIntervalSince1970,
             "byteSize": backup.byteSize,
         ]
+    }
+
+    static func databaseBackupURLToDict(_ url: URL) -> [String: Any] {
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        var dict: [String: Any] = [
+            "name": url.lastPathComponent,
+            "path": url.path,
+            "exists": FileManager.default.fileExists(atPath: url.path),
+            "byteSize": attrs[.size] as? Int64 ?? 0,
+        ]
+        if let createdAt = attrs[.creationDate] as? Date {
+            dict["createdAt"] = ISO8601DateFormatter().string(from: createdAt)
+        }
+        if let modifiedAt = attrs[.modificationDate] as? Date {
+            dict["modifiedAt"] = ISO8601DateFormatter().string(from: modifiedAt)
+        }
+        return dict
+    }
+
+    static func databaseBackupVerificationDict(_ url: URL) -> [String: Any] {
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        let byteSize = attrs[.size] as? Int64 ?? 0
+        return [
+            "exists": FileManager.default.fileExists(atPath: url.path),
+            "nonEmpty": byteSize > 0,
+            "byteSize": byteSize,
+        ]
+    }
+
+    static func databaseIntegrityToDict(_ status: DatabaseIntegrityStatus) -> [String: Any] {
+        [
+            "healthy": status.isHealthy,
+            "messages": status.messages,
+        ]
+    }
+
+    static func databaseRestorePlanPayload(
+        selector: String,
+        backup: DatabaseSafetyService.SQLiteBackupInfo,
+        databaseURL: URL,
+        ciderRunning: Bool
+    ) -> [String: Any] {
+        [
+            "selector": selector,
+            "targetDatabase": databaseURL.path,
+            "selectedBackup": databaseBackupToDict(backup, index: 0),
+            "requiresConfirmation": true,
+            "requiredConfirmationFlag": "--yes",
+            "activeAppBlocker": ciderRunning,
+            "blockers": ciderRunning ? ["cider_app_running"] : [],
+            "preRestoreSnapshotPlanned": true,
+            "rollbackGuidance": "Confirmed restore creates a pre-restore snapshot. Use db backups and db restore --dry-run before any rollback.",
+            "safeNextCommands": [
+                "cider-cli db backups --json",
+                "cider-cli db restore \(selector) --dry-run --json",
+            ],
+        ]
+    }
+
+    static func databaseEnvelope(
+        command: String,
+        readOnly: Bool,
+        changed: Bool,
+        payload: [String: Any] = [:]
+    ) -> [String: Any] {
+        var dict = payload
+        dict["ok"] = true
+        dict["command"] = command
+        dict["readOnly"] = readOnly
+        dict["changed"] = changed
+        if dict["safeNextCommands"] == nil {
+            dict["safeNextCommands"] = readOnly
+                ? ["cider-cli db integrity --json"]
+                : ["cider-cli db integrity --json", "cider-cli db backups --json"]
+        }
+        return dict
+    }
+
+    static func printDatabaseError(
+        command: String,
+        message: String,
+        readOnly: Bool,
+        payload: [String: Any] = [:]
+    ) {
+        processExitCode = 1
+        if jsonOutput {
+            var dict = payload
+            dict["ok"] = false
+            dict["command"] = command
+            dict["readOnly"] = readOnly
+            dict["changed"] = false
+            dict["error"] = message
+            if dict["safeNextCommands"] == nil {
+                dict["safeNextCommands"] = ["cider-cli db backups --json", "cider-cli db integrity --json"]
+            }
+            outputJSON(dict)
+        } else {
+            print("Error: \(message)")
+        }
+    }
+
+    static func databaseCommandName(_ subcommand: String?) -> String {
+        switch subcommand {
+        case "backups", "list": return "db.backups"
+        case "backup", "create": return "db.backup"
+        case "integrity", "check": return "db.integrity"
+        case "audit", "log": return "db.audit"
+        case "restore": return "db.restore"
+        default: return "db"
+        }
+    }
+
+    static func isDatabaseMutationSubcommand(_ subcommand: String?) -> Bool {
+        switch subcommand {
+        case "backup", "create", "restore":
+            return true
+        default:
+            return false
+        }
     }
 
     static func mutationAuditEntryToDict(_ entry: MutationAuditEntry) -> [String: Any] {

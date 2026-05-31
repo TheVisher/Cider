@@ -1354,6 +1354,75 @@ struct CiderCLIAgentSafetyTests {
         #expect(missingPayload["changed"] as? Bool == false)
     }
 
+    @Test("database admin commands return safe json envelopes")
+    func databaseAdminCommandsReturnSafeJSONEnvelopes() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-db-json-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let integrity = try runCLI(args: ["db", "integrity", "--json"], vault: vault)
+        let integrityPayload = try parseJSONObject(integrity.stdout)
+        #expect(integrity.status == 0)
+        #expect(integrityPayload["ok"] as? Bool == true)
+        #expect(integrityPayload["command"] as? String == "db.integrity")
+        #expect(integrityPayload["readOnly"] as? Bool == true)
+        #expect(integrityPayload["changed"] as? Bool == false)
+
+        let backup = try runCLI(args: ["db", "backup", "--json"], vault: vault)
+        let backupPayload = try parseJSONObject(backup.stdout)
+        #expect(backup.status == 0)
+        #expect(backupPayload["ok"] as? Bool == true)
+        #expect(backupPayload["command"] as? String == "db.backup")
+        #expect(backupPayload["readOnly"] as? Bool == false)
+        #expect(backupPayload["changed"] as? Bool == true)
+        #expect(backupPayload["verification"] as? [String: Any] != nil)
+        let createdBackup = try #require(backupPayload["backup"] as? [String: Any])
+        #expect(createdBackup["path"] as? String != nil)
+
+        let backups = try runCLI(args: ["db", "backups", "--json"], vault: vault)
+        let backupsPayload = try parseJSONObject(backups.stdout)
+        #expect(backupsPayload["command"] as? String == "db.backups")
+        #expect(backupsPayload["readOnly"] as? Bool == true)
+        #expect((backupsPayload["backups"] as? [[String: Any]])?.isEmpty == false)
+
+        let dryRun = try runCLI(args: ["db", "restore", "latest", "--dry-run", "--json"], vault: vault)
+        let dryRunPayload = try parseJSONObject(dryRun.stdout)
+        #expect(dryRun.status == 0)
+        #expect(dryRunPayload["ok"] as? Bool == true)
+        #expect(dryRunPayload["command"] as? String == "db.restore")
+        #expect(dryRunPayload["readOnly"] as? Bool == true)
+        #expect(dryRunPayload["changed"] as? Bool == false)
+        #expect(dryRunPayload["requiresConfirmation"] as? Bool == true)
+        #expect(dryRunPayload["preRestoreSnapshotPlanned"] as? Bool == true)
+        let activeAppBlocker = dryRunPayload["activeAppBlocker"] as? Bool == true
+
+        let restoreWithoutConfirmation = try runCLI(args: ["db", "restore", "latest", "--json"], vault: vault)
+        let restoreWithoutConfirmationPayload = try parseJSONObject(restoreWithoutConfirmation.stdout)
+        #expect(restoreWithoutConfirmation.status == 1)
+        #expect(restoreWithoutConfirmationPayload["ok"] as? Bool == false)
+        #expect(restoreWithoutConfirmationPayload["command"] as? String == "db.restore")
+        #expect(restoreWithoutConfirmationPayload["requiresConfirmation"] as? Bool == true)
+
+        let restore = try runCLI(args: ["db", "restore", "latest", "--yes", "--json"], vault: vault)
+        let restorePayload = try parseJSONObject(restore.stdout)
+        #expect(restorePayload["command"] as? String == "db.restore")
+        if activeAppBlocker {
+            #expect(restore.status == 1)
+            #expect(restorePayload["ok"] as? Bool == false)
+            #expect(restorePayload["activeAppBlocker"] as? Bool == true)
+            #expect(restorePayload["changed"] as? Bool == false)
+        } else {
+            #expect(restore.status == 0)
+            #expect(restorePayload["ok"] as? Bool == true)
+            #expect(restorePayload["readOnly"] as? Bool == false)
+            #expect(restorePayload["changed"] as? Bool == true)
+            #expect(restorePayload["preRestoreSnapshot"] as? [String: Any] != nil)
+            let restoreIntegrity = try #require(restorePayload["integrity"] as? [String: Any])
+            #expect(restoreIntegrity["healthy"] as? Bool == true)
+        }
+    }
+
     @Test("project context summary bounds relation-heavy output")
     func projectContextSummaryBoundsRelationHeavyOutput() throws {
         let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cider")
