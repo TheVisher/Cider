@@ -59,12 +59,20 @@ final class BookmarkAIEnrichment {
            !bookmark.notesManuallySet, bookmark.notes.isEmpty
         {
             if let result = await OEmbedService.fetch(for: bookmark.urlString) {
-                let suggestedTitle = OEmbedService.suggestTitle(
+                let notes = OEmbedService.buildNotes(from: result)
+                var suggestedTitle = OEmbedService.suggestTitle(
                     from: result,
                     currentTitle: bookmark.title,
                     urlString: bookmark.urlString
                 )
-                let notes = OEmbedService.buildNotes(from: result)
+                if let notesTitle = Self.suggestedTitleFromNotes(
+                    notes ?? result.title ?? "",
+                    currentTitle: bookmark.title,
+                    urlString: bookmark.urlString,
+                    titleManuallySet: bookmark.titleManuallySet
+                ) {
+                    suggestedTitle = notesTitle
+                }
                 await MainActor.run {
                     VaultBookmarkService.shared.applyOEmbedResults(
                         for: bookmark.id,
@@ -223,6 +231,37 @@ final class BookmarkAIEnrichment {
         return extractTitleFromOCR(text, urlString: urlString)
     }
 
+    static func suggestedTitleFromNotes(
+        _ notes: String,
+        currentTitle: String,
+        urlString: String,
+        titleManuallySet: Bool
+    ) -> String? {
+        guard canUseOCRTitle(
+            currentTitle: currentTitle,
+            urlString: urlString,
+            titleManuallySet: titleManuallySet
+        ) else { return nil }
+
+        let lines = notes
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { line in
+                guard line.count >= 4 else { return false }
+                let lower = line.lowercased()
+                return !lower.hasPrefix("by ")
+                    && !lower.hasPrefix("via ")
+                    && !lower.hasPrefix("url:")
+                    && !lower.hasPrefix("path:")
+                    && !lower.hasPrefix("title:")
+            }
+        guard let firstLine = lines.first else { return nil }
+        let cleaned = cleanNotesTitleLine(firstLine, urlString: urlString)
+        guard !cleaned.isEmpty else { return nil }
+        let truncated = String(cleaned.prefix(80))
+        return titleCased(truncated)
+    }
+
     private static func canUseOCRTitle(
         currentTitle: String,
         urlString: String,
@@ -275,6 +314,29 @@ final class BookmarkAIEnrichment {
         }
 
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func cleanNotesTitleLine(_ line: String, urlString: String) -> String {
+        var cleaned = line
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let url = URL(string: urlString),
+           (url.host?.lowercased() ?? "").contains("tiktok.com") {
+            if let viralRange = cleaned.range(
+                of: #"\bviral\s+(.+?)\s+(?:is|are|was|were|will|about)\b"#,
+                options: [.regularExpression, .caseInsensitive]
+            ) {
+                cleaned = String(cleaned[viralRange])
+                    .replacingOccurrences(of: #"(?i)\s+(?:is|are|was|were|will|about)\b.*$"#, with: "", options: .regularExpression)
+            } else if let ingredientsRange = cleaned.range(of: " ingredients:", options: [.caseInsensitive]) {
+                cleaned = String(cleaned[..<ingredientsRange.lowerBound])
+            }
+        }
+
+        return cleaned
+            .replacingOccurrences(of: #"^[^\p{L}\p{N}]+"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func titleCased(_ title: String) -> String {

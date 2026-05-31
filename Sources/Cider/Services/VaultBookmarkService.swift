@@ -1566,6 +1566,30 @@ final class VaultBookmarkService: ObservableObject {
         return bookmarks.first(where: { $0.id == bookmarkID })
     }
 
+    @discardableResult
+    func applyStoredSemanticTitleCandidateIfNeeded(for bookmarkID: UUID) -> Bookmark? {
+        if let updated = applyStoredOCRTitleCandidateIfNeeded(for: bookmarkID) {
+            return updated
+        }
+        guard let bookmark = bookmarks.first(where: { $0.id == bookmarkID }),
+              let title = BookmarkAIEnrichment.suggestedTitleFromNotes(
+                  bookmark.notes,
+                  currentTitle: bookmark.title,
+                  urlString: bookmark.urlString,
+                  titleManuallySet: bookmark.titleManuallySet
+              )
+        else { return nil }
+
+        applyAIResults(
+            for: bookmarkID,
+            tags: bookmark.tags,
+            ocrText: bookmark.ocrText,
+            dominantColors: bookmark.dominantColors,
+            title: title
+        )
+        return bookmarks.first(where: { $0.id == bookmarkID })
+    }
+
     func applyOEmbedResults(
         for bookmarkID: UUID,
         title: String?,
@@ -3038,6 +3062,7 @@ final class VaultBookmarkService: ObservableObject {
         if currentTitle.isEmpty { return true }
         if currentTitle.caseInsensitiveCompare(bookmark.urlString) == .orderedSame { return true }
         return isHostDerivedTitle(bookmark, sourceURL: sourceURL)
+            || isProviderGenericTitle(bookmark.title, sourceURL: sourceURL)
     }
 
     private func isHostDerivedTitle(_ bookmark: Bookmark, sourceURL: URL) -> Bool {

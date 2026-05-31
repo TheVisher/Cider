@@ -39,4 +39,16 @@ struct BookmarkEnrichmentPolicyTests {
 
         #expect(suggested == nil)
     }
+
+    @Test("TikTok generic title uses recipe notes as visible title candidate")
+    func tiktokGenericTitleUsesRecipeNotesAsVisibleTitleCandidate() {
+        let suggested = BookmarkAIEnrichment.suggestedTitleFromNotes(
+            "this viral smores bark is about to be your annual summer little treat after dinner\nBy ashleymarkletreats\nVia TikTok",
+            currentTitle: "TikTok - Make Your Day",
+            urlString: "https://www.tiktok.com/t/ZP8s1eSw4/",
+            titleManuallySet: false
+        )
+
+        #expect(suggested == "Viral Smores Bark")
+    }
 }

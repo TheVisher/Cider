@@ -1743,6 +1743,102 @@ struct BookmarkSQLiteTests {
         #expect(!fm.fileExists(atPath: oldURL.path))
     }
 
+    @Test("OEmbed title enrichment replaces TikTok provider generic title")
+    func oEmbedTitleEnrichmentReplacesTikTokProviderGenericTitle() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-tiktok-oembed-provider-generic-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let oldRelativePath = "Inbox/Bookmarks/Tiktok.Com (3).webloc"
+        let oldURL = vault.appendingPathComponent(oldRelativePath)
+        let sourceURL = "https://www.tiktok.com/t/ZP8s1eSw4/"
+        let plist = ["URL": sourceURL]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: oldURL, options: .atomic)
+
+        let bookmarkID = UUID()
+        let service = makeService(db)
+        let bookmark = Bookmark(
+            id: bookmarkID,
+            title: "TikTok - Make Your Day",
+            urlString: sourceURL,
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            relativePath: oldRelativePath
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        service.applyOEmbedResults(
+            for: bookmarkID,
+            title: "this viral smores bark is about to be your annual summer little treat after dinner",
+            notes: "this viral smores bark is about to be your annual summer little treat after dinner\nBy ashleymarkletreats\nVia TikTok"
+        )
+
+        let updated = try #require(service.bookmarks.first)
+        #expect(updated.title == "this viral smores bark is about to be your annual summer little treat after dinner")
+        #expect(updated.relativePath == "Inbox/Bookmarks/this viral smores bark is about to be your annual summer little treat after dinner.webloc")
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Inbox/Bookmarks/this viral smores bark is about to be your annual summer little treat after dinner.webloc").path))
+        #expect(!fm.fileExists(atPath: oldURL.path))
+    }
+
+    @Test("Stored TikTok notes title promotion renames generic bookmark artifact")
+    func storedTikTokNotesTitlePromotionRenamesGenericArtifact() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-tiktok-notes-artifact-rename-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let oldRelativePath = "Inbox/Bookmarks/Tiktok.Com (3).webloc"
+        let oldURL = vault.appendingPathComponent(oldRelativePath)
+        let sourceURL = "https://www.tiktok.com/t/ZP8s1eSw4/"
+        let plist = ["URL": sourceURL]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: oldURL, options: .atomic)
+
+        let bookmarkID = UUID()
+        let service = makeService(db)
+        let bookmark = Bookmark(
+            id: bookmarkID,
+            title: "TikTok - Make Your Day",
+            urlString: sourceURL,
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            notes: "this viral smores bark is about to be your annual summer little treat after dinner\nBy ashleymarkletreats\nVia TikTok",
+            relativePath: oldRelativePath
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        let updated = try #require(service.applyStoredSemanticTitleCandidateIfNeeded(for: bookmarkID))
+
+        #expect(updated.title == "Viral Smores Bark")
+        #expect(updated.relativePath == "Inbox/Bookmarks/Viral Smores Bark.webloc")
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Inbox/Bookmarks/Viral Smores Bark.webloc").path))
+        #expect(!fm.fileExists(atPath: oldURL.path))
+    }
+
     @Test("OEmbed title enrichment can replace provider-generic manual title")
     func oEmbedTitleEnrichmentReplacesProviderGenericManualTitle() throws {
         let (db, url) = try makeTestDB()

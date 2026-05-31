@@ -2037,7 +2037,7 @@ struct CiderCLI {
                     waitResult = nil
                 }
                 if let captured = waitResult?.bookmark ?? service.bookmarks.first(where: { $0.id == bm.id }) {
-                    let updated = service.applyStoredOCRTitleCandidateIfNeeded(for: bm.id) ?? captured
+                    let updated = service.applyStoredSemanticTitleCandidateIfNeeded(for: bm.id) ?? captured
                     if let waitResult, jsonOutput {
                         printBookmarkEnrichmentLifecycleResult(
                             before: bm,
