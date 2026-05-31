@@ -91,15 +91,27 @@ final class CiderServicesProvider: NSObject {
         if let url = URL(string: trimmed),
            let scheme = url.scheme?.lowercased(),
            scheme == "http" || scheme == "https" {
-            let saved = (try? urlCaptureHandler(url.absoluteString)) != nil
-            postToast(message: saved ? "Saved from Services" : "Could not save URL", isSuccess: saved)
+            let receipt: CaptureReceipt
+            if let result = try? urlCaptureHandler(url.absoluteString) {
+                receipt = CaptureReceipt(result: result)
+            } else {
+                receipt = .failed("Could not save URL")
+            }
+            postToast(
+                message: receipt.toastMessage(success: "Saved from Services"),
+                isSuccess: receipt.isSuccess
+            )
             return
         }
 
         // Plain text → new note
         do {
-            _ = try noteCaptureHandler(trimmed)
-            postToast(message: "Created note from Services", isSuccess: true)
+            let result = try noteCaptureHandler(trimmed)
+            let receipt = CaptureReceipt(result: result)
+            postToast(
+                message: receipt.toastMessage(success: "Created note from Services"),
+                isSuccess: receipt.isSuccess
+            )
         } catch {
             postToast(message: "Could not create note from Services", isSuccess: false)
         }
@@ -125,10 +137,10 @@ final class CiderServicesProvider: NSObject {
         guard let data else { return }
         do {
             let result = try imageCaptureHandler(data, nil, nil)
-            let didAssignThumbnail = result.partialSuccess?.status != "thumbnail_assignment_failed"
+            let receipt = CaptureReceipt(result: result)
             postToast(
-                message: didAssignThumbnail ? "Saved image from Services" : "Saved image placeholder from Services",
-                isSuccess: didAssignThumbnail
+                message: receipt.toastMessage(success: "Saved image from Services"),
+                isSuccess: receipt.isSuccess
             )
         } catch {
             postToast(message: "Could not save image from Services", isSuccess: false)

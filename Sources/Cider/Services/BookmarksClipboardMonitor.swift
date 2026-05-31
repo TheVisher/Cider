@@ -109,20 +109,21 @@ final class BookmarksClipboardMonitor {
                     )
                     return
                 }
-            } else if (try? CiderBookmarkCaptureAdapter().addURLBookmark(
+            } else if let result = try? CiderBookmarkCaptureAdapter().addURLBookmark(
                 urlString: value,
                 sourceContext: CaptureSourceContext(
                     surface: "clipboard_monitor",
                     channel: "pasteboard",
                     originalText: value
                 )
-            )) != nil {
+            ) {
+                let receipt = CaptureReceipt(result: result.captureResult)
                 NotificationCenter.default.post(
                     name: .showBookmarkCaptureToast,
                     object: nil,
                     userInfo: [
-                        "message": "Saved copied URL",
-                        "isSuccess": true,
+                        "message": receipt.toastMessage(success: "Saved copied URL"),
+                        "isSuccess": receipt.isSuccess,
                     ]
                 )
                 return

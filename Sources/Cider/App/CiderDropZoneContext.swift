@@ -243,16 +243,17 @@ final class CiderDropZoneContext: ObservableObject {
         status = .processing("Saving text as a note...")
         do {
             let result = try noteCaptureHandler(trimmed)
+            let receipt = CaptureReceipt(result: result)
             droppedItems.insert(
                 DroppedItem(
                     kind: .text,
                     title: result.item.title,
                     detail: result.item.relativePath ?? trimmed,
-                    didPersist: true
+                    didPersist: receipt.didPersist
                 ),
                 at: 0
             )
-            status = .success("Saved text as note.")
+            status = dropStatus(for: receipt, success: "Saved text as note.")
         } catch {
             recordFallback(
                 kind: .text,
@@ -297,16 +298,17 @@ final class CiderDropZoneContext: ObservableObject {
 
         do {
             let result = try fileCaptureHandler(url)
+            let receipt = CaptureReceipt(result: result)
             droppedItems.insert(
                 DroppedItem(
                     kind: VaultFileType.from(extension: url.pathExtension) == .image ? .image : .file,
                     title: result.item.title,
                     detail: result.item.relativePath ?? url.lastPathComponent,
-                    didPersist: true
+                    didPersist: receipt.didPersist
                 ),
                 at: 0
             )
-            status = .success("Saved \(result.item.title) to Inbox.")
+            status = dropStatus(for: receipt, success: "Saved \(result.item.title) to Inbox.")
         } catch {
             recordFallback(
                 kind: .file,
@@ -336,28 +338,28 @@ final class CiderDropZoneContext: ObservableObject {
             )
             return
         }
-        let didAssignThumbnail = result.partialSuccess?.status != "thumbnail_assignment_failed"
+        let receipt = CaptureReceipt(result: result)
 
         droppedItems.insert(
             DroppedItem(
                 kind: .image,
                 title: result.item.title,
-                detail: didAssignThumbnail ? "Saved as an image bookmark." : "Created image bookmark, but thumbnail save failed.",
-                didPersist: true,
+                detail: receipt.state == .partialSideEffects
+                    ? "Created image bookmark, but follow-up repair is needed."
+                    : "Saved as an image bookmark.",
+                didPersist: receipt.didPersist,
                 bookmarkID: result.item.id
             ),
             at: 0
         )
-        status = didAssignThumbnail
-            ? .success("Saved dropped image.")
-            : .fallback("Created image bookmark without a thumbnail.")
+        status = dropStatus(for: receipt, success: "Saved dropped image.")
 
         NotificationCenter.default.post(
             name: .showBookmarkCaptureToast,
             object: nil,
             userInfo: [
-                "message": didAssignThumbnail ? "Saved dropped image" : "Saved image placeholder",
-                "isSuccess": didAssignThumbnail
+                "message": receipt.toastMessage(success: "Saved dropped image"),
+                "isSuccess": receipt.isSuccess
             ]
         )
     }
@@ -405,40 +407,52 @@ final class CiderDropZoneContext: ObservableObject {
 
         resetDismissProgress()
         status = .processing("Saving bookmark...")
-        guard let bookmark = try? CiderBookmarkCaptureAdapter()
+        guard let result = try? CiderBookmarkCaptureAdapter()
             .addURLBookmark(
                 urlString: rawValue,
                 sourceContext: CaptureSourceContext(
                     surface: "drop_zone",
                     originalText: rawValue
                 )
-            )
-            .bookmark else {
+            ) else {
             resetDismissProgress()
             status = .failure("That URL could not be saved.")
             return true
         }
+        let receipt = CaptureReceipt(result: result.captureResult)
+        let bookmark = result.bookmark
 
         droppedItems.insert(
             DroppedItem(
                 kind: .bookmark,
                 title: bookmark.title,
                 detail: bookmark.urlString,
-                didPersist: true,
+                didPersist: receipt.didPersist,
                 bookmarkID: bookmark.id
             ),
             at: 0
         )
-        status = .success("Saved bookmark.")
+        status = dropStatus(for: receipt, success: "Saved bookmark.")
         NotificationCenter.default.post(
             name: .showBookmarkCaptureToast,
             object: nil,
             userInfo: [
-                "message": "Saved dropped URL",
-                "isSuccess": true
+                "message": receipt.toastMessage(success: "Saved dropped URL"),
+                "isSuccess": receipt.isSuccess
             ]
         )
         return true
+    }
+
+    private func dropStatus(for receipt: CaptureReceipt, success: String) -> DropStatus {
+        switch receipt.state {
+        case .saved, .savedWithReview, .duplicate:
+            return .success(receipt.toastMessage(success: success))
+        case .partialSideEffects:
+            return .fallback(receipt.toastMessage(success: success))
+        case .failed:
+            return .failure(receipt.toastMessage(success: success))
+        }
     }
 
     private func finishDropInteraction(now: Date = Date()) {

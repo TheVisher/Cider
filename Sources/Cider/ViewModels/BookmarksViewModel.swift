@@ -84,19 +84,42 @@ final class BookmarksViewModel: ObservableObject {
         folderID: UUID? = nil,
         sourceContext: CaptureSourceContext? = nil
     ) -> Bool {
-        (try? CiderBookmarkCaptureAdapter().addURLBookmark(
+        captureBookmark(
             urlString: urlString,
             title: title,
             folderID: folderID,
             sourceContext: sourceContext
-        )) != nil
+        ).didPersist
+    }
+
+    @discardableResult
+    func captureBookmark(
+        urlString: String,
+        title: String?,
+        folderID: UUID? = nil,
+        sourceContext: CaptureSourceContext? = nil
+    ) -> CaptureReceipt {
+        guard let result = try? CiderBookmarkCaptureAdapter().addURLBookmark(
+            urlString: urlString,
+            title: title,
+            folderID: folderID,
+            sourceContext: sourceContext
+        ) else {
+            return .failed("Could not save bookmark")
+        }
+        return CaptureReceipt(result: result.captureResult)
     }
 
     @discardableResult
     func addBookmarkFromPasteboard() -> Bool {
+        captureBookmarkFromPasteboard().didPersist
+    }
+
+    @discardableResult
+    func captureBookmarkFromPasteboard() -> CaptureReceipt {
         let pasteboard = NSPasteboard.general
         if let string = pasteboard.string(forType: .string) {
-            return addBookmark(
+            return captureBookmark(
                 urlString: string,
                 title: nil,
                 sourceContext: CaptureSourceContext(
@@ -108,7 +131,7 @@ final class BookmarksViewModel: ObservableObject {
         }
         if let values = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
            let first = values.first {
-            return addBookmark(
+            return captureBookmark(
                 urlString: first.absoluteString,
                 title: nil,
                 sourceContext: CaptureSourceContext(
@@ -118,13 +141,13 @@ final class BookmarksViewModel: ObservableObject {
                 )
             )
         }
-        return false
+        return .failed("Clipboard does not contain a URL")
     }
 
     @discardableResult
     func captureBookmarkFromActiveBrowserOrClipboard() -> Bool {
         if let capture = ActiveBrowserCaptureService.captureFromFrontmostBrowser() {
-            let saved = addBookmark(
+            let receipt = captureBookmark(
                 urlString: capture.urlString,
                 title: capture.title,
                 sourceContext: CaptureSourceContext(
@@ -135,10 +158,10 @@ final class BookmarksViewModel: ObservableObject {
                 )
             )
             postCaptureToast(
-                message: saved ? "Saved from active browser" : "Unable to save active browser tab",
-                isSuccess: saved
+                message: receipt.toastMessage(success: "Saved from active browser"),
+                isSuccess: receipt.isSuccess
             )
-            return saved
+            return receipt.didPersist
         }
 
         let failureHint = ActiveBrowserCaptureService.consumeFailureHint()

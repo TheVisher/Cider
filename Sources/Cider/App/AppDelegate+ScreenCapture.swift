@@ -95,21 +95,35 @@ extension AppDelegate {
             },
             onCreateNote: { [weak self] in
                 self?.dismissScreenCaptureToast()
-                _ = try? CiderCaptureService().addScreenCaptureNoteCapture(
-                    title: route.suggestedTitle.isEmpty ? "Screen Capture" : route.suggestedTitle,
-                    ocrText: ocrText ?? "",
-                    screenshot: image,
-                    sourceURL: nil,
-                    folderID: nil,
-                    sourceContext: CaptureSourceContext(
-                        surface: "screen_capture",
-                        originalText: ocrText,
-                        metadata: [
-                            "routeTitle": route.suggestedTitle
-                        ]
-                    )
+                let receipt: CaptureReceipt
+                if let result = try? CiderCaptureService().addScreenCaptureNoteCapture(
+                        title: route.suggestedTitle.isEmpty ? "Screen Capture" : route.suggestedTitle,
+                        ocrText: ocrText ?? "",
+                        screenshot: image,
+                        sourceURL: nil,
+                        folderID: nil,
+                        sourceContext: CaptureSourceContext(
+                            surface: "screen_capture",
+                            originalText: ocrText,
+                            metadata: [
+                                "routeTitle": route.suggestedTitle
+                            ]
+                        )
+                    ) {
+                    receipt = CaptureReceipt(result: result)
+                } else {
+                    receipt = .failed("Could not save screen capture")
+                }
+                self?.showBookmarkCaptureToast(
+                    message: receipt.toastMessage(success: "Saved screen capture"),
+                    isSuccess: receipt.isSuccess
                 )
-                self?.transitionToCiderMainWindow()
+                if receipt.didPersist {
+                    self?.transitionToCiderMainWindow()
+                } else {
+                    let shouldRestorePanel = self?.screenCaptureWasVisible ?? false
+                    if shouldRestorePanel { self?.transitionToCiderMainWindow() }
+                }
             },
             onCreateDateCard: { [weak self] in
                 self?.dismissScreenCaptureToast()

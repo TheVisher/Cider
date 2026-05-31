@@ -63,7 +63,8 @@ extension CiderPanelView {
 
     @MainActor
     func saveDroppedURL(_ rawValue: String, folderID: UUID?) {
-        let bookmark = try? CiderBookmarkCaptureAdapter()
+        let receipt: CaptureReceipt
+        if let result = try? CiderBookmarkCaptureAdapter()
             .addURLBookmark(
                 urlString: rawValue,
                 folderID: folderID,
@@ -71,14 +72,17 @@ extension CiderPanelView {
                     surface: "url_drop",
                     originalText: rawValue
                 )
-            )
-            .bookmark
+            ) {
+            receipt = CaptureReceipt(result: result.captureResult)
+        } else {
+            receipt = .failed("Dropped content is not a URL")
+        }
         NotificationCenter.default.post(
             name: .showBookmarkCaptureToast,
             object: nil,
             userInfo: [
-                "message": bookmark == nil ? "Dropped content is not a URL" : "Saved dropped URL",
-                "isSuccess": bookmark != nil
+                "message": receipt.toastMessage(success: "Saved dropped URL"),
+                "isSuccess": receipt.isSuccess
             ]
         )
     }

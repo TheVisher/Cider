@@ -32,7 +32,7 @@ struct CiderServicesProviderTests {
         let toast = try #require(toasts.first)
 
         #expect(capturedText == "Save this from Services")
-        #expect(toast.message == "Created note from Services")
+        #expect(toast.message == "Created note from Services - review needed")
         #expect(toast.isSuccess == true)
     }
 
@@ -69,7 +69,7 @@ struct CiderServicesProviderTests {
         provider.handleImage(Data([1, 2, 3]))
         let toast = try #require(toasts.first)
 
-        #expect(toast.message == "Saved image placeholder from Services")
+        #expect(toast.message == "Saved image from Services - needs repair")
         #expect(toast.isSuccess == false)
     }
 

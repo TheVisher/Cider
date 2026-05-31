@@ -234,10 +234,10 @@ extension AppDelegate {
                 if let urlString = browserCapture?.urlString {
                     VaultBookmarkService.shared.updateURL(for: result.item.id, urlString: urlString)
                 }
-                let didAssignThumbnail = result.partialSuccess?.status != "thumbnail_assignment_failed"
+                let receipt = CaptureReceipt(result: result)
                 self.showBookmarkCaptureToast(
-                    message: didAssignThumbnail ? "Saved copied image" : "Saved image placeholder",
-                    isSuccess: didAssignThumbnail
+                    message: receipt.toastMessage(success: "Saved copied image"),
+                    isSuccess: receipt.isSuccess
                 )
             },
             onDiscard: { [weak self] in
@@ -275,17 +275,22 @@ extension AppDelegate {
             },
             onSave: { [weak self] in
                 guard let self else { return }
-                let saved = (try? CiderBookmarkCaptureAdapter().addURLBookmark(
+                let receipt: CaptureReceipt
+                if let result = try? CiderBookmarkCaptureAdapter().addURLBookmark(
                     urlString: normalized,
                     sourceContext: CaptureSourceContext(
                         surface: "clipboard_review_toast",
                         channel: "pasteboard",
                         originalText: normalized
                     )
-                )) != nil
+                ) {
+                    receipt = CaptureReceipt(result: result.captureResult)
+                } else {
+                    receipt = .failed("Could not save copied URL")
+                }
                 self.showBookmarkCaptureToast(
-                    message: saved ? "Saved copied URL" : "Could not save copied URL",
-                    isSuccess: saved
+                    message: receipt.toastMessage(success: "Saved copied URL"),
+                    isSuccess: receipt.isSuccess
                 )
             },
             onDiscard: { [weak self] in

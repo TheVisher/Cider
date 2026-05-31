@@ -434,7 +434,7 @@ struct ClipboardViewerView: View {
         switch item.type {
         case .url:
             if let urlString = item.textContent {
-                if let bookmark = try? CiderBookmarkCaptureAdapter()
+                if let result = try? CiderBookmarkCaptureAdapter()
                     .addURLBookmark(
                         urlString: urlString,
                         sourceContext: CaptureSourceContext(
@@ -442,13 +442,16 @@ struct ClipboardViewerView: View {
                             channel: "pasteboard",
                             originalText: urlString
                         )
-                    )
-                    .bookmark {
-                    resultID = bookmark.id
+                    ) {
+                    let receipt = CaptureReceipt(result: result.captureResult)
+                    resultID = receipt.itemID
                     NotificationCenter.default.post(
                         name: .showBookmarkCaptureToast,
                         object: nil,
-                        userInfo: ["message": "Saved as bookmark", "isSuccess": true]
+                        userInfo: [
+                            "message": receipt.toastMessage(success: "Saved as bookmark"),
+                            "isSuccess": receipt.isSuccess
+                        ]
                     )
                 }
             }
@@ -478,15 +481,15 @@ struct ClipboardViewerView: View {
                         ]
                     )
                 ) else { return }
-                let didAssignThumbnail = result.partialSuccess?.status != "thumbnail_assignment_failed"
+                let receipt = CaptureReceipt(result: result)
                 clipboardStorage.markSaved(itemID, savedItemID: result.item.id)
                 flashSaved(itemID)
                 NotificationCenter.default.post(
                     name: .showBookmarkCaptureToast,
                     object: nil,
                     userInfo: [
-                        "message": didAssignThumbnail ? "Saved as image bookmark" : "Saved image placeholder",
-                        "isSuccess": didAssignThumbnail
+                        "message": receipt.toastMessage(success: "Saved as image bookmark"),
+                        "isSuccess": receipt.isSuccess
                     ]
                 )
             }
@@ -520,10 +523,14 @@ struct ClipboardViewerView: View {
             )
             return nil
         }
+        let receipt = CaptureReceipt(result: result)
         NotificationCenter.default.post(
             name: .showBookmarkCaptureToast,
             object: nil,
-            userInfo: ["message": "Saved as note", "isSuccess": true]
+            userInfo: [
+                "message": receipt.toastMessage(success: "Saved as note"),
+                "isSuccess": receipt.isSuccess
+            ]
         )
         return result.item.id
     }
