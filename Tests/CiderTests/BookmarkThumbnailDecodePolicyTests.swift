@@ -106,4 +106,21 @@ struct BookmarkThumbnailDecodePolicyTests {
         #expect(image.size.width > 0)
         #expect(image.size.height > 0)
     }
+
+    @MainActor
+    @Test("X text post captures can render a local fallback card")
+    func xTextPostFallbackCardRendersImageData() throws {
+        let pageURL = try #require(URL(string: "https://x.com/pejmanjohn/status/2060739993124098407?s=20"))
+        let data = try #require(
+            VaultBookmarkService.socialPostFallbackCardData(
+                for: pageURL,
+                title: "Pejman Pour-Moezzi: Has anyone synced Memory across multiple harnesses (OpenClaw, Codex and Claude Code)?"
+            )
+        )
+
+        #expect(data.count > 1_000)
+        let image = try #require(NSImage(data: data))
+        #expect(image.size.width > 0)
+        #expect(image.size.height > 0)
+    }
 }

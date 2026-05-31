@@ -2448,7 +2448,8 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         let htmlResult = await fetchHTMLEnrichmentPayload(for: pageURL)
-        let githubFallbackData = githubRepositoryFallbackCardData(for: pageURL, title: htmlResult?.title)
+        let fallbackCardData = githubRepositoryFallbackCardData(for: pageURL, title: htmlResult?.title)
+            ?? socialPostFallbackCardData(for: pageURL, title: htmlResult?.title)
 
         let hasRealThumbnail = htmlResult?.thumbnailURL != nil
             && !isFaviconURL(htmlResult?.thumbnailURL)
@@ -2463,7 +2464,7 @@ final class VaultBookmarkService: ObservableObject {
                     title: htmlResult.title,
                     thumbnailURL: htmlResult.thumbnailURL,
                     screenshotData: htmlResult.screenshotData,
-                    thumbnailFallbackData: githubFallbackData,
+                    thumbnailFallbackData: fallbackCardData,
                     recipeExtractionText: htmlResult.recipeExtractionText,
                     carouselImageURLs: htmlResult.carouselImageURLs
                 )
@@ -2485,23 +2486,26 @@ final class VaultBookmarkService: ObservableObject {
             enrichLog.info("Trying WebView fallback for \(pageURL.host ?? "?", privacy: .public)")
             let extracted = await WebViewMetadataExtractor.extract(from: pageURL)
             let hasResult = extracted.title != nil || extracted.imageURL != nil
+            let resolvedTitle = extracted.title ?? htmlResult?.title
+            let resolvedFallbackCardData = fallbackCardData
+                ?? socialPostFallbackCardData(for: pageURL, title: resolvedTitle)
             if hasResult || extracted.screenshotData != nil {
                 return BookmarkEnrichmentPayload(
-                    title: extracted.title ?? htmlResult?.title,
+                    title: resolvedTitle,
                     thumbnailURL: extracted.imageURL ?? htmlResult?.thumbnailURL,
                     screenshotData: extracted.screenshotData,
-                    thumbnailFallbackData: githubFallbackData,
+                    thumbnailFallbackData: resolvedFallbackCardData,
                     recipeExtractionText: htmlResult?.recipeExtractionText
                 )
             }
         }
 
-        if let htmlResult, githubFallbackData != nil {
+        if let htmlResult, fallbackCardData != nil {
             return BookmarkEnrichmentPayload(
                 title: htmlResult.title,
                 thumbnailURL: htmlResult.thumbnailURL,
                 screenshotData: htmlResult.screenshotData,
-                thumbnailFallbackData: githubFallbackData,
+                thumbnailFallbackData: fallbackCardData,
                 recipeExtractionText: htmlResult.recipeExtractionText,
                 carouselImageURLs: htmlResult.carouselImageURLs
             )
@@ -2634,6 +2638,107 @@ final class VaultBookmarkService: ObservableObject {
         )
 
         return bitmap.representation(using: .png, properties: [:])
+    }
+
+    static func socialPostFallbackCardData(for pageURL: URL, title: String?) -> Data? {
+        guard isSocialPostFallbackHost(pageURL.host),
+              let parsed = socialPostFallbackContent(from: title),
+              !parsed.body.isEmpty else {
+            return nil
+        }
+
+        let width = 1200
+        let height = 630
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: width,
+            pixelsHigh: height,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        defer { NSGraphicsContext.restoreGraphicsState() }
+
+        let size = NSSize(width: width, height: height)
+        NSColor(calibratedRed: 0.04, green: 0.05, blue: 0.07, alpha: 1).setFill()
+        NSRect(origin: .zero, size: size).fill()
+
+        NSColor(calibratedRed: 0.12, green: 0.64, blue: 0.96, alpha: 1).setFill()
+        NSRect(x: 0, y: 0, width: size.width, height: 16).fill()
+
+        let avatarRect = NSRect(x: 74, y: 456, width: 80, height: 80)
+        NSColor(calibratedWhite: 1, alpha: 0.10).setFill()
+        NSBezierPath(ovalIn: avatarRect).fill()
+        ("X" as NSString).draw(
+            in: avatarRect.insetBy(dx: 25, dy: 18),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 34, weight: .bold),
+                .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.78),
+            ]
+        )
+
+        let author = parsed.author ?? "X post"
+        (author as NSString).draw(
+            in: NSRect(x: 180, y: 488, width: 820, height: 42),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 30, weight: .semibold),
+                .foregroundColor: NSColor.white,
+            ]
+        )
+
+        ("x.com" as NSString).draw(
+            in: NSRect(x: 180, y: 448, width: 300, height: 32),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 22, weight: .medium),
+                .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.55),
+            ]
+        )
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        paragraph.lineSpacing = 6
+        (parsed.body as NSString).draw(
+            in: NSRect(x: 74, y: 166, width: 990, height: 244),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 40, weight: .regular),
+                .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.90),
+                .paragraphStyle: paragraph,
+            ]
+        )
+
+        return bitmap.representation(using: .png, properties: [:])
+    }
+
+    private static func isSocialPostFallbackHost(_ host: String?) -> Bool {
+        let normalized = host?.lowercased() ?? ""
+        return normalized == "x.com"
+            || normalized == "twitter.com"
+            || normalized.hasSuffix(".x.com")
+            || normalized.hasSuffix(".twitter.com")
+    }
+
+    private static func socialPostFallbackContent(from title: String?) -> (author: String?, body: String)? {
+        guard let title = title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else {
+            return nil
+        }
+
+        let parts = title.split(separator: ":", maxSplits: 1).map {
+            String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if parts.count == 2, !parts[1].isEmpty {
+            return (parts[0].isEmpty ? nil : parts[0], parts[1])
+        }
+        return (nil, title)
     }
 
     private static func githubRepositoryIdentity(for pageURL: URL) -> (owner: String, name: String)? {

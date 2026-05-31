@@ -450,8 +450,14 @@ struct CiderCaptureResult {
     private static func localCaptureAssetExists(relativePath: String) -> Bool {
         let trimmed = relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        let url = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(trimmed)
-        return FileManager.default.fileExists(atPath: url.path)
+        let bookmarkURL = StoragePaths.cachedDirectoryURL(for: .bookmarks)
+            .appendingPathComponent(trimmed)
+        if FileManager.default.fileExists(atPath: bookmarkURL.path) {
+            return true
+        }
+
+        let legacyVaultURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(trimmed)
+        return FileManager.default.fileExists(atPath: legacyVaultURL.path)
     }
 
     private static func bookmarkCaptureRepairCommands(for bookmark: Bookmark) -> [String] {
