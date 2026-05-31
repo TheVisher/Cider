@@ -1,6 +1,40 @@
 import AppKit
 import Foundation
 
+enum NoteContentIOOperation: String, Equatable, Sendable {
+    case read
+    case write
+}
+
+struct NoteContentIOIssue: Equatable, Sendable {
+    let noteID: UUID
+    let relativePath: String
+    let fileURL: URL
+    let operation: NoteContentIOOperation
+    let message: String
+
+    init(noteID: UUID, relativePath: String, fileURL: URL, operation: NoteContentIOOperation, error: Error) {
+        self.noteID = noteID
+        self.relativePath = relativePath
+        self.fileURL = fileURL
+        self.operation = operation
+        self.message = error.localizedDescription
+    }
+}
+
+struct NoteContentResult: Equatable, Sendable {
+    let content: String?
+    let issue: NoteContentIOIssue?
+
+    static func success(_ content: String) -> NoteContentResult {
+        NoteContentResult(content: content, issue: nil)
+    }
+
+    static func failure(_ issue: NoteContentIOIssue) -> NoteContentResult {
+        NoteContentResult(content: nil, issue: issue)
+    }
+}
+
 struct Note: Identifiable, Hashable {
     let id: UUID
     var title: String
@@ -44,10 +78,27 @@ struct Note: Identifiable, Hashable {
     /// The raw content to use for display — loads from disk if the in-memory field is empty.
     /// Internal so NoteCardData.load() can call it once and pass through.
     var resolvedContent: String {
-        if !content.isEmpty { return content }
-        guard !relativePath.isEmpty else { return "" }
+        if let content = resolvedContentResult.content {
+            return content
+        }
+        return ""
+    }
+
+    var resolvedContentResult: NoteContentResult {
+        if !content.isEmpty { return .success(content) }
+        guard !relativePath.isEmpty else { return .success("") }
         let fileURL = absoluteFileURL
-        return (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+        do {
+            return .success(try String(contentsOf: fileURL, encoding: .utf8))
+        } catch {
+            return .failure(NoteContentIOIssue(
+                noteID: id,
+                relativePath: relativePath,
+                fileURL: fileURL,
+                operation: .read,
+                error: error
+            ))
+        }
     }
 
     /// Resolves the absolute file URL for this note.

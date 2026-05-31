@@ -9,12 +9,18 @@ struct NoteSnapshotInfo: Identifiable, Hashable {
     let modifiedAt: Date
 }
 
+struct NoteAttachmentReferenceScan: Equatable, Sendable {
+    let referencedFilenames: Set<String>
+    let unreadableNoteURLs: [URL]
+}
+
 /// Manages notes as .md files on disk with a lightweight JSON index for UUID mapping.
 @MainActor
 final class NotesStorage: ObservableObject {
     static let shared = NotesStorage()
 
     @Published private(set) var notes: [Note] = []
+    @Published private(set) var lastContentIOIssue: NoteContentIOIssue?
 
     private let logger = Logger(subsystem: "com.cider.app", category: "NotesStorage")
 
@@ -1046,14 +1052,35 @@ final class NotesStorage: ObservableObject {
         return note
     }
 
-    func loadContent(for note: Note) -> String {
+    func loadContentResult(for note: Note) -> NoteContentResult {
         if let cached = contentCache[note.id], cached.modifiedAt == note.modifiedAt {
-            return cached.content
+            return .success(cached.content)
         }
         let fileURL = noteFileURL(for: note)
-        let content = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
-        contentCache[note.id] = (note.modifiedAt, content)
-        return content
+        do {
+            let content = try String(contentsOf: fileURL, encoding: .utf8)
+            contentCache[note.id] = (note.modifiedAt, content)
+            lastContentIOIssue = nil
+            return .success(content)
+        } catch {
+            let issue = NoteContentIOIssue(
+                noteID: note.id,
+                relativePath: note.relativePath,
+                fileURL: fileURL,
+                operation: .read,
+                error: error
+            )
+            lastContentIOIssue = issue
+            logger.error("Failed to read note content at \(fileURL.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return .failure(issue)
+        }
+    }
+
+    func loadContent(for note: Note) -> String {
+        if let content = loadContentResult(for: note).content {
+            return content
+        }
+        return note.content
     }
 
     /// Convert stored markdown to editor-friendly markdown (absolute image paths).
@@ -1079,15 +1106,52 @@ final class NotesStorage: ObservableObject {
         return NotesMarkdownPathCodec.markdownForPersistence(markdown, notesDirectoryURL: noteDir)
     }
 
-    func save(note: Note, createSnapshot: Bool = true) {
+    @discardableResult
+    func save(note: Note, createSnapshot: Bool = true) -> Bool {
         let fileURL = noteFileURL(for: note)
-        let previousContent = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+        let previousContent: String
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                previousContent = try String(contentsOf: fileURL, encoding: .utf8)
+            } catch {
+                let issue = NoteContentIOIssue(
+                    noteID: note.id,
+                    relativePath: note.relativePath,
+                    fileURL: fileURL,
+                    operation: .read,
+                    error: error
+                )
+                lastContentIOIssue = issue
+                logger.error("Refusing to save note after unreadable previous content at \(fileURL.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                return false
+            }
+        } else {
+            previousContent = ""
+        }
 
         if createSnapshot, previousContent != note.content {
             saveSnapshot(content: previousContent, for: note)
         }
 
-        try? note.content.write(to: fileURL, atomically: true, encoding: .utf8)
+        do {
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try note.content.write(to: fileURL, atomically: true, encoding: .utf8)
+            lastContentIOIssue = nil
+        } catch {
+            let issue = NoteContentIOIssue(
+                noteID: note.id,
+                relativePath: note.relativePath,
+                fileURL: fileURL,
+                operation: .write,
+                error: error
+            )
+            lastContentIOIssue = issue
+            logger.error("Failed to write note content at \(fileURL.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return false
+        }
 
         if previousContent != note.content {
             scheduleAttachmentCleanup()
@@ -1102,6 +1166,7 @@ final class NotesStorage: ObservableObject {
             notes[idx].content = note.content
             persistNoteToDatabase(notes[idx])
         }
+        return true
     }
 
     func scheduleSave(note: Note) {
@@ -2000,7 +2065,12 @@ final class NotesStorage: ObservableObject {
             return
         }
 
-        let referencedFiles = referencedAttachmentFilenamesFromPaths(notePaths)
+        let referenceScan = referencedAttachmentScan(fromNotePaths: notePaths)
+        let referencedFiles = referenceScan.referencedFilenames
+        if !referenceScan.unreadableNoteURLs.isEmpty {
+            let logger = Logger(subsystem: "com.cider.app", category: "NotesStorage")
+            logger.error("Attachment cleanup skipped \(referenceScan.unreadableNoteURLs.count, privacy: .public) unreadable note files while scanning references.")
+        }
         let orphanCutoff = Date().addingTimeInterval(-gracePeriodSeconds)
 
         for fileURL in attachmentURLs {
@@ -2025,7 +2095,7 @@ final class NotesStorage: ObservableObject {
         }
     }
 
-    private nonisolated static func referencedAttachmentFilenamesFromPaths(_ notePaths: [URL]) -> Set<String> {
+    nonisolated static func referencedAttachmentScan(fromNotePaths notePaths: [URL]) -> NoteAttachmentReferenceScan {
         // Matches relative: (.attachments/file) or (./\.attachments/file)
         // Also matches absolute file:// URLs: (file:///path/.attachments/file)
         let markdownReferencePattern = #"\((?:file:///[^)]*?/|(?:\./)?)?\.attachments/([^)]+)\)"#
@@ -2035,9 +2105,11 @@ final class NotesStorage: ObservableObject {
         let htmlRegex = try? NSRegularExpression(pattern: htmlReferencePattern, options: [])
 
         var referenced = Set<String>()
+        var unreadableNoteURLs: [URL] = []
 
         for noteURL in notePaths {
             guard let content = try? String(contentsOf: noteURL, encoding: .utf8) else {
+                unreadableNoteURLs.append(noteURL)
                 continue
             }
 
@@ -2058,7 +2130,10 @@ final class NotesStorage: ObservableObject {
             }
         }
 
-        return referenced
+        return NoteAttachmentReferenceScan(
+            referencedFilenames: referenced,
+            unreadableNoteURLs: unreadableNoteURLs
+        )
     }
 
     private nonisolated static func extractAttachmentFilenames(
