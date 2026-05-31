@@ -1537,6 +1537,33 @@ final class VaultBookmarkService: ObservableObject {
         bookmark = renameBookmarkArtifactAfterTitleUpgrade(previous: previous, updated: bookmark)
         bookmarks[index] = bookmark
         persist()
+        SecondBrainItemMutationIndexer.rebuildAfterMutation(
+            database: resolvedDatabase,
+            ownerType: "bookmark",
+            ownerID: bookmarkID
+        )
+    }
+
+    @discardableResult
+    func applyStoredOCRTitleCandidateIfNeeded(for bookmarkID: UUID) -> Bookmark? {
+        guard let bookmark = bookmarks.first(where: { $0.id == bookmarkID }),
+              let ocrText = bookmark.ocrText,
+              let title = BookmarkAIEnrichment.suggestedTitleFromOCR(
+                  ocrText,
+                  currentTitle: bookmark.title,
+                  urlString: bookmark.urlString,
+                  titleManuallySet: bookmark.titleManuallySet
+              )
+        else { return nil }
+
+        applyAIResults(
+            for: bookmarkID,
+            tags: bookmark.tags,
+            ocrText: bookmark.ocrText,
+            dominantColors: bookmark.dominantColors,
+            title: title
+        )
+        return bookmarks.first(where: { $0.id == bookmarkID })
     }
 
     func applyOEmbedResults(
@@ -1562,6 +1589,11 @@ final class VaultBookmarkService: ObservableObject {
         bookmark = renameBookmarkArtifactAfterTitleUpgrade(previous: previous, updated: bookmark)
         bookmarks[index] = bookmark
         persist()
+        SecondBrainItemMutationIndexer.rebuildAfterMutation(
+            database: resolvedDatabase,
+            ownerType: "bookmark",
+            ownerID: bookmarkID
+        )
     }
 
     func applyAISummary(_ summary: String, for bookmarkID: UUID) {

@@ -1697,6 +1697,52 @@ struct BookmarkSQLiteTests {
         #expect(!fm.fileExists(atPath: oldURL.path))
     }
 
+    @Test("Stored TikTok OCR title promotion renames generic bookmark artifact")
+    func storedTikTokOCRTitlePromotionRenamesGenericArtifact() throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-tiktok-ocr-artifact-rename-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let oldRelativePath = "Inbox/Bookmarks/Tiktok.Com (3).webloc"
+        let oldURL = vault.appendingPathComponent(oldRelativePath)
+        let sourceURL = "https://www.tiktok.com/t/ZP8poHUSr/"
+        let plist = ["URL": sourceURL]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: oldURL, options: .atomic)
+
+        let bookmarkID = UUID()
+        let service = makeService(db)
+        let bookmark = Bookmark(
+            id: bookmarkID,
+            title: "TikTok - Make Your Day",
+            urlString: sourceURL,
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            ocrText: "Richmond night market 5/29/26 BAU BOT TITKE",
+            relativePath: oldRelativePath
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        let updated = try #require(service.applyStoredOCRTitleCandidateIfNeeded(for: bookmarkID))
+
+        #expect(updated.title == "Richmond Night Market 5/29/26")
+        #expect(updated.relativePath == "Inbox/Bookmarks/Richmond Night Market 5-29-26.webloc")
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Inbox/Bookmarks/Richmond Night Market 5-29-26.webloc").path))
+        #expect(!fm.fileExists(atPath: oldURL.path))
+    }
+
     @Test("OEmbed title enrichment can replace provider-generic manual title")
     func oEmbedTitleEnrichmentReplacesProviderGenericManualTitle() throws {
         let (db, url) = try makeTestDB()

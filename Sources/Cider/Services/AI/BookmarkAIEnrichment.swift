@@ -139,7 +139,12 @@ final class BookmarkAIEnrichment {
         // ── 5a. Smart title from OCR (image bookmarks with generic titles) ──────
         // Skip if the user or an external agent explicitly set the title.
         var suggestedTitle: String?
-        if let text = ocrText, !text.isEmpty, !bookmark.titleManuallySet, isGenericImageTitle(bookmark.title) {
+        if let text = ocrText, !text.isEmpty,
+           Self.canUseOCRTitle(
+               currentTitle: bookmark.title,
+               urlString: bookmark.urlString,
+               titleManuallySet: bookmark.titleManuallySet
+           ) {
             // Prefer Apple Intelligence if available, fall back to first OCR line
             if let aiTitle = await SummaryService.shared.suggestTitle(
                 currentTitle: bookmark.title,
@@ -147,7 +152,12 @@ final class BookmarkAIEnrichment {
             ) {
                 suggestedTitle = aiTitle
             } else {
-                suggestedTitle = extractTitleFromOCR(text)
+                suggestedTitle = Self.suggestedTitleFromOCR(
+                    text,
+                    currentTitle: bookmark.title,
+                    urlString: bookmark.urlString,
+                    titleManuallySet: bookmark.titleManuallySet
+                )
             }
         }
 
@@ -199,8 +209,34 @@ final class BookmarkAIEnrichment {
         return existing + newSuggested
     }
 
+    static func suggestedTitleFromOCR(
+        _ text: String,
+        currentTitle: String,
+        urlString: String,
+        titleManuallySet: Bool
+    ) -> String? {
+        guard canUseOCRTitle(
+            currentTitle: currentTitle,
+            urlString: urlString,
+            titleManuallySet: titleManuallySet
+        ) else { return nil }
+        return extractTitleFromOCR(text, urlString: urlString)
+    }
+
+    private static func canUseOCRTitle(
+        currentTitle: String,
+        urlString: String,
+        titleManuallySet: Bool
+    ) -> Bool {
+        if titleManuallySet { return false }
+        if isGenericImageTitle(currentTitle) { return true }
+        guard let url = URL(string: urlString) else { return false }
+        return isHostDerivedTitle(currentTitle, sourceURL: url)
+            || isProviderGenericTitle(currentTitle, sourceURL: url)
+    }
+
     /// Returns true if the title looks like a generic placeholder that can be replaced.
-    private func isGenericImageTitle(_ title: String) -> Bool {
+    private static func isGenericImageTitle(_ title: String) -> Bool {
         let t = title.trimmingCharacters(in: .whitespaces)
         if t.isEmpty { return true }
         if t.lowercased() == "saved image" { return true }
@@ -212,13 +248,90 @@ final class BookmarkAIEnrichment {
     }
 
     /// Extract a meaningful title from the first non-trivial line of OCR text.
-    private func extractTitleFromOCR(_ text: String) -> String? {
+    private static func extractTitleFromOCR(_ text: String, urlString: String) -> String? {
         let lines = text
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { $0.count >= 4 && !$0.allSatisfy { $0.isNumber || $0.isPunctuation || $0 == " " } }
         guard let firstLine = lines.first else { return nil }
-        let truncated = String(firstLine.prefix(60))
-        return truncated.capitalized
+        let cleaned = cleanOCRTitleLine(firstLine, urlString: urlString)
+        guard !cleaned.isEmpty else { return nil }
+        let truncated = String(cleaned.prefix(60))
+        return titleCased(truncated)
+    }
+
+    private static func cleanOCRTitleLine(_ line: String, urlString: String) -> String {
+        var cleaned = line
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let url = URL(string: urlString),
+           (url.host?.lowercased() ?? "").contains("tiktok.com"),
+           let dateRange = cleaned.range(
+               of: #"\b\d{1,2}/\d{1,2}/\d{2,4}\b"#,
+               options: .regularExpression
+           ) {
+            cleaned = String(cleaned[...dateRange.upperBound])
+        }
+
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func titleCased(_ title: String) -> String {
+        title
+            .split(separator: " ")
+            .map { word in
+                if word.count <= 3, word.allSatisfy(\.isUppercase) {
+                    return String(word)
+                }
+                return word.capitalized
+            }
+            .joined(separator: " ")
+    }
+
+    private static func isHostDerivedTitle(_ title: String, sourceURL: URL) -> Bool {
+        let current = duplicateSuffixStrippedTitle(title)
+        guard !current.isEmpty else { return true }
+        let hostTitle = resolvedTitle(for: sourceURL)
+        return current.caseInsensitiveCompare(hostTitle) == .orderedSame
+    }
+
+    private static func isProviderGenericTitle(_ title: String, sourceURL: URL) -> Bool {
+        let normalized = duplicateSuffixStrippedTitle(title)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return true }
+
+        let host = sourceURL.host?.lowercased() ?? ""
+        let genericTitles: [String]
+        if host.contains("tiktok.com") {
+            genericTitles = ["tiktok - make your day"]
+        } else if host.contains("instagram.com") {
+            genericTitles = ["instagram"]
+        } else if host.contains("reddit.com") {
+            genericTitles = [
+                "reddit - dive into anything",
+                "reddit - the heart of the internet",
+            ]
+        } else if host.contains("x.com") || host.contains("twitter.com") {
+            genericTitles = ["x.com", "x", "twitter", "twitter.com"]
+        } else {
+            genericTitles = []
+        }
+        return genericTitles.contains(normalized)
+    }
+
+    private static func resolvedTitle(for url: URL) -> String {
+        if let host = url.host {
+            let hostWithoutWWW = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+            return hostWithoutWWW.capitalized
+        }
+        return url.absoluteString
+    }
+
+    private static func duplicateSuffixStrippedTitle(_ title: String) -> String {
+        title
+            .replacingOccurrences(of: #" \(\d+\)$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

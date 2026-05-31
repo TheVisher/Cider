@@ -15,4 +15,28 @@ struct BookmarkEnrichmentPolicyTests {
             hasRealThumbnail: true
         ))
     }
+
+    @Test("TikTok generic title uses OCR as visible title candidate")
+    func tiktokGenericTitleUsesOCRAsVisibleTitleCandidate() {
+        let suggested = BookmarkAIEnrichment.suggestedTitleFromOCR(
+            "Richmond night market 5/29/26 BAU BOT TITKE",
+            currentTitle: "TikTok - Make Your Day",
+            urlString: "https://www.tiktok.com/t/ZP8poHUSr/",
+            titleManuallySet: false
+        )
+
+        #expect(suggested == "Richmond Night Market 5/29/26")
+    }
+
+    @Test("TikTok OCR title candidate does not replace manual title")
+    func tiktokOCRTitleCandidateDoesNotReplaceManualTitle() {
+        let suggested = BookmarkAIEnrichment.suggestedTitleFromOCR(
+            "Richmond night market 5/29/26",
+            currentTitle: "My TikTok Dinner Ideas",
+            urlString: "https://www.tiktok.com/t/ZP8poHUSr/",
+            titleManuallySet: true
+        )
+
+        #expect(suggested == nil)
+    }
 }

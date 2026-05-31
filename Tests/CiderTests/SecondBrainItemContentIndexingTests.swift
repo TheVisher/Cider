@@ -142,6 +142,32 @@ struct SecondBrainItemContentIndexingTests {
         }
     }
 
+    @Test("bookmark OCR title promotion rebuilds searchable chunks")
+    func bookmarkOCRTitlePromotionRebuildsSearchableChunks() throws {
+        try withIsolatedVault { db, _ in
+            let bookmark = Bookmark(
+                title: "TikTok - Make Your Day",
+                urlString: "https://www.tiktok.com/t/ZP8poHUSr/",
+                ocrText: "Richmond night market 5/29/26 BAU BOT TITKE",
+                relativePath: "Inbox/Bookmarks/Tiktok.Com (3).webloc"
+            )
+            let seed = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            seed.persistBookmarkToDatabase(db, bookmark: bookmark)
+
+            let service = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            service.loadBookmarksFromDatabase(db)
+
+            let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmark.id.uuidString)
+            _ = try SecondBrainItemContentIndexingService(database: db).rebuild(owner: owner)
+
+            _ = service.applyStoredOCRTitleCandidateIfNeeded(for: bookmark.id)
+
+            let store = SecondBrainStore(database: db)
+            #expect(try store.searchChunks(query: "\"Make Your Day\"", limit: 5).isEmpty)
+            #expect(try store.searchChunks(query: "\"Richmond Night Market\"", limit: 5).first?.owner == owner)
+        }
+    }
+
     @Test("bookmark folder assignment rebuilds searchable chunks")
     func bookmarkFolderAssignmentRebuildsSearchableChunks() throws {
         try withIsolatedVault { db, _ in
