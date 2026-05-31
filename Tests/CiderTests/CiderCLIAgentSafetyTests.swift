@@ -458,6 +458,21 @@ struct CiderCLIAgentSafetyTests {
         #expect(!result.stderr.contains("Source required"))
     }
 
+    @Test("cli help documents source path versus destination path flags")
+    func cliHelpDocumentsSourcePathVersusDestinationPathFlags() throws {
+        let captureHelp = try runCLI(args: ["capture", "add", "--help"])
+        let itemHelp = try runCLI(args: ["item", "help"])
+        let topHelp = try runCLI(args: ["help"])
+
+        #expect(captureHelp.stdout.contains("--path <source-file-path>"))
+        #expect(captureHelp.stdout.contains("--folder <target-folder-path>"))
+        #expect(captureHelp.stdout.contains("Example destination: --folder \"Inbox/Notes\""))
+        #expect(itemHelp.stdout.contains("--path <target-folder-path>"))
+        #expect(itemHelp.stdout.contains("Do not pass artifact filenames such as Example.webloc to item move --path."))
+        #expect(topHelp.stdout.contains("--path <source-file-path>"))
+        #expect(topHelp.stdout.contains("--path <target-folder-path>"))
+    }
+
     @Test("capture add event and contact reject missing required fields")
     func captureAddEventAndContactRejectMissingRequiredFields() throws {
         let eventResult = try runCLI(args: [
@@ -953,6 +968,59 @@ struct CiderCLIAgentSafetyTests {
         let path = try db.prepare("SELECT relative_path FROM items WHERE type = 'vaultFile' LIMIT 1;")
         #expect(try path.step())
         #expect(path.string(at: 0).hasPrefix("Inbox/Files/"))
+    }
+
+    @Test("capture add accepts nested target folder paths through folder flag")
+    func captureAddAcceptsNestedTargetFolderPathsThroughFolderFlag() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-capture-folder-path-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "note",
+                "--folder", "Inbox/Notes",
+                "Nested folder target note",
+                "--json",
+            ],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        let item = try #require(payload["item"] as? [String: Any])
+        #expect(item["relativePath"] as? String == "Inbox/Notes/Nested folder target note.md")
+        let routing = try #require(payload["routing"] as? [String: Any])
+        #expect(routing["status"] as? String == "recorded")
+        #expect(routing["statusReason"] == nil)
+    }
+
+    @Test("item move path rejects filename shaped target folders")
+    func itemMovePathRejectsFilenameShapedTargetFolders() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-item-move-file-path-guard-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let createResult = try runCLI(
+            args: ["note", "create", "Do Not File Shape", "--content", "body", "--json"],
+            vault: vault
+        )
+        let created = try parseJSONObject(createResult.stdout)
+        let noteID = try #require(created["id"] as? String)
+
+        let moveResult = try runCLI(
+            args: ["item", "move", "note", noteID, "--path", "Inbox/Bookmarks/Example.webloc", "--json"],
+            vault: vault
+        )
+        let move = try parseJSONObject(moveResult.stdout)
+
+        #expect(moveResult.status != 0)
+        #expect(move["ok"] as? Bool == false)
+        #expect((move["error"] as? String)?.contains("looks like a file path") == true)
+        #expect((move["error"] as? String)?.contains("--folder Inbox/Bookmarks") == true)
     }
 
     @Test("item move note into project notes records project ownership and unfile clears it")
