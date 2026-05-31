@@ -5916,10 +5916,25 @@ struct CiderCLI {
         switch subcommand {
         case "list", "ls":
             let boards = storage.boards
-            print("Boards (\(boards.count)):")
-            for board in boards {
-                let cols = board.columns.map { "\($0.name)(\($0.cards.count))" }.joined(separator: ", ")
-                print("  [\(board.id)] \(board.name) — \(cols)")
+            if jsonOutput {
+                outputJSON(boardReadEnvelope(
+                    command: "board.list",
+                    payload: [
+                        "count": boards.count,
+                        "boards": boards.map { board in
+                            var dict = boardIdentityDict(board)
+                            dict["columns"] = board.columns.map(boardColumnSummaryToDict)
+                            dict["cardCount"] = board.columns.reduce(0) { $0 + $1.cards.count }
+                            return dict
+                        },
+                    ]
+                ))
+            } else {
+                print("Boards (\(boards.count)):")
+                for board in boards {
+                    let cols = board.columns.map { "\($0.name)(\($0.cards.count))" }.joined(separator: ", ")
+                    print("  [\(board.id)] \(board.name) — \(cols)")
+                }
             }
 
         case "audit":
@@ -5951,11 +5966,16 @@ struct CiderCLI {
                 print("Error: Board name required.")
                 return
             }
-            if let board = storage.boards.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame || $0.id == name }) {
+            if let board = findBoardSilently(name, in: storage) {
                 guard let tagFilters = parseBoardTagFilters(from: args) else { return }
                 let visibleBoard = board.filteredByTags(tagFilters)
                 if jsonOutput {
-                    outputJSON(boardToDict(visibleBoard))
+                    var payload: [String: Any] = [
+                        "boardDetail": boardToDict(visibleBoard),
+                        "tagFilters": tagFilters,
+                    ]
+                    payload["columns"] = visibleBoard.columns.map(boardColumnSummaryToDict)
+                    outputJSON(boardReadEnvelope(command: "board.show", board: visibleBoard, payload: payload))
                 } else {
                     print("Board: \(visibleBoard.name) (\(visibleBoard.id))")
                     if !tagFilters.isEmpty {
@@ -5975,7 +5995,7 @@ struct CiderCLI {
                     }
                 }
             } else {
-                print("Error: Board '\(name)' not found")
+                printBoardReadError(command: "board.show", message: "Board '\(name)' not found", boardRef: name)
             }
 
         case "tags":
@@ -5997,10 +6017,17 @@ struct CiderCLI {
                 print("Error: Usage: cider-cli board workflow <board> [--json]")
                 return
             }
-            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let board = findBoardSilently(boardRef, in: storage) else {
+                printBoardReadError(command: "board.workflow", message: "Board '\(boardRef)' not found", boardRef: boardRef)
+                return
+            }
             let summary = KanbanAgentWorkflowSummary(board: board)
             if jsonOutput {
-                outputJSON(kanbanAgentWorkflowSummaryToDict(summary))
+                outputJSON(boardReadEnvelope(
+                    command: "board.workflow",
+                    board: board,
+                    payload: ["workflow": kanbanAgentWorkflowSummaryToDict(summary)]
+                ))
             } else {
                 print("Agent workflow for: \(summary.boardName) [\(summary.boardID)]")
                 if summary.laneSummaries.isEmpty {
@@ -6037,15 +6064,20 @@ struct CiderCLI {
                 printCLIError("Invalid --limit '\(parseFlag("--limit", from: args) ?? "")'. Use a positive number.")
                 return
             }
-            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let board = findBoardSilently(boardRef, in: storage) else {
+                printBoardReadError(command: "board.recent", message: "Board '\(boardRef)' not found", boardRef: boardRef)
+                return
+            }
             let recentCards = recentKanbanCards(in: board, limit: limitValue)
             if jsonOutput {
-                outputJSON([
-                    "ok": true,
-                    "board": ["id": board.id, "name": board.name],
+                outputJSON(boardReadEnvelope(
+                    command: "board.recent",
+                    board: board,
+                    payload: [
                     "limit": limitValue,
                     "cards": recentCards.map(boardRecentCardToDict),
-                ])
+                    ]
+                ))
             } else if recentCards.isEmpty {
                 print("No cards found for board: \(board.name)")
             } else {
@@ -6062,10 +6094,17 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli board testing-summary <board> [--json]")
                 return
             }
-            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let board = findBoardSilently(boardRef, in: storage) else {
+                printBoardReadError(command: "board.testing-summary", message: "Board '\(boardRef)' not found", boardRef: boardRef)
+                return
+            }
             let summary = KanbanTestingTriageSummary(board: board)
             if jsonOutput {
-                outputJSON(kanbanTestingTriageSummaryToDict(summary))
+                outputJSON(boardReadEnvelope(
+                    command: "board.testing-summary",
+                    board: board,
+                    payload: ["testingSummary": kanbanTestingTriageSummaryToDict(summary)]
+                ))
             } else {
                 print("Testing summary for: \(summary.boardName) [\(summary.boardID)]")
                 print("  Needs Erik: \(summary.needsErik.count)  Agent can verify: \(summary.agentCanVerify.count)  Mixed: \(summary.mixed.count)")
@@ -6080,13 +6119,16 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli board parent-summary <board> --card <id> [--refresh --dry-run|--confirm] [--json]")
                 return
             }
-            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let board = findBoardSilently(boardRef, in: storage) else {
+                printBoardReadError(command: "board.parent-summary", message: "Board '\(boardRef)' not found", boardRef: boardRef)
+                return
+            }
             guard var parent = board.card(matching: cardID) else {
-                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                printBoardReadError(command: "board.parent-summary", message: "Card '\(cardID)' not found in board '\(board.name)'", board: board, cardRef: cardID)
                 return
             }
             guard let rollup = KanbanParentChildRollup(board: board, parentID: parent.id) else {
-                printCLIError("Card '\(parent.title)' has no child cards.")
+                printBoardReadError(command: "board.parent-summary", message: "Card '\(parent.title)' has no child cards.", board: board, card: parent)
                 return
             }
 
@@ -6112,13 +6154,18 @@ struct CiderCLI {
             }
 
             if jsonOutput {
-                outputJSON(parentSummaryToDict(
+                outputJSON(boardReadEnvelope(
+                    command: "board.parent-summary",
+                    board: board,
+                    card: parent,
+                    payload: ["parentSummary": parentSummaryToDict(
                     board: board,
                     parent: parent,
                     rollup: rollup,
                     plan: plan,
                     refreshRequested: refreshRequested,
                     applied: applied
+                    )]
                 ))
             } else {
                 print("Parent summary: \(parent.title) [\(parent.id)]")
@@ -6146,16 +6193,24 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli board card inspect <board> --card <id> [--json]")
                 return
             }
-            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let board = findBoardSilently(boardRef, in: storage) else {
+                printBoardReadError(command: "board.card.inspect", message: "Board '\(boardRef)' not found", boardRef: boardRef, cardRef: cardID)
+                return
+            }
             guard let card = board.card(matching: cardID) else {
-                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                printBoardReadError(command: "board.card.inspect", message: "Card '\(cardID)' not found in board '\(board.name)'", board: board, cardRef: cardID)
                 return
             }
             let column = board.columns.first { column in
                 column.cards.contains { $0.id == card.id }
             }
             if jsonOutput {
-                outputJSON(boardCardInspectToDict(board: board, column: column, card: card))
+                outputJSON(boardReadEnvelope(
+                    command: "board.card.inspect",
+                    board: board,
+                    card: card,
+                    payload: boardCardInspectToDict(board: board, column: column, card: card)
+                ))
             } else {
                 print("Card: \(card.title) [\(card.id)]")
                 if let column {
@@ -6177,16 +6232,21 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli board children <board> --card <id>")
                 return
             }
-            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let board = findBoardSilently(boardRef, in: storage) else {
+                printBoardReadError(command: "board.children", message: "Board '\(boardRef)' not found", boardRef: boardRef, cardRef: cardID)
+                return
+            }
             guard let parent = board.card(matching: cardID) else {
-                printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                printBoardReadError(command: "board.children", message: "Card '\(cardID)' not found in board '\(board.name)'", board: board, cardRef: cardID)
                 return
             }
             let children = board.childCards(of: parent.id)
             if jsonOutput {
-                outputJSON([
-                    "board": board.name,
-                    "card": parent.id,
+                outputJSON(boardReadEnvelope(
+                    command: "board.children",
+                    board: board,
+                    card: parent,
+                    payload: [
                     "children": children.map { child in
                         var dict: [String: Any] = [
                             "id": child.id,
@@ -6198,7 +6258,8 @@ struct CiderCLI {
                         if let completed = child.completed { dict["completed"] = ISO8601DateFormatter().string(from: completed) }
                         return dict
                     },
-                ])
+                    ]
+                ))
             } else if children.isEmpty {
                 print("No child cards for: \(parent.title) [\(parent.id)]")
             } else {
@@ -9115,13 +9176,17 @@ struct CiderCLI {
     }
 
     static func findBoard(_ nameOrID: String, in storage: KanbanStorage) -> KanbanBoard? {
-        if let board = storage.boards.first(where: {
-            $0.name.localizedCaseInsensitiveCompare(nameOrID) == .orderedSame || $0.id == nameOrID
-        }) {
+        if let board = findBoardSilently(nameOrID, in: storage) {
             return board
         }
         printCLIError("Board '\(nameOrID)' not found")
         return nil
+    }
+
+    static func findBoardSilently(_ nameOrID: String, in storage: KanbanStorage) -> KanbanBoard? {
+        storage.boards.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(nameOrID) == .orderedSame || $0.id == nameOrID
+        })
     }
 
     static func printTestingTriageSection(_ title: String, items: [KanbanTestingTriageSummary.Item]) {
@@ -11835,6 +11900,64 @@ struct CiderCLI {
             commands.append("cider-cli board card inspect \(board.id) --card \(card.id) --json")
         }
         return commands
+    }
+
+    static func boardReadEnvelope(
+        command: String,
+        board: KanbanBoard? = nil,
+        card: KanbanCard? = nil,
+        payload: [String: Any] = [:]
+    ) -> [String: Any] {
+        var dict = payload
+        dict["ok"] = true
+        dict["command"] = command
+        dict["readOnly"] = true
+        dict["changed"] = false
+        if let board {
+            dict["board"] = boardIdentityDict(board)
+            dict["safeVerificationCommands"] = boardVerificationCommands(board: board, card: card)
+        } else {
+            dict["safeVerificationCommands"] = ["cider-cli board list --json"]
+        }
+        if let card, dict["card"] == nil {
+            dict["card"] = board.map { boardCardSummaryToDict(board: $0, card: card) } ?? minimalCardToDict(card)
+        }
+        return dict
+    }
+
+    static func printBoardReadError(
+        command: String,
+        message: String,
+        boardRef: String? = nil,
+        board: KanbanBoard? = nil,
+        cardRef: String? = nil,
+        card: KanbanCard? = nil
+    ) {
+        processExitCode = 1
+        if jsonOutput {
+            var dict: [String: Any] = [
+                "ok": false,
+                "command": command,
+                "readOnly": true,
+                "changed": false,
+                "error": message,
+                "safeVerificationCommands": ["cider-cli board list --json"]
+            ]
+            if let board {
+                dict["board"] = boardIdentityDict(board)
+                dict["safeVerificationCommands"] = boardVerificationCommands(board: board, card: card)
+            } else if let boardRef {
+                dict["boardRef"] = boardRef
+            }
+            if let card {
+                dict["card"] = board.map { boardCardSummaryToDict(board: $0, card: card) } ?? minimalCardToDict(card)
+            } else if let cardRef {
+                dict["cardRef"] = cardRef
+            }
+            outputJSON(dict)
+        } else {
+            print("Error: \(message)")
+        }
     }
 
     static func boardMutationEnvelope(

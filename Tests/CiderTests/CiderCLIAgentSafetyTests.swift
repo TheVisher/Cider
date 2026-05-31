@@ -1285,6 +1285,75 @@ struct CiderCLIAgentSafetyTests {
         #expect(deleteBoardPayload["changed"] as? Bool == true)
     }
 
+    @Test("board read commands return normalized strict process json")
+    func boardReadCommandsReturnNormalizedStrictProcessJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-board-read-json-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let create = try runCLI(args: ["board", "create", "Agent Read Board", "--json"], vault: vault)
+        let createPayload = try parseJSONObject(create.stdout)
+        let board = try #require(createPayload["board"] as? [String: Any])
+        let boardID = try #require(board["id"] as? String)
+
+        let addCard = try runCLI(
+            args: ["board", "add-card", boardID, "--column", "Backlog", "--title", "Read JSON card", "--json"],
+            vault: vault
+        )
+        let addCardPayload = try parseJSONObject(addCard.stdout)
+        let card = try #require(addCardPayload["card"] as? [String: Any])
+        let cardID = try #require(card["id"] as? String)
+
+        let list = try runCLI(args: ["board", "list", "--json"], vault: vault)
+        let listPayload = try parseJSONObject(list.stdout)
+        #expect(list.status == 0)
+        #expect(listPayload["ok"] as? Bool == true)
+        #expect(listPayload["command"] as? String == "board.list")
+        #expect(listPayload["readOnly"] as? Bool == true)
+        #expect(listPayload["changed"] as? Bool == false)
+        #expect((listPayload["boards"] as? [[String: Any]])?.contains { $0["id"] as? String == boardID } == true)
+
+        let show = try runCLI(args: ["board", "show", boardID, "--json"], vault: vault)
+        let showPayload = try parseJSONObject(show.stdout)
+        #expect(show.status == 0)
+        #expect(showPayload["command"] as? String == "board.show")
+        #expect(showPayload["readOnly"] as? Bool == true)
+        #expect(showPayload["changed"] as? Bool == false)
+        #expect(showPayload["boardDetail"] as? [String: Any] != nil)
+
+        let workflow = try runCLI(args: ["board", "workflow", boardID, "--json"], vault: vault)
+        let workflowPayload = try parseJSONObject(workflow.stdout)
+        #expect(workflow.status == 0)
+        #expect(workflowPayload["command"] as? String == "board.workflow")
+
+        let recent = try runCLI(args: ["board", "recent", boardID, "--limit", "5", "--json"], vault: vault)
+        let recentPayload = try parseJSONObject(recent.stdout)
+        #expect(recent.status == 0)
+        #expect(recentPayload["command"] as? String == "board.recent")
+        #expect(recentPayload["limit"] as? Int == 5)
+
+        let inspect = try runCLI(args: ["board", "card", "inspect", boardID, "--card", cardID, "--json"], vault: vault)
+        let inspectPayload = try parseJSONObject(inspect.stdout)
+        #expect(inspect.status == 0)
+        #expect(inspectPayload["command"] as? String == "board.card.inspect")
+        #expect(inspectPayload["readOnly"] as? Bool == true)
+        #expect(inspectPayload["changed"] as? Bool == false)
+
+        let children = try runCLI(args: ["board", "children", boardID, "--card", cardID, "--json"], vault: vault)
+        let childrenPayload = try parseJSONObject(children.stdout)
+        #expect(children.status == 0)
+        #expect(childrenPayload["command"] as? String == "board.children")
+
+        let missing = try runCLI(args: ["board", "show", "missing-board", "--json"], vault: vault)
+        let missingPayload = try parseJSONObject(missing.stdout)
+        #expect(missing.status == 1)
+        #expect(missingPayload["ok"] as? Bool == false)
+        #expect(missingPayload["command"] as? String == "board.show")
+        #expect(missingPayload["readOnly"] as? Bool == true)
+        #expect(missingPayload["changed"] as? Bool == false)
+    }
+
     @Test("project context summary bounds relation-heavy output")
     func projectContextSummaryBoundsRelationHeavyOutput() throws {
         let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cider")
