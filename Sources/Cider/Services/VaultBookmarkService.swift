@@ -1981,6 +1981,19 @@ final class VaultBookmarkService: ObservableObject {
         enrichmentTasks[bookmarkID] = task
     }
 
+    func completeMetadataEnrichment(
+        for bookmarkID: UUID,
+        sourceURL: URL,
+        payload: BookmarkEnrichmentPayload?
+    ) async {
+        await completeEnrichment(
+            for: bookmarkID,
+            sourceURL: sourceURL,
+            payload: payload,
+            imageAssets: nil
+        )
+    }
+
     private func completeEnrichment(
         for bookmarkID: UUID,
         sourceURL: URL,
@@ -1991,6 +2004,7 @@ final class VaultBookmarkService: ObservableObject {
 
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
 
+        let previous = bookmarks[index]
         var bookmark = bookmarks[index]
         var changed = false
 
@@ -2072,6 +2086,7 @@ final class VaultBookmarkService: ObservableObject {
         changed = markEnrichmentComplete(&bookmark) || changed
         if changed { bookmark.updatedAt = Date() }
 
+        bookmark = renameBookmarkArtifactAfterTitleUpgrade(previous: previous, updated: bookmark)
         bookmarks[index] = bookmark
 
         if changed {

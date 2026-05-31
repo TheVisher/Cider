@@ -1697,6 +1697,60 @@ struct BookmarkSQLiteTests {
         #expect(!fm.fileExists(atPath: oldURL.path))
     }
 
+    @Test("Native metadata enrichment renames generic bookmark artifact")
+    func nativeMetadataEnrichmentRenamesGenericArtifact() async throws {
+        let (db, url) = try makeTestDB()
+        let fm = FileManager.default
+        let vault = fm.temporaryDirectory.appendingPathComponent("cider-native-artifact-rename-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let inbox = vault.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+        try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let oldRelativePath = "Inbox/Bookmarks/X.Com (9).webloc"
+        let oldURL = vault.appendingPathComponent(oldRelativePath)
+        let sourceURL = "https://x.com/paralivesgame/status/2051702756730122542?s=12"
+        let plist = ["URL": sourceURL]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: oldURL, options: .atomic)
+
+        let bookmarkID = UUID()
+        let service = makeService(db)
+        let bookmark = Bookmark(
+            id: bookmarkID,
+            title: "X.Com",
+            urlString: sourceURL,
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            relativePath: oldRelativePath
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        await service.completeMetadataEnrichment(
+            for: bookmarkID,
+            sourceURL: try #require(URL(string: sourceURL)),
+            payload: BookmarkEnrichmentPayload(
+                title: "Paralives: Paralives is out May 25th, 2026 in Early Access!!",
+                thumbnailURL: URL(string: "https://pbs.twimg.com/media/example.jpg"),
+                screenshotData: nil
+            )
+        )
+
+        let updated = try #require(service.bookmarks.first)
+        #expect(updated.title == "Paralives: Paralives is out May 25th, 2026 in Early Access!!")
+        #expect(updated.relativePath == "Inbox/Bookmarks/Paralives- Paralives is out May 25th, 2026 in Early Access!!.webloc")
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent("Inbox/Bookmarks/Paralives- Paralives is out May 25th, 2026 in Early Access!!.webloc").path))
+        #expect(!fm.fileExists(atPath: oldURL.path))
+    }
+
     @Test("Stored TikTok OCR title promotion renames generic bookmark artifact")
     func storedTikTokOCRTitlePromotionRenamesGenericArtifact() throws {
         let (db, url) = try makeTestDB()
