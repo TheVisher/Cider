@@ -40,14 +40,19 @@ struct ChatCaptureIntakeResult {
     var status: Status
     var reason: String
     var captureResult: CiderCaptureResult?
+    var captureResults: [CiderCaptureResult] = []
+    var captureEventID: UUID? = nil
+    var safeNextCommands: [String] = []
 }
 
 @MainActor
 final class ChatCaptureIntakeService {
     private let captureService: CiderCaptureService
+    private let database: CiderDatabase?
 
-    init(captureService: CiderCaptureService = CiderCaptureService()) {
+    init(captureService: CiderCaptureService = CiderCaptureService(), database: CiderDatabase? = nil) {
         self.captureService = captureService
+        self.database = database
     }
 
     func capture(_ input: ChatCaptureInput) throws -> ChatCaptureIntakeResult {
@@ -69,34 +74,46 @@ final class ChatCaptureIntakeService {
             return ChatCaptureIntakeResult(
                 status: .captured,
                 reason: "Captured through canonical capture service.",
-                captureResult: result
+                captureResult: result,
+                captureResults: [result]
             )
         }
 
-        if let localAttachment = input.attachments.first(where: { attachment in
+        let localAttachments = input.attachments.compactMap { attachment -> (ChatAttachment, String)? in
             guard let localPath = attachment.localPath?.trimmingCharacters(in: .whitespacesAndNewlines) else {
-                return false
+                return nil
             }
-            return !localPath.isEmpty
-        }), let localPath = localAttachment.localPath {
-            let result = try captureService.addFileCapture(
-                sourcePath: localPath,
-                title: localAttachment.filename,
-                folderID: nil,
-                sourceContext: sourceContext(for: input)
-            )
+            return localPath.isEmpty ? nil : (attachment, localPath)
+        }
+        if !localAttachments.isEmpty {
+            let results = try localAttachments.map { attachment, localPath in
+                try captureService.addFileCapture(
+                    sourcePath: localPath,
+                    title: attachment.filename,
+                    folderID: nil,
+                    sourceContext: sourceContext(for: input)
+                )
+            }
             return ChatCaptureIntakeResult(
                 status: .captured,
-                reason: "Captured local chat attachment through canonical capture service.",
-                captureResult: result
+                reason: localAttachments.count == 1
+                    ? "Captured local chat attachment through canonical capture service."
+                    : "Captured \(localAttachments.count) local chat attachments through canonical capture service.",
+                captureResult: results.first,
+                captureResults: results
             )
         }
 
         if !input.attachments.isEmpty {
+            let reviewEventID = try recordUnsupportedAttachmentReview(for: input)
             return ChatCaptureIntakeResult(
                 status: .needsReview,
-                reason: "Chat message contains unsupported attachment content without a local file path.",
-                captureResult: nil
+                reason: "Chat message contains unsupported attachment content without a local file path; Cider recorded it for review.",
+                captureResult: nil,
+                captureEventID: reviewEventID,
+                safeNextCommands: reviewEventID.map {
+                    ["cider-cli item backlinks capture_event \($0.uuidString) --json"]
+                } ?? []
             )
         }
 
@@ -128,5 +145,122 @@ final class ChatCaptureIntakeService {
             },
             metadata: input.metadata
         )
+    }
+
+    private var resolvedDatabase: CiderDatabase? {
+        database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
+    }
+
+    private func recordUnsupportedAttachmentReview(for input: ChatCaptureInput) throws -> UUID? {
+        guard let db = resolvedDatabase, db.isOpen else {
+            return nil
+        }
+
+        let eventID = UUID()
+        let context = sourceContext(for: input)
+        let metadata = DatabaseHelpers.encodeJSON(reviewMetadata(for: input)) ?? "{}"
+        try db.withTransaction {
+            let stmt = try db.prepare("""
+                INSERT INTO capture_events (
+                    id, source_kind, surface, channel, channel_id, thread_id, message_id,
+                    sender_id, sender_name, source_url, source_file, source_text,
+                    attachment_count, metadata, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """)
+            stmt.bind(eventID.uuidString, at: 1)
+                .bind("chat_unsupported_attachment", at: 2)
+                .bind(context.surface, at: 3)
+                .bind(context.channel, at: 4)
+                .bind(context.channelID, at: 5)
+                .bind(context.threadID, at: 6)
+                .bind(context.messageID, at: 7)
+                .bind(context.senderID, at: 8)
+                .bind(context.senderName, at: 9)
+                .bind(nil as String?, at: 10)
+                .bind(nil as String?, at: 11)
+                .bind(context.originalText, at: 12)
+                .bind(context.attachments.count, at: 13)
+                .bind(metadata, at: 14)
+                .bind(DatabaseHelpers.encode(Date()), at: 15)
+            try stmt.step()
+
+            try persistUnsupportedReviewAttachments(
+                context.attachments,
+                eventID: eventID,
+                database: db
+            )
+        }
+
+        try SecondBrainEnrichmentOutputService(database: db).record(SecondBrainEnrichmentOutput(
+            owner: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString),
+            kind: "unsupported_chat_attachment",
+            value: unsupportedAttachmentValue(for: input),
+            normalizedValue: "chat_unsupported_attachments:\(eventID.uuidString.lowercased())",
+            label: "Unsupported chat attachment",
+            evidence: "Chat capture included attachment metadata without a local file path.",
+            source: "chat.capture",
+            confidence: 1,
+            reviewState: "needs_review",
+            metadata: reviewMetadata(for: input)
+        ))
+
+        return eventID
+    }
+
+    private func persistUnsupportedReviewAttachments(
+        _ attachments: [CaptureSourceContext.Attachment],
+        eventID: UUID,
+        database: CiderDatabase
+    ) throws {
+        let now = DatabaseHelpers.encode(Date())
+        for (index, attachment) in attachments.enumerated() {
+            let attachmentID = UUID()
+            let metadata = DatabaseHelpers.encodeJSON([
+                "capture_event_id": eventID.uuidString,
+                "attachment_index": String(index),
+                "review_state": "needs_review",
+            ]) ?? "{}"
+            let stmt = try database.prepare("""
+                INSERT INTO capture_attachments (
+                    id, capture_event_id, attachment_index, source_attachment_id,
+                    filename, mime_type, local_path, remote_url, byte_size,
+                    metadata, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """)
+            stmt.bind(attachmentID.uuidString, at: 1)
+                .bind(eventID.uuidString, at: 2)
+                .bind(index, at: 3)
+                .bind(attachment.id, at: 4)
+                .bind(attachment.filename, at: 5)
+                .bind(attachment.mimeType, at: 6)
+                .bind(attachment.localPath, at: 7)
+                .bind(attachment.remoteURL, at: 8)
+                .bind(nil as Int64?, at: 9)
+                .bind(metadata, at: 10)
+                .bind(now, at: 11)
+            try stmt.step()
+        }
+    }
+
+    private func unsupportedAttachmentValue(for input: ChatCaptureInput) -> String {
+        input.attachments
+            .enumerated()
+            .map { index, attachment in
+                attachment.filename
+                    ?? attachment.remoteURL
+                    ?? attachment.id
+                    ?? "attachment-\(index + 1)"
+            }
+            .joined(separator: ", ")
+    }
+
+    private func reviewMetadata(for input: ChatCaptureInput) -> [String: String] {
+        var metadata = input.metadata
+        metadata["reason"] = "unsupported_chat_attachment"
+        metadata["attachmentCount"] = String(input.attachments.count)
+        if let messageID = input.messageID { metadata["messageID"] = messageID }
+        if let channelID = input.channelID { metadata["channelID"] = channelID }
+        metadata["channel"] = input.channel.rawValue
+        return metadata
     }
 }

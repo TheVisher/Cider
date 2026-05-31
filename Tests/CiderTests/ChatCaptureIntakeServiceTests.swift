@@ -287,6 +287,112 @@ struct ChatCaptureIntakeServiceTests {
         }
     }
 
+    @Test("discord multi local attachment capture imports each file and preserves full attachment context")
+    func discordMultiLocalAttachmentCaptureImportsEachFileAndPreservesFullAttachmentContext() throws {
+        try withIsolatedVault { db, notes, files in
+            let firstFile = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("first-upload.txt")
+            let secondFile = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("second-upload.txt")
+            try "First Discord attachment".write(to: firstFile, atomically: true, encoding: .utf8)
+            try "Second Discord attachment".write(to: secondFile, atomically: true, encoding: .utf8)
+
+            let service = ChatCaptureIntakeService(
+                captureService: CiderCaptureService(
+                    notesStorage: notes,
+                    vaultFileStorage: files,
+                    database: db
+                )
+            )
+
+            let result = try service.capture(ChatCaptureInput(
+                channel: .discord,
+                channelID: "discord-channel-multi",
+                threadID: "discord-thread-multi",
+                messageID: "discord-msg-multi",
+                senderID: "discord-user-multi",
+                senderName: "Erik",
+                text: "   ",
+                attachments: [
+                    ChatAttachment(
+                        id: "attachment-first",
+                        filename: "first-upload.txt",
+                        mimeType: "text/plain",
+                        localPath: firstFile.path,
+                        remoteURL: "https://cdn.discordapp.example/first-upload.txt"
+                    ),
+                    ChatAttachment(
+                        id: "attachment-second",
+                        filename: "second-upload.txt",
+                        mimeType: "text/plain",
+                        localPath: secondFile.path,
+                        remoteURL: "https://cdn.discordapp.example/second-upload.txt"
+                    )
+                ],
+                intent: .capture
+            ))
+
+            #expect(result.status == .captured)
+            #expect(result.captureResults.count == 2)
+            #expect(result.captureResults.allSatisfy { $0.item.type == "vaultFile" })
+            #expect(Set(result.captureResults.map(\.source.file)) == Set([firstFile.path, secondFile.path]))
+
+            let eventIDs = result.captureResults.compactMap(\.captureEventID)
+            #expect(eventIDs.count == 2)
+            for eventID in eventIDs {
+                #expect(try captureAttachmentCount(db, eventID: eventID) == 2)
+            }
+        }
+    }
+
+    @Test("mixed local and remote chat attachments preserve unsupported remote metadata")
+    func mixedLocalAndRemoteChatAttachmentsPreserveUnsupportedRemoteMetadata() throws {
+        try withIsolatedVault { db, notes, files in
+            let localFile = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("local-upload.txt")
+            try "Local attachment".write(to: localFile, atomically: true, encoding: .utf8)
+
+            let service = ChatCaptureIntakeService(
+                captureService: CiderCaptureService(
+                    notesStorage: notes,
+                    vaultFileStorage: files,
+                    database: db
+                )
+            )
+
+            let result = try service.capture(ChatCaptureInput(
+                channel: .discord,
+                channelID: "discord-channel-mixed",
+                threadID: nil,
+                messageID: "discord-msg-mixed",
+                senderID: "discord-user-mixed",
+                senderName: "Erik",
+                text: "   ",
+                attachments: [
+                    ChatAttachment(
+                        id: "attachment-local",
+                        filename: "local-upload.txt",
+                        mimeType: "text/plain",
+                        localPath: localFile.path,
+                        remoteURL: nil
+                    ),
+                    ChatAttachment(
+                        id: "attachment-remote",
+                        filename: "remote-only.pdf",
+                        mimeType: "application/pdf",
+                        localPath: nil,
+                        remoteURL: "https://cdn.discordapp.example/remote-only.pdf"
+                    )
+                ],
+                intent: .capture
+            ))
+
+            let capture = try #require(result.captureResult)
+            let eventID = try #require(capture.captureEventID)
+            #expect(result.status == .captured)
+            #expect(result.captureResults.count == 1)
+            #expect(try captureAttachmentCount(db, eventID: eventID) == 2)
+            #expect(try captureAttachmentRemoteURLs(db, eventID: eventID).contains("https://cdn.discordapp.example/remote-only.pdf"))
+        }
+    }
+
     @Test("chat capture persists attachment-level provenance and owner relations")
     func chatCapturePersistsAttachmentLevelProvenanceAndOwnerRelations() throws {
         try withIsolatedVault { db, notes, files in
@@ -365,15 +471,16 @@ struct ChatCaptureIntakeServiceTests {
         }
     }
 
-    @Test("remote-only chat attachment returns review outcome without mutating")
-    func remoteOnlyChatAttachmentReturnsReviewOutcomeWithoutMutating() throws {
+    @Test("remote-only chat attachment records durable review state")
+    func remoteOnlyChatAttachmentRecordsDurableReviewState() throws {
         try withIsolatedVault { db, notes, files in
             let service = ChatCaptureIntakeService(
                 captureService: CiderCaptureService(
                     notesStorage: notes,
                     vaultFileStorage: files,
                     database: db
-                )
+                ),
+                database: db
             )
 
             let result = try service.capture(ChatCaptureInput(
@@ -399,10 +506,50 @@ struct ChatCaptureIntakeServiceTests {
             #expect(result.status == .needsReview)
             #expect(result.captureResult == nil)
             #expect(result.reason.contains("unsupported attachment"))
+            let eventID = try #require(result.captureEventID)
+            #expect(result.safeNextCommands.contains("cider-cli item backlinks capture_event \(eventID.uuidString) --json"))
 
-            let stmt = try db.prepare("SELECT count(*) FROM capture_events;")
-            try stmt.step()
-            #expect(stmt.int(at: 0) == 0)
+            #expect(try captureAttachmentCount(db, eventID: eventID) == 1)
+            #expect(try captureAttachmentRemoteURLs(db, eventID: eventID) == ["https://cdn.discordapp.example/remote.pdf"])
+            #expect(try unsupportedAttachmentReviewOutputCount(db, eventID: eventID) == 1)
         }
+    }
+
+    private func captureAttachmentCount(_ db: CiderDatabase, eventID: UUID) throws -> Int {
+        let stmt = try db.prepare("SELECT count(*) FROM capture_attachments WHERE capture_event_id = ?;")
+        stmt.bind(eventID.uuidString, at: 1)
+        try stmt.step()
+        return stmt.int(at: 0)
+    }
+
+    private func captureAttachmentRemoteURLs(_ db: CiderDatabase, eventID: UUID) throws -> [String] {
+        let stmt = try db.prepare("""
+            SELECT remote_url
+            FROM capture_attachments
+            WHERE capture_event_id = ?
+            ORDER BY attachment_index ASC;
+            """)
+        stmt.bind(eventID.uuidString, at: 1)
+        var urls: [String] = []
+        while try stmt.step() {
+            if let url = stmt.optionalString(at: 0) {
+                urls.append(url)
+            }
+        }
+        return urls
+    }
+
+    private func unsupportedAttachmentReviewOutputCount(_ db: CiderDatabase, eventID: UUID) throws -> Int {
+        let stmt = try db.prepare("""
+            SELECT count(*)
+            FROM enrichment_outputs
+            WHERE owner_type = 'capture_event'
+              AND owner_id = ?
+              AND kind = 'unsupported_chat_attachment'
+              AND review_state = 'needs_review';
+            """)
+        stmt.bind(eventID.uuidString, at: 1)
+        try stmt.step()
+        return stmt.int(at: 0)
     }
 }
