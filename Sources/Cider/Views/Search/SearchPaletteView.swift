@@ -80,6 +80,13 @@ private enum SelectableItem: Identifiable {
     }
 }
 
+enum SearchPaletteSearchPublishPolicy {
+    static func canPublish(taskQuery: String, currentQuery: String, isCancelled: Bool) -> Bool {
+        guard !isCancelled else { return false }
+        return currentQuery.trimmingCharacters(in: .whitespacesAndNewlines) == taskQuery
+    }
+}
+
 // MARK: - Search Palette View
 
 struct SearchPaletteView: View {
@@ -259,7 +266,13 @@ struct SearchPaletteView: View {
             searchTask = Task {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled else { return }
-                results = await SearchService.search(query: trimmed, bookmarks: bookmarks, notes: notes)
+                let foundResults = await SearchService.search(query: trimmed, bookmarks: bookmarks, notes: notes)
+                guard SearchPaletteSearchPublishPolicy.canPublish(
+                    taskQuery: trimmed,
+                    currentQuery: query,
+                    isCancelled: Task.isCancelled
+                ) else { return }
+                results = foundResults
             }
         }
     }

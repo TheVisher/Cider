@@ -78,6 +78,17 @@ struct SearchScope: Equatable {
 
 @MainActor
 enum SearchService {
+    struct Snapshot {
+        var query: String
+        var bookmarks: [Bookmark]
+        var notes: [Note]
+        var dateCards: [DateCard]
+        var contacts: [ContactCard]
+        var todos: [TodoCard]
+        var vaultFiles: [VaultFile]
+        var folders: [Folder]
+        var labels: [CardLabel]
+    }
 
     // MARK: - Scope Parsing
 
@@ -88,6 +99,18 @@ enum SearchService {
     /// Folder/tag names support spaces — all tokens after `@folder:` until the next `@`
     /// modifier are consumed as part of the name.
     static func parseScope(from rawQuery: String) -> SearchScope {
+        parseScope(
+            from: rawQuery,
+            folders: VaultFolderService.shared.legacyFolders,
+            labels: CardLabelStorage.shared.labels
+        )
+    }
+
+    nonisolated static func parseScope(
+        from rawQuery: String,
+        folders: [Folder],
+        labels: [CardLabel]
+    ) -> SearchScope {
         let trimmed = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return SearchScope(cleanQuery: "")
@@ -143,12 +166,12 @@ enum SearchService {
                     continue
                 }
                 // Look up folder: exact match first, then prefix match
-                if let folder = VaultFolderService.shared.legacyFolders.first(where: {
+                if let folder = folders.first(where: {
                     $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
                 }) {
                     folderIDs.insert(folder.id)
                     folderNames.append(folder.name)
-                } else if let folder = VaultFolderService.shared.legacyFolders.first(where: {
+                } else if let folder = folders.first(where: {
                     $0.name.lowercased().hasPrefix(name.lowercased())
                 }) {
                     folderIDs.insert(folder.id)
@@ -174,11 +197,11 @@ enum SearchService {
                 let name = nameParts.joined(separator: " ")
                 guard !name.isEmpty else { continue }
                 labelName = name
-                if let label = CardLabelStorage.shared.labels.first(where: {
+                if let label = labels.first(where: {
                     $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
                 }) {
                     labelID = label.id
-                } else if let label = CardLabelStorage.shared.labels.first(where: {
+                } else if let label = labels.first(where: {
                     $0.name.lowercased().hasPrefix(name.lowercased())
                 }) {
                     labelID = label.id
@@ -219,13 +242,49 @@ enum SearchService {
     // MARK: - Search
 
     static func search(query: String, bookmarks: [Bookmark], notes: [Note]) async -> [SearchResult] {
+        let snapshot = Snapshot(
+            query: query,
+            bookmarks: bookmarks,
+            notes: notes,
+            dateCards: DateCardStorage.shared.dateCards,
+            contacts: ContactStorage.shared.contacts,
+            todos: TodoCardStorage.shared.todoCards,
+            vaultFiles: VaultFileService.shared.files,
+            folders: VaultFolderService.shared.legacyFolders,
+            labels: CardLabelStorage.shared.labels
+        )
+        return await search(snapshot: snapshot)
+    }
+
+    nonisolated static func search(snapshot: Snapshot) async -> [SearchResult] {
+        await search(
+            query: snapshot.query,
+            bookmarks: snapshot.bookmarks,
+            notes: snapshot.notes,
+            dateCards: snapshot.dateCards,
+            contacts: snapshot.contacts,
+            todos: snapshot.todos,
+            vaultFiles: snapshot.vaultFiles,
+            folders: snapshot.folders,
+            labels: snapshot.labels
+        )
+    }
+
+    private nonisolated static func search(
+        query: String,
+        bookmarks: [Bookmark],
+        notes: [Note],
+        dateCards: [DateCard],
+        contacts: [ContactCard],
+        todos: [TodoCard],
+        vaultFiles: [VaultFile],
+        folders: [Folder],
+        labels: [CardLabel]
+    ) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
-        let scope = parseScope(from: trimmed)
-
-        let dateCards = DateCardStorage.shared.dateCards
-        let contacts  = ContactStorage.shared.contacts
+        let scope = parseScope(from: trimmed, folders: folders, labels: labels)
 
         // If clean query is empty but we have scopes, show all items matching scope
         let tokens: [String]
@@ -303,7 +362,6 @@ enum SearchService {
         }
 
         if shouldSearchType(.todo) {
-            let todos = TodoCardStorage.shared.todoCards
             let filtered = applyTagScope(todos: todos, scope: scope)
             if tokens.isEmpty {
                 results += filtered.map { todo in
@@ -319,7 +377,6 @@ enum SearchService {
         }
 
         if shouldSearchType(.vaultFile) {
-            let vaultFiles = VaultFileService.shared.files
             var filtered = applyFolderFilter(vaultFiles, scope: scope) { $0.folderID }
             if let labelID = scope.labelID {
                 filtered = filtered.filter { $0.labelIDs.contains(labelID) }
@@ -344,7 +401,7 @@ enum SearchService {
 
     /// Apply folder scope: if specific folders are set, filter to those.
     /// If showAllFolders, filter to items that have ANY folder assigned.
-    private static func applyFolderFilter<T>(_ items: [T], scope: SearchScope, folderID: (T) -> UUID?) -> [T] {
+    private nonisolated static func applyFolderFilter<T>(_ items: [T], scope: SearchScope, folderID: (T) -> UUID?) -> [T] {
         if !scope.folderIDs.isEmpty {
             return items.filter { item in
                 guard let fID = folderID(item) else { return false }
@@ -356,7 +413,7 @@ enum SearchService {
         return items
     }
 
-    private static func applyFolderAndTagScope(bookmarks: [Bookmark], scope: SearchScope) -> [Bookmark] {
+    private nonisolated static func applyFolderAndTagScope(bookmarks: [Bookmark], scope: SearchScope) -> [Bookmark] {
         var result = applyFolderFilter(bookmarks, scope: scope) { $0.folderID }
         if let labelID = scope.labelID {
             result = result.filter { $0.labelIDs.contains(labelID) }
@@ -364,7 +421,7 @@ enum SearchService {
         return result
     }
 
-    private static func applyFolderAndTagScope(notes: [Note], scope: SearchScope) -> [Note] {
+    private nonisolated static func applyFolderAndTagScope(notes: [Note], scope: SearchScope) -> [Note] {
         var result = applyFolderFilter(notes, scope: scope) { $0.folderID }
         if let labelID = scope.labelID {
             result = result.filter { $0.labelIDs.contains(labelID) }
@@ -372,7 +429,7 @@ enum SearchService {
         return result
     }
 
-    private static func applyTagScope(dateCards: [DateCard], scope: SearchScope) -> [DateCard] {
+    private nonisolated static func applyTagScope(dateCards: [DateCard], scope: SearchScope) -> [DateCard] {
         var result = applyFolderFilter(dateCards, scope: scope) { $0.folderID }
         if let labelID = scope.labelID {
             result = result.filter { $0.labelIDs.contains(labelID) }
@@ -380,7 +437,7 @@ enum SearchService {
         return result
     }
 
-    private static func applyTagScope(contacts: [ContactCard], scope: SearchScope) -> [ContactCard] {
+    private nonisolated static func applyTagScope(contacts: [ContactCard], scope: SearchScope) -> [ContactCard] {
         var result = applyFolderFilter(contacts, scope: scope) { $0.folderID }
         if let labelID = scope.labelID {
             result = result.filter { $0.labelIDs.contains(labelID) }
@@ -388,7 +445,7 @@ enum SearchService {
         return result
     }
 
-    static func searchBookmarks(_ tokens: [String], in bookmarks: [Bookmark]) -> [SearchResult] {
+    nonisolated static func searchBookmarks(_ tokens: [String], in bookmarks: [Bookmark]) -> [SearchResult] {
         bookmarks.compactMap { bookmark in
             var fields = [bookmark.title, bookmark.urlString, bookmark.hostDisplay, bookmark.notes] + bookmark.tags
             if let ocr = bookmark.ocrText { fields.append(ocr) }
@@ -419,11 +476,11 @@ enum SearchService {
     }
 
     // Note content is loaded off the main actor to avoid blocking the UI.
-    static func searchNotes(_ tokens: [String], in notes: [Note]) async -> [SearchResult] {
+    nonisolated static func searchNotes(_ tokens: [String], in notes: [Note]) async -> [SearchResult] {
         await fetchNoteResults(tokens: tokens, notes: notes)
     }
 
-    static func searchDateCards(_ tokens: [String], in dateCards: [DateCard]) -> [SearchResult] {
+    nonisolated static func searchDateCards(_ tokens: [String], in dateCards: [DateCard]) -> [SearchResult] {
         dateCards.compactMap { card in
             let fields = [card.title, card.details, card.location]
             guard matchesAllTokens(tokens, in: fields) else { return nil }
@@ -453,7 +510,7 @@ enum SearchService {
         }
     }
 
-    static func searchContacts(_ tokens: [String], in contacts: [ContactCard]) -> [SearchResult] {
+    nonisolated static func searchContacts(_ tokens: [String], in contacts: [ContactCard]) -> [SearchResult] {
         contacts.compactMap { contact in
             let fields = [contact.displayName, contact.relationshipLabel, contact.notes]
             guard matchesAllTokens(tokens, in: fields) else { return nil }
@@ -482,7 +539,7 @@ enum SearchService {
         }
     }
 
-    static func searchVaultFiles(_ tokens: [String], in files: [VaultFile]) -> [SearchResult] {
+    nonisolated static func searchVaultFiles(_ tokens: [String], in files: [VaultFile]) -> [SearchResult] {
         files.compactMap { file in
             let fields = [file.filename, file.displayTitle, file.notes, file.ocrText ?? ""]
                 .filter { !$0.isEmpty }
@@ -495,7 +552,7 @@ enum SearchService {
         }
     }
 
-    private static func applyTagScope(todos: [TodoCard], scope: SearchScope) -> [TodoCard] {
+    private nonisolated static func applyTagScope(todos: [TodoCard], scope: SearchScope) -> [TodoCard] {
         var result = applyFolderFilter(todos, scope: scope) { $0.folderID }
         if let labelID = scope.labelID {
             result = result.filter { $0.labelIDs.contains(labelID) }
@@ -503,7 +560,7 @@ enum SearchService {
         return result
     }
 
-    static func searchTodos(_ tokens: [String], in todos: [TodoCard]) -> [SearchResult] {
+    nonisolated static func searchTodos(_ tokens: [String], in todos: [TodoCard]) -> [SearchResult] {
         todos.compactMap { todo in
             var fields = [todo.title, todo.details]
             fields.append(contentsOf: todo.checklist.map(\.title))
