@@ -69,6 +69,8 @@ Hidden or removed legacy commands return `legacyRemoved: true` with a canonical 
 
 After capture, agents should verify and continue through backend-backed item/review commands: `item get`, `item search`, `item context`, `item relations`, `item backlinks`, `item move`, `item route`, `item link`, `review list`, `review approve`, `review correct`, `review enrich`, and `storage audit`.
 
+`bookmark enrich <id> [--timeout <seconds>|--no-wait] --json` is the explicit bookmark metadata refetch path. It is allowed for a single bookmark ID only; legacy batch enrichment remains removed in favor of `review enrich-batch --confirm --json`. JSON output must report `command: bookmark.enrich`, `status: completed|timed_out|scheduled`, before/after bookmark snapshots, changed metadata fields, wait timing when applicable, and safe follow-up commands. This lets agents tell the difference between a completed no-op, a still-pending WebView/native enrichment, and a blocked/partial metadata capture such as X/Twitter pages.
+
 ## Important Command Areas
 
 Keep command details in CLI help and tests, not sprawling docs. The core command areas agents rely on are:

@@ -52,6 +52,7 @@ struct CiderCLI {
         switch command {
         case "bookmark", "bm":
             if subcommand == "add" || subcommand == "create" { return nil }
+            if subcommand == "enrich", !args.contains("--all") { return nil }
             if subcommand == "move" {
                 return LegacyRemovedCommand(command: label, replacement: "cider-cli item move bookmark <id> --folder <name|path> --json")
             }
@@ -2021,7 +2022,9 @@ struct CiderCLI {
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
-                print("Scheduling enrichment for '\(bm.title)'...")
+                if !jsonOutput {
+                    print("Scheduling enrichment for '\(bm.title)'...")
+                }
                 service.refetchMetadata(for: bm.id)
                 let waitResult: BookmarkNativeCaptureWaitResult?
                 if let timeout = bookmarkNativeCaptureWaitTimeout(from: args) {
@@ -2034,6 +2037,29 @@ struct CiderCLI {
                     waitResult = nil
                 }
                 if let updated = waitResult?.bookmark ?? service.bookmarks.first(where: { $0.id == bm.id }) {
+                    if let waitResult, jsonOutput {
+                        printBookmarkEnrichmentLifecycleResult(
+                            before: bm,
+                            after: updated,
+                            waitResult: waitResult
+                        )
+                        return
+                    }
+                    if jsonOutput {
+                        outputJSON([
+                            "command": "bookmark.enrich",
+                            "itemID": bm.id.uuidString,
+                            "itemType": "bookmark",
+                            "title": updated.title,
+                            "status": "scheduled",
+                            "waited": false,
+                            "before": bookmarkLifecycleSnapshot(bm),
+                            "after": bookmarkLifecycleSnapshot(updated),
+                            "changedFields": changedBookmarkMetadataFields(before: bm, after: updated),
+                            "safeActions": bookmarkEnrichmentLifecycleSafeActions(itemID: bm.id, status: "scheduled"),
+                        ])
+                        return
+                    }
                     print("  Title: \(updated.title)")
                     print("  Thumbnail: \(updated.thumbnailRelativePath ?? "none")")
                     print("  Remote thumbnail: \(updated.thumbnailRemoteURLString ?? "none")")
@@ -9508,6 +9534,71 @@ struct CiderCLI {
         print("  Review resolved: \(reviewResolved ? "yes" : "no")")
         print("  Message: \(reviewEnrichmentLifecycleMessage(status: status, changedFields: changedFields, reviewResolved: reviewResolved))")
         print("  Safe actions: \(safeActions.joined(separator: ", "))")
+    }
+
+    static func printBookmarkEnrichmentLifecycleResult(
+        before: Bookmark?,
+        after: Bookmark?,
+        waitResult: BookmarkNativeCaptureWaitResult
+    ) {
+        let status = waitResult.timedOut ? "timed_out" : "completed"
+        let changedFields = changedBookmarkMetadataFields(before: before, after: after)
+        let itemID = after?.id ?? before?.id
+        let title = after?.title ?? before?.title ?? "Bookmark"
+        let safeActions = itemID.map {
+            bookmarkEnrichmentLifecycleSafeActions(itemID: $0, status: status)
+        } ?? []
+
+        if jsonOutput {
+            outputJSON([
+                "command": "bookmark.enrich",
+                "itemID": itemID?.uuidString ?? "",
+                "itemType": "bookmark",
+                "title": title,
+                "status": status,
+                "message": bookmarkEnrichmentLifecycleMessage(status: status, changedFields: changedFields),
+                "waited": true,
+                "elapsedSeconds": waitResult.elapsedSeconds,
+                "timeoutSeconds": waitResult.timeoutSeconds,
+                "before": bookmarkLifecycleSnapshot(before),
+                "after": bookmarkLifecycleSnapshot(after),
+                "changedFields": changedFields,
+                "safeActions": safeActions,
+            ])
+            return
+        }
+
+        print("\(status.replacingOccurrences(of: "_", with: " ").capitalized): \(title) (\(itemID?.uuidString.prefix(8) ?? "unknown"))")
+        print("  Action: bookmark.enrich")
+        print("  Type: bookmark")
+        print("  Waited: \(String(format: "%.1f", waitResult.elapsedSeconds))s / \(String(format: "%.1f", waitResult.timeoutSeconds))s")
+        print("  Changed: \(changedFields.isEmpty ? "none" : changedFields.joined(separator: ", "))")
+        print("  Message: \(bookmarkEnrichmentLifecycleMessage(status: status, changedFields: changedFields))")
+        print("  Safe actions: \(safeActions.joined(separator: ", "))")
+    }
+
+    static func bookmarkEnrichmentLifecycleMessage(status: String, changedFields: [String]) -> String {
+        switch status {
+        case "completed":
+            return changedFields.isEmpty
+                ? "Bookmark enrichment completed; no visible metadata fields changed."
+                : "Bookmark enrichment completed and updated \(changedFields.joined(separator: ", "))."
+        case "timed_out":
+            return "Bookmark enrichment was scheduled, but did not reach a final complete state before the timeout."
+        default:
+            return "Bookmark enrichment finished with status \(status)."
+        }
+    }
+
+    static func bookmarkEnrichmentLifecycleSafeActions(itemID: UUID, status: String) -> [String] {
+        var actions = [
+            "item get bookmark \(itemID.uuidString) --json",
+            "capture add --kind bookmark --url <url> --timeout 20 --json",
+        ]
+        if status == "timed_out" || status == "scheduled" {
+            actions.insert("bookmark enrich \(itemID.uuidString) --timeout 20 --json", at: 0)
+        }
+        return actions
     }
 
     static func reviewEnrichmentLifecycleMessage(

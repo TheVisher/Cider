@@ -2381,15 +2381,22 @@ final class VaultBookmarkService: ObservableObject {
 
         let hasRealThumbnail = htmlResult?.thumbnailURL != nil
             && !isFaviconURL(htmlResult?.thumbnailURL)
+        let needsWebView = shouldAttemptRenderedMetadataFallback(
+            pageURL: pageURL,
+            htmlTitle: htmlResult?.title,
+            hasRealThumbnail: hasRealThumbnail
+        )
         if let htmlResult, hasRealThumbnail {
-            return BookmarkEnrichmentPayload(
-                title: htmlResult.title,
-                thumbnailURL: htmlResult.thumbnailURL,
-                screenshotData: htmlResult.screenshotData,
-                thumbnailFallbackData: githubFallbackData,
-                recipeExtractionText: htmlResult.recipeExtractionText,
-                carouselImageURLs: htmlResult.carouselImageURLs
-            )
+            if !needsWebView {
+                return BookmarkEnrichmentPayload(
+                    title: htmlResult.title,
+                    thumbnailURL: htmlResult.thumbnailURL,
+                    screenshotData: htmlResult.screenshotData,
+                    thumbnailFallbackData: githubFallbackData,
+                    recipeExtractionText: htmlResult.recipeExtractionText,
+                    carouselImageURLs: htmlResult.carouselImageURLs
+                )
+            }
         }
 
         // oEmbed fallback
@@ -2403,7 +2410,6 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         // WebView fallback
-        let needsWebView = htmlResult?.title == nil || !hasRealThumbnail
         if needsWebView {
             enrichLog.info("Trying WebView fallback for \(pageURL.host ?? "?", privacy: .public)")
             let extracted = await WebViewMetadataExtractor.extract(from: pageURL)
@@ -2431,6 +2437,45 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         return htmlResult
+    }
+
+    static func shouldAttemptRenderedMetadataFallback(
+        pageURL: URL,
+        htmlTitle: String?,
+        hasRealThumbnail: Bool
+    ) -> Bool {
+        if htmlTitle == nil || !hasRealThumbnail { return true }
+        guard isRenderedMetadataPreferredHost(pageURL.host),
+              let htmlTitle else { return false }
+        return isProviderGenericRenderedTitle(htmlTitle, sourceURL: pageURL)
+    }
+
+    private static func isRenderedMetadataPreferredHost(_ host: String?) -> Bool {
+        let normalized = host?.lowercased() ?? ""
+        return normalized == "x.com"
+            || normalized == "twitter.com"
+            || normalized.hasSuffix(".x.com")
+            || normalized.hasSuffix(".twitter.com")
+    }
+
+    private static func isProviderGenericRenderedTitle(_ title: String, sourceURL: URL) -> Bool {
+        let normalized = duplicateSuffixStrippedStaticTitle(title)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return true }
+        let host = sourceURL.host?.lowercased() ?? ""
+        if host.contains("x.com") || host.contains("twitter.com") {
+            return ["x", "x.com", "twitter", "twitter.com", "post / x"].contains(normalized)
+        }
+        return false
+    }
+
+    private static func duplicateSuffixStrippedStaticTitle(_ title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let range = trimmed.range(of: #" \(\d+\)$"#, options: .regularExpression) else {
+            return trimmed
+        }
+        return String(trimmed[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func githubRepositoryFallbackCardData(for pageURL: URL, title: String?) -> Data? {

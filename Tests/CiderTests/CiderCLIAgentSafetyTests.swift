@@ -217,6 +217,48 @@ struct CiderCLIAgentSafetyTests {
         #expect(payload["reviewResolved"] as? Bool != nil)
     }
 
+    @Test("bookmark enrich json waits with explicit lifecycle result")
+    func bookmarkEnrichJSONWaitsWithExplicitLifecycleResult() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-bookmark-enrich-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "bookmark",
+                "--url", "https://example.com/bookmark-enrich-\(UUID().uuidString)",
+                "--title", "X.Com",
+                "--no-wait",
+                "--json",
+            ],
+            vault: vault
+        )
+        let capturePayload = try parseJSONObject(captureResult.stdout)
+        let bookmark = try #require(capturePayload["bookmark"] as? [String: Any])
+        let itemID = try #require(bookmark["id"] as? String)
+
+        let result = try runCLI(
+            args: ["bookmark", "enrich", itemID, "--timeout", "0", "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(payload["command"] as? String == "bookmark.enrich")
+        #expect(payload["itemID"] as? String == itemID)
+        #expect(payload["status"] as? String == "timed_out")
+        #expect(payload["waited"] as? Bool == true)
+        #expect(payload["elapsedSeconds"] as? Double != nil)
+        #expect(payload["timeoutSeconds"] as? Double == 0)
+        #expect(payload["before"] as? [String: Any] != nil)
+        #expect(payload["after"] as? [String: Any] != nil)
+        #expect(payload["changedFields"] as? [String] != nil)
+        let safeActions = try #require(payload["safeActions"] as? [String])
+        #expect(safeActions.contains("bookmark enrich \(itemID) --timeout 20 --json"))
+        #expect(safeActions.contains("item get bookmark \(itemID) --json"))
+    }
+
     @Test("capture add json reports visible bookmark quality")
     func captureAddJSONReportsVisibleBookmarkQuality() throws {
         let vault = FileManager.default.temporaryDirectory
