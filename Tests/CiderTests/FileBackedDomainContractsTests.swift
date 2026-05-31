@@ -133,6 +133,30 @@ struct FileBackedDomainContractsTests {
         }
     }
 
+    @Test("root agent instructions declare canonical bookmark capture workflow")
+    func rootAgentInstructionsDeclareCanonicalBookmarkCaptureWorkflow() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let rootAgentDoc = repoRoot.appendingPathComponent("AGENTS.md")
+        let rootSource = try String(contentsOf: rootAgentDoc, encoding: .utf8)
+
+        for snippet in [
+            "cider-cli capture add --kind bookmark --url \"<url>\" --json",
+            "Inspect the capture JSON for duplicate, routing, review, provenance, indexing, `nextSafeAction`, and `safeNextCommands`.",
+            "cider-cli item get bookmark <id> --json",
+            "Route or review only through backend-backed `item`/`review` commands.",
+        ] {
+            #expect(rootSource.contains(snippet), "AGENTS.md missing canonical bookmark capture snippet: \(snippet)")
+        }
+
+        for legacySnippet in [
+            "duplicate-check <url> --json",
+            "bookmark enrich <id>",
+            "bookmark get <id> --json",
+        ] {
+            #expect(!rootSource.contains(legacySnippet), "AGENTS.md still presents legacy bookmark capture command: \(legacySnippet)")
+        }
+    }
+
     @Test("core docs declare sync and media bridge boundaries")
     func coreDocsDeclareSyncAndMediaBridgeBoundaries() throws {
         let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)

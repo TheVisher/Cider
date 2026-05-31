@@ -43,12 +43,11 @@ For Cider development work, agents should use the boards in `~/CiderVault/.cider
 
 When the user sends a bare URL, do not stop after creating the bookmark. Use the full capture loop before reporting success:
 
-1. Run `duplicate-check <url> --json`.
-2. Save new bookmarks to a conservative staging path such as `Inbox/Bookmarks` unless the target folder is already obvious.
-3. Run `bookmark enrich <id>` or otherwise let Cider fetch metadata.
-4. Re-read with `bookmark get <id> --json`.
-5. Route based on the enriched title/content and current vault topology; if routing confidence is below about 90%, leave it in `Inbox/Bookmarks` and ask.
-6. Re-read again and report the verified final title, folder, relative path, and any caveat.
+1. Capture through `cider-cli capture add --kind bookmark --url "<url>" --json`.
+2. Inspect the capture JSON for duplicate, routing, review, provenance, indexing, `nextSafeAction`, and `safeNextCommands`.
+3. Re-read through `cider-cli item get bookmark <id> --json` when an item ID is available.
+4. Route or review only through backend-backed `item`/`review` commands.
+5. Report the verified final title, routing/review state, destination or folder when available, and any caveat.
 
 Active board files:
 
