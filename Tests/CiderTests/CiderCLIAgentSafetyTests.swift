@@ -1434,6 +1434,51 @@ struct CiderCLIAgentSafetyTests {
         }
     }
 
+    @Test("blessed agent JSON commands have process fixtures")
+    func blessedAgentJSONCommandsHaveProcessFixtures() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-blessed-json-fixtures-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let capture = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "bookmark",
+                "--url", "https://example.com/blessed-json-fixture-\(UUID().uuidString)",
+                "--title", "Blessed JSON Fixture",
+                "--no-wait",
+                "--json",
+            ],
+            vault: vault
+        )
+        let capturePayload = try assertStrictProcessJSON(capture, command: "capture.add")
+        let bookmark = try #require(capturePayload["bookmark"] as? [String: Any])
+        let bookmarkID = try #require(bookmark["id"] as? String)
+
+        let boardCreate = try runCLI(args: ["board", "create", "Fixture Board", "--json"], vault: vault)
+        let boardPayload = try assertStrictProcessJSON(boardCreate, command: "board.create")
+        let board = try #require(boardPayload["board"] as? [String: Any])
+        let boardID = try #require(board["id"] as? String)
+
+        let commands: [([String], String)] = [
+            (["item", "get", "bookmark", bookmarkID, "--json"], "item.get"),
+            (["item", "graph-health", "--json"], "item.graph-health"),
+            (["item", "dogfood-intelligence", "--limit", "1", "--json"], "item.dogfood-intelligence"),
+            (["review", "list", "--json"], "review.list"),
+            (["storage", "audit", "--json"], "storage.audit"),
+            (["db", "integrity", "--json"], "db.integrity"),
+            (["board", "list", "--json"], "board.list"),
+            (["board", "show", boardID, "--json"], "board.show"),
+            (["media", "identify", "--dry-run", "--json"], "media.identify"),
+        ]
+
+        for (args, expectedCommand) in commands {
+            let result = try runCLI(args: args, vault: vault)
+            _ = try assertStrictProcessJSON(result, command: expectedCommand)
+        }
+    }
+
     @Test("project context summary bounds relation-heavy output")
     func projectContextSummaryBoundsRelationHeavyOutput() throws {
         let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cider")
@@ -1516,6 +1561,18 @@ struct CiderCLIAgentSafetyTests {
         let data = Data(json.utf8)
         let object = try JSONSerialization.jsonObject(with: data)
         return try #require(object as? [[String: Any]])
+    }
+
+    private func assertStrictProcessJSON(
+        _ result: (stdout: String, stderr: String, status: Int32),
+        command: String
+    ) throws -> [String: Any] {
+        #expect(result.status == 0, "Expected \(command) to exit 0; stderr: \(result.stderr)")
+        #expect(result.stdout.first == "{", "Expected \(command) JSON to start at byte 0")
+        let payload = try parseJSONObject(result.stdout)
+        #expect(payload["command"] as? String == command)
+        #expect(payload["legacyRemoved"] == nil)
+        return payload
     }
 
     private func runCLI(args: [String]) throws -> (stdout: String, stderr: String, status: Int32) {

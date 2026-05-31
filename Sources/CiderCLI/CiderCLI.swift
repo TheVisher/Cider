@@ -412,7 +412,12 @@ struct CiderCLI {
             do {
                 let report = try CiderStorageAuditService().audit()
                 if jsonOutput {
-                    outputJSON(storageAuditReportToDict(report))
+                    var payload = storageAuditReportToDict(report)
+                    payload["ok"] = true
+                    payload["command"] = "storage.audit"
+                    payload["readOnly"] = true
+                    payload["changed"] = false
+                    outputJSON(payload)
                 } else {
                     print("Storage audit")
                     print("  Doctor findings: \(report.totalDoctorFindings) (\(report.fixableDoctorFindings) fixable)")
@@ -4307,6 +4312,9 @@ struct CiderCLI {
                     if jsonOutput {
                         var dict = itemContextBundleToDict(bundle)
                         dict["ok"] = true
+                        dict["command"] = "item.get"
+                        dict["readOnly"] = true
+                        dict["changed"] = false
                         dict["exists"] = true
                         dict["ownerResolved"] = true
                         dict["sourceRef"] = [
