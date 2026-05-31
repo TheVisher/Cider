@@ -87,6 +87,7 @@ struct CiderCLI {
                 replacement: "cider-cli capture add --kind event --title \"<title>\" --date yyyy-MM-dd --stdin --json"
             )
         case "contact":
+            if subcommand == "profile" || subcommand == "field" || subcommand == "fields" { return nil }
             if subcommand != "create" {
                 return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
             }
@@ -3826,7 +3827,7 @@ struct CiderCLI {
             }
             guard let contact = findContact(ref, in: storage) else { return }
             if jsonOutput {
-                outputJSON(contactProfileOutput(contact))
+                outputJSON(contactProfileEnvelope(contact, action: "show", readOnly: true, changed: false))
             } else {
                 printContactProfile(contact)
             }
@@ -3920,9 +3921,7 @@ struct CiderCLI {
             }
 
             if jsonOutput {
-                var output = contactProfileOutput(updated)
-                output["action"] = action
-                outputJSON(output)
+                outputJSON(contactProfileEnvelope(updated, action: action, readOnly: false, changed: true))
             } else {
                 print("\(action.capitalized): \(updated.displayName) (\(updated.id.uuidString.prefix(8)))")
             }
@@ -3950,7 +3949,13 @@ struct CiderCLI {
             }
             guard let contact = findContact(ref, in: storage) else { return }
             if jsonOutput {
-                outputJSON(contact.customFields.map(contactFieldToDict))
+                outputJSON(contactFieldEnvelope(
+                    contact: contact,
+                    action: "list",
+                    readOnly: true,
+                    changed: false,
+                    fields: contact.customFields.map(contactFieldToDict)
+                ))
             } else {
                 print("Fields for \(contact.displayName) (\(contact.customFields.count)):")
                 for field in contact.customFields {
@@ -3984,7 +3989,7 @@ struct CiderCLI {
                 return
             }
             if jsonOutput {
-                outputJSON(contactFieldToDict(field))
+                outputJSON(contactFieldEnvelope(contact: contact, action: "added", readOnly: false, changed: true, field: field))
             } else {
                 print("Added field: \(field.section) / \(field.label) (\(field.id.uuidString.prefix(8)))")
             }
@@ -4031,7 +4036,7 @@ struct CiderCLI {
                 return
             }
             if jsonOutput {
-                outputJSON(contactFieldToDict(updatedField))
+                outputJSON(contactFieldEnvelope(contact: contact, action: "updated", readOnly: false, changed: true, field: updatedField))
             } else {
                 print("Updated field: \(updatedField.section) / \(updatedField.label) (\(updatedField.id.uuidString.prefix(8)))")
             }
@@ -4059,7 +4064,7 @@ struct CiderCLI {
                 return
             }
             if jsonOutput {
-                outputJSON(contactFieldToDict(removed))
+                outputJSON(contactFieldEnvelope(contact: contact, action: "deleted", readOnly: false, changed: true, field: removed))
             } else {
                 print("Deleted field: \(removed.section) / \(removed.label) (\(removed.id.uuidString.prefix(8)))")
             }
@@ -12941,6 +12946,26 @@ struct CiderCLI {
         return dict
     }
 
+    static func contactProfileEnvelope(
+        _ contact: ContactCard,
+        action: String,
+        readOnly: Bool,
+        changed: Bool
+    ) -> [String: Any] {
+        var dict = contactProfileOutput(contact)
+        dict["ok"] = true
+        dict["command"] = "contact.profile"
+        dict["action"] = action
+        dict["contact"] = contactIdentityDict(contact)
+        dict["readOnly"] = readOnly
+        dict["changed"] = changed
+        dict["safeNextCommands"] = contactSafeNextCommands(contact)
+        if !readOnly {
+            dict["mutationSource"] = "contact.profile.apply"
+        }
+        return dict
+    }
+
     static func contactFieldToDict(_ field: ContactCustomField) -> [String: Any] {
         [
             "id": field.id.uuidString,
@@ -12949,6 +12974,59 @@ struct CiderCLI {
             "value": field.value,
             "kind": field.kind.rawValue,
             "pinned": field.isPinned
+        ]
+    }
+
+    static func contactFieldEnvelope(
+        contact: ContactCard,
+        action: String,
+        readOnly: Bool,
+        changed: Bool,
+        field: ContactCustomField? = nil,
+        fields: [[String: Any]]? = nil
+    ) -> [String: Any] {
+        var dict: [String: Any] = [
+            "ok": true,
+            "command": "contact.field",
+            "action": action,
+            "contact": contactIdentityDict(contact),
+            "readOnly": readOnly,
+            "changed": changed,
+            "safeNextCommands": contactSafeNextCommands(contact)
+        ]
+        if let field {
+            dict["field"] = contactFieldToDict(field)
+        }
+        if let fields {
+            dict["fields"] = fields
+        }
+        if !readOnly {
+            dict["mutationSource"] = "contact.field.\(contactFieldMutationVerb(for: action))"
+        }
+        return dict
+    }
+
+    static func contactFieldMutationVerb(for action: String) -> String {
+        switch action {
+        case "added": return "add"
+        case "updated": return "update"
+        case "deleted": return "delete"
+        default: return action
+        }
+    }
+
+    static func contactIdentityDict(_ contact: ContactCard) -> [String: Any] {
+        [
+            "id": contact.id.uuidString,
+            "displayName": contact.displayName
+        ]
+    }
+
+    static func contactSafeNextCommands(_ contact: ContactCard) -> [String] {
+        let id = String(contact.id.uuidString.prefix(8))
+        return [
+            "cider-cli contact profile show \(id) --json",
+            "cider-cli contact field list \(id) --json"
         ]
     }
 

@@ -1110,6 +1110,99 @@ struct CiderCLIAgentSafetyTests {
         #expect(reviewLane["safeActions"] as? [String] == ["media identify --dry-run --json"])
     }
 
+    @Test("contact profile and field commands are reachable as strict process json")
+    func contactProfileAndFieldCommandsAreReachableAsStrictProcessJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-contact-contract-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let profileJSON = #"{"displayName":"Agent Contract Contact","email":"agent@example.com"}"#
+        let apply = try runCLI(
+            args: [
+                "contact", "profile", "apply", "Agent Contract Contact",
+                "--profile-json", profileJSON,
+                "--create",
+                "--json",
+            ],
+            vault: vault
+        )
+        let applyPayload = try parseJSONObject(apply.stdout)
+        #expect(apply.status == 0)
+        #expect(apply.stdout.first == "{")
+        #expect(applyPayload["ok"] as? Bool == true)
+        #expect(applyPayload["command"] as? String == "contact.profile")
+        #expect(applyPayload["action"] as? String == "created")
+        #expect(applyPayload["changed"] as? Bool == true)
+        #expect(applyPayload["mutationSource"] as? String == "contact.profile.apply")
+
+        let show = try runCLI(args: ["contact", "profile", "show", "Agent Contract Contact", "--json"], vault: vault)
+        let showPayload = try parseJSONObject(show.stdout)
+        #expect(show.status == 0)
+        #expect(show.stdout.first == "{")
+        #expect(showPayload["ok"] as? Bool == true)
+        #expect(showPayload["command"] as? String == "contact.profile")
+        #expect(showPayload["action"] as? String == "show")
+        #expect(showPayload["readOnly"] as? Bool == true)
+        #expect(showPayload["changed"] as? Bool == false)
+
+        let add = try runCLI(
+            args: [
+                "contact", "field", "add", "Agent Contract Contact",
+                "--section", "Context",
+                "--label", "Source",
+                "--value", "Codex",
+                "--json",
+            ],
+            vault: vault
+        )
+        let addPayload = try parseJSONObject(add.stdout)
+        #expect(add.status == 0)
+        #expect(add.stdout.first == "{")
+        #expect(addPayload["ok"] as? Bool == true)
+        #expect(addPayload["command"] as? String == "contact.field")
+        #expect(addPayload["action"] as? String == "added")
+        #expect(addPayload["changed"] as? Bool == true)
+        #expect(addPayload["mutationSource"] as? String == "contact.field.add")
+        let addedField = try #require(addPayload["field"] as? [String: Any])
+        let fieldID = try #require(addedField["id"] as? String)
+        #expect(addedField["label"] as? String == "Source")
+
+        let update = try runCLI(
+            args: [
+                "contact", "field", "update", "Agent Contract Contact", String(fieldID.prefix(8)),
+                "--value", "Hermes",
+                "--json",
+            ],
+            vault: vault
+        )
+        let updatePayload = try parseJSONObject(update.stdout)
+        #expect(update.status == 0)
+        #expect(updatePayload["action"] as? String == "updated")
+        let updatedField = try #require(updatePayload["field"] as? [String: Any])
+        #expect(updatedField["value"] as? String == "Hermes")
+
+        let list = try runCLI(args: ["contact", "field", "list", "Agent Contract Contact", "--json"], vault: vault)
+        let listPayload = try parseJSONObject(list.stdout)
+        #expect(list.status == 0)
+        #expect(listPayload["ok"] as? Bool == true)
+        #expect(listPayload["command"] as? String == "contact.field")
+        #expect(listPayload["action"] as? String == "list")
+        #expect(listPayload["readOnly"] as? Bool == true)
+        #expect(listPayload["changed"] as? Bool == false)
+        let fields = try #require(listPayload["fields"] as? [[String: Any]])
+        #expect(fields.count == 1)
+
+        let delete = try runCLI(
+            args: ["contact", "field", "delete", "Agent Contract Contact", String(fieldID.prefix(8)), "--json"],
+            vault: vault
+        )
+        let deletePayload = try parseJSONObject(delete.stdout)
+        #expect(delete.status == 0)
+        #expect(deletePayload["action"] as? String == "deleted")
+        #expect(deletePayload["changed"] as? Bool == true)
+    }
+
     @Test("project context summary bounds relation-heavy output")
     func projectContextSummaryBoundsRelationHeavyOutput() throws {
         let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cider")
