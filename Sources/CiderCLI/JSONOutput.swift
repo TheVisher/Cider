@@ -283,8 +283,27 @@ func storageAuditReportToDict(_ report: CiderStorageAuditReport) -> [String: Any
         "doctorFindingSampleLimit": report.doctorFindingSampleLimit,
         "doctorFindingSamples": report.doctorFindingSamples.map(storageAuditDoctorFindingSampleToDict),
         "schemaFindings": report.schemaFindings.map(storageAuditSchemaFindingToDict),
+        "searchIndexDriftFindings": report.searchIndexDriftFindings.map(searchIndexDriftFindingToDict),
         "mismatches": report.mismatches.map(storageAuditMismatchToDict),
     ]
+}
+
+func searchIndexDriftFindingToDict(_ finding: CiderSearchIndexDriftFinding) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": finding.id,
+        "kind": finding.kind,
+        "severity": finding.severity,
+        "itemType": finding.itemType,
+        "itemID": finding.itemID,
+        "title": finding.title,
+        "updatedAt": ISO8601DateFormatter().string(from: finding.updatedAt),
+        "chunkCount": finding.chunkCount,
+        "safeRepairCommand": finding.safeRepairCommand,
+    ]
+    if let chunkUpdatedAt = finding.chunkUpdatedAt {
+        dict["chunkUpdatedAt"] = ISO8601DateFormatter().string(from: chunkUpdatedAt)
+    }
+    return dict
 }
 
 func storageAuditDoctorFindingSampleToDict(_ sample: CiderStorageAuditDoctorFindingSample) -> [String: Any] {

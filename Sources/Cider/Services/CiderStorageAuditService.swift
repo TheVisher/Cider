@@ -7,6 +7,19 @@ struct CiderStorageAuditMismatch: Codable, Equatable {
     var detail: String
 }
 
+struct CiderSearchIndexDriftFinding: Codable, Equatable {
+    var id: String
+    var kind: String
+    var severity: String
+    var itemType: String
+    var itemID: String
+    var title: String
+    var updatedAt: Date
+    var chunkUpdatedAt: Date?
+    var chunkCount: Int
+    var safeRepairCommand: String
+}
+
 struct CiderStorageAuditDoctorFindingSample: Codable, Equatable {
     var id: String
     var severity: String
@@ -32,6 +45,7 @@ struct CiderStorageAuditReport: Equatable {
     var doctorFindingSampleLimit: Int = 20
     var doctorFindingSamples: [CiderStorageAuditDoctorFindingSample] = []
     var schemaFindings: [CiderStorageAuditSchemaFinding]
+    var searchIndexDriftFindings: [CiderSearchIndexDriftFinding] = []
     var mismatches: [CiderStorageAuditMismatch]
 }
 
@@ -229,6 +243,7 @@ final class CiderStorageAuditService {
                 limit: doctorFindingSampleLimit
             ),
             schemaFindings: try schemaFindings(),
+            searchIndexDriftFindings: try searchIndexDriftFindings(),
             mismatches: mismatches(modelCounts: modelCounts, sqliteCounts: sqliteCounts)
         )
     }
@@ -692,6 +707,50 @@ final class CiderStorageAuditService {
             .sorted { lhs, rhs in lhs.key.localizedCaseInsensitiveCompare(rhs.key) == .orderedAscending }
             .prefix(limit)
             .map { CiderDuplicateRelativePathFinding(relativePath: $0.key, items: $0.value) }
+    }
+
+    private func searchIndexDriftFindings() throws -> [CiderSearchIndexDriftFinding] {
+        guard try tableExists("items"), try tableExists("content_chunks") else { return [] }
+        let stmt = try database.prepare("""
+            SELECT
+                i.id,
+                i.type,
+                i.title,
+                i.updated_at,
+                COUNT(c.id) AS chunk_count,
+                MAX(c.updated_at) AS chunk_updated_at
+            FROM items i
+            LEFT JOIN content_chunks c
+              ON c.owner_id = i.id
+             AND c.owner_type = CASE WHEN i.type = 'event' THEN 'dateCard' ELSE i.type END
+            WHERE i.type IN ('bookmark', 'note', 'todo', 'event', 'contact', 'vaultFile')
+            GROUP BY i.id, i.type, i.title, i.updated_at
+            HAVING chunk_count = 0 OR chunk_updated_at IS NULL OR chunk_updated_at < i.updated_at
+            ORDER BY i.updated_at DESC, i.title COLLATE NOCASE ASC;
+            """)
+        var findings: [CiderSearchIndexDriftFinding] = []
+        while try stmt.step() {
+            let itemID = stmt.string(at: 0)
+            let itemType = stmt.string(at: 1)
+            let title = stmt.string(at: 2)
+            let updatedAt = DatabaseHelpers.decodeDate(stmt.double(at: 3))
+            let chunkCount = stmt.int(at: 4)
+            let chunkUpdatedAt = stmt.optionalDouble(at: 5).map(DatabaseHelpers.decodeDate)
+            let kind = chunkCount == 0 ? "missing_content_chunks" : "stale_content_chunks"
+            findings.append(CiderSearchIndexDriftFinding(
+                id: "search-index-drift:\(itemType):\(itemID)",
+                kind: kind,
+                severity: "warning",
+                itemType: itemType,
+                itemID: itemID,
+                title: title,
+                updatedAt: updatedAt,
+                chunkUpdatedAt: chunkUpdatedAt,
+                chunkCount: chunkCount,
+                safeRepairCommand: "cider-cli item rebuild-chunks \(itemType) \(itemID) --json"
+            ))
+        }
+        return findings
     }
 
     private struct BookmarkDriftCandidate {

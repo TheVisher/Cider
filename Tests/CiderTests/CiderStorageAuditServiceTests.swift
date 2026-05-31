@@ -344,6 +344,45 @@ struct CiderStorageAuditServiceTests {
         try stmt.step()
     }
 
+    private func insertSearchIndexDriftItem(
+        _ db: CiderDatabase,
+        id: UUID,
+        type: String = "note",
+        title: String = "Drifted note",
+        updatedAt: Date = Date(timeIntervalSince1970: 200),
+        chunkUpdatedAt: Date? = nil
+    ) throws {
+        let encodedUpdatedAt = DatabaseHelpers.encode(updatedAt)
+        let itemStmt = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, ?, ?, ?, ?, NULL, NULL);
+            """)
+        itemStmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(type, at: 2)
+            .bind(title, at: 3)
+            .bind(encodedUpdatedAt, at: 4)
+            .bind(encodedUpdatedAt, at: 5)
+        try itemStmt.step()
+
+        guard let chunkUpdatedAt else { return }
+        let chunkStmt = try db.prepare("""
+            INSERT INTO content_chunks (
+                id, item_id, owner_type, owner_id, source, title, body,
+                chunk_index, content_hash, metadata, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, 'item_index.test', ?, 'stale projection body',
+                    0, 'stale-projection-hash', '{}', ?, ?);
+            """)
+        chunkStmt.bind(DatabaseHelpers.encode(UUID()), at: 1)
+            .bind(DatabaseHelpers.encode(id), at: 2)
+            .bind(type, at: 3)
+            .bind(DatabaseHelpers.encode(id), at: 4)
+            .bind(title, at: 5)
+            .bind(DatabaseHelpers.encode(chunkUpdatedAt), at: 6)
+            .bind(DatabaseHelpers.encode(chunkUpdatedAt), at: 7)
+        try chunkStmt.step()
+    }
+
     private func insertBookmarkDriftFixture(
         _ db: CiderDatabase,
         id: UUID,
@@ -563,6 +602,41 @@ struct CiderStorageAuditServiceTests {
         })
     }
 
+    @Test("storage audit reports missing and stale item search projections")
+    func storageAuditReportsMissingAndStaleItemSearchProjections() throws {
+        let (db, dbURL) = try makeTestDB()
+        defer { db.close(); cleanup(dbURL) }
+
+        let missingID = UUID()
+        let staleID = UUID()
+        try insertSearchIndexDriftItem(db, id: missingID, title: "Missing chunks")
+        try insertSearchIndexDriftItem(
+            db,
+            id: staleID,
+            title: "Stale chunks",
+            updatedAt: Date(timeIntervalSince1970: 300),
+            chunkUpdatedAt: Date(timeIntervalSince1970: 100)
+        )
+
+        let service = CiderStorageAuditService(
+            database: db,
+            modelCountsProvider: { [:] },
+            doctorReportProvider: { VaultDoctor.Report(startedAt: Date(), finishedAt: Date(), findings: []) },
+            duplicateFindingsProvider: { [] }
+        )
+        let report = try service.audit()
+
+        #expect(report.searchIndexDriftFindings.map(\.itemID).contains(missingID.uuidString))
+        #expect(report.searchIndexDriftFindings.map(\.itemID).contains(staleID.uuidString))
+        let missing = try #require(report.searchIndexDriftFindings.first { $0.itemID == missingID.uuidString })
+        let stale = try #require(report.searchIndexDriftFindings.first { $0.itemID == staleID.uuidString })
+        #expect(missing.kind == "missing_content_chunks")
+        #expect(missing.chunkUpdatedAt == nil)
+        #expect(missing.safeRepairCommand == "cider-cli item rebuild-chunks note \(missingID.uuidString) --json")
+        #expect(stale.kind == "stale_content_chunks")
+        #expect(stale.chunkUpdatedAt != nil)
+    }
+
     @Test("storage audit JSON exposes compact groups and mismatches")
     func storageAuditJSONExposesCompactGroupsAndMismatches() throws {
         let report = CiderStorageAuditReport(
@@ -616,6 +690,43 @@ struct CiderStorageAuditServiceTests {
         })
         let doctorGroups = try #require(dict["doctorFindingGroups"] as? [String: Int])
         #expect(doctorGroups["warning:duplicateNoteContent"] == 1)
+    }
+
+    @Test("storage audit JSON exposes search index drift repair commands")
+    func storageAuditJSONExposesSearchIndexDriftRepairCommands() throws {
+        let itemID = UUID()
+        let report = CiderStorageAuditReport(
+            generatedAt: Date(timeIntervalSince1970: 12),
+            modelCounts: [:],
+            sqliteCounts: [:],
+            fileArtifactCounts: [:],
+            doctorFindingGroups: [:],
+            duplicateFindingGroups: [:],
+            totalDoctorFindings: 0,
+            fixableDoctorFindings: 0,
+            schemaFindings: [],
+            searchIndexDriftFindings: [
+                CiderSearchIndexDriftFinding(
+                    id: "search-index-drift:note:\(itemID.uuidString)",
+                    kind: "missing_content_chunks",
+                    severity: "warning",
+                    itemType: "note",
+                    itemID: itemID.uuidString,
+                    title: "Missing chunks",
+                    updatedAt: Date(timeIntervalSince1970: 200),
+                    chunkUpdatedAt: nil,
+                    chunkCount: 0,
+                    safeRepairCommand: "cider-cli item rebuild-chunks note \(itemID.uuidString) --json"
+                )
+            ],
+            mismatches: []
+        )
+        let dict = storageAuditReportToDict(report)
+        let findings = try #require(dict["searchIndexDriftFindings"] as? [[String: Any]])
+        let first = try #require(findings.first)
+
+        #expect(first["kind"] as? String == "missing_content_chunks")
+        #expect(first["safeRepairCommand"] as? String == "cider-cli item rebuild-chunks note \(itemID.uuidString) --json")
     }
 
     @Test("storage audit JSON exposes actionable doctor finding samples")

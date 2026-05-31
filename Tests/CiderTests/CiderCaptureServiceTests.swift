@@ -854,6 +854,30 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("captured note is findable through UI search and item search")
+    func capturedNoteIsFindableThroughUISearchAndItemSearch() async throws {
+        try await withIsolatedVault { db, bookmarks, notes, _, _ in
+            let service = CiderCaptureService(notesStorage: notes, database: db)
+            let result = try service.addNoteCapture(
+                title: "Projection parity note",
+                content: "Search projection parity token prism-lantern",
+                folderID: nil
+            )
+
+            let uiResults = await SearchService.search(
+                query: "prism-lantern",
+                bookmarks: bookmarks.bookmarks,
+                notes: notes.notes
+            )
+            let itemResults = try CiderItemContextService(database: db).search("prism-lantern", limit: 5)
+
+            #expect(uiResults.contains { $0.id == result.item.id && $0.type == .note })
+            #expect(itemResults.contains {
+                $0.owner == SecondBrainOwnerRef(ownerType: "note", ownerID: result.item.id.uuidString)
+            })
+        }
+    }
+
     @Test("capture result reports canonical side effect statuses on success")
     func captureResultReportsCanonicalSideEffectStatusesOnSuccess() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in
