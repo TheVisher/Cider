@@ -65,6 +65,8 @@ Hidden or removed legacy commands return `legacyRemoved: true` with a canonical 
 
 `bookmark add`, `note create`, `todo create`, and `file import` are temporary compatibility wrappers. They should remain hidden from top-level help, call the capture backend, and return `compatibilityWrapper: true`, `backendCommand: capture.add`, and nested `capture.command: capture.add`.
 
+`note daily append --kind journal|food-log [--date YYYY-MM-DD] [--time HH:mm] (--stdin|--text-file <path>|--content <text>) --json` is the blessed same-day append path for running journals and food logs. It must upsert one note per kind/day, preserve source context in JSON and mutation audit metadata, write through Cider storage, and return `safeNextCommands` for `item get` / `item context` verification.
+
 After capture, agents should verify and continue through backend-backed item/review commands: `item get`, `item search`, `item context`, `item relations`, `item backlinks`, `item move`, `item route`, `item link`, `review list`, `review approve`, `review correct`, `review enrich`, and `storage audit`.
 
 ## Important Command Areas

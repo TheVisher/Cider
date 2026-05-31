@@ -255,6 +255,85 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeNextCommands.contains("cider-cli item rebuild-chunks bookmark \(itemID) --json"))
     }
 
+    @Test("note daily append upserts same-day food log and refreshes context")
+    func noteDailyAppendUpsertsSameDayFoodLogAndRefreshesContext() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-daily-append-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let firstResult = try runCLI(
+            args: [
+                "note", "daily", "append",
+                "--kind", "food-log",
+                "--date", "2026-05-28",
+                "--time", "13:30",
+                "--content", "Coke Zero",
+                "--source", "discord",
+                "--json",
+            ],
+            vault: vault
+        )
+        let first = try parseJSONObject(firstResult.stdout)
+        #expect(first["ok"] as? Bool == true)
+        #expect(first["command"] as? String == "note.daily.append")
+        #expect(first["created"] as? Bool == true)
+        #expect(first["kind"] as? String == "food-log")
+        #expect(first["date"] as? String == "2026-05-28")
+        let firstNote = try #require(first["note"] as? [String: Any])
+        let noteID = try #require(firstNote["id"] as? String)
+        let firstContent = try #require(first["content"] as? String)
+        #expect(firstContent.contains("Food Log 2026-05-28"))
+        #expect(firstContent.contains("- 13:30 - Coke Zero"))
+
+        let secondResult = try runCLI(
+            args: [
+                "note", "daily", "append",
+                "--kind", "food-log",
+                "--date", "2026-05-28",
+                "--time", "15:45",
+                "--content", "Protein shake",
+                "--source", "discord",
+                "--json",
+            ],
+            vault: vault
+        )
+        let second = try parseJSONObject(secondResult.stdout)
+        #expect(second["ok"] as? Bool == true)
+        #expect(second["created"] as? Bool == false)
+        let secondNote = try #require(second["note"] as? [String: Any])
+        #expect(secondNote["id"] as? String == noteID)
+        let secondContent = try #require(second["content"] as? String)
+        #expect(secondContent.contains("- 13:30 - Coke Zero"))
+        #expect(secondContent.contains("- 15:45 - Protein shake"))
+
+        let journalResult = try runCLI(
+            args: [
+                "note", "daily", "append",
+                "--kind", "journal",
+                "--date", "2026-05-28",
+                "--time", "20:00",
+                "--content", "Evening reflection",
+                "--source", "discord",
+                "--json",
+            ],
+            vault: vault
+        )
+        let journal = try parseJSONObject(journalResult.stdout)
+        #expect(journal["ok"] as? Bool == true)
+        #expect(journal["kind"] as? String == "journal")
+        #expect(journal["created"] as? Bool == true)
+        let journalContent = try #require(journal["content"] as? String)
+        #expect(journalContent.contains("Daily Journal 2026-05-28"))
+        #expect(journalContent.contains("- 20:00 - Evening reflection"))
+
+        let inspectResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
+        let inspected = try parseJSONObject(inspectResult.stdout)
+        #expect(inspected["ok"] as? Bool == true)
+        let chunks = try #require(inspected["chunks"] as? [[String: Any]])
+        #expect(chunks.contains { ($0["body"] as? String)?.contains("Protein shake") == true })
+    }
+
     @Test("capture add json rejects missing source")
     func captureAddJSONRejectsMissingSource() throws {
         let result = try runCLI(args: ["capture", "add", "--json"])

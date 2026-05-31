@@ -66,7 +66,7 @@ struct CiderCLI {
             }
             return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
         case "note":
-            if subcommand == "create" || subcommand == "project-artifact" || subcommand == "artifact" { return nil }
+            if subcommand == "create" || subcommand == "project-artifact" || subcommand == "artifact" || subcommand == "daily" { return nil }
             if subcommand == "move" {
                 return LegacyRemovedCommand(command: label, replacement: "cider-cli item move note <id> --folder <name|path> --json")
             }
@@ -2331,6 +2331,9 @@ struct CiderCLI {
         case "project-artifact", "artifact":
             handleProjectArtifactNoteCommand(args: args, storage: storage)
 
+        case "daily":
+            handleDailyNoteCommand(args: args, storage: storage)
+
         case "get", "show":
             guard let idPrefix = args.first else {
                 print("Error: ID prefix required.")
@@ -2567,8 +2570,148 @@ struct CiderCLI {
             print("Attached '\(filename)' to '\(note.title)' → \(savedURL.path)")
 
         default:
-            printCLIError("Unknown note command: \(subcommand ?? "nil"). Commands: list, create, get, pin, move, delete, update, tag, untag, snapshots, restore-snapshot, attach-image")
+            printCLIError("Unknown note command: \(subcommand ?? "nil"). Commands: list, create, daily, get, pin, move, delete, update, tag, untag, snapshots, restore-snapshot, attach-image")
         }
+    }
+
+    static func handleDailyNoteCommand(args: [String], storage: NotesStorage) {
+        let subcommand = args.first
+        let rest = Array(args.dropFirst())
+        switch subcommand {
+        case nil, "help", "--help", "-h":
+            print("""
+            Daily note commands:
+              cider-cli note daily append --kind journal|food-log [--date YYYY-MM-DD] [--time HH:mm] (--stdin|--text-file <path>|--content <text>) [--source <source>] [--json]
+            """)
+
+        case "append":
+            guard let spec = dailyNoteKindSpec(parseFlag("--kind", from: rest) ?? "journal") else {
+                printCLIError("Usage: cider-cli note daily append --kind journal|food-log [--date YYYY-MM-DD] [--time HH:mm] (--stdin|--text-file <path>|--content <text>) [--source <source>] [--json]")
+                return
+            }
+            let dateString = parseFlag("--date", from: rest) ?? localDateFormatter.string(from: Date())
+            guard isValidLocalDateString(dateString) else {
+                printCLIError("--date must be YYYY-MM-DD")
+                return
+            }
+            let timeString = parseFlag("--time", from: rest) ?? twentyFourHourTimeFormatter.string(from: Date())
+            guard isValidClockTimeString(timeString) else {
+                printCLIError("--time must be HH:mm")
+                return
+            }
+            guard let rawContent = projectArtifactContent(from: rest) else { return }
+            let body = rawContent.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !body.isEmpty else {
+                printCLIError("Daily append content cannot be empty.")
+                return
+            }
+
+            let title = "\(spec.titlePrefix) \(dateString)"
+            let existing = storage.notes.first { note in
+                note.title.localizedCaseInsensitiveCompare(title) == .orderedSame
+            }
+            let created = existing == nil
+            let note: Note
+            if let existing {
+                note = existing
+            } else {
+                let createdNote = storage.createNew(initialContent: dailyNoteSeedContent(title: title))
+                storage.rename(note: createdNote, to: title)
+                note = storage.notes.first(where: { $0.id == createdNote.id }) ?? createdNote
+            }
+            let before = MutationAuditSnapshots.note(note)
+            let existingContent = storage.loadContent(for: note)
+            let entry = "- \(timeString) - \(body)"
+            var updated = note
+            updated.content = dailyNoteContentByAppending(entry: entry, to: existingContent, title: title)
+            storage.save(note: updated)
+            let current = storage.notes.first(where: { $0.id == note.id }) ?? updated
+            let content = storage.loadContent(for: current)
+            let source = parseFlag("--source", from: rest) ?? "cider-cli"
+            MutationAuditService.shared.record(
+                action: "daily_append",
+                itemType: "note",
+                itemID: current.id,
+                before: before,
+                after: MutationAuditSnapshots.note(current),
+                metadata: [
+                    "kind": spec.kind,
+                    "date": dateString,
+                    "time": timeString,
+                    "source": source,
+                ]
+            )
+
+            if jsonOutput {
+                outputJSON([
+                    "ok": true,
+                    "command": "note.daily.append",
+                    "kind": spec.kind,
+                    "date": dateString,
+                    "time": timeString,
+                    "created": created,
+                    "note": noteToDict(current),
+                    "content": content,
+                    "appendedEntry": entry,
+                    "sourceContext": [
+                        "source": source,
+                        "kind": spec.kind,
+                        "date": dateString,
+                        "time": timeString,
+                    ],
+                    "indexing": [
+                        "status": "indexed",
+                        "ownerType": "note",
+                        "ownerID": current.id.uuidString,
+                    ],
+                    "safeNextCommands": [
+                        "cider-cli item get note \(current.id.uuidString) --json",
+                        "cider-cli item context note \(current.id.uuidString) --json",
+                    ],
+                ] as [String: Any])
+            } else {
+                print("Appended \(spec.kind) entry to \(current.title) (\(current.id.uuidString.prefix(8)))")
+                print("  Path: \(current.relativePath)")
+            }
+
+        default:
+            printCLIError("Unknown daily note command: \(subcommand ?? "nil"). Commands: append")
+        }
+    }
+
+    struct DailyNoteKindSpec {
+        let kind: String
+        let titlePrefix: String
+    }
+
+    static func dailyNoteKindSpec(_ raw: String) -> DailyNoteKindSpec? {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+            .replacingOccurrences(of: "_", with: "-") {
+        case "journal", "daily", "daily-journal":
+            return DailyNoteKindSpec(kind: "journal", titlePrefix: "Daily Journal")
+        case "food", "food-log":
+            return DailyNoteKindSpec(kind: "food-log", titlePrefix: "Food Log")
+        default:
+            return nil
+        }
+    }
+
+    static func dailyNoteSeedContent(title: String) -> String {
+        "# \(title)\n\n## Entries"
+    }
+
+    static func dailyNoteContentByAppending(entry: String, to existing: String, title: String) -> String {
+        let trimmed = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.isEmpty ? dailyNoteSeedContent(title: title) : trimmed
+        return "\(base)\n\(entry)"
+    }
+
+    static func isValidLocalDateString(_ value: String) -> Bool {
+        localDateFormatter.date(from: value).map { localDateFormatter.string(from: $0) == value } ?? false
+    }
+
+    static func isValidClockTimeString(_ value: String) -> Bool {
+        twentyFourHourTimeFormatter.date(from: value).map { twentyFourHourTimeFormatter.string(from: $0) == value } ?? false
     }
 
     static func handleProjectArtifactNoteCommand(args: [String], storage: NotesStorage) {
@@ -7918,6 +8061,14 @@ struct CiderCLI {
     static let localTimeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "h:mm a"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .autoupdatingCurrent
+        return f
+    }()
+
+    static let twentyFourHourTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = .autoupdatingCurrent
         return f
