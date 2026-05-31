@@ -1114,7 +1114,7 @@ struct CiderCLI {
             }
 
             let targetFolder: VaultFolder?
-            switch resolveCaptureFolderArg(from: args) {
+            switch resolveCaptureFolderArg(from: args, source: source) {
             case .unspecified: targetFolder = nil
             case .resolved(let folder): targetFolder = folder
             case .failed: return
@@ -1275,7 +1275,8 @@ struct CiderCLI {
     }
 
     static func printCaptureUsage() {
-        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <text-file-path>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+        print("       Example destination: --folder \"Inbox/Notes\". In capture add, --path is always a source file, not a destination.")
         print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
     }
 
@@ -1396,7 +1397,7 @@ struct CiderCLI {
 
         case "correct":
             guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--folder", "--path", "--reason", "--actor"]) else {
-                printCLIError("Usage: cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
+                printCLIError("Usage: cider-cli review correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
                 return
             }
 
@@ -1552,7 +1553,7 @@ struct CiderCLI {
               cider-cli review enrichment-reconcile-apply [--group <group-id>] [--limit <n>] [--approve <token>] [--actor user|agent] [--execute] [--json]
               cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]
               cider-cli review approve <item-id> [--actor user|agent] [--json]
-              cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+              cider-cli review correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
               cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
               cider-cli review enrich <item-id> [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
               cider-cli review enrich-batch --confirm [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
@@ -1697,7 +1698,7 @@ struct CiderCLI {
 
         case "correct":
             guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--folder", "--path", "--reason", "--actor"]) else {
-                printCLIError("Usage: cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
+                printCLIError("Usage: cider-cli routing correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
                 return
             }
 
@@ -1761,7 +1762,7 @@ struct CiderCLI {
             Usage:
               cider-cli routing explain <item-id> [--json]
               cider-cli routing approve <item-id> [--actor user|agent] [--json]
-              cider-cli routing correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+              cider-cli routing correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
               cider-cli routing rerun <item-id> [--actor user|agent] [--json]
             """)
 
@@ -1798,7 +1799,7 @@ struct CiderCLI {
                 from: args,
                 valueFlags: ["--title", "--folder", "--path", "--timeout", "--wait-timeout", "--capture-timeout"]
             ) else {
-                printCLIError("URL required. Usage: cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--path <vault-path>] [--timeout <seconds>|--no-wait] [--json]")
+                printCLIError("URL required. Usage: cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--path <target-folder-path>] [--timeout <seconds>|--no-wait] [--json]")
                 return
             }
             // Resolve the destination folder BEFORE creating, so that a bad
@@ -1900,7 +1901,7 @@ struct CiderCLI {
 
         case "move":
             guard let firstArg = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli bookmark move <id>[,id,...] [--folder <name|path> | --path <vault-path>]")
+                print("Error: ID prefix required. Usage: cider-cli bookmark move <id>[,id,...] [--folder <name|path> | --path <target-folder-path>]")
                 return
             }
             let prefixes = splitIDs(firstArg)
@@ -2400,7 +2401,7 @@ struct CiderCLI {
 
         case "move":
             guard let firstArg = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli note move <id>[,id,...] [--folder <name|path> | --path <vault-path>]")
+                print("Error: ID prefix required. Usage: cider-cli note move <id>[,id,...] [--folder <name|path> | --path <target-folder-path>]")
                 return
             }
             let prefixes = splitIDs(firstArg)
@@ -4331,7 +4332,8 @@ struct CiderCLI {
               cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
               cider-cli item sync-project <project-id-or-name> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
-              cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <vault-path>) [--actor <name>] [--source <source>] [--json]
+              cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
+                Do not pass artifact filenames such as Example.webloc to item move --path.
               cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
               cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
               cider-cli item backfill-kanban [--board <name-or-id>] [--json]
@@ -4979,7 +4981,7 @@ struct CiderCLI {
         case "move":
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
-                printCLIError("Usage: cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <vault-path>) [--actor <name>] [--source <source>] [--json]")
+                printCLIError("Usage: cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]")
                 return
             }
             let folder: VaultFolder
@@ -5324,7 +5326,7 @@ struct CiderCLI {
 
         case "move":
             guard let firstArg = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli file move <id>[,id,...] [--folder <name|path> | --path <vault-path>]")
+                print("Error: ID prefix required. Usage: cider-cli file move <id>[,id,...] [--folder <name|path> | --path <target-folder-path>]")
                 return
             }
             let prefixes = splitIDs(firstArg)
@@ -8476,7 +8478,7 @@ struct CiderCLI {
             throw CaptureAddArgumentError.message("Unsupported --kind '\(unsupported)'. Use note, todo, bookmark, file, event, or contact.")
         }
 
-        throw CaptureAddArgumentError.message("Source required. Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <path>|--url <url>|--path <path>|<url|text|file-path>) [--title <title>] [--folder <name|path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+        throw CaptureAddArgumentError.message("Source required. Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <text-file-path>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
     }
 
     static func capturePositionalArguments(from args: [String]) -> [String] {
@@ -12750,6 +12752,13 @@ struct CiderCLI {
     /// folders already registered in canonical storage.
     static func resolveFolderArg(from args: [String]) -> FolderArgResolution {
         if let path = parseFlag("--path", from: args) {
+            if looksLikeVaultArtifactPath(path) {
+                let parentPath = parentFolderPath(forArtifactPath: path) ?? "<folder-path>"
+                printCLIError(
+                    "`--path \(path)` looks like a file path, but this command expects a target folder path. Use `--folder \(parentPath)` or `--path \(parentPath)` to move into the containing folder."
+                )
+                return .failed
+            }
             if let folder = findOrCreateFolderByPath(path) {
                 return .resolved(folder)
             }
@@ -12778,14 +12787,23 @@ struct CiderCLI {
 
     /// `capture add --path` is the canonical source-file flag, so capture target
     /// placement only honors `--folder`.
-    static func resolveCaptureFolderArg(from args: [String]) -> FolderArgResolution {
+    static func resolveCaptureFolderArg(from args: [String], source: CaptureAddSource) -> FolderArgResolution {
         guard let name = parseFlag("--folder", from: args) else {
             return .unspecified
         }
         if name.contains("/") {
-            if let folder = findFolderStrict(name) {
+            if name.hasPrefix("Inbox/") || name.localizedCaseInsensitiveCompare("Inbox") == .orderedSame {
+                let expectedPath = canonicalInboxPath(for: source)
+                guard name.localizedCaseInsensitiveCompare(expectedPath) == .orderedSame else {
+                    printCLIError("`--folder \(name)` is a canonical Inbox path for another item type. Use `--folder \(expectedPath)` for this capture, or choose a non-Inbox vault folder path.")
+                    return .failed
+                }
+                return .unspecified
+            }
+            if let folder = findOrCreateFolderByPath(name) {
                 return .resolved(folder)
             }
+            printCLIError("Could not resolve or create capture target folder '\(name)'")
             return .failed
         }
         if let folder = findFolder(named: name) {
@@ -12793,6 +12811,57 @@ struct CiderCLI {
         }
         print("Error: No folder found with name '\(name)'")
         return .failed
+    }
+
+    static func canonicalInboxPath(for source: CaptureAddSource) -> String {
+        switch source {
+        case .inferred(let raw):
+            if looksLikeURL(raw) { return "Inbox/Bookmarks" }
+            if FileManager.default.fileExists(atPath: NSString(string: raw).expandingTildeInPath) {
+                return "Inbox/Files"
+            }
+            return "Inbox/Notes"
+        case .note:
+            return "Inbox/Notes"
+        case .todo:
+            return "Inbox/Todos"
+        case .bookmark:
+            return "Inbox/Bookmarks"
+        case .file:
+            return "Inbox/Files"
+        case .event:
+            return "Inbox/Date Cards"
+        case .contact:
+            return "Inbox/Contacts"
+        }
+    }
+
+    static func looksLikeURL(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased() else {
+            return false
+        }
+        return scheme == "http" || scheme == "https"
+    }
+
+    static func looksLikeVaultArtifactPath(_ path: String) -> Bool {
+        let trimmed = path.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        guard let leaf = trimmed.split(separator: "/").last else { return false }
+        guard let dot = leaf.lastIndex(of: ".") else { return false }
+        let ext = leaf[leaf.index(after: dot)...].lowercased()
+        let knownArtifactExtensions: Set<String> = [
+            "webloc", "md", "markdown", "ics", "vcf",
+            "png", "jpg", "jpeg", "gif", "heic", "webp",
+            "pdf", "txt", "rtf", "doc", "docx",
+        ]
+        return knownArtifactExtensions.contains(ext)
+    }
+
+    static func parentFolderPath(forArtifactPath path: String) -> String? {
+        let trimmed = path.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        let parts = trimmed.split(separator: "/").map(String.init)
+        guard parts.count > 1 else { return nil }
+        return parts.dropLast().joined(separator: "/")
     }
 
     static func routingTarget(for folder: VaultFolder?, inboxPath: String) -> CiderRoutingDecisionTarget {
@@ -13327,7 +13396,7 @@ struct CiderCLI {
         CiderCLI — Second Brain v1 agent API
 
         CAPTURE
-          cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <path>|--url <url>|--path <path>) [--title <title>] [--date yyyy-MM-dd] [--details <text>] [--name <name>] [--folder <name|path>] [--timeout <seconds>|--no-wait] [--json]
+          cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <text-file-path>|--url <url>|--path <source-file-path>) [--title <title>] [--date yyyy-MM-dd] [--details <text>] [--name <name>] [--folder <target-folder-path>] [--timeout <seconds>|--no-wait] [--json]
 
         ITEM
           cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]
@@ -13344,7 +13413,7 @@ struct CiderCLI {
           cider-cli item graph-health [--json]
           cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
           cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
-          cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <vault-path>) [--actor <name>] [--source <source>] [--json]
+          cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
           cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
           cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
           cider-cli item doctor [--json]
@@ -13358,7 +13427,7 @@ struct CiderCLI {
           cider-cli review enrichment-reconcile-samples [--group <group-id>] [--limit <n>] [--json]
           cider-cli review enrichment-reconcile-apply [--group <group-id>] [--limit <n>] [--approve <token>] [--actor user|agent] [--execute] [--json]
           cider-cli review approve <item-id> [--actor user|agent] [--json]
-          cider-cli review correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+          cider-cli review correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
           cider-cli review enrich <item-id> [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
           cider-cli review enrich-batch --confirm [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
@@ -13367,7 +13436,7 @@ struct CiderCLI {
         ROUTE
           cider-cli route explain <item-id> [--json]
           cider-cli route approve <item-id> [--actor user|agent] [--json]
-          cider-cli route correct <item-id> (--folder <name|path>|--path <vault-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
+          cider-cli route correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli route rerun <item-id> [--actor user|agent] [--json]
 
         STORAGE

@@ -45,13 +45,22 @@ Core capture flags:
 - `--stdin` reads exact raw source text from standard input.
 - `--text-file <path>` reads exact raw source text from a file.
 - `--url <url>` is the explicit bookmark source.
-- `--path <path>` is the explicit file source.
+- `--path <source-file-path>` is the explicit file source for `capture add`.
+- `--folder <target-folder-path>` is the destination folder selector for `capture add`; examples include `Inbox/Notes`, `Inbox/Bookmarks`, and project or topic folders.
 - `--json` is required for agent verification.
+
+Folder/path rules:
+
+- Source paths are local filesystem inputs. In `capture add`, `--path` always means source file, never destination.
+- Target folders are vault-relative destination folders. Use `--folder "Inbox/Notes"` when capturing a note directly to the Notes inbox.
+- Target paths in `item move`, `review correct`, and `route correct` are folder paths. `--path "Projects/Cider/Notes"` means move or route into that folder.
+- Vault artifact paths include filenames such as `Inbox/Bookmarks/Example.webloc` or `Projects/Cider/Notes/Plan.md`. Do not pass artifact filenames to `item move --path`; pass the containing folder with `--folder Inbox/Bookmarks` or `--path Inbox/Bookmarks`.
 
 Canonical examples:
 
 ```bash
 printf '%s' "$RAW_NOTE" | cider-cli capture add --kind note --stdin --json
+cider-cli capture add --kind note --folder "Inbox/Notes" "Quick note" --json
 printf '%s' "$RAW_TODO" | cider-cli capture add --kind todo --stdin --json
 cider-cli capture add --kind bookmark --url "https://example.com?a=1&b=two" --json
 cider-cli capture add --kind file --path "/path/with spaces.txt" --json
@@ -100,6 +109,7 @@ Core commands:
 - `item sync-project <project> --json`: explicit project workspace sync/seed path for backend project metadata and Kanban owner relations. This can mutate state; JSON reports `readOnly: false`, `changed`, and `mutationReason`.
 - `item route <type> <id-or-ref> --target-type <space|folder|board> --reason <text> --json`: records a routing decision without silently moving files.
 - `item route ... --target-type space` records native Space membership and creates a `belongs_to_space` owner relation so item context and graph inspection can see the Space assignment.
+- `item move <type> <id-or-ref> --path <target-folder-path> --json`: moves an item into a folder path. The path must be a folder, not a `.webloc`, `.md`, `.ics`, `.vcf`, or other artifact filename.
 - `item backfill-kanban [--board <name-or-id>] --json`: rebuilds Kanban card projections from YAML into SQLite sections/chunks.
 - `item dogfood-intelligence [--limit <n>] --json`: bounded mutation that rebuilds reviewable enrichment outputs and similarity candidates from existing content chunks. Generated rows remain `suggested`; accepting similarity candidates is a separate explicit command.
 - `item doctor --json`: checks second-brain tables and SQLite integrity.
