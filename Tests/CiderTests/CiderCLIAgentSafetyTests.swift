@@ -1090,6 +1090,26 @@ struct CiderCLIAgentSafetyTests {
         #expect((apply["mutationReason"] as? String)?.contains("MediaItem YAML") == true)
     }
 
+    @Test("media identify dry-run is reachable as strict process json")
+    func mediaIdentifyDryRunIsReachableAsStrictProcessJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-media-identify-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(args: ["media", "identify", "--dry-run", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(result.stdout.first == "{")
+        #expect(payload["command"] as? String == "media.identify")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["legacyRemoved"] == nil)
+        let reviewLane = try #require(payload["reviewLane"] as? [String: Any])
+        #expect(reviewLane["safeActions"] as? [String] == ["media identify --dry-run --json"])
+    }
+
     @Test("project context summary bounds relation-heavy output")
     func projectContextSummaryBoundsRelationHeavyOutput() throws {
         let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cider")

@@ -115,6 +115,7 @@ struct CiderCLI {
         case "clipboard", "cb":
             return LegacyRemovedCommand(command: label, replacement: "cider-cli capture add --kind note --stdin --json")
         case "media":
+            if subcommand == "identify" { return nil }
             return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
         case "recall":
             return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
