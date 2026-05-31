@@ -163,8 +163,7 @@ final class VaultFileService: ObservableObject {
             options: [.skipsHiddenFiles]
         ) {
             while let url = enumerator.nextObject() as? URL {
-                let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
-                let relativePath = url.path.hasPrefix(rootPrefix) ? String(url.path.dropFirst(rootPrefix.count)) : url.path
+                let relativePath = vaultRelativePath(for: url, root: root)
                 let components = relativePath.split(separator: "/").map(String.init)
 
                 // Skip excluded top-level directories
@@ -197,8 +196,7 @@ final class VaultFileService: ObservableObject {
                 options: [.skipsHiddenFiles]
             ) {
                 while let url = enumerator.nextObject() as? URL {
-                    let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
-                let relativePath = url.path.hasPrefix(rootPrefix) ? String(url.path.dropFirst(rootPrefix.count)) : url.path
+                    let relativePath = vaultRelativePath(for: url, root: root)
                     if let file = processFile(url: url, relativePath: relativePath, idMapDirty: &idMapDirty) {
                         scanned.append(file)
                     }
@@ -537,8 +535,7 @@ final class VaultFileService: ObservableObject {
             options: [.skipsHiddenFiles]
         ) {
             while let url = enumerator.nextObject() as? URL {
-                let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
-                let relativePath = url.path.hasPrefix(rootPrefix) ? String(url.path.dropFirst(rootPrefix.count)) : url.path
+                let relativePath = vaultRelativePath(for: url, root: root)
                 let components = relativePath.split(separator: "/").map(String.init)
                 if let top = components.first, Self.excludedDirectoryPrefixes.contains(top) {
                     if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
@@ -561,8 +558,7 @@ final class VaultFileService: ObservableObject {
                 options: [.skipsHiddenFiles]
             ) {
                 while let url = enumerator.nextObject() as? URL {
-                    let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
-                    let relativePath = url.path.hasPrefix(rootPrefix) ? String(url.path.dropFirst(rootPrefix.count)) : url.path
+                    let relativePath = vaultRelativePath(for: url, root: root)
                     migrateFile(at: url, relativePath: relativePath)
                 }
             }
@@ -582,6 +578,24 @@ final class VaultFileService: ObservableObject {
     }
 
     // MARK: - Private Helpers
+
+    private func vaultRelativePath(for url: URL, root: URL) -> String {
+        let canonicalRootPath = root.resolvingSymlinksInPath().standardizedFileURL.path
+        let canonicalURLPath = url.resolvingSymlinksInPath().standardizedFileURL.path
+        let canonicalPrefix = canonicalRootPath.hasSuffix("/") ? canonicalRootPath : canonicalRootPath + "/"
+        if canonicalURLPath.hasPrefix(canonicalPrefix) {
+            return String(canonicalURLPath.dropFirst(canonicalPrefix.count))
+        }
+
+        let rootPath = root.standardizedFileURL.path
+        let urlPath = url.standardizedFileURL.path
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        if urlPath.hasPrefix(prefix) {
+            return String(urlPath.dropFirst(prefix.count))
+        }
+
+        return url.path
+    }
 
     /// Returns the appropriate Inbox subdirectory for a file type.
     private func inboxDirectory(for fileType: VaultFileType) -> URL {

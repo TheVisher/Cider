@@ -901,6 +901,49 @@ struct CiderCLIAgentSafetyTests {
         #expect(unfiledAfter["folderID"] == nil)
     }
 
+    @Test("file capture returns a canonical vault file id resolvable by item commands")
+    func fileCaptureReturnsCanonicalVaultFileIDResolvableByItemCommands() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-file-capture-identity-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-file-capture-source-\(UUID().uuidString).txt")
+        try "file capture identity regression".write(to: source, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let captureResult = try runCLI(
+            args: ["capture", "add", "--kind", "file", "--path", source.path, "--json"],
+            vault: vault
+        )
+        let capture = try parseJSONObject(captureResult.stdout)
+        let item = try #require(capture["item"] as? [String: Any])
+        let itemID = try #require(item["id"] as? String)
+
+        let getResult = try runCLI(args: ["item", "get", "vaultFile", itemID, "--json"], vault: vault)
+        let get = try parseJSONObject(getResult.stdout)
+        #expect(getResult.status == 0)
+        #expect(get["ok"] as? Bool == true)
+
+        let contextResult = try runCLI(args: ["item", "context", "file", itemID, "--json"], vault: vault)
+        let context = try parseJSONObject(contextResult.stdout)
+        #expect(contextResult.status == 0)
+        #expect(context["ok"] as? Bool == true)
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { db.close() }
+
+        let count = try db.prepare("SELECT COUNT(*) FROM items WHERE type = 'vaultFile';")
+        #expect(try count.step())
+        #expect(count.int(at: 0) == 1)
+
+        let path = try db.prepare("SELECT relative_path FROM items WHERE type = 'vaultFile' LIMIT 1;")
+        #expect(try path.step())
+        #expect(path.string(at: 0).hasPrefix("Inbox/Files/"))
+    }
+
     @Test("item move note into project notes records project ownership and unfile clears it")
     func itemMoveNoteIntoProjectNotesRecordsProjectOwnership() throws {
         let vault = FileManager.default.temporaryDirectory
