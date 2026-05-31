@@ -492,6 +492,23 @@ struct KanbanBoardFileLockingTests {
         #expect(output.contains("Usage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]"))
     }
 
+    @Test("board create rejects flag-like missing names")
+    func boardCreateRejectsFlagLikeMissingNames() throws {
+        let cli = try #require(Self.ciderCLIURL())
+        let vault = try Self.makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try Self.runCLIResult(cli, vault: vault, args: ["board", "create", "--help"])
+        let output = String(data: result.output, encoding: .utf8) ?? ""
+
+        #expect(result.status == 1)
+        #expect(output.contains("Usage: cider-cli board create <name> [--project <project-id>]"))
+
+        let boardsDirectory = vault.appendingPathComponent(".cider/boards", isDirectory: true)
+        let boardFiles = (try? FileManager.default.contentsOfDirectory(at: boardsDirectory, includingPropertiesForKeys: nil)) ?? []
+        #expect(boardFiles.isEmpty)
+    }
+
     @Test("board mutation validation failures exit nonzero")
     func boardMutationValidationFailuresExitNonzero() throws {
         let cli = try #require(Self.ciderCLIURL())
