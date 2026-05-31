@@ -280,7 +280,18 @@ final class NotesViewModel: ObservableObject {
     /// Called when a .md/.txt file is dropped onto the editor. Reads the content
     /// with correct UTF-8 encoding (bypassing WKWebView's DOM drop handler which
     /// may interpret files as Latin-1).
-    func handleDroppedTextFileContent(_ content: String) {
+    func handleDroppedTextFileContent(_ content: String, provenance: NoteEditorImportProvenance) {
+        if let note = selectedNote {
+            recordEditorImportAudit(
+                action: "editor_import_text",
+                note: note,
+                provenance: provenance,
+                extraMetadata: [
+                    "importedCharacterCount": String(content.count),
+                    "previousCharacterCount": String(editingContent.count),
+                ]
+            )
+        }
         pushContentToEditor(content)
     }
 
@@ -358,9 +369,19 @@ final class NotesViewModel: ObservableObject {
 
     // MARK: - Image Handling
 
-    func handleImageDrop(data: Data, filename: String) {
+    func handleImageDrop(data: Data, filename: String, provenance: NoteEditorImportProvenance) {
         guard let note = selectedNote else { return }
         let imageURL = NotesStorage.shared.saveImage(data: data, filename: filename, for: note)
+        recordEditorImportAudit(
+            action: "editor_import_image",
+            note: note,
+            provenance: provenance,
+            extraMetadata: [
+                "byteCount": String(data.count),
+                "storedFilename": imageURL.lastPathComponent,
+                "storedPath": imageURL.path,
+            ]
+        )
         guard let webView = editorWebView else { return }
         let src = imageURL.absoluteString
         let alt = filename
@@ -380,7 +401,25 @@ final class NotesViewModel: ObservableObject {
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let data = try? Data(contentsOf: url) else { return }
-        handleImageDrop(data: data, filename: url.lastPathComponent)
+        handleImageDrop(data: data, filename: url.lastPathComponent, provenance: .imagePicker(url))
+    }
+
+    private func recordEditorImportAudit(
+        action: String,
+        note: Note,
+        provenance: NoteEditorImportProvenance,
+        extraMetadata: [String: String]
+    ) {
+        var metadata = provenance.auditMetadata
+        extraMetadata.forEach { key, value in metadata[key] = value }
+        MutationAuditService.shared.record(
+            action: action,
+            itemType: "note",
+            itemID: note.id,
+            before: MutationAuditSnapshots.note(note),
+            after: MutationAuditSnapshots.note(note),
+            metadata: metadata
+        )
     }
 
     // MARK: - Note Selection

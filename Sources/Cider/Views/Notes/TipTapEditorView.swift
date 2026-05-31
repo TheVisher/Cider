@@ -67,7 +67,7 @@ final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigat
                    let base64 = payload["data"],
                    let name = payload["name"],
                    let imageData = Data(base64Encoded: base64) {
-                    viewModel.handleImageDrop(data: imageData, filename: name)
+                    viewModel.handleImageDrop(data: imageData, filename: name, provenance: .webViewImage(filename: name))
                 }
 
             case "slashCommandImage":
@@ -281,7 +281,7 @@ final class TipTapWebView: WKWebView {
                     let content = try await Task.detached(priority: .userInitiated) {
                         try String(contentsOf: fileURL, encoding: .utf8)
                     }.value
-                    viewModel?.handleDroppedTextFileContent(content)
+                    viewModel?.handleDroppedTextFileContent(content, provenance: .textFile(fileURL))
                 } catch {
                     logger.error("Failed to read dropped text file: \(error.localizedDescription, privacy: .public)")
                 }
@@ -353,14 +353,22 @@ final class TipTapWebView: WKWebView {
            let rep = NSBitmapImageRep(data: tiffData),
            let pngData = rep.representation(using: .png, properties: [:]) {
             Task { @MainActor [weak viewModel] in
-                viewModel?.handleImageDrop(data: pngData, filename: "dropped-image.png")
+                viewModel?.handleImageDrop(
+                    data: pngData,
+                    filename: "dropped-image.png",
+                    provenance: .pasteboardImage(filename: "dropped-image.png")
+                )
             }
             return true
         }
 
         if let pngData = pb.data(forType: .png) {
             Task { @MainActor [weak viewModel] in
-                viewModel?.handleImageDrop(data: pngData, filename: "dropped-image.png")
+                viewModel?.handleImageDrop(
+                    data: pngData,
+                    filename: "dropped-image.png",
+                    provenance: .pasteboardImage(filename: "dropped-image.png")
+                )
             }
             return true
         }
@@ -376,7 +384,11 @@ final class TipTapWebView: WKWebView {
                     let data = try await Task.detached(priority: .userInitiated) {
                         try Data(contentsOf: imageURL)
                     }.value
-                    viewModel?.handleImageDrop(data: data, filename: imageURL.lastPathComponent)
+                    viewModel?.handleImageDrop(
+                        data: data,
+                        filename: imageURL.lastPathComponent,
+                        provenance: .imageFile(imageURL)
+                    )
                 } catch {
                     logger.error("Failed to read dropped image file: \(error.localizedDescription, privacy: .public)")
                 }
@@ -394,7 +406,7 @@ final class TipTapWebView: WKWebView {
                 do {
                     let (data, _) = try await URLSession.shared.data(from: url)
                     let filename = url.lastPathComponent.isEmpty ? "web-image.png" : url.lastPathComponent
-                    viewModel.handleImageDrop(data: data, filename: filename)
+                    viewModel.handleImageDrop(data: data, filename: filename, provenance: .remoteImageURL(url, filename: filename))
                 } catch {
                     logger.error("Failed to download web image: \(error.localizedDescription, privacy: .public)")
                 }
