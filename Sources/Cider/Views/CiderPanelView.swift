@@ -315,6 +315,7 @@ struct CiderPanelView: View {
             }
             openSurfaceInMainWindow(floatableSurface)
         }
+        .modifier(CiderExternalOpenModifier(isMainWindow: surface == .mainWindow, open: handleExternalOpenTarget))
         .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { notification in
             let ui = notification.userInfo
             let step = ui?["initialStep"] as? String

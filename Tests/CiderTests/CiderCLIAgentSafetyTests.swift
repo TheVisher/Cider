@@ -334,6 +334,68 @@ struct CiderCLIAgentSafetyTests {
         #expect(chunks.contains { ($0["body"] as? String)?.contains("Protein shake") == true })
     }
 
+    @Test("item open resolves library refs and reports external open notification")
+    func itemOpenResolvesLibraryRefsAndReportsExternalOpenNotification() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-item-open-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let createResult = try runCLI(
+            args: ["note", "create", "Open Me", "--content", "Surface this note", "--json"],
+            vault: vault
+        )
+        let created = try parseJSONObject(createResult.stdout)
+        let noteID = try #require(created["id"] as? String)
+
+        let openResult = try runCLI(
+            args: ["item", "open", "note", noteID, "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(openResult.stdout)
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.open")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["notificationPosted"] as? Bool == true)
+        #expect(payload["notificationName"] as? String == "cider.externalOpenRequest")
+        let target = try #require(payload["target"] as? [String: Any])
+        #expect(target["type"] as? String == "note")
+        #expect(target["id"] as? String == noteID)
+        #expect(target["title"] as? String == "Open Me")
+        let sourceRef = try #require(payload["sourceRef"] as? [String: Any])
+        #expect(sourceRef["type"] as? String == "note")
+        #expect(sourceRef["ref"] as? String == noteID)
+    }
+
+    @Test("item open resolves kanban cards with board context")
+    func itemOpenResolvesKanbanCardsWithBoardContext() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-card-open-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["board", "create", "Open Board"], vault: vault)
+        let addResult = try runCLI(
+            args: ["board", "add-card", "Open Board", "--column", "Backlog", "--title", "Open Card", "--json"],
+            vault: vault
+        )
+        let added = try parseJSONObject(addResult.stdout)
+        let card = try #require(added["card"] as? [String: Any])
+        let cardID = try #require(card["id"] as? String)
+
+        let openResult = try runCLI(args: ["item", "open", "card", cardID, "--json"], vault: vault)
+        let payload = try parseJSONObject(openResult.stdout)
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.open")
+        let target = try #require(payload["target"] as? [String: Any])
+        #expect(target["type"] as? String == "card")
+        #expect(target["id"] as? String == cardID)
+        #expect(target["title"] as? String == "Open Card")
+        #expect(target["boardID"] as? String != nil)
+        #expect(target["boardName"] as? String == "Open Board")
+    }
+
     @Test("capture add json rejects missing source")
     func captureAddJSONRejectsMissingSource() throws {
         let result = try runCLI(args: ["capture", "add", "--json"])

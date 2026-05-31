@@ -4285,6 +4285,7 @@ struct CiderCLI {
               cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
+              cider-cli item open <type> <id-or-ref> [--json]
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
               cider-cli item capability-map [--json]
@@ -4363,6 +4364,27 @@ struct CiderCLI {
                     command: "item.owner-get",
                     deprecated: false
                 )
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "open":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item open <type> <id-or-ref> [--json]")
+                return
+            }
+            do {
+                let result = try itemOpenPayload(type: positional[0], ref: positional[1], store: store)
+                let posted = CiderExternalOpenBridge.post(userInfo: result.notificationUserInfo)
+                var payload = result.payload
+                payload["notificationPosted"] = posted
+                if jsonOutput {
+                    outputJSON(payload)
+                } else if let target = payload["target"] as? [String: Any] {
+                    print("Requested Cider open: \(target["type"] ?? positional[0]):\(target["id"] ?? positional[1])")
+                    print("  Notification: \(CiderExternalOpenBridge.notificationName.rawValue)")
+                }
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -10569,6 +10591,112 @@ struct CiderCLI {
 
     static let itemGetLegacyOwnerDeprecationMessage = "item get with non-library owner refs is deprecated; use cider-cli item owner-get <owner-type> <owner-id-or-ref> --json for legacy owner-section inspection."
 
+    static func itemOpenPayload(
+        type rawType: String,
+        ref rawRef: String,
+        store: SecondBrainStore
+    ) throws -> (payload: [String: Any], notificationUserInfo: [String: String]) {
+        let requestID = UUID().uuidString
+        let requestedAt = ISO8601DateFormatter().string(from: Date())
+        let normalizedType = rawType.trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedLowercase
+            .replacingOccurrences(of: "-", with: "_")
+
+        let target: [String: String]
+        if isKanbanCardItemType(rawType) {
+            let detail = try resolveKanbanCardDetail(ref: rawRef)
+            try? SecondBrainKanbanProjectionService(store: store).refreshCard(boardID: detail.board.id, card: detail.card)
+            target = [
+                "type": "card",
+                "id": detail.card.id,
+                "title": detail.card.title,
+                "boardID": detail.board.id,
+                "boardName": detail.board.name,
+            ]
+        } else if normalizedType == "board" || normalizedType == "boards" || normalizedType == "kanban_board" {
+            guard let board = KanbanStorage.shared.boards.first(where: {
+                $0.id == rawRef || $0.name.localizedCaseInsensitiveCompare(rawRef) == .orderedSame
+            }) else {
+                throw NSError(
+                    domain: "CiderCLI",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "No board found matching '\(rawRef)'."]
+                )
+            }
+            target = [
+                "type": "board",
+                "id": board.id,
+                "title": board.name,
+                "boardID": board.id,
+                "boardName": board.name,
+            ]
+        } else {
+            let entityType = try ItemLinkService.entityType(from: rawType)
+            let resolved = try ItemLinkService.shared.resolve(type: entityType, ref: rawRef)
+            let summary = ItemLinkService.shared.summary(for: resolved)
+            target = [
+                "type": resolved.type.rawValue,
+                "id": resolved.entityID.uuidString,
+                "title": summary?.title ?? resolved.entityID.uuidString,
+            ]
+        }
+
+        var notificationUserInfo = target.reduce(into: [
+            CiderExternalOpenBridge.Key.requestID: requestID,
+            CiderExternalOpenBridge.Key.targetType: target["type"] ?? rawType,
+            CiderExternalOpenBridge.Key.targetID: target["id"] ?? rawRef,
+            CiderExternalOpenBridge.Key.sourceType: rawType,
+            CiderExternalOpenBridge.Key.sourceRef: rawRef,
+            CiderExternalOpenBridge.Key.requestedAt: requestedAt,
+        ]) { partial, pair in
+            switch pair.key {
+            case "type":
+                partial[CiderExternalOpenBridge.Key.targetType] = pair.value
+            case "id":
+                partial[CiderExternalOpenBridge.Key.targetID] = pair.value
+            case "title":
+                partial[CiderExternalOpenBridge.Key.title] = pair.value
+            case "boardID":
+                partial[CiderExternalOpenBridge.Key.boardID] = pair.value
+            case "boardName":
+                partial[CiderExternalOpenBridge.Key.boardName] = pair.value
+            default:
+                break
+            }
+        }
+
+        if notificationUserInfo[CiderExternalOpenBridge.Key.title] == nil {
+            notificationUserInfo[CiderExternalOpenBridge.Key.title] = target["id"] ?? rawRef
+        }
+
+        var targetDict: [String: Any] = [
+            "type": target["type"] ?? rawType,
+            "id": target["id"] ?? rawRef,
+            "title": target["title"] ?? "",
+        ]
+        if let boardID = target["boardID"] { targetDict["boardID"] = boardID }
+        if let boardName = target["boardName"] { targetDict["boardName"] = boardName }
+
+        return ([
+            "ok": true,
+            "command": "item.open",
+            "readOnly": true,
+            "changed": false,
+            "notificationName": CiderExternalOpenBridge.notificationName.rawValue,
+            "requestID": requestID,
+            "requestedAt": requestedAt,
+            "target": targetDict,
+            "sourceRef": [
+                "type": rawType,
+                "ref": rawRef,
+            ],
+            "safeNextCommands": [
+                "cider-cli item get \(targetDict["type"] ?? rawType) \(targetDict["id"] ?? rawRef) --json",
+            ],
+            "message": "Posted a request for the running Cider app to open the resolved target. This confirms notification delivery was attempted, not that a human saw the item.",
+        ] as [String: Any], notificationUserInfo)
+    }
+
     static func ownerInspectionPayload(
         type rawType: String,
         ref rawRef: String,
@@ -13113,6 +13241,7 @@ struct CiderCLI {
           cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]
           cider-cli item get <type> <id-or-ref> [--json]
           cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
+          cider-cli item open <type> <id-or-ref> [--json]
           cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
           cider-cli item related <type> <id-or-ref> [--json]
           cider-cli item relations <owner-type> <owner-id-or-ref> [--json]

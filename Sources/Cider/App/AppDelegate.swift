@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var ciderMainWindow: CiderMainWindow?
     var qaCiderMainWindow: NSWindow?
     var floatingPanelManager: CiderFloatingPanelManager?
+    var externalOpenObserver: NSObjectProtocol?
 
     // Undo toast
     var undoToastPanel: BookmarkCaptureToastPanel?
@@ -144,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeBookmarksNotifications()
         observeCiderMainWindowNotifications()
         observeCiderPanelNotifications()
+        observeExternalOpenRequests()
         observeConfigChanges()
         observeWorkspaceApplicationActivation()
         startDoubleTapDetection()
@@ -258,6 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        CiderExternalOpenBridge.stopForwarding(externalOpenObserver)
         flushNotesDraftIfNeeded()
         stopBookmarkClipboardReviewTimer()
         bookmarkCaptureToastHideWorkItem?.cancel()

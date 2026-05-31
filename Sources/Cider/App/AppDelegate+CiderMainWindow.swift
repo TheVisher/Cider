@@ -86,6 +86,16 @@ extension AppDelegate {
             .store(in: &cancellables)
     }
 
+    func observeExternalOpenRequests() {
+        externalOpenObserver = CiderExternalOpenBridge.startForwardingToLocalNotificationCenter()
+        NotificationCenter.default.publisher(for: .openCiderExternalTarget)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.transitionToCiderMainWindow()
+            }
+            .store(in: &cancellables)
+    }
+
     @objc func openCiderMainWindowFromMenu() {
         transitionToCiderMainWindow()
     }

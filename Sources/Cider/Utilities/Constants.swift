@@ -72,6 +72,7 @@ extension Notification.Name {
     static let dockCiderSurface = Notification.Name("cider.dockCiderSurface")
     static let reanchorCiderSurface = Notification.Name("cider.reanchorCiderSurface")
     static let openCiderSurfaceInMainWindow = Notification.Name("cider.openCiderSurfaceInMainWindow")
+    static let openCiderExternalTarget = Notification.Name("cider.openCiderExternalTarget")
     static let toggleCiderPanelCollapse = Notification.Name("cider.toggleCiderPanelCollapse")
     static let maximizeCiderPanel = Notification.Name("cider.maximizeCiderPanel")
     static let openBookmarkDetails = Notification.Name("cider.openBookmarkDetails")
