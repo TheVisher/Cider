@@ -9,6 +9,19 @@ struct KanbanBoardLoadIssue {
     var message: String
 }
 
+enum KanbanBoardRepairIssueKind: String, Equatable, Sendable {
+    case readFailed
+    case decodeFailed
+}
+
+struct KanbanBoardRepairIssue: Equatable, Sendable {
+    var boardID: String
+    var fileURL: URL
+    var kind: KanbanBoardRepairIssueKind
+    var message: String
+    var recoveryCommand: String
+}
+
 /// Manages YAML-backed Kanban boards stored in the vault.
 /// Both the Cider UI and AI agents can read/write to the same YAML files.
 @MainActor
@@ -16,6 +29,7 @@ final class KanbanStorage: ObservableObject {
     static let shared = KanbanStorage()
 
     @Published var boards: [KanbanBoard] = []
+    @Published private(set) var lastRepairIssue: KanbanBoardRepairIssue?
 
     private let logger = Logger(subsystem: "com.cider.app", category: "KanbanStorage")
     private var watcher: FSEventsWatcher?
@@ -113,6 +127,54 @@ final class KanbanStorage: ObservableObject {
         }
     }
 
+    private func loadFreshBoardForWrite(boardID: String) -> KanbanBoard? {
+        let url = boardFileURL(for: boardID)
+        let content: String
+        do {
+            content = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            lastRepairIssue = repairIssue(
+                boardID: boardID,
+                fileURL: url,
+                kind: .readFailed,
+                message: "Could not read board YAML file '\(url.lastPathComponent)': \(error.localizedDescription)"
+            )
+            logger.error("Blocked Kanban write for \(boardID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+
+        do {
+            var board = try YAMLDecoder().decode(KanbanBoard.self, from: content)
+            board.assignMissingDisplayKeys()
+            lastRepairIssue = nil
+            return board
+        } catch {
+            lastRepairIssue = repairIssue(
+                boardID: boardID,
+                fileURL: url,
+                kind: .decodeFailed,
+                message: "Could not decode board YAML file '\(url.lastPathComponent)': \(error.localizedDescription)"
+            )
+            logger.error("Blocked Kanban write for \(boardID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    private func repairIssue(
+        boardID: String,
+        fileURL: URL,
+        kind: KanbanBoardRepairIssueKind,
+        message: String
+    ) -> KanbanBoardRepairIssue {
+        KanbanBoardRepairIssue(
+            boardID: boardID,
+            fileURL: fileURL,
+            kind: kind,
+            message: message,
+            recoveryCommand: "cider-cli board audit --json"
+        )
+    }
+
     // MARK: - Save
 
     private func save(_ board: KanbanBoard) {
@@ -171,7 +233,7 @@ final class KanbanStorage: ObservableObject {
 
         var didMutate = false
         _ = withExclusiveBoardFileLock(boardID: boardID) {
-            guard var board = load(from: boardFileURL(for: boardID)) ?? boards.first(where: { $0.id == boardID }) else {
+            guard var board = loadFreshBoardForWrite(boardID: boardID) else {
                 return
             }
             body(&board)
@@ -206,9 +268,9 @@ final class KanbanStorage: ObservableObject {
 
         var trashItem: TrashItem?
         _ = withExclusiveBoardFileLock(boardID: id) {
-            guard let board = load(from: boardFileURL(for: id)) ?? boards.first(where: { $0.id == id }) else { return }
             let url = boardFileURL(for: id)
-            let yamlContent = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            guard let board = loadFreshBoardForWrite(boardID: id) else { return }
+            guard let yamlContent = try? String(contentsOf: url, encoding: .utf8) else { return }
 
             trashItem = TrashStorage.shared.trashKanbanBoard(
                 boardID: id,

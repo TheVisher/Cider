@@ -177,6 +177,114 @@ struct KanbanBoardFileLockingTests {
         #expect(notes.contains("## Implementation History"))
     }
 
+    @Test("mutating invalid board YAML fails closed without writing stale memory")
+    @MainActor
+    func mutatingInvalidBoardYAMLFailsClosedWithoutWritingStaleMemory() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Invalid YAML Guard")
+        let boardURL = Self.boardFileURL(vault: vault, boardID: board.id)
+        let invalidYAML = "id: \(board.id)\nname: [\n"
+        try invalidYAML.write(to: boardURL, atomically: true, encoding: .utf8)
+
+        let created = storage.addCard(boardID: board.id, columnID: "backlog", title: "Must not persist")
+
+        #expect(created == nil)
+        #expect(try String(contentsOf: boardURL, encoding: .utf8) == invalidYAML)
+        #expect(storage.lastRepairIssue?.boardID == board.id)
+        #expect(storage.lastRepairIssue?.kind == .decodeFailed)
+        #expect(storage.loadIssues().contains { $0.boardID == board.id })
+    }
+
+    @Test("mutating unreadable board YAML fails closed without writing stale memory")
+    @MainActor
+    func mutatingUnreadableBoardYAMLFailsClosedWithoutWritingStaleMemory() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Unreadable YAML Guard")
+        let boardURL = Self.boardFileURL(vault: vault, boardID: board.id)
+        let unreadableBytes = Data([0xff, 0xfe, 0xfd])
+        try unreadableBytes.write(to: boardURL)
+
+        let created = storage.addCard(boardID: board.id, columnID: "backlog", title: "Must not persist")
+
+        #expect(created == nil)
+        #expect(try Data(contentsOf: boardURL) == unreadableBytes)
+        #expect(storage.lastRepairIssue?.boardID == board.id)
+        #expect(storage.lastRepairIssue?.kind == .readFailed)
+    }
+
+    @Test("updating stale in-memory card does not overwrite invalid board YAML")
+    @MainActor
+    func updatingStaleInMemoryCardDoesNotOverwriteInvalidBoardYAML() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Stale Memory Guard")
+        let card = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "Original"))
+        let boardURL = Self.boardFileURL(vault: vault, boardID: board.id)
+        let invalidYAML = "id: \(board.id)\ncolumns:\n  - broken: [\n"
+        try invalidYAML.write(to: boardURL, atomically: true, encoding: .utf8)
+
+        var edited = card
+        edited.title = "Stale edit"
+        storage.updateCard(boardID: board.id, card: edited)
+
+        #expect(try String(contentsOf: boardURL, encoding: .utf8) == invalidYAML)
+        #expect(storage.lastRepairIssue?.boardID == board.id)
+        #expect(storage.lastRepairIssue?.kind == .decodeFailed)
+    }
+
+    @Test("delete unreadable board YAML fails closed and preserves raw file")
+    @MainActor
+    func deleteUnreadableBoardYAMLFailsClosedAndPreservesRawFile() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Delete Guard")
+        let boardURL = Self.boardFileURL(vault: vault, boardID: board.id)
+        let unreadableBytes = Data([0xff, 0xfe, 0xfd])
+        try unreadableBytes.write(to: boardURL)
+
+        let trashItem = storage.deleteBoard(id: board.id)
+
+        #expect(trashItem == nil)
+        #expect(try Data(contentsOf: boardURL) == unreadableBytes)
+        #expect(storage.boards.contains { $0.id == board.id })
+        #expect(storage.lastRepairIssue?.boardID == board.id)
+        #expect(storage.lastRepairIssue?.kind == .readFailed)
+    }
+
     @Test("reviewed inbox cards stay reviewed after no-op detail save and reload")
     @MainActor
     func reviewedInboxCardsStayReviewedAfterNoOpDetailSaveAndReload() throws {
@@ -709,6 +817,13 @@ struct KanbanBoardFileLockingTests {
             .appendingPathComponent("cider-kanban-locking-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
         return vault
+    }
+
+    private static func boardFileURL(vault: URL, boardID: String) -> URL {
+        vault
+            .appendingPathComponent(".cider", isDirectory: true)
+            .appendingPathComponent("boards", isDirectory: true)
+            .appendingPathComponent("\(boardID).yaml")
     }
 
     @discardableResult
