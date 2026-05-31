@@ -236,8 +236,11 @@ struct CiderCLIAgentSafetyTests {
             vault: vault
         )
         let payload = try parseJSONObject(result.stdout)
+        let bookmark = try #require(payload["bookmark"] as? [String: Any])
+        let itemID = try #require(bookmark["id"] as? String)
         let quality = try #require(payload["captureQuality"] as? [String: Any])
         let reasons = try #require(quality["degradedReasons"] as? [String])
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
 
         #expect(quality["semanticStatus"] as? String == "pending")
         #expect(quality["metadataComplete"] as? Bool == false)
@@ -248,6 +251,8 @@ struct CiderCLIAgentSafetyTests {
         #expect(reasons.contains("metadata_pending"))
         #expect(reasons.contains("title_generic"))
         #expect(reasons.contains("card_image_missing"))
+        #expect(safeNextCommands.contains("cider-cli review enrich \(itemID) --actor agent --timeout 20 --json"))
+        #expect(safeNextCommands.contains("cider-cli item rebuild-chunks bookmark \(itemID) --json"))
     }
 
     @Test("capture add json rejects missing source")

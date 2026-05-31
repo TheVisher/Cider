@@ -393,6 +393,7 @@ struct CiderCaptureServiceTests {
             let degradedDict = result.toDictionary(finalBookmark: degradedBookmark)
             let degradedQuality = try #require(degradedDict["captureQuality"] as? [String: Any])
             let degradedReasons = try #require(degradedQuality["degradedReasons"] as? [String])
+            let degradedSafeNextCommands = try #require(degradedDict["safeNextCommands"] as? [String])
 
             #expect(degradedQuality["metadataComplete"] as? Bool == true)
             #expect(degradedQuality["cardComplete"] as? Bool == false)
@@ -403,6 +404,8 @@ struct CiderCaptureServiceTests {
             #expect(degradedQuality["visibleCardCurrent"] as? Bool == false)
             #expect(degradedReasons.contains("title_generic"))
             #expect(degradedReasons.contains("card_image_missing"))
+            #expect(degradedSafeNextCommands.contains("cider-cli review enrich \(result.item.id.uuidString) --actor agent --timeout 20 --json"))
+            #expect(degradedSafeNextCommands.contains("cider-cli item rebuild-chunks bookmark \(result.item.id.uuidString) --json"))
 
             let stalePathBookmark = Bookmark(
                 id: result.item.id,
@@ -478,6 +481,112 @@ struct CiderCaptureServiceTests {
             #expect(richQuality["pathStatus"] as? String == "current")
             #expect(richQuality["visibleCardCurrent"] as? Bool == true)
             #expect(richReasons.isEmpty)
+        }
+    }
+
+    @Test("capture quality dogfood fixtures cover stale external bookmark receipts")
+    func captureQualityDogfoodFixturesCoverStaleExternalBookmarkReceipts() throws {
+        struct Fixture {
+            let url: String
+            let genericTitle: String
+            let richTitle: String
+        }
+
+        let fixtures = [
+            Fixture(
+                url: "https://www.kite.video/",
+                genericTitle: "Kite.Video",
+                richTitle: "Kite Video Capture Platform"
+            ),
+            Fixture(
+                url: "https://store.steampowered.com/app/1118520/Paralives/",
+                genericTitle: "Store.Steampowered.Com",
+                richTitle: "Paralives on Steam"
+            ),
+            Fixture(
+                url: "https://www.8bitdo.com/",
+                genericTitle: "8Bitdo.Com",
+                richTitle: "8BitDo Ultimate Controller"
+            ),
+            Fixture(
+                url: "https://store.steampowered.com/app/3060070/MyDockFinder/",
+                genericTitle: "Store.Steampowered.Com",
+                richTitle: "MyDockFinder on Steam"
+            ),
+            Fixture(
+                url: "https://www.remio.ai/",
+                genericTitle: "Remio.Ai",
+                richTitle: "remio AI Assistant"
+            ),
+        ]
+
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db
+            )
+
+            for fixture in fixtures {
+                let result = try service.add(fixture.url)
+                let enrichedAt = Date(timeIntervalSince1970: 1_775_000_000)
+
+                let staleBookmark = Bookmark(
+                    id: result.item.id,
+                    title: fixture.genericTitle,
+                    urlString: fixture.url,
+                    createdAt: Date(timeIntervalSince1970: 1_774_999_000),
+                    updatedAt: Date(timeIntervalSince1970: 1_774_999_500),
+                    metadataUpdatedAt: enrichedAt,
+                    relativePath: "Inbox/Bookmarks/\(fixture.genericTitle).webloc",
+                    enrichmentStatus: "complete",
+                    lastEnrichedAt: enrichedAt
+                )
+                let staleDict = result.toDictionary(finalBookmark: staleBookmark)
+                let staleQuality = try #require(staleDict["captureQuality"] as? [String: Any])
+                let staleReasons = try #require(staleQuality["degradedReasons"] as? [String])
+                let staleSafeNextCommands = try #require(staleDict["safeNextCommands"] as? [String])
+
+                #expect(staleQuality["semanticStatus"] as? String == "degraded")
+                #expect(staleQuality["visibleCardCurrent"] as? Bool == false)
+                #expect(staleReasons.contains("title_generic"))
+                #expect(staleReasons.contains("card_image_missing"))
+                #expect(staleSafeNextCommands.contains("cider-cli review enrich \(result.item.id.uuidString) --actor agent --timeout 20 --json"))
+                #expect(staleSafeNextCommands.contains("cider-cli item rebuild-chunks bookmark \(result.item.id.uuidString) --json"))
+
+                let thumbnailPath = ".thumbnails/\(result.item.id.uuidString).jpg"
+                let thumbnailURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(thumbnailPath)
+                try FileManager.default.createDirectory(
+                    at: thumbnailURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try Data("thumbnail-\(fixture.richTitle)".utf8).write(to: thumbnailURL)
+                let richFilename = BookmarkFileService.shared.sanitizedFilename(fixture.richTitle)
+                let richBookmark = Bookmark(
+                    id: result.item.id,
+                    title: fixture.richTitle,
+                    urlString: fixture.url,
+                    createdAt: Date(timeIntervalSince1970: 1_774_999_000),
+                    updatedAt: Date(timeIntervalSince1970: 1_775_000_100),
+                    thumbnailRelativePath: thumbnailPath,
+                    metadataUpdatedAt: enrichedAt,
+                    relativePath: "Inbox/Bookmarks/\(richFilename).webloc",
+                    enrichmentStatus: "complete",
+                    lastEnrichedAt: enrichedAt
+                )
+                let richDict = result.toDictionary(finalBookmark: richBookmark)
+                let richQuality = try #require(richDict["captureQuality"] as? [String: Any])
+                let richReasons = try #require(richQuality["degradedReasons"] as? [String])
+
+                #expect(richQuality["semanticStatus"] as? String == "complete")
+                #expect(richQuality["visibleCardCurrent"] as? Bool == true)
+                #expect(richQuality["titleQuality"] as? String == "rich")
+                #expect(richQuality["thumbnailStatus"] as? String == "local")
+                #expect(richQuality["pathStatus"] as? String == "current")
+                #expect(richReasons.isEmpty)
+            }
         }
     }
 

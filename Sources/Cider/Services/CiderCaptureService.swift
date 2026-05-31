@@ -300,7 +300,16 @@ struct CiderCaptureResult {
         }
         dict["enrichment"] = enrichmentDict
 
-        dict["captureQuality"] = Self.captureQualityDictionary(for: finalBookmark)
+        let captureQuality = Self.captureQualityDictionary(for: finalBookmark)
+        dict["captureQuality"] = captureQuality
+        if captureQuality["degraded"] as? Bool == true {
+            let repairCommands = Self.bookmarkCaptureRepairCommands(for: finalBookmark)
+            var commands = (dict["safeNextCommands"] as? [String]) ?? []
+            for command in repairCommands where !commands.contains(command) {
+                commands.append(command)
+            }
+            dict["safeNextCommands"] = commands
+        }
 
         return dict
     }
@@ -443,6 +452,13 @@ struct CiderCaptureResult {
         guard !trimmed.isEmpty else { return false }
         let url = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(trimmed)
         return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    private static func bookmarkCaptureRepairCommands(for bookmark: Bookmark) -> [String] {
+        [
+            "cider-cli review enrich \(bookmark.id.uuidString) --actor agent --timeout 20 --json",
+            "cider-cli item rebuild-chunks bookmark \(bookmark.id.uuidString) --json",
+        ]
     }
 
     @MainActor
