@@ -533,7 +533,8 @@ struct KanbanBoardFileLockingTests {
 
         let jsonData = try Self.runCLIData(cli, vault: vault, args: ["board", "show", "Locking Smoke", "--json"])
         let root = try #require(try JSONSerialization.jsonObject(with: jsonData) as? [String: Any])
-        let columns = try #require(root["columns"] as? [[String: Any]])
+        let boardDetail = try #require(root["boardDetail"] as? [String: Any])
+        let columns = try #require(boardDetail["columns"] as? [[String: Any]])
         let backlog = try #require(columns.first { ($0["id"] as? String) == "backlog" })
         let cards = try #require(backlog["cards"] as? [[String: Any]])
         let titles = Set(cards.compactMap { $0["title"] as? String })
