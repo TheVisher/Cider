@@ -245,10 +245,22 @@ struct CiderCaptureResult {
 
     private func safeNextCommands() -> [String] {
         var commands = ["cider-cli item get \(item.type) \(item.id.uuidString) --json"]
+        if let existingItemID = duplicate.existingItemID {
+            commands.append("cider-cli item get \(item.type) \(existingItemID.uuidString) --json")
+        }
+        if routing.reviewNeeded {
+            commands.append("cider-cli routing explain \(item.id.uuidString) --json")
+            commands.append("cider-cli review list --item-type \(item.type) --state needs_review --limit 10 --json")
+        }
         if canonicalSideEffectPartialSuccess() != nil {
             commands.append("cider-cli storage audit --json")
         }
-        return commands
+        return orderedUnique(commands)
+    }
+
+    private func orderedUnique(_ commands: [String]) -> [String] {
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
     }
 
     private func canonicalSideEffectPartialSuccess() -> PartialSuccess? {
