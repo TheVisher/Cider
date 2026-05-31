@@ -449,7 +449,7 @@ struct CiderCaptureServiceTests {
             #expect(missingThumbnailQuality["visibleCardCurrent"] as? Bool == false)
             #expect(missingThumbnailReasons.contains("card_image_missing"))
 
-            let thumbnailURL = StoragePaths.cachedDirectoryURL(for: .bookmarks)
+            let thumbnailURL = StoragePaths.cachedVaultDirectoryURL
                 .appendingPathComponent(".thumbnails/swift-markdown-engine.jpg")
             try FileManager.default.createDirectory(
                 at: thumbnailURL.deletingLastPathComponent(),
