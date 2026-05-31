@@ -157,6 +157,44 @@ struct FileBackedDomainContractsTests {
         }
     }
 
+    @Test("integration script uses isolated canonical capture workflow")
+    func integrationScriptUsesIsolatedCanonicalCaptureWorkflow() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let script = repoRoot.appendingPathComponent("scripts/integration-test.sh")
+        let source = try String(contentsOf: script, encoding: .utf8)
+
+        for snippet in [
+            "TEST_VAULT=$(mktemp -d",
+            "trap cleanup EXIT",
+            "run_cli()",
+            "\"$CLI\" --vault \"$TEST_VAULT\"",
+            "assert_capture_receipt",
+            "capture add --kind bookmark",
+            "capture add --kind note",
+            "capture add --kind todo",
+            "capture add --kind file",
+            "capture add --kind event",
+            "capture add --kind contact",
+            "item get bookmark",
+            "review list --json",
+        ] {
+            #expect(source.contains(snippet), "scripts/integration-test.sh missing isolated capture snippet: \(snippet)")
+        }
+
+        for legacySnippet in [
+            "$CLI trash empty",
+            "~/CiderVault",
+            "$HOME/CiderVault",
+            "bookmark add",
+            "event create",
+            "contact create",
+            "duplicate-check",
+            "$CLI query",
+        ] {
+            #expect(!source.contains(legacySnippet), "scripts/integration-test.sh still uses real-vault or legacy surface: \(legacySnippet)")
+        }
+    }
+
     @Test("core docs declare sync and media bridge boundaries")
     func coreDocsDeclareSyncAndMediaBridgeBoundaries() throws {
         let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
