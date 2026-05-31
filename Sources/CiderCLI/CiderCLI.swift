@@ -6748,7 +6748,10 @@ struct CiderCLI {
             }
 
         case "create":
-            let name = args.first ?? "New Board"
+            guard let name = args.first, !name.hasPrefix("--") else {
+                printCLIError("Usage: cider-cli board create <name> [--project <project-id>]")
+                return
+            }
             let board = storage.createBoard(name: name)
             let projectID = ProjectBoardRegistrationService.normalizedProjectID(parseFlag("--project", from: args))
             let savedView = ProjectBoardRegistrationService.register(board: board, projectID: projectID)
