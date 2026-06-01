@@ -28,11 +28,12 @@ struct ContactCLIHelpTextTests {
         #expect(text.contains("cider-cli contact field delete <id|name> <field-id|label>"))
     }
 
-    @Test("contact help exposes field and notes operations for agents")
-    func contactHelpExposesFieldAndNotesOperations() {
+    @Test("contact help exposes retained profile and field operations for agents")
+    func contactHelpExposesRetainedProfileAndFieldOperations() {
         #expect(ContactCLIHelpText.contact.contains("contact field add"))
-        #expect(ContactCLIHelpText.contact.contains("contact update <id-prefix>"))
-        #expect(ContactCLIHelpText.contact.contains("--notes"))
+        #expect(ContactCLIHelpText.contact.contains("contact profile apply"))
+        #expect(!ContactCLIHelpText.contact.contains("contact update <id-prefix>"))
+        #expect(!ContactCLIHelpText.contact.contains("contact list [--json]"))
         #expect(ContactCLIHelpText.field.contains("contact field delete"))
     }
 }

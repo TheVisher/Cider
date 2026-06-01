@@ -52,7 +52,6 @@ struct CiderCLI {
         switch command {
         case "bookmark", "bm":
             if subcommand == "add" || subcommand == "create" { return nil }
-            if subcommand == "enrich", !args.contains("--all") { return nil }
             if subcommand == "move" {
                 return LegacyRemovedCommand(command: label, replacement: "cider-cli item move bookmark <id> --folder <name|path> --json")
             }
@@ -61,6 +60,9 @@ struct CiderCLI {
                     command: "bookmark enrich --all",
                     replacement: "cider-cli review enrich-batch --confirm --json"
                 )
+            }
+            if subcommand == "enrich" {
+                return LegacyRemovedCommand(command: label, replacement: "cider-cli review enrich <item-id> --json")
             }
             if subcommand == "date-suggestions" || subcommand == "dates" {
                 return LegacyRemovedCommand(command: label, replacement: "cider-cli review list --kind date-suggestion --json")
@@ -125,6 +127,18 @@ struct CiderCLI {
         default:
             return nil
         }
+    }
+
+    static func printHiddenLegacyCommandIfRemoved(command: String, subcommand: String?, args: [String]) -> Bool {
+        guard let removed = hiddenLegacyCommandResponse(command: command, subcommand: subcommand, args: args) else {
+            return false
+        }
+        printRemovedLegacyCommand(
+            command: removed.command,
+            replacement: removed.replacement,
+            reason: removed.reason
+        )
+        return true
     }
 
     static func legacyCommandLabel(command: String, subcommand: String?) -> String {
@@ -729,6 +743,9 @@ struct CiderCLI {
     // MARK: - Recall / Evaluation Commands
 
     static func handleRecall(subcommand: String?, args: [String]) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "recall", subcommand: subcommand, args: args) else {
+            return
+        }
         let service = CiderRecallScorecardService()
         switch subcommand {
         case nil, "help", "--help", "-h":
@@ -953,6 +970,9 @@ struct CiderCLI {
     // MARK: - Dashboard Commands
 
     static func handleDashboard(subcommand: String?, args: [String]) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "dashboard", subcommand: subcommand, args: args) else {
+            return
+        }
         switch subcommand {
         case "topic", "topics":
             handleDashboardTopic(subcommand: args.first, args: Array(args.dropFirst()))
@@ -1847,6 +1867,9 @@ struct CiderCLI {
     }
 
     static func handleBookmark(subcommand: String?, args: [String], service: VaultBookmarkService) async {
+        guard !printHiddenLegacyCommandIfRemoved(command: "bookmark", subcommand: subcommand, args: args) else {
+            return
+        }
         switch subcommand {
         case "list", "ls":
             let folderName = parseFlag("--folder", from: args)
@@ -2085,68 +2108,14 @@ struct CiderCLI {
             }
 
         case "enrich":
-            if args.first == "--all" {
-                printRemovedLegacyCommand(
-                    command: "bookmark enrich --all",
-                    replacement: "Use cider-cli review enrich-batch --confirm for review-backed enrichment.",
-                    reason: "bookmark enrich --all bypassed the review-backed batch surface."
-                )
-                return
-            }
-            guard let idPrefix = args.first else {
-                print("Error: ID prefix or --all required. Usage: cider-cli bookmark enrich <id> [--timeout <seconds>|--no-wait] | --all --confirm")
-                return
-            }
-            if let bm = findBookmark(idPrefix, in: service) {
-                if !jsonOutput {
-                    print("Scheduling enrichment for '\(bm.title)'...")
-                }
-                service.refetchMetadata(for: bm.id)
-                let waitResult: BookmarkNativeCaptureWaitResult?
-                if let timeout = bookmarkNativeCaptureWaitTimeout(from: args) {
-                    waitResult = await waitForNativeBookmarkCapture(
-                        bm.id,
-                        in: service,
-                        timeout: timeout
-                    )
-                } else {
-                    waitResult = nil
-                }
-                if let captured = waitResult?.bookmark ?? service.bookmarks.first(where: { $0.id == bm.id }) {
-                    let updated = service.applyStoredSemanticTitleCandidateIfNeeded(for: bm.id) ?? captured
-                    if let waitResult, jsonOutput {
-                        printBookmarkEnrichmentLifecycleResult(
-                            before: bm,
-                            after: updated,
-                            waitResult: waitResult
-                        )
-                        return
-                    }
-                    if jsonOutput {
-                        outputJSON([
-                            "command": "bookmark.enrich",
-                            "itemID": bm.id.uuidString,
-                            "itemType": "bookmark",
-                            "title": updated.title,
-                            "status": "scheduled",
-                            "waited": false,
-                            "before": bookmarkLifecycleSnapshot(bm),
-                            "after": bookmarkLifecycleSnapshot(updated),
-                            "changedFields": changedBookmarkMetadataFields(before: bm, after: updated),
-                            "safeActions": bookmarkEnrichmentLifecycleSafeActions(itemID: bm.id, status: "scheduled"),
-                        ])
-                        return
-                    }
-                    print("  Title: \(updated.title)")
-                    print("  Thumbnail: \(updated.thumbnailRelativePath ?? "none")")
-                    print("  Remote thumbnail: \(updated.thumbnailRemoteURLString ?? "none")")
-                    print("  OCR: \(updated.ocrText?.prefix(80) ?? "none")")
-                    print("  Colors: \(updated.dominantColors?.joined(separator: ", ") ?? "none")")
-                    if let waitResult {
-                        print("  Native capture: \(waitResult.timedOut ? "timed out" : "settled") after \(String(format: "%.1f", waitResult.elapsedSeconds))s")
-                    }
-                }
-            }
+            let replacement = args.contains("--all")
+                ? "cider-cli review enrich-batch --confirm --json"
+                : "cider-cli review enrich <item-id> --json"
+            printRemovedLegacyCommand(
+                command: args.contains("--all") ? "bookmark enrich --all" : "bookmark enrich",
+                replacement: replacement,
+                reason: "Bookmark enrichment now runs through the review-backed enrichment API."
+            )
 
         case "update", "set":
             guard let idPrefix = args.first else {
@@ -2331,7 +2300,7 @@ struct CiderCLI {
             let store = EmbeddingStore.shared
             store.load()
             guard store.vector(for: bookmark.id) != nil else {
-                print("No embedding found for '\(bookmark.title)'. Run 'bookmark enrich' first.")
+                print("No embedding found for '\(bookmark.title)'. Run 'review enrich \(bookmark.id.uuidString) --json' first.")
                 return
             }
             let similarIDs = SimilarItemsService.findSimilar(to: bookmark.id, in: store, limit: limit)
@@ -2374,6 +2343,9 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleNote(subcommand: String?, args: [String], storage: NotesStorage) async {
+        guard !printHiddenLegacyCommandIfRemoved(command: "note", subcommand: subcommand, args: args) else {
+            return
+        }
         switch subcommand {
         case "list", "ls":
             let folderName = parseFlag("--folder", from: args)
@@ -3457,6 +3429,9 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleTodo(subcommand: String?, args: [String], storage: TodoCardStorage) async {
+        guard !printHiddenLegacyCommandIfRemoved(command: "todo", subcommand: subcommand, args: args) else {
+            return
+        }
         switch subcommand {
         case "list", "ls":
             let showCompleted = args.contains("--completed")
@@ -3820,6 +3795,9 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleEvent(subcommand: String?, args: [String]) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "event", subcommand: subcommand, args: args) else {
+            return
+        }
         let storage = DateCardStorage.shared
         switch subcommand {
         case "list", "ls":
@@ -3971,6 +3949,9 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleContact(subcommand: String?, args: [String]) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "contact", subcommand: subcommand, args: args) else {
+            return
+        }
         let storage = ContactStorage.shared
         switch subcommand {
         case nil, "help", "--help", "-h":
@@ -4383,6 +4364,9 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleLink(subcommand: String?, args: [String]) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "link", subcommand: subcommand, args: args) else {
+            return
+        }
         let service = ItemLinkService.shared
         switch subcommand {
         case nil, "help", "--help", "-h":
@@ -6426,6 +6410,9 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleFile(subcommand: String?, args: [String], service: VaultFileService) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "file", subcommand: subcommand, args: args) else {
+            return
+        }
         switch subcommand {
         case "add", "import":
             guard let sourcePath = args.first else {
@@ -6679,6 +6666,9 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleFolder(subcommand: String?, args: [String]) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "folder", subcommand: subcommand, args: args) else {
+            return
+        }
         switch subcommand {
         case "list", "ls":
             // Component-wise sort so children always immediately follow their
@@ -8246,6 +8236,9 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleLabel(subcommand: String?, args: [String]) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "label", subcommand: subcommand, args: args) else {
+            return
+        }
         let storage = CardLabelStorage.shared
         switch subcommand {
         case "list", "ls":
@@ -8402,6 +8395,9 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleTrash(subcommand: String?, args: [String]) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "trash", subcommand: subcommand, args: args) else {
+            return
+        }
         switch subcommand {
         case "list", "ls":
             var items = TrashStorage.shared.allTrashItems()
@@ -9452,6 +9448,9 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleDuplicateCheck(args: [String]) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "duplicate-check", subcommand: args.first, args: Array(args.dropFirst())) else {
+            return
+        }
         guard let url = args.first else {
             print("Usage: cider-cli duplicate-check <url>")
             return
@@ -9497,6 +9496,9 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleClipboard(subcommand: String?, args: [String]) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "clipboard", subcommand: subcommand, args: args) else {
+            return
+        }
         let storage = ClipboardStorage.shared
 
         switch subcommand {
@@ -11171,71 +11173,6 @@ struct CiderCLI {
         print("  Review resolved: \(reviewResolved ? "yes" : "no")")
         print("  Message: \(reviewEnrichmentLifecycleMessage(status: status, changedFields: changedFields, reviewResolved: reviewResolved))")
         print("  Safe actions: \(safeActions.joined(separator: ", "))")
-    }
-
-    static func printBookmarkEnrichmentLifecycleResult(
-        before: Bookmark?,
-        after: Bookmark?,
-        waitResult: BookmarkNativeCaptureWaitResult
-    ) {
-        let status = waitResult.timedOut ? "timed_out" : "completed"
-        let changedFields = changedBookmarkMetadataFields(before: before, after: after)
-        let itemID = after?.id ?? before?.id
-        let title = after?.title ?? before?.title ?? "Bookmark"
-        let safeActions = itemID.map {
-            bookmarkEnrichmentLifecycleSafeActions(itemID: $0, status: status)
-        } ?? []
-
-        if jsonOutput {
-            outputJSON([
-                "command": "bookmark.enrich",
-                "itemID": itemID?.uuidString ?? "",
-                "itemType": "bookmark",
-                "title": title,
-                "status": status,
-                "message": bookmarkEnrichmentLifecycleMessage(status: status, changedFields: changedFields),
-                "waited": true,
-                "elapsedSeconds": waitResult.elapsedSeconds,
-                "timeoutSeconds": waitResult.timeoutSeconds,
-                "before": bookmarkLifecycleSnapshot(before),
-                "after": bookmarkLifecycleSnapshot(after),
-                "changedFields": changedFields,
-                "safeActions": safeActions,
-            ])
-            return
-        }
-
-        print("\(status.replacingOccurrences(of: "_", with: " ").capitalized): \(title) (\(itemID?.uuidString.prefix(8) ?? "unknown"))")
-        print("  Action: bookmark.enrich")
-        print("  Type: bookmark")
-        print("  Waited: \(String(format: "%.1f", waitResult.elapsedSeconds))s / \(String(format: "%.1f", waitResult.timeoutSeconds))s")
-        print("  Changed: \(changedFields.isEmpty ? "none" : changedFields.joined(separator: ", "))")
-        print("  Message: \(bookmarkEnrichmentLifecycleMessage(status: status, changedFields: changedFields))")
-        print("  Safe actions: \(safeActions.joined(separator: ", "))")
-    }
-
-    static func bookmarkEnrichmentLifecycleMessage(status: String, changedFields: [String]) -> String {
-        switch status {
-        case "completed":
-            return changedFields.isEmpty
-                ? "Bookmark enrichment completed; no visible metadata fields changed."
-                : "Bookmark enrichment completed and updated \(changedFields.joined(separator: ", "))."
-        case "timed_out":
-            return "Bookmark enrichment was scheduled, but did not reach a final complete state before the timeout."
-        default:
-            return "Bookmark enrichment finished with status \(status)."
-        }
-    }
-
-    static func bookmarkEnrichmentLifecycleSafeActions(itemID: UUID, status: String) -> [String] {
-        var actions = [
-            "item get bookmark \(itemID.uuidString) --json",
-            "capture add --kind bookmark --url <url> --timeout 20 --json",
-        ]
-        if status == "timed_out" || status == "scheduled" {
-            actions.insert("bookmark enrich \(itemID.uuidString) --timeout 20 --json", at: 0)
-        }
-        return actions
     }
 
     static func reviewEnrichmentLifecycleMessage(

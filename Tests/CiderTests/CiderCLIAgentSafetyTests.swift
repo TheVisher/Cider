@@ -721,46 +721,16 @@ struct CiderCLIAgentSafetyTests {
         #expect(payload["reviewResolved"] as? Bool != nil)
     }
 
-    @Test("bookmark enrich json waits with explicit lifecycle result")
-    func bookmarkEnrichJSONWaitsWithExplicitLifecycleResult() throws {
-        let vault = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cider-cli-bookmark-enrich-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: vault) }
-
-        let captureResult = try runCLI(
-            args: [
-                "capture", "add",
-                "--kind", "bookmark",
-                "--url", "https://example.com/bookmark-enrich-\(UUID().uuidString)",
-                "--title", "X.Com",
-                "--no-wait",
-                "--json",
-            ],
-            vault: vault
-        )
-        let capturePayload = try parseJSONObject(captureResult.stdout)
-        let bookmark = try #require(capturePayload["bookmark"] as? [String: Any])
-        let itemID = try #require(bookmark["id"] as? String)
-
-        let result = try runCLI(
-            args: ["bookmark", "enrich", itemID, "--timeout", "0", "--json"],
-            vault: vault
-        )
+    @Test("legacy bookmark enrich is removed with review replacement")
+    func legacyBookmarkEnrichIsRemovedWithReviewReplacement() throws {
+        let result = try runCLI(args: ["bookmark", "enrich", "abc", "--json"])
         let payload = try parseJSONObject(result.stdout)
 
-        #expect(payload["command"] as? String == "bookmark.enrich")
-        #expect(payload["itemID"] as? String == itemID)
-        #expect(payload["status"] as? String == "timed_out")
-        #expect(payload["waited"] as? Bool == true)
-        #expect(payload["elapsedSeconds"] as? Double != nil)
-        #expect(payload["timeoutSeconds"] as? Double == 0)
-        #expect(payload["before"] as? [String: Any] != nil)
-        #expect(payload["after"] as? [String: Any] != nil)
-        #expect(payload["changedFields"] as? [String] != nil)
-        let safeActions = try #require(payload["safeActions"] as? [String])
-        #expect(safeActions.contains("bookmark enrich \(itemID) --timeout 20 --json"))
-        #expect(safeActions.contains("item get bookmark \(itemID) --json"))
+        #expect(result.status != 0)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["legacyRemoved"] as? Bool == true)
+        #expect(payload["command"] as? String == "bookmark enrich")
+        #expect(payload["replacement"] as? String == "cider-cli review enrich <item-id> --json")
     }
 
     @Test("capture add json reports visible bookmark quality")
@@ -1109,6 +1079,7 @@ struct CiderCLIAgentSafetyTests {
     func hiddenLegacyTypeSpecificCommandsReturnStructuredReplacementGuidance() throws {
         let cases: [(args: [String], command: String, replacement: String)] = [
             (["bookmark", "list", "--json"], "bookmark list", "cider-cli item search <query> --json"),
+            (["bookmark", "enrich", "abc", "--json"], "bookmark enrich", "cider-cli review enrich <item-id> --json"),
             (["note", "list", "--json"], "note list", "cider-cli item search <query> --json"),
             (["todo", "list", "--json"], "todo list", "cider-cli item search <query> --json"),
             (["event", "list", "--json"], "event list", "cider-cli item search <query> --json"),
@@ -1143,6 +1114,44 @@ struct CiderCLIAgentSafetyTests {
             #expect(dict["replacement"] as? String == testCase.replacement)
             #expect(dict["reason"] as? String == "Use the Second Brain v1 agent API.")
         }
+    }
+
+    @Test("type specific legacy handlers repeat the removed command guard")
+    func typeSpecificLegacyHandlersRepeatRemovedCommandGuard() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try [
+            "Sources/CiderCLI/CiderCLI.swift",
+            "Sources/CiderCLI/MediaCLI.swift",
+        ]
+        .map { try String(contentsOf: root.appendingPathComponent($0), encoding: .utf8) }
+        .joined(separator: "\n")
+        let guardedCommands = [
+            "bookmark",
+            "note",
+            "todo",
+            "event",
+            "contact",
+            "link",
+            "file",
+            "folder",
+            "label",
+            "trash",
+            "clipboard",
+            "dashboard",
+            "media",
+            "recall",
+            "duplicate-check",
+        ]
+
+        for command in guardedCommands {
+            let guardLine = #"printHiddenLegacyCommandIfRemoved(command: "\#(command)""#
+            #expect(source.contains(guardLine), "Missing handler-level legacy tombstone guard for \(command)")
+        }
+        #expect(source.contains(#""bookmark enrich", "cider-cli review enrich <item-id> --json""#) == false)
+        #expect(source.contains("actions.insert(\"review enrich \\(itemID.uuidString) --timeout 20\", at: 0)"))
     }
 
     @Test("hidden legacy commands print concise text replacement guidance")

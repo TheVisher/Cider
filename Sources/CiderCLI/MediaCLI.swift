@@ -3,6 +3,9 @@ import Foundation
 
 extension CiderCLI {
     static func handleMedia(subcommand: String?, args: [String], bookmarks: [Bookmark]) {
+        guard !printHiddenLegacyCommandIfRemoved(command: "media", subcommand: subcommand, args: args) else {
+            return
+        }
         switch subcommand {
         case "identify":
             let mode: MediaBackfillMode = args.contains("--apply") ? .apply : .dryRun
