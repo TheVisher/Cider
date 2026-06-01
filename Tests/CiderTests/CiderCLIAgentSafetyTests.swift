@@ -351,6 +351,117 @@ struct CiderCLIAgentSafetyTests {
         #expect((inspectedItem["relativePath"] as? String)?.contains("Projects/Cider/Notes") == true)
     }
 
+    @Test("item owner get folder returns read only metadata and counts")
+    func itemOwnerGetFolderReturnsReadOnlyMetadataAndCounts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-folder-owner-get-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let parentNote = try createNote(title: "Folder Parent Note", content: "Parent", vault: vault)
+        _ = try runCLI(
+            args: ["item", "move", "note", parentNote, "--path", "Projects/Cider/Notes", "--json"],
+            vault: vault
+        )
+        let childNote = try createNote(title: "Folder Child Note", content: "Child", vault: vault)
+        _ = try runCLI(
+            args: ["item", "move", "note", childNote, "--path", "Projects/Cider/Notes/Child", "--json"],
+            vault: vault
+        )
+
+        let result = try runCLI(
+            args: ["item", "owner-get", "folder", "Projects/Cider/Notes", "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.owner-get.folder")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        let folder = try #require(payload["folder"] as? [String: Any])
+        #expect(folder["name"] as? String == "Notes")
+        #expect(folder["relativePath"] as? String == "Projects/Cider/Notes")
+        #expect(folder["parentRelativePath"] as? String == "Projects/Cider")
+        #expect(folder["isRoot"] as? Bool == false)
+        #expect(folder["isInbox"] as? Bool == false)
+
+        let counts = try #require(payload["counts"] as? [String: Any])
+        #expect(counts["directItemCount"] as? Int == 1)
+        #expect(counts["descendantItemCount"] as? Int == 2)
+        #expect(counts["directChildFolderCount"] as? Int == 1)
+        #expect(counts["descendantFolderCount"] as? Int == 1)
+        let directByType = try #require(counts["directItemsByType"] as? [String: Any])
+        let descendantByType = try #require(counts["descendantItemsByType"] as? [String: Any])
+        #expect(directByType["note"] as? Int == 1)
+        #expect(descendantByType["note"] as? Int == 2)
+
+        let health = try #require(payload["health"] as? [String: Any])
+        #expect(health["existsInIndex"] as? Bool == true)
+        #expect(health["existsOnDisk"] as? Bool == true)
+        #expect(health["isGhost"] as? Bool == false)
+        #expect(health["missingDirectory"] as? Bool == false)
+
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item search <query> --json"))
+        #expect(safeNextCommands.contains("cider-cli item move <type> <id-or-ref> --path \"Projects/Cider/Notes\" --json"))
+        #expect(safeNextCommands.contains("cider-cli storage audit --json"))
+    }
+
+    @Test("item owner get folder reports ambiguous name matches")
+    func itemOwnerGetFolderReportsAmbiguousNameMatches() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-folder-owner-ambiguous-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let first = try createNote(title: "First Shared", content: "First", vault: vault)
+        _ = try runCLI(args: ["item", "move", "note", first, "--path", "Alpha/Shared", "--json"], vault: vault)
+        let second = try createNote(title: "Second Shared", content: "Second", vault: vault)
+        _ = try runCLI(args: ["item", "move", "note", second, "--path", "Beta/Shared", "--json"], vault: vault)
+
+        let result = try runCLI(args: ["item", "owner-get", "folder", "Shared", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status != 0)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == "item.owner-get.folder")
+        #expect((payload["error"] as? String)?.contains("Ambiguous folder reference") == true)
+        let matches = try #require(payload["matches"] as? [[String: Any]])
+        #expect(matches.count == 2)
+        #expect(Set(matches.compactMap { $0["relativePath"] as? String }) == ["Alpha/Shared", "Beta/Shared"])
+    }
+
+    @Test("item owner get folder returns inbox metadata")
+    func itemOwnerGetFolderReturnsInboxMetadata() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-folder-owner-inbox-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try createNote(title: "Inbox Metadata Note", content: "Inbox", vault: vault)
+
+        let result = try runCLI(args: ["item", "owner-get", "folder", "Inbox", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.owner-get.folder")
+        let folder = try #require(payload["folder"] as? [String: Any])
+        #expect(folder["name"] as? String == "Inbox")
+        #expect(folder["relativePath"] as? String == "Inbox")
+        #expect(folder["isRoot"] as? Bool == true)
+        #expect(folder["isInbox"] as? Bool == true)
+        let counts = try #require(payload["counts"] as? [String: Any])
+        #expect(counts["directItemCount"] as? Int == 1)
+        let directByType = try #require(counts["directItemsByType"] as? [String: Any])
+        #expect(directByType["note"] as? Int == 1)
+        let health = try #require(payload["health"] as? [String: Any])
+        #expect(health["existsInIndex"] as? Bool == true)
+        #expect(health["existsOnDisk"] as? Bool == true)
+    }
+
     @Test("review enrich json waits with bounded lifecycle result")
     func reviewEnrichJSONWaitsWithBoundedLifecycleResult() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -1828,6 +1939,15 @@ struct CiderCLIAgentSafetyTests {
         #expect(payload["command"] as? String == command)
         #expect(payload["legacyRemoved"] == nil)
         return payload
+    }
+
+    private func createNote(title: String, content: String, vault: URL) throws -> String {
+        let result = try runCLI(
+            args: ["note", "create", title, "--content", content, "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+        return try #require(payload["id"] as? String)
     }
 
     private func runCLI(args: [String], stdin: String? = nil) throws -> (stdout: String, stderr: String, status: Int32) {

@@ -4418,6 +4418,7 @@ struct CiderCLI {
               cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
+                Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
               cider-cli item open <type> <id-or-ref> [--json]
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
@@ -4488,6 +4489,13 @@ struct CiderCLI {
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
                 printCLIError("Usage: cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]")
+                return
+            }
+            if positional[0]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: "-", with: "_") == "folder" {
+                printFolderOwnerInspection(ref: positional[1])
                 return
             }
             do {
@@ -11507,6 +11515,13 @@ struct CiderCLI {
 
     static let itemGetLegacyOwnerDeprecationMessage = "item get with non-library owner refs is deprecated; use cider-cli item owner-get <owner-type> <owner-id-or-ref> --json for legacy owner-section inspection."
 
+    enum FolderOwnerResolution {
+        case inbox
+        case folder(VaultFolder)
+        case ambiguous([VaultFolder])
+        case missing
+    }
+
     static func itemOpenPayload(
         type rawType: String,
         ref rawRef: String,
@@ -11655,6 +11670,329 @@ struct CiderCLI {
             dict["deprecationMessage"] = itemGetLegacyOwnerDeprecationMessage
         }
         return (owner, sections, routes, actions, dict)
+    }
+
+    static func printFolderOwnerInspection(ref rawRef: String) {
+        let ref = rawRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch resolveFolderOwner(ref: ref) {
+        case .folder(let folder):
+            let payload = folderOwnerInspectionPayload(folder: folder, sourceRef: ref)
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("\(folder.relativePath) (\(folder.id.uuidString))")
+            }
+        case .inbox:
+            let payload = inboxFolderOwnerInspectionPayload(sourceRef: ref)
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("Inbox")
+            }
+        case .ambiguous(let matches):
+            processExitCode = 1
+            let payload: [String: Any] = [
+                "ok": false,
+                "command": "item.owner-get.folder",
+                "readOnly": true,
+                "changed": false,
+                "error": "Ambiguous folder reference '\(ref)'. Use one of the returned relativePath or id values.",
+                "sourceRef": [
+                    "type": "folder",
+                    "ref": ref,
+                ],
+                "matches": matches
+                    .sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
+                    .map(folderOwnerMatchDict),
+                "safeNextCommands": [
+                    "cider-cli item owner-get folder <relative-path-or-id> --json",
+                    "cider-cli item search <query> --json",
+                ],
+            ]
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("Error: Ambiguous folder reference '\(ref)'.")
+                for match in matches.sorted(by: { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }) {
+                    print("  \(match.relativePath) (\(match.id.uuidString))")
+                }
+            }
+        case .missing:
+            processExitCode = 1
+            let payload: [String: Any] = [
+                "ok": false,
+                "command": "item.owner-get.folder",
+                "readOnly": true,
+                "changed": false,
+                "error": "No folder found matching '\(ref)'.",
+                "sourceRef": [
+                    "type": "folder",
+                    "ref": ref,
+                ],
+                "matches": [],
+                "safeNextCommands": [
+                    "cider-cli item search <query> --json",
+                    "cider-cli storage audit --json",
+                ],
+            ]
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("Error: No folder found matching '\(ref)'.")
+            }
+        }
+    }
+
+    static func resolveFolderOwner(ref: String) -> FolderOwnerResolution {
+        let service = VaultFolderService.shared
+        let normalizedRef = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if normalizedRef.isEmpty || normalizedRef.localizedCaseInsensitiveCompare("Inbox") == .orderedSame {
+            return .inbox
+        }
+
+        if let uuid = UUID(uuidString: normalizedRef),
+           let folder = service.folder(for: uuid) {
+            return .folder(folder)
+        }
+
+        let lowerRef = normalizedRef.lowercased()
+        let idPrefixMatches = service.folders.filter { $0.id.uuidString.lowercased().hasPrefix(lowerRef) }
+        if idPrefixMatches.count == 1 {
+            return .folder(idPrefixMatches[0])
+        } else if idPrefixMatches.count > 1 {
+            return .ambiguous(idPrefixMatches)
+        }
+
+        let pathMatches = service.folders.filter {
+            $0.relativePath.localizedCaseInsensitiveCompare(normalizedRef) == .orderedSame
+        }
+        if pathMatches.count == 1 {
+            return .folder(pathMatches[0])
+        } else if pathMatches.count > 1 {
+            return .ambiguous(pathMatches)
+        }
+
+        let nameMatches = service.folders.filter {
+            $0.name.localizedCaseInsensitiveCompare(normalizedRef) == .orderedSame
+        }
+        if nameMatches.count == 1 {
+            return .folder(nameMatches[0])
+        } else if nameMatches.count > 1 {
+            return .ambiguous(nameMatches)
+        }
+        return .missing
+    }
+
+    static func folderOwnerInspectionPayload(folder: VaultFolder, sourceRef: String) -> [String: Any] {
+        let service = VaultFolderService.shared
+        let childFolders = service.children(of: folder.id)
+        let descendants = service.folders.filter { candidate in
+            candidate.relativePath.hasPrefix(folder.relativePath + "/")
+        }
+        let directCounts = itemCounts { $0 == folder.id }
+        let descendantFolderIDs = Set(([folder] + descendants).map(\.id))
+        let descendantCounts = itemCounts { folderID in
+            guard let folderID else { return false }
+            return descendantFolderIDs.contains(folderID)
+        }
+        let parentID = service.parentID(for: folder)
+        let parent = parentID.flatMap { service.folder(for: $0) }
+        let existsOnDisk = folderDirectoryExists(folder)
+        var folderDict = folderOwnerFolderDict(
+            id: folder.id.uuidString,
+            name: folder.name,
+            relativePath: folder.relativePath,
+            parentID: parentID?.uuidString,
+            parentRelativePath: parent?.relativePath,
+            isRoot: parentID == nil,
+            isInbox: false,
+            icon: folder.icon,
+            iconIsEmoji: folder.iconIsEmoji,
+            coverImagePath: folder.coverImagePath,
+            coverImageOffsetY: folder.coverImageOffsetY,
+            createdAt: folder.createdAt,
+            updatedAt: folder.updatedAt
+        )
+        folderDict["breadcrumb"] = service.path(to: folder.id).map(folderOwnerMatchDict)
+
+        return [
+            "ok": true,
+            "command": "item.owner-get.folder",
+            "readOnly": true,
+            "changed": false,
+            "exists": true,
+            "ownerResolved": true,
+            "sourceRef": [
+                "type": "folder",
+                "ref": sourceRef,
+            ],
+            "owner": ownerToDict(SecondBrainOwnerRef(ownerType: "folder", ownerID: folder.id.uuidString)),
+            "folder": folderDict,
+            "counts": folderOwnerCountsDict(
+                directCounts: directCounts,
+                descendantCounts: descendantCounts,
+                directChildFolderCount: childFolders.count,
+                descendantFolderCount: descendants.count
+            ),
+            "health": [
+                "existsInIndex": true,
+                "existsInDatabase": true,
+                "existsOnDisk": existsOnDisk,
+                "isGhost": !existsOnDisk,
+                "missingDirectory": !existsOnDisk,
+            ],
+            "safeNextCommands": folderOwnerSafeNextCommands(relativePath: folder.relativePath),
+        ]
+    }
+
+    static func inboxFolderOwnerInspectionPayload(sourceRef: String) -> [String: Any] {
+        let service = VaultFolderService.shared
+        let directCounts = itemCounts { $0 == nil }
+        let allFolderIDs = Set(service.folders.map(\.id))
+        let descendantCounts = itemCounts { folderID in
+            guard let folderID else { return true }
+            return allFolderIDs.contains(folderID)
+        }
+        let inboxURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("Inbox")
+        var isDirectory = ObjCBool(false)
+        let inboxExistsOnDisk = FileManager.default.fileExists(atPath: inboxURL.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        let now = Date()
+        return [
+            "ok": true,
+            "command": "item.owner-get.folder",
+            "readOnly": true,
+            "changed": false,
+            "exists": true,
+            "ownerResolved": true,
+            "sourceRef": [
+                "type": "folder",
+                "ref": sourceRef,
+            ],
+            "owner": ownerToDict(SecondBrainOwnerRef(ownerType: "folder", ownerID: "Inbox")),
+            "folder": folderOwnerFolderDict(
+                id: "Inbox",
+                name: "Inbox",
+                relativePath: "Inbox",
+                parentID: nil,
+                parentRelativePath: nil,
+                isRoot: true,
+                isInbox: true,
+                icon: "tray",
+                iconIsEmoji: false,
+                coverImagePath: nil,
+                coverImageOffsetY: nil,
+                createdAt: now,
+                updatedAt: now
+            ),
+            "counts": folderOwnerCountsDict(
+                directCounts: directCounts,
+                descendantCounts: descendantCounts,
+                directChildFolderCount: service.children(of: nil).count,
+                descendantFolderCount: service.folders.count
+            ),
+            "health": [
+                "existsInIndex": true,
+                "existsInDatabase": true,
+                "existsOnDisk": inboxExistsOnDisk,
+                "isGhost": false,
+                "missingDirectory": !inboxExistsOnDisk,
+            ],
+            "safeNextCommands": folderOwnerSafeNextCommands(relativePath: "Inbox"),
+        ]
+    }
+
+    static func folderOwnerFolderDict(
+        id: String,
+        name: String,
+        relativePath: String,
+        parentID: String?,
+        parentRelativePath: String?,
+        isRoot: Bool,
+        isInbox: Bool,
+        icon: String?,
+        iconIsEmoji: Bool,
+        coverImagePath: String?,
+        coverImageOffsetY: Double?,
+        createdAt: Date,
+        updatedAt: Date
+    ) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": id,
+            "name": name,
+            "relativePath": relativePath,
+            "isRoot": isRoot,
+            "isInbox": isInbox,
+            "iconIsEmoji": iconIsEmoji,
+            "created": ISO8601DateFormatter().string(from: createdAt),
+            "updated": ISO8601DateFormatter().string(from: updatedAt),
+        ]
+        if let parentID { dict["parentID"] = parentID }
+        if let parentRelativePath { dict["parentRelativePath"] = parentRelativePath }
+        if let icon { dict["icon"] = icon }
+        if let coverImagePath { dict["coverImagePath"] = coverImagePath }
+        if let coverImageOffsetY { dict["coverImageOffsetY"] = coverImageOffsetY }
+        return dict
+    }
+
+    static func folderOwnerMatchDict(_ folder: VaultFolder) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": folder.id.uuidString,
+            "name": folder.name,
+            "relativePath": folder.relativePath,
+        ]
+        if let parentID = VaultFolderService.shared.parentID(for: folder) {
+            dict["parentID"] = parentID.uuidString
+        }
+        if let parentPath = folder.parentRelativePath {
+            dict["parentRelativePath"] = parentPath
+        }
+        return dict
+    }
+
+    static func folderOwnerCountsDict(
+        directCounts: [String: Int],
+        descendantCounts: [String: Int],
+        directChildFolderCount: Int,
+        descendantFolderCount: Int
+    ) -> [String: Any] {
+        [
+            "directItemsByType": directCounts,
+            "descendantItemsByType": descendantCounts,
+            "directItemCount": directCounts.values.reduce(0, +),
+            "descendantItemCount": descendantCounts.values.reduce(0, +),
+            "directChildFolderCount": directChildFolderCount,
+            "descendantFolderCount": descendantFolderCount,
+        ]
+    }
+
+    static func itemCounts(matching predicate: (UUID?) -> Bool) -> [String: Int] {
+        [
+            "bookmark": VaultBookmarkService.shared.bookmarks.filter { predicate($0.folderID) }.count,
+            "note": NotesStorage.shared.notes.filter { predicate($0.folderID) }.count,
+            "todo": TodoCardStorage.shared.todoCards.filter { predicate($0.folderID) }.count,
+            "event": DateCardStorage.shared.dateCards.filter { predicate($0.folderID) }.count,
+            "contact": ContactStorage.shared.contacts.filter { predicate($0.folderID) }.count,
+            "file": VaultFileService.shared.files.filter { predicate($0.folderID) }.count,
+        ]
+    }
+
+    static func folderDirectoryExists(_ folder: VaultFolder) -> Bool {
+        var isDirectory = ObjCBool(false)
+        return FileManager.default.fileExists(
+            atPath: VaultFolderService.shared.absoluteURL(for: folder).path,
+            isDirectory: &isDirectory
+        ) && isDirectory.boolValue
+    }
+
+    static func folderOwnerSafeNextCommands(relativePath: String) -> [String] {
+        [
+            "cider-cli item search <query> --json",
+            "cider-cli item move <type> <id-or-ref> --path \"\(relativePath)\" --json",
+            "cider-cli item route <type> <id-or-ref> --target-type folder --target-path \"\(relativePath)\" --reason <reason> --json",
+            "cider-cli storage audit --json",
+            "cider-cli storage doctor-plan --json",
+        ]
     }
 
     static func printOwnerInspection(
@@ -14410,6 +14748,7 @@ struct CiderCLI {
           cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]
           cider-cli item get <type> <id-or-ref> [--json]
           cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
+            Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
           cider-cli item open <type> <id-or-ref> [--json]
           cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
           cider-cli item related <type> <id-or-ref> [--json]
