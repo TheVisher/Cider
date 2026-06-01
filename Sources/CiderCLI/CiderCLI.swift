@@ -5086,6 +5086,12 @@ struct CiderCLI {
         case "link":
             handleLink(subcommand: "add", args: args)
 
+        case "batch-plan":
+            handleItemBatchPlan(args: args)
+
+        case "batch-apply":
+            handleItemBatchApply(args: args)
+
         case "move":
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
@@ -5323,6 +5329,280 @@ struct CiderCLI {
 
         default:
             printCLIError("Unknown item command: \(subcommand ?? "nil"). Run 'cider-cli item help' for usage.")
+        }
+    }
+
+    struct ItemBatchOperationPlan {
+        var index: Int
+        var operationID: String
+        var action: String
+        var type: String?
+        var ref: String?
+        var status: String
+        var error: String?
+        var itemRef: LibraryEntityRef?
+        var targetFolder: VaultFolder?
+        var targetRelativePath: String?
+        var applySupported: Bool
+
+        @MainActor
+        func toDictionary() -> [String: Any] {
+            var dict: [String: Any] = [
+                "index": index,
+                "id": operationID,
+                "action": action,
+                "status": status,
+                "applySupported": applySupported,
+            ]
+            if let type { dict["type"] = type }
+            if let ref { dict["ref"] = ref }
+            if let itemRef {
+                dict["item"] = ["type": itemRef.type.rawValue, "id": itemRef.entityID.uuidString]
+            }
+            if let targetRelativePath { dict["targetRelativePath"] = targetRelativePath }
+            if let targetFolder { dict["target"] = folderToDict(targetFolder) }
+            if let error { dict["error"] = error }
+            return dict
+        }
+    }
+
+    static func handleItemBatchPlan(args: [String]) {
+        do {
+            let input = try itemBatchInput(from: args)
+            let plans = try itemBatchOperations(from: input).enumerated().map { index, operation in
+                itemBatchOperationPlan(index: index, operation: operation)
+            }
+            outputJSON(itemBatchEnvelope(
+                command: "item.batch.plan",
+                readOnly: true,
+                changed: false,
+                operations: plans,
+                approvalToken: itemBatchApprovalToken(for: plans),
+                partialFailures: []
+            ))
+        } catch {
+            printItemBatchError(command: "item.batch.plan", message: error.localizedDescription)
+        }
+    }
+
+    static func handleItemBatchApply(args: [String]) {
+        do {
+            let input = try itemBatchInput(from: args)
+            let plans = try itemBatchOperations(from: input).enumerated().map { index, operation in
+                itemBatchOperationPlan(index: index, operation: operation)
+            }
+            let token = itemBatchApprovalToken(for: plans)
+            guard parseFlag("--approve", from: args) == token else {
+                printItemBatchError(command: "item.batch.apply", message: "Batch apply requires --approve \(token).", approvalToken: token, operations: plans)
+                return
+            }
+            guard args.contains("--execute") else {
+                printItemBatchError(command: "item.batch.apply", message: "Batch apply requires --execute after approval.", approvalToken: token, operations: plans)
+                return
+            }
+
+            let mutationService = CiderItemMutationService(database: .shared)
+            var changed = false
+            var partialFailures: [String] = []
+            var outputOperations: [[String: Any]] = []
+            for plan in plans {
+                var dict = plan.toDictionary()
+                guard plan.status == "valid" else {
+                    partialFailures.append("\(plan.operationID): \(plan.error ?? "invalid_operation")")
+                    outputOperations.append(dict)
+                    continue
+                }
+                guard plan.applySupported, let ref = plan.itemRef else {
+                    let message = "apply_not_supported_for_\(plan.action)"
+                    dict["status"] = "skipped"
+                    dict["error"] = message
+                    partialFailures.append("\(plan.operationID): \(message)")
+                    outputOperations.append(dict)
+                    continue
+                }
+
+                do {
+                    let result: CiderItemMutationResult
+                    if plan.action == "move" {
+                        guard let folder = plan.targetFolder else {
+                            throw CaptureAddArgumentError.message("missing_target_folder")
+                        }
+                        result = try mutationService.move(
+                            ref: ref,
+                            toFolder: folder.id,
+                            targetRelativePath: folder.relativePath,
+                            actor: parseFlag("--actor", from: args) ?? "agent",
+                            source: "item.batch.apply",
+                            reason: "Applied through approval-gated item batch."
+                        )
+                    } else if plan.action == "unfile" {
+                        result = try mutationService.unfile(
+                            ref: ref,
+                            actor: parseFlag("--actor", from: args) ?? "agent",
+                            source: "item.batch.apply",
+                            reason: "Applied through approval-gated item batch."
+                        )
+                    } else {
+                        throw CaptureAddArgumentError.message("apply_not_supported_for_\(plan.action)")
+                    }
+                    var resultDict = result.toDictionary()
+                    resultDict["index"] = plan.index
+                    resultDict["id"] = plan.operationID
+                    resultDict["status"] = result.ok ? "applied" : "failed"
+                    outputOperations.append(resultDict)
+                    changed = changed || result.ok
+                    partialFailures.append(contentsOf: result.partialFailures.map { "\(plan.operationID): \($0)" })
+                } catch {
+                    dict["status"] = "failed"
+                    dict["error"] = error.localizedDescription
+                    partialFailures.append("\(plan.operationID): \(error.localizedDescription)")
+                    outputOperations.append(dict)
+                }
+            }
+
+            outputJSON([
+                "ok": partialFailures.isEmpty,
+                "command": "item.batch.apply",
+                "readOnly": false,
+                "changed": changed,
+                "approvalRequired": true,
+                "requiredApprovalToken": token,
+                "operationCount": plans.count,
+                "operations": outputOperations,
+                "partialFailures": partialFailures,
+                "nextSafeAction": partialFailures.isEmpty ? "inspect_items" : "inspect_partial_failures",
+                "safeNextCommands": ["cider-cli db audit --source cli --json", "cider-cli item search <query> --json"],
+                "rollbackGuidance": "Use the per-operation before/after payloads and mutation audit entries to inspect or reverse each item with blessed item commands.",
+            ] as [String: Any])
+        } catch {
+            printItemBatchError(command: "item.batch.apply", message: error.localizedDescription)
+        }
+    }
+
+    static func itemBatchInput(from args: [String]) throws -> String {
+        guard args.contains("--stdin") else {
+            throw CaptureAddArgumentError.message("Usage: cider-cli item batch-plan --stdin --json or cider-cli item batch-apply --stdin --approve <token> --execute --json")
+        }
+        guard let input = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8),
+              !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CaptureAddArgumentError.message("Could not read batch JSON from stdin.")
+        }
+        return input
+    }
+
+    static func itemBatchOperations(from input: String) throws -> [[String: Any]] {
+        guard let data = input.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let operations = object["operations"] as? [[String: Any]],
+              !operations.isEmpty else {
+            throw CaptureAddArgumentError.message("Batch JSON must be an object with a non-empty operations array.")
+        }
+        return operations
+    }
+
+    static func itemBatchOperationPlan(index: Int, operation: [String: Any]) -> ItemBatchOperationPlan {
+        let id = (operation["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let action = ((operation["action"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let type = (operation["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ref = (operation["ref"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let operationID = id?.isEmpty == false ? id! : "op-\(index)"
+        guard ["move", "unfile", "route", "link"].contains(action) else {
+            return ItemBatchOperationPlan(index: index, operationID: operationID, action: action.isEmpty ? "unknown" : action, type: type, ref: ref, status: "invalid", error: "action_must_be_move_unfile_route_or_link", itemRef: nil, targetFolder: nil, targetRelativePath: nil, applySupported: false)
+        }
+        guard let type, let ref, !type.isEmpty, !ref.isEmpty else {
+            return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: type, ref: ref, status: "invalid", error: "type_and_ref_required", itemRef: nil, targetFolder: nil, targetRelativePath: nil, applySupported: false)
+        }
+        let entityType: LibraryEntityType
+        let itemRef: LibraryEntityRef
+        do {
+            entityType = try ItemLinkService.entityType(from: type)
+            itemRef = try ItemLinkService.shared.resolve(type: entityType, ref: ref)
+        } catch {
+            return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: type, ref: ref, status: "invalid", error: error.localizedDescription, itemRef: nil, targetFolder: nil, targetRelativePath: nil, applySupported: false)
+        }
+
+        if action == "move" {
+            let path = (operation["path"] as? String) ?? (operation["targetPath"] as? String) ?? (operation["folder"] as? String)
+            guard let path, !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "path_required_for_move", itemRef: itemRef, targetFolder: nil, targetRelativePath: nil, applySupported: false)
+            }
+            if looksLikeVaultArtifactPath(path) {
+                return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_path_must_be_folder_path", itemRef: itemRef, targetFolder: nil, targetRelativePath: path, applySupported: false)
+            }
+            guard let folder = findOrCreateFolderByPath(path) else {
+                return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_folder_not_found", itemRef: itemRef, targetFolder: nil, targetRelativePath: path, applySupported: false)
+            }
+            return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "valid", error: nil, itemRef: itemRef, targetFolder: folder, targetRelativePath: folder.relativePath, applySupported: true)
+        }
+
+        return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "valid", error: nil, itemRef: itemRef, targetFolder: nil, targetRelativePath: operation["targetPath"] as? String, applySupported: action == "unfile")
+    }
+
+    static func itemBatchApprovalToken(for plans: [ItemBatchOperationPlan]) -> String {
+        let seed = plans.map {
+            "\($0.index)|\($0.operationID)|\($0.action)|\($0.type ?? "")|\($0.ref ?? "")|\($0.targetRelativePath ?? "")|\($0.status)"
+        }.joined(separator: "\n")
+        var hash: UInt64 = 1469598103934665603
+        for byte in seed.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1099511628211
+        }
+        return "APPROVE_BATCH_" + String(hash, radix: 16).uppercased()
+    }
+
+    static func itemBatchEnvelope(
+        command: String,
+        readOnly: Bool,
+        changed: Bool,
+        operations: [ItemBatchOperationPlan],
+        approvalToken: String,
+        partialFailures: [String]
+    ) -> [String: Any] {
+        let invalidCount = operations.filter { $0.status != "valid" }.count
+        return [
+            "ok": invalidCount == 0 && partialFailures.isEmpty,
+            "command": command,
+            "readOnly": readOnly,
+            "changed": changed,
+            "approvalRequired": true,
+            "requiredApprovalToken": approvalToken,
+            "operationCount": operations.count,
+            "validOperationCount": operations.count - invalidCount,
+            "invalidOperationCount": invalidCount,
+            "operations": operations.map { $0.toDictionary() },
+            "partialFailures": partialFailures,
+            "nextSafeAction": invalidCount == 0 ? "approve_batch_apply" : "fix_batch_request",
+            "safeNextCommands": ["cider-cli item batch-apply --stdin --approve \(approvalToken) --execute --json"],
+            "rollbackGuidance": "No mutation has happened in the plan step. Apply only after reviewing every operation.",
+        ] as [String: Any]
+    }
+
+    static func printItemBatchError(
+        command: String,
+        message: String,
+        approvalToken: String? = nil,
+        operations: [ItemBatchOperationPlan] = []
+    ) {
+        processExitCode = 1
+        if jsonOutput {
+            var payload: [String: Any] = [
+                "ok": false,
+                "command": command,
+                "readOnly": command == "item.batch.plan",
+                "changed": false,
+                "approvalRequired": true,
+                "error": message,
+                "operations": operations.map { $0.toDictionary() },
+                "partialFailures": [message],
+                "nextSafeAction": "fix_batch_request",
+                "safeNextCommands": ["cider-cli item batch-plan --stdin --json"],
+            ]
+            if let approvalToken {
+                payload["requiredApprovalToken"] = approvalToken
+            }
+            outputJSON(payload)
+        } else {
+            print("Error: \(message)")
         }
     }
 
@@ -14141,6 +14421,8 @@ struct CiderCLI {
           cider-cli item graph-health [--json]
           cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
           cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
+          cider-cli item batch-plan --stdin [--json]
+          cider-cli item batch-apply --stdin --approve <token> --execute [--actor <name>] [--json]
           cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
           cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
           cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]

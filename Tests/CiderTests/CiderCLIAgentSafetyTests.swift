@@ -179,6 +179,178 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("--confirm") == true)
     }
 
+    @Test("item batch plan validates stdin operations without mutating")
+    func itemBatchPlanValidatesStdinOperationsWithoutMutating() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-batch-plan-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "note",
+                "--title", "Batch Plan Source",
+                "--stdin",
+                "--json",
+            ],
+            vault: vault,
+            stdin: "Move me only after approval."
+        )
+        let capturePayload = try parseJSONObject(captureResult.stdout)
+        let note = try #require(capturePayload["item"] as? [String: Any])
+        let noteID = try #require(note["id"] as? String)
+
+        let request = """
+        {
+          "operations": [
+            {
+              "id": "move-note",
+              "action": "move",
+              "type": "note",
+              "ref": "\(noteID)",
+              "path": "Projects/Cider/Notes"
+            }
+          ]
+        }
+        """
+
+        let result = try runCLI(
+            args: ["item", "batch-plan", "--stdin", "--json"],
+            vault: vault,
+            stdin: request
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.batch.plan")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["approvalRequired"] as? Bool == true)
+        #expect((payload["requiredApprovalToken"] as? String)?.hasPrefix("APPROVE_BATCH_") == true)
+        #expect(payload["nextSafeAction"] as? String == "approve_batch_apply")
+        let operations = try #require(payload["operations"] as? [[String: Any]])
+        #expect(operations.count == 1)
+        #expect(operations.first?["status"] as? String == "valid")
+        #expect(operations.first?["action"] as? String == "move")
+        #expect(operations.first?["targetRelativePath"] as? String == "Projects/Cider/Notes")
+
+        let inspectResult = try runCLI(
+            args: ["item", "get", "note", noteID, "--json"],
+            vault: vault
+        )
+        let inspected = try parseJSONObject(inspectResult.stdout)
+        let inspectedItem = try #require(inspected["item"] as? [String: Any])
+        #expect((inspectedItem["relativePath"] as? String)?.contains("Projects/Cider/Notes") != true)
+    }
+
+    @Test("item batch apply requires approval token and execute flag")
+    func itemBatchApplyRequiresApprovalTokenAndExecuteFlag() throws {
+        let request = """
+        {
+          "operations": [
+            {
+              "id": "missing",
+              "action": "move",
+              "type": "note",
+              "ref": "missing",
+              "path": "Projects/Cider/Notes"
+            }
+          ]
+        }
+        """
+
+        let result = try runCLI(
+            args: ["item", "batch-apply", "--stdin", "--json"],
+            stdin: request
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status != 0)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == "item.batch.apply")
+        #expect(payload["approvalRequired"] as? Bool == true)
+        #expect((payload["error"] as? String)?.contains("--approve") == true)
+        #expect(payload["changed"] as? Bool == false)
+    }
+
+    @Test("item batch apply moves valid items through existing mutation service")
+    func itemBatchApplyMovesValidItemsThroughExistingMutationService() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-batch-apply-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "note",
+                "--title", "Batch Apply Source",
+                "--stdin",
+                "--json",
+            ],
+            vault: vault,
+            stdin: "Move me through the batch contract."
+        )
+        let capturePayload = try parseJSONObject(captureResult.stdout)
+        let note = try #require(capturePayload["item"] as? [String: Any])
+        let noteID = try #require(note["id"] as? String)
+
+        let request = """
+        {
+          "operations": [
+            {
+              "id": "move-note",
+              "action": "move",
+              "type": "note",
+              "ref": "\(noteID)",
+              "path": "Projects/Cider/Notes"
+            }
+          ]
+        }
+        """
+
+        let planResult = try runCLI(
+            args: ["item", "batch-plan", "--stdin", "--json"],
+            vault: vault,
+            stdin: request
+        )
+        let plan = try parseJSONObject(planResult.stdout)
+        let token = try #require(plan["requiredApprovalToken"] as? String)
+
+        let applyResult = try runCLI(
+            args: ["item", "batch-apply", "--stdin", "--approve", token, "--execute", "--json"],
+            vault: vault,
+            stdin: request
+        )
+        let apply = try parseJSONObject(applyResult.stdout)
+
+        #expect(applyResult.status == 0)
+        #expect(apply["ok"] as? Bool == true)
+        #expect(apply["command"] as? String == "item.batch.apply")
+        #expect(apply["changed"] as? Bool == true)
+        let operations = try #require(apply["operations"] as? [[String: Any]])
+        #expect(operations.first?["status"] as? String == "applied")
+        #expect(operations.first?["mutationAuditEntryID"] as? String != nil)
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { db.close() }
+        let audit = MutationAuditService(database: db)
+            .loadEntries()
+            .first { $0.itemID.uuidString == noteID && $0.action == "item_move" }
+        #expect(audit?.metadata["source"] == "item.batch.apply")
+
+        let inspectResult = try runCLI(
+            args: ["item", "get", "note", noteID, "--json"],
+            vault: vault
+        )
+        let inspected = try parseJSONObject(inspectResult.stdout)
+        let inspectedItem = try #require(inspected["item"] as? [String: Any])
+        #expect((inspectedItem["relativePath"] as? String)?.contains("Projects/Cider/Notes") == true)
+    }
+
     @Test("review enrich json waits with bounded lifecycle result")
     func reviewEnrichJSONWaitsWithBoundedLifecycleResult() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -1658,16 +1830,16 @@ struct CiderCLIAgentSafetyTests {
         return payload
     }
 
-    private func runCLI(args: [String]) throws -> (stdout: String, stderr: String, status: Int32) {
+    private func runCLI(args: [String], stdin: String? = nil) throws -> (stdout: String, stderr: String, status: Int32) {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-cli-agent-safety-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: vault) }
 
-        return try runCLI(args: args, vault: vault)
+        return try runCLI(args: args, vault: vault, stdin: stdin)
     }
 
-    private func runCLI(args: [String], vault: URL) throws -> (stdout: String, stderr: String, status: Int32) {
+    private func runCLI(args: [String], vault: URL, stdin: String? = nil) throws -> (stdout: String, stderr: String, status: Int32) {
         let cli = try cliURL()
         let process = Process()
         process.executableURL = cli
@@ -1677,7 +1849,15 @@ struct CiderCLIAgentSafetyTests {
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
-        try process.run()
+        if let stdin {
+            let input = Pipe()
+            process.standardInput = input
+            try process.run()
+            input.fileHandleForWriting.write(Data(stdin.utf8))
+            try input.fileHandleForWriting.close()
+        } else {
+            try process.run()
+        }
         process.waitUntilExit()
 
         return (
