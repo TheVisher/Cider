@@ -549,6 +549,149 @@ struct CiderReviewQueueServiceTests {
         #expect(dictionary["reasonCodes"] as? [String] == ["routing_low_confidence"])
     }
 
+    @Test("capture review worklist includes uncertain routing with read only safe commands")
+    func captureReviewWorklistIncludesUncertainRouting() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let itemID = try insertBookmark(db, title: "Route Me", enrichmentStatus: "complete", lastEnrichedAt: Date())
+        let routing = CiderRoutingDecisionService(database: db)
+        _ = try routing.recordDecision(
+            itemID: itemID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0.1,
+            reason: "Needs a human route.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        let queue = CiderReviewQueueService(database: db, routingDecisionService: routing)
+
+        let result = try queue.captureReviewWorklist(limit: 10)
+
+        #expect(result.command == "capture.review-queue")
+        #expect(result.readOnly == true)
+        #expect(result.changed == false)
+        let item = try #require(result.items.first { $0.itemID == itemID })
+        #expect(item.kind == "low_confidence_routing")
+        #expect(item.reasonCodes == ["routing_low_confidence"])
+        #expect(item.severity == "medium")
+        #expect(item.reviewState == "needs_review")
+        #expect(item.routingState?["targetPath"] == "Inbox/Bookmarks")
+        #expect(item.safeNextCommands.contains("cider-cli item get bookmark \(itemID.uuidString) --json"))
+        #expect(item.safeNextCommands.contains { $0.contains("review approve") } == false)
+        #expect(result.countsByReasonCode["routing_low_confidence"] == 1)
+    }
+
+    @Test("capture review worklist surfaces unsupported attachment capture events")
+    func captureReviewWorklistSurfacesUnsupportedAttachments() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let eventID = UUID()
+        let attachmentID = UUID()
+        let now = Date().timeIntervalSince1970
+        let metadata = DatabaseHelpers.encodeJSON([
+            "review_reason": "unsupported_attachment",
+            "review_state": "needs_review",
+        ]) ?? "{}"
+        let insertEvent = try db.prepare("""
+            INSERT INTO capture_events (
+                id, source_kind, surface, channel, channel_id, thread_id, message_id,
+                sender_id, sender_name, source_url, source_file, source_text,
+                attachment_count, metadata, created_at
+            ) VALUES (?, 'chat_unsupported_attachment', 'chat', 'discord', 'channel-1', NULL, 'msg-1',
+                      'user-1', 'Erik', NULL, NULL, 'see attachment', 1, ?, ?);
+            """)
+        insertEvent.bind(eventID.uuidString, at: 1)
+            .bind(metadata, at: 2)
+            .bind(now, at: 3)
+        try insertEvent.step()
+
+        let insertAttachment = try db.prepare("""
+            INSERT INTO capture_attachments (
+                id, capture_event_id, attachment_index, source_attachment_id,
+                filename, mime_type, local_path, remote_url, byte_size, metadata, created_at
+            ) VALUES (?, ?, 0, 'remote-1', 'remote.pdf', 'application/pdf',
+                      NULL, 'https://cdn.example/remote.pdf', NULL, ?, ?);
+            """)
+        insertAttachment.bind(attachmentID.uuidString, at: 1)
+            .bind(eventID.uuidString, at: 2)
+            .bind(metadata, at: 3)
+            .bind(now, at: 4)
+        try insertAttachment.step()
+
+        try SecondBrainEnrichmentOutputService(database: db).record(SecondBrainEnrichmentOutput(
+            owner: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString),
+            kind: "unsupported_chat_attachment",
+            value: "remote.pdf",
+            normalizedValue: "chat_unsupported_attachments:\(eventID.uuidString.lowercased())",
+            label: "Unsupported chat attachment",
+            evidence: "Chat capture included attachment metadata without a local file path.",
+            source: "chat.capture",
+            confidence: 1,
+            reviewState: "needs_review",
+            metadata: ["review_state": "needs_review"]
+        ))
+
+        let result = try CiderReviewQueueService(database: db).captureReviewWorklist(limit: 10)
+
+        let item = try #require(result.items.first { $0.ownerID == eventID.uuidString })
+        #expect(item.kind == "unsupported_attachment")
+        #expect(item.itemType == "capture_event")
+        #expect(item.reasonCodes == ["unsupported_attachment", "remote_only_attachment"])
+        #expect(item.severity == "high")
+        #expect(item.provenance["channel"] == "discord")
+        #expect(item.provenance["messageID"] == "msg-1")
+        #expect(item.attachmentSummary?["count"] == "1")
+        #expect(item.safeNextCommands.contains("cider-cli item backlinks capture_event \(eventID.uuidString) --json"))
+        #expect(result.countsByReasonCode["unsupported_attachment"] == 1)
+    }
+
+    @Test("capture review worklist surfaces missing and stale indexing")
+    func captureReviewWorklistSurfacesMissingAndStaleIndexing() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let missingID = try insertItem(
+            db,
+            type: "note",
+            title: "Missing Index",
+            relativePath: "Inbox/Notes/Missing Index.md"
+        )
+        let staleID = try insertItem(
+            db,
+            type: "note",
+            title: "Stale Index",
+            relativePath: "Inbox/Notes/Stale Index.md",
+            updatedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let insertChunk = try db.prepare("""
+            INSERT INTO content_chunks (
+                id, item_id, owner_type, owner_id, source, title, body,
+                chunk_index, content_hash, metadata, created_at, updated_at
+            ) VALUES (?, ?, 'note', ?, 'test', 'Stale Index', 'old body',
+                      0, 'old-hash', '{}', ?, ?);
+            """)
+        insertChunk.bind(UUID().uuidString, at: 1)
+            .bind(staleID.uuidString, at: 2)
+            .bind(staleID.uuidString, at: 3)
+            .bind(Date(timeIntervalSince1970: 1_000).timeIntervalSince1970, at: 4)
+            .bind(Date(timeIntervalSince1970: 1_000).timeIntervalSince1970, at: 5)
+        try insertChunk.step()
+
+        let result = try CiderReviewQueueService(database: db).captureReviewWorklist(limit: 10)
+
+        let missing = try #require(result.items.first { $0.itemID == missingID })
+        let stale = try #require(result.items.first { $0.itemID == staleID })
+        #expect(missing.kind == "indexing")
+        #expect(missing.reasonCodes == ["index_missing_chunks"])
+        #expect(missing.indexingStatus == "missing")
+        #expect(missing.safeNextCommands.contains("cider-cli item search-debug \"Missing Index\" --limit 5 --json"))
+        #expect(stale.reasonCodes == ["index_stale_chunks"])
+        #expect(stale.indexingStatus == "stale")
+        #expect(result.countsByReasonCode["index_missing_chunks"] == 1)
+        #expect(result.countsByReasonCode["index_stale_chunks"] == 1)
+    }
+
     @Test("review queue summary groups actionable work and previews batch enrichment")
     func reviewQueueSummaryGroupsActionableWorkAndPreviewsBatchEnrichment() throws {
         let (db, url) = try makeTempDB()

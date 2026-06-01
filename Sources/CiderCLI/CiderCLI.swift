@@ -1320,12 +1320,31 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "review-queue", "worklist":
+            do {
+                let result = try CiderReviewQueueService().captureReviewWorklist(
+                    limit: parseFlag("--limit", from: args).flatMap(Int.init) ?? 50,
+                    includeDeferred: args.contains("--include-deferred")
+                )
+                if jsonOutput {
+                    outputJSON(result.toDictionary())
+                } else {
+                    print("Capture review queue: \(result.totalCount) item(s) need attention.")
+                    for item in result.items {
+                        print("  [\(item.severity)] \(item.kind) \(item.ownerType):\(item.ownerID) - \(item.title)")
+                        print("    \(item.reasonCodes.joined(separator: ", "))")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case nil, "help", "--help", "-h":
             printCaptureUsage()
 
         default:
             print("Unknown capture command: \(subcommand ?? "nil")")
-            print("Commands: add, archive-artifacts")
+            print("Commands: add, review-queue, archive-artifacts")
         }
     }
 
@@ -1335,6 +1354,7 @@ struct CiderCLI {
 
     static func printCaptureUsage() {
         print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+        print("       cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]")
         print("       Example destination: --folder \"Inbox/Notes\". In capture add, --path is always a source file, not a destination.")
         print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
     }
@@ -15559,6 +15579,7 @@ struct CiderCLI {
 
         CAPTURE
           cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--url <url>|--path <source-file-path>|--content <text>) [--title <title>] [--date yyyy-MM-dd|today] [--details <text>] [--name <name>] [--folder <target-folder-path>] [--timeout <seconds>|--no-wait] [--json]
+          cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]
 
         ITEM
           cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]

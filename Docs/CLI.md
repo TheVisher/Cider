@@ -80,6 +80,8 @@ Hidden or removed legacy commands return `legacyRemoved: true` with a canonical 
 
 `note daily append --kind journal|food-log [--date YYYY-MM-DD|today] [--time HH:mm] (--stdin|--text-file <path>|--content <text>) --json` remains the lower-level same-day append path for running journals and food logs. It must upsert one note per kind/day, preserve source context in JSON and mutation audit metadata, write through Cider storage, and return `safeNextCommands` for `item get` / `item context` verification.
 
+`capture review-queue [--limit <n>] [--include-deferred] --json` is the agent-safe read-only capture worklist. It returns `command: capture.review-queue`, `readOnly: true`, `changed: false`, reason-code counts, item identity, severity/priority, provenance summaries, routing/review state, indexing/enrichment status, unsupported attachment summaries, and safe follow-up commands. It includes existing review queue items plus capture-health rows for unsupported attachments and missing or stale chunks. It does not approve, move, delete, or repair state by itself.
+
 After capture, agents should verify and continue through backend-backed item/review commands: `item get`, `item search`, `item context`, `item relations`, `item backlinks`, `item move`, `item route`, `item link`, `review list`, `review approve`, `review correct`, `review enrich`, and `storage audit`.
 
 `storage active-duplicate-invariants --json` is the canonical duplicate/integrity checker for active vault state. `storage restart-duplicate-regression --json` wraps that checker around the supported startup rebuild/reconcile path, returning pre/post snapshots, issue counts, new/resolved issue fingerprints, and `passed`/`status` fields so agents can detect restart-only duplicate, stale projection, and vault/SQLite drift regressions without parsing prose.
@@ -92,7 +94,7 @@ After capture, agents should verify and continue through backend-backed item/rev
 
 Keep command details in CLI help and tests, not sprawling docs. The core command areas agents rely on are:
 
-- capture: `capture add --kind ... --json` for all new user material
+- capture: `capture add --kind ... --json` for all new user material, plus `capture review-queue --json` for read-only capture worklists
 - item: get/search/query/recent/context/relations/backlinks/graph-health/project-context/doctor, plus backend-backed move/unfile/route/link
 - export: bounded folder/item/card/project export in JSON or Markdown; no unbounded whole-vault dumps
 - review: list/summary/drilldown/approve/correct/defer/enrich/enrich-batch/jobs

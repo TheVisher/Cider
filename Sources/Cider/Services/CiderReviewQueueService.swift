@@ -16,6 +16,102 @@ struct CiderReviewQueueResult: Equatable {
     }
 }
 
+struct CiderCaptureReviewWorklistResult: Equatable {
+    var command: String = "capture.review-queue"
+    var generatedAt: Date
+    var readOnly: Bool = true
+    var changed: Bool = false
+    var totalCount: Int
+    var items: [CiderCaptureReviewWorklistItem]
+    var countsByReasonCode: [String: Int]
+    var countsByKind: [String: Int]
+    var safeNextCommands: [String]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        return [
+            "ok": true,
+            "command": command,
+            "generatedAt": formatter.string(from: generatedAt),
+            "readOnly": readOnly,
+            "changed": changed,
+            "totalCount": totalCount,
+            "count": items.count,
+            "countsByReasonCode": countsByReasonCode,
+            "countsByKind": countsByKind,
+            "items": items.map { $0.toDictionary() },
+            "safeNextCommands": safeNextCommands,
+        ]
+    }
+}
+
+struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
+    var id: String
+    var kind: String
+    var source: String
+    var ownerType: String
+    var ownerID: String
+    var itemID: UUID?
+    var itemType: String
+    var title: String
+    var relativePath: String?
+    var reason: String
+    var reasonCodes: [String]
+    var severity: String
+    var priority: Int
+    var reviewState: String
+    var provenance: [String: String]
+    var routingState: [String: String]?
+    var indexingStatus: String?
+    var enrichmentStatus: String?
+    var attachmentSummary: [String: String]?
+    var createdAt: Date
+    var safeNextCommands: [String]
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        var dictionary: [String: Any] = [
+            "id": id,
+            "kind": kind,
+            "source": source,
+            "owner": [
+                "ownerType": ownerType,
+                "ownerID": ownerID,
+                "ref": "\(ownerType):\(ownerID)",
+            ],
+            "itemType": itemType,
+            "title": title,
+            "reason": reason,
+            "reasonCodes": reasonCodes,
+            "severity": severity,
+            "priority": priority,
+            "reviewState": reviewState,
+            "provenance": provenance,
+            "createdAt": formatter.string(from: createdAt),
+            "safeNextCommands": safeNextCommands,
+        ]
+        if let itemID {
+            dictionary["itemID"] = itemID.uuidString
+        }
+        if let relativePath {
+            dictionary["relativePath"] = relativePath
+        }
+        if let routingState {
+            dictionary["routingState"] = routingState
+        }
+        if let indexingStatus {
+            dictionary["indexingStatus"] = indexingStatus
+        }
+        if let enrichmentStatus {
+            dictionary["enrichmentStatus"] = enrichmentStatus
+        }
+        if let attachmentSummary {
+            dictionary["attachmentSummary"] = attachmentSummary
+        }
+        return dictionary
+    }
+}
+
 struct CiderReviewQueueSummaryResult: Equatable {
     var command: String
     var generatedAt: Date
@@ -749,6 +845,40 @@ final class CiderReviewQueueService {
                 for: items,
                 sampleLimit: batchEnrichmentSampleLimit
             )
+        )
+    }
+
+    func captureReviewWorklist(
+        limit: Int = 50,
+        includeDeferred: Bool = false,
+        now: Date = Date()
+    ) throws -> CiderCaptureReviewWorklistResult {
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
+        let cappedLimit = max(0, limit)
+        let reviewItems = try list(limit: Int.max, includeDeferred: includeDeferred, now: now).items
+            .map(captureWorklistItem(from:))
+        let captureItems = try unsupportedAttachmentWorklistItems(in: db, now: now)
+        let indexingItems = try indexingWorklistItems(in: db, now: now)
+        let allItems = (reviewItems + captureItems + indexingItems).sorted { lhs, rhs in
+            if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+        let page = Array(allItems.prefix(cappedLimit))
+        let safeNextCommands = orderedUnique(
+            [
+                "cider-cli capture review-queue --limit \(cappedLimit) --json",
+                "cider-cli review summary --json",
+                "cider-cli item doctor --json",
+            ] + page.flatMap(\.safeNextCommands)
+        )
+        return CiderCaptureReviewWorklistResult(
+            generatedAt: now,
+            totalCount: allItems.count,
+            items: page,
+            countsByReasonCode: groupedCounts(allItems.flatMap(\.reasonCodes)),
+            countsByKind: groupedCounts(allItems.map(\.kind)),
+            safeNextCommands: safeNextCommands
         )
     }
 
@@ -1773,6 +1903,258 @@ final class CiderReviewQueueService {
                 safeActions: ["inspect_duplicates", "manual_review"]
             )
         }
+    }
+
+    private func captureWorklistItem(from item: CiderReviewQueueItem) -> CiderCaptureReviewWorklistItem {
+        let severity: String
+        let priority: Int
+        switch item.kind {
+        case "duplicate_candidate":
+            severity = "high"
+            priority = 20
+        case "low_confidence_routing":
+            severity = "medium"
+            priority = 30
+        case "enrichment":
+            severity = item.reviewState == "needs_review" ? "medium" : "low"
+            priority = item.reviewState == "needs_review" ? 40 : 60
+        default:
+            severity = item.reviewState == "needs_review" ? "medium" : "low"
+            priority = 70
+        }
+        var routingState: [String: String]?
+        if let target = item.target {
+            routingState = [
+                "reviewState": item.reviewState,
+                "targetKind": target.kind,
+                "targetName": target.name,
+                "targetPath": target.relativePath,
+            ]
+            if let confidence = item.confidence {
+                routingState?["confidence"] = String(confidence)
+            }
+            if let routingDecisionID = item.routingDecisionID {
+                routingState?["routingDecisionID"] = routingDecisionID.uuidString
+            }
+        }
+        return CiderCaptureReviewWorklistItem(
+            id: "capture-worklist-\(item.id)",
+            kind: item.kind,
+            source: item.source,
+            ownerType: item.itemType,
+            ownerID: item.itemID.uuidString,
+            itemID: item.itemID,
+            itemType: item.itemType,
+            title: item.title,
+            relativePath: item.relativePath,
+            reason: item.reason,
+            reasonCodes: item.reasonCodes,
+            severity: severity,
+            priority: priority,
+            reviewState: item.reviewState,
+            provenance: [
+                "source": item.source,
+                "kind": item.kind,
+            ],
+            routingState: routingState,
+            indexingStatus: nil,
+            enrichmentStatus: item.kind == "enrichment" ? item.reviewState : nil,
+            attachmentSummary: nil,
+            createdAt: item.createdAt,
+            safeNextCommands: itemSafeInspectionCommands(type: item.itemType, id: item.itemID, title: item.title)
+        )
+    }
+
+    private func unsupportedAttachmentWorklistItems(in db: CiderDatabase, now: Date) throws -> [CiderCaptureReviewWorklistItem] {
+        let stmt = try db.prepare("""
+            SELECT e.id, e.source_kind, e.surface, e.channel, e.channel_id, e.thread_id,
+                   e.message_id, e.sender_id, e.sender_name, e.source_text,
+                   e.attachment_count, e.created_at,
+                   o.kind, o.review_state, o.evidence, o.metadata,
+                   COUNT(a.id) AS attachment_row_count,
+                   SUM(CASE WHEN a.local_path IS NULL AND a.remote_url IS NOT NULL THEN 1 ELSE 0 END) AS remote_only_count,
+                   GROUP_CONCAT(COALESCE(a.filename, a.source_attachment_id, a.remote_url), ', ') AS attachment_names
+            FROM capture_events e
+            JOIN enrichment_outputs o
+              ON o.owner_type = 'capture_event'
+             AND o.owner_id = e.id
+             AND o.review_state IN ('needs_review', 'suggested')
+             AND o.kind IN ('unsupported_chat_attachment')
+            LEFT JOIN capture_attachments a
+              ON a.capture_event_id = e.id
+            GROUP BY e.id, o.id
+            ORDER BY e.created_at DESC, e.id DESC;
+            """)
+        var items: [CiderCaptureReviewWorklistItem] = []
+        while try stmt.step() {
+            let eventID = stmt.string(at: 0)
+            let sourceKind = stmt.string(at: 1)
+            let surface = stmt.optionalString(at: 2)
+            let channel = stmt.optionalString(at: 3)
+            let channelID = stmt.optionalString(at: 4)
+            let threadID = stmt.optionalString(at: 5)
+            let messageID = stmt.optionalString(at: 6)
+            let senderID = stmt.optionalString(at: 7)
+            let senderName = stmt.optionalString(at: 8)
+            let sourceText = stmt.optionalString(at: 9)
+            let attachmentCount = stmt.int(at: 10)
+            let createdAt = DatabaseHelpers.decodeDate(stmt.double(at: 11))
+            let reviewState = stmt.string(at: 13)
+            let evidence = stmt.optionalString(at: 14) ?? "Capture has unsupported attachment content that needs review."
+            let attachmentRowCount = stmt.int(at: 16)
+            let remoteOnlyCount = stmt.int(at: 17)
+            let attachmentNames = stmt.optionalString(at: 18)
+            var reasonCodes = ["unsupported_attachment"]
+            if remoteOnlyCount > 0 {
+                reasonCodes.append("remote_only_attachment")
+            }
+            var provenance: [String: String] = [
+                "sourceKind": sourceKind,
+            ]
+            if let surface { provenance["surface"] = surface }
+            if let channel { provenance["channel"] = channel }
+            if let channelID { provenance["channelID"] = channelID }
+            if let threadID { provenance["threadID"] = threadID }
+            if let messageID { provenance["messageID"] = messageID }
+            if let senderID { provenance["senderID"] = senderID }
+            if let senderName { provenance["senderName"] = senderName }
+            if let sourceText, !sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                provenance["sourceTextPreview"] = String(sourceText.prefix(120))
+            }
+            var attachmentSummary = [
+                "count": String(max(attachmentCount, attachmentRowCount)),
+                "remoteOnlyCount": String(remoteOnlyCount),
+            ]
+            if let attachmentNames, !attachmentNames.isEmpty {
+                attachmentSummary["names"] = attachmentNames
+            }
+            items.append(CiderCaptureReviewWorklistItem(
+                id: "capture-worklist-unsupported-\(eventID)",
+                kind: "unsupported_attachment",
+                source: "capture_event",
+                ownerType: "capture_event",
+                ownerID: eventID,
+                itemID: nil,
+                itemType: "capture_event",
+                title: attachmentNames ?? "Unsupported capture attachment",
+                relativePath: nil,
+                reason: evidence,
+                reasonCodes: reasonCodes,
+                severity: "high",
+                priority: 10,
+                reviewState: reviewState,
+                provenance: provenance,
+                routingState: nil,
+                indexingStatus: nil,
+                enrichmentStatus: reviewState,
+                attachmentSummary: attachmentSummary,
+                createdAt: createdAt,
+                safeNextCommands: [
+                    "cider-cli item backlinks capture_event \(eventID) --json",
+                    "cider-cli item owner-get capture_event \(eventID) --json",
+                    "cider-cli review summary --json",
+                ]
+            ))
+        }
+        return items
+    }
+
+    private func indexingWorklistItems(in db: CiderDatabase, now: Date) throws -> [CiderCaptureReviewWorklistItem] {
+        let activeDatabaseTypes = LibraryEntityType.activeCases.map(ItemLinkService.databaseItemType(for:))
+        guard !activeDatabaseTypes.isEmpty else { return [] }
+        let placeholders = Array(repeating: "?", count: activeDatabaseTypes.count).joined(separator: ", ")
+        let stmt = try db.prepare("""
+            SELECT i.id, i.type, i.title, i.relative_path, i.updated_at,
+                   COUNT(c.id) AS chunk_count,
+                   MAX(c.updated_at) AS newest_chunk_updated_at
+            FROM items i
+            LEFT JOIN content_chunks c
+              ON c.owner_id = i.id
+             AND c.owner_type = CASE WHEN i.type = 'event' THEN 'dateCard' ELSE i.type END
+            WHERE i.type IN (\(placeholders))
+            GROUP BY i.id, i.type, i.title, i.relative_path, i.updated_at
+            HAVING chunk_count = 0 OR newest_chunk_updated_at IS NULL OR newest_chunk_updated_at < i.updated_at
+            ORDER BY i.updated_at DESC, i.title COLLATE NOCASE ASC;
+            """)
+        for (index, type) in activeDatabaseTypes.enumerated() {
+            stmt.bind(type, at: Int32(index + 1))
+        }
+        var items: [CiderCaptureReviewWorklistItem] = []
+        while try stmt.step() {
+            guard let itemID = UUID(uuidString: stmt.string(at: 0)) else { continue }
+            let rawType = stmt.string(at: 1)
+            let itemType = rawType == "event" ? "dateCard" : rawType
+            let title = stmt.string(at: 2)
+            let relativePath = stmt.optionalString(at: 3)
+            let itemUpdatedAt = DatabaseHelpers.decodeDate(stmt.double(at: 4))
+            let chunkCount = stmt.int(at: 5)
+            let newestChunkUpdatedAt = stmt.optionalDouble(at: 6).map(DatabaseHelpers.decodeDate)
+            let indexingStatus = chunkCount == 0 ? "missing" : "stale"
+            let reasonCode = chunkCount == 0 ? "index_missing_chunks" : "index_stale_chunks"
+            let reason = chunkCount == 0
+                ? "Item has no searchable content chunks."
+                : "Item content chunks are older than the item row."
+            var provenance: [String: String] = [
+                "source": "content_chunks",
+                "itemUpdatedAt": ISO8601DateFormatter().string(from: itemUpdatedAt),
+                "chunkCount": String(chunkCount),
+            ]
+            if let newestChunkUpdatedAt {
+                provenance["newestChunkUpdatedAt"] = ISO8601DateFormatter().string(from: newestChunkUpdatedAt)
+            }
+            items.append(CiderCaptureReviewWorklistItem(
+                id: "capture-worklist-index-\(itemID.uuidString)",
+                kind: "indexing",
+                source: "content_chunks",
+                ownerType: itemType,
+                ownerID: itemID.uuidString,
+                itemID: itemID,
+                itemType: itemType,
+                title: title,
+                relativePath: relativePath,
+                reason: reason,
+                reasonCodes: [reasonCode],
+                severity: "medium",
+                priority: indexingStatus == "missing" ? 35 : 45,
+                reviewState: "needs_review",
+                provenance: provenance,
+                routingState: nil,
+                indexingStatus: indexingStatus,
+                enrichmentStatus: nil,
+                attachmentSummary: nil,
+                createdAt: itemUpdatedAt,
+                safeNextCommands: [
+                    "cider-cli item get \(itemType) \(itemID.uuidString) --json",
+                    "cider-cli item context \(itemType) \(itemID.uuidString) --json",
+                    "cider-cli item search-debug \"\(escapedCommandArgument(title))\" --limit 5 --json",
+                    "cider-cli item doctor --json",
+                ]
+            ))
+        }
+        return items
+    }
+
+    private func itemSafeInspectionCommands(type: String, id: UUID, title: String) -> [String] {
+        [
+            "cider-cli item get \(type) \(id.uuidString) --json",
+            "cider-cli item context \(type) \(id.uuidString) --json",
+            "cider-cli item search-debug \"\(escapedCommandArgument(title))\" --limit 5 --json",
+            "cider-cli review list --limit 20 --json",
+        ]
+    }
+
+    private func escapedCommandArgument(_ value: String) -> String {
+        value.replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    private func orderedUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for value in values where !value.isEmpty && !seen.contains(value) {
+            seen.insert(value)
+            output.append(value)
+        }
+        return output
     }
 
     private func reasonCodeSuffix(for rawValue: String) -> String {
