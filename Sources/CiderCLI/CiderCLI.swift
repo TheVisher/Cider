@@ -4364,9 +4364,6 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleLink(subcommand: String?, args: [String]) {
-        guard !printHiddenLegacyCommandIfRemoved(command: "link", subcommand: subcommand, args: args) else {
-            return
-        }
         let service = ItemLinkService.shared
         switch subcommand {
         case nil, "help", "--help", "-h":

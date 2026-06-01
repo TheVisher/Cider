@@ -1134,7 +1134,6 @@ struct CiderCLIAgentSafetyTests {
             "todo",
             "event",
             "contact",
-            "link",
             "file",
             "folder",
             "label",
@@ -1230,6 +1229,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(visibleSectionHeaders == [
             "CAPTURE",
             "ITEM",
+            "EXPORT",
             "REVIEW",
             "ROUTE",
             "STORAGE",
