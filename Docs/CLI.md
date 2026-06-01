@@ -110,6 +110,7 @@ Agents should prefer `cider-cli item ...` and `cider-cli space ...` for second-b
 Core commands:
 
 - `item search <query> --json`: FTS-backed search over projected chunks.
+- `item search-debug <query> --json`: read-only recall diagnostics for agents. Returns exact item/chunk matches, matched chunk context, routing/provenance where available, missing or stale index warnings, semantic/vector availability status, machine-readable warnings/errors, and safe follow-up commands. It does not repair or mutate indexes.
 - `item get <type> <id-or-ref> --json`: unified item context for library item refs such as bookmark, note, todo, dateCard/event, contact, and vaultFile, including `captureProvenance` when a capture event produced the item.
 - `item owner-get <owner-type> <owner-id-or-ref> --json`: legacy owner-section inspection for projected owners such as Kanban cards; returns structured sections, routing decisions, agent actions, and owner resolution metadata.
 - `item owner-get folder <id|path|name|Inbox> --json`: blessed read-only folder metadata inspection. Returns folder ID/name/path, parent/root flags, icon/cover metadata, direct and descendant folder/item counts by type, health flags for missing/ghost directories, and `safeNextCommands` for search, move, route, storage audit, and doctor planning.

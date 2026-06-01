@@ -246,6 +246,131 @@ struct CiderItemContextServiceTests {
         })
     }
 
+    @Test("search diagnostics explain FTS chunk hits with item routing and safe commands")
+    func searchDiagnosticsExplainChunkHitsWithItemContext() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(note, title: "Saffron recall note", relativePath: "Inbox/Notes/Saffron recall note.md", into: db)
+
+        let store = SecondBrainStore(database: db)
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: note.entityID.uuidString)
+        try store.replaceChunks(owner: owner, chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: note.entityID.uuidString,
+                source: "test",
+                title: "Saffron memory",
+                body: "The saffron diagnostic token should be visible through FTS.",
+                chunkIndex: 0
+            )
+        ])
+        try store.recordRoutingDecision(
+            SecondBrainRoutingDecision(
+                owner: owner,
+                itemID: note.entityID.uuidString,
+                targetType: "folder",
+                targetPath: "Projects/Cider/Recall",
+                confidence: 0.82,
+                reason: "Recall diagnostics work belongs with Cider.",
+                status: "accepted",
+                actor: "agent",
+                source: "routing.test"
+            )
+        )
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let report = try service.searchDiagnostics("saffron diagnostic", limit: 10)
+
+        #expect(report.query == "saffron diagnostic")
+        #expect(report.exactMatches.contains { $0.kind == .chunk && $0.item?.id == note.entityID })
+        #expect(report.matchedChunks.contains {
+            $0.chunk.owner == owner
+                && $0.item?.id == note.entityID
+                && $0.routingDecisions.map(\.targetPath).contains("Projects/Cider/Recall")
+                && $0.indexFreshness.status == "fresh"
+        })
+        #expect(report.semanticStatus.available == false)
+        #expect(report.semanticStatus.status == "unavailable")
+        #expect(report.safeNextCommands.contains("cider-cli item get note \(note.entityID.uuidString) --json"))
+        #expect(report.safeNextCommands.contains("cider-cli item rebuild-chunks note \(note.entityID.uuidString) --json"))
+
+        let dict = CiderCLI.itemSearchDiagnosticsReportToDict(report)
+        #expect(dict["command"] as? String == "item.search-debug")
+        #expect(dict["readOnly"] as? Bool == true)
+        #expect(dict["changed"] as? Bool == false)
+        #expect((dict["matchedChunks"] as? [[String: Any]])?.isEmpty == false)
+        #expect((dict["semanticStatus"] as? [String: Any])?["status"] as? String == "unavailable")
+        #expect((dict["safeNextCommands"] as? [String])?.contains("cider-cli item rebuild-chunks note \(note.entityID.uuidString) --json") == true)
+    }
+
+    @Test("search diagnostics return machine readable no match warnings")
+    func searchDiagnosticsReturnNoMatchWarnings() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(note, title: "Ordinary recall note", relativePath: "Inbox/Notes/Ordinary recall note.md", into: db)
+
+        let service = CiderItemContextService(database: db)
+        let report = try service.searchDiagnostics("missing-zircon-token", limit: 10)
+
+        #expect(report.exactMatches.isEmpty)
+        #expect(report.matchedChunks.isEmpty)
+        #expect(report.warnings.contains { $0.kind == "no_matches" })
+        #expect(report.safeNextCommands.contains("cider-cli item search \"missing-zircon-token\" --limit 10 --json"))
+    }
+
+    @Test("search diagnostics identify missing and stale item chunk indexes")
+    func searchDiagnosticsIdentifyMissingAndStaleIndexes() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let missing = LibraryEntityRef(type: .note, entityID: UUID())
+        let stale = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(missing, title: "Nebula missing index", relativePath: "Inbox/Notes/Nebula missing index.md", into: db)
+        try insertItem(stale, title: "Nebula stale index", relativePath: "Inbox/Notes/Nebula stale index.md", into: db)
+
+        let oldDate = Date(timeIntervalSince1970: 1_000)
+        let newDate = Date(timeIntervalSince1970: 2_000)
+        let updateItem = try db.prepare("UPDATE items SET updated_at = ? WHERE id = ?;")
+        updateItem.bind(DatabaseHelpers.encode(newDate), at: 1)
+            .bind(DatabaseHelpers.encode(stale.entityID), at: 2)
+        try updateItem.step()
+
+        let chunkStmt = try db.prepare("""
+            INSERT INTO content_chunks (
+                id, item_id, owner_type, owner_id, source, title, body,
+                chunk_index, content_hash, metadata, created_at, updated_at
+            )
+            VALUES (?, ?, 'note', ?, 'test', 'Nebula stale index', 'old nebula body',
+                    0, 'stale-hash', '{}', ?, ?);
+            """)
+        chunkStmt.bind(UUID().uuidString, at: 1)
+            .bind(stale.entityID.uuidString, at: 2)
+            .bind(stale.entityID.uuidString, at: 3)
+            .bind(DatabaseHelpers.encode(oldDate), at: 4)
+            .bind(DatabaseHelpers.encode(oldDate), at: 5)
+        try chunkStmt.step()
+
+        let service = CiderItemContextService(database: db)
+        let report = try service.searchDiagnostics("Nebula", limit: 10)
+
+        #expect(report.indexWarnings.contains {
+            $0.kind == "missing_chunks" && $0.item?.id == missing.entityID
+        })
+        #expect(report.indexWarnings.contains {
+            $0.kind == "stale_chunks" && $0.item?.id == stale.entityID
+        })
+        #expect(report.indexWarnings.contains {
+            $0.safeRepairCommand == "cider-cli item rebuild-chunks note \(missing.entityID.uuidString) --json"
+        })
+        #expect(report.indexWarnings.contains {
+            $0.safeRepairCommand == "cider-cli item rebuild-chunks note \(stale.entityID.uuidString) --json"
+        })
+    }
+
     @Test("search handles common Kanban acceptance terms alongside item matches")
     func searchHandlesCommonKanbanAcceptanceTermsAlongsideItemMatches() throws {
         let (db, url) = try makeTestDB()

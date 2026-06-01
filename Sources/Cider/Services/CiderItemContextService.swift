@@ -129,6 +129,64 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var rank: Double
 }
 
+struct CiderItemSearchDiagnosticsWarning: Identifiable, Equatable {
+    var id: String = UUID().uuidString
+    var kind: String
+    var message: String
+    var owner: SecondBrainOwnerRef?
+    var item: CiderItemSummary?
+}
+
+struct CiderItemSearchSemanticStatus: Equatable {
+    var available: Bool
+    var status: String
+    var reason: String
+}
+
+struct CiderItemSearchIndexFreshness: Equatable {
+    var status: String
+    var itemUpdatedAt: Date?
+    var newestChunkUpdatedAt: Date?
+    var chunkCount: Int
+}
+
+struct CiderItemSearchDiagnosticsChunkMatch: Identifiable, Equatable {
+    var id: String { chunk.id }
+    var searchResult: CiderItemSearchResult
+    var chunk: CiderItemChunk
+    var item: CiderItemSummary?
+    var routingDecisions: [SecondBrainRoutingDecision]
+    var captureProvenance: [CiderItemCaptureProvenance]
+    var indexFreshness: CiderItemSearchIndexFreshness
+}
+
+struct CiderItemSearchIndexWarning: Identifiable, Equatable {
+    var id: String = UUID().uuidString
+    var kind: String
+    var message: String
+    var owner: SecondBrainOwnerRef
+    var item: CiderItemSummary?
+    var itemUpdatedAt: Date?
+    var newestChunkUpdatedAt: Date?
+    var chunkCount: Int
+    var safeRepairCommand: String
+}
+
+struct CiderItemSearchDiagnosticsReport: Equatable {
+    var command: String = "item.search-debug"
+    var query: String
+    var generatedAt: Date
+    var exactMatches: [CiderItemSearchResult]
+    var matchedChunks: [CiderItemSearchDiagnosticsChunkMatch]
+    var candidateItems: [CiderItemSummary]
+    var excludedItems: [CiderItemSearchDiagnosticsWarning]
+    var indexWarnings: [CiderItemSearchIndexWarning]
+    var semanticStatus: CiderItemSearchSemanticStatus
+    var warnings: [CiderItemSearchDiagnosticsWarning]
+    var errors: [CiderItemSearchDiagnosticsWarning]
+    var safeNextCommands: [String]
+}
+
 enum CiderItemContextError: Error, LocalizedError {
     case itemNotFound(UUID)
     case unsupportedItemType(String)
@@ -259,6 +317,133 @@ final class CiderItemContextService {
         return Array(results.prefix(max(1, limit)))
     }
 
+    func searchDiagnostics(_ query: String, limit: Int = 20) throws -> CiderItemSearchDiagnosticsReport {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let boundedLimit = max(1, limit)
+        let generatedAt = nowProvider()
+        guard !trimmed.isEmpty else {
+            return CiderItemSearchDiagnosticsReport(
+                query: trimmed,
+                generatedAt: generatedAt,
+                exactMatches: [],
+                matchedChunks: [],
+                candidateItems: [],
+                excludedItems: [],
+                indexWarnings: [],
+                semanticStatus: semanticUnavailableStatus(),
+                warnings: [
+                    CiderItemSearchDiagnosticsWarning(
+                        kind: "empty_query",
+                        message: "Search diagnostics need a non-empty query."
+                    )
+                ],
+                errors: [],
+                safeNextCommands: []
+            )
+        }
+
+        var warnings: [CiderItemSearchDiagnosticsWarning] = []
+        var errors: [CiderItemSearchDiagnosticsWarning] = []
+        let exactMatches: [CiderItemSearchResult]
+        do {
+            exactMatches = try search(trimmed, limit: boundedLimit)
+        } catch {
+            exactMatches = try searchItems(trimmed, limit: boundedLimit)
+            errors.append(
+                CiderItemSearchDiagnosticsWarning(
+                    kind: "fts_search_unavailable",
+                    message: error.localizedDescription
+                )
+            )
+        }
+
+        var matchedChunks: [CiderItemSearchDiagnosticsChunkMatch] = []
+        do {
+            let chunkMatches = try secondBrainStore.searchChunks(query: trimmed, limit: boundedLimit)
+            for result in chunkMatches {
+                guard let chunk = try chunk(id: result.id, owner: result.owner) else {
+                    warnings.append(
+                        CiderItemSearchDiagnosticsWarning(
+                            kind: "missing_chunk_row",
+                            message: "FTS returned chunk \(result.id), but the content_chunks row was not readable.",
+                            owner: result.owner
+                        )
+                    )
+                    continue
+                }
+                let item = try? itemSummary(owner: result.owner)
+                let routing = (try? secondBrainStore.routingDecisions(for: result.owner)) ?? []
+                let backlinks = (try? secondBrainStore.backlinks(for: result.owner)) ?? []
+                let provenance = (try? captureProvenance(from: backlinks)) ?? []
+                matchedChunks.append(
+                    CiderItemSearchDiagnosticsChunkMatch(
+                        searchResult: CiderItemSearchResult(
+                            id: "chunk-\(result.id)",
+                            kind: .chunk,
+                            owner: result.owner,
+                            item: item,
+                            title: result.title,
+                            snippet: result.snippet,
+                            rank: result.rank
+                        ),
+                        chunk: chunk,
+                        item: item,
+                        routingDecisions: routing,
+                        captureProvenance: provenance,
+                        indexFreshness: try indexFreshness(for: result.owner, item: item)
+                    )
+                )
+            }
+        } catch {
+            errors.append(
+                CiderItemSearchDiagnosticsWarning(
+                    kind: "fts_chunk_diagnostics_unavailable",
+                    message: error.localizedDescription
+                )
+            )
+        }
+
+        let candidateItems = exactMatches.compactMap(\.item).reduce(into: [CiderItemSummary]()) { output, item in
+            guard !output.contains(where: { $0.id == item.id }) else { return }
+            output.append(item)
+        }
+        let indexWarnings = try itemIndexWarnings(matching: trimmed, limit: boundedLimit)
+        if exactMatches.isEmpty && matchedChunks.isEmpty {
+            warnings.append(
+                CiderItemSearchDiagnosticsWarning(
+                    kind: "no_matches",
+                    message: "No title/path or FTS chunk matches were found for '\(trimmed)'."
+                )
+            )
+        }
+
+        var safeCommands = [
+            "cider-cli item search \"\(escapedCommandArgument(trimmed))\" --limit \(boundedLimit) --json",
+            "cider-cli item search-debug \"\(escapedCommandArgument(trimmed))\" --limit \(boundedLimit) --json",
+            "cider-cli item doctor --json",
+        ]
+        for item in candidateItems + matchedChunks.compactMap(\.item) {
+            safeCommands.append("cider-cli item get \(item.type.rawValue) \(item.id.uuidString) --json")
+            safeCommands.append("cider-cli item context \(item.type.rawValue) \(item.id.uuidString) --json")
+            safeCommands.append("cider-cli item rebuild-chunks \(item.type.rawValue) \(item.id.uuidString) --json")
+        }
+        safeCommands += indexWarnings.map(\.safeRepairCommand)
+
+        return CiderItemSearchDiagnosticsReport(
+            query: trimmed,
+            generatedAt: generatedAt,
+            exactMatches: exactMatches,
+            matchedChunks: matchedChunks,
+            candidateItems: candidateItems,
+            excludedItems: [],
+            indexWarnings: indexWarnings,
+            semanticStatus: semanticUnavailableStatus(),
+            warnings: warnings,
+            errors: errors,
+            safeNextCommands: orderedUnique(safeCommands)
+        )
+    }
+
     private func searchItems(
         _ query: String,
         limit: Int,
@@ -321,6 +506,129 @@ final class CiderItemContextService {
             if spaceRefs != nil, results.count >= max(1, limit) { break }
         }
         return results
+    }
+
+    private func chunk(id: String, owner: SecondBrainOwnerRef) throws -> CiderItemChunk? {
+        let stmt = try database.prepare("""
+            SELECT id, item_id, source, title, body, chunk_index, metadata, created_at, updated_at
+            FROM content_chunks
+            WHERE id = ? AND owner_type = ? AND owner_id = ?
+            LIMIT 1;
+            """)
+        stmt.bind(id, at: 1)
+            .bind(owner.ownerType, at: 2)
+            .bind(owner.ownerID, at: 3)
+        guard try stmt.step() else { return nil }
+        return CiderItemChunk(
+            id: stmt.string(at: 0),
+            owner: owner,
+            itemID: stmt.optionalString(at: 1).flatMap(UUID.init(uuidString:)),
+            source: stmt.string(at: 2),
+            title: stmt.string(at: 3),
+            body: stmt.string(at: 4),
+            chunkIndex: stmt.int(at: 5),
+            metadata: DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 6)) ?? [:],
+            createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 7)),
+            updatedAt: DatabaseHelpers.decodeDate(stmt.double(at: 8))
+        )
+    }
+
+    private func itemIndexWarnings(matching query: String, limit: Int) throws -> [CiderItemSearchIndexWarning] {
+        let activeDatabaseTypes = LibraryEntityType.activeCases.map(ItemLinkService.databaseItemType(for:))
+        guard !activeDatabaseTypes.isEmpty else { return [] }
+        let placeholders = Array(repeating: "?", count: activeDatabaseTypes.count).joined(separator: ", ")
+        let stmt = try database.prepare("""
+            SELECT i.id, i.type, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
+                   COUNT(c.id) AS chunk_count,
+                   MAX(c.updated_at) AS newest_chunk_updated_at
+            FROM items i
+            LEFT JOIN content_chunks c
+              ON c.owner_id = i.id
+             AND c.owner_type = CASE WHEN i.type = 'event' THEN 'dateCard' ELSE i.type END
+            WHERE i.type IN (\(placeholders))
+              AND (
+                    i.title LIKE ? ESCAPE '\\'
+                 OR IFNULL(i.relative_path, '') LIKE ? ESCAPE '\\'
+              )
+            GROUP BY i.id, i.type, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path
+            HAVING chunk_count = 0 OR newest_chunk_updated_at IS NULL OR newest_chunk_updated_at < i.updated_at
+            ORDER BY i.updated_at DESC, i.title COLLATE NOCASE ASC
+            LIMIT ?;
+            """)
+        for (index, type) in activeDatabaseTypes.enumerated() {
+            stmt.bind(type, at: Int32(index + 1))
+        }
+        let pattern = "%\(escapedLikePattern(query))%"
+        let queryStart = activeDatabaseTypes.count + 1
+        stmt.bind(pattern, at: Int32(queryStart))
+            .bind(pattern, at: Int32(queryStart + 1))
+            .bind(max(1, limit), at: Int32(queryStart + 2))
+
+        var warnings: [CiderItemSearchIndexWarning] = []
+        while try stmt.step() {
+            let item = try itemSummary(from: stmt)
+            let owner = owner(for: item)
+            let chunkCount = stmt.int(at: 7)
+            let itemUpdatedAt = item.updatedAt
+            let newestChunkUpdatedAt = stmt.optionalDouble(at: 8).map(DatabaseHelpers.decodeDate)
+            let kind = chunkCount == 0 ? "missing_chunks" : "stale_chunks"
+            let message: String
+            if chunkCount == 0 {
+                message = "Item matched the query by title/path, but has no searchable content chunks."
+            } else {
+                message = "Item matched the query by title/path, but its newest content chunk is older than the item row."
+            }
+            warnings.append(
+                CiderItemSearchIndexWarning(
+                    kind: kind,
+                    message: message,
+                    owner: owner,
+                    item: item,
+                    itemUpdatedAt: itemUpdatedAt,
+                    newestChunkUpdatedAt: newestChunkUpdatedAt,
+                    chunkCount: chunkCount,
+                    safeRepairCommand: "cider-cli item rebuild-chunks \(item.type.rawValue) \(item.id.uuidString) --json"
+                )
+            )
+        }
+        return warnings
+    }
+
+    private func indexFreshness(for owner: SecondBrainOwnerRef, item: CiderItemSummary?) throws -> CiderItemSearchIndexFreshness {
+        let stmt = try database.prepare("""
+            SELECT COUNT(id), MAX(updated_at)
+            FROM content_chunks
+            WHERE owner_type = ? AND owner_id = ?;
+            """)
+        stmt.bind(owner.ownerType, at: 1)
+            .bind(owner.ownerID, at: 2)
+        guard try stmt.step() else {
+            return CiderItemSearchIndexFreshness(status: "unknown", itemUpdatedAt: item?.updatedAt, newestChunkUpdatedAt: nil, chunkCount: 0)
+        }
+        let chunkCount = stmt.int(at: 0)
+        let newestChunkUpdatedAt = stmt.optionalDouble(at: 1).map(DatabaseHelpers.decodeDate)
+        let status: String
+        if chunkCount == 0 {
+            status = "missing"
+        } else if let item, let newestChunkUpdatedAt, newestChunkUpdatedAt < item.updatedAt {
+            status = "stale"
+        } else {
+            status = "fresh"
+        }
+        return CiderItemSearchIndexFreshness(
+            status: status,
+            itemUpdatedAt: item?.updatedAt,
+            newestChunkUpdatedAt: newestChunkUpdatedAt,
+            chunkCount: chunkCount
+        )
+    }
+
+    private func semanticUnavailableStatus() -> CiderItemSearchSemanticStatus {
+        CiderItemSearchSemanticStatus(
+            available: false,
+            status: "unavailable",
+            reason: "Semantic/vector recall is not configured for item search-debug yet."
+        )
     }
 
     private func chunks(for owner: SecondBrainOwnerRef) throws -> [CiderItemChunk] {

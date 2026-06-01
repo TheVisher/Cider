@@ -4455,6 +4455,7 @@ struct CiderCLI {
             print("""
             Item graph commands:
               cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]
+              cider-cli item search-debug <query> [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
                 Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
@@ -4518,6 +4519,34 @@ struct CiderCLI {
                     for result in results {
                         let label = result.kind == .item ? "item" : "chunk"
                         print("  [\(label) \(result.owner.ownerType):\(result.owner.ownerID)] \(result.title) — \(result.snippet)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "search-debug", "debug-search":
+            let query = leadingPositionalArgs(from: args).joined(separator: " ")
+            guard !query.isEmpty else {
+                printCLIError("Usage: cider-cli item search-debug <query> [--limit <n>] [--json]")
+                return
+            }
+            let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 20
+            do {
+                let report = try contextService.searchDiagnostics(query, limit: limit)
+                if jsonOutput {
+                    outputJSON(itemSearchDiagnosticsReportToDict(report))
+                } else {
+                    print("Item search diagnostics for '\(report.query)':")
+                    print("  Exact matches: \(report.exactMatches.count)")
+                    print("  Matched chunks: \(report.matchedChunks.count)")
+                    print("  Index warnings: \(report.indexWarnings.count)")
+                    print("  Semantic: \(report.semanticStatus.status)")
+                    for warning in report.warnings {
+                        print("  Warning [\(warning.kind)]: \(warning.message)")
+                    }
+                    for error in report.errors {
+                        print("  Error [\(error.kind)]: \(error.message)")
                     }
                 }
             } catch {
@@ -14222,6 +14251,99 @@ struct CiderCLI {
         return dict
     }
 
+    static func itemSearchDiagnosticsReportToDict(_ report: CiderItemSearchDiagnosticsReport) -> [String: Any] {
+        [
+            "ok": report.errors.isEmpty,
+            "command": report.command,
+            "readOnly": true,
+            "changed": false,
+            "query": report.query,
+            "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
+            "exactMatches": report.exactMatches.map(itemSearchResultToDict),
+            "matchedChunks": report.matchedChunks.map(itemSearchDiagnosticsChunkMatchToDict),
+            "candidateItems": report.candidateItems.map(itemSummaryToDict),
+            "excludedItems": report.excludedItems.map(itemSearchDiagnosticsWarningToDict),
+            "indexWarnings": report.indexWarnings.map(itemSearchIndexWarningToDict),
+            "semanticStatus": itemSearchSemanticStatusToDict(report.semanticStatus),
+            "warnings": report.warnings.map(itemSearchDiagnosticsWarningToDict),
+            "errors": report.errors.map(itemSearchDiagnosticsWarningToDict),
+            "safeNextCommands": report.safeNextCommands,
+        ]
+    }
+
+    static func itemSearchDiagnosticsChunkMatchToDict(_ match: CiderItemSearchDiagnosticsChunkMatch) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": match.id,
+            "searchResult": itemSearchResultToDict(match.searchResult),
+            "chunk": itemChunkToDict(match.chunk),
+            "routingDecisions": match.routingDecisions.map(routingDecisionToDict),
+            "captureProvenance": match.captureProvenance.map(captureProvenanceToDict),
+            "indexFreshness": itemSearchIndexFreshnessToDict(match.indexFreshness),
+        ]
+        if let item = match.item {
+            dict["item"] = itemSummaryToDict(item)
+        }
+        return dict
+    }
+
+    static func itemSearchIndexFreshnessToDict(_ freshness: CiderItemSearchIndexFreshness) -> [String: Any] {
+        var dict: [String: Any] = [
+            "status": freshness.status,
+            "chunkCount": freshness.chunkCount,
+        ]
+        if let itemUpdatedAt = freshness.itemUpdatedAt {
+            dict["itemUpdatedAt"] = ISO8601DateFormatter().string(from: itemUpdatedAt)
+        }
+        if let newestChunkUpdatedAt = freshness.newestChunkUpdatedAt {
+            dict["newestChunkUpdatedAt"] = ISO8601DateFormatter().string(from: newestChunkUpdatedAt)
+        }
+        return dict
+    }
+
+    static func itemSearchIndexWarningToDict(_ warning: CiderItemSearchIndexWarning) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": warning.id,
+            "kind": warning.kind,
+            "message": warning.message,
+            "owner": ownerToDict(warning.owner),
+            "chunkCount": warning.chunkCount,
+            "safeRepairCommand": warning.safeRepairCommand,
+        ]
+        if let item = warning.item {
+            dict["item"] = itemSummaryToDict(item)
+        }
+        if let itemUpdatedAt = warning.itemUpdatedAt {
+            dict["itemUpdatedAt"] = ISO8601DateFormatter().string(from: itemUpdatedAt)
+        }
+        if let newestChunkUpdatedAt = warning.newestChunkUpdatedAt {
+            dict["newestChunkUpdatedAt"] = ISO8601DateFormatter().string(from: newestChunkUpdatedAt)
+        }
+        return dict
+    }
+
+    static func itemSearchDiagnosticsWarningToDict(_ warning: CiderItemSearchDiagnosticsWarning) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": warning.id,
+            "kind": warning.kind,
+            "message": warning.message,
+        ]
+        if let owner = warning.owner {
+            dict["owner"] = ownerToDict(owner)
+        }
+        if let item = warning.item {
+            dict["item"] = itemSummaryToDict(item)
+        }
+        return dict
+    }
+
+    static func itemSearchSemanticStatusToDict(_ status: CiderItemSearchSemanticStatus) -> [String: Any] {
+        [
+            "available": status.available,
+            "status": status.status,
+            "reason": status.reason,
+        ]
+    }
+
     static func routingDecisionToDict(_ decision: SecondBrainRoutingDecision) -> [String: Any] {
         var dict: [String: Any] = [
             "id": decision.id,
@@ -15440,6 +15562,7 @@ struct CiderCLI {
 
         ITEM
           cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]
+          cider-cli item search-debug <query> [--limit <n>] [--json]
           cider-cli item get <type> <id-or-ref> [--json]
           cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
             Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
