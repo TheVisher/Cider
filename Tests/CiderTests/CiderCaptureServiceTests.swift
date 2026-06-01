@@ -153,6 +153,51 @@ struct CiderCaptureServiceTests {
         #expect(statement.string(at: 0) == "test-harness")
     }
 
+    @Test("explicitly captured markdown files remain visible after vault file scan")
+    func capturedMarkdownFileRemainsVisibleAfterVaultFileScan() throws {
+        let previousOverride = StoragePaths.vaultOverride
+        let vault = try makeTempVault()
+        CiderDatabase.shared.close()
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        StoragePaths.ensureVaultStructure()
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        try FileManager.default.createDirectory(
+            at: dbURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try CiderDatabase.shared.open(at: dbURL)
+        let vaultFileService = VaultFileService.shared
+        vaultFileService._resetIDMapForTesting()
+        vaultFileService._setFilesForTesting([])
+        defer {
+            vaultFileService._resetIDMapForTesting()
+            vaultFileService._setFilesForTesting([])
+            CiderDatabase.shared.close()
+            StoragePaths.vaultOverride = previousOverride
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+
+        let sourceURL = vault.appendingPathComponent("source.md")
+        try "Captured markdown body".write(to: sourceURL, atomically: true, encoding: .utf8)
+
+        let storage = VaultFileStorage(database: CiderDatabase.shared)
+        let capture = CiderCaptureService(vaultFileStorage: storage, database: CiderDatabase.shared)
+        let result = try capture.addFileCapture(
+            sourcePath: sourceURL.path,
+            title: nil,
+            folderID: nil
+        )
+
+        vaultFileService.scan()
+
+        #expect(result.item.type == "vaultFile")
+        #expect(result.item.relativePath == "Inbox/Files/source.md")
+        #expect(vaultFileService.files.contains { $0.id == result.item.id })
+        #expect(vaultFileService.files.count == 1)
+    }
+
     private func withIsolatedVault<T>(
         _ body: (CiderDatabase, VaultBookmarkService, NotesStorage, TodoCardStorage, VaultFileStorage) async throws -> T
     ) async throws -> T {

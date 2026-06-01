@@ -619,9 +619,14 @@ final class VaultFileService: ObservableObject {
         if resourceValues?.isDirectory == true { return nil }
         if resourceValues?.isSymbolicLink == true { return nil }
 
-        // Skip Cider-native file types
+        // Skip Cider-native file types unless the file was explicitly captured
+        // as a vaultFile earlier. This keeps arbitrary dropped Markdown owned by
+        // NotesStorage while preserving file-capture provenance/model visibility.
         let ext = url.pathExtension.lowercased()
-        if Self.excludedExtensions.contains(ext) || ext.isEmpty {
+        let existingVaultFileIDForPath: UUID? = (Self.excludedExtensions.contains(ext) || ext.isEmpty)
+            ? lookupExistingVaultFileID(relativePath: relativePath)
+            : nil
+        if (Self.excludedExtensions.contains(ext) || ext.isEmpty) && existingVaultFileIDForPath == nil {
             return nil
         }
 
@@ -646,7 +651,7 @@ final class VaultFileService: ObservableObject {
         // INSERT a new row at an existing relative_path and trip UNIQUE
         // indefinitely.
         let id: UUID
-        if let dbID = lookupExistingVaultFileID(relativePath: relativePath) {
+        if let dbID = existingVaultFileIDForPath ?? lookupExistingVaultFileID(relativePath: relativePath) {
             id = dbID
             if idMap[relativePath] != dbID {
                 idMap[relativePath] = dbID
