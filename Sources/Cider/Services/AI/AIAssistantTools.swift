@@ -1348,7 +1348,19 @@ struct CreateReminderTool: Tool {
 
         let details = arguments.details?.trimmingCharacters(in: .whitespacesAndNewlines)
         let location = arguments.location?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let result = try? CiderCaptureService().addDateCardCapture(
+        let recurrenceFrequency: DateCardRecurrenceFrequency?
+        switch AgentReminderToolSupport.recurrenceFrequency(from: arguments.frequency) {
+        case .valid(let parsed):
+            recurrenceFrequency = parsed
+        case .invalid(let invalid):
+            return AgentCaptureToolResultFormatter.failureJsonString(
+                message: "Invalid frequency '\(invalid)'. Use daily, weekly, monthly, or yearly.",
+                code: "invalid_reminder_frequency"
+            )
+        }
+
+        let captureService = CiderCaptureService()
+        guard var result = try? captureService.addDateCardCapture(
             title: title,
             sourceText: details?.isEmpty == false ? details : title,
             startAt: date,
@@ -1370,22 +1382,8 @@ struct CreateReminderTool: Tool {
             )
         }
 
-        // Recurrence
-        if let freqStr = arguments.frequency?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-           !freqStr.isEmpty {
-            let freq: DateCardRecurrenceFrequency
-            switch freqStr {
-            case "daily": freq = .daily
-            case "weekly": freq = .weekly
-            case "monthly": freq = .monthly
-            case "yearly": freq = .yearly
-            default:
-                return AgentCaptureToolResultFormatter.failureJsonString(
-                    message: "Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly.",
-                    code: "invalid_reminder_frequency"
-                )
-            }
-            card.recurrenceRule = DateCardRecurrenceRule(frequency: freq)
+        if let recurrenceFrequency {
+            card.recurrenceRule = DateCardRecurrenceRule(frequency: recurrenceFrequency)
         }
 
         // Reminder offsets
@@ -1395,7 +1393,19 @@ struct CreateReminderTool: Tool {
             card.rules.append(SurfacingRule(type: .remindBeforeMinutes, integerValue: second))
         }
 
-        _ = DateCardStorage.shared.updateDateCard(card)
+        guard AgentReminderToolSupport.updateDateCard(card) else {
+            return AgentCaptureToolResultFormatter.jsonString(
+                message: "Created reminder \"\(title)\" but failed to persist reminder recurrence/rules.",
+                captureResult: result,
+                additionalPartialFailures: [
+                    AgentCaptureToolResultFormatter.partialFailure(
+                        status: "reminder_update_failed",
+                        reason: "The date card was captured, but Cider could not persist the recurrence or reminder rules."
+                    )
+                ]
+            )
+        }
+        result = captureService.refreshItemIndexing(result)
 
         // Trigger reconciliation so notifications are scheduled immediately
         ReminderReconciler.shared.reconcile()

@@ -9,6 +9,7 @@ final class SummaryService {
     static let shared = SummaryService()
 
     private let logger = Logger(subsystem: "com.cider.app", category: "SummaryService")
+    private var summarizeArticleOverrideForTesting: ((String) async -> String?)?
 
     private func makeSession() -> LanguageModelSession {
         LanguageModelSession(instructions: """
@@ -33,6 +34,9 @@ final class SummaryService {
     /// - Parameter articleText: Raw article text (will be truncated if too long)
     /// - Returns: Summary string, or nil on failure
     func summarize(articleText: String) async -> String? {
+        if let summarizeArticleOverrideForTesting {
+            return await summarizeArticleOverrideForTesting(articleText)
+        }
         guard AIAvailability.isFoundationModelsAvailable else { return nil }
         // Stay within context window — ~4000 chars is safe for the on-device model
         let truncated = String(articleText.prefix(4000))
@@ -45,6 +49,14 @@ final class SummaryService {
             logger.error("Summary failed: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+
+    func _setSummarizeArticleOverrideForTesting(_ override: @escaping (String) async -> String?) {
+        summarizeArticleOverrideForTesting = override
+    }
+
+    func _resetSummarizeArticleOverrideForTesting() {
+        summarizeArticleOverrideForTesting = nil
     }
 
     /// Summarize a Kanban card for board scanning. The full notes remain the source of truth.

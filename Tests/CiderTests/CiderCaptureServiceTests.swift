@@ -473,6 +473,32 @@ struct CiderCaptureServiceTests {
             #expect(missingThumbnailQuality["visibleCardCurrent"] as? Bool == false)
             #expect(missingThumbnailReasons.contains("card_image_missing"))
 
+            let remoteOnlyThumbnailBookmark = Bookmark(
+                id: result.item.id,
+                title: "GitHub - nodes-app/swift-markdown-engine",
+                urlString: "https://github.com/nodes-app/swift-markdown-engine",
+                createdAt: Date(timeIntervalSince1970: 1_774_999_000),
+                updatedAt: Date(timeIntervalSince1970: 1_774_999_500),
+                thumbnailRemoteURLString: "https://example.com/remote-only-thumbnail.jpg",
+                thumbnailRelativePath: ".thumbnails/remote-only-swift-markdown-engine.jpg",
+                metadataUpdatedAt: enrichedAt,
+                relativePath: "Inbox/Bookmarks/GitHub - nodes-app-swift-markdown-engine.webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: enrichedAt
+            )
+            let remoteOnlyThumbnailURL = StoragePaths.cachedVaultDirectoryURL
+                .appendingPathComponent(".thumbnails/remote-only-swift-markdown-engine.jpg")
+            try Data().write(to: remoteOnlyThumbnailURL)
+            let remoteOnlyDict = result.toDictionary(finalBookmark: remoteOnlyThumbnailBookmark)
+            let remoteOnlyQuality = try #require(remoteOnlyDict["captureQuality"] as? [String: Any])
+            let remoteOnlyReasons = try #require(remoteOnlyQuality["degradedReasons"] as? [String])
+
+            #expect(remoteOnlyQuality["semanticStatus"] as? String == "degraded")
+            #expect(remoteOnlyQuality["thumbnailStatus"] as? String == "remote_only")
+            #expect(remoteOnlyQuality["cardComplete"] as? Bool == false)
+            #expect(remoteOnlyQuality["visibleCardCurrent"] as? Bool == false)
+            #expect(remoteOnlyReasons.contains("card_image_not_local"))
+
             let thumbnailURL = StoragePaths.cachedVaultDirectoryURL
                 .appendingPathComponent(".thumbnails/swift-markdown-engine.jpg")
             try FileManager.default.createDirectory(

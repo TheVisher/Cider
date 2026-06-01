@@ -398,6 +398,8 @@ struct CiderCaptureResult {
         }
         if thumbnailStatus == "missing" {
             degradedReasons.append("card_image_missing")
+        } else if thumbnailStatus == "remote_only" {
+            degradedReasons.append("card_image_not_local")
         }
         switch pathStatus {
         case "missing": degradedReasons.append("path_missing")
@@ -407,7 +409,7 @@ struct CiderCaptureResult {
 
         let cardComplete = metadataComplete
             && titleQuality == "rich"
-            && thumbnailStatus != "missing"
+            && thumbnailStatusIsLocalReady(thumbnailStatus)
             && pathStatus == "current"
         let semanticStatus: String
         if bookmark.isEnriching || !metadataComplete {
@@ -484,9 +486,18 @@ struct CiderCaptureResult {
         }
         if let thumbnailRemoteURLString = bookmark.thumbnailRemoteURLString,
            !thumbnailRemoteURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "remote"
+            return "remote_only"
         }
         return "missing"
+    }
+
+    private static func thumbnailStatusIsLocalReady(_ status: String) -> Bool {
+        switch status {
+        case "local", "local_carousel", "local_original":
+            return true
+        default:
+            return false
+        }
     }
 
     private static func localCaptureAssetExists(relativePath: String) -> Bool {
@@ -1578,6 +1589,10 @@ final class CiderCaptureService {
             return result
         }
         return result
+    }
+
+    func refreshItemIndexing(_ result: CiderCaptureResult) -> CiderCaptureResult {
+        indexCapturedItem(result)
     }
 
     private func indexedChunkTrace(

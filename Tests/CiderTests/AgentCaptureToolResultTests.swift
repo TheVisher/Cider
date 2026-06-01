@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import Cider
 
+@Suite(.serialized)
 @MainActor
 struct AgentCaptureToolResultTests {
     private func makeTempVault() throws -> URL {
@@ -33,6 +34,30 @@ struct AgentCaptureToolResultTests {
             try? FileManager.default.removeItem(at: vault)
         }
         return try body()
+    }
+
+    private func withSharedIsolatedVault<T>(_ body: () async throws -> T) async throws -> T {
+        let previousOverride = StoragePaths.vaultOverride
+        let vault = try makeTempVault()
+        CiderDatabase.shared.close()
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        StoragePaths.ensureVaultStructure()
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        try FileManager.default.createDirectory(
+            at: dbURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try CiderDatabase.shared.open(at: dbURL)
+        ReminderReconciler.shared.setSkipReconcileWorkForTesting(true)
+        defer {
+            ReminderReconciler.shared.setSkipReconcileWorkForTesting(false)
+            CiderDatabase.shared.close()
+            StoragePaths.vaultOverride = previousOverride
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        return try await body()
     }
 
     @Test("agent capture tool formatter returns structured success payload")
@@ -274,10 +299,162 @@ struct AgentCaptureToolResultTests {
         }
     }
 
+    @Test("MLX create reminder reports final persisted indexing trace")
+    func mlxCreateReminderReportsFinalPersistedIndexingTrace() throws {
+        try withSharedIsolatedVault {
+            let output = MLXToolExecutor.execute(
+                name: "createReminder",
+                arguments: [
+                    "title": "CID343 final indexing reminder",
+                    "date": "2026-06-16",
+                    "details": "Verify final persisted recurrence indexing",
+                    "frequency": "weekly",
+                    "remindMinutesBefore": 45,
+                ]
+            )
+            let payload = try decodeJSON(output)
+            let item = try #require(payload["item"] as? [String: Any])
+            let itemID = try #require(item["id"] as? String)
+            let capture = try #require(payload["capture"] as? [String: Any])
+            let indexing = try #require(capture["indexing"] as? [String: Any])
+            let chunks = try #require(indexing["chunks"] as? [[String: Any]])
+            let responseChunkID = try #require(chunks.first?["id"] as? String)
+            let currentChunk = try #require(try contentChunk(ownerType: "dateCard", ownerID: itemID))
+
+            #expect(indexing["status"] as? String == "indexed")
+            #expect(responseChunkID == currentChunk.id)
+            #expect(currentChunk.body.contains("Recurrence:"))
+            #expect(currentChunk.body.contains("weekly"))
+        }
+    }
+
+    @Test("MLX create reminder validates invalid frequency before capture")
+    func mlxCreateReminderValidatesInvalidFrequencyBeforeCapture() throws {
+        try withSharedIsolatedVault {
+            let beforeCount = DateCardStorage.shared.dateCards.count
+            let output = MLXToolExecutor.execute(
+                name: "createReminder",
+                arguments: [
+                    "title": "CID343 invalid frequency reminder",
+                    "date": "2026-06-17",
+                    "frequency": "fortnightly",
+                ]
+            )
+            let payload = try decodeJSON(output)
+            let error = try #require(payload["error"] as? [String: Any])
+
+            #expect(payload["ok"] as? Bool == false)
+            #expect(error["code"] as? String == "invalid_reminder_frequency")
+            #expect(payload["item"] == nil)
+            #expect(DateCardStorage.shared.dateCards.count == beforeCount)
+        }
+    }
+
+    @Test("MLX create reminder reports update failure with capture identity")
+    func mlxCreateReminderReportsUpdateFailureWithCaptureIdentity() throws {
+        try withSharedIsolatedVault {
+            AgentReminderToolSupport._setDateCardUpdateHandlerForTesting { _ in false }
+            defer { AgentReminderToolSupport._resetDateCardUpdateHandlerForTesting() }
+
+            let output = MLXToolExecutor.execute(
+                name: "createReminder",
+                arguments: [
+                    "title": "CID343 update failure reminder",
+                    "date": "2026-06-18",
+                    "details": "This capture succeeds before reminder mutation fails",
+                    "frequency": "monthly",
+                ]
+            )
+            let payload = try decodeJSON(output)
+            let item = try #require(payload["item"] as? [String: Any])
+            let itemID = try #require(item["id"] as? String)
+            let failures = try #require(payload["partialFailures"] as? [[String: Any]])
+            let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+
+            #expect(payload["ok"] as? Bool == false)
+            #expect(item["type"] as? String == "event")
+            #expect(failures.contains { $0["status"] as? String == "reminder_update_failed" })
+            #expect(safeNextCommands.contains("cider-cli item get event \(itemID) --json"))
+        }
+    }
+
+    @Test("assistant create reminder reports update failure with capture identity")
+    func assistantCreateReminderReportsUpdateFailureWithCaptureIdentity() async throws {
+        try await withSharedIsolatedVault {
+            AgentReminderToolSupport._setDateCardUpdateHandlerForTesting { _ in false }
+            defer { AgentReminderToolSupport._resetDateCardUpdateHandlerForTesting() }
+
+            let output = try await CreateReminderTool().call(
+                arguments: CreateReminderTool.Arguments(
+                    title: "CID343 assistant update failure reminder",
+                    date: "2026-06-19",
+                    frequency: "yearly",
+                    remindMinutesBefore: 60,
+                    secondRemindMinutesBefore: nil,
+                    allDay: true,
+                    location: nil,
+                    details: "Foundation tool capture succeeds before reminder mutation fails"
+                )
+            )
+            let payload = try decodeJSON(output)
+            let item = try #require(payload["item"] as? [String: Any])
+            let itemID = try #require(item["id"] as? String)
+            let failures = try #require(payload["partialFailures"] as? [[String: Any]])
+            let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+
+            #expect(payload["ok"] as? Bool == false)
+            #expect(item["type"] as? String == "event")
+            #expect(failures.contains { $0["status"] as? String == "reminder_update_failed" })
+            #expect(safeNextCommands.contains("cider-cli item get event \(itemID) --json"))
+        }
+    }
+
+    @Test("summary save tool executes and returns structured capture JSON")
+    func summarySaveToolExecutesStructuredCaptureJSON() async throws {
+        try await withSharedIsolatedVault {
+            SummaryService.shared._setSummarizeArticleOverrideForTesting { _ in
+                "CID343 saved summary body from test override."
+            }
+            defer { SummaryService.shared._resetSummarizeArticleOverrideForTesting() }
+
+            let output = try await SummarizeTextTool().call(
+                arguments: SummarizeTextTool.Arguments(
+                    text: "A long pasted article for summary-save JSON verification.",
+                    saveAsNote: true,
+                    noteTitle: "CID343 Summary Save",
+                    folderName: nil
+                )
+            )
+            let payload = try decodeJSON(output)
+            let item = try #require(payload["item"] as? [String: Any])
+            let capture = try #require(payload["capture"] as? [String: Any])
+
+            #expect(payload["toolResultVersion"] as? Int == 1)
+            #expect(payload["kind"] as? String == "capture")
+            #expect(payload["ok"] as? Bool != nil)
+            #expect(item["type"] as? String == "note")
+            #expect(capture["indexing"] as? [String: Any] != nil)
+        }
+    }
+
     private func decodeJSON(_ output: String) throws -> [String: Any] {
         let data = Data(output.utf8)
         let object = try JSONSerialization.jsonObject(with: data)
         return try #require(object as? [String: Any])
+    }
+
+    private func contentChunk(ownerType: String, ownerID: String) throws -> (id: String, body: String)? {
+        let stmt = try CiderDatabase.shared.prepare("""
+            SELECT id, body
+            FROM content_chunks
+            WHERE owner_type = ? AND owner_id = ?
+            ORDER BY chunk_index ASC
+            LIMIT 1;
+            """)
+        stmt.bind(ownerType, at: 1)
+            .bind(ownerID, at: 2)
+        guard try stmt.step() else { return nil }
+        return (stmt.string(at: 0), stmt.string(at: 1))
     }
 
     private func block(named marker: String, in source: String) -> String? {
