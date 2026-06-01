@@ -7930,7 +7930,9 @@ struct CiderCLI {
             }
 
         case "create":
-            guard let name = args.first, !name.hasPrefix("--") else {
+            guard !args.contains("--help"), !args.contains("-h"),
+                  let name = args.first,
+                  !name.hasPrefix("--") else {
                 printCLIError("Usage: cider-cli board create <name> [--project <project-id>]")
                 return
             }
