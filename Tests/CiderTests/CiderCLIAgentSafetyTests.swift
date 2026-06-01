@@ -1666,6 +1666,46 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeCommands.contains("cider-cli item sync-project cider --json"))
     }
 
+    @Test("memory suggest reports mutating reviewable candidate JSON contract")
+    func memorySuggestReportsMutatingReviewableCandidateJSONContract() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-memory-suggest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["board", "create", "Cider", "--json"], vault: vault)
+        _ = try runCLI(args: ["item", "sync-project", "cider", "--json"], vault: vault)
+
+        let result = try runCLI(args: [
+            "item", "memory-suggest", "project", "cider",
+            "--kind", "agent_lesson",
+            "--value", "Prefer reviewable candidates before permanent memory writes.",
+            "--evidence", "CID-351 requires no automatic memory promotion.",
+            "--source", "codex",
+            "--confidence", "0.9",
+            "--json",
+        ], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.memory-suggest")
+        #expect(payload["readOnly"] as? Bool == false)
+        #expect(payload["changed"] as? Bool == true)
+        let owner = try #require(payload["owner"] as? [String: Any])
+        #expect(owner["ownerType"] as? String == "project")
+        #expect(owner["ownerID"] as? String == "cider")
+        let candidate = try #require(payload["candidate"] as? [String: Any])
+        #expect(candidate["kind"] as? String == "memory_candidate")
+        #expect(candidate["reviewState"] as? String == "suggested")
+        let metadata = try #require(candidate["metadata"] as? [String: String])
+        #expect(metadata["memory_kind"] == "agent_lesson")
+        let action = try #require(payload["agentAction"] as? [String: Any])
+        #expect(action["actionType"] as? String == "memory_candidate_suggested")
+        let safeCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeCommands.contains("cider-cli item project-context cider --json"))
+        #expect(safeCommands.contains("cider-cli capture review-queue --json"))
+    }
+
     @Test("media identify json separates read-only review from mutating apply")
     func mediaIdentifyJSONSeparatesReadOnlyReviewFromMutatingApply() throws {
         let dryRunReport = MediaBackfillReport(

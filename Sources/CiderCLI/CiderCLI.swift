@@ -4491,6 +4491,7 @@ struct CiderCLI {
               cider-cli item rebuild-references <note|card|board> <id-or-ref> [--json]
               cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]
               cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
+              cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind preference|pattern|project_context|relationship_context|agent_lesson --value <text> --evidence <text> [--source <source>] [--confidence <0-1>] [--json]
               cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
               cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
               cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
@@ -4951,6 +4952,75 @@ struct CiderCLI {
                     for key in result.kindCounts.keys.sorted() {
                         print("  \(key): \(result.kindCounts[key] ?? 0)")
                     }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "memory-suggest", "suggest-memory":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind <kind> --value <text> --evidence <text> [--source <source>] [--confidence <0-1>] [--json]")
+                return
+            }
+            guard let kind = parseFlag("--kind", from: args) else {
+                printCLIError("Missing required flag --kind.")
+                return
+            }
+            guard let value = parseFlag("--value", from: args) else {
+                printCLIError("Missing required flag --value.")
+                return
+            }
+            guard let evidence = parseFlag("--evidence", from: args) else {
+                printCLIError("Missing required flag --evidence.")
+                return
+            }
+            let confidence: Double?
+            if let rawConfidence = parseFlag("--confidence", from: args) {
+                guard let parsed = Double(rawConfidence) else {
+                    printCLIError("Invalid --confidence '\(rawConfidence)'. Use a number from 0 to 1.")
+                    return
+                }
+                confidence = parsed
+            } else {
+                confidence = nil
+            }
+            do {
+                let service = SecondBrainMemoryCandidateService(database: .shared, store: store)
+                let result: SecondBrainMemoryCandidateResult
+                if positional[0].trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "project" {
+                    result = try service.suggest(
+                        ownerType: positional[0],
+                        ownerRef: positional[1],
+                        kind: kind,
+                        value: value,
+                        evidence: evidence,
+                        source: parseFlag("--source", from: args),
+                        confidence: confidence
+                    )
+                } else {
+                    result = try service.suggest(
+                        owner: normalizedOwner(type: positional[0], ref: positional[1]),
+                        requestedOwnerType: positional[0],
+                        requestedOwnerRef: positional[1],
+                        kind: kind,
+                        value: value,
+                        evidence: evidence,
+                        source: parseFlag("--source", from: args),
+                        confidence: confidence
+                    )
+                }
+                let payload = memoryCandidateResultToDict(
+                    result,
+                    sourceType: positional[0],
+                    sourceRef: positional[1]
+                )
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Suggested memory candidate \(result.candidate.id) for \(result.owner.canonicalRef)")
+                    print("  Review state: \(result.candidate.reviewState)")
+                    print("  Kind: \(result.candidate.metadata["memory_kind"] ?? result.candidate.kind)")
                 }
             } catch {
                 printCLIError(error.localizedDescription)
@@ -14047,6 +14117,48 @@ struct CiderCLI {
         if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
         if let confidence = output.confidence { dict["confidence"] = confidence }
         return dict
+    }
+
+    static func memoryCandidateResultToDict(
+        _ result: SecondBrainMemoryCandidateResult,
+        sourceType: String,
+        sourceRef: String
+    ) -> [String: Any] {
+        let safeCommands = memoryCandidateSafeCommands(owner: result.owner)
+        return [
+            "ok": true,
+            "command": "item.memory-suggest",
+            "readOnly": false,
+            "changed": true,
+            "mutationReason": "Recorded a reviewable memory candidate; no permanent memory was promoted.",
+            "sourceRef": [
+                "type": sourceType,
+                "ref": sourceRef,
+            ],
+            "owner": ownerToDict(result.owner),
+            "candidate": enrichmentOutputToDict(result.candidate),
+            "agentAction": agentActionToDict(result.agentAction),
+            "safeNextCommands": safeCommands,
+            "safeCommands": safeCommands,
+        ]
+    }
+
+    static func memoryCandidateSafeCommands(owner: SecondBrainOwnerRef) -> [String] {
+        var commands: [String] = []
+        switch owner.ownerType {
+        case "project":
+            commands.append("cider-cli item project-context \(owner.ownerID) --json")
+        case "kanban_card":
+            commands.append("cider-cli item context card \(owner.ownerID) --json")
+        case "bookmark", "note", "dateCard", "contact", "todo", "vaultFile":
+            commands.append("cider-cli item context \(owner.ownerType) \(owner.ownerID) --json")
+        default:
+            commands.append("cider-cli item owner-get \(owner.ownerType) \(owner.ownerID) --json")
+        }
+        commands.append("cider-cli capture review-queue --json")
+        commands.append("cider-cli item owner-get \(owner.ownerType) \(owner.ownerID) --json")
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
     }
 
     static func similarityCandidateToDict(_ candidate: SecondBrainSimilarityCandidate) -> [String: Any] {
