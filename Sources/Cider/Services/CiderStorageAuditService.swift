@@ -171,6 +171,40 @@ struct CiderActiveDuplicateInvariantReport: Equatable {
     var vaultSQLiteMismatches: [CiderVaultSQLitePathMismatch] = []
 }
 
+struct CiderRestartDuplicateRegressionReport: Equatable {
+    var command: String = "storage.restart-duplicate-regression"
+    var generatedAt: Date
+    var isMutating: Bool = true
+    var status: String
+    var passed: Bool
+    var before: CiderActiveDuplicateInvariantReport
+    var after: CiderActiveDuplicateInvariantReport
+    var snapshotBefore: CiderRestartDuplicateSnapshot
+    var snapshotAfter: CiderRestartDuplicateSnapshot
+    var regression: CiderRestartDuplicateRegressionDelta
+    var rebuildReconcileActions: [String]
+}
+
+struct CiderRestartDuplicateSnapshot: Equatable {
+    var generatedAt: Date
+    var sqliteTableCounts: [String: Int]
+    var itemCountsByType: [String: Int]
+    var duplicateRelativePathRowCount: Int
+    var vaultArtifactCountsByExtension: [String: Int]
+    var vaultArtifactFingerprint: String
+}
+
+struct CiderRestartDuplicateRegressionDelta: Equatable {
+    var beforeIssueCount: Int
+    var afterIssueCount: Int
+    var newIssueFingerprints: [String]
+    var resolvedIssueFingerprints: [String]
+    var sqliteTableCountChanges: [String: Int]
+    var itemCountChangesByType: [String: Int]
+    var vaultArtifactCountChangesByExtension: [String: Int]
+    var vaultArtifactFingerprintChanged: Bool
+}
+
 struct CiderDuplicateRelativePathFinding: Equatable {
     var relativePath: String
     var items: [CiderDuplicateRelativePathItem]
@@ -281,6 +315,60 @@ final class CiderStorageAuditService {
             duplicateRelativePaths: duplicateRelativePaths,
             sqliteMismatches: mismatches,
             vaultSQLiteMismatches: vaultSQLiteMismatches
+        )
+    }
+
+    func restartRebuildDuplicateRegressionLoop(
+        limit: Int = defaultDoctorFindingSampleLimit,
+        rebuildReconcile: (() throws -> Void)? = nil
+    ) throws -> CiderRestartDuplicateRegressionReport {
+        let normalizedLimit = max(0, limit)
+        let snapshotBefore = try restartDuplicateSnapshot()
+        let before = try activeDuplicateInvariantCheck(limit: normalizedLimit)
+
+        if let rebuildReconcile {
+            try rebuildReconcile()
+        } else {
+            try runSupportedStartupRebuildReconcilePath()
+        }
+
+        let snapshotAfter = try restartDuplicateSnapshot()
+        let after = try activeDuplicateInvariantCheck(limit: normalizedLimit)
+        let regression = restartDuplicateRegressionDelta(
+            before: before,
+            after: after,
+            snapshotBefore: snapshotBefore,
+            snapshotAfter: snapshotAfter
+        )
+        let hasRegression = !regression.newIssueFingerprints.isEmpty
+            || regression.afterIssueCount > regression.beforeIssueCount
+        let status: String
+        if hasRegression {
+            status = "regression_detected"
+        } else if after.status == "clean" {
+            status = "clean"
+        } else {
+            status = "known_issues_stable"
+        }
+
+        return CiderRestartDuplicateRegressionReport(
+            generatedAt: nowProvider(),
+            status: status,
+            passed: !hasRegression,
+            before: before,
+            after: after,
+            snapshotBefore: snapshotBefore,
+            snapshotAfter: snapshotAfter,
+            regression: regression,
+            rebuildReconcileActions: [
+                "capture_pre_reconcile_snapshot",
+                "storage.active-duplicate-invariants.before",
+                "startup.ensure_inbox_directories",
+                "startup.rebuild_vault_index_if_empty",
+                "startup.vault_reconcile",
+                "capture_post_reconcile_snapshot",
+                "storage.active-duplicate-invariants.after",
+            ]
         )
     }
 
@@ -773,6 +861,179 @@ final class CiderStorageAuditService {
         }
 
         return findings
+    }
+
+    private func runSupportedStartupRebuildReconcilePath() throws {
+        guard CiderDatabase.shared.isOpen else { return }
+        VaultFileService.shared.ensureInboxDirectories()
+        if VaultIndexService.shared.entries.isEmpty {
+            VaultIndexService.shared.rebuildFromCurrentState()
+        }
+        VaultReconciler.reconcile()
+    }
+
+    private func restartDuplicateSnapshot() throws -> CiderRestartDuplicateSnapshot {
+        CiderRestartDuplicateSnapshot(
+            generatedAt: nowProvider(),
+            sqliteTableCounts: try sqliteTableCountsForRestartDuplicateSnapshot(),
+            itemCountsByType: try itemCountsByTypeForRestartDuplicateSnapshot(),
+            duplicateRelativePathRowCount: try duplicateRelativePathRowCountForRestartDuplicateSnapshot(),
+            vaultArtifactCountsByExtension: vaultArtifactCountsByExtensionForRestartDuplicateSnapshot(),
+            vaultArtifactFingerprint: vaultArtifactFingerprintForRestartDuplicateSnapshot()
+        )
+    }
+
+    private func sqliteTableCountsForRestartDuplicateSnapshot() throws -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for table in [
+            "items",
+            "folders",
+            "content_chunks",
+            "capture_events",
+            "capture_attachments",
+            "routing_decisions",
+            "review_items",
+        ] {
+            if try tableExists(table) {
+                counts[table] = try rowCount(table: table)
+            } else {
+                counts[table] = 0
+            }
+        }
+        return counts
+    }
+
+    private func itemCountsByTypeForRestartDuplicateSnapshot() throws -> [String: Int] {
+        guard try tableExists("items") else { return [:] }
+        let stmt = try database.prepare("""
+            SELECT type, COUNT(*)
+            FROM items
+            GROUP BY type
+            ORDER BY type COLLATE NOCASE ASC;
+            """)
+        var counts: [String: Int] = [:]
+        while try stmt.step() {
+            counts[stmt.string(at: 0)] = stmt.int(at: 1)
+        }
+        return counts
+    }
+
+    private func duplicateRelativePathRowCountForRestartDuplicateSnapshot() throws -> Int {
+        guard try tableExists("items") else { return 0 }
+        let stmt = try database.prepare("""
+            SELECT COALESCE(SUM(row_count - 1), 0)
+            FROM (
+                SELECT relative_path, COUNT(*) AS row_count
+                FROM items
+                WHERE relative_path IS NOT NULL AND relative_path != ''
+                GROUP BY lower(relative_path)
+                HAVING COUNT(*) > 1
+            );
+            """)
+        guard try stmt.step() else { return 0 }
+        return stmt.int(at: 0)
+    }
+
+    private func vaultArtifactCountsByExtensionForRestartDuplicateSnapshot() -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for path in managedVaultArtifactPathsForRestartDuplicateSnapshot() {
+            let ext = (path as NSString).pathExtension.lowercased()
+            counts[ext, default: 0] += 1
+        }
+        return counts
+    }
+
+    private func vaultArtifactFingerprintForRestartDuplicateSnapshot() -> String {
+        var hash: UInt64 = 1_469_598_103_934_665_603
+        for path in managedVaultArtifactPathsForRestartDuplicateSnapshot() {
+            for byte in path.utf8 {
+                hash ^= UInt64(byte)
+                hash &*= 1_099_511_628_211
+            }
+            hash ^= 0xff
+            hash &*= 1_099_511_628_211
+        }
+        return String(format: "%016llx", hash)
+    }
+
+    private func managedVaultArtifactPathsForRestartDuplicateSnapshot() -> [String] {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: vaultRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+
+        var paths: [String] = []
+        for case let url as URL in enumerator {
+            let relativePath = relativePath(for: url, under: vaultRoot)
+            if relativePath == ".cider" || relativePath.hasPrefix(".cider/") || relativePath.hasPrefix("Projects/") {
+                enumerator.skipDescendants()
+                continue
+            }
+            guard managedArtifactExtensions.contains(url.pathExtension.lowercased()),
+                  let isRegular = try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile,
+                  isRegular == true else { continue }
+            paths.append(relativePath)
+        }
+        return paths.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func restartDuplicateRegressionDelta(
+        before: CiderActiveDuplicateInvariantReport,
+        after: CiderActiveDuplicateInvariantReport,
+        snapshotBefore: CiderRestartDuplicateSnapshot,
+        snapshotAfter: CiderRestartDuplicateSnapshot
+    ) -> CiderRestartDuplicateRegressionDelta {
+        let beforeFingerprints = Set(issueFingerprints(for: before))
+        let afterFingerprints = Set(issueFingerprints(for: after))
+
+        return CiderRestartDuplicateRegressionDelta(
+            beforeIssueCount: before.summary["totalIssues"] ?? 0,
+            afterIssueCount: after.summary["totalIssues"] ?? 0,
+            newIssueFingerprints: Array(afterFingerprints.subtracting(beforeFingerprints)).sorted(),
+            resolvedIssueFingerprints: Array(beforeFingerprints.subtracting(afterFingerprints)).sorted(),
+            sqliteTableCountChanges: countChanges(
+                before: snapshotBefore.sqliteTableCounts,
+                after: snapshotAfter.sqliteTableCounts
+            ),
+            itemCountChangesByType: countChanges(
+                before: snapshotBefore.itemCountsByType,
+                after: snapshotAfter.itemCountsByType
+            ),
+            vaultArtifactCountChangesByExtension: countChanges(
+                before: snapshotBefore.vaultArtifactCountsByExtension,
+                after: snapshotAfter.vaultArtifactCountsByExtension
+            ),
+            vaultArtifactFingerprintChanged: snapshotBefore.vaultArtifactFingerprint != snapshotAfter.vaultArtifactFingerprint
+        )
+    }
+
+    private func issueFingerprints(for report: CiderActiveDuplicateInvariantReport) -> [String] {
+        let duplicateFindings = report.duplicateFindings.map {
+            "duplicateFinding:\($0.entityType.rawValue):\($0.kind.rawValue):\($0.id)"
+        }
+        let duplicateRelativePaths = report.duplicateRelativePaths.map {
+            "duplicateRelativePath:\($0.relativePath):\($0.items.map(\.id).sorted().joined(separator: ","))"
+        }
+        let sqliteMismatches = report.sqliteMismatches.map {
+            "sqliteMismatch:\($0.key):\($0.modelCount):\($0.sqliteCount)"
+        }
+        let vaultSQLiteMismatches = report.vaultSQLiteMismatches.map {
+            "vaultSQLiteMismatch:\($0.kind):\($0.relativePath):\($0.itemID ?? "")"
+        }
+        return duplicateFindings + duplicateRelativePaths + sqliteMismatches + vaultSQLiteMismatches
+    }
+
+    private func countChanges(before: [String: Int], after: [String: Int]) -> [String: Int] {
+        var changes: [String: Int] = [:]
+        for key in Set(before.keys).union(after.keys).sorted() {
+            let delta = (after[key] ?? 0) - (before[key] ?? 0)
+            if delta != 0 {
+                changes[key] = delta
+            }
+        }
+        return changes
     }
 
     private struct TrackedItemPathRow {

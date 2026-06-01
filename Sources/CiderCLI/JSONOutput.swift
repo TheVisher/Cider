@@ -442,6 +442,46 @@ func activeDuplicateInvariantReportToDict(_ report: CiderActiveDuplicateInvarian
     ]
 }
 
+func restartDuplicateRegressionReportToDict(_ report: CiderRestartDuplicateRegressionReport) -> [String: Any] {
+    [
+        "command": report.command,
+        "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
+        "isMutating": report.isMutating,
+        "status": report.status,
+        "passed": report.passed,
+        "before": activeDuplicateInvariantReportToDict(report.before),
+        "after": activeDuplicateInvariantReportToDict(report.after),
+        "snapshotBefore": restartDuplicateSnapshotToDict(report.snapshotBefore),
+        "snapshotAfter": restartDuplicateSnapshotToDict(report.snapshotAfter),
+        "regression": restartDuplicateRegressionDeltaToDict(report.regression),
+        "rebuildReconcileActions": report.rebuildReconcileActions,
+    ]
+}
+
+func restartDuplicateSnapshotToDict(_ snapshot: CiderRestartDuplicateSnapshot) -> [String: Any] {
+    [
+        "generatedAt": ISO8601DateFormatter().string(from: snapshot.generatedAt),
+        "sqliteTableCounts": snapshot.sqliteTableCounts,
+        "itemCountsByType": snapshot.itemCountsByType,
+        "duplicateRelativePathRowCount": snapshot.duplicateRelativePathRowCount,
+        "vaultArtifactCountsByExtension": snapshot.vaultArtifactCountsByExtension,
+        "vaultArtifactFingerprint": snapshot.vaultArtifactFingerprint,
+    ]
+}
+
+func restartDuplicateRegressionDeltaToDict(_ delta: CiderRestartDuplicateRegressionDelta) -> [String: Any] {
+    [
+        "beforeIssueCount": delta.beforeIssueCount,
+        "afterIssueCount": delta.afterIssueCount,
+        "newIssueFingerprints": delta.newIssueFingerprints,
+        "resolvedIssueFingerprints": delta.resolvedIssueFingerprints,
+        "sqliteTableCountChanges": delta.sqliteTableCountChanges,
+        "itemCountChangesByType": delta.itemCountChangesByType,
+        "vaultArtifactCountChangesByExtension": delta.vaultArtifactCountChangesByExtension,
+        "vaultArtifactFingerprintChanged": delta.vaultArtifactFingerprintChanged,
+    ]
+}
+
 func duplicateFindingToDict(_ finding: VaultDuplicateAuditor.Finding) -> [String: Any] {
     [
         "id": finding.id,

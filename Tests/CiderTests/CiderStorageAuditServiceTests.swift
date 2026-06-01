@@ -104,6 +104,27 @@ struct CiderStorageAuditServiceTests {
         return try stmt.step()
     }
 
+    private func itemCountsProvider(for db: CiderDatabase) -> () -> [String: Int] {
+        {
+            var counts: [String: Int] = [:]
+            if let folders = try? self.rowCount(db, table: "folders") {
+                counts["folder"] = folders
+            }
+            guard let stmt = try? db.prepare("SELECT type, COUNT(*) FROM items GROUP BY type;") else {
+                return counts
+            }
+            while (try? stmt.step()) == true {
+                counts[stmt.string(at: 0)] = stmt.int(at: 1)
+            }
+            return counts
+        }
+    }
+
+    private func rowCount(_ db: CiderDatabase, table: String) throws -> Int {
+        let stmt = try db.prepare("SELECT COUNT(*) FROM \(table);")
+        return try stmt.step() ? stmt.int(at: 0) : 0
+    }
+
     @Test("VaultDoctor reports stale folder sync aliases")
     func vaultDoctorReportsStaleFolderSyncAliases() throws {
         let (db, url) = try makeTestDB()
@@ -397,6 +418,116 @@ struct CiderStorageAuditServiceTests {
         #expect(firstPath["relativePath"] as? String == "Inbox/Notes/CodexNote.md")
         #expect(firstMismatch["kind"] as? String == "sqlite_row_missing_vault_file")
         #expect(firstMismatch["relativePath"] as? String == "Inbox/Notes/Missing.md")
+    }
+
+    @Test("restart duplicate regression loop snapshots and passes stable clean state")
+    func restartDuplicateRegressionLoopSnapshotsAndPassesStableCleanState() throws {
+        let (db, url) = try makeTestDB()
+        let vault = try makeTempVault()
+        defer {
+            cleanup(url)
+            try? FileManager.default.removeItem(at: vault)
+        }
+
+        try makeDirectories(["Notes"], under: vault)
+        try "stable".write(
+            to: vault.appendingPathComponent("Notes/Stable.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try insertFolder(db, id: UUID(), relativePath: "Notes")
+        try insertItem(db, id: UUID(), type: "note", title: "Stable", relativePath: "Notes/Stable.md")
+
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            modelCountsProvider: itemCountsProvider(for: db),
+            doctorReportProvider: {
+                VaultDoctor.Report(
+                    startedAt: Date(timeIntervalSince1970: 10),
+                    finishedAt: Date(timeIntervalSince1970: 11),
+                    findings: []
+                )
+            },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.restartRebuildDuplicateRegressionLoop(limit: 10, rebuildReconcile: {})
+
+        #expect(report.command == "storage.restart-duplicate-regression")
+        #expect(report.isMutating == true)
+        #expect(report.status == "clean")
+        #expect(report.passed == true)
+        #expect(report.before.status == "clean")
+        #expect(report.after.status == "clean")
+        #expect(report.snapshotBefore.sqliteTableCounts["items"] == 1)
+        #expect(report.snapshotAfter.sqliteTableCounts["items"] == 1)
+        #expect(report.snapshotBefore.vaultArtifactCountsByExtension["md"] == 1)
+        #expect(report.snapshotAfter.vaultArtifactCountsByExtension["md"] == 1)
+        #expect(report.regression.newIssueFingerprints.isEmpty)
+        #expect(report.regression.sqliteTableCountChanges.isEmpty)
+    }
+
+    @Test("restart duplicate regression loop fails when reconcile introduces duplicate rows")
+    func restartDuplicateRegressionLoopFailsWhenReconcileIntroducesDuplicateRows() throws {
+        let (db, url) = try makeTestDB()
+        let vault = try makeTempVault()
+        defer {
+            cleanup(url)
+            try? FileManager.default.removeItem(at: vault)
+        }
+
+        try makeDirectories(["Notes"], under: vault)
+        try "duplicate".write(
+            to: vault.appendingPathComponent("Notes/Duplicate.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try insertFolder(db, id: UUID(), relativePath: "Notes")
+        try insertItem(db, id: UUID(), type: "note", title: "Duplicate", relativePath: "Notes/Duplicate.md")
+
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            modelCountsProvider: itemCountsProvider(for: db),
+            doctorReportProvider: {
+                VaultDoctor.Report(
+                    startedAt: Date(timeIntervalSince1970: 10),
+                    finishedAt: Date(timeIntervalSince1970: 11),
+                    findings: []
+                )
+            },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.restartRebuildDuplicateRegressionLoop(limit: 10) {
+            try db.runSQL("DROP INDEX IF EXISTS idx_items_path;")
+            try insertItem(db, id: UUID(), type: "note", title: "Duplicate 2", relativePath: "Notes/Duplicate.md")
+        }
+
+        #expect(report.status == "regression_detected")
+        #expect(report.passed == false)
+        #expect(report.before.status == "clean")
+        #expect(report.after.status == "issues_found")
+        #expect(report.regression.beforeIssueCount == 0)
+        #expect(report.regression.afterIssueCount == 1)
+        #expect(report.regression.newIssueFingerprints.contains {
+            $0.hasPrefix("duplicateRelativePath:Notes/Duplicate.md:")
+        })
+        #expect(report.snapshotBefore.duplicateRelativePathRowCount == 0)
+        #expect(report.snapshotAfter.duplicateRelativePathRowCount == 1)
+        #expect(report.regression.sqliteTableCountChanges["items"] == 1)
+        #expect(report.regression.itemCountChangesByType["note"] == 1)
+
+        let dict = restartDuplicateRegressionReportToDict(report)
+        #expect(dict["command"] as? String == "storage.restart-duplicate-regression")
+        #expect(dict["status"] as? String == "regression_detected")
+        #expect(dict["passed"] as? Bool == false)
+        let regression = try #require(dict["regression"] as? [String: Any])
+        #expect(regression["afterIssueCount"] as? Int == 1)
+        #expect((regression["newIssueFingerprints"] as? [String])?.isEmpty == false)
     }
 
     private func insertContentChunk(

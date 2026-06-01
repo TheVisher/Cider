@@ -405,6 +405,7 @@ struct CiderCLI {
               cider-cli storage doctor-plan [--limit <n>] [--json]
               cider-cli storage doctor-apply --finding <id> --canonical <path> --duplicate <path> --approve <token> [--execute] [--json]
               cider-cli storage active-duplicate-invariants [--limit <n>] [--json]
+              cider-cli storage restart-duplicate-regression [--limit <n>] [--json]
               cider-cli storage bookmark-drift-audit [--limit <n>] [--json]
               cider-cli storage bookmark-drift-repair --item <id> --approve <token> [--execute] [--json]
               cider-cli storage repair-schema [--approve REPAIR_SCHEMA] [--execute] [--json]
@@ -512,6 +513,38 @@ struct CiderCLI {
                     for mismatch in report.vaultSQLiteMismatches {
                         print("    [\(mismatch.kind)] \(mismatch.relativePath): \(mismatch.detail)")
                     }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "restart-duplicate-regression", "restart-rebuild-duplicate-regression", "duplicate-restart-regression":
+            let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+            do {
+                let report = try CiderStorageAuditService().restartRebuildDuplicateRegressionLoop(limit: limit)
+                if jsonOutput {
+                    outputJSON(restartDuplicateRegressionReportToDict(report))
+                } else {
+                    print("Restart/rebuild duplicate regression loop")
+                    print("  Mutating: \(report.isMutating ? "yes" : "no")")
+                    print("  Status: \(report.status)")
+                    print("  Passed: \(report.passed ? "yes" : "no")")
+                    print("  Before issues: \(report.regression.beforeIssueCount)")
+                    print("  After issues: \(report.regression.afterIssueCount)")
+                    print("  New issue fingerprints: \(report.regression.newIssueFingerprints.count)")
+                    for fingerprint in report.regression.newIssueFingerprints {
+                        print("    \(fingerprint)")
+                    }
+                    if !report.regression.sqliteTableCountChanges.isEmpty {
+                        print("  SQLite table count changes:")
+                        for key in report.regression.sqliteTableCountChanges.keys.sorted() {
+                            print("    \(key): \(report.regression.sqliteTableCountChanges[key] ?? 0)")
+                        }
+                    }
+                    if report.regression.vaultArtifactFingerprintChanged {
+                        print("  Vault artifact fingerprint changed")
+                    }
+                    print("  Machine-readable output: rerun with --json")
                 }
             } catch {
                 printCLIError(error.localizedDescription)
@@ -693,7 +726,7 @@ struct CiderCLI {
             }
 
         default:
-            printCLIError("Unknown storage command: \(subcommand ?? "nil"). Commands: audit, doctor-plan, doctor-apply, active-duplicate-invariants, bookmark-drift-audit, bookmark-drift-repair, repair-schema")
+            printCLIError("Unknown storage command: \(subcommand ?? "nil"). Commands: audit, doctor-plan, doctor-apply, active-duplicate-invariants, restart-duplicate-regression, bookmark-drift-audit, bookmark-drift-repair, repair-schema")
         }
     }
 

@@ -82,6 +82,8 @@ Hidden or removed legacy commands return `legacyRemoved: true` with a canonical 
 
 After capture, agents should verify and continue through backend-backed item/review commands: `item get`, `item search`, `item context`, `item relations`, `item backlinks`, `item move`, `item route`, `item link`, `review list`, `review approve`, `review correct`, `review enrich`, and `storage audit`.
 
+`storage active-duplicate-invariants --json` is the canonical duplicate/integrity checker for active vault state. `storage restart-duplicate-regression --json` wraps that checker around the supported startup rebuild/reconcile path, returning pre/post snapshots, issue counts, new/resolved issue fingerprints, and `passed`/`status` fields so agents can detect restart-only duplicate, stale projection, and vault/SQLite drift regressions without parsing prose.
+
 `bookmark enrich <id> [--timeout <seconds>|--no-wait] --json` is the explicit bookmark metadata refetch path. It is allowed for a single bookmark ID only; legacy batch enrichment remains removed in favor of `review enrich-batch --confirm --json`. JSON output must report `command: bookmark.enrich`, `status: completed|timed_out|scheduled`, before/after bookmark snapshots, changed metadata fields, wait timing when applicable, and safe follow-up commands. This lets agents tell the difference between a completed no-op, a still-pending WebView/native enrichment, and a blocked/partial metadata capture such as X/Twitter pages.
 
 `cider-cli export folder <relative-path|id|Inbox> --format json|md [--limit <n>] [--json]` is the blessed bounded export path when an agent needs a shareable or tool-ingestable folder snapshot. JSON exports return `command: export.folder`, `readOnly: true`, `changed: false`, scope metadata, counts, stable `type:id` refs, item IDs, relative paths, related/backlink/provenance arrays, Markdown text, and safe follow-up commands. Markdown exports render item metadata and body text without requiring agents to scrape raw vault files. `export item <type> <id-or-ref>`, `export card <board-id/card-id|card-id>`, and `export project <project-id-or-name>` provide smaller bounded scopes. Whole-vault export is intentionally refused with structured JSON guidance; agents should increase `--limit` only after inspecting the scope.
@@ -94,7 +96,7 @@ Keep command details in CLI help and tests, not sprawling docs. The core command
 - item: get/search/query/recent/context/relations/backlinks/graph-health/project-context/doctor, plus backend-backed move/unfile/route/link
 - export: bounded folder/item/card/project export in JSON or Markdown; no unbounded whole-vault dumps
 - review: list/summary/drilldown/approve/correct/defer/enrich/enrich-batch/jobs
-- storage: audit/doctor-plan/doctor-apply/repair-schema
+- storage: audit/active-duplicate-invariants/restart-duplicate-regression/doctor-plan/doctor-apply/repair-schema
 - route/routing: temporary routing aliases until consolidated
 - migrate, doctor, and db integrity
 - spaces: explain routing context and agent instructions
