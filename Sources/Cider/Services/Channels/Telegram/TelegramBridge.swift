@@ -610,6 +610,7 @@ actor TelegramBridge: ChannelBridge {
         }
 
         if let localURL = try? await downloadPhoto(fileID: photo.fileID) {
+            lines.append("Telegram image file_id: \(photo.fileID)")
             lines.append("Local image copy: \(localURL.path)")
             if let ocrText = await OCRService.extractText(from: localURL)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -619,6 +620,7 @@ actor TelegramBridge: ChannelBridge {
                 lines.append("OCR text from image: (none detected)")
             }
         } else {
+            lines.append("Telegram image file_id: \(photo.fileID)")
             lines.append("Image download failed, so only caption/text context is available.")
         }
 

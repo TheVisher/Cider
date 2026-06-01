@@ -130,6 +130,74 @@ struct ChatCaptureIntakeServiceTests {
         #expect(attachment.localPath == "/tmp/cider-image.png")
     }
 
+    @Test("telegram failed image download with save intent records unsupported attachment review")
+    func telegramFailedImageDownloadWithSaveIntentRecordsUnsupportedAttachmentReview() throws {
+        try withIsolatedVault { db, notes, files in
+            let service = ChatCaptureIntakeService(
+                captureService: CiderCaptureService(
+                    notesStorage: notes,
+                    vaultFileStorage: files,
+                    database: db
+                ),
+                database: db
+            )
+            let update = TelegramUpdateEnvelope(
+                updateID: 46,
+                chatID: 9005,
+                senderID: 7011,
+                senderDisplayName: "Erik",
+                text: """
+                The user sent an image on Telegram.
+                Caption: save this
+                Telegram image file_id: AgACAgQAAxkBAAIB
+                Image download failed, so only caption/text context is available.
+                """
+            )
+
+            let input = try #require(ChatRuntimeCaptureAdapter.input(fromTelegram: update))
+            #expect(input.intent == .capture)
+            #expect(input.text == "")
+            #expect(input.metadata["attachment_failure_reason"] == "telegram_image_download_failed")
+            let attachment = try #require(input.attachments.first)
+            #expect(attachment.id == "AgACAgQAAxkBAAIB")
+            #expect(attachment.filename == nil)
+            #expect(attachment.mimeType == "image/jpeg")
+            #expect(attachment.localPath == nil)
+
+            let result = try ChatRuntimeCaptureAdapter.captureIfNeeded(
+                fromTelegram: update,
+                intakeService: service
+            )
+
+            #expect(result?.status == .needsReview)
+            #expect(result?.captureResult == nil)
+            let eventID = try #require(result?.captureEventID)
+            #expect(result?.safeNextCommands.contains("cider-cli item backlinks capture_event \(eventID.uuidString) --json") == true)
+            #expect(try captureAttachmentCount(db, eventID: eventID) == 1)
+            #expect(try captureAttachmentSourceIDs(db, eventID: eventID) == ["AgACAgQAAxkBAAIB"])
+            #expect(try unsupportedAttachmentReviewOutputCount(db, eventID: eventID) == 1)
+
+            let stmt = try db.prepare("""
+                SELECT source_kind, surface, channel, channel_id, thread_id, message_id, sender_id,
+                       sender_name, attachment_count, metadata
+                FROM capture_events
+                WHERE id = ?;
+                """)
+            stmt.bind(eventID.uuidString, at: 1)
+            #expect(try stmt.step())
+            #expect(stmt.string(at: 0) == "chat_unsupported_attachment")
+            #expect(stmt.string(at: 1) == "chat")
+            #expect(stmt.string(at: 2) == "telegram")
+            #expect(stmt.string(at: 3) == "9005")
+            #expect(stmt.string(at: 4) == "9005")
+            #expect(stmt.string(at: 5) == "telegram:46")
+            #expect(stmt.string(at: 6) == "7011")
+            #expect(stmt.string(at: 7) == "Erik")
+            #expect(stmt.int(at: 8) == 1)
+            #expect(stmt.string(at: 9).contains("telegram_image_download_failed"))
+        }
+    }
+
     @Test("telegram runtime bare save intent is not captured as chat-history text")
     func telegramRuntimeBareSaveIntentIsNotCapturedAsChatHistoryText() throws {
         let update = TelegramUpdateEnvelope(
@@ -537,6 +605,23 @@ struct ChatCaptureIntakeServiceTests {
             }
         }
         return urls
+    }
+
+    private func captureAttachmentSourceIDs(_ db: CiderDatabase, eventID: UUID) throws -> [String] {
+        let stmt = try db.prepare("""
+            SELECT source_attachment_id
+            FROM capture_attachments
+            WHERE capture_event_id = ?
+            ORDER BY attachment_index ASC;
+            """)
+        stmt.bind(eventID.uuidString, at: 1)
+        var ids: [String] = []
+        while try stmt.step() {
+            if let id = stmt.optionalString(at: 0) {
+                ids.append(id)
+            }
+        }
+        return ids
     }
 
     private func unsupportedAttachmentReviewOutputCount(_ db: CiderDatabase, eventID: UUID) throws -> Int {

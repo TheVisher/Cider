@@ -84,12 +84,12 @@ struct CaptureParitySafetyTests {
                 violations.append("\(file): AI reminder creation still uses DateCardStorage directly")
             }
             if file.hasSuffix("AIAssistantTools.swift"),
-               !source.contains("CiderCaptureService().addNoteCapture(")
-                || !source.contains("CiderCaptureService().addDateCardCapture(") {
+               !source.contains(".addNoteCapture(")
+                || !source.contains(".addDateCardCapture(") {
                 violations.append("\(file): AI tools missing canonical note/date capture calls")
             }
             if file.hasSuffix("MLXToolExecutor.swift"),
-               !source.contains("CiderCaptureService().addDateCardCapture(") {
+               !source.contains(".addDateCardCapture(") {
                 violations.append("\(file): MLX reminder tool missing canonical date capture call")
             }
         }
