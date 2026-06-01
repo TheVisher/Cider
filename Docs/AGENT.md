@@ -195,9 +195,10 @@ When the user sends a bare URL, use the full capture loop:
 
 ## Agent Save Routing
 
-When an agent saves a bookmark, note, contact, todo, date card, or file:
+When an agent saves a bookmark, note, contact, todo, date card, journal entry, or file:
 
 - Use `cider-cli capture add --kind ... --json`; use `--stdin` or `--text-file` for exact raw text, `--url` for bookmarks, and `--path` for files.
+- For journal-style memory intake, use `cider-cli capture add --kind journal --date today --stdin --json`; this appends to the daily journal and returns normal capture JSON.
 - Route obvious items before creation when the destination is clear.
 - Use Inbox when classification is uncertain.
 - Do not create in Inbox and move later unless routing is genuinely unclear.

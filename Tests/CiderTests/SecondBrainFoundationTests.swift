@@ -415,6 +415,97 @@ struct SecondBrainFoundationTests {
         try requireAgentFacingCaptureState(noteFilePayload, expectedOriginalText: sourceFile.path)
     }
 
+    @Test("capture add journal appends to daily journal with strict JSON")
+    func captureAddJournalAppendsToDailyJournalWithStrictJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-journal-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let first = try runCLIResult([
+            "capture", "add",
+            "--kind", "journal",
+            "--date", "2026-05-28",
+            "--time", "08:15",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: "Morning driving reflection")
+        #expect(first.status == 0, "stdout:\n\(first.stdout)\nstderr:\n\(first.stderr)")
+        #expect(first.stdout.first == "{")
+        let firstPayload = try jsonObject(from: first.stdout)
+        #expect(firstPayload["ok"] as? Bool == true)
+        #expect(firstPayload["command"] as? String == "capture.add")
+        #expect(firstPayload["kind"] as? String == "journal")
+        #expect(firstPayload["date"] as? String == "2026-05-28")
+        #expect(firstPayload["time"] as? String == "08:15")
+        #expect(firstPayload["created"] as? Bool == true)
+        #expect(firstPayload["nextSafeAction"] as? String == "inspect_item")
+
+        let firstItem = try #require(firstPayload["item"] as? [String: Any])
+        let noteID = try #require(firstItem["id"] as? String)
+        #expect(firstItem["type"] as? String == "note")
+        #expect(firstItem["title"] as? String == "Daily Journal 2026-05-28")
+        let firstContent = try #require(firstPayload["content"] as? String)
+        #expect(firstContent.contains("- 08:15 - Morning driving reflection"))
+        let firstSource = try #require(firstPayload["source"] as? [String: Any])
+        #expect(firstSource["kind"] as? String == "text")
+        #expect(firstSource["text"] as? String == "Morning driving reflection")
+        try requireAgentFacingCaptureState(firstPayload, expectedOriginalText: "Morning driving reflection")
+
+        let secondPayload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "journal",
+            "--date", "2026-05-28",
+            "--time", "17:45",
+            "Evening commute note",
+            "--json",
+        ], vaultURL: vault))
+        #expect(secondPayload["created"] as? Bool == false)
+        let secondItem = try #require(secondPayload["item"] as? [String: Any])
+        #expect(secondItem["id"] as? String == noteID)
+        let secondContent = try #require(secondPayload["content"] as? String)
+        #expect(secondContent.contains("- 08:15 - Morning driving reflection"))
+        #expect(secondContent.contains("- 17:45 - Evening commute note"))
+
+        let getPayload = try jsonObject(from: runCLI([
+            "item", "get", "note", noteID, "--json",
+        ], vaultURL: vault))
+        let chunks = try #require(getPayload["chunks"] as? [[String: Any]])
+        #expect(chunks.contains { ($0["body"] as? String)?.contains("Evening commute note") == true })
+    }
+
+    @Test("capture add journal defaults date to today and rejects empty content as JSON")
+    func captureAddJournalDefaultsDateToTodayAndRejectsEmptyContentAsJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-journal-defaults-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let payload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "journal",
+            "--time", "09:00",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: "Today default journal"))
+        let date = try #require(payload["date"] as? String)
+        #expect(date.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil)
+        let item = try #require(payload["item"] as? [String: Any])
+        #expect(item["title"] as? String == "Daily Journal \(date)")
+
+        let empty = try runCLIResult([
+            "capture", "add",
+            "--kind", "journal",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: "   \n")
+        #expect(empty.status != 0)
+        #expect(empty.stdout.first == "{")
+        let error = try jsonObject(from: empty.stdout)
+        #expect(error["ok"] as? Bool == false)
+        #expect((error["error"] as? String)?.contains("Journal capture content cannot be empty") == true)
+    }
+
     @Test("capture add positional note joins shell split text exactly")
     func captureAddPositionalNoteJoinsShellSplitTextExactly() throws {
         let vault = FileManager.default.temporaryDirectory

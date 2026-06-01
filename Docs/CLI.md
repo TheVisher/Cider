@@ -37,13 +37,14 @@ Every card must include `created: 'YYYY-MM-DD'`.
 
 ## Second Brain v1 Agent CLI Surface
 
-`cider-cli capture add` is the canonical agent capture API. Agents should use it for new notes, todos, bookmarks, files, events, and contacts, and should include `--json` for verification.
+`cider-cli capture add` is the canonical agent capture API. Agents should use it for new notes, todos, bookmarks, files, events, contacts, and journal entries, and should include `--json` for verification.
 
 Core capture flags:
 
-- `--kind note|todo|bookmark|file|event|contact` selects the item kind explicitly. Do not rely on inference when the kind is known.
+- `--kind note|todo|bookmark|file|event|contact|journal` selects the item kind explicitly. Do not rely on inference when the kind is known.
 - `--stdin` reads exact raw source text from standard input.
 - `--text-file <path>` reads exact raw source text from a file.
+- `--content <text>` is accepted for journal capture and daily append helpers when stdin is awkward.
 - `--url <url>` is the explicit bookmark source.
 - `--path <source-file-path>` is the explicit file source for `capture add`.
 - `--folder <target-folder-path>` is the destination folder selector for `capture add`; examples include `Inbox/Notes`, `Inbox/Bookmarks`, and project or topic folders.
@@ -66,6 +67,7 @@ cider-cli capture add --kind bookmark --url "https://example.com?a=1&b=two" --js
 cider-cli capture add --kind file --path "/path/with spaces.txt" --json
 printf '%s' "$RAW_EVENT_DETAILS" | cider-cli capture add --kind event --title "Passport appointment" --date 2026-05-20 --time "10:30 AM" --location "City Hall" --stdin --json
 printf '%s' "$RAW_CONTACT_NOTES" | cider-cli capture add --kind contact --name "Avery Example" --email avery@example.com --phone "555-0100" --stdin --json
+printf '%s' "$RAW_JOURNAL" | cider-cli capture add --kind journal --date today --stdin --json
 ```
 
 The capture JSON contract reports `command: capture.add`, source text/source metadata, item identity when available, routing/review state, provenance/indexing status, `nextSafeAction`, and `safeNextCommands`.
@@ -74,7 +76,9 @@ Hidden or removed legacy commands return `legacyRemoved: true` with a canonical 
 
 `bookmark add`, `note create`, `todo create`, and `file import` are temporary compatibility wrappers. They should remain hidden from top-level help, call the capture backend, and return `compatibilityWrapper: true`, `backendCommand: capture.add`, and nested `capture.command: capture.add`.
 
-`note daily append --kind journal|food-log [--date YYYY-MM-DD] [--time HH:mm] (--stdin|--text-file <path>|--content <text>) --json` is the blessed same-day append path for running journals and food logs. It must upsert one note per kind/day, preserve source context in JSON and mutation audit metadata, write through Cider storage, and return `safeNextCommands` for `item get` / `item context` verification.
+`capture add --kind journal [--date YYYY-MM-DD|today] [--time HH:mm] (--stdin|--text-file <path>|--content <text>|<journal text>) --json` is the blessed agent journal capture path. It appends to the daily journal note through the same storage behavior as `note daily append --kind journal`, returns `command: capture.add`, and reports `nextSafeAction: inspect_item` with `safeNextCommands` for `item get` / `item context` verification.
+
+`note daily append --kind journal|food-log [--date YYYY-MM-DD|today] [--time HH:mm] (--stdin|--text-file <path>|--content <text>) --json` remains the lower-level same-day append path for running journals and food logs. It must upsert one note per kind/day, preserve source context in JSON and mutation audit metadata, write through Cider storage, and return `safeNextCommands` for `item get` / `item context` verification.
 
 After capture, agents should verify and continue through backend-backed item/review commands: `item get`, `item search`, `item context`, `item relations`, `item backlinks`, `item move`, `item route`, `item link`, `review list`, `review approve`, `review correct`, `review enrich`, and `storage audit`.
 

@@ -1193,6 +1193,19 @@ struct CiderCLI {
                         folderID: targetFolder?.id,
                         sourceContext: sourceContext
                     )
+                case .journal(let raw):
+                    let payload = try captureAddJournalPayload(rawContent: raw, args: args, storage: NotesStorage.shared)
+                    if jsonOutput {
+                        outputJSON(payload)
+                    } else {
+                        print("Captured journal entry: \(payload["date"] as? String ?? "")")
+                        if let item = payload["item"] as? [String: Any],
+                           let title = item["title"] as? String {
+                            print("  Journal: \(title)")
+                        }
+                        print("  Next safe action: \(payload["nextSafeAction"] as? String ?? "inspect_item")")
+                    }
+                    return
                 }
                 let waitResult: BookmarkNativeCaptureWaitResult?
                 if result.item.type == "bookmark", let timeout = bookmarkNativeCaptureWaitTimeout(from: args) {
@@ -1282,7 +1295,7 @@ struct CiderCLI {
     }
 
     static func printCaptureUsage() {
-        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <text-file-path>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
         print("       Example destination: --folder \"Inbox/Notes\". In capture add, --path is always a source file, not a destination.")
         print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
     }
@@ -2616,102 +2629,244 @@ struct CiderCLI {
         case nil, "help", "--help", "-h":
             print("""
             Daily note commands:
-              cider-cli note daily append --kind journal|food-log [--date YYYY-MM-DD] [--time HH:mm] (--stdin|--text-file <path>|--content <text>) [--source <source>] [--json]
+              cider-cli note daily append --kind journal|food-log [--date YYYY-MM-DD|today] [--time HH:mm] (--stdin|--text-file <path>|--content <text>) [--source <source>] [--json]
             """)
 
         case "append":
             guard let spec = dailyNoteKindSpec(parseFlag("--kind", from: rest) ?? "journal") else {
-                printCLIError("Usage: cider-cli note daily append --kind journal|food-log [--date YYYY-MM-DD] [--time HH:mm] (--stdin|--text-file <path>|--content <text>) [--source <source>] [--json]")
-                return
-            }
-            let dateString = parseFlag("--date", from: rest) ?? localDateFormatter.string(from: Date())
-            guard isValidLocalDateString(dateString) else {
-                printCLIError("--date must be YYYY-MM-DD")
-                return
-            }
-            let timeString = parseFlag("--time", from: rest) ?? twentyFourHourTimeFormatter.string(from: Date())
-            guard isValidClockTimeString(timeString) else {
-                printCLIError("--time must be HH:mm")
+                printCLIError("Usage: cider-cli note daily append --kind journal|food-log [--date YYYY-MM-DD|today] [--time HH:mm] (--stdin|--text-file <path>|--content <text>) [--source <source>] [--json]")
                 return
             }
             guard let rawContent = projectArtifactContent(from: rest) else { return }
-            let body = rawContent.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !body.isEmpty else {
-                printCLIError("Daily append content cannot be empty.")
-                return
-            }
-
-            let title = "\(spec.titlePrefix) \(dateString)"
-            let existing = storage.notes.first { note in
-                note.title.localizedCaseInsensitiveCompare(title) == .orderedSame
-            }
-            let created = existing == nil
-            let note: Note
-            if let existing {
-                note = existing
-            } else {
-                let createdNote = storage.createNew(initialContent: dailyNoteSeedContent(title: title))
-                storage.rename(note: createdNote, to: title)
-                note = storage.notes.first(where: { $0.id == createdNote.id }) ?? createdNote
-            }
-            let before = MutationAuditSnapshots.note(note)
-            let existingContent = storage.loadContent(for: note)
-            let entry = "- \(timeString) - \(body)"
-            var updated = note
-            updated.content = dailyNoteContentByAppending(entry: entry, to: existingContent, title: title)
-            storage.save(note: updated)
-            let current = storage.notes.first(where: { $0.id == note.id }) ?? updated
-            let content = storage.loadContent(for: current)
-            let source = parseFlag("--source", from: rest) ?? "cider-cli"
-            MutationAuditService.shared.record(
-                action: "daily_append",
-                itemType: "note",
-                itemID: current.id,
-                before: before,
-                after: MutationAuditSnapshots.note(current),
-                metadata: [
-                    "kind": spec.kind,
-                    "date": dateString,
-                    "time": timeString,
-                    "source": source,
-                ]
-            )
-
-            if jsonOutput {
-                outputJSON([
-                    "ok": true,
-                    "command": "note.daily.append",
-                    "kind": spec.kind,
-                    "date": dateString,
-                    "time": timeString,
-                    "created": created,
-                    "note": noteToDict(current),
-                    "content": content,
-                    "appendedEntry": entry,
-                    "sourceContext": [
-                        "source": source,
-                        "kind": spec.kind,
-                        "date": dateString,
-                        "time": timeString,
-                    ],
-                    "indexing": [
-                        "status": "indexed",
-                        "ownerType": "note",
-                        "ownerID": current.id.uuidString,
-                    ],
-                    "safeNextCommands": [
-                        "cider-cli item get note \(current.id.uuidString) --json",
-                        "cider-cli item context note \(current.id.uuidString) --json",
-                    ],
-                ] as [String: Any])
-            } else {
-                print("Appended \(spec.kind) entry to \(current.title) (\(current.id.uuidString.prefix(8)))")
-                print("  Path: \(current.relativePath)")
+            do {
+                let result = try appendDailyNoteEntry(
+                    spec: spec,
+                    dateRaw: parseFlag("--date", from: rest),
+                    timeRaw: parseFlag("--time", from: rest),
+                    rawContent: rawContent,
+                    source: parseFlag("--source", from: rest) ?? "cider-cli",
+                    storage: storage,
+                    emptyContentMessage: "Daily append content cannot be empty."
+                )
+                if jsonOutput {
+                    outputJSON(dailyNoteAppendPayload(result))
+                } else {
+                    print("Appended \(result.spec.kind) entry to \(result.note.title) (\(result.note.id.uuidString.prefix(8)))")
+                    print("  Path: \(result.note.relativePath)")
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
             }
 
         default:
             printCLIError("Unknown daily note command: \(subcommand ?? "nil"). Commands: append")
         }
+    }
+
+    struct DailyNoteAppendResult {
+        let spec: DailyNoteKindSpec
+        let date: String
+        let time: String
+        let created: Bool
+        let note: Note
+        let content: String
+        let appendedEntry: String
+        let rawContent: String
+        let source: String
+    }
+
+    static func captureAddJournalPayload(rawContent: String, args: [String], storage: NotesStorage) throws -> [String: Any] {
+        let result = try appendDailyNoteEntry(
+            spec: DailyNoteKindSpec(kind: "journal", titlePrefix: "Daily Journal"),
+            dateRaw: parseFlag("--date", from: args),
+            timeRaw: parseFlag("--time", from: args),
+            rawContent: rawContent,
+            source: parseFlag("--source", from: args) ?? "capture.add",
+            storage: storage,
+            emptyContentMessage: "Journal capture content cannot be empty."
+        )
+        return journalCapturePayload(result, args: args)
+    }
+
+    static func appendDailyNoteEntry(
+        spec: DailyNoteKindSpec,
+        dateRaw: String?,
+        timeRaw: String?,
+        rawContent: String,
+        source: String,
+        storage: NotesStorage,
+        emptyContentMessage: String
+    ) throws -> DailyNoteAppendResult {
+        let dateString = try resolveDailyNoteDateString(dateRaw)
+        let timeString = timeRaw ?? twentyFourHourTimeFormatter.string(from: Date())
+        guard isValidClockTimeString(timeString) else {
+            throw CaptureAddArgumentError.message("--time must be HH:mm")
+        }
+        let body = rawContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else {
+            throw CaptureAddArgumentError.message(emptyContentMessage)
+        }
+
+        let title = "\(spec.titlePrefix) \(dateString)"
+        let existing = storage.notes.first { note in
+            note.title.localizedCaseInsensitiveCompare(title) == .orderedSame
+        }
+        let created = existing == nil
+        let note: Note
+        if let existing {
+            note = existing
+        } else {
+            let createdNote = storage.createNew(initialContent: dailyNoteSeedContent(title: title))
+            storage.rename(note: createdNote, to: title)
+            note = storage.notes.first(where: { $0.id == createdNote.id }) ?? createdNote
+        }
+        let before = MutationAuditSnapshots.note(note)
+        let existingContent = storage.loadContent(for: note)
+        let entry = "- \(timeString) - \(body)"
+        var updated = note
+        updated.content = dailyNoteContentByAppending(entry: entry, to: existingContent, title: title)
+        storage.save(note: updated)
+        let current = storage.notes.first(where: { $0.id == note.id }) ?? updated
+        let content = storage.loadContent(for: current)
+        MutationAuditService.shared.record(
+            action: "daily_append",
+            itemType: "note",
+            itemID: current.id,
+            before: before,
+            after: MutationAuditSnapshots.note(current),
+            metadata: [
+                "kind": spec.kind,
+                "date": dateString,
+                "time": timeString,
+                "source": source,
+            ]
+        )
+
+        return DailyNoteAppendResult(
+            spec: spec,
+            date: dateString,
+            time: timeString,
+            created: created,
+            note: current,
+            content: content,
+            appendedEntry: entry,
+            rawContent: rawContent,
+            source: source
+        )
+    }
+
+    static func resolveDailyNoteDateString(_ raw: String?) throws -> String {
+        guard let raw else { return localDateFormatter.string(from: Date()) }
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+        if normalized == "today" {
+            return localDateFormatter.string(from: Date())
+        }
+        guard isValidLocalDateString(raw) else {
+            throw CaptureAddArgumentError.message("--date must be YYYY-MM-DD or today")
+        }
+        return raw
+    }
+
+    static func dailyNoteAppendPayload(_ result: DailyNoteAppendResult) -> [String: Any] {
+        [
+            "ok": true,
+            "command": "note.daily.append",
+            "kind": result.spec.kind,
+            "date": result.date,
+            "time": result.time,
+            "created": result.created,
+            "note": noteToDict(result.note),
+            "content": result.content,
+            "appendedEntry": result.appendedEntry,
+            "sourceContext": [
+                "source": result.source,
+                "kind": result.spec.kind,
+                "date": result.date,
+                "time": result.time,
+            ],
+            "indexing": [
+                "status": "indexed",
+                "ownerType": "note",
+                "ownerID": result.note.id.uuidString,
+            ],
+            "safeNextCommands": [
+                "cider-cli item get note \(result.note.id.uuidString) --json",
+                "cider-cli item context note \(result.note.id.uuidString) --json",
+            ],
+        ] as [String: Any]
+    }
+
+    static func journalCapturePayload(_ result: DailyNoteAppendResult, args: [String]) -> [String: Any] {
+        let sourceContext = captureSourceContext(from: args, originalText: result.rawContent)
+        let item: [String: Any] = [
+            "id": result.note.id.uuidString,
+            "type": "note",
+            "title": result.note.title,
+            "folderName": result.note.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox",
+            "folderID": result.note.folderID?.uuidString as Any,
+            "relativePath": result.note.relativePath,
+        ]
+        var payload: [String: Any] = [
+            "ok": true,
+            "changed": true,
+            "readOnly": false,
+            "command": "capture.add",
+            "kind": "journal",
+            "captureKind": "journal",
+            "date": result.date,
+            "time": result.time,
+            "created": result.created,
+            "source": [
+                "kind": "text",
+                "itemID": result.note.id.uuidString,
+                "itemType": "note",
+                "text": result.rawContent,
+            ],
+            "item": item,
+            "note": noteToDict(result.note),
+            "content": result.content,
+            "appendedEntry": result.appendedEntry,
+            "destination": [
+                "kind": "daily_note",
+                "relativePath": result.note.relativePath,
+                "title": result.note.title,
+            ],
+            "enrichment": [
+                "status": "not_applicable",
+                "isEnriching": false,
+                "titleState": "daily_journal",
+            ],
+            "duplicate": [
+                "status": "not_checked",
+            ],
+            "routing": [
+                "reviewNeeded": false,
+                "confidence": 1,
+                "reason": "Daily journal append does not require folder routing review.",
+                "reviewState": "ok",
+                "status": "recorded",
+            ],
+            "provenance": [
+                "status": "recorded",
+                "ownerType": "note",
+                "ownerID": result.note.id.uuidString,
+                "auditAction": "daily_append",
+            ],
+            "indexing": [
+                "status": "indexed",
+                "ownerType": "note",
+                "ownerID": result.note.id.uuidString,
+            ],
+            "nextSafeAction": "inspect_item",
+            "safeNextCommands": [
+                "cider-cli item get note \(result.note.id.uuidString) --json",
+                "cider-cli item context note \(result.note.id.uuidString) --json",
+            ],
+        ] as [String: Any]
+        if let sourceContext {
+            payload["sourceContext"] = sourceContext.toDictionary()
+        }
+        return payload
     }
 
     struct DailyNoteKindSpec {
@@ -8339,6 +8494,7 @@ struct CiderCLI {
         case file(String)
         case event(CaptureAddEventInput)
         case contact(CaptureAddContactInput)
+        case journal(String)
 
         var originalText: String {
             switch self {
@@ -8348,6 +8504,8 @@ struct CiderCLI {
                 event.sourceText
             case .contact(let contact):
                 contact.sourceText
+            case .journal(let raw):
+                raw
             }
         }
     }
@@ -8643,16 +8801,24 @@ struct CiderCLI {
             return try .event(resolveCaptureAddEventInput(from: args, rawText: rawText))
         case "contact":
             return try .contact(resolveCaptureAddContactInput(from: args, rawText: rawText))
+        case "journal", "daily", "daily-journal":
+            if let rawText { return .journal(rawText) }
+            if let content = parseFlag("--content", from: args) {
+                return .journal(content
+                    .replacingOccurrences(of: "\\n", with: "\n")
+                    .replacingOccurrences(of: "\\t", with: "\t"))
+            }
+            if let positionalText { return .journal(positionalText) }
         case let unsupported?:
-            throw CaptureAddArgumentError.message("Unsupported --kind '\(unsupported)'. Use note, todo, bookmark, file, event, or contact.")
+            throw CaptureAddArgumentError.message("Unsupported --kind '\(unsupported)'. Use note, todo, bookmark, file, event, contact, or journal.")
         }
 
-        throw CaptureAddArgumentError.message("Source required. Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <text-file-path>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+        throw CaptureAddArgumentError.message("Source required. Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
     }
 
     static func capturePositionalArguments(from args: [String]) -> [String] {
         let valueFlags: Set<String> = [
-            "--kind", "--title", "--folder", "--path", "--text-file", "--url",
+            "--kind", "--title", "--folder", "--path", "--text-file", "--content", "--url",
             "--surface", "--channel", "--channel-id", "--thread-id", "--message-id",
             "--sender-id", "--sender-name", "--timeout", "--wait-timeout", "--capture-timeout",
             "--source-meta", "--date", "--time", "--location", "--details", "--name",
@@ -13236,6 +13402,8 @@ struct CiderCLI {
             return "Inbox/Date Cards"
         case .contact:
             return "Inbox/Contacts"
+        case .journal:
+            return "Inbox/Notes"
         }
     }
 
@@ -13872,7 +14040,7 @@ struct CiderCLI {
         CiderCLI — Second Brain v1 agent API
 
         CAPTURE
-          cider-cli capture add [--kind note|todo|bookmark|file|event|contact] (--stdin|--text-file <text-file-path>|--url <url>|--path <source-file-path>) [--title <title>] [--date yyyy-MM-dd] [--details <text>] [--name <name>] [--folder <target-folder-path>] [--timeout <seconds>|--no-wait] [--json]
+          cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--url <url>|--path <source-file-path>|--content <text>) [--title <title>] [--date yyyy-MM-dd|today] [--details <text>] [--name <name>] [--folder <target-folder-path>] [--timeout <seconds>|--no-wait] [--json]
 
         ITEM
           cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]

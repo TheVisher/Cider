@@ -454,7 +454,7 @@ struct CiderCLIAgentSafetyTests {
 
         #expect(result.status == 0)
         #expect(result.stdout.contains("Usage: cider-cli capture add"))
-        #expect(result.stdout.contains("--kind note|todo|bookmark|file|event|contact"))
+        #expect(result.stdout.contains("--kind note|todo|bookmark|file|event|contact|journal"))
         #expect(!result.stderr.contains("Source required"))
     }
 
@@ -1523,6 +1523,21 @@ struct CiderCLIAgentSafetyTests {
         let capturePayload = try assertStrictProcessJSON(capture, command: "capture.add")
         let bookmark = try #require(capturePayload["bookmark"] as? [String: Any])
         let bookmarkID = try #require(bookmark["id"] as? String)
+
+        let journalCapture = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "journal",
+                "--date", "today",
+                "--time", "08:30",
+                "--content", "Blessed journal fixture",
+                "--json",
+            ],
+            vault: vault
+        )
+        let journalPayload = try assertStrictProcessJSON(journalCapture, command: "capture.add")
+        #expect(journalPayload["kind"] as? String == "journal")
+        #expect(journalPayload["nextSafeAction"] as? String == "inspect_item")
 
         let boardCreate = try runCLI(args: ["board", "create", "Fixture Board", "--json"], vault: vault)
         let boardPayload = try assertStrictProcessJSON(boardCreate, command: "board.create")
