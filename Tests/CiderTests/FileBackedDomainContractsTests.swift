@@ -105,6 +105,8 @@ struct FileBackedDomainContractsTests {
             "cider-cli capture add --kind contact --name \"Avery Example\" --email avery@example.com --phone \"555-0100\" --stdin --json",
             "cider-cli capture add --kind journal --date today --stdin --json",
             "`capture add --kind journal [--date YYYY-MM-DD|today]",
+            "Agents must not edit daily journal Markdown directly",
+            "successful journal captures should not be routed into folder-review correction chores",
             "`bookmark add`, `note create`, `todo create`, and `file import` are temporary compatibility wrappers.",
             "`compatibilityWrapper: true`",
             "Hidden or removed legacy commands return `legacyRemoved: true`",
@@ -124,6 +126,8 @@ struct FileBackedDomainContractsTests {
 
         for snippet in [
             "New agent capture must use `cider-cli capture add --kind ... --json`.",
+            "Journal, voice-derived, and driving reflection intake must use `cider-cli capture add --kind journal --date today --stdin --json`",
+            "Successful journal captures should be verified through `safeNextCommands`",
             "Do not call hidden type-specific legacy commands such as `bookmark`, `note`, `todo`, `event`, `contact`, `file`, `folder`, `tag`, `label`, or `dashboard` as alternate APIs.",
             "Use `cider-cli board ...` commands for routine Kanban mutations",
             "Do not patch board YAML by hand for normal card work.",
@@ -162,6 +166,24 @@ struct FileBackedDomainContractsTests {
             "bookmark get <id> --json",
         ] {
             #expect(!rootSource.contains(legacySnippet), "AGENTS.md still presents legacy bookmark capture command: \(legacySnippet)")
+        }
+    }
+
+    @Test("root agent instructions declare canonical journal capture workflow")
+    func rootAgentInstructionsDeclareCanonicalJournalCaptureWorkflow() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let rootAgentDoc = repoRoot.appendingPathComponent("AGENTS.md")
+        let rootSource = try String(contentsOf: rootAgentDoc, encoding: .utf8)
+
+        for snippet in [
+            "## Journal Capture Workflow",
+            "cider-cli capture add --kind journal --date today --stdin --json",
+            "Inspect the capture JSON for item identity, provenance, indexing, `nextSafeAction`, and `safeNextCommands`.",
+            "cider-cli item get note <id> --json",
+            "Do not edit daily journal Markdown directly",
+            "do not send successful journal captures into folder-route review chores",
+        ] {
+            #expect(rootSource.contains(snippet), "AGENTS.md missing canonical journal capture snippet: \(snippet)")
         }
     }
 

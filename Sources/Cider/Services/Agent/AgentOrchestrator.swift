@@ -65,6 +65,10 @@ actor AgentOrchestrator {
     /// Maximum tool call rounds per conversation turn
     private let maxToolRounds = 5
 
+    func _processRuntimeRoutingDecisionForTesting(_ userMessage: String) -> (route: String, detail: String?, hints: String?)? {
+        processRuntimeRoutingDecision(for: userMessage).map { ($0.route, $0.detail, $0.hints) }
+    }
+
     // MARK: - Configuration
 
     func setProvider(_ provider: any AgentProvider) {
@@ -582,8 +586,15 @@ actor AgentOrchestrator {
         let explicitlyRequestsFilesystem = ["filesystem", "on disk", "on-disk", "raw files", "files on disk"]
             .contains(where: normalized.contains)
         let asksToCaptureOrSave = [
-            "save", "add", "capture", "store", "bookmark this", "file this"
+            "save", "add", "capture", "store", "bookmark this", "file this", "journal this", "log this"
         ].contains(where: normalized.contains)
+        let journalCaptureSignals = [
+            "journal this", "journal entry", "journal note", "journal-style", "journaling",
+            "voice journal", "driving journal", "life log", "log this", "reflection"
+        ]
+        let asksForJournalCapture = asksToCaptureOrSave
+            && journalCaptureSignals.contains(where: normalized.contains)
+            && !asksForSearch
         let creationIntentSignals = [
             "create", "make", "add", "save", "schedule", "set up"
         ]
@@ -673,7 +684,15 @@ actor AgentOrchestrator {
             hints.append("- Only add extra AI-owned enrichment after the item already exists and only through backend-backed review or item commands.")
         }
 
-        if asksToCaptureOrSave && taskReminderSignals && !asksToCreateEvent {
+        if asksForJournalCapture {
+            route = "journal-capture"
+            detail = "journal or reflection capture"
+            hints.append("- This sounds like journal or voice-derived reflection intake. Send the exact entry text on stdin to `cider-cli capture add --kind journal --date today --stdin --json`.")
+            hints.append("- Inspect the capture JSON for item identity, provenance, indexing, `nextSafeAction`, and `safeNextCommands`; successful journal captures should verify with `item get` or `item context`.")
+            hints.append("- Do not edit daily journal Markdown directly, do not use raw note files as the API, and do not send a successful journal capture into folder-route review chores.")
+        }
+
+        if asksToCaptureOrSave && taskReminderSignals && !asksToCreateEvent && !asksForJournalCapture {
             route = "todo-create"
             detail = "todo capture"
             hints.append("- This looks like a todo/task capture. Use the shortest safe path: send the exact task text on stdin to `cider-cli capture add --kind todo --stdin --json`.")

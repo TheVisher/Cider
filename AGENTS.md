@@ -49,6 +49,16 @@ When the user sends a bare URL, do not stop after creating the bookmark. Use the
 4. Route or review only through backend-backed `item`/`review` commands.
 5. Report the verified final title, routing/review state, destination or folder when available, and any caveat.
 
+## Journal Capture Workflow
+
+When the user asks to journal, log, or save a voice-derived driving reflection, use the capture-first journal path:
+
+1. Capture through `cider-cli capture add --kind journal --date today --stdin --json`.
+2. Inspect the capture JSON for item identity, provenance, indexing, `nextSafeAction`, and `safeNextCommands`.
+3. Re-read through `cider-cli item get note <id> --json` or `cider-cli item context note <id> --json` when an item ID is available.
+4. Do not edit daily journal Markdown directly, and do not send successful journal captures into folder-route review chores.
+5. Report the verified daily journal title/date and any caveat.
+
 Active board files:
 
 - `~/CiderVault/.cider/boards/2afee0.yaml` — Cider (default dedicated Cider product/project board; move newly audited Cider work here instead of deleting old cards)

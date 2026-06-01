@@ -49,7 +49,9 @@ struct AIAssistantPromptTests {
         #expect(prompt.contains("Second-brain tool rules:"))
         #expect(prompt.contains("Treat Cider's item/capture/review/storage APIs as the source of truth."))
         #expect(prompt.contains("For new user material, use the capture door first: capture add."))
-        #expect(prompt.contains("For uncertain placement, use review/routing flows and leave a reviewable reason."))
+        #expect(prompt.contains("cider-cli capture add --kind journal --date today --stdin --json"))
+        #expect(prompt.contains("Do not edit daily journal Markdown directly"))
+        #expect(prompt.contains("For uncertain non-journal placement, use review/routing flows and leave a reviewable reason."))
     }
 
     @Test("MLX prompt includes vault routing doctrine")
@@ -60,7 +62,23 @@ struct AIAssistantPromptTests {
         #expect(prompt.contains("Second-brain tool rules:"))
         #expect(prompt.contains("Treat Cider's item/capture/review/storage APIs as the source of truth."))
         #expect(prompt.contains("For new user material, use the capture door first: capture add."))
-        #expect(prompt.contains("For uncertain placement, use review/routing flows and leave a reviewable reason."))
+        #expect(prompt.contains("cider-cli capture add --kind journal --date today --stdin --json"))
+        #expect(prompt.contains("Do not edit daily journal Markdown directly"))
+        #expect(prompt.contains("For uncertain non-journal placement, use review/routing flows and leave a reviewable reason."))
+    }
+
+    @Test("process runtime routes journal requests to capture-first guidance")
+    func processRuntimeRoutesJournalRequestsToCaptureFirstGuidance() async throws {
+        let orchestrator = AgentOrchestrator()
+
+        let decision = try #require(await orchestrator._processRuntimeRoutingDecisionForTesting(
+            "Journal this driving reflection: I noticed the morning commute is where planning actually happens."
+        ))
+
+        #expect(decision.route == "journal-capture")
+        #expect(decision.hints?.contains("cider-cli capture add --kind journal --date today --stdin --json") == true)
+        #expect(decision.hints?.contains("Do not edit daily journal Markdown directly") == true)
+        #expect(decision.hints?.contains("folder-route review chores") == true)
     }
 
     @Test("assistant prompt includes unified current item context for bookmark and note")

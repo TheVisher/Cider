@@ -58,6 +58,7 @@ Agents should be conservative operators over real Cider data:
 
 - Use `cider-cli` or Cider services for current facts whenever possible.
 - New agent capture must use `cider-cli capture add --kind ... --json`.
+- Journal, voice-derived, and driving reflection intake must use `cider-cli capture add --kind journal --date today --stdin --json`; do not edit daily journal Markdown directly.
 - Do not call hidden type-specific legacy commands such as `bookmark`, `note`, `todo`, `event`, `contact`, `file`, `folder`, `tag`, `label`, or `dashboard` as alternate APIs.
 - Do not treat memory as more current than the Cider store, CLI, vault, or active Kanban card.
 - Do not write AI-generated text into user-owned fields such as bookmark notes.
@@ -199,6 +200,7 @@ When an agent saves a bookmark, note, contact, todo, date card, journal entry, o
 
 - Use `cider-cli capture add --kind ... --json`; use `--stdin` or `--text-file` for exact raw text, `--url` for bookmarks, and `--path` for files.
 - For journal-style memory intake, use `cider-cli capture add --kind journal --date today --stdin --json`; this appends to the daily journal and returns normal capture JSON.
+- Successful journal captures should be verified through `safeNextCommands` such as `item get` or `item context`, not sent through folder-route review chores.
 - Route obvious items before creation when the destination is clear.
 - Use Inbox when classification is uncertain.
 - Do not create in Inbox and move later unless routing is genuinely unclear.
