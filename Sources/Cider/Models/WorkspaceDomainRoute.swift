@@ -62,13 +62,13 @@ enum WorkspaceDomainRoutePolicy {
         case .aiAssistant:
             return [.chats]
         case .bookmarks:
-            return [.inbox, .folders, .tags, .recent, .savedViews]
+            return [.inbox, .folders, .tags, .recent]
         case .tasksEvents:
             return [.inbox]
         case .media, .people:
             return []
         case .notes, .files:
-            return [.folders, .tags, .recent, .savedViews]
+            return [.folders, .tags, .recent]
         }
     }
 

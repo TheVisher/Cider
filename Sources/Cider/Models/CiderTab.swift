@@ -7,6 +7,7 @@ enum CiderTab: Identifiable, Hashable {
     case domainDashboard(WorkspaceNavigationDomain)
     case projectOverview(projectID: String, name: String)
     case projectInbox(projectID: String, name: String)
+    case projectBoard(projectID: String, boardID: String, name: String)
     case projectSurface(projectID: String, surface: ProjectWorkspaceSurface, name: String)
     case projectReferences(projectID: String, name: String)
     case spaceOverview(id: String, name: String)
@@ -29,6 +30,7 @@ enum CiderTab: Identifiable, Hashable {
         case .domainDashboard(let domain): "domain-dashboard-\(domain.rawValue)"
         case .projectOverview(let projectID, _): "project-overview-\(projectID)"
         case .projectInbox(let projectID, _): "project-inbox-\(projectID)"
+        case .projectBoard(let projectID, let boardID, _): "project-board-\(projectID)-\(boardID)"
         case .projectSurface(let projectID, let surface, _): "project-surface-\(projectID)-\(surface.id)"
         case .projectReferences(let projectID, _): "project-references-\(projectID)"
         case .spaceOverview(let id, _): "space-overview-\(id)"
@@ -45,6 +47,7 @@ enum CiderTab: Identifiable, Hashable {
         case .domainDashboard(let domain): "\(domain.title) Dashboard"
         case .projectOverview(_, let name): name
         case .projectInbox(_, let name): name
+        case .projectBoard(_, _, let name): name
         case .projectSurface(_, _, let name): name
         case .projectReferences(_, let name): name
         case .spaceOverview(_, let name): name
@@ -61,6 +64,7 @@ enum CiderTab: Identifiable, Hashable {
         case .domainDashboard(let domain): domain.systemImage
         case .projectOverview: "rectangle.3.group"
         case .projectInbox: "tray.full"
+        case .projectBoard: "rectangle.split.3x1"
         case .projectSurface(_, let surface, _): surface.systemImage
         case .projectReferences: "photo.on.rectangle"
         case .spaceOverview: "square.grid.2x2"

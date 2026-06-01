@@ -113,9 +113,7 @@ extension CiderPanelView {
         guard selectedNavigationDomain == .projects,
               let project = selectedProjectWorkspace,
               project.kind == .project,
-              case .savedView(let savedViewID, let tabName) = tab,
-              let savedView = savedViewStorage.savedView(for: savedViewID),
-              case .kanban(let boardID) = savedView.kind,
+              case .projectBoard(_, let boardID, let tabName) = tab,
               project.boardIDs.contains(boardID) else {
             return nil
         }
@@ -141,15 +139,9 @@ extension CiderPanelView {
         }
 
         projectAssociationStore.include(boardID: board.id, inProjectID: project.id)
-        let savedView = savedViewStorage.savedViews.first { savedView in
-            if case .kanban(let boardID) = savedView.kind {
-                return boardID == board.id
-            }
-            return false
-        } ?? savedViewStorage.createKanbanView(name: board.name, boardID: board.id)
 
         selectedFolderID = nil
-        selectedTab = .savedView(id: savedView.id, name: savedView.name)
+        selectedTab = .projectBoard(projectID: project.id, boardID: board.id, name: board.name)
     }
 
     func deleteTab(_ tab: CiderTab) {
@@ -192,22 +184,7 @@ extension CiderPanelView {
     }
 
     func createSavedViewFromCurrentState() {
-        let name = nextSavedViewName()
-        let filter = SavedViewFilterSpec(entityTypes: [])
-        let layout = SavedViewLayoutSpec(
-            displayMode: homeDisplayMode,
-            cardSizeScale: homeCardSizeScale,
-            showsGhostCells: true,
-            showsCalendarProjection: false
-        )
-        let savedView = savedViewStorage.createSavedView(
-            name: name,
-            filterSpec: filter,
-            layoutSpec: layout,
-            isBlank: true
-        )
-        savedViewStorage.addToTabOrder(savedView.id)
-        selectedTab = .savedView(id: savedView.id, name: savedView.name)
+        openNavigationDomain(.browse)
     }
 
     func deleteSavedView(_ id: UUID) {
@@ -229,50 +206,8 @@ extension CiderPanelView {
 
     func ensureDefaultTabs() {
         restorePersistentDynamicTabsIfNeeded()
-
-        if savedViewStorage.savedViews.contains(where: { $0.kind == .dashboard }) == false {
-            let dashboard = savedViewStorage.createDashboardView()
-            savedViewStorage.removeFromTabOrder(dashboard.id)
-            savedViewStorage.insertInTabOrder(dashboard.id, at: 0)
-            if selectedTab == nil {
-                selectedTab = .savedView(id: dashboard.id, name: dashboard.name)
-            }
-        }
-
-        guard savedViewStorage.tabOrder.isEmpty else {
-            // Tabs exist — just select the first one if nothing is selected
-            if selectedTab == nil {
-                selectedTab = allTabs.first
-            }
-            return
-        }
-
-        // First launch — create Inbox (unassigned items) + Library (all items)
-        let inbox = savedViewStorage.createSavedView(
-            name: "Inbox",
-            filterSpec: SavedViewFilterSpec(onlyUnassigned: true)
-        )
-        savedViewStorage.addToTabOrder(inbox.id)
-
-        let library = savedViewStorage.createSavedView(
-            name: "Library",
-            filterSpec: SavedViewFilterSpec()
-        )
-        savedViewStorage.addToTabOrder(library.id)
-
-        // Create onboarding tab if not already completed
-        let config = CiderConfig.load()
-        if !config.hasCompletedOnboarding {
-            let welcome = savedViewStorage.createSavedView(
-                name: "Welcome",
-                filterSpec: SavedViewFilterSpec(),
-                isBlank: true,
-                isOnboarding: true
-            )
-            savedViewStorage.insertInTabOrder(welcome.id, at: 0)
-            selectedTab = .savedView(id: welcome.id, name: welcome.name)
-        } else {
-            selectedTab = .savedView(id: inbox.id, name: inbox.name)
+        if selectedTab == nil {
+            selectedTab = .domainDashboard(.mainDashboard)
         }
     }
 

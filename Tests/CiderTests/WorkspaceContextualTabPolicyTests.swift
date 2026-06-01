@@ -2,7 +2,7 @@ import XCTest
 @testable import Cider
 
 final class WorkspaceContextualTabPolicyTests: XCTestCase {
-    func testDashboardDomainShowsDashboardTabsAndKeepsAssistantOutOfTopTabs() {
+    func testDashboardDomainDoesNotSurfaceLegacySavedViewTabs() {
         let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
         let libraryID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
         let tabs: [CiderTab] = [
@@ -21,10 +21,10 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
             savedViews: savedViews
         )
 
-        XCTAssertEqual(result.map(\.id), ["saved-\(dashboardID.uuidString)"])
+        XCTAssertTrue(result.isEmpty)
     }
 
-    func testProjectsDomainShowsKanbanTabsAndKeepsAssistantOutOfTopTabs() {
+    func testProjectsDomainDoesNotSurfaceLegacyKanbanSavedViewTabs() {
         let boardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
         let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
         let tabs: [CiderTab] = [
@@ -44,22 +44,11 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(result.map(\.id), [
-            CiderTab.domainDashboard(.projects).id,
-            "saved-\(boardID.uuidString)"
+            CiderTab.domainDashboard(.projects).id
         ])
     }
 
-    func testProjectsDomainWithSelectedProjectGeneratesProjectScopedTabs() {
-        let ciderID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
-        let webID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C2")!
-        let iosID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C3")!
-        let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
-        let savedViews = [
-            SavedView(id: dashboardID, name: "Dashboard", kind: .dashboard),
-            SavedView(id: ciderID, name: "Cider", kind: .kanban(boardID: "2afee0")),
-            SavedView(id: webID, name: "Cider Web", kind: .kanban(boardID: "08c899")),
-            SavedView(id: iosID, name: "Cider iOS", kind: .kanban(boardID: "2d3f69"))
-        ]
+    func testProjectsDomainWithSelectedProjectGeneratesExplicitProjectScopedTabs() {
         let selectedProject = ProjectWorkspace(
             id: "cider",
             kind: .project,
@@ -72,16 +61,16 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         let result = WorkspaceContextualTabPolicy.tabs(
             for: .projects,
             selectedProject: selectedProject,
-            allTabs: [.savedView(id: dashboardID, name: "Dashboard")],
-            savedViews: savedViews
+            allTabs: [],
+            savedViews: []
         )
 
         XCTAssertEqual(result.map(\.id), [
             "project-overview-cider",
             "project-inbox-cider",
-            "saved-\(ciderID.uuidString)",
-            "saved-\(webID.uuidString)",
-            "saved-\(iosID.uuidString)",
+            "project-board-cider-2afee0",
+            "project-board-cider-08c899",
+            "project-board-cider-2d3f69",
             "project-surface-cider-notes",
             "project-surface-cider-decisions",
             "project-surface-cider-assets",
@@ -102,8 +91,7 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(result.map(\.id), [
-            CiderTab.domainDashboard(.projects).id,
-            "saved-\(boardID.uuidString)"
+            CiderTab.domainDashboard(.projects).id
         ])
     }
 
@@ -144,7 +132,7 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         XCTAssertEqual(result.first?.displayName, "All Boards")
     }
 
-    func testProjectsBrowseAllBoardsAllowsCurrentBoardDrillInWithoutGlobalTabs() {
+    func testProjectsBrowseAllBoardsIgnoresLegacySavedViewBoardDrillIn() {
         let dashboardID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
         let ciderID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
         let bugsID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B6")!
@@ -177,13 +165,10 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
             savedViews: savedViews
         )
 
-        XCTAssertEqual(result.map(\.id), [
-            "project-overview-browse-all-boards",
-            "saved-\(bugsID.uuidString)"
-        ])
+        XCTAssertEqual(result.map(\.id), ["project-overview-browse-all-boards"])
     }
 
-    func testBookmarkDomainPrependsDashboardTabAndFiltersBookmarkSavedViews() {
+    func testBookmarkDomainDoesNotSurfaceLegacySavedViewTabs() {
         let bookmarksID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
         let notesID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C2")!
         let tabs: [CiderTab] = [
@@ -215,8 +200,7 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(bookmarkTabs.map(\.id), [
-            CiderTab.domainDashboard(.bookmarks).id,
-            "saved-\(bookmarksID.uuidString)"
+            CiderTab.domainDashboard(.bookmarks).id
         ])
         XCTAssertEqual(mediaTabs.map(\.id), [CiderTab.domainDashboard(.media).id])
     }

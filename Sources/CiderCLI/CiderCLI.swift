@@ -8094,20 +8094,15 @@ struct CiderCLI {
             }
             let board = storage.createBoard(name: name)
             let projectID = ProjectBoardRegistrationService.normalizedProjectID(parseFlag("--project", from: args))
-            let savedView = ProjectBoardRegistrationService.register(board: board, projectID: projectID)
+            ProjectBoardRegistrationService.register(board: board, projectID: projectID)
             if jsonOutput {
                 var dict = boardMutationEnvelope(command: "board.create", action: "created", board: board)
-                dict["savedView"] = [
-                    "id": savedView.id.uuidString,
-                    "name": savedView.name
-                ]
                 if let projectID {
                     dict["projectID"] = projectID
                 }
                 outputJSON(dict)
             } else {
                 print("Created board: \(board.name) (\(board.id))")
-                print("Registered kanban view: \(savedView.name) (\(savedView.id.uuidString.prefix(8)))")
                 if let projectID {
                     print("Added to project: \(projectID)")
                 }
@@ -15578,39 +15573,10 @@ struct CiderCLI {
             }
 
         case "create":
-            guard let name = args.first else {
-                print("Error: Usage: cider-cli view create <name> [--type <bookmark|note|todo|...>] [--folder <name|path>] [--query <text>]")
-                return
-            }
-            var filterSpec = SavedViewFilterSpec()
-            if let typeStr = parseFlag("--type", from: args) {
-                let types = typeStr.split(separator: ",").compactMap { LibraryEntityType(rawValue: String($0)) }
-                filterSpec.entityTypes = Set(types)
-            }
-            if let folderArg = parseFlag("--folder", from: args) {
-                if let folder = findFolderStrict(folderArg) {
-                    filterSpec.folderID = folder.id
-                } else {
-                    return
-                }
-            }
-            if let query = parseFlag("--query", from: args) {
-                filterSpec.textQuery = query
-            }
-            let view = storage.createSavedView(name: name, filterSpec: filterSpec)
-            print("Created saved view '\(view.name)' (\(view.id.uuidString.prefix(8)))")
+            print("Error: Saved Views are legacy compatibility data. Use current Library routes, Spaces, or Project/Kanban routes instead.")
 
         case "create-kanban":
-            guard let name = args.first else {
-                print("Error: Usage: cider-cli view create-kanban <name> --board <board-name-or-id>")
-                return
-            }
-            guard let boardArg = parseFlag("--board", from: args) else {
-                print("Error: --board required")
-                return
-            }
-            let view = storage.createKanbanView(name: name, boardID: boardArg)
-            print("Created kanban view '\(view.name)' (\(view.id.uuidString.prefix(8)))")
+            print("Error: Kanban Saved Views are legacy compatibility data. Use cider-cli board create <name> [--project <project-id>] instead.")
 
         case "rename":
             guard let idPrefix = args.first else {
@@ -15650,38 +15616,14 @@ struct CiderCLI {
             }
 
         case "pin":
-            guard let idPrefix = args.first else {
-                print("Error: Usage: cider-cli view pin <id|name>")
-                return
-            }
-            guard let view = storage.savedViews.first(where: {
-                $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
-                $0.name.lowercased() == idPrefix.lowercased()
-            }) else {
-                print("Error: No saved view found matching '\(idPrefix)'")
-                return
-            }
-            storage.addToTabOrder(view.id)
-            print("Pinned '\(view.name)' to tab bar")
+            print("Error: SavedView tab pinning is disabled. Saved Views are legacy compatibility data.")
 
         case "unpin":
-            guard let idPrefix = args.first else {
-                print("Error: Usage: cider-cli view unpin <id|name>")
-                return
-            }
-            guard let view = storage.savedViews.first(where: {
-                $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
-                $0.name.lowercased() == idPrefix.lowercased()
-            }) else {
-                print("Error: No saved view found matching '\(idPrefix)'")
-                return
-            }
-            storage.removeFromTabOrder(view.id)
-            print("Unpinned '\(view.name)' from tab bar")
+            print("Error: SavedView tab pinning is disabled. Saved Views are legacy compatibility data.")
 
         default:
             print("Unknown view command: \(subcommand ?? "nil")")
-            print("Commands: list, get, create, create-kanban, rename, delete, pin, unpin")
+            print("Commands: list, get, rename, delete")
         }
     }
 

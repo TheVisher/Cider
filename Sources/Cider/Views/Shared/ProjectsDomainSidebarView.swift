@@ -98,23 +98,14 @@ struct ProjectsDomainSidebarView: View {
             return .overview
         case .projectInbox:
             return .inbox
+        case .projectBoard(_, let boardID, _):
+            return .board(boardID)
         case .projectSurface(_, let surface, _):
             return .surface(surface)
         case .projectReferences:
             return .surface(.assets)
-        case .savedView:
-            return selectedBoardID.map { .board($0) }
-        case .search, .tag, .domainDashboard, .spaceOverview, .spacesManager, .aiAssistant:
+        case .savedView, .search, .tag, .domainDashboard, .spaceOverview, .spacesManager, .aiAssistant:
             return nil
         }
-    }
-
-    private var selectedBoardID: String? {
-        guard case .savedView(let id, _) = selectedTab,
-              let savedView = SavedViewStorage.shared.savedView(for: id),
-              case .kanban(let boardID) = savedView.kind else {
-            return nil
-        }
-        return boardID
     }
 }

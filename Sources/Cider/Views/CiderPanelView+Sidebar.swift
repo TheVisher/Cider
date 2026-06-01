@@ -285,40 +285,14 @@ extension CiderPanelView {
         onlyUnassigned: Bool,
         entityTypes: Set<LibraryEntityType> = LibraryEntityType.activeCases
     ) {
-        let name = explicitName ?? (onlyUnassigned ? "Inbox" : "Library")
-
-        if let savedView = savedViewStorage.savedViews.first(where: {
-            $0.kind == .library
-                && $0.filterSpec.onlyUnassigned == onlyUnassigned
-                && $0.filterSpec.entityTypes == entityTypes
-        }) {
-            selectedTab = .savedView(id: savedView.id, name: savedView.name)
-            return
-        }
-
         if onlyUnassigned {
             homeDisplayMode = LibraryInboxPresentationPolicy.preferredDisplayMode
         }
-
-        let savedView = savedViewStorage.createSavedView(
-            name: name,
-            filterSpec: SavedViewFilterSpec(
-                entityTypes: entityTypes,
-                onlyUnassigned: onlyUnassigned
-            ),
-            layoutSpec: SavedViewLayoutSpec(
-                displayMode: onlyUnassigned ? LibraryInboxPresentationPolicy.preferredDisplayMode : .list
-            )
-        )
-        savedViewStorage.addToTabOrder(savedView.id)
-        selectedTab = .savedView(id: savedView.id, name: savedView.name)
+        selectedTab = .domainDashboard(.browse)
     }
 
     var dashboardTab: CiderTab? {
-        guard let savedView = savedViewStorage.savedViews.first(where: { $0.kind == .dashboard }) else {
-            return nil
-        }
-        return .savedView(id: savedView.id, name: savedView.name)
+        .domainDashboard(.mainDashboard)
     }
 
     func selectProjectWorkspace(_ workspace: ProjectWorkspace) {

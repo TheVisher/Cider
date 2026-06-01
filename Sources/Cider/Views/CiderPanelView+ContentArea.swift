@@ -236,6 +236,24 @@ extension CiderPanelView {
                         title: "Project Inbox not found"
                     )
                 }
+            case .projectBoard(let projectID, let boardID, _):
+                if let project = projectWorkspaceCatalog.workspace(id: projectID),
+                   kanbanStorage.boards.contains(where: { $0.id == boardID }) {
+                    projectWorkspaceContent(for: project, selectedKind: .board(boardID)) {
+                        KanbanBoardView(
+                            boardID: boardID,
+                            milestoneFilterCardID: kanbanMilestoneFilterByBoardID[boardID],
+                            projectHeaderTabs: projectHeaderTabs(for: project, selectedKind: .board(boardID)),
+                            onSelectProjectHeaderTab: selectProjectHeaderTab,
+                            onOpenCard: openKanbanCardDetail
+                        )
+                    }
+                } else {
+                    EmptyStateView(
+                        icon: "rectangle.split.3x1",
+                        title: "Project board not found"
+                    )
+                }
             case .projectSurface(let projectID, let surface, _):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
                     projectWorkspaceContent(for: project, selectedKind: .surface(surface)) {
@@ -713,23 +731,8 @@ extension CiderPanelView {
     }
 
     func openOrCreateOnboardingTab() {
-        // Check if an onboarding tab already exists in the tab bar
-        if let existing = savedViewStorage.savedViews.first(where: { $0.isOnboarding }),
-           savedViewStorage.tabOrder.contains(existing.id) {
-            selectedTab = .savedView(id: existing.id, name: existing.name)
-            selectedFolderID = nil
-            return
-        }
-        // Create a new onboarding tab at the front
-        let welcome = savedViewStorage.createSavedView(
-            name: "Welcome",
-            filterSpec: SavedViewFilterSpec(),
-            isBlank: true,
-            isOnboarding: true
-        )
-        savedViewStorage.insertInTabOrder(welcome.id, at: 0)
-        selectedTab = .savedView(id: welcome.id, name: welcome.name)
         selectedFolderID = nil
+        selectedTab = .domainDashboard(.mainDashboard)
     }
 
     // MARK: - noTabsEmptyState
@@ -784,19 +787,10 @@ extension CiderPanelView {
     func openDashboardTarget(_ target: HomeOverviewActionTarget) {
         switch target {
         case .inbox:
-            if let inbox = savedViewStorage.savedViews.first(where: {
-                $0.kind == .library && $0.filterSpec.onlyUnassigned
-            }) {
-                selectedFolderID = nil
-                selectedTab = .savedView(id: inbox.id, name: inbox.name)
-            } else {
-                let inbox = savedViewStorage.createSavedView(
-                    name: "Inbox",
-                    filterSpec: SavedViewFilterSpec(onlyUnassigned: true)
-                )
-                selectedFolderID = nil
-                selectedTab = .savedView(id: inbox.id, name: inbox.name)
-            }
+            selectedNavigationDomain = .browse
+            selectedDomainRouteKind = .inbox
+            selectedFolderID = nil
+            selectedTab = .domainDashboard(.browse)
         case .savedView(let name, let filterSpec, let sortMode):
             openDashboardLibraryView(named: name, filterSpec: filterSpec, sortMode: sortMode)
         }
@@ -809,9 +803,9 @@ extension CiderPanelView {
         } else {
             kanbanMilestoneFilterByBoardID[boardID] = nil
         }
-        let savedView = savedViewStorage.ensureKanbanView(name: board.name, boardID: board.id)
         selectedFolderID = nil
-        selectedTab = .savedView(id: savedView.id, name: savedView.name)
+        let projectID = selectedProjectWorkspace?.id ?? projectWorkspaceCatalog.browseAllBoards.id
+        selectedTab = .projectBoard(projectID: projectID, boardID: board.id, name: board.name)
     }
 
     func openMilestoneArtifact(_ link: ProjectWorkspaceMilestoneArtifactLink) {
@@ -904,15 +898,14 @@ extension CiderPanelView {
 
     func createProjectBoard(in project: ProjectWorkspace) {
         let board = kanbanStorage.createBoard(name: "Untitled Board")
-        let savedView = ProjectBoardRegistrationService.register(
+        ProjectBoardRegistrationService.register(
             board: board,
             projectID: project.id,
-            savedViewStorage: savedViewStorage,
             associationStore: projectAssociationStore
         )
         selectedProjectWorkspaceID = project.id
         selectedFolderID = nil
-        selectedTab = .savedView(id: savedView.id, name: savedView.name)
+        selectedTab = .projectBoard(projectID: project.id, boardID: board.id, name: board.name)
     }
 
     func projectArtifactRelations(for project: ProjectWorkspace) -> [SecondBrainRelation] {
@@ -997,21 +990,10 @@ extension CiderPanelView {
         filterSpec: SavedViewFilterSpec,
         sortMode: LibrarySortMode = .createdDescending
     ) {
-        if let existing = savedViewStorage.savedViews.first(where: {
-            $0.kind == .library && $0.name == name && $0.filterSpec == filterSpec
-        }) {
-            selectedFolderID = nil
-            selectedTab = .savedView(id: existing.id, name: existing.name)
-            return
-        }
-
-        let savedView = savedViewStorage.createSavedView(
-            name: name,
-            filterSpec: filterSpec,
-            sortSpec: SavedViewSortSpec(mode: sortMode)
-        )
+        selectedNavigationDomain = .browse
+        selectedDomainRouteKind = .all
         selectedFolderID = nil
-        selectedTab = .savedView(id: savedView.id, name: savedView.name)
+        selectedTab = .domainDashboard(.browse)
     }
 }
 

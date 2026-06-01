@@ -53,6 +53,12 @@ extension CiderPanelView {
         switch selectedTab {
         case .aiAssistant, .domainDashboard, .projectOverview, .projectInbox, .projectSurface, .projectReferences, .spaceOverview, .spacesManager:
             return CiderLivePerformanceContext(view: selectedTab.displayName, visibleItemCount: nil)
+        case .projectBoard(_, let boardID, let name):
+            let visibleCards = KanbanStorage.shared.boards
+                .first(where: { $0.id == boardID })?
+                .allCards
+                .count
+            return CiderLivePerformanceContext(view: name, visibleItemCount: visibleCards)
         case .search(_, let query):
             return CiderLivePerformanceContext(
                 view: query.isEmpty ? "Search" : "Search: \(query)",

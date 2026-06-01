@@ -774,13 +774,8 @@ final class KanbanStorage: ObservableObject {
         return nil
     }
 
-    /// Ensure every board YAML file has a corresponding SavedView tab entry.
-    /// Call once at app launch after both KanbanStorage and SavedViewStorage have loaded.
+    /// Legacy no-op retained for callers from the old generated-tab model.
+    /// Kanban boards now open through explicit project/board navigation.
     func syncTabsWithBoards() {
-        let savedViewStorage = SavedViewStorage.shared
-        for board in boards {
-            _ = savedViewStorage.ensureKanbanView(name: board.name, boardID: board.id)
-            logger.info("Ensured tab for board: \(board.name, privacy: .public)")
-        }
     }
 }

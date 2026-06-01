@@ -82,7 +82,7 @@ Key code: `Sources/Cider/Views/Dashboard/`, `Sources/Cider/Views/Home/`, `Source
 
 ## Spaces
 
-Spaces are domain surfaces over shared second-brain state, such as Media, Food, Projects, Finance, People, and Recipes. They can provide dashboards, routing hints, saved views, and domain-specific workflows, but they must not become independent storage silos.
+Spaces are domain surfaces over shared second-brain state, such as Media, Food, Projects, Finance, People, and Recipes. They can provide dashboards, routing hints, and domain-specific workflows, but they must not become independent storage silos.
 
 The target backend shape is a native SQLite `spaces` table for Space identity and instructions, with `space_memberships` and owner relations carrying semantic membership. Folder paths and `.cider-space.yaml` metadata remain compatibility/export surfaces until the cutover is proven.
 
@@ -118,11 +118,11 @@ Settings manage vault location, hotkeys, intelligence, storage, sync, update rem
 
 Key code: `Sources/Cider/Views/Settings/`, `Sources/Cider/Services/SyncService.swift`.
 
-## Saved Views And Sources
+## Legacy Saved Views And Sources
 
-Saved views are reusable lenses over Cider data, not separate storage containers. Sources and linked references help explain where an item came from and how it relates to other vault objects.
+Saved Views are a legacy compatibility model for older vault data and generated tabs. They should load without breaking launch, but active navigation should use current domains, Library routes, Spaces, and explicit Project/Kanban routes instead. Sources and linked references help explain where an item came from and how it relates to other vault objects.
 
-Key code: `Sources/Cider/Views/SavedViews/`, `Sources/Cider/Models/SavedView.swift`, `Sources/Cider/Services/SavedViewStorage.swift`.
+Key code: `Sources/Cider/Models/SavedView.swift`, `Sources/Cider/Services/SavedViewStorage.swift`.
 
 ## Whiteboard And Browser Sessions
 

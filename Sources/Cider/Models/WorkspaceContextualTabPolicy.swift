@@ -36,17 +36,16 @@ enum WorkspaceContextualTabPolicy {
         if domain == .projects, let selectedProject {
             switch selectedProject.kind {
             case .project:
-                return projectTabs(for: selectedProject, savedViews: savedViews, allTabs: domainTabs)
+                return projectTabs(for: selectedProject, allTabs: domainTabs)
             case .browseAllBoards:
-                return browseAllBoardTabs(for: selectedProject, selectedTab: selectedTab, savedViews: savedViews)
+                return browseAllBoardTabs(for: selectedProject, selectedTab: selectedTab)
             case .home:
                 break
             }
         }
 
-        let savedViewByID = Dictionary(uniqueKeysWithValues: savedViews.map { ($0.id, $0) })
         let matchingTabs = domainTabs.filter { tab in
-            isCompatibilityTab(tab) || matches(tab, domain: domain, savedViewByID: savedViewByID)
+            isCompatibilityTab(tab) || matches(tab, domain: domain)
         }
         if domain == .mainDashboard { return matchingTabs }
         return [CiderTab.domainDashboard(domain)] + matchingTabs
@@ -54,21 +53,14 @@ enum WorkspaceContextualTabPolicy {
 
     private static func projectTabs(
         for project: ProjectWorkspace,
-        savedViews: [SavedView],
         allTabs: [CiderTab]
     ) -> [CiderTab] {
-        let boardTabs = project.boardIDs.compactMap { boardID -> CiderTab? in
-            guard let savedView = savedViews.first(where: { savedView in
-                if case .kanban(let savedBoardID) = savedView.kind {
-                    return savedBoardID == boardID
-                }
-                return false
-            }) else { return nil }
-            return .savedView(id: savedView.id, name: savedView.name)
+        let boardTabs = project.boardIDs.map { boardID in
+            CiderTab.projectBoard(projectID: project.id, boardID: boardID, name: boardID)
         }
 
         let surfaceTabs = project.surfaces
-            .filter { $0 != .boards }
+            .filter { $0 != .boards && $0 != .milestones }
             .map { surface in
                 CiderTab.projectSurface(projectID: project.id, surface: surface, name: surface.tabName)
             }
@@ -86,21 +78,19 @@ enum WorkspaceContextualTabPolicy {
 
     private static func browseAllBoardTabs(
         for workspace: ProjectWorkspace,
-        selectedTab: CiderTab?,
-        savedViews: [SavedView]
+        selectedTab: CiderTab?
     ) -> [CiderTab] {
         var result: [CiderTab] = [
             .projectOverview(projectID: workspace.id, name: "All Boards")
         ]
 
-        guard case .savedView(let selectedID, let selectedName) = selectedTab,
-              let savedView = savedViews.first(where: { $0.id == selectedID }),
-              case .kanban(let boardID) = savedView.kind,
+        guard case .projectBoard(let projectID, let boardID, let selectedName) = selectedTab,
+              projectID == workspace.id,
               workspace.boardIDs.contains(boardID) else {
             return result
         }
 
-        result.append(.savedView(id: selectedID, name: selectedName))
+        result.append(.projectBoard(projectID: workspace.id, boardID: boardID, name: selectedName))
         return result
     }
 
@@ -109,49 +99,26 @@ enum WorkspaceContextualTabPolicy {
         if case .search = tab { return true }
         if case .tag = tab { return true }
         if case .spaceOverview = tab { return true }
+        if case .projectBoard = tab { return true }
         return false
     }
 
     private static func matches(
         _ tab: CiderTab,
-        domain: WorkspaceNavigationDomain,
-        savedViewByID: [UUID: SavedView]
+        domain: WorkspaceNavigationDomain
     ) -> Bool {
-        guard case .savedView(let id, _) = tab,
-              let savedView = savedViewByID[id] else {
-            return false
-        }
-
         switch domain {
         case .mainDashboard:
-            return savedView.kind == .dashboard
+            return false
         case .spaces:
             return false
         case .projects:
-            if case .kanban = savedView.kind { return true }
+            if case .projectBoard = tab { return true }
             return false
-        case .bookmarks:
-            return isLibraryView(savedView, scopedTo: [.bookmark])
-        case .notes:
-            return isLibraryView(savedView, scopedTo: [.note])
-        case .tasksEvents:
-            return isLibraryView(savedView, scopedTo: [.todo, .dateCard])
-        case .files:
-            return isLibraryView(savedView, scopedTo: [.vaultFile])
-        case .people:
-            return isLibraryView(savedView, scopedTo: [.contact])
-        case .browse:
-            return savedView.kind == .library
+        case .bookmarks, .notes, .tasksEvents, .files, .people, .browse:
+            return false
         case .media, .aiAssistant:
             return false
         }
-    }
-
-    private static func isLibraryView(_ savedView: SavedView, scopedTo entityTypes: Set<LibraryEntityType>) -> Bool {
-        guard savedView.kind == .library else { return false }
-        let activeTypes = savedView.filterSpec.entityTypes.isEmpty
-            ? LibraryEntityType.activeCases
-            : savedView.filterSpec.entityTypes
-        return !activeTypes.isDisjoint(with: entityTypes) && activeTypes.isSubset(of: entityTypes)
     }
 }

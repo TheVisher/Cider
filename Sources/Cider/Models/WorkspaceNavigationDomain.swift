@@ -43,7 +43,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         case .files: "Vault files and attachments"
         case .people: "Contacts and relationships"
         case .aiAssistant: "Ask questions and run agent workflows"
-        case .browse: "All items, folders, tags, and saved views"
+        case .browse: "All items, folders, and tags"
         }
     }
 

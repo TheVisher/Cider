@@ -86,7 +86,7 @@ struct CiderPanelView: View {
     @AppStorage("cider.sidebarProfileExpanded") var sidebarProfileExpanded: Bool = true
 
     var allTabs: [CiderTab] {
-        savedViewTabs + dynamicTabs
+        dynamicTabs
     }
 
     var contextualTabs: [CiderTab] {
@@ -109,12 +109,6 @@ struct CiderPanelView: View {
     var selectedProjectWorkspace: ProjectWorkspace? {
         guard selectedNavigationDomain == .projects else { return nil }
         return projectWorkspaceCatalog.workspace(id: selectedProjectWorkspaceID)
-    }
-
-    private var savedViewTabs: [CiderTab] {
-        savedViewStorage.tabOrderedViews().map { savedView in
-            .savedView(id: savedView.id, name: savedView.name)
-        }
     }
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
@@ -477,11 +471,9 @@ struct CiderPanelView: View {
                     handleQuickAction(action)
                 },
                 onSelectTag: { tag in
-                    let filter = SavedViewFilterSpec(labelIDs: [tag.id])
-                    let savedView = savedViewStorage.createSavedView(name: tag.name, filterSpec: filter)
-                    savedViewStorage.addToTabOrder(savedView.id)
                     selectedFolderID = nil
-                    selectedTab = .savedView(id: savedView.id, name: savedView.name)
+                    selectedTagIDs = [tag.id]
+                    selectedTab = .tag(id: UUID())
                 }
             )
         }

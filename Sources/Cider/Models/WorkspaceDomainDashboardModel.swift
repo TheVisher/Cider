@@ -40,13 +40,12 @@ enum WorkspaceDomainDashboardProvider {
         bookmarks: [Bookmark] = [],
         bookmarkFolders: [Folder] = []
     ) -> WorkspaceDomainDashboardModel {
-        let dashboardTabs = dashboardTabs(allTabs: allTabs, savedViews: savedViews)
         let compatibleTabs = WorkspaceContextualTabPolicy.tabs(
             for: domain,
-            allTabs: dashboardTabs,
-            savedViews: savedViews
+            allTabs: allTabs,
+            savedViews: []
         )
-        let items = compatibleTabs.compactMap { item(for: $0, savedViews: savedViews) }
+        let items = compatibleTabs.compactMap { item(for: $0) }
         var sections = section(for: domain, items: items).map { [$0] } ?? []
         sections.append(contentsOf: domainInsightSections(
             for: domain,
@@ -63,28 +62,8 @@ enum WorkspaceDomainDashboardProvider {
             primaryAction: primaryAction,
             sections: sections,
             emptyStateTitle: "No \(domain.title) dashboard items yet",
-            emptyStateSubtitle: "Use Library to see every tab, folder, saved view, and board while this domain gets richer."
+            emptyStateSubtitle: "Use Library to see every tab, folder, and board while this domain gets richer."
         )
-    }
-
-    private static func dashboardTabs(allTabs: [CiderTab], savedViews: [SavedView]) -> [CiderTab] {
-        var seenIDs = Set(allTabs.map(\.id))
-        var tabs = allTabs
-
-        for savedView in savedViews.sorted(by: savedViewSort) {
-            let tab = CiderTab.savedView(id: savedView.id, name: savedView.name)
-            guard seenIDs.contains(tab.id) == false else { continue }
-            seenIDs.insert(tab.id)
-            tabs.append(tab)
-        }
-
-        return tabs
-    }
-
-    private static func savedViewSort(_ lhs: SavedView, _ rhs: SavedView) -> Bool {
-        if lhs.isTabPinned != rhs.isTabPinned { return lhs.isTabPinned && !rhs.isTabPinned }
-        if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
-        return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
     }
 
     private static func section(
@@ -230,10 +209,7 @@ enum WorkspaceDomainDashboardProvider {
         )
     }
 
-    private static func item(
-        for tab: CiderTab,
-        savedViews: [SavedView]
-    ) -> WorkspaceDomainDashboardItem? {
+    private static func item(for tab: CiderTab) -> WorkspaceDomainDashboardItem? {
         switch tab {
         case .domainDashboard, .spacesManager:
             return nil
@@ -258,6 +234,14 @@ enum WorkspaceDomainDashboardProvider {
                 id: tab.id,
                 title: name,
                 subtitle: "\(projectID) unread agent work and review queue",
+                systemImage: tab.systemImage,
+                target: tab
+            )
+        case .projectBoard(let projectID, _, let name):
+            return WorkspaceDomainDashboardItem(
+                id: tab.id,
+                title: name,
+                subtitle: "\(projectID) Kanban board",
                 systemImage: tab.systemImage,
                 target: tab
             )
@@ -301,15 +285,8 @@ enum WorkspaceDomainDashboardProvider {
                 systemImage: "tag",
                 target: tab
             )
-        case .savedView(let id, let title):
-            let savedView = savedViews.first(where: { $0.id == id })
-            return WorkspaceDomainDashboardItem(
-                id: tab.id,
-                title: title,
-                subtitle: savedView?.kind.systemImage == nil ? nil : savedView?.name,
-                systemImage: savedView?.kind.systemImage ?? "square.grid.2x2",
-                target: tab
-            )
+        case .savedView:
+            return nil
         }
     }
 }

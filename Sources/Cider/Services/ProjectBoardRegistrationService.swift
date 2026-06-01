@@ -6,14 +6,12 @@ enum ProjectBoardRegistrationService {
     static func register(
         board: KanbanBoard,
         projectID: String?,
-        savedViewStorage: SavedViewStorage = .shared,
         associationStore: ProjectWorkspaceAssociationStore = .shared
-    ) -> SavedView {
-        let savedView = savedViewStorage.ensureKanbanView(name: board.name, boardID: board.id)
+    ) -> KanbanBoard {
         if let normalizedProjectID = normalizedProjectID(projectID) {
             associationStore.include(boardID: board.id, inProjectID: normalizedProjectID)
         }
-        return savedView
+        return board
     }
 
     static func normalizedProjectID(_ value: String?) -> String? {

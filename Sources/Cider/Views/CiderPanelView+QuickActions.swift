@@ -23,17 +23,17 @@ extension CiderPanelView {
         case .newTag:
             openOrSelectTagTab()
         case .newTab:
-            createSavedViewFromCurrentState()
+            openNavigationDomain(.browse)
         case .newKanban:
             let board = KanbanStorage.shared.createBoard(name: "Untitled Board")
-            let savedView = ProjectBoardRegistrationService.register(
+            ProjectBoardRegistrationService.register(
                 board: board,
                 projectID: selectedProjectWorkspaceID,
-                savedViewStorage: savedViewStorage,
                 associationStore: projectAssociationStore
             )
             selectedFolderID = nil
-            selectedTab = .savedView(id: savedView.id, name: savedView.name)
+            let projectID = selectedProjectWorkspaceID ?? projectWorkspaceCatalog.browseAllBoards.id
+            selectedTab = .projectBoard(projectID: projectID, boardID: board.id, name: board.name)
         case .openSettings:
             NotificationCenter.default.post(name: .openCiderSettings, object: nil)
         }

@@ -111,6 +111,12 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
     }
 
     func testDomainRoutesUseWorkflowDestinationsInsteadOfContentTypeDomains() {
+        for domain in WorkspaceNavigationDomain.allCases {
+            XCTAssertFalse(
+                WorkspaceDomainRoutePolicy.routes(for: domain).map(\.kind).contains(.savedViews),
+                "\(domain.title) should not expose legacy Saved Views route"
+            )
+        }
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .tasksEvents).map(\.kind),
             [.inbox]

@@ -24,7 +24,7 @@ struct TodoEditorContext: Identifiable {
 // MARK: - LibraryItemEditor
 
 /// Shared save/create helpers for date cards and contacts.
-/// Used by CiderPanelView, SavedViewTabContent, and any other surface
+/// Used by CiderPanelView and any other surface
 /// that needs to create or edit these entity types.
 enum LibraryItemEditor {
 
