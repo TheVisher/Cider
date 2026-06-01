@@ -4,6 +4,37 @@ import Testing
 
 @MainActor
 struct AgentCaptureToolResultTests {
+    private func makeTempVault() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-agent-capture-tool-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func withSharedIsolatedVault<T>(_ body: () throws -> T) throws -> T {
+        let previousOverride = StoragePaths.vaultOverride
+        let vault = try makeTempVault()
+        CiderDatabase.shared.close()
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        StoragePaths.ensureVaultStructure()
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        try FileManager.default.createDirectory(
+            at: dbURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try CiderDatabase.shared.open(at: dbURL)
+        ReminderReconciler.shared.setSkipReconcileWorkForTesting(true)
+        defer {
+            ReminderReconciler.shared.setSkipReconcileWorkForTesting(false)
+            CiderDatabase.shared.close()
+            StoragePaths.vaultOverride = previousOverride
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        return try body()
+    }
+
     @Test("agent capture tool formatter returns structured success payload")
     func agentCaptureToolFormatterReturnsStructuredSuccessPayload() throws {
         let itemID = UUID()
@@ -171,6 +202,76 @@ struct AgentCaptureToolResultTests {
         }
 
         #expect(violations.isEmpty, "Agent capture tools must return structured capture payloads:\n\(violations.joined(separator: "\n"))")
+    }
+
+    @Test("agent reminder and summary save tools use structured capture results")
+    func agentReminderAndSummarySaveToolsUseStructuredCaptureResults() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let files: [(URL, [String])] = [
+            (
+                repoRoot.appendingPathComponent("Sources/Cider/Services/AI/MLXToolExecutor.swift"),
+                ["private static func createReminder"]
+            ),
+            (
+                repoRoot.appendingPathComponent("Sources/Cider/Services/AI/AIAssistantTools.swift"),
+                ["struct CreateReminderTool", "struct SummarizeTextTool"]
+            ),
+        ]
+        var violations: [String] = []
+
+        for (fileURL, markers) in files {
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            let relativePath = fileURL.path.replacingOccurrences(of: repoRoot.path + "/", with: "")
+            for marker in markers {
+                guard let body = block(named: marker, in: source) else {
+                    violations.append("\(relativePath): missing \(marker) implementation")
+                    continue
+                }
+                if !body.contains("AgentCaptureToolResultFormatter.jsonString(") {
+                    violations.append("\(relativePath): \(marker) still returns prose-only capture output")
+                }
+            }
+        }
+
+        #expect(violations.isEmpty, "Agent reminder and summary-save tools must return structured capture payloads:\n\(violations.joined(separator: "\n"))")
+    }
+
+    @Test("MLX create reminder returns a structured capture payload")
+    func mlxCreateReminderReturnsStructuredCapturePayload() throws {
+        try withSharedIsolatedVault {
+            let output = MLXToolExecutor.execute(
+                name: "createReminder",
+                arguments: [
+                    "title": "CID343 structured reminder",
+                    "date": "2026-06-15",
+                    "details": "Verify assistant reminder capture JSON",
+                    "remindMinutesBefore": 30,
+                ]
+            )
+            let payload = try decodeJSON(output)
+
+            #expect(payload["toolResultVersion"] as? Int == 1)
+            #expect(payload["kind"] as? String == "capture")
+            #expect(payload["ok"] as? Bool == true)
+            #expect((payload["message"] as? String)?.contains("Created reminder") == true)
+            #expect(payload["nextSafeAction"] as? String != nil)
+
+            let item = try #require(payload["item"] as? [String: Any])
+            let itemID = try #require(item["id"] as? String)
+            let itemType = try #require(item["type"] as? String)
+            #expect(item["ref"] as? String == "\(itemType):\(itemID)")
+
+            let capture = try #require(payload["capture"] as? [String: Any])
+            let source = try #require(capture["source"] as? [String: Any])
+            #expect(source["itemID"] as? String == itemID)
+            #expect(source["itemType"] as? String == itemType)
+            #expect(capture["routing"] as? [String: Any] != nil)
+            #expect(capture["provenance"] as? [String: Any] != nil)
+            #expect(capture["indexing"] as? [String: Any] != nil)
+
+            let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+            #expect(safeNextCommands.contains("cider-cli item get \(itemType) \(itemID) --json"))
+        }
     }
 
     private func decodeJSON(_ output: String) throws -> [String: Any] {

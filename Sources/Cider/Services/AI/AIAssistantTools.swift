@@ -932,16 +932,28 @@ struct SummarizeTextTool: Tool {
                     )
                 )
                 guard let result else {
-                    return "Could not save summary as a note:\n\n\(summary)"
+                    return AgentCaptureToolResultFormatter.failureJsonString(
+                        message: "Could not save summary as a note.",
+                        code: "summary_note_capture_failed"
+                    )
                 }
 
                 if let folder {
                     if result.partialSuccess == nil {
-                        return "Summary saved as note \"\(title)\" in folder \"\(folder.name)\":\n\n\(summary)"
+                        return AgentCaptureToolResultFormatter.jsonString(
+                            message: "Summary saved as note \"\(title)\" in folder \"\(folder.name)\".",
+                            captureResult: result
+                        )
                     }
-                    return "Summary saved as note \"\(title)\" but failed to move it to folder \"\(folder.name)\":\n\n\(summary)"
+                    return AgentCaptureToolResultFormatter.jsonString(
+                        message: "Summary saved as note \"\(title)\" but failed to move it to folder \"\(folder.name)\".",
+                        captureResult: result
+                    )
                 }
-                return "Summary saved as note \"\(title)\":\n\n\(summary)"
+                return AgentCaptureToolResultFormatter.jsonString(
+                    message: "Summary saved as note \"\(title)\".",
+                    captureResult: result
+                )
             } }
         }
 
@@ -1316,14 +1328,22 @@ struct CreateReminderTool: Tool {
 
     nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let title = arguments.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return "Reminder title cannot be empty." }
+        guard !title.isEmpty else {
+            return AgentCaptureToolResultFormatter.failureJsonString(
+                message: "Reminder title cannot be empty.",
+                code: "missing_reminder_title"
+            )
+        }
 
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
         df.locale = Locale(identifier: "en_US_POSIX")
         df.timeZone = .current
         guard let date = df.date(from: arguments.date) else {
-            return "Invalid date format. Use yyyy-MM-dd (e.g. '2026-05-01')."
+            return AgentCaptureToolResultFormatter.failureJsonString(
+                message: "Invalid date format. Use yyyy-MM-dd (e.g. '2026-05-01').",
+                code: "invalid_reminder_date"
+            )
         }
 
         let details = arguments.details?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1344,7 +1364,10 @@ struct CreateReminderTool: Tool {
         ),
               var card = DateCardStorage.shared.dateCard(for: result.item.id)
         else {
-            return "Failed to create reminder (disk write failed)."
+            return AgentCaptureToolResultFormatter.failureJsonString(
+                message: "Failed to create reminder (disk write failed).",
+                code: "reminder_capture_failed"
+            )
         }
 
         // Recurrence
@@ -1356,7 +1379,11 @@ struct CreateReminderTool: Tool {
             case "weekly": freq = .weekly
             case "monthly": freq = .monthly
             case "yearly": freq = .yearly
-            default: return "Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly."
+            default:
+                return AgentCaptureToolResultFormatter.failureJsonString(
+                    message: "Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly.",
+                    code: "invalid_reminder_frequency"
+                )
             }
             card.recurrenceRule = DateCardRecurrenceRule(frequency: freq)
         }
@@ -1379,7 +1406,10 @@ struct CreateReminderTool: Tool {
             .compactMap(\.integerValue)
             .map { $0 == 0 ? "at time" : "\($0) min before" }
             .joined(separator: ", ")
-        return "Created reminder: \"\(title)\" on \(arguments.date)\(recurring). Reminders: \(remindDesc)."
+        return AgentCaptureToolResultFormatter.jsonString(
+            message: "Created reminder: \"\(title)\" on \(arguments.date)\(recurring). Reminders: \(remindDesc).",
+            captureResult: result
+        )
     } } }
 }
 

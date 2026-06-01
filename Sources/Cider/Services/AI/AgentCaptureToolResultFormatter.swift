@@ -33,6 +33,7 @@ enum AgentCaptureToolResultFormatter {
             "routing": captureDict["routing"] as? [String: Any] ?? [:],
             "partialFailures": partialFailures,
             "nextSafeAction": captureResult.nextSafeAction,
+            "safeNextCommands": captureDict["safeNextCommands"] as? [String] ?? [],
             "capture": captureDict,
         ]
         if let captureEventID = captureDict["captureEventID"] {
@@ -41,6 +42,37 @@ enum AgentCaptureToolResultFormatter {
         if let captureEventOwner = captureDict["captureEventOwner"] {
             payload["captureEventOwner"] = captureEventOwner
         }
+
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            return message
+        }
+        return json
+    }
+
+    static func failureJsonString(
+        message: String,
+        code: String,
+        safeNextCommands: [String] = []
+    ) -> String {
+        let payload: [String: Any] = [
+            "toolResultVersion": 1,
+            "kind": "capture",
+            "ok": false,
+            "message": message,
+            "error": [
+                "code": code,
+                "message": message,
+            ],
+            "partialFailures": [
+                [
+                    "status": code,
+                    "reason": message,
+                ]
+            ],
+            "safeNextCommands": safeNextCommands,
+        ]
 
         guard JSONSerialization.isValidJSONObject(payload),
               let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),

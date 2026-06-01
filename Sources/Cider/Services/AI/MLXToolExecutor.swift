@@ -827,18 +827,27 @@ enum MLXToolExecutor {
         MutationAuditContext.withSource(.agent) {
         let title = string("title", from: args)
         guard !title.isEmpty else {
-            return "Reminder title is required."
+            return AgentCaptureToolResultFormatter.failureJsonString(
+                message: "Reminder title is required.",
+                code: "missing_reminder_title"
+            )
         }
         let dateStr = string("date", from: args)
         guard !dateStr.isEmpty else {
-            return "Date is required (yyyy-MM-dd format)."
+            return AgentCaptureToolResultFormatter.failureJsonString(
+                message: "Date is required (yyyy-MM-dd format).",
+                code: "missing_reminder_date"
+            )
         }
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
         df.locale = Locale(identifier: "en_US_POSIX")
         df.timeZone = .current
         guard let date = df.date(from: dateStr) else {
-            return "Invalid date format. Use yyyy-MM-dd (e.g. '2026-05-01')."
+            return AgentCaptureToolResultFormatter.failureJsonString(
+                message: "Invalid date format. Use yyyy-MM-dd (e.g. '2026-05-01').",
+                code: "invalid_reminder_date"
+            )
         }
 
         let loc = string("location", from: args)
@@ -859,7 +868,10 @@ enum MLXToolExecutor {
         ),
               var card = DateCardStorage.shared.dateCard(for: result.item.id)
         else {
-            return "Failed to create reminder (disk write failed)."
+            return AgentCaptureToolResultFormatter.failureJsonString(
+                message: "Failed to create reminder (disk write failed).",
+                code: "reminder_capture_failed"
+            )
         }
 
         // Recurrence
@@ -871,7 +883,11 @@ enum MLXToolExecutor {
             case "weekly": freq = .weekly
             case "monthly": freq = .monthly
             case "yearly": freq = .yearly
-            default: return "Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly."
+            default:
+                return AgentCaptureToolResultFormatter.failureJsonString(
+                    message: "Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly.",
+                    code: "invalid_reminder_frequency"
+                )
             }
             card.recurrenceRule = DateCardRecurrenceRule(frequency: freq)
         }
@@ -887,7 +903,10 @@ enum MLXToolExecutor {
         ReminderReconciler.shared.reconcile()
 
         let recurring = card.recurrenceRule != nil ? " (recurring \(card.recurrenceRule!.frequency.rawValue))" : ""
-        return "Created reminder: \"\(title)\" on \(dateStr)\(recurring)."
+        return AgentCaptureToolResultFormatter.jsonString(
+            message: "Created reminder: \"\(title)\" on \(dateStr)\(recurring).",
+            captureResult: result
+        )
         }
     }
 

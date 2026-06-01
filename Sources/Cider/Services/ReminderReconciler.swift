@@ -19,6 +19,10 @@ final class ReminderReconciler {
     private var reconcileHookForTesting: (() -> Void)?
     private var skipReconcileWorkForTesting = false
 
+    func setSkipReconcileWorkForTesting(_ skip: Bool) {
+        skipReconcileWorkForTesting = skip
+    }
+
     /// Call on app launch, wake-from-sleep, time zone change, vault changes, and day rollover.
     func reconcile() {
         reconcileHookForTesting?()
