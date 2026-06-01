@@ -321,10 +321,12 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.recentCaptureItems.map(\.sourceTypeLabel), ["URL", "Text", "Todo", "Image"])
         XCTAssertEqual(snapshot.recentCaptureItems.map(\.itemTypeLabel), ["Bookmark", "Note", "Todo", "File"])
         XCTAssertEqual(snapshot.recentCaptureItems.map(\.destinationLabel), ["Inbox / Unfiled", "Inbox / Unfiled", "Research", "Inbox / Unfiled"])
-        XCTAssertEqual(snapshot.recentCaptureItems.map(\.reviewState), ["needs_review", "needs_review", "pending", "needs_review"])
-        XCTAssertEqual(snapshot.recentCaptureItems.map(\.reviewNeeded), [true, true, false, true])
+        XCTAssertEqual(snapshot.recentCaptureItems.map(\.reviewState), ["needs_review", "ok", "pending", "ok"])
+        XCTAssertEqual(snapshot.recentCaptureItems.map(\.reviewNeeded), [true, false, false, false])
         XCTAssertEqual(snapshot.recentCaptureItems[0].safeFollowUpActions, ["Review", "Check metadata", "Open item", "Defer"])
+        XCTAssertEqual(snapshot.recentCaptureItems[1].safeFollowUpActions, ["Open item"])
         XCTAssertEqual(snapshot.recentCaptureItems[2].safeFollowUpActions, ["Review reminder", "Open item", "Defer"])
+        XCTAssertEqual(snapshot.recentCaptureItems[3].safeFollowUpActions, ["Open item"])
         XCTAssertFalse(snapshot.recentCaptureItems[2].safeFollowUpActions.contains("Create reminder"))
     }
 
@@ -530,22 +532,105 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(snapshot.reviewCockpitItems.map(\.title), ["Routed capture", "Needs metadata"])
-        XCTAssertEqual(snapshot.reviewCockpitItems[0].kindLabel, "Routing")
-        XCTAssertEqual(snapshot.reviewCockpitItems[0].reason, "Low confidence route.")
-        XCTAssertEqual(snapshot.reviewCockpitItems[0].confidenceLabel, "62% confidence")
-        XCTAssertEqual(snapshot.reviewCockpitItems[0].targetLabel, "Spaces/Research")
-        XCTAssertTrue(snapshot.reviewCockpitItems[0].canApprove)
+        XCTAssertEqual(snapshot.reviewCockpitItems.map(\.title), ["Needs metadata"])
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].kindLabel, "Enrichment")
+        XCTAssertNil(snapshot.reviewCockpitItems[0].confidenceLabel)
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].targetLabel, "Inbox/Bookmarks/Needs metadata.webloc")
+        XCTAssertFalse(snapshot.reviewCockpitItems[0].canApprove)
         XCTAssertTrue(snapshot.reviewCockpitItems[0].canCorrect)
-        XCTAssertTrue(snapshot.reviewCockpitItems[0].canDefer)
-        XCTAssertEqual(snapshot.reviewCockpitItems[0].item?.id, "bookmark-\(bookmark.id.uuidString)")
+        XCTAssertFalse(snapshot.reviewCockpitItems[0].canDefer)
+    }
 
-        XCTAssertEqual(snapshot.reviewCockpitItems[1].kindLabel, "Enrichment")
-        XCTAssertNil(snapshot.reviewCockpitItems[1].confidenceLabel)
-        XCTAssertEqual(snapshot.reviewCockpitItems[1].targetLabel, "Inbox/Bookmarks/Needs metadata.webloc")
-        XCTAssertFalse(snapshot.reviewCockpitItems[1].canApprove)
-        XCTAssertTrue(snapshot.reviewCockpitItems[1].canCorrect)
-        XCTAssertFalse(snapshot.reviewCockpitItems[1].canDefer)
+    func testDashboardReviewCockpitSuppressesLegacyFolderRoutingNoise() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let bookmarkID = UUID()
+        let routingItem = CiderReviewQueueItem(
+            id: "review-routing-\(UUID().uuidString)",
+            kind: "low_confidence_routing",
+            source: "routing_decision",
+            itemID: bookmarkID,
+            itemType: "bookmark",
+            title: "Routine route",
+            relativePath: "Inbox/Bookmarks/Routine route.webloc",
+            reason: "Low confidence route.",
+            suggestedAction: "Approve or correct route",
+            reviewState: "needs_review",
+            confidence: 0.62,
+            routingDecisionID: UUID(),
+            target: nil,
+            createdAt: now,
+            safeActions: ["approve", "correct", "defer"]
+        )
+        let inboxItem = CiderReviewQueueItem(
+            id: "review-inbox-\(UUID().uuidString)",
+            kind: "inbox_backlog",
+            source: "inbox",
+            itemID: UUID(),
+            itemType: "note",
+            title: "Routine inbox note",
+            relativePath: "Inbox/Notes/Routine inbox note.md",
+            reason: "Still in Inbox.",
+            suggestedAction: "Route to folder",
+            reviewState: "needs_review",
+            confidence: nil,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now,
+            safeActions: ["correct", "defer"]
+        )
+        let enrichmentItem = CiderReviewQueueItem(
+            id: "review-enrichment-\(UUID().uuidString)",
+            kind: "enrichment_failed",
+            source: "enrichment",
+            itemID: UUID(),
+            itemType: "bookmark",
+            title: "Needs metadata",
+            relativePath: "Inbox/Bookmarks/Needs metadata.webloc",
+            reason: "Metadata fetch failed.",
+            suggestedAction: "Enrich before routing",
+            reviewState: "needs_review",
+            confidence: nil,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now,
+            safeActions: ["enrich", "correct", "defer"]
+        )
+        let duplicateItem = CiderReviewQueueItem(
+            id: "review-duplicate-\(UUID().uuidString)",
+            kind: "duplicate_candidate",
+            source: "duplicate",
+            itemID: UUID(),
+            itemType: "bookmark",
+            title: "Possible duplicate",
+            relativePath: "Inbox/Bookmarks/Possible duplicate.webloc",
+            reason: "Possible duplicate URL.",
+            suggestedAction: "Review duplicate",
+            reviewState: "needs_review",
+            confidence: nil,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now,
+            safeActions: ["correct", "defer"]
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: [routingItem, inboxItem, enrichmentItem, duplicateItem],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.reviewCockpitItems.map(\.title), ["Needs metadata", "Possible duplicate"])
+        XCTAssertEqual(
+            snapshot.reviewCockpitSummary.badges,
+            [
+                HomeReviewCockpitBadge(id: "kind-duplicate_candidate", label: "Duplicate", value: 1),
+                HomeReviewCockpitBadge(id: "kind-enrichment_failed", label: "Enrichment", value: 1),
+            ]
+        )
+        XCTAssertEqual(snapshot.reviewCockpitSummary.totalCount, 2)
     }
 
     func testReviewCockpitToleratesDuplicateLibraryItemUUIDs() {
@@ -569,20 +654,20 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         )
         let reviewItem = CiderReviewQueueItem(
             id: "review-duplicate-\(UUID().uuidString)",
-            kind: "low_confidence_routing",
-            source: "routing_decision",
+            kind: "duplicate_candidate",
+            source: "duplicate",
             itemID: bookmarkID,
             itemType: "bookmark",
             title: "Duplicate-safe capture",
             relativePath: "Inbox/Bookmarks/Duplicate-safe capture.webloc",
-            reason: "Needs routing review.",
-            suggestedAction: "Approve or correct route",
+            reason: "Possible duplicate bookmark.",
+            suggestedAction: "Review duplicate",
             reviewState: "needs_review",
-            confidence: 0.71,
-            routingDecisionID: UUID(),
+            confidence: nil,
+            routingDecisionID: nil,
             target: nil,
             createdAt: now,
-            safeActions: ["approve", "correct"]
+            safeActions: ["correct", "defer"]
         )
 
         let snapshot = HomeOverviewDataProvider.makeSnapshot(
@@ -684,13 +769,11 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(snapshot.reviewCockpitSummary.totalCount, 9)
+        XCTAssertEqual(snapshot.reviewCockpitSummary.totalCount, 4)
         XCTAssertEqual(
             snapshot.reviewCockpitSummary.badges,
             [
                 HomeReviewCockpitBadge(id: "kind-enrichment_failed", label: "Enrichment", value: 4),
-                HomeReviewCockpitBadge(id: "kind-low_confidence_routing", label: "Routing", value: 3),
-                HomeReviewCockpitBadge(id: "kind-inbox_backlog", label: "Inbox", value: 2),
             ]
         )
         XCTAssertEqual(snapshot.reviewCockpitSummary.safeActionCounts["enrich"], 4)
@@ -726,7 +809,6 @@ final class HomeOverviewDataProviderTests: XCTestCase {
     func testReviewCockpitSummaryBuildsVisibleLanesAndExplicitBatchControl() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let enrichmentID = UUID()
-        let routingID = UUID()
         let enrichmentItem = CiderReviewQueueItem(
             id: "review-enrichment-\(enrichmentID.uuidString)",
             kind: "enrichment",
@@ -743,28 +825,6 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             target: nil,
             createdAt: now,
             safeActions: ["enrich", "correct", "defer"]
-        )
-        let routingItem = CiderReviewQueueItem(
-            id: "review-routing-\(routingID.uuidString)",
-            kind: "low_confidence_routing",
-            source: "routing",
-            itemID: routingID,
-            itemType: "bookmark",
-            title: "Confirm Route",
-            relativePath: "Inbox/Bookmarks/Confirm Route.webloc",
-            reason: "Routing confidence is low.",
-            suggestedAction: "Approve or correct route",
-            reviewState: "needs_review",
-            confidence: 0.62,
-            routingDecisionID: UUID(),
-            target: CiderRoutingDecisionTarget(
-                kind: "folder",
-                name: "Research",
-                relativePath: "Spaces/Research",
-                folderID: nil
-            ),
-            createdAt: now.addingTimeInterval(-60),
-            safeActions: ["approve", "correct", "defer"]
         )
         let summary = HomeOverviewDataProvider.makeSnapshot(
             items: [],
@@ -787,15 +847,6 @@ final class HomeOverviewDataProviderTests: XCTestCase {
                         itemType: "bookmark",
                         count: 234,
                         sampleItems: [enrichmentItem]
-                    ),
-                    CiderReviewQueueGroup(
-                        id: "low_confidence_routing:needs_review:approve:bookmark",
-                        kind: "low_confidence_routing",
-                        reviewState: "needs_review",
-                        requiredSafeAction: "approve",
-                        itemType: "bookmark",
-                        count: 2,
-                        sampleItems: [routingItem]
                     ),
                 ],
                 batchEnrichmentPreview: CiderReviewQueueBatchEnrichmentPreview(
@@ -822,14 +873,6 @@ final class HomeOverviewDataProviderTests: XCTestCase {
                     actionLabel: "Enrich",
                     sampleTitles: ["Needs Metadata"],
                     keepsRoutingSeparate: true
-                ),
-                HomeReviewCockpitLane(
-                    id: "low_confidence_routing:needs_review:approve:bookmark",
-                    title: "Routing",
-                    count: 2,
-                    actionLabel: "Approve",
-                    sampleTitles: ["Confirm Route"],
-                    keepsRoutingSeparate: false
                 ),
             ]
         )
@@ -981,8 +1024,8 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         let reviewBookmarks = (0..<6).map { index in
             Bookmark(
                 id: UUID(),
-                title: "Routing review \(index)",
-                urlString: "https://example.com/routing-\(index)",
+                title: "Metadata review \(index)",
+                urlString: "https://example.com/metadata-\(index)",
                 createdAt: now.addingTimeInterval(TimeInterval(-index * 60)),
                 updatedAt: now,
                 folderID: nil
@@ -990,26 +1033,21 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         }
         let reviewItems = reviewBookmarks.enumerated().map { index, bookmark in
             CiderReviewQueueItem(
-                id: "review-routing-\(index)",
-                kind: "low_confidence_routing",
-                source: "routing_decision",
+                id: "review-enrichment-\(index)",
+                kind: "enrichment_failed",
+                source: "enrichment",
                 itemID: bookmark.id,
                 itemType: "bookmark",
                 title: bookmark.title,
                 relativePath: "Inbox/Bookmarks/\(bookmark.title).webloc",
-                reason: "Low confidence route.",
-                suggestedAction: "Approve or correct route",
+                reason: "Metadata fetch failed.",
+                suggestedAction: "Enrich before routing",
                 reviewState: "needs_review",
-                confidence: 0.62,
-                routingDecisionID: UUID(),
-                target: CiderRoutingDecisionTarget(
-                    kind: "folder",
-                    name: "Research",
-                    relativePath: "Spaces/Research",
-                    folderID: nil
-                ),
+                confidence: nil,
+                routingDecisionID: nil,
+                target: nil,
                 createdAt: now.addingTimeInterval(TimeInterval(-index)),
-                safeActions: ["approve", "correct", "defer"]
+                safeActions: ["enrich", "correct", "defer"]
             )
         }
         let deadlineBookmark = Bookmark(

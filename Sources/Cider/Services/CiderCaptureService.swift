@@ -94,6 +94,14 @@ struct CiderCaptureResult {
         var reviewState: String
         var status: String = "not_applicable"
         var statusReason: String? = nil
+
+        var needsAgentRouteReview: Bool {
+            reviewNeeded && status != "recorded"
+        }
+
+        var defaultNextSafeAction: String {
+            needsAgentRouteReview ? "review_route" : "inspect_item"
+        }
     }
 
     struct PartialSuccess {
@@ -248,7 +256,7 @@ struct CiderCaptureResult {
         if let existingItemID = duplicate.existingItemID {
             commands.append("cider-cli item get \(item.type) \(existingItemID.uuidString) --json")
         }
-        if routing.reviewNeeded {
+        if routing.needsAgentRouteReview {
             commands.append("cider-cli routing explain \(item.id.uuidString) --json")
             commands.append("cider-cli review list --item-type \(item.type) --state needs_review --limit 10 --json")
         }
@@ -754,7 +762,7 @@ final class CiderCaptureService {
             titleState: manualTitle == nil ? "derived" : "manual",
             duplicateStatus: "not_checked",
             routing: routing,
-            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            nextSafeAction: routing.defaultNextSafeAction,
             partialSuccess: partialSuccess,
             sourceContext: sourceContext
         )
@@ -820,7 +828,7 @@ final class CiderCaptureService {
             titleState: manualTitle == nil ? "derived" : "manual",
             duplicateStatus: "not_checked",
             routing: routing,
-            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            nextSafeAction: routing.defaultNextSafeAction,
             partialSuccess: partialSuccess,
             sourceContext: sourceContext
         )
@@ -866,7 +874,7 @@ final class CiderCaptureService {
             titleState: "manual",
             duplicateStatus: "not_checked",
             routing: routing,
-            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            nextSafeAction: routing.defaultNextSafeAction,
             partialSuccess: thumbnailPartialSuccess(didAssignThumbnail: didAssignThumbnail),
             sourceContext: sourceContext
         )
@@ -983,7 +991,7 @@ final class CiderCaptureService {
             titleState: titleState,
             duplicateStatus: "new",
             routing: routing,
-            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            nextSafeAction: routing.defaultNextSafeAction,
             partialSuccess: partialSuccess,
             sourceContext: sourceContext
         )
@@ -1070,7 +1078,7 @@ final class CiderCaptureService {
             titleState: titleState,
             duplicateStatus: "not_checked",
             routing: routing,
-            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            nextSafeAction: routing.defaultNextSafeAction,
             partialSuccess: partialSuccess,
             sourceContext: sourceContext
         )
@@ -1156,7 +1164,7 @@ final class CiderCaptureService {
             titleState: titleState,
             duplicateStatus: "not_checked",
             routing: routing,
-            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            nextSafeAction: routing.defaultNextSafeAction,
             partialSuccess: partialSuccess,
             sourceContext: sourceContext
         )
@@ -1245,7 +1253,7 @@ final class CiderCaptureService {
             titleState: file.title == nil ? "filename_derived" : "manual",
             duplicateStatus: "not_checked",
             routing: routing,
-            nextSafeAction: routing.reviewNeeded ? "review_route" : "inspect_item",
+            nextSafeAction: routing.defaultNextSafeAction,
             sourceContext: sourceContext
         )
     }

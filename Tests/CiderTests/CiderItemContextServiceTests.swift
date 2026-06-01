@@ -204,9 +204,10 @@ struct CiderItemContextServiceTests {
         let packet = try CiderItemContextService(database: db).agentContext(for: ref)
         let homeSurfacing = try #require(snapshot.recentCaptureItems.first?.surfacingExplanation)
 
-        #expect(packet.surfacing.reason == homeSurfacing.reason)
         #expect(packet.surfacing.reviewState == homeSurfacing.reviewState)
         #expect(packet.surfacing.suggestedAction == homeSurfacing.suggestedAction)
+        #expect(packet.surfacing.reviewState == "ok")
+        #expect(packet.surfacing.suggestedAction == "Open")
     }
 
     @Test("search returns item title matches and chunk text matches through one surface")

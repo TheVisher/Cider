@@ -14,26 +14,20 @@ enum CiderSurfacingExplanationService {
     }
 
     static func itemContextExplanation(for item: CiderItemSummary) -> CiderSurfacingExplanation? {
-        guard item.folderID == nil || isInboxPath(item.relativePath) else { return nil }
         switch item.type {
         case .bookmark:
-            return reviewExplanation(
-                reason: "Still in Inbox / unfiled",
-                suggestedAction: "Route to folder",
-                sourceSignal: "item_context"
-            )
+            return nil
         case .note:
-            return reviewExplanation(
-                reason: "Inbox note needs routing",
-                suggestedAction: "Route to folder",
-                sourceSignal: "item_context"
-            )
+            if isUntitled(item.title) {
+                return reviewExplanation(
+                    reason: "Untitled inbox note",
+                    suggestedAction: "Ask Erik",
+                    sourceSignal: "item_context"
+                )
+            }
+            return nil
         case .vaultFile:
-            return reviewExplanation(
-                reason: "Unfiled vault file",
-                suggestedAction: "Route to folder",
-                sourceSignal: "item_context"
-            )
+            return nil
         default:
             return nil
         }
@@ -59,14 +53,11 @@ enum CiderSurfacingExplanationService {
         case .bookmark(let bookmark):
             if bookmarkGenericTitleReason(bookmark) != nil { return "Clean up title" }
             if bookmarkNeedsEnrichment(bookmark) { return "Needs enrichment" }
-            if bookmark.folderID == nil { return "Route to folder" }
             return "Open"
         case .note(let note):
             if isUntitled(note.title) { return "Ask Erik" }
-            if note.folderID == nil || isInboxPath(note.relativePath) { return "Route to folder" }
             return "Open"
-        case .vaultFile(let file):
-            if file.folderID == nil || isInboxPath(file.relativePath) { return "Route to folder" }
+        case .vaultFile:
             return "Open"
         case .todo(let todo):
             if todo.isCompleted { return "Review" }
@@ -83,14 +74,11 @@ enum CiderSurfacingExplanationService {
         case .bookmark(let bookmark):
             if let reason = bookmarkGenericTitleReason(bookmark) { return reason }
             if bookmarkNeedsEnrichment(bookmark) { return "Bookmark needs enrichment" }
-            if bookmark.folderID == nil { return "Still in Inbox / unfiled" }
             return "Recently captured bookmark"
         case .note(let note):
             if isUntitled(note.title) { return "Untitled inbox note" }
-            if note.folderID == nil || isInboxPath(note.relativePath) { return "Inbox note needs routing" }
             return "Recently captured note"
-        case .vaultFile(let file):
-            if file.folderID == nil || isInboxPath(file.relativePath) { return "Unfiled vault file" }
+        case .vaultFile:
             return "Recently captured file"
         case .todo(let todo):
             if todo.isCompleted { return "Completed todo surfaced recently" }
@@ -104,7 +92,7 @@ enum CiderSurfacingExplanationService {
 
     private static func surfacingUrgency(for suggestedAction: String) -> String {
         switch suggestedAction {
-        case "Clean up title", "Needs enrichment", "Route to folder", "Ask Erik":
+        case "Clean up title", "Needs enrichment", "Ask Erik":
             return "review"
         case "Add reminder", "Add action URL", "Do next":
             return "action"
@@ -115,7 +103,7 @@ enum CiderSurfacingExplanationService {
 
     private static func surfacingReviewState(for suggestedAction: String) -> String {
         switch suggestedAction {
-        case "Clean up title", "Needs enrichment", "Route to folder", "Ask Erik":
+        case "Clean up title", "Needs enrichment", "Ask Erik":
             return "needs_review"
         case "Add reminder", "Add action URL":
             return "pending"

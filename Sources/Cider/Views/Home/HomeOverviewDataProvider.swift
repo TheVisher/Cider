@@ -120,8 +120,9 @@ enum HomeOverviewDataProvider {
             }
             .prefix(4)
             .map { $0 }
+        let visibleReviewQueueItems = reviewQueueItems.filter(isVisibleReviewCockpitItem)
         let reviewCockpitItems = reviewCockpitItems(
-            from: reviewQueueItems,
+            from: visibleReviewQueueItems,
             bookmarkDateSuggestionResults: bookmarkDateSuggestionResults,
             libraryItems: items
         )
@@ -263,7 +264,7 @@ enum HomeOverviewDataProvider {
             reviewCockpitItems: reviewCockpitItems,
             reviewCockpitSummary: reviewCockpitSummary(
                 from: reviewQueueSummary,
-                fallbackItems: reviewQueueItems,
+                fallbackItems: visibleReviewQueueItems,
                 now: now
             ),
             triageItems: triageItems,
@@ -555,6 +556,19 @@ enum HomeOverviewDataProvider {
         return cappedReviewCockpitItems(queueItems: queueItems, suggestionItems: suggestionItems)
     }
 
+    private static func isVisibleReviewCockpitItem(_ item: CiderReviewQueueItem) -> Bool {
+        isVisibleReviewCockpitKind(item.kind)
+    }
+
+    private static func isVisibleReviewCockpitKind(_ kind: String) -> Bool {
+        switch kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "low_confidence_routing", "deferred_routing", "inbox_backlog":
+            return false
+        default:
+            return true
+        }
+    }
+
     private static func cappedReviewCockpitItems(
         queueItems: [HomeReviewCockpitItem],
         suggestionItems: [HomeReviewCockpitItem],
@@ -575,13 +589,20 @@ enum HomeOverviewDataProvider {
         now: Date
     ) -> HomeReviewCockpitSummary {
         if let summary {
+            let visibleCountsByKind = summary.countsByKind.filter { kind, _ in
+                isVisibleReviewCockpitKind(kind)
+            }
+            let visibleGroups = summary.groups.filter { group in
+                isVisibleReviewCockpitKind(group.kind)
+            }
+
             return HomeReviewCockpitSummary(
-                totalCount: summary.totalCount,
-                badges: reviewCockpitBadges(from: summary.countsByKind),
+                totalCount: visibleCountsByKind.values.reduce(0, +),
+                badges: reviewCockpitBadges(from: visibleCountsByKind),
                 itemTypeCounts: summary.countsByItemType,
                 reviewStateCounts: summary.countsByReviewState,
                 safeActionCounts: summary.countsBySafeAction,
-                groups: reviewCockpitGroups(from: summary.groups),
+                groups: reviewCockpitGroups(from: visibleGroups),
                 batchEnrichmentPreview: reviewCockpitBatchEnrichmentPreview(from: summary.batchEnrichmentPreview),
                 generatedAt: summary.generatedAt
             )
@@ -888,35 +909,18 @@ enum HomeOverviewDataProvider {
                     confidenceLabel: "Needs approval"
                 )
             }
-            if bookmark.folderID == nil {
-                return HomeTriageItem(
-                    id: "triage-\(item.id)-folder",
-                    item: item,
-                    reason: "Still in Inbox / unfiled",
-                    suggestedAction: "Route to folder",
-                    confidenceLabel: "Needs approval"
-                )
-            }
         case .note(let note):
-            if note.folderID == nil || isInboxPath(note.relativePath) || isUntitled(note.title) {
+            if isUntitled(note.title) {
                 return HomeTriageItem(
                     id: "triage-\(item.id)-note",
                     item: item,
-                    reason: isUntitled(note.title) ? "Untitled inbox note" : "Inbox note needs routing",
+                    reason: "Untitled inbox note",
                     suggestedAction: "Ask Erik",
                     confidenceLabel: "Low confidence"
                 )
             }
-        case .vaultFile(let file):
-            if file.folderID == nil || isInboxPath(file.relativePath) || file.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-                return HomeTriageItem(
-                    id: "triage-\(item.id)-file",
-                    item: item,
-                    reason: "Unfiled vault file",
-                    suggestedAction: "Route to folder",
-                    confidenceLabel: "Needs approval"
-                )
-            }
+        case .vaultFile:
+            return nil
         case .dateCard, .contact, .todo:
             return nil
         }
