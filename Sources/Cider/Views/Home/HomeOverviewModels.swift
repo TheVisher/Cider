@@ -22,7 +22,6 @@ enum HomeTelemetryMetricKind: String, CaseIterable, Equatable {
 
 enum HomeOverviewActionTarget: Equatable {
     case inbox
-    case savedView(name: String, filterSpec: SavedViewFilterSpec, sortMode: LibrarySortMode)
 }
 
 struct HomeTelemetryMetric: Equatable, Identifiable {

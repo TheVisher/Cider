@@ -271,7 +271,7 @@ extension CiderPanelView {
             } else {
                 selectedTab = .domainDashboard(domain)
             }
-        case .recent, .savedViews:
+        case .recent:
             selectedTab = .domainDashboard(domain)
         }
     }

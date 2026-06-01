@@ -35,15 +35,13 @@ struct WorkspaceDomainDashboardAction: Equatable {
 enum WorkspaceDomainDashboardProvider {
     static func model(
         for domain: WorkspaceNavigationDomain,
-        savedViews: [SavedView],
         allTabs: [CiderTab],
         bookmarks: [Bookmark] = [],
         bookmarkFolders: [Folder] = []
     ) -> WorkspaceDomainDashboardModel {
         let compatibleTabs = WorkspaceContextualTabPolicy.tabs(
             for: domain,
-            allTabs: allTabs,
-            savedViews: []
+            allTabs: allTabs
         )
         let items = compatibleTabs.compactMap { item(for: $0) }
         var sections = section(for: domain, items: items).map { [$0] } ?? []
@@ -285,8 +283,6 @@ enum WorkspaceDomainDashboardProvider {
                 systemImage: "tag",
                 target: tab
             )
-        case .savedView:
-            return nil
         }
     }
 }

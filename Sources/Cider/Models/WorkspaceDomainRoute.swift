@@ -10,7 +10,6 @@ enum WorkspaceDomainRouteKind: String, CaseIterable, Hashable {
     case folders
     case tags
     case recent
-    case savedViews
     case chats
 
     var libraryEntityTypes: Set<LibraryEntityType>? {
@@ -21,7 +20,7 @@ enum WorkspaceDomainRouteKind: String, CaseIterable, Hashable {
             return [.note]
         case .files:
             return [.vaultFile]
-        case .overview, .inbox, .all, .folders, .tags, .recent, .savedViews, .chats:
+        case .overview, .inbox, .all, .folders, .tags, .recent, .chats:
             return nil
         }
     }
@@ -92,8 +91,6 @@ enum WorkspaceDomainRoutePolicy {
             return WorkspaceDomainRoute(kind: kind, title: "Tags", systemImage: "tag")
         case .recent:
             return WorkspaceDomainRoute(kind: kind, title: "Recent", systemImage: "clock")
-        case .savedViews:
-            return WorkspaceDomainRoute(kind: kind, title: "Saved Views", systemImage: "rectangle.stack")
         case .chats:
             return WorkspaceDomainRoute(kind: kind, title: "Chats", systemImage: "bubble.left.and.bubble.right")
         }

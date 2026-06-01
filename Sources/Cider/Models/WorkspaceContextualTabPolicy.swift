@@ -5,8 +5,7 @@ enum WorkspaceContextualTabPolicy {
         for domain: WorkspaceNavigationDomain?,
         selectedProject: ProjectWorkspace? = nil,
         selectedTab: CiderTab? = nil,
-        allTabs: [CiderTab],
-        savedViews: [SavedView]
+        allTabs: [CiderTab]
     ) -> [CiderTab] {
         if selectedTab == .aiAssistant && domain == nil { return [.aiAssistant] }
         if let selectedTab, case .spaceOverview = selectedTab, domain == nil {

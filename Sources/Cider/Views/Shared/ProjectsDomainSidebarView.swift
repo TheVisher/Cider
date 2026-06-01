@@ -104,7 +104,7 @@ struct ProjectsDomainSidebarView: View {
             return .surface(surface)
         case .projectReferences:
             return .surface(.assets)
-        case .savedView, .search, .tag, .domainDashboard, .spaceOverview, .spacesManager, .aiAssistant:
+        case .search, .tag, .domainDashboard, .spaceOverview, .spacesManager, .aiAssistant:
             return nil
         }
     }

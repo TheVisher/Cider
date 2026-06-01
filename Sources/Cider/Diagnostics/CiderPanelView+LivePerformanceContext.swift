@@ -69,20 +69,6 @@ extension CiderPanelView {
                 view: selectedTab.displayName,
                 visibleItemCount: libraryViewModel.items.count
             )
-        case .savedView(let id, let name):
-            if let savedView = savedViewStorage.savedView(for: id) {
-                switch savedView.kind {
-                case .kanban(let boardID):
-                    let visibleCards = KanbanStorage.shared.boards
-                        .first(where: { $0.id == boardID })?
-                        .allCards
-                        .count
-                    return CiderLivePerformanceContext(view: name, visibleItemCount: visibleCards)
-                default:
-                    return CiderLivePerformanceContext(view: name, visibleItemCount: libraryViewModel.items.count)
-                }
-            }
-            return CiderLivePerformanceContext(view: name, visibleItemCount: nil)
         }
     }
 }

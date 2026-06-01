@@ -43,26 +43,10 @@ extension CiderPanelView {
     func openDomainDashboardTab(_ tab: CiderTab) {
         selectedFolderID = nil
         selectedTagIDs.removeAll()
-
-        if case .savedView(let id, _) = tab {
-            savedViewStorage.addToTabOrder(id)
-        }
-
         selectedTab = tab
     }
 
     func reorderVisibleTabs(from sourceIndex: Int, to destinationIndex: Int) {
-        let visibleTabs = contextualTabs
-        guard visibleTabs.indices.contains(sourceIndex),
-              visibleTabs.indices.contains(destinationIndex),
-              let sourceID = visibleTabs[sourceIndex].savedViewID,
-              let destinationID = visibleTabs[destinationIndex].savedViewID,
-              let globalSourceIndex = savedViewStorage.tabOrder.firstIndex(of: sourceID),
-              let globalDestinationIndex = savedViewStorage.tabOrder.firstIndex(of: destinationID) else {
-            return
-        }
-
-        savedViewStorage.moveTab(from: globalSourceIndex, to: globalDestinationIndex)
     }
 
     func closeTab(_ tab: CiderTab) {
@@ -72,13 +56,9 @@ extension CiderPanelView {
 
         let wasSelected = selectedTab == tab
 
-        if case .savedView(let id, _) = tab {
-            savedViewStorage.removeFromTabOrder(id)
-        } else {
-            dynamicTabs.removeAll { $0 == tab }
-            if tab == .aiAssistant {
-                CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(false)
-            }
+        dynamicTabs.removeAll { $0 == tab }
+        if tab == .aiAssistant {
+            CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(false)
         }
 
         if wasSelected {
@@ -145,63 +125,7 @@ extension CiderPanelView {
     }
 
     func deleteTab(_ tab: CiderTab) {
-        guard case .savedView(let id, _) = tab else {
-            closeTab(tab)
-            return
-        }
-        guard let savedView = savedViewStorage.savedView(for: id) else { return }
-
-        // For kanban tabs, trash the board YAML file
-        if case .kanban(let boardID) = savedView.kind {
-            if let trashItem = KanbanStorage.shared.deleteBoard(id: boardID) {
-                CiderUndoManager.shared.record(.deletedToTrash(itemType: .kanbanBoard, trashItem: trashItem))
-            }
-        }
-
-        let wasSelected = selectedTab == tab
-        savedViewStorage.deleteSavedView(id)
-        if wasSelected {
-            selectedTab = allTabs.first
-        }
-    }
-
-    func deleteClosedTab(_ savedView: SavedView) {
-        if case .kanban(let boardID) = savedView.kind {
-            if let trashItem = KanbanStorage.shared.deleteBoard(id: boardID) {
-                CiderUndoManager.shared.record(.deletedToTrash(itemType: .kanbanBoard, trashItem: trashItem))
-            }
-        }
-        savedViewStorage.deleteSavedView(savedView.id)
-    }
-
-    func reopenTab(_ id: UUID) {
-        guard let savedView = savedViewStorage.savedView(for: id) else { return }
-        savedViewStorage.addToTabOrder(id)
-        withAnimation(reduceMotion ? .none : CiderAnimation.snappy) {
-            selectedFolderID = nil
-            selectedTab = .savedView(id: savedView.id, name: savedView.name)
-        }
-    }
-
-    func createSavedViewFromCurrentState() {
-        openNavigationDomain(.browse)
-    }
-
-    func deleteSavedView(_ id: UUID) {
-        let wasSelected = selectedTab?.savedViewID == id
-        _ = savedViewStorage.deleteSavedView(id)
-        if wasSelected {
-            selectedTab = allTabs.first
-        }
-    }
-
-    private func nextSavedViewName() -> String {
-        let usedNames = Set(savedViewStorage.tabOrderedViews().map(\.name))
-        var index = 1
-        while usedNames.contains("View \(index)") {
-            index += 1
-        }
-        return "View \(index)"
+        closeTab(tab)
     }
 
     func ensureDefaultTabs() {

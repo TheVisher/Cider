@@ -6,7 +6,6 @@ struct CiderPanelView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
     var surface: CiderWorkspaceSurface = .mainWindow
-    @ObservedObject var savedViewStorage = SavedViewStorage.shared
     @ObservedObject var kanbanStorage = KanbanStorage.shared
     @ObservedObject var projectAssociationStore = ProjectWorkspaceAssociationStore.shared
     @ObservedObject var notesStorage = NotesStorage.shared
@@ -94,8 +93,7 @@ struct CiderPanelView: View {
             for: selectedNavigationDomain,
             selectedProject: selectedProjectWorkspace,
             selectedTab: selectedTab,
-            allTabs: allTabs,
-            savedViews: savedViewStorage.savedViews
+            allTabs: allTabs
         )
     }
 

@@ -168,7 +168,6 @@ extension CiderPanelView {
                     WorkspaceDomainDashboardView(
                         model: WorkspaceDomainDashboardProvider.model(
                             for: domain,
-                            savedViews: savedViewStorage.savedViews,
                             allTabs: allTabs,
                             bookmarks: bookmarksViewModel.bookmarks,
                             bookmarkFolders: bookmarksViewModel.folders
@@ -389,146 +388,7 @@ extension CiderPanelView {
                     presentationStyle: .embedded
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .savedView(let id, _):
-                if let savedView = savedViewStorage.savedView(for: id) {
-                    if case .kanban(let boardID) = savedView.kind {
-                        KanbanBoardView(
-                            boardID: boardID,
-                            milestoneFilterCardID: kanbanMilestoneFilterByBoardID[boardID],
-                            projectHeaderTabs: projectHeaderTabs(for: boardID),
-                            onSelectProjectHeaderTab: selectProjectHeaderTab,
-                            onOpenCard: openKanbanCardDetail
-                        )
-                    } else if case .dashboard = savedView.kind {
-                        let reviewQueueService = CiderReviewQueueService()
-                        let reviewQueueItems = (try? reviewQueueService.list(limit: 8).items) ?? []
-                        let reviewQueueSummary = try? reviewQueueService.summary()
-                        let bookmarkDateSuggestionResults = HomeOverviewDataProvider.bookmarkDateSuggestionResults(
-                            from: libraryViewModel.items
-                        )
-                        DashboardHubView(showsTopicSwitcher: false, onOpenSourceURL: { url in
-                            openURLSafely(url)
-                        }) {
-                            HomeOverviewDashboardView(
-                                snapshot: HomeOverviewDataProvider.makeSnapshot(
-                                    items: libraryViewModel.items,
-                                    recentItems: libraryViewModel.recentItems,
-                                    folders: bookmarksViewModel.folders,
-                                    savedViews: savedViewStorage.savedViews,
-                                    tabOrder: savedViewStorage.tabOrder,
-                                    kanbanBoards: kanbanStorage.boards,
-                                    reviewQueueItems: reviewQueueItems,
-                                    reviewQueueSummary: reviewQueueSummary,
-                                    bookmarkDateSuggestionResults: bookmarkDateSuggestionResults,
-                                    surfacingDays: CiderConfig.load().dateCardSurfacingDays
-                                ),
-                                onOpenItem: { item in openDashboardItem(item) },
-                                onOpenTarget: { target in openDashboardTarget(target) },
-                                onOpenTab: { tab in openDashboardTab(tab) },
-                                onOpenKanbanCard: { boardID, cardID in
-                                    selectedKanbanBoardID = boardID
-                                    selectedKanbanCardID = cardID
-                                },
-                                onApproveReview: { reviewItem in
-                                    do {
-                                        if let approval = reviewItem.dateSuggestionApproval {
-                                            _ = try CiderBookmarkDateSuggestionApprovalService().approve(
-                                                bookmarkID: approval.bookmarkID,
-                                                suggestionKey: approval.suggestionKey
-                                            )
-                                        } else {
-                                            try CiderReviewQueueService().approve(itemID: reviewItem.itemID, actor: "user")
-                                        }
-                                        return true
-                                    } catch {
-                                        print("Dashboard review approve failed: \(error.localizedDescription)")
-                                        return false
-                                    }
-                                },
-                                onDeferReview: { reviewItem in
-                                    do {
-                                        try CiderReviewQueueService().deferReview(
-                                            itemID: reviewItem.itemID,
-                                            reason: "Deferred from Dashboard review cockpit.",
-                                            actor: "user"
-                                        )
-                                        return true
-                                    } catch {
-                                        print("Dashboard review defer failed: \(error.localizedDescription)")
-                                        return false
-                                    }
-                                },
-                                onEnrichReviewBatch: {
-                                    do {
-                                        _ = try CiderReviewQueueService().enrichBatch(actor: "user")
-                                        return true
-                                    } catch {
-                                        print("Dashboard review batch enrich failed: \(error.localizedDescription)")
-                                        return false
-                                    }
-                                },
-                                onOpenSettings: {
-                                    NotificationCenter.default.post(name: .openCiderSettings, object: nil)
-                                },
-                                onSyncNow: {
-                                    SyncService.shared.syncNow()
-                                },
-                                onCreateNew: {
-                                    showNewItemPicker = true
-                                }
-                            )
-                        }
-                    } else if savedView.isOnboarding {
-                        OnboardingTabView(onDismiss: {
-                            dismissOnboardingTab(id: id)
-                        })
-                    } else if savedView.isBlank {
-                        blankTabWelcome(savedViewID: id)
-                    } else {
-                        HomeDashboardView(
-                            bookmarksViewModel: bookmarksViewModel,
-                            notesViewModel: notesViewModel,
-                            libraryViewModel: libraryViewModel,
-                            selectedFolderID: nil,
-                            displayMode: $homeDisplayMode,
-                            cardSizeScale: $homeCardSizeScale,
-                            continueSectionCollapsed: .constant(true),
-                            selectedItemIDs: $selectedItemIDs,
-                            sortMode: sortModeBinding(for: id),
-                            entityFilter: entityFilterBinding(for: id),
-                            searchText: debouncedSearchText,
-                            onOpenNote: { note in openNoteDetail(note) },
-                            onShowBookmarkDetails: { openBookmarkDetails($0) },
-                            onEditDateCard: { dateCard in
-                                newEventEditorContext = DateCardEditorContext(
-                                    existingCard: dateCard,
-                                    defaultDate: dateCard.startAt
-                                )
-                            },
-                            onEditContact: { contact in
-                                newContactEditorContext = ContactEditorContext(existingContact: contact)
-                            },
-                            onOpenDateCard: { openDateCardDetail($0) },
-                            onOpenContact: { openContactDetail($0) },
-                            onOpenTodo: { openTodoDetail($0) },
-                            onOpenVaultFile: { openVaultFileDetail($0) },
-            
-                            onlyUnassigned: savedView.filterSpec.onlyUnassigned,
-                            activeLabelIDs: savedView.filterSpec.labelIDs,
-                            maxVisibleItems: libraryFeedMaxVisibleItems(for: savedView),
-                            onToggleLabelBulk: { toggleTagOnSelected($0) },
-                            showComingUp: LibraryFeedPresentationPolicy.showsComingUpSection(on: .savedView),
-                            scrollToItemID: $scrollToItemID,
-                            focusedItemID: focusedItemID
-                        )
-                    }
-                } else {
-                    EmptyStateView(
-                        icon: "square.grid.2x2",
-                        title: "Saved view not found"
-                    )
-                }
-            case .search(let searchID, let query):
+            case .search(_, let query):
                 HomeDashboardView(
                     bookmarksViewModel: bookmarksViewModel,
                     notesViewModel: notesViewModel,
@@ -538,8 +398,8 @@ extension CiderPanelView {
                     cardSizeScale: $homeCardSizeScale,
                     continueSectionCollapsed: .constant(true),
                     selectedItemIDs: $selectedItemIDs,
-                    sortMode: sortModeBinding(for: searchID),
-                    entityFilter: entityFilterBinding(for: searchID),
+                    sortMode: $homeSort,
+                    entityFilter: $homeEntityFilter,
                     searchText: query,
                     onOpenNote: { note in openNoteDetail(note) },
                     onShowBookmarkDetails: { openBookmarkDetails($0) },
@@ -598,7 +458,6 @@ extension CiderPanelView {
                 WorkspaceDomainDashboardView(
                     model: WorkspaceDomainDashboardProvider.model(
                         for: domain,
-                        savedViews: savedViewStorage.savedViews,
                         allTabs: allTabs,
                         bookmarks: bookmarksViewModel.bookmarks,
                         bookmarkFolders: bookmarksViewModel.folders
@@ -614,120 +473,6 @@ extension CiderPanelView {
                 noTabsEmptyState
             }
         }
-    }
-
-    @ViewBuilder
-    func blankTabWelcome(savedViewID: UUID) -> some View {
-        let closed = savedViewStorage.savedViews.filter {
-            !savedViewStorage.tabOrder.contains($0.id) && !$0.isOnboarding
-        }
-
-        VStack(spacing: Spacing.xl) {
-            Spacer()
-
-            Image(systemName: "square.grid.2x2.fill")
-                .font(CiderFont.emptyStateIcon)
-                .foregroundColor(CiderColors.tertiary)
-
-            VStack(spacing: Spacing.sm) {
-                Text("New Tab")
-                    .font(CiderFont.headingSemibold)
-                    .foregroundColor(CiderColors.primary)
-
-                Text("Configure this tab to show exactly what you need.")
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.tertiary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                blankTabHint(icon: "line.3.horizontal.decrease.circle", text: "Filter by bookmarks, notes, events, or contacts")
-                blankTabHint(icon: "arrow.up.arrow.down", text: "Sort by date added, modified, title, or event date")
-                blankTabHint(icon: "tray", text: "Toggle \"Unassigned Only\" to create an inbox")
-                blankTabHint(icon: "square.grid.2x2", text: "Switch between list, grid, and masonry layouts")
-                blankTabHint(icon: "textformat.size", text: "Adjust card size with the slider")
-            }
-
-            Button("Open View Options") {
-                isHomeViewOptionsVisible = true
-            }
-            .buttonStyle(CiderAccentButtonStyle())
-
-            Button("Show All Items") {
-                activateBlankTab(savedViewID)
-            }
-            .buttonStyle(.plain)
-            .font(CiderFont.labelMedium)
-            .foregroundColor(CiderColors.controlAccent)
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(alignment: .bottom) {
-            closedTabsGrid(closed)
-        }
-    }
-
-    @ViewBuilder
-    private func closedTabsGrid(_ closed: [SavedView]) -> some View {
-        VStack(spacing: Spacing.sm) {
-            Divider()
-                .padding(.horizontal, Spacing.lg)
-
-            Text("Closed Tabs")
-                .font(CiderFont.captionSemibold)
-                .foregroundColor(CiderColors.tertiary)
-
-            if closed.isEmpty {
-                Text("Closed tabs appear here")
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.quaternary)
-                    .frame(minHeight: 32)
-            } else {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 100, maximum: 160), spacing: Spacing.sm)],
-                    spacing: Spacing.sm
-                ) {
-                    ForEach(closed) { sv in
-                        ClosedTabCard(
-                            savedView: sv,
-                            onReopen: { reopenTab(sv.id) },
-                            onDelete: { deleteClosedTab(sv) }
-                        )
-                    }
-                }
-                .padding(.horizontal, Spacing.lg)
-            }
-        }
-        .padding(.bottom, Spacing.md)
-    }
-
-    private func blankTabHint(icon: String, text: String) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: icon)
-                .font(CiderFont.bodyMedium)
-                .foregroundColor(CiderColors.controlAccent)
-                .frame(width: 20, alignment: .center)
-            Text(text)
-                .font(CiderFont.body)
-                .foregroundColor(CiderColors.secondary)
-        }
-    }
-
-    func activateBlankTab(_ savedViewID: UUID) {
-        guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
-        savedView.isBlank = false
-        savedViewStorage.updateSavedView(savedView)
-    }
-
-    func dismissOnboardingTab(id: UUID) {
-        savedViewStorage.removeFromTabOrder(id)
-        savedViewStorage.deleteSavedView(id)
-        var config = CiderConfig.load()
-        config.hasCompletedOnboarding = true
-        config.save()
-        selectedTab = allTabs.first
     }
 
     func openOrCreateOnboardingTab() {
@@ -771,19 +516,6 @@ extension CiderPanelView {
         }
     }
 
-    func libraryFeedMaxVisibleItems(for savedView: SavedView) -> Int? {
-        guard selectedNavigationDomain == .browse,
-              selectedDomainRouteKind == .inbox,
-              savedView.kind == .library,
-              savedView.filterSpec.onlyUnassigned
-        else { return nil }
-        return LibraryInboxPresentationPolicy.maxVisibleItems
-    }
-
-    func openDashboardTab(_ tab: HomeOverviewClosedTabSummary) {
-        reopenTab(tab.id)
-    }
-
     func openDashboardTarget(_ target: HomeOverviewActionTarget) {
         switch target {
         case .inbox:
@@ -791,8 +523,6 @@ extension CiderPanelView {
             selectedDomainRouteKind = .inbox
             selectedFolderID = nil
             selectedTab = .domainDashboard(.browse)
-        case .savedView(let name, let filterSpec, let sortMode):
-            openDashboardLibraryView(named: name, filterSpec: filterSpec, sortMode: sortMode)
         }
     }
 
@@ -983,71 +713,5 @@ extension CiderPanelView {
             return backlog.id
         }
         return board.columns.first?.id
-    }
-
-    private func openDashboardLibraryView(
-        named name: String,
-        filterSpec: SavedViewFilterSpec,
-        sortMode: LibrarySortMode = .createdDescending
-    ) {
-        selectedNavigationDomain = .browse
-        selectedDomainRouteKind = .all
-        selectedFolderID = nil
-        selectedTab = .domainDashboard(.browse)
-    }
-}
-
-// MARK: - ClosedTabCard
-
-private struct ClosedTabCard: View {
-    let savedView: SavedView
-    let onReopen: () -> Void
-    let onDelete: () -> Void
-
-    @State private var isHovered = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var icon: String {
-        if case .kanban = savedView.kind { return "square.split.2x1" }
-        return "square.grid.2x2"
-    }
-
-    var body: some View {
-        Button(action: onReopen) {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: icon)
-                    .font(CiderFont.captionMedium)
-                    .foregroundColor(isHovered ? CiderColors.primary : CiderColors.tertiary)
-                Text(savedView.name)
-                    .font(CiderFont.label)
-                    .foregroundColor(isHovered ? CiderColors.primary : CiderColors.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                if isHovered {
-                    Spacer(minLength: 0)
-                    Button(action: onDelete) {
-                        Image(systemName: "trash")
-                            .font(CiderFont.captionMedium)
-                            .foregroundColor(CiderColors.destructive)
-                            .padding(Spacing.xxs)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .transition(.opacity.combined(with: .scale(0.8)))
-                }
-            }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
-            .frame(maxWidth: .infinity, minHeight: 32)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isHovered ? CiderColors.separatorLight : CiderColors.surfaceInput)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .animation(reduceMotion ? .none : .snappy, value: isHovered)
     }
 }

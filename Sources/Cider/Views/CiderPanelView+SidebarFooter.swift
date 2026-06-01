@@ -66,24 +66,6 @@ extension CiderPanelView {
                         showCardDetailsOnHover: $showCardDetailsOnHover
                     )
                 }
-            } else if let savedViewID = selectedTab?.savedViewID,
-                      let savedView = savedViewStorage.savedView(for: savedViewID),
-                      savedView.kind != .dashboard {
-                expandedFilterButton(isEnabled: true) {
-                    isHomeViewOptionsVisible.toggle()
-                }
-                .popover(isPresented: $isHomeViewOptionsVisible) {
-                    ViewOptionsDropdown(
-                        displayMode: $homeDisplayMode,
-                        cardSizeScale: $homeCardSizeScale,
-                        hideCardFooters: $hideCardFooters,
-                        showCardDetailsOnHover: $showCardDetailsOnHover,
-                        sortMode: sortModeBinding(for: savedViewID),
-                        entityFilter: entityFilterBinding(for: savedViewID),
-                        tagFilter: tagFilterBinding(for: savedViewID),
-                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID)
-                    )
-                }
             } else {
                 expandedFilterButton(isEnabled: false) {}
             }
@@ -113,24 +95,6 @@ extension CiderPanelView {
                         cardSizeScale: $homeCardSizeScale,
                         hideCardFooters: $hideCardFooters,
                         showCardDetailsOnHover: $showCardDetailsOnHover
-                    )
-                }
-            } else if let savedViewID = selectedTab?.savedViewID,
-                      let savedView = savedViewStorage.savedView(for: savedViewID),
-                      savedView.kind != .dashboard {
-                compactFilterButton(isEnabled: true) {
-                    isHomeViewOptionsVisible.toggle()
-                }
-                .popover(isPresented: $isHomeViewOptionsVisible) {
-                    ViewOptionsDropdown(
-                        displayMode: $homeDisplayMode,
-                        cardSizeScale: $homeCardSizeScale,
-                        hideCardFooters: $hideCardFooters,
-                        showCardDetailsOnHover: $showCardDetailsOnHover,
-                        sortMode: sortModeBinding(for: savedViewID),
-                        entityFilter: entityFilterBinding(for: savedViewID),
-                        tagFilter: tagFilterBinding(for: savedViewID),
-                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID)
                     )
                 }
             } else {
@@ -352,89 +316,11 @@ extension CiderPanelView {
                         showCardDetailsOnHover: $showCardDetailsOnHover
                     )
                 }
-        } else if let savedViewID = selectedTab?.savedViewID,
-                  let savedView = savedViewStorage.savedView(for: savedViewID),
-                  savedView.kind != .dashboard {
-            Image(systemName: "slider.horizontal.3")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(isHomeViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
-                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
-                .contentShape(Rectangle())
-                .onTapGesture { isHomeViewOptionsVisible.toggle() }
-                .help("View options")
-                .popover(isPresented: $isHomeViewOptionsVisible) {
-                    ViewOptionsDropdown(
-                        displayMode: $homeDisplayMode,
-                        cardSizeScale: $homeCardSizeScale,
-                        hideCardFooters: $hideCardFooters,
-                        showCardDetailsOnHover: $showCardDetailsOnHover,
-                        sortMode: sortModeBinding(for: savedViewID),
-                        entityFilter: entityFilterBinding(for: savedViewID),
-                        tagFilter: tagFilterBinding(for: savedViewID),
-                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID)
-                    )
-                }
         } else {
             // Invisible spacer to keep layout stable
             Color.clear
                 .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
         }
-    }
-
-    func onlyUnassignedBinding(for savedViewID: UUID) -> Binding<Bool> {
-        Binding(
-            get: {
-                savedViewStorage.savedView(for: savedViewID)?.filterSpec.onlyUnassigned ?? false
-            },
-            set: { newValue in
-                guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
-                savedView.filterSpec.onlyUnassigned = newValue
-                if savedView.isBlank { savedView.isBlank = false }
-                savedViewStorage.updateSavedView(savedView)
-            }
-        )
-    }
-
-    func tagFilterBinding(for savedViewID: UUID) -> Binding<Set<UUID>> {
-        Binding(
-            get: {
-                savedViewStorage.savedView(for: savedViewID)?.filterSpec.labelIDs ?? []
-            },
-            set: { newValue in
-                guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
-                savedView.filterSpec.labelIDs = newValue
-                if savedView.isBlank && !newValue.isEmpty { savedView.isBlank = false }
-                savedViewStorage.updateSavedView(savedView)
-            }
-        )
-    }
-
-    func entityFilterBinding(for savedViewID: UUID) -> Binding<Set<LibraryEntityType>> {
-        Binding(
-            get: {
-                savedViewStorage.savedView(for: savedViewID)?.filterSpec.entityTypes ?? LibraryEntityType.activeCases
-            },
-            set: { newValue in
-                guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
-                savedView.filterSpec.entityTypes = newValue
-                if savedView.isBlank && !newValue.isEmpty { savedView.isBlank = false }
-                savedViewStorage.updateSavedView(savedView)
-            }
-        )
-    }
-
-    func sortModeBinding(for savedViewID: UUID) -> Binding<LibrarySortMode> {
-        Binding(
-            get: {
-                savedViewStorage.savedView(for: savedViewID)?.sortSpec.mode ?? .createdDescending
-            },
-            set: { newValue in
-                guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
-                savedView.sortSpec.mode = newValue
-                if savedView.isBlank { savedView.isBlank = false }
-                savedViewStorage.updateSavedView(savedView)
-            }
-        )
     }
 
 }

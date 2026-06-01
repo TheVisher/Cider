@@ -14,7 +14,7 @@ extension CiderPanelView {
             for n in notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
             for dc in dateCards { selectedItemIDs.insert("datecard-\(dc.id.uuidString)") }
             for c in contacts { selectedItemIDs.insert("contact-\(c.id.uuidString)") }
-        } else if selectedTab?.savedViewID != nil {
+        } else if selectedTab != nil {
             for item in libraryViewModel.items {
                 selectedItemIDs.insert(item.id)
             }

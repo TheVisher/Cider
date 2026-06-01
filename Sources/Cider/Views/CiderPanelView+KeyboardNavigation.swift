@@ -158,20 +158,6 @@ extension CiderPanelView {
                 }
             }
             return all.map(\.id)
-        } else if let tab = selectedTab, let savedViewID = tab.savedViewID {
-            if let savedView = savedViewStorage.savedView(for: savedViewID), !savedView.isBlank, !savedView.isOnboarding {
-                let filterSpec = SavedViewFilterSpec(
-                    entityTypes: savedView.filterSpec.entityTypes.isEmpty
-                        ? LibraryEntityType.activeCases : savedView.filterSpec.entityTypes,
-                    labelIDs: savedView.filterSpec.labelIDs,
-                    includeCompleted: true,
-                    textQuery: debouncedSearchText,
-                    onlyUnassigned: savedView.filterSpec.onlyUnassigned
-                )
-                let sortSpec = SavedViewSortSpec(mode: savedView.sortSpec.mode)
-                return libraryViewModel.filteredItems(using: filterSpec, sort: sortSpec).map(\.id)
-            }
-            return []
         } else {
             return []
         }

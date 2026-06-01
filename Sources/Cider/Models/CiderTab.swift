@@ -1,7 +1,6 @@
 import Foundation
 
 enum CiderTab: Identifiable, Hashable {
-    case savedView(id: UUID, name: String)
     case search(id: UUID, query: String)
     case tag(id: UUID)
     case domainDashboard(WorkspaceNavigationDomain)
@@ -24,7 +23,6 @@ enum CiderTab: Identifiable, Hashable {
 
     var id: String {
         switch self {
-        case .savedView(let id, _): "saved-\(id.uuidString)"
         case .search(let id, _): "search-\(id.uuidString)"
         case .tag(let id): "tag-\(id.uuidString)"
         case .domainDashboard(let domain): "domain-dashboard-\(domain.rawValue)"
@@ -41,7 +39,6 @@ enum CiderTab: Identifiable, Hashable {
 
     var displayName: String {
         switch self {
-        case .savedView(_, let name): name
         case .search(_, let query): query.isEmpty ? "Search" : query
         case .tag: "Tags"
         case .domainDashboard(let domain): "\(domain.title) Dashboard"
@@ -58,7 +55,6 @@ enum CiderTab: Identifiable, Hashable {
 
     var systemImage: String {
         switch self {
-        case .savedView: "square.grid.2x2"
         case .search: "magnifyingglass"
         case .tag: "tag"
         case .domainDashboard(let domain): domain.systemImage
@@ -73,8 +69,4 @@ enum CiderTab: Identifiable, Hashable {
         }
     }
 
-    var savedViewID: UUID? {
-        if case .savedView(let id, _) = self { return id }
-        return nil
-    }
 }

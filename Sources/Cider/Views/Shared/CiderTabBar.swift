@@ -7,31 +7,18 @@ struct CiderTabBar: View {
     var onCloseTab: ((CiderTab) -> Void)?
     var onDeleteTab: ((CiderTab) -> Void)?
     var onReorderTab: ((Int, Int) -> Void)?
-    var onRenameTab: ((UUID, String) -> Void)?
     var projectBoardActionTitle: ((CiderTab) -> String?)?
     var onRemoveBoardFromProject: ((CiderTab) -> Void)?
     var onAddTab: (() -> Void)?
-    var onReopenTab: ((UUID) -> Void)?
     var onOpenBoard: ((KanbanBoard) -> Void)?
     var projectAddableBoards: [KanbanBoard]?
     var onAddBoardToProject: ((KanbanBoard) -> Void)?
     var onOpenAIAssistantTab: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @ObservedObject private var dateCardStorage = DateCardStorage.shared
-    @ObservedObject private var savedViewStorage = SavedViewStorage.shared
     @ObservedObject private var kanbanStorage = KanbanStorage.shared
 
     @State private var draggingTabID: String?
-    @State private var renamingTabID: UUID?
-    @State private var renameText: String = ""
     @State private var showAddTabPopover = false
-    @FocusState private var isRenameFieldFocused: Bool
-
-    private var closedTabs: [SavedView] {
-        savedViewStorage.savedViews.filter {
-            !savedViewStorage.tabOrder.contains($0.id) && !$0.isOnboarding
-        }
-    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -65,23 +52,9 @@ struct CiderTabBar: View {
                 Image(systemName: iconForTab(tab))
                     .font(CiderFont.bodyMedium)
 
-                if renamingTabID == tab.savedViewID, let savedViewID = tab.savedViewID {
-                    TextField("", text: $renameText, onCommit: {
-                        commitRename(savedViewID)
-                    })
-                    .textFieldStyle(.plain)
+                Text(tab.displayName)
                     .font(isSelected ? CiderFont.labelSemibold : CiderFont.label)
-                    .frame(minWidth: CiderTabDesign.renameFieldMinWidth, maxWidth: CiderTabDesign.renameFieldMaxWidth)
-                    .focused($isRenameFieldFocused)
-                    .task {
-                        try? await Task.sleep(for: .milliseconds(150))
-                        isRenameFieldFocused = true
-                    }
-                } else {
-                    Text(tab.displayName)
-                        .font(isSelected ? CiderFont.labelSemibold : CiderFont.label)
-                        .lineLimit(1)
-                }
+                    .lineLimit(1)
 
                 if count > 0 {
                     Text("\(count)")
@@ -107,21 +80,11 @@ struct CiderTabBar: View {
         }
         .buttonStyle(.plain)
         .background(CiderWindowDragExclusionReporter(id: "tab-\(tab.id)"))
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded {
-                if let savedViewID = tab.savedViewID {
-                    renameText = tab.displayName
-                    renamingTabID = savedViewID
-                }
-            }
-        )
         .contextMenu {
             if let title = projectBoardActionTitle?(tab) {
                 Button(title) {
                     onRemoveBoardFromProject?(tab)
                 }
-            } else if tab.savedViewID != nil {
-                savedViewMenuItems(for: tab)
             } else if tab != .aiAssistant && !isPersistentContextTab(tab) {
                 Button("Close Tab") {
                     onCloseTab?(tab)
@@ -135,23 +98,6 @@ struct CiderTabBar: View {
             draggingTabID: $draggingTabID,
             onReorder: onReorderTab
         )
-    }
-
-    @ViewBuilder
-    private func savedViewMenuItems(for tab: CiderTab) -> some View {
-        Button("Rename Tab") {
-            if let savedViewID = tab.savedViewID {
-                renameText = tab.displayName
-                renamingTabID = savedViewID
-            }
-        }
-        Button("Close Tab") {
-            onCloseTab?(tab)
-        }
-        Divider()
-        Button("Delete Tab", role: .destructive) {
-            onDeleteTab?(tab)
-        }
     }
 
     private func addTabButton(action: @escaping () -> Void) -> some View {
@@ -256,9 +202,8 @@ struct CiderTabBar: View {
                     .buttonStyle(.plain)
                 }
 
-                // Boards not yet open as tabs
-                let openBoardIDs = Set(savedViewStorage.savedViews.compactMap { sv -> String? in
-                    if case .kanban(let id) = sv.kind, savedViewStorage.tabOrder.contains(sv.id) { return id }
+                let openBoardIDs = Set(tabs.compactMap { tab -> String? in
+                    if case .projectBoard(_, let boardID, _) = tab { return boardID }
                     return nil
                 })
                 let unopenedBoards = kanbanStorage.boards.filter { !openBoardIDs.contains($0.id) }
@@ -296,59 +241,13 @@ struct CiderTabBar: View {
                     }
                 }
 
-                if !closedTabs.isEmpty {
-                    Divider()
-                        .padding(.vertical, Spacing.xxs)
-
-                    Text("Closed")
-                        .font(CiderFont.captionSemibold)
-                        .foregroundColor(CiderColors.tertiary)
-                        .padding(.horizontal, Spacing.md)
-                        .padding(.top, Spacing.xs)
-                        .padding(.bottom, Spacing.xxs)
-
-                    ForEach(closedTabs) { sv in
-                        Button {
-                            onReopenTab?(sv.id)
-                            showAddTabPopover = false
-                        } label: {
-                            HStack(spacing: Spacing.sm) {
-                                Image(systemName: { if case .kanban = sv.kind { return "square.split.2x1" }; return "square.grid.2x2" }())
-                                    .font(CiderFont.bodyMedium)
-                                    .frame(width: Spacing.lg, alignment: .center)
-                                Text(sv.name)
-                                    .font(CiderFont.body)
-                                    .lineLimit(1)
-                            }
-                            .foregroundColor(CiderColors.secondary)
-                            .padding(.horizontal, Spacing.md)
-                            .padding(.vertical, Spacing.sm)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
             }
         }
         .padding(.vertical, Spacing.xs)
         .frame(minWidth: CiderTabDesign.addTabPopoverMinWidth)
     }
 
-    private func commitRename(_ savedViewID: UUID) {
-        let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            onRenameTab?(savedViewID, trimmed)
-        }
-        renamingTabID = nil
-        renameText = ""
-    }
-
     private func iconForTab(_ tab: CiderTab) -> String {
-        if case .savedView(let id, _) = tab,
-           let savedView = savedViewStorage.savedView(for: id) {
-            return savedView.kind.systemImage
-        }
         return tab.systemImage
     }
 
@@ -364,10 +263,6 @@ struct CiderTabBar: View {
 
     private func badgeCount(for tab: CiderTab) -> Int {
         switch tab {
-        case .savedView(let id, _):
-            // Show urgent date card count on the first (Home) tab
-            guard tabs.first?.savedViewID == id else { return 0 }
-            return dateCardStorage.dateCards.filter { $0.urgency() != nil }.count
         case .search: return 0
         case .tag: return 0
         case .domainDashboard: return 0
@@ -394,23 +289,7 @@ private extension View {
         draggingTabID: Binding<String?>,
         onReorder: ((Int, Int) -> Void)?
     ) -> some View {
-        if tab.savedViewID != nil {
-            self
-                .onDrag {
-                    CiderInternalDragState.markStarted()
-                    draggingTabID.wrappedValue = tab.id
-                    return NSItemProvider(object: tab.id as NSString)
-                }
-                .onDrop(of: [.text], delegate: TabReorderDropDelegate(
-                    tabID: tab.id,
-                    tabIndex: index,
-                    tabs: tabs,
-                    draggingTabID: draggingTabID,
-                    onReorder: onReorder
-                ))
-        } else {
-            self
-        }
+        self
     }
 }
 

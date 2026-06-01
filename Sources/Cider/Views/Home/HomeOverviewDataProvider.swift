@@ -69,28 +69,28 @@ enum HomeOverviewDataProvider {
             HomeTelemetryMetric(
                 kind: .bookmarks,
                 value: items.filter { if case .bookmark = $0 { return true }; return false }.count,
-                target: savedViewTarget(name: "Bookmarks", entityTypes: [.bookmark], sortMode: .createdDescending)
+                target: libraryTarget(name: "Bookmarks", entityTypes: [.bookmark], sortMode: .createdDescending)
             ),
             HomeTelemetryMetric(
                 kind: .notes,
                 value: items.filter { if case .note = $0 { return true }; return false }.count,
-                target: savedViewTarget(name: "Notes", entityTypes: [.note], sortMode: .updatedDescending)
+                target: libraryTarget(name: "Notes", entityTypes: [.note], sortMode: .updatedDescending)
             ),
             HomeTelemetryMetric(
                 kind: .todos,
                 value: items.filter { if case .todo = $0 { return true }; return false }.count,
-                target: savedViewTarget(name: "Todos", entityTypes: [.todo], sortMode: .dateUpcoming)
+                target: libraryTarget(name: "Todos", entityTypes: [.todo], sortMode: .dateUpcoming)
             ),
             HomeTelemetryMetric(
                 kind: .events,
                 value: items.filter { if case .dateCard = $0 { return true }; return false }.count,
-                target: savedViewTarget(name: "Events", entityTypes: [.dateCard], sortMode: .dateUpcoming)
+                target: libraryTarget(name: "Events", entityTypes: [.dateCard], sortMode: .dateUpcoming)
             ),
             HomeTelemetryMetric(kind: .unfiled, value: unfiledCount, target: .inbox),
             HomeTelemetryMetric(
                 kind: .urgent,
                 value: urgentCount,
-                target: savedViewTarget(name: "Urgent", entityTypes: [.todo, .dateCard], sortMode: .dateUpcoming)
+                target: libraryTarget(name: "Urgent", entityTypes: [.todo, .dateCard], sortMode: .dateUpcoming)
             )
         ]
 
@@ -144,27 +144,27 @@ enum HomeOverviewDataProvider {
                 )
             }
 
-        let recentTarget = savedViewTarget(
+        let recentTarget = libraryTarget(
             name: "Recent Activity",
             entityTypes: LibraryEntityType.activeCases,
             sortMode: .updatedDescending
         )
-        let upcomingTarget = savedViewTarget(
+        let upcomingTarget = libraryTarget(
             name: "Upcoming",
             entityTypes: [.todo, .dateCard],
             sortMode: .dateUpcoming
         )
-        let resurfaceTarget = savedViewTarget(
+        let resurfaceTarget = libraryTarget(
             name: "Resurface",
             entityTypes: LibraryEntityType.activeCases,
             sortMode: .updatedAscending
         )
-        let urgentTarget = savedViewTarget(
+        let urgentTarget = libraryTarget(
             name: "Urgent",
             entityTypes: [.todo, .dateCard],
             sortMode: .dateUpcoming
         )
-        let notesTarget = savedViewTarget(
+        let notesTarget = libraryTarget(
             name: "Notes",
             entityTypes: [.note],
             sortMode: .updatedDescending
@@ -1179,15 +1179,11 @@ enum HomeOverviewDataProvider {
         return parts
     }
 
-    private static func savedViewTarget(
+    private static func libraryTarget(
         name: String,
         entityTypes: Set<LibraryEntityType>,
         sortMode: LibrarySortMode
     ) -> HomeOverviewActionTarget {
-        .savedView(
-            name: name,
-            filterSpec: SavedViewFilterSpec(entityTypes: entityTypes),
-            sortMode: sortMode
-        )
+        .inbox
     }
 }
