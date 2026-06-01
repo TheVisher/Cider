@@ -2685,7 +2685,9 @@ struct CiderCLI {
             storage: storage,
             emptyContentMessage: "Journal capture content cannot be empty."
         )
-        return journalCapturePayload(result, args: args)
+        let sourceContext = captureSourceContext(from: args, originalText: result.rawContent)
+        let provenance = recordJournalCaptureProvenance(result, sourceContext: sourceContext)
+        return journalCapturePayload(result, args: args, sourceContext: sourceContext, provenance: provenance)
     }
 
     static func appendDailyNoteEntry(
@@ -2796,8 +2798,95 @@ struct CiderCLI {
         ] as [String: Any]
     }
 
-    static func journalCapturePayload(_ result: DailyNoteAppendResult, args: [String]) -> [String: Any] {
-        let sourceContext = captureSourceContext(from: args, originalText: result.rawContent)
+    static func recordJournalCaptureProvenance(
+        _ result: DailyNoteAppendResult,
+        sourceContext: CaptureSourceContext?
+    ) -> [String: Any] {
+        guard CiderDatabase.shared.isOpen else {
+            return [
+                "status": "unavailable",
+                "ownerType": "capture_event",
+                "ownerID": NSNull(),
+                "captureEventID": NSNull(),
+                "reason": "Capture provenance could not be recorded because no writable database is available.",
+                "auditAction": "daily_append",
+            ] as [String: Any]
+        }
+
+        let eventID = UUID()
+        let database = CiderDatabase.shared
+        var metadata = sourceContext?.metadata ?? [:]
+        metadata["command"] = "capture.add"
+        metadata["kind"] = "journal"
+        metadata["date"] = result.date
+        metadata["time"] = result.time
+        let encodedMetadata = DatabaseHelpers.encodeJSON(metadata) ?? "{}"
+
+        do {
+            try database.withTransaction {
+                let stmt = try database.prepare("""
+                    INSERT INTO capture_events (
+                        id, source_kind, surface, channel, channel_id, thread_id, message_id,
+                        sender_id, sender_name, source_url, source_file, source_text,
+                        attachment_count, metadata, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """)
+                stmt.bind(eventID.uuidString, at: 1)
+                    .bind("journal", at: 2)
+                    .bind(sourceContext?.surface, at: 3)
+                    .bind(sourceContext?.channel, at: 4)
+                    .bind(sourceContext?.channelID, at: 5)
+                    .bind(sourceContext?.threadID, at: 6)
+                    .bind(sourceContext?.messageID, at: 7)
+                    .bind(sourceContext?.senderID, at: 8)
+                    .bind(sourceContext?.senderName, at: 9)
+                    .bind(nil as String?, at: 10)
+                    .bind(nil as String?, at: 11)
+                    .bind(sourceContext?.originalText ?? result.rawContent, at: 12)
+                    .bind(sourceContext?.attachments.count ?? 0, at: 13)
+                    .bind(encodedMetadata, at: 14)
+                    .bind(DatabaseHelpers.encode(Date()), at: 15)
+                try stmt.step()
+
+                let captureOwner = SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString)
+                let itemOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: result.note.id.uuidString)
+                try SecondBrainStore(database: database).recordRelation(SecondBrainRelation(
+                    sourceOwner: captureOwner,
+                    targetOwner: itemOwner,
+                    relationType: "produced_item",
+                    evidence: "Journal capture appended to \(result.note.title).",
+                    source: "capture.add",
+                    actor: "system",
+                    confidence: 1,
+                    metadata: metadata
+                ))
+            }
+
+            return [
+                "status": "recorded",
+                "ownerType": "capture_event",
+                "ownerID": eventID.uuidString,
+                "captureEventID": eventID.uuidString,
+                "auditAction": "daily_append",
+            ] as [String: Any]
+        } catch {
+            return [
+                "status": "failed",
+                "ownerType": "capture_event",
+                "ownerID": NSNull(),
+                "captureEventID": NSNull(),
+                "reason": "Capture provenance failed: \(error.localizedDescription)",
+                "auditAction": "daily_append",
+            ] as [String: Any]
+        }
+    }
+
+    static func journalCapturePayload(
+        _ result: DailyNoteAppendResult,
+        args: [String],
+        sourceContext: CaptureSourceContext?,
+        provenance: [String: Any]
+    ) -> [String: Any] {
         let item: [String: Any] = [
             "id": result.note.id.uuidString,
             "type": "note",
@@ -2846,12 +2935,7 @@ struct CiderCLI {
                 "reviewState": "ok",
                 "status": "recorded",
             ],
-            "provenance": [
-                "status": "recorded",
-                "ownerType": "note",
-                "ownerID": result.note.id.uuidString,
-                "auditAction": "daily_append",
-            ],
+            "provenance": provenance,
             "indexing": [
                 "status": "indexed",
                 "ownerType": "note",

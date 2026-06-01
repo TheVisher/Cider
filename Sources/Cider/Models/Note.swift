@@ -73,6 +73,26 @@ struct Note: Identifiable, Hashable {
         projectID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
+    var isDailyJournalNote: Bool {
+        title.range(
+            of: #"^Daily Journal \d{4}-\d{2}-\d{2}$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    var dailyJournalDateLabel: String? {
+        guard isDailyJournalNote else { return nil }
+        return String(title.dropFirst("Daily Journal ".count))
+    }
+
+    var journalCaptureSubtitle: String? {
+        guard isDailyJournalNote else { return nil }
+        if let dailyJournalDateLabel {
+            return "Journal capture - \(dailyJournalDateLabel)"
+        }
+        return "Journal capture"
+    }
+
     // MARK: - Computed Properties for Card Display
 
     /// The raw content to use for display — loads from disk if the in-memory field is empty.

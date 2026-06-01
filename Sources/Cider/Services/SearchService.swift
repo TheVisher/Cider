@@ -322,7 +322,7 @@ enum SearchService {
                 results += filtered.map { note in
                     SearchResult(
                         id: note.id, type: .note, title: note.title,
-                        subtitle: nil, snippet: nil,
+                        subtitle: note.journalCaptureSubtitle, snippet: nil,
                         date: note.modifiedAt, note: note
                     )
                 }
@@ -598,7 +598,7 @@ enum SearchService {
     ) async -> [SearchResult] {
         notes.compactMap { note in
             let fileURL = note.absoluteFileURL
-            let rawContent = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+            let rawContent = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? note.content
             let strippedContent = rawContent
                 .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
                 .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
@@ -613,10 +613,10 @@ enum SearchService {
             let snippet: SearchSnippet?
             let subtitle: String?
             if titleMatch {
-                subtitle = String(strippedContent.prefix(80))
+                subtitle = note.journalCaptureSubtitle ?? String(strippedContent.prefix(80))
                 snippet  = nil
             } else {
-                subtitle = nil
+                subtitle = note.journalCaptureSubtitle
                 snippet  = extractSnippet(tokens: tokens, from: strippedContent)
             }
 

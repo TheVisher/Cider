@@ -46,6 +46,42 @@ struct SearchServiceSnapshotTests {
         #expect(resultTypes == Set<SearchResultType>([.bookmark, .note, .dateCard, .contact, .todo, .vaultFile]))
     }
 
+    @Test("snapshot search surfaces daily journal notes as journal capture results")
+    func snapshotSearchSurfacesDailyJournalNotesAsJournalCaptureResults() async throws {
+        let journal = Note(
+            title: "Daily Journal 2026-05-28",
+            content: "# Daily Journal 2026-05-28\n\n- 08:15 - Morning commute planning insight",
+            modifiedAt: Date(timeIntervalSince1970: 1_770_000_000),
+            relativePath: "Inbox/Notes/Daily Journal 2026-05-28.md"
+        )
+        let reference = Note(
+            title: "Commute Reference",
+            content: "Morning commute planning insight",
+            modifiedAt: Date(timeIntervalSince1970: 1_760_000_000),
+            relativePath: "Inbox/Notes/Commute Reference.md"
+        )
+
+        let snapshot = SearchService.Snapshot(
+            query: "planning insight",
+            bookmarks: [],
+            notes: [journal, reference],
+            dateCards: [],
+            contacts: [],
+            todos: [],
+            vaultFiles: [],
+            folders: [],
+            labels: []
+        )
+
+        let results = await SearchService.search(snapshot: snapshot)
+        let journalResult = try #require(results.first { $0.id == journal.id })
+
+        #expect(journalResult.type == .note)
+        #expect(journalResult.title == "Daily Journal 2026-05-28")
+        #expect(journalResult.subtitle == "Journal capture - 2026-05-28")
+        #expect(journalResult.snippet?.match.localizedCaseInsensitiveContains("planning") == true)
+    }
+
     private static func bookmark(index: Int, labelID: UUID, folderID: UUID, now: Date) -> Bookmark {
         Bookmark(
             title: index == 123 ? "Needle bookmark" : "Bookmark \(index)",

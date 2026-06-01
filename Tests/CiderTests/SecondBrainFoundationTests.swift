@@ -440,6 +440,9 @@ struct SecondBrainFoundationTests {
         #expect(firstPayload["time"] as? String == "08:15")
         #expect(firstPayload["created"] as? Bool == true)
         #expect(firstPayload["nextSafeAction"] as? String == "inspect_item")
+        let firstProvenance = try #require(firstPayload["provenance"] as? [String: Any])
+        #expect(firstProvenance["status"] as? String == "recorded")
+        #expect(firstProvenance["ownerType"] as? String == "capture_event")
 
         let firstItem = try #require(firstPayload["item"] as? [String: Any])
         let noteID = try #require(firstItem["id"] as? String)
@@ -472,6 +475,24 @@ struct SecondBrainFoundationTests {
         ], vaultURL: vault))
         let chunks = try #require(getPayload["chunks"] as? [[String: Any]])
         #expect(chunks.contains { ($0["body"] as? String)?.contains("Evening commute note") == true })
+
+        let contextPayload = try jsonObject(from: runCLI([
+            "item", "context", "note", noteID, "--json",
+        ], vaultURL: vault))
+        let provenance = try #require(contextPayload["provenance"] as? [String])
+        #expect(provenance.contains("capture:journal"))
+        let captureProvenance = try #require(contextPayload["captureProvenance"] as? [[String: Any]])
+        #expect(captureProvenance.contains { entry in
+            entry["sourceKind"] as? String == "journal"
+                && entry["sourceText"] as? String == "Evening commute note"
+        })
+
+        let searchPayload = try jsonObjectArray(from: runCLI([
+            "item", "search", "Evening commute note", "--json",
+        ], vaultURL: vault))
+        #expect(searchPayload.contains { result in
+            result["title"] as? String == "Daily Journal 2026-05-28"
+        })
     }
 
     @Test("capture add journal defaults date to today and rejects empty content as JSON")

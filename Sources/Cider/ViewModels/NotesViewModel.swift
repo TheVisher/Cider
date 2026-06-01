@@ -112,7 +112,9 @@ final class NotesViewModel: ObservableObject {
     }
 
     var filteredNotes: [Note] {
-        guard !searchText.isEmpty else { return notes }
+        guard !searchText.isEmpty else {
+            return notes.filter { !$0.isDailyJournalNote }
+        }
         let query = searchText.lowercased()
         // Filter by title only — content search requires disk I/O (loadContent reads from disk)
         // which must not run synchronously on @MainActor in a frequently-rendered computed

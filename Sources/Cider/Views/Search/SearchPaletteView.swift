@@ -125,6 +125,14 @@ struct SearchPaletteView: View {
         results.filter { $0.type == .note }
     }
 
+    private var journalResults: [SearchResult] {
+        noteResults.filter { $0.note?.isDailyJournalNote == true }
+    }
+
+    private var regularNoteResults: [SearchResult] {
+        noteResults.filter { $0.note?.isDailyJournalNote != true }
+    }
+
     private var dateCardResults: [SearchResult] {
         results.filter { $0.type == .dateCard }
     }
@@ -176,6 +184,16 @@ struct SearchPaletteView: View {
     private var recentNotes: [Note] {
         Array(
             notes
+                .filter { !$0.isDailyJournalNote }
+                .sorted { $0.modifiedAt > $1.modifiedAt }
+                .prefix(SearchPaletteDesign.recentNoteCount)
+        )
+    }
+
+    private var recentJournalNotes: [Note] {
+        Array(
+            notes
+                .filter(\.isDailyJournalNote)
                 .sorted { $0.modifiedAt > $1.modifiedAt }
                 .prefix(SearchPaletteDesign.recentNoteCount)
         )
@@ -532,7 +550,7 @@ struct SearchPaletteView: View {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     actionsSection(actions: filteredActions)
 
-                    let hasRecents = !recentBookmarks.isEmpty || !recentNotes.isEmpty
+                    let hasRecents = !recentBookmarks.isEmpty || !recentJournalNotes.isEmpty || !recentNotes.isEmpty
                                   || !recentDateCards.isEmpty || !recentContacts.isEmpty
                     if hasRecents {
                         recentItemsSection
@@ -577,8 +595,11 @@ struct SearchPaletteView: View {
                         if !bookmarkResults.isEmpty {
                             resultsSection(title: "Bookmarks", icon: "bookmark", results: bookmarkResults)
                         }
-                        if !noteResults.isEmpty {
-                            resultsSection(title: "Notes", icon: "note.text", results: noteResults)
+                        if !journalResults.isEmpty {
+                            resultsSection(title: "Journal", icon: "book.closed", results: journalResults)
+                        }
+                        if !regularNoteResults.isEmpty {
+                            resultsSection(title: "Notes", icon: "note.text", results: regularNoteResults)
                         }
                         if !dateCardResults.isEmpty {
                             resultsSection(title: "Date Cards", icon: "calendar", results: dateCardResults)
@@ -772,6 +793,21 @@ struct SearchPaletteView: View {
                         title: bookmark.title,
                         subtitle: bookmark.hasURL ? bookmark.hostDisplay : "",
                         date: bookmark.updatedAt
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            ForEach(recentJournalNotes) { note in
+                Button {
+                    onOpenNote(note)
+                    onDismiss()
+                } label: {
+                    recentRowContent(
+                        icon: "book.closed",
+                        title: note.title,
+                        subtitle: note.journalCaptureSubtitle,
+                        date: note.modifiedAt
                     )
                 }
                 .buttonStyle(.plain)
