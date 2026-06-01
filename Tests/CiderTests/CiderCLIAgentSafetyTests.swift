@@ -351,6 +351,142 @@ struct CiderCLIAgentSafetyTests {
         #expect((inspectedItem["relativePath"] as? String)?.contains("Projects/Cider/Notes") == true)
     }
 
+    @Test("item batch apply records route and link operations")
+    func itemBatchApplyRecordsRouteAndLinkOperations() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-batch-route-link-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceNoteID = try createNote(title: "Batch Route Link Source", content: "Source", vault: vault)
+        let targetNoteID = try createNote(title: "Batch Route Link Target", content: "Target", vault: vault)
+
+        let request = """
+        {
+          "operations": [
+            {
+              "id": "route-source",
+              "action": "route",
+              "type": "note",
+              "ref": "\(sourceNoteID)",
+              "targetType": "folder",
+              "targetPath": "Projects/Cider/Routes",
+              "reason": "Batch route relation",
+              "confidence": 0.75,
+              "status": "accepted"
+            },
+            {
+              "id": "link-source-target",
+              "action": "link",
+              "type": "note",
+              "ref": "\(sourceNoteID)",
+              "targetType": "note",
+              "targetRef": "\(targetNoteID)"
+            }
+          ]
+        }
+        """
+
+        let planResult = try runCLI(args: ["item", "batch-plan", "--stdin", "--json"], vault: vault, stdin: request)
+        let plan = try parseJSONObject(planResult.stdout)
+        let plannedOperations = try #require(plan["operations"] as? [[String: Any]])
+        #expect(plannedOperations.allSatisfy { $0["applySupported"] as? Bool == true })
+        let token = try #require(plan["requiredApprovalToken"] as? String)
+
+        let applyResult = try runCLI(
+            args: ["item", "batch-apply", "--stdin", "--approve", token, "--execute", "--json"],
+            vault: vault,
+            stdin: request
+        )
+        let apply = try parseJSONObject(applyResult.stdout)
+
+        #expect(applyResult.status == 0)
+        #expect(apply["ok"] as? Bool == true)
+        #expect(apply["changed"] as? Bool == true)
+        let appliedOperations = try #require(apply["operations"] as? [[String: Any]])
+        #expect(appliedOperations.count == 2)
+        #expect(Set(appliedOperations.compactMap { $0["status"] as? String }) == ["applied"])
+        let routeOperation = try #require(appliedOperations.first { $0["id"] as? String == "route-source" })
+        #expect(routeOperation["action"] as? String == "route")
+        #expect(routeOperation["routingDecision"] as? [String: Any] != nil)
+        let linkOperation = try #require(appliedOperations.first { $0["id"] as? String == "link-source-target" })
+        #expect(linkOperation["action"] as? String == "link")
+        #expect(linkOperation["link"] as? [String: Any] != nil)
+
+        let inspectResult = try runCLI(args: ["item", "get", "note", sourceNoteID, "--json"], vault: vault)
+        let inspected = try parseJSONObject(inspectResult.stdout)
+        let routingDecisions = try #require(inspected["routingDecisions"] as? [[String: Any]])
+        #expect(routingDecisions.contains {
+            $0["targetType"] as? String == "folder"
+                && $0["targetPath"] as? String == "Projects/Cider/Routes"
+                && $0["reason"] as? String == "Batch route relation"
+                && $0["source"] as? String == "item.batch.apply"
+        })
+
+        let relatedResult = try runCLI(args: ["item", "related", "note", sourceNoteID, "--json"], vault: vault)
+        let related = try parseJSONArray(relatedResult.stdout)
+        #expect(related.contains { $0["id"] as? String == targetNoteID })
+    }
+
+    @Test("item batch apply reports partial failures while applying valid route operations")
+    func itemBatchApplyReportsPartialFailuresWhileApplyingValidRouteOperations() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-batch-route-partial-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceNoteID = try createNote(title: "Batch Partial Route Source", content: "Source", vault: vault)
+
+        let request = """
+        {
+          "operations": [
+            {
+              "id": "route-source",
+              "action": "route",
+              "type": "note",
+              "ref": "\(sourceNoteID)",
+              "targetType": "folder",
+              "targetPath": "Projects/Cider/Partial",
+              "reason": "Batch partial route"
+            },
+            {
+              "id": "missing-link-target",
+              "action": "link",
+              "type": "note",
+              "ref": "\(sourceNoteID)",
+              "targetType": "note",
+              "targetRef": "missing-note-id"
+            }
+          ]
+        }
+        """
+
+        let planResult = try runCLI(args: ["item", "batch-plan", "--stdin", "--json"], vault: vault, stdin: request)
+        let plan = try parseJSONObject(planResult.stdout)
+        let token = try #require(plan["requiredApprovalToken"] as? String)
+
+        let applyResult = try runCLI(
+            args: ["item", "batch-apply", "--stdin", "--approve", token, "--execute", "--json"],
+            vault: vault,
+            stdin: request
+        )
+        let apply = try parseJSONObject(applyResult.stdout)
+
+        #expect(applyResult.status == 0)
+        #expect(apply["ok"] as? Bool == false)
+        #expect(apply["changed"] as? Bool == true)
+        let partialFailures = try #require(apply["partialFailures"] as? [String])
+        #expect(partialFailures.contains { $0.contains("missing-link-target") })
+        let operations = try #require(apply["operations"] as? [[String: Any]])
+        #expect(operations.first { $0["id"] as? String == "route-source" }?["status"] as? String == "applied")
+        #expect(operations.first { $0["id"] as? String == "missing-link-target" }?["status"] as? String == "invalid")
+
+        let inspectResult = try runCLI(args: ["item", "get", "note", sourceNoteID, "--json"], vault: vault)
+        let inspected = try parseJSONObject(inspectResult.stdout)
+        let routingDecisions = try #require(inspected["routingDecisions"] as? [[String: Any]])
+        #expect(routingDecisions.contains { $0["targetPath"] as? String == "Projects/Cider/Partial" })
+    }
+
     @Test("item owner get folder returns read only metadata and counts")
     func itemOwnerGetFolderReturnsReadOnlyMetadataAndCounts() throws {
         let vault = FileManager.default.temporaryDirectory

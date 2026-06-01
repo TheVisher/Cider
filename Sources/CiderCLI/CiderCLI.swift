@@ -5349,9 +5349,56 @@ struct CiderCLI {
         var status: String
         var error: String?
         var itemRef: LibraryEntityRef?
+        var targetItemRef: LibraryEntityRef?
+        var targetType: String?
+        var targetID: String?
+        var targetRef: String?
         var targetFolder: VaultFolder?
         var targetRelativePath: String?
+        var reason: String?
+        var confidence: Double?
+        var routeStatus: String?
         var applySupported: Bool
+
+        init(
+            index: Int,
+            operationID: String,
+            action: String,
+            type: String?,
+            ref: String?,
+            status: String,
+            error: String?,
+            itemRef: LibraryEntityRef?,
+            targetItemRef: LibraryEntityRef? = nil,
+            targetType: String? = nil,
+            targetID: String? = nil,
+            targetRef: String? = nil,
+            targetFolder: VaultFolder?,
+            targetRelativePath: String?,
+            reason: String? = nil,
+            confidence: Double? = nil,
+            routeStatus: String? = nil,
+            applySupported: Bool
+        ) {
+            self.index = index
+            self.operationID = operationID
+            self.action = action
+            self.type = type
+            self.ref = ref
+            self.status = status
+            self.error = error
+            self.itemRef = itemRef
+            self.targetItemRef = targetItemRef
+            self.targetType = targetType
+            self.targetID = targetID
+            self.targetRef = targetRef
+            self.targetFolder = targetFolder
+            self.targetRelativePath = targetRelativePath
+            self.reason = reason
+            self.confidence = confidence
+            self.routeStatus = routeStatus
+            self.applySupported = applySupported
+        }
 
         @MainActor
         func toDictionary() -> [String: Any] {
@@ -5367,8 +5414,17 @@ struct CiderCLI {
             if let itemRef {
                 dict["item"] = ["type": itemRef.type.rawValue, "id": itemRef.entityID.uuidString]
             }
+            if let targetItemRef {
+                dict["targetItem"] = ["type": targetItemRef.type.rawValue, "id": targetItemRef.entityID.uuidString]
+            }
+            if let targetType { dict["targetType"] = targetType }
+            if let targetID { dict["targetID"] = targetID }
+            if let targetRef { dict["targetRef"] = targetRef }
             if let targetRelativePath { dict["targetRelativePath"] = targetRelativePath }
             if let targetFolder { dict["target"] = folderToDict(targetFolder) }
+            if let reason { dict["reason"] = reason }
+            if let confidence { dict["confidence"] = confidence }
+            if let routeStatus { dict["routeStatus"] = routeStatus }
             if let error { dict["error"] = error }
             return dict
         }
@@ -5450,6 +5506,22 @@ struct CiderCLI {
                             source: "item.batch.apply",
                             reason: "Applied through approval-gated item batch."
                         )
+                    } else if plan.action == "route" {
+                        let route = try applyItemBatchRoute(plan: plan, ref: ref, actor: parseFlag("--actor", from: args) ?? "agent")
+                        var routeDict = plan.toDictionary()
+                        routeDict["status"] = "applied"
+                        routeDict["routingDecision"] = route
+                        outputOperations.append(routeDict)
+                        changed = true
+                        continue
+                    } else if plan.action == "link" {
+                        let link = try applyItemBatchLink(plan: plan, ref: ref, actor: parseFlag("--actor", from: args) ?? "agent")
+                        var linkDict = plan.toDictionary()
+                        linkDict["status"] = "applied"
+                        linkDict["link"] = link
+                        outputOperations.append(linkDict)
+                        changed = true
+                        continue
                     } else {
                         throw CaptureAddArgumentError.message("apply_not_supported_for_\(plan.action)")
                     }
@@ -5485,6 +5557,92 @@ struct CiderCLI {
         } catch {
             printItemBatchError(command: "item.batch.apply", message: error.localizedDescription)
         }
+    }
+
+    static func applyItemBatchRoute(plan: ItemBatchOperationPlan, ref: LibraryEntityRef, actor: String) throws -> [String: Any] {
+        guard let targetType = plan.targetType,
+              let reason = plan.reason else {
+            throw CaptureAddArgumentError.message("invalid_route_operation")
+        }
+        let targetPath = plan.targetRelativePath
+        let targetID = plan.targetID
+        let target = CiderRoutingDecisionTarget(
+            kind: targetType,
+            name: targetPath ?? targetID ?? targetType,
+            relativePath: targetPath ?? targetID ?? targetType,
+            folderID: targetType == "folder" ? targetID.flatMap(UUID.init(uuidString:)) : nil,
+            spaceID: targetType == "space" ? targetID : nil
+        )
+        let routingDecision = try CiderRoutingDecisionService().recordDecision(
+            itemID: ref.entityID,
+            itemType: ref.type.rawValue,
+            target: target,
+            confidence: plan.confidence ?? 1.0,
+            reason: reason,
+            actor: actor,
+            source: "item.batch.apply",
+            reviewState: plan.routeStatus ?? "accepted"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: ref.type.rawValue, ownerID: ref.entityID.uuidString)
+        let store = SecondBrainStore(database: .shared)
+        try store.recordAgentAction(
+            SecondBrainAgentAction(
+                owner: owner,
+                itemID: ref.entityID.uuidString,
+                toolName: "item.batch.apply",
+                actionType: "route",
+                source: "item.batch.apply",
+                status: "succeeded",
+                summary: reason
+            )
+        )
+        if let decision = try store.routingDecisions(for: owner)
+            .first(where: { $0.id == routingDecision.id.uuidString }) {
+            return routingDecisionToDict(decision)
+        }
+        return [
+            "id": routingDecision.id.uuidString,
+            "owner": ownerToDict(owner),
+            "targetType": targetType,
+            "targetPath": targetPath ?? "",
+            "targetID": targetID ?? "",
+            "confidence": plan.confidence ?? 1.0,
+            "reason": reason,
+            "status": plan.routeStatus ?? "accepted",
+            "actor": actor,
+            "source": "item.batch.apply",
+        ]
+    }
+
+    static func applyItemBatchLink(plan: ItemBatchOperationPlan, ref: LibraryEntityRef, actor: String) throws -> [String: Any] {
+        guard let target = plan.targetItemRef else {
+            throw CaptureAddArgumentError.message("invalid_link_operation")
+        }
+        try ItemLinkService.shared.addLink(from: ref, to: target)
+        let owner = SecondBrainOwnerRef(ownerType: ref.type.rawValue, ownerID: ref.entityID.uuidString)
+        try SecondBrainStore(database: .shared).recordAgentAction(
+            SecondBrainAgentAction(
+                owner: owner,
+                itemID: ref.entityID.uuidString,
+                toolName: "item.batch.apply",
+                actionType: "link",
+                source: "item.batch.apply",
+                status: "succeeded",
+                summary: "Linked \(ref.type.rawValue):\(ref.entityID.uuidString) to \(target.type.rawValue):\(target.entityID.uuidString)."
+            )
+        )
+        return [
+            "source": [
+                "type": ref.type.rawValue,
+                "id": ref.entityID.uuidString,
+            ],
+            "target": [
+                "type": target.type.rawValue,
+                "id": target.entityID.uuidString,
+            ],
+            "actor": actor,
+            "sourceCommand": "item.batch.apply",
+        ]
     }
 
     static func itemBatchInput(from args: [String]) throws -> String {
@@ -5541,6 +5699,51 @@ struct CiderCLI {
                 return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_folder_not_found", itemRef: itemRef, targetFolder: nil, targetRelativePath: path, applySupported: false)
             }
             return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "valid", error: nil, itemRef: itemRef, targetFolder: folder, targetRelativePath: folder.relativePath, applySupported: true)
+        }
+
+        if action == "route" {
+            let targetType = ((operation["targetType"] as? String) ?? (operation["target-type"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard ["space", "folder", "board"].contains(targetType) else {
+                return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_type_must_be_space_folder_or_board", itemRef: itemRef, targetFolder: nil, targetRelativePath: operation["targetPath"] as? String, applySupported: false)
+            }
+            let targetID = (operation["targetID"] as? String) ?? (operation["targetId"] as? String) ?? (operation["target-id"] as? String)
+            let targetPath = (operation["targetPath"] as? String) ?? (operation["target-path"] as? String) ?? (operation["path"] as? String)
+            guard targetID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    || targetPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+                return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_id_or_target_path_required_for_route", itemRef: itemRef, targetType: targetType, targetID: targetID, targetFolder: nil, targetRelativePath: targetPath, applySupported: false)
+            }
+            let reason = ((operation["reason"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !reason.isEmpty else {
+                return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "reason_required_for_route", itemRef: itemRef, targetType: targetType, targetID: targetID, targetFolder: nil, targetRelativePath: targetPath, applySupported: false)
+            }
+            let routeStatus = ((operation["status"] as? String) ?? "accepted").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard ["accepted", "needs_review", "rejected"].contains(routeStatus) else {
+                return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "route_status_must_be_accepted_needs_review_or_rejected", itemRef: itemRef, targetType: targetType, targetID: targetID, targetFolder: nil, targetRelativePath: targetPath, reason: reason, applySupported: false)
+            }
+            let confidence = Double("\(operation["confidence"] ?? "")") ?? 1.0
+            guard confidence >= 0, confidence <= 1 else {
+                return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "confidence_must_be_between_0_and_1", itemRef: itemRef, targetType: targetType, targetID: targetID, targetFolder: nil, targetRelativePath: targetPath, reason: reason, routeStatus: routeStatus, applySupported: false)
+            }
+            return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "valid", error: nil, itemRef: itemRef, targetType: targetType, targetID: targetID, targetFolder: nil, targetRelativePath: targetPath, reason: reason, confidence: confidence, routeStatus: routeStatus, applySupported: true)
+        }
+
+        if action == "link" {
+            let targetType = ((operation["targetType"] as? String) ?? (operation["target-type"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let targetRef = ((operation["targetRef"] as? String) ?? (operation["target-ref"] as? String) ?? (operation["targetID"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !targetType.isEmpty, !targetRef.isEmpty else {
+                return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_type_and_target_ref_required_for_link", itemRef: itemRef, targetType: targetType.isEmpty ? nil : targetType, targetRef: targetRef.isEmpty ? nil : targetRef, targetFolder: nil, targetRelativePath: nil, applySupported: false)
+            }
+            do {
+                let targetEntityType = try ItemLinkService.entityType(from: targetType)
+                let targetItemRef = try ItemLinkService.shared.resolve(type: targetEntityType, ref: targetRef)
+                return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "valid", error: nil, itemRef: itemRef, targetItemRef: targetItemRef, targetType: targetEntityType.rawValue, targetRef: targetRef, targetFolder: nil, targetRelativePath: nil, applySupported: true)
+            } catch {
+                return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: error.localizedDescription, itemRef: itemRef, targetType: targetType, targetRef: targetRef, targetFolder: nil, targetRelativePath: nil, applySupported: false)
+            }
         }
 
         return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "valid", error: nil, itemRef: itemRef, targetFolder: nil, targetRelativePath: operation["targetPath"] as? String, applySupported: action == "unfile")
