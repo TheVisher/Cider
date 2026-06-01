@@ -438,6 +438,7 @@ func activeDuplicateInvariantReportToDict(_ report: CiderActiveDuplicateInvarian
         "duplicateFindings": report.duplicateFindings.map(duplicateFindingToDict),
         "duplicateRelativePaths": report.duplicateRelativePaths.map(duplicateRelativePathFindingToDict),
         "sqliteMismatches": report.sqliteMismatches.map(storageAuditMismatchToDict),
+        "vaultSQLiteMismatches": report.vaultSQLiteMismatches.map(vaultSQLitePathMismatchToDict),
     ]
 }
 
@@ -480,6 +481,24 @@ func duplicateRelativePathItemToDict(_ item: CiderDuplicateRelativePathItem) -> 
         "type": item.type,
         "title": item.title,
     ]
+}
+
+func vaultSQLitePathMismatchToDict(_ mismatch: CiderVaultSQLitePathMismatch) -> [String: Any] {
+    var dict: [String: Any] = [
+        "kind": mismatch.kind,
+        "relativePath": mismatch.relativePath,
+        "detail": mismatch.detail,
+    ]
+    if let itemID = mismatch.itemID {
+        dict["itemID"] = itemID
+    }
+    if let itemType = mismatch.itemType {
+        dict["itemType"] = itemType
+    }
+    if let title = mismatch.title {
+        dict["title"] = title
+    }
+    return dict
 }
 
 func bookmarkDriftRepairReportToDict(_ report: CiderBookmarkDriftRepairReport) -> [String: Any] {

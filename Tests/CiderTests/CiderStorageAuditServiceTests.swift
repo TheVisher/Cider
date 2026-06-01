@@ -294,12 +294,76 @@ struct CiderStorageAuditServiceTests {
         #expect(report.sqliteMismatches.first?.key == "note")
     }
 
+    @Test("active duplicate invariant check reports vault SQLite path mismatches read-only")
+    func activeDuplicateInvariantCheckReportsVaultSQLitePathMismatchesReadOnly() throws {
+        let (db, url) = try makeTestDB()
+        let vault = try makeTempVault()
+        defer {
+            cleanup(url)
+            try? FileManager.default.removeItem(at: vault)
+        }
+
+        let trackedID = UUID()
+        let missingID = UUID()
+        try makeDirectories(["Notes", "Bookmarks"], under: vault)
+        try insertFolder(db, id: UUID(), relativePath: "Bookmarks")
+        try "tracked".write(
+            to: vault.appendingPathComponent("Notes/Tracked.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "loose".write(
+            to: vault.appendingPathComponent("Bookmarks/Loose.webloc"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try insertItem(db, id: trackedID, type: "note", title: "Tracked", relativePath: "Notes/Tracked.md")
+        try insertItem(db, id: missingID, type: "note", title: "Missing", relativePath: "Notes/Missing.md")
+
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            modelCountsProvider: { ["folder": 1, "note": 2] },
+            doctorReportProvider: {
+                VaultDoctor.Report(
+                    startedAt: Date(timeIntervalSince1970: 10),
+                    finishedAt: Date(timeIntervalSince1970: 11),
+                    findings: []
+                )
+            },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.activeDuplicateInvariantCheck(limit: 10)
+
+        #expect(report.isMutating == false)
+        #expect(report.status == "issues_found")
+        #expect(report.summary["vaultSQLiteMismatches"] == 2)
+        #expect(report.summary["totalIssues"] == 2)
+        #expect(report.vaultSQLiteMismatches.contains {
+            $0.kind == "sqlite_row_missing_vault_file"
+                && $0.itemID == missingID.uuidString
+                && $0.relativePath == "Notes/Missing.md"
+        })
+        #expect(report.vaultSQLiteMismatches.contains {
+            $0.kind == "vault_file_missing_sqlite_row"
+                && $0.relativePath == "Bookmarks/Loose.webloc"
+        })
+    }
+
     @Test("active duplicate invariant JSON exposes non-mutating status and duplicate paths")
     func activeDuplicateInvariantJSONExposesNonMutatingStatusAndDuplicatePaths() throws {
         let report = CiderActiveDuplicateInvariantReport(
             generatedAt: Date(timeIntervalSince1970: 12),
             status: "issues_found",
-            summary: ["duplicateFindings": 0, "duplicateRelativePaths": 1, "sqliteMismatches": 0, "totalIssues": 1],
+            summary: [
+                "duplicateFindings": 0,
+                "duplicateRelativePaths": 1,
+                "sqliteMismatches": 0,
+                "vaultSQLiteMismatches": 1,
+                "totalIssues": 2,
+            ],
             duplicateFindingLimit: 20,
             duplicateFindings: [],
             duplicateRelativePaths: [
@@ -308,17 +372,31 @@ struct CiderStorageAuditServiceTests {
                     items: [CiderDuplicateRelativePathItem(id: "note-1", type: "note", title: "CodexNote")]
                 )
             ],
-            sqliteMismatches: []
+            sqliteMismatches: [],
+            vaultSQLiteMismatches: [
+                CiderVaultSQLitePathMismatch(
+                    kind: "sqlite_row_missing_vault_file",
+                    itemID: "note-2",
+                    itemType: "note",
+                    title: "Missing",
+                    relativePath: "Inbox/Notes/Missing.md",
+                    detail: "SQLite item row points to a missing vault file."
+                )
+            ]
         )
 
         let dict = activeDuplicateInvariantReportToDict(report)
         let duplicatePaths = try #require(dict["duplicateRelativePaths"] as? [[String: Any]])
         let firstPath = try #require(duplicatePaths.first)
+        let vaultSQLiteMismatches = try #require(dict["vaultSQLiteMismatches"] as? [[String: Any]])
+        let firstMismatch = try #require(vaultSQLiteMismatches.first)
 
         #expect(dict["command"] as? String == "storage.active-duplicate-invariants")
         #expect(dict["isMutating"] as? Bool == false)
         #expect(dict["status"] as? String == "issues_found")
         #expect(firstPath["relativePath"] as? String == "Inbox/Notes/CodexNote.md")
+        #expect(firstMismatch["kind"] as? String == "sqlite_row_missing_vault_file")
+        #expect(firstMismatch["relativePath"] as? String == "Inbox/Notes/Missing.md")
     }
 
     private func insertContentChunk(

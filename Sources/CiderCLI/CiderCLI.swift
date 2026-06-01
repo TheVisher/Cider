@@ -499,6 +499,7 @@ struct CiderCLI {
                     print("  Duplicate findings: \(report.duplicateFindings.count)")
                     print("  Duplicate relative paths: \(report.duplicateRelativePaths.count)")
                     print("  SQLite mismatches: \(report.sqliteMismatches.count)")
+                    print("  Vault/SQLite path mismatches: \(report.vaultSQLiteMismatches.count)")
                     for finding in report.duplicateFindings {
                         print("    [\(finding.entityType.rawValue)/\(finding.kind.rawValue)] \(finding.summary)")
                     }
@@ -507,6 +508,9 @@ struct CiderCLI {
                     }
                     for mismatch in report.sqliteMismatches {
                         print("    [mismatch] \(mismatch.detail)")
+                    }
+                    for mismatch in report.vaultSQLiteMismatches {
+                        print("    [\(mismatch.kind)] \(mismatch.relativePath): \(mismatch.detail)")
                     }
                 }
             } catch {

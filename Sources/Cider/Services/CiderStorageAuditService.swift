@@ -168,6 +168,7 @@ struct CiderActiveDuplicateInvariantReport: Equatable {
     var duplicateFindings: [VaultDuplicateAuditor.Finding]
     var duplicateRelativePaths: [CiderDuplicateRelativePathFinding]
     var sqliteMismatches: [CiderStorageAuditMismatch]
+    var vaultSQLiteMismatches: [CiderVaultSQLitePathMismatch] = []
 }
 
 struct CiderDuplicateRelativePathFinding: Equatable {
@@ -179,6 +180,15 @@ struct CiderDuplicateRelativePathItem: Equatable {
     var id: String
     var type: String
     var title: String
+}
+
+struct CiderVaultSQLitePathMismatch: Equatable {
+    var kind: String
+    var itemID: String?
+    var itemType: String?
+    var title: String?
+    var relativePath: String
+    var detail: String
 }
 
 @MainActor
@@ -253,7 +263,8 @@ final class CiderStorageAuditService {
         let duplicateFindings = Array(duplicateFindingsProvider().prefix(normalizedLimit))
         let duplicateRelativePaths = try duplicateRelativePathFindings(limit: normalizedLimit)
         let mismatches = try mismatches(modelCounts: modelCountsProvider(), sqliteCounts: sqliteCountsByEntity())
-        let issueCount = duplicateFindings.count + duplicateRelativePaths.count + mismatches.count
+        let vaultSQLiteMismatches = try vaultSQLitePathMismatches(limit: normalizedLimit)
+        let issueCount = duplicateFindings.count + duplicateRelativePaths.count + mismatches.count + vaultSQLiteMismatches.count
 
         return CiderActiveDuplicateInvariantReport(
             generatedAt: nowProvider(),
@@ -262,12 +273,14 @@ final class CiderStorageAuditService {
                 "duplicateFindings": duplicateFindings.count,
                 "duplicateRelativePaths": duplicateRelativePaths.count,
                 "sqliteMismatches": mismatches.count,
+                "vaultSQLiteMismatches": vaultSQLiteMismatches.count,
                 "totalIssues": issueCount,
             ],
             duplicateFindingLimit: normalizedLimit,
             duplicateFindings: duplicateFindings,
             duplicateRelativePaths: duplicateRelativePaths,
-            sqliteMismatches: mismatches
+            sqliteMismatches: mismatches,
+            vaultSQLiteMismatches: vaultSQLiteMismatches
         )
     }
 
@@ -707,6 +720,142 @@ final class CiderStorageAuditService {
             .sorted { lhs, rhs in lhs.key.localizedCaseInsensitiveCompare(rhs.key) == .orderedAscending }
             .prefix(limit)
             .map { CiderDuplicateRelativePathFinding(relativePath: $0.key, items: $0.value) }
+    }
+
+    private func vaultSQLitePathMismatches(limit: Int) throws -> [CiderVaultSQLitePathMismatch] {
+        guard limit > 0, try tableExists("items") else { return [] }
+
+        let trackedRows = try trackedItemPathRows()
+        let trackedPaths = Set(trackedRows.map(\.relativePath))
+        var findings: [CiderVaultSQLitePathMismatch] = []
+
+        for row in trackedRows {
+            guard findings.count < limit else { return findings }
+            guard isSafeRelativePath(row.relativePath) else {
+                findings.append(CiderVaultSQLitePathMismatch(
+                    kind: "sqlite_row_unsafe_relative_path",
+                    itemID: row.id,
+                    itemType: row.type,
+                    title: row.title,
+                    relativePath: row.relativePath,
+                    detail: "SQLite item row has an unsafe relative_path and cannot be resolved inside the vault."
+                ))
+                continue
+            }
+
+            let url = vaultRoot.appendingPathComponent(row.relativePath)
+            var isDirectory: ObjCBool = false
+            if !FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) || isDirectory.boolValue {
+                findings.append(CiderVaultSQLitePathMismatch(
+                    kind: "sqlite_row_missing_vault_file",
+                    itemID: row.id,
+                    itemType: row.type,
+                    title: row.title,
+                    relativePath: row.relativePath,
+                    detail: "SQLite item row points to a missing vault file."
+                ))
+            }
+        }
+
+        guard findings.count < limit else { return findings }
+        let activeFolderPaths = try activeFolderRelativePaths()
+        for path in managedVaultArtifactPaths(activeFolderPaths: activeFolderPaths)
+            .filter({ !trackedPaths.contains($0) })
+            .prefix(limit - findings.count) {
+            findings.append(CiderVaultSQLitePathMismatch(
+                kind: "vault_file_missing_sqlite_row",
+                itemID: nil,
+                itemType: nil,
+                title: nil,
+                relativePath: path,
+                detail: "Vault item-like file exists without a matching SQLite item row."
+            ))
+        }
+
+        return findings
+    }
+
+    private struct TrackedItemPathRow {
+        var id: String
+        var type: String
+        var title: String
+        var relativePath: String
+    }
+
+    private func trackedItemPathRows() throws -> [TrackedItemPathRow] {
+        let stmt = try database.prepare("""
+            SELECT id, type, title, relative_path
+            FROM items
+            WHERE relative_path IS NOT NULL AND relative_path != ''
+            ORDER BY relative_path COLLATE NOCASE ASC, updated_at DESC, title COLLATE NOCASE ASC;
+            """)
+        var rows: [TrackedItemPathRow] = []
+        while try stmt.step() {
+            rows.append(TrackedItemPathRow(
+                id: stmt.string(at: 0),
+                type: stmt.string(at: 1),
+                title: stmt.string(at: 2),
+                relativePath: stmt.string(at: 3)
+            ))
+        }
+        return rows
+    }
+
+    private func activeFolderRelativePaths() throws -> Set<String> {
+        guard try tableExists("folders") else { return [] }
+        let stmt = try database.prepare("""
+            SELECT relative_path
+            FROM folders
+            WHERE relative_path IS NOT NULL AND relative_path != '';
+            """)
+        var paths = Set<String>()
+        while try stmt.step() {
+            paths.insert(stmt.string(at: 0))
+        }
+        return paths
+    }
+
+    private func managedVaultArtifactPaths(activeFolderPaths: Set<String>) -> [String] {
+        guard !activeFolderPaths.isEmpty else { return [] }
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: vaultRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+
+        var paths: [String] = []
+        for case let url as URL in enumerator {
+            let relativePath = relativePath(for: url, under: vaultRoot)
+            if relativePath == ".cider" || relativePath.hasPrefix(".cider/") || relativePath.hasPrefix("Projects/") {
+                enumerator.skipDescendants()
+                continue
+            }
+            guard managedArtifactExtensions.contains(url.pathExtension.lowercased()),
+                  let isRegular = try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile,
+                  isRegular == true,
+                  activeFolderPaths.contains(parentRelativePath(of: relativePath)) else { continue }
+            paths.append(relativePath)
+        }
+        return paths.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func parentRelativePath(of relativePath: String) -> String {
+        let parent = (relativePath as NSString).deletingLastPathComponent
+        return parent == "." ? "" : parent
+    }
+
+    private var managedArtifactExtensions: Set<String> {
+        ["md", "webloc", "url", "vcf", "ics"]
+    }
+
+    private func relativePath(for url: URL, under root: URL) -> String {
+        let rootPath = root.standardizedFileURL.path
+        let filePath = url.standardizedFileURL.path
+        guard filePath.hasPrefix(rootPath + "/") else {
+            return url.lastPathComponent
+        }
+        return String(filePath.dropFirst(rootPath.count + 1))
     }
 
     private func searchIndexDriftFindings() throws -> [CiderSearchIndexDriftFinding] {
