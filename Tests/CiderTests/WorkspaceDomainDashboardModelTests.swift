@@ -15,7 +15,7 @@ final class WorkspaceDomainDashboardModelTests: XCTestCase {
         XCTAssertEqual(model.sections.first?.items.first?.subtitle, "cider Kanban board")
     }
 
-    func testProviderDoesNotBackfillDomainDashboardFromLegacySavedViews() {
+    func testProviderDoesNotBackfillDomainDashboardFromRetiredViews() {
         let model = WorkspaceDomainDashboardProvider.model(
             for: .bookmarks,
             allTabs: []

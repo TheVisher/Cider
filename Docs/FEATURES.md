@@ -118,11 +118,9 @@ Settings manage vault location, hotkeys, intelligence, storage, sync, update rem
 
 Key code: `Sources/Cider/Views/Settings/`, `Sources/Cider/Services/SyncService.swift`.
 
-## Legacy Saved Views And Sources
+## Sources
 
-Saved Views are a legacy compatibility model for older vault data and generated tabs. They should load without breaking launch, but active navigation should use current domains, Library routes, Spaces, and explicit Project/Kanban routes instead. Sources and linked references help explain where an item came from and how it relates to other vault objects.
-
-Key code: `Sources/Cider/Models/SavedView.swift`, `Sources/Cider/Services/SavedViewStorage.swift`.
+Sources and linked references explain where an item came from and how it relates to other vault objects. Active navigation should use current domains, Library routes, Spaces, and explicit Project/Kanban routes.
 
 ## Whiteboard And Browser Sessions
 

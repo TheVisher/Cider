@@ -1,7 +1,7 @@
 import Foundation
 
 enum LibraryFeedSurface: CaseIterable {
-    case savedView
+    case library
     case searchResults
     case tagDetail
 }
@@ -9,7 +9,7 @@ enum LibraryFeedSurface: CaseIterable {
 enum LibraryFeedPresentationPolicy {
     static func showsComingUpSection(on surface: LibraryFeedSurface) -> Bool {
         switch surface {
-        case .savedView, .searchResults, .tagDetail:
+        case .library, .searchResults, .tagDetail:
             return false
         }
     }

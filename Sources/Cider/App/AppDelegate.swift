@@ -502,7 +502,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ContactStorage.shared.reload()
         DateCardStorage.shared.reload()
         CardLabelStorage.shared.reload()
-        SavedViewStorage.shared.reload()
+        LegacyViewStorage.shared.reload()
         ClipboardStorage.shared.reload()
 
         // Toggle automatic bookmark capture from copied URLs/images

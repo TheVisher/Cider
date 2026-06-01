@@ -37,8 +37,8 @@ struct HomeDashboardView: View {
 
     // MARK: - Library Items
 
-    private var filterSpec: SavedViewFilterSpec {
-        SavedViewFilterSpec(
+    private var filterSpec: LibraryFilterSpec {
+        LibraryFilterSpec(
             entityTypes: entityFilter,
             labelIDs: activeLabelIDs,
             folderID: selectedFolderID,
@@ -52,8 +52,8 @@ struct HomeDashboardView: View {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var sortSpec: SavedViewSortSpec {
-        SavedViewSortSpec(mode: sortMode)
+    private var sortSpec: LibrarySortSpec {
+        LibrarySortSpec(mode: sortMode)
     }
 
     /// Continue section always shows global recents regardless of folder/filter selection

@@ -1,11 +1,11 @@
 import XCTest
 @testable import Cider
 
-final class DashboardSavedViewKindTests: XCTestCase {
+final class LegacyViewKindCompatibilityTests: XCTestCase {
     func testDashboardKindRoundTripsThroughCodable() throws {
-        let savedView = SavedView(name: "Dashboard", kind: .dashboard)
-        let data = try JSONEncoder.ciderTestEncoder.encode(savedView)
-        let decoded = try JSONDecoder.ciderTestDecoder.decode(SavedView.self, from: data)
+        let legacyView = LegacyView(name: "Dashboard", kind: .dashboard)
+        let data = try JSONEncoder.ciderTestEncoder.encode(legacyView)
+        let decoded = try JSONDecoder.ciderTestDecoder.decode(LegacyView.self, from: data)
 
         XCTAssertEqual(decoded.kind, .dashboard)
         XCTAssertEqual(decoded.kind.systemImage, "gauge.medium")
@@ -24,7 +24,7 @@ final class DashboardSavedViewKindTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let decoded = try JSONDecoder.ciderTestDecoder.decode(SavedView.self, from: payload)
+        let decoded = try JSONDecoder.ciderTestDecoder.decode(LegacyView.self, from: payload)
 
         XCTAssertEqual(decoded.kind, .library)
     }

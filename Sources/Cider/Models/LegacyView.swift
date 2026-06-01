@@ -13,7 +13,7 @@ enum LibrarySortMode: String, Codable, CaseIterable, Hashable {
     case dateFarthest
 }
 
-struct SavedViewFilterSpec: Codable, Hashable {
+struct LibraryFilterSpec: Codable, Hashable {
     var entityTypes: Set<LibraryEntityType>
     var labelIDs: Set<UUID>
     var folderID: UUID?
@@ -48,7 +48,7 @@ struct SavedViewFilterSpec: Codable, Hashable {
     }
 }
 
-struct SavedViewSortSpec: Codable, Hashable {
+struct LibrarySortSpec: Codable, Hashable {
     var mode: LibrarySortMode
 
     init(mode: LibrarySortMode = .createdDescending) {
@@ -56,7 +56,7 @@ struct SavedViewSortSpec: Codable, Hashable {
     }
 }
 
-struct SavedViewLayoutSpec: Codable, Hashable {
+struct LegacyViewLayoutSpec: Codable, Hashable {
     var displayMode: LibraryDisplayMode
     var cardSizeScale: Double
     var showsGhostCells: Bool
@@ -88,29 +88,29 @@ struct SavedViewLayoutSpec: Codable, Hashable {
     }
 }
 
-struct SavedView: Identifiable, Codable, Hashable {
+struct LegacyView: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
-    var filterSpec: SavedViewFilterSpec
-    var sortSpec: SavedViewSortSpec
-    var layoutSpec: SavedViewLayoutSpec
+    var filterSpec: LibraryFilterSpec
+    var sortSpec: LibrarySortSpec
+    var layoutSpec: LegacyViewLayoutSpec
     var isTabPinned: Bool
     var isBlank: Bool
     var isOnboarding: Bool
-    var kind: SavedViewKind
+    var kind: LegacyViewKind
     var createdAt: Date
     var updatedAt: Date
 
     init(
         id: UUID = UUID(),
         name: String,
-        filterSpec: SavedViewFilterSpec = SavedViewFilterSpec(),
-        sortSpec: SavedViewSortSpec = SavedViewSortSpec(),
-        layoutSpec: SavedViewLayoutSpec = SavedViewLayoutSpec(),
+        filterSpec: LibraryFilterSpec = LibraryFilterSpec(),
+        sortSpec: LibrarySortSpec = LibrarySortSpec(),
+        layoutSpec: LegacyViewLayoutSpec = LegacyViewLayoutSpec(),
         isTabPinned: Bool = true,
         isBlank: Bool = false,
         isOnboarding: Bool = false,
-        kind: SavedViewKind = .library,
+        kind: LegacyViewKind = .library,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -131,13 +131,13 @@ struct SavedView: Identifiable, Codable, Hashable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
-        filterSpec = try container.decodeIfPresent(SavedViewFilterSpec.self, forKey: .filterSpec) ?? SavedViewFilterSpec()
-        sortSpec = try container.decodeIfPresent(SavedViewSortSpec.self, forKey: .sortSpec) ?? SavedViewSortSpec()
-        layoutSpec = try container.decodeIfPresent(SavedViewLayoutSpec.self, forKey: .layoutSpec) ?? SavedViewLayoutSpec()
+        filterSpec = try container.decodeIfPresent(LibraryFilterSpec.self, forKey: .filterSpec) ?? LibraryFilterSpec()
+        sortSpec = try container.decodeIfPresent(LibrarySortSpec.self, forKey: .sortSpec) ?? LibrarySortSpec()
+        layoutSpec = try container.decodeIfPresent(LegacyViewLayoutSpec.self, forKey: .layoutSpec) ?? LegacyViewLayoutSpec()
         isTabPinned = try container.decodeIfPresent(Bool.self, forKey: .isTabPinned) ?? true
         isBlank = try container.decodeIfPresent(Bool.self, forKey: .isBlank) ?? false
         isOnboarding = try container.decodeIfPresent(Bool.self, forKey: .isOnboarding) ?? false
-        kind = try container.decodeIfPresent(SavedViewKind.self, forKey: .kind) ?? .library
+        kind = try container.decodeIfPresent(LegacyViewKind.self, forKey: .kind) ?? .library
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }

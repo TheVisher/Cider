@@ -1,9 +1,9 @@
 import Foundation
 
-/// Discriminator for what a `SavedView` tab renders.
+/// Discriminator for what a `LegacyView` tab renders.
 /// `.library` is the default (existing behavior),
 /// `.kanban` links to a YAML-backed Kanban board.
-enum SavedViewKind: Codable, Hashable {
+enum LegacyViewKind: Codable, Hashable {
     case dashboard
     case library
     case kanban(boardID: String)

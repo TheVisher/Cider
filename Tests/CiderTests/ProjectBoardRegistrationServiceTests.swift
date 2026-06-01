@@ -3,7 +3,7 @@ import XCTest
 
 final class ProjectBoardRegistrationServiceTests: XCTestCase {
     @MainActor
-    func testRegisterBoardForProjectCreatesProjectAssociationWithoutSavedViewSideEffect() throws {
+    func testRegisterBoardForProjectCreatesProjectAssociationWithoutRetiredViewSideEffect() throws {
         let suiteName = "ProjectBoardRegistrationServiceTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {

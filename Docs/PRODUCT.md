@@ -55,7 +55,7 @@ Cider still keeps important older capabilities, but they should now serve the se
 - Bookmarks are one captured item type, not the product center.
 - Notes and files are durable memory artifacts plus searchable context.
 - Todos, dates, contacts, and reminders are life-memory objects, not side utilities.
-- Spaces are lenses over shared state, not separate storage systems. Legacy Saved Views are compatibility-only and should not drive active navigation.
+- Spaces are lenses over shared state, not separate storage systems.
 - Kanban is first-class as Cider's own work surface and agent handoff system, but Cider should not become a heavy project-management clone.
 - Historical Markdown plans, stale bug notes, and old roadmap clutter belong in Kanban or git history, not active docs.
 

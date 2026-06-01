@@ -138,7 +138,7 @@ Regression areas worth checking after related changes:
 - DatePicker/popover behavior in panel contexts
 - masonry/card sizing after window resize
 - note editor save/reopen/image serialization
-- Space dashboards and saved views over shared item state
+- Space dashboards over shared item state
 
 ## Notes Editor Smoke
 

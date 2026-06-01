@@ -8,7 +8,7 @@ final class LibraryViewModel: ObservableObject {
     @Published private(set) var recentItems: [LibraryItemV2] = []
 
     /// Cache for filteredItems — avoids re-filtering+sorting on unrelated body evaluations.
-    private var filteredItemsCache: (filter: SavedViewFilterSpec, sort: SavedViewSortSpec, result: [LibraryItemV2])?
+    private var filteredItemsCache: (filter: LibraryFilterSpec, sort: LibrarySortSpec, result: [LibraryItemV2])?
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -34,8 +34,8 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func filteredItems(
-        using filterSpec: SavedViewFilterSpec,
-        sort sortSpec: SavedViewSortSpec
+        using filterSpec: LibraryFilterSpec,
+        sort sortSpec: LibrarySortSpec
     ) -> [LibraryItemV2] {
         if let cache = filteredItemsCache, cache.filter == filterSpec, cache.sort == sortSpec {
             return cache.result
@@ -102,10 +102,10 @@ final class LibraryViewModel: ObservableObject {
         return result
     }
 
-    func calendarBuckets(for month: Date, using filterSpec: SavedViewFilterSpec) -> [Date: [LibraryItemV2]] {
+    func calendarBuckets(for month: Date, using filterSpec: LibraryFilterSpec) -> [Date: [LibraryItemV2]] {
         let calendar = Calendar.current
         guard let monthInterval = calendar.dateInterval(of: .month, for: month) else { return [:] }
-        let sorted = filteredItems(using: filterSpec, sort: SavedViewSortSpec(mode: .createdDescending))
+        let sorted = filteredItems(using: filterSpec, sort: LibrarySortSpec(mode: .createdDescending))
 
         var buckets: [Date: [LibraryItemV2]] = [:]
         for item in sorted {

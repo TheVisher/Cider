@@ -448,12 +448,12 @@ struct CiderConfig: Codable {
             if let oldBookmarksDir = try legacyContainer.decodeIfPresent(String.self, forKey: .ciderDataDirectory),
                oldBookmarksDir != "~/Documents/Cider/Bookmarks" {
                 overrides[StorageType.bookmarks.rawValue] = oldBookmarksDir
-                // Contacts, date cards, stacks, labels, saved views, sources were also in this dir
+                // Contacts, date cards, stacks, labels, retired view compatibility data, and sources were also in this dir
                 overrides[StorageType.contacts.rawValue] = oldBookmarksDir
                 overrides[StorageType.dateCards.rawValue] = oldBookmarksDir
                 overrides[StorageType.stacks.rawValue] = oldBookmarksDir
                 overrides[StorageType.labels.rawValue] = oldBookmarksDir
-                overrides[StorageType.savedViews.rawValue] = oldBookmarksDir
+                overrides[StorageType.retiredViewCompatibility.rawValue] = oldBookmarksDir
                 overrides[StorageType.sources.rawValue] = oldBookmarksDir
             }
             if let oldNotesDir = try legacyContainer.decodeIfPresent(String.self, forKey: .notesDirectory),

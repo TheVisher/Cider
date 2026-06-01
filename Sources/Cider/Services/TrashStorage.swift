@@ -488,7 +488,7 @@ final class TrashStorage {
         let fileURL = boardsDir.appendingPathComponent("\(payload.boardID).yaml")
         try? payload.yamlContent.write(to: fileURL, atomically: true, encoding: .utf8)
 
-        // Reload the board. Legacy SavedView tabs are no longer recreated.
+        // Reload the board without recreating removed generated tabs.
         KanbanStorage.shared.reload()
         KanbanStorage.shared.refreshSecondBrainProjectionIfAvailable(boardID: payload.boardID)
 

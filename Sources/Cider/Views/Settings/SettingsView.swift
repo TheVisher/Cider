@@ -155,7 +155,7 @@ struct SettingsView: View {
     }
 
     var overrideableTypes: [StorageType] {
-        [.bookmarks, .notes, .contacts, .dateCards, .stacks, .labels, .savedViews, .sources]
+        [.bookmarks, .notes, .contacts, .dateCards, .stacks, .labels, .sources]
     }
 
     func openAccessibilityPreferences() {

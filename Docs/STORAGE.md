@@ -24,7 +24,7 @@ These contracts tell agents which file/YAML domains are intentional authorities,
 | Agent memory | Legacy | Durable memory Markdown/review files are review artifacts and compatibility memory, not canonical second-brain item truth. | Do not let legacy memory files override SQLite item graph, capture, or routing state; future chat/memory intake should feed canonical capture/provenance services. |
 | Folder Kanban | Legacy | `.cider/folder-kanban/*.yaml` stores per-folder item columns tied to legacy folder organization. | Do not expand as second-brain truth; hide or retire when Spaces/item routing replaces folder-centered workflows. |
 | Dashboard topics and cards | Hybrid | `DashboardStorage` stores local JSON dashboard topics/cards/runs; it is product state, not vault evidence or canonical item memory. | Keep as local UI state until schema compatibility is explicit; link to canonical items instead of duplicating item truth. |
-| Vault folders | Hybrid | Folders are storage topology for durable artifacts and conservative routing, but not the meaning layer. | Preserve user topology and identity on moves; Spaces/saved views/routing decisions should carry meaning. |
+| Vault folders | Hybrid | Folders are storage topology for durable artifacts and conservative routing, but not the meaning layer. | Preserve user topology and identity on moves; Spaces, routing decisions, and explicit project/board routes should carry meaning. |
 
 ## Second Brain Item Graph
 
@@ -91,7 +91,7 @@ The target future model is native structured sections rendered into dashboard/so
 
 The vault stores user-readable artifacts in folders such as Inbox, Bookmarks, Notes, Todos, Date Cards, Contacts, and Files. Routing should be conservative when confidence is low.
 
-Spaces are surfaces over shared SQLite/vault state. A Space may correspond to folders, saved views, dashboard panels, routing hints, or domain-specific UI, but it must not become a separate authority for item identity or memory.
+Spaces are surfaces over shared SQLite/vault state. A Space may correspond to folders, dashboard panels, routing hints, or domain-specific UI, but it must not become a separate authority for item identity or memory.
 
 Project work surfaces use vault folders for user-visible Markdown and reference material:
 

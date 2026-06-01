@@ -94,17 +94,17 @@ final class TemporalModelsCodableTests: XCTestCase {
         XCTAssertNil(card.urgency(now: now, windowDays: 7))
     }
 
-    func testSavedViewCodableRoundTrip() throws {
-        var filter = SavedViewFilterSpec()
+    func testLegacyViewCodableRoundTrip() throws {
+        var filter = LibraryFilterSpec()
         filter.entityTypes = [.bookmark, .dateCard]
         filter.includeCompleted = false
         filter.textQuery = "bills"
 
-        let original = SavedView(
+        let original = LegacyView(
             name: "Bills",
             filterSpec: filter,
-            sortSpec: SavedViewSortSpec(mode: .updatedDescending),
-            layoutSpec: SavedViewLayoutSpec(
+            sortSpec: LibrarySortSpec(mode: .updatedDescending),
+            layoutSpec: LegacyViewLayoutSpec(
                 displayMode: .grid,
                 cardSizeScale: 1.75,
                 showsGhostCells: true,
@@ -119,7 +119,7 @@ final class TemporalModelsCodableTests: XCTestCase {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(SavedView.self, from: data)
+        let decoded = try decoder.decode(LegacyView.self, from: data)
 
         XCTAssertEqual(decoded.name, "Bills")
         XCTAssertEqual(decoded.filterSpec.entityTypes, [.bookmark, .dateCard])
