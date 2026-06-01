@@ -1474,6 +1474,48 @@ struct CiderCLIAgentSafetyTests {
         #expect(path.string(at: 0).hasPrefix("Inbox/Files/"))
     }
 
+    @Test("file capture indexes readable text files for item search")
+    func fileCaptureIndexesReadableTextFilesForItemSearch() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-file-capture-text-index-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let distinctiveWord = "CID298SaffronQuasarReceipt"
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-file-capture-text-source-\(UUID().uuidString).txt")
+        try """
+        This source file checks text indexing for Cider captures.
+        Distinctive body token: \(distinctiveWord)
+        """.write(to: source, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let captureResult = try runCLI(
+            args: ["capture", "add", "--kind", "file", "--path", source.path, "--json"],
+            vault: vault
+        )
+        let capture = try parseJSONObject(captureResult.stdout)
+        #expect(captureResult.status == 0)
+        let item = try #require(capture["item"] as? [String: Any])
+        let itemID = try #require(item["id"] as? String)
+        let indexing = try #require(capture["indexing"] as? [String: Any])
+        #expect(indexing["status"] as? String == "indexed")
+        #expect(indexing["ownerType"] as? String == "vaultFile")
+        #expect(indexing["ownerID"] as? String == itemID)
+
+        let searchResult = try runCLI(
+            args: ["item", "search", distinctiveWord, "--json"],
+            vault: vault
+        )
+        let results = try parseJSONArray(searchResult.stdout)
+        #expect(searchResult.status == 0)
+        #expect(results.contains { result in
+            guard let owner = result["owner"] as? [String: Any] else { return false }
+            return owner["ownerType"] as? String == "vaultFile"
+                && owner["ownerID"] as? String == itemID
+        })
+    }
+
     @Test("capture add accepts nested target folder paths through folder flag")
     func captureAddAcceptsNestedTargetFolderPathsThroughFolderFlag() throws {
         let vault = FileManager.default.temporaryDirectory

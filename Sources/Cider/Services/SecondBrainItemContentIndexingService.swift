@@ -176,7 +176,7 @@ final class SecondBrainItemContentIndexingService {
                 ]
             )
         case "vaultFile":
-            return try singleDetail(
+            var content = try singleDetail(
                 owner: owner,
                 sql: """
                 SELECT i.title, f.filename, f.file_type, f.file_size, f.notes, f.ocr_text, i.relative_path
@@ -192,6 +192,11 @@ final class SecondBrainItemContentIndexingService {
                     (6, "Path"),
                 ]
             )
+            if let relativePath = content?.fields.first(where: { $0.label == "Path" })?.value,
+               let text = readableTextFileContent(relativePath: relativePath) {
+                content?.fields.append(("Text content", text))
+            }
+            return content
         default:
             throw IndexingError.unsupportedOwnerType(owner.ownerType)
         }
@@ -225,6 +230,44 @@ final class SecondBrainItemContentIndexingService {
         }
 
         return ItemContent(owner: owner, itemID: owner.ownerID, title: title, fields: values)
+    }
+
+    private func readableTextFileContent(relativePath: String) -> String? {
+        guard isReadableTextFile(relativePath: relativePath) else { return nil }
+
+        let fileURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(relativePath)
+        guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+              let data = try? Data(contentsOf: fileURL) else {
+            return nil
+        }
+
+        for encoding in [String.Encoding.utf8, .utf16, .ascii, .isoLatin1] {
+            guard let text = String(data: data, encoding: encoding) else { continue }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        return nil
+    }
+
+    private func isReadableTextFile(relativePath: String) -> Bool {
+        let ext = URL(fileURLWithPath: relativePath).pathExtension.lowercased()
+        return [
+            "txt",
+            "text",
+            "md",
+            "markdown",
+            "csv",
+            "tsv",
+            "json",
+            "jsonl",
+            "yaml",
+            "yml",
+            "xml",
+            "html",
+            "htm",
+            "log",
+        ].contains(ext)
     }
 
     private func chunkDrafts(for item: ItemContent) -> [SecondBrainChunkDraft] {
