@@ -112,11 +112,32 @@ struct CiderCaptureResult {
     }
 
     struct SideEffectStatus {
+        struct IndexedChunk {
+            var id: String
+            var ownerType: String
+            var ownerID: String
+            var source: String
+            var title: String
+            var chunkIndex: Int
+
+            func toDictionary() -> [String: Any] {
+                [
+                    "id": id,
+                    "ownerType": ownerType,
+                    "ownerID": ownerID,
+                    "source": source,
+                    "title": title,
+                    "chunkIndex": chunkIndex,
+                ]
+            }
+        }
+
         var status: String
         var reason: String?
         var ownerType: String?
         var ownerID: String?
         var captureEventID: UUID?
+        var chunks: [IndexedChunk] = []
 
         func toDictionary() -> [String: Any] {
             var dict: [String: Any] = ["status": status]
@@ -124,6 +145,7 @@ struct CiderCaptureResult {
             if let ownerType { dict["ownerType"] = ownerType }
             if let ownerID { dict["ownerID"] = ownerID }
             if let captureEventID { dict["captureEventID"] = captureEventID.uuidString }
+            if !chunks.isEmpty { dict["chunks"] = chunks.map { $0.toDictionary() } }
             return dict
         }
     }
@@ -1531,6 +1553,15 @@ final class CiderCaptureService {
         }
         do {
             _ = try SecondBrainItemContentIndexingService(database: database).rebuild(owner: owner)
+            let chunks = try indexedChunkTrace(owner: owner, database: database)
+            result.indexing = .init(
+                status: "indexed",
+                reason: nil,
+                ownerType: owner.ownerType,
+                ownerID: owner.ownerID,
+                captureEventID: result.captureEventID,
+                chunks: chunks
+            )
         } catch {
             result.indexing = .init(
                 status: "failed",
@@ -1541,14 +1572,40 @@ final class CiderCaptureService {
             )
             return result
         }
-        result.indexing = .init(
-            status: "indexed",
-            reason: nil,
-            ownerType: owner.ownerType,
-            ownerID: owner.ownerID,
-            captureEventID: result.captureEventID
-        )
         return result
+    }
+
+    private func indexedChunkTrace(
+        owner: SecondBrainOwnerRef,
+        database: CiderDatabase,
+        limit: Int = 20
+    ) throws -> [CiderCaptureResult.SideEffectStatus.IndexedChunk] {
+        let normalizedLimit = max(1, min(limit, 50))
+        let stmt = try database.prepare("""
+            SELECT id, source, title, chunk_index
+            FROM content_chunks
+            WHERE owner_type = ? AND owner_id = ?
+            ORDER BY chunk_index ASC, title COLLATE NOCASE ASC
+            LIMIT ?;
+            """)
+        stmt.bind(owner.ownerType, at: 1)
+            .bind(owner.ownerID, at: 2)
+            .bind(normalizedLimit, at: 3)
+
+        var chunks: [CiderCaptureResult.SideEffectStatus.IndexedChunk] = []
+        while try stmt.step() {
+            chunks.append(
+                CiderCaptureResult.SideEffectStatus.IndexedChunk(
+                    id: stmt.string(at: 0),
+                    ownerType: owner.ownerType,
+                    ownerID: owner.ownerID,
+                    source: stmt.string(at: 1),
+                    title: stmt.string(at: 2),
+                    chunkIndex: stmt.int(at: 3)
+                )
+            )
+        }
+        return chunks
     }
 
     private func persistCaptureAttachments(
