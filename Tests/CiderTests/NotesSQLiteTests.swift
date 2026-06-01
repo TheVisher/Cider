@@ -1214,6 +1214,106 @@ struct NotesSQLiteTests {
         #expect(try projectNotePathRelationRowCount(db, relativePath: relativePath) == 1)
     }
 
+    @Test("Rescan persists externally added project QA artifacts")
+    func rescanPersistsExternallyAddedProjectQAArtifacts() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = makeTempVaultURL()
+        defer {
+            cleanup(vault)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let service = makeService(db)
+        let existing = Note(
+            title: "Existing Note",
+            content: "Already canonical.",
+            relativePath: "Inbox/Notes/Existing Note.md"
+        )
+        let existingFileURL = vault.appendingPathComponent(existing.relativePath)
+        try FileManager.default.createDirectory(
+            at: existingFileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try existing.content.write(to: existingFileURL, atomically: true, encoding: .utf8)
+        service.persistNoteToDatabase(db, note: existing)
+        service.loadNotesFromDatabase(db)
+
+        let relativePath = "Projects/Cider/QA/External QA Audit.md"
+        let fileURL = vault.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "# External QA Audit\n\nNew artifact from disk.\n".write(
+            to: fileURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        service.rescan()
+
+        let adopted = try #require(service.notes.first { $0.relativePath == relativePath })
+        #expect(adopted.projectID == "cider")
+        #expect(adopted.artifactType == "qa")
+        #expect(try noteItemCount(db) == service.notes.count)
+        #expect(try noteItemExists(db, id: adopted.id, title: "External QA Audit", relativePath: relativePath))
+        #expect(try noteRowCount(db, id: adopted.id) == 1)
+        #expect(try projectNoteRelationRowCount(db, id: adopted.id, relativePath: relativePath) == 1)
+    }
+
+    @Test("Rescan restores SQLite-backed notes when sync fails")
+    func rescanRestoresSQLiteBackedNotesWhenSyncFails() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = makeTempVaultURL()
+        defer {
+            cleanup(vault)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let service = makeService(db)
+        let existing = Note(
+            title: "Existing Note",
+            content: "Already canonical.",
+            relativePath: "Inbox/Notes/Existing Note.md"
+        )
+        let existingFileURL = vault.appendingPathComponent(existing.relativePath)
+        try FileManager.default.createDirectory(
+            at: existingFileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try existing.content.write(to: existingFileURL, atomically: true, encoding: .utf8)
+        service.persistNoteToDatabase(db, note: existing)
+
+        let conflictingRelativePath = "Projects/Cider/QA/Conflicting QA Audit.md"
+        try db.runSQL("""
+            INSERT INTO items (id, type, title, created_at, updated_at, relative_path)
+            VALUES ('CONFLICTING-VAULT-FILE', 'vaultFile', 'Conflicting QA Audit', 1, 1, '\(conflictingRelativePath)');
+            """)
+        let conflictingFileURL = vault.appendingPathComponent(conflictingRelativePath)
+        try FileManager.default.createDirectory(
+            at: conflictingFileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "# Conflicting QA Audit\n".write(to: conflictingFileURL, atomically: true, encoding: .utf8)
+
+        service.loadNotesFromDatabase(db)
+        service.rescan()
+
+        #expect(service.notes.map(\.id) == [existing.id])
+        #expect(try noteItemCount(db) == 1)
+        #expect(try noteItemExists(db, id: existing.id, title: "Existing Note", relativePath: existing.relativePath))
+        let persistedNoteCount = try noteItemCount(db)
+        #expect(service.notes.count == persistedNoteCount)
+    }
+
     @Test("Project decision and QA artifacts record typed relation producers")
     func projectDecisionAndQAArtifactsRecordTypedRelationProducers() throws {
         let (db, url) = try makeTestDB()
@@ -1285,6 +1385,21 @@ struct NotesSQLiteTests {
         stmt.bind(DatabaseHelpers.encode(id), at: 1)
         guard try stmt.step() else { return 0 }
         return Int(stmt.int64(at: 0))
+    }
+
+    private func noteItemCount(_ db: CiderDatabase) throws -> Int {
+        let stmt = try db.prepare("SELECT COUNT(*) FROM items WHERE type = 'note';")
+        guard try stmt.step() else { return 0 }
+        return Int(stmt.int64(at: 0))
+    }
+
+    private func noteItemExists(_ db: CiderDatabase, id: UUID, title: String, relativePath: String) throws -> Bool {
+        let stmt = try db.prepare("SELECT COUNT(*) FROM items WHERE id = ? AND type = 'note' AND title = ? AND relative_path = ?;")
+        stmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(title, at: 2)
+            .bind(relativePath, at: 3)
+        guard try stmt.step() else { return false }
+        return stmt.int64(at: 0) == 1
     }
 
     private func projectNoteRelationRowCount(_ db: CiderDatabase, id: UUID, relativePath: String) throws -> Int {

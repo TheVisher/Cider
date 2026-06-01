@@ -530,6 +530,73 @@ struct CiderStorageAuditServiceTests {
         #expect((regression["newIssueFingerprints"] as? [String])?.isEmpty == false)
     }
 
+    @Test("restart duplicate regression loop accepts project artifact rescan adoption")
+    func restartDuplicateRegressionLoopAcceptsProjectArtifactRescanAdoption() throws {
+        let (db, url) = try makeTestDB()
+        let vault = try makeTempVault()
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let noteService = NotesStorage(database: db)
+        let existing = Note(
+            title: "Existing Note",
+            content: "Already canonical.",
+            relativePath: "Inbox/Notes/Existing Note.md"
+        )
+        let existingFileURL = vault.appendingPathComponent(existing.relativePath)
+        try FileManager.default.createDirectory(
+            at: existingFileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try existing.content.write(to: existingFileURL, atomically: true, encoding: .utf8)
+        noteService.persistNoteToDatabase(db, note: existing)
+        noteService.loadNotesFromDatabase(db)
+
+        let relativePath = "Projects/Cider/QA/External QA Audit.md"
+        let fileURL = vault.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "# External QA Audit\n\nNew artifact from disk.\n".write(
+            to: fileURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            modelCountsProvider: { ["note": noteService.notes.count] },
+            doctorReportProvider: {
+                VaultDoctor.Report(
+                    startedAt: Date(timeIntervalSince1970: 10),
+                    finishedAt: Date(timeIntervalSince1970: 11),
+                    findings: []
+                )
+            },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.restartRebuildDuplicateRegressionLoop(limit: 10) {
+            noteService.rescan()
+        }
+
+        #expect(report.status == "clean")
+        #expect(report.passed == true)
+        #expect(report.regression.newIssueFingerprints.isEmpty)
+        #expect(report.after.sqliteMismatches.isEmpty)
+        #expect(report.snapshotAfter.itemCountsByType["note"] == 2)
+    }
+
     private func insertContentChunk(
         _ db: CiderDatabase,
         id: UUID = UUID(),

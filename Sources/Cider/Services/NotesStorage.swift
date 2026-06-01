@@ -461,6 +461,8 @@ final class NotesStorage: ObservableObject {
             logger.info("Rescan synced \(self.notes.count, privacy: .public) notes to SQLite (removed \(removedIDs.count, privacy: .public); projectCiderNotes=\(self.projectArtifactNoteCount(projectID: "cider"), privacy: .public))")
         } catch {
             logger.error("Failed to sync rescan to SQLite: \(error.localizedDescription, privacy: .public)")
+            contentCache.removeAll()
+            loadNotesFromDatabase(db)
         }
     }
 
