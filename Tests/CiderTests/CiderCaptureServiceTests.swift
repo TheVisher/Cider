@@ -457,6 +457,13 @@ struct CiderCaptureServiceTests {
                 enrichmentStatus: "complete",
                 lastEnrichedAt: enrichedAt
             )
+            let emptyThumbnailURL = StoragePaths.cachedVaultDirectoryURL
+                .appendingPathComponent(".thumbnails/missing-swift-markdown-engine.jpg")
+            try FileManager.default.createDirectory(
+                at: emptyThumbnailURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data().write(to: emptyThumbnailURL)
             let missingThumbnailDict = result.toDictionary(finalBookmark: missingThumbnailBookmark)
             let missingThumbnailQuality = try #require(missingThumbnailDict["captureQuality"] as? [String: Any])
             let missingThumbnailReasons = try #require(missingThumbnailQuality["degradedReasons"] as? [String])
