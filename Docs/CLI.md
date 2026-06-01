@@ -84,12 +84,15 @@ After capture, agents should verify and continue through backend-backed item/rev
 
 `bookmark enrich <id> [--timeout <seconds>|--no-wait] --json` is the explicit bookmark metadata refetch path. It is allowed for a single bookmark ID only; legacy batch enrichment remains removed in favor of `review enrich-batch --confirm --json`. JSON output must report `command: bookmark.enrich`, `status: completed|timed_out|scheduled`, before/after bookmark snapshots, changed metadata fields, wait timing when applicable, and safe follow-up commands. This lets agents tell the difference between a completed no-op, a still-pending WebView/native enrichment, and a blocked/partial metadata capture such as X/Twitter pages.
 
+`cider-cli export folder <relative-path|id|Inbox> --format json|md [--limit <n>] [--json]` is the blessed bounded export path when an agent needs a shareable or tool-ingestable folder snapshot. JSON exports return `command: export.folder`, `readOnly: true`, `changed: false`, scope metadata, counts, stable `type:id` refs, item IDs, relative paths, related/backlink/provenance arrays, Markdown text, and safe follow-up commands. Markdown exports render item metadata and body text without requiring agents to scrape raw vault files. `export item <type> <id-or-ref>`, `export card <board-id/card-id|card-id>`, and `export project <project-id-or-name>` provide smaller bounded scopes. Whole-vault export is intentionally refused with structured JSON guidance; agents should increase `--limit` only after inspecting the scope.
+
 ## Important Command Areas
 
 Keep command details in CLI help and tests, not sprawling docs. The core command areas agents rely on are:
 
 - capture: `capture add --kind ... --json` for all new user material
 - item: get/search/query/recent/context/relations/backlinks/graph-health/project-context/doctor, plus backend-backed move/unfile/route/link
+- export: bounded folder/item/card/project export in JSON or Markdown; no unbounded whole-vault dumps
 - review: list/summary/drilldown/approve/correct/defer/enrich/enrich-batch/jobs
 - storage: audit/doctor-plan/doctor-apply/repair-schema
 - route/routing: temporary routing aliases until consolidated

@@ -285,6 +285,8 @@ struct CiderCLI {
             handleLink(subcommand: subcommand, args: remaining)
         case "item":
             handleItem(subcommand: subcommand, args: remaining)
+        case "export":
+            handleExport(subcommand: subcommand, args: remaining)
         case "file":
             handleFile(subcommand: subcommand, args: remaining, service: vaultFileService)
         case "folder":
@@ -5815,6 +5817,456 @@ struct CiderCLI {
         } else {
             print("Error: \(message)")
         }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: - Agent-safe Export Commands
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleExport(subcommand: String?, args: [String]) {
+        switch subcommand {
+        case nil, "help", "--help", "-h":
+            print("""
+            Agent-safe export commands:
+              cider-cli export folder <relative-path|id|Inbox> --format json|md [--limit <n>] [--json]
+              cider-cli export item <type> <id-or-ref> --format json|md [--json]
+              cider-cli export card <board-id/card-id|card-id> --format json|md [--json]
+              cider-cli export project <project-id-or-name> --format json|md [--limit <n>] [--json]
+
+            Whole-vault export is intentionally unavailable; export bounded folders, projects, cards, or items.
+            """)
+        case "folder":
+            handleFolderExport(args: args)
+        case "item":
+            handleItemExport(args: args)
+        case "card":
+            handleCardExport(args: args)
+        case "project":
+            handleProjectExport(args: args)
+        case "vault", "all":
+            printExportError(
+                command: "export.vault",
+                message: "Whole-vault export is not available through the agent CLI. Export a bounded folder, project, card, or item instead.",
+                safeNextCommands: [
+                    "cider-cli export folder <relative-path> --format json --limit 100 --json",
+                    "cider-cli export project <project-id-or-name> --format json --limit 100 --json",
+                    "cider-cli export card <board-id/card-id> --format json --json",
+                    "cider-cli export item <type> <id-or-ref> --format json --json",
+                ]
+            )
+        default:
+            printExportError(
+                command: "export",
+                message: "Unknown export scope '\(subcommand ?? "nil")'. Run 'cider-cli export help' for usage.",
+                safeNextCommands: ["cider-cli export help"]
+            )
+        }
+    }
+
+    static func handleFolderExport(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        guard let folderRef = positional.first else {
+            printExportError(
+                command: "export.folder",
+                message: "Usage: cider-cli export folder <relative-path|id|Inbox> --format json|md [--limit <n>] [--json]",
+                safeNextCommands: ["cider-cli item owner-get folder <relative-path-or-id> --json"]
+            )
+            return
+        }
+        let format = exportFormat(from: args)
+        guard exportFormatIsSupported(format) else {
+            printExportError(command: "export.folder", message: "--format must be json or md.")
+            return
+        }
+        guard let limit = exportLimit(from: args) else {
+            printExportError(command: "export.folder", message: "--limit must be a positive integer.")
+            return
+        }
+
+        let folderPath: String
+        let folderIDs: Set<UUID>
+        let scope: [String: Any]
+        switch resolveFolderOwner(ref: folderRef) {
+        case .folder(let folder):
+            let descendants = VaultFolderService.shared.folders.filter { $0.relativePath.hasPrefix(folder.relativePath + "/") }
+            folderIDs = Set(([folder] + descendants).map(\.id))
+            folderPath = folder.relativePath
+            scope = [
+                "type": "folder",
+                "id": folder.id.uuidString,
+                "name": folder.name,
+                "relativePath": folder.relativePath,
+                "descendantFolderCount": descendants.count,
+            ]
+        case .inbox:
+            folderIDs = []
+            folderPath = "Inbox"
+            scope = [
+                "type": "folder",
+                "id": "Inbox",
+                "name": "Inbox",
+                "relativePath": "Inbox",
+                "descendantFolderCount": 0,
+            ]
+        case .ambiguous(let matches):
+            printExportError(
+                command: "export.folder",
+                message: "Ambiguous folder reference '\(folderRef)'. Use a returned relativePath or id.",
+                payload: ["matches": matches.map(folderOwnerMatchDict)],
+                safeNextCommands: ["cider-cli item owner-get folder <relative-path-or-id> --json"]
+            )
+            return
+        case .missing:
+            printExportError(
+                command: "export.folder",
+                message: "No folder found matching '\(folderRef)'.",
+                safeNextCommands: ["cider-cli item owner-get folder <relative-path-or-id> --json"]
+            )
+            return
+        }
+
+        let refs = exportRefs(inFolderIDs: folderIDs, includeInbox: folderPath == "Inbox")
+        guard refs.count <= limit else {
+            printExportError(
+                command: "export.folder",
+                message: "Export scope contains \(refs.count) items, which exceeds --limit \(limit). Increase --limit after reviewing the scope.",
+                payload: [
+                    "scope": scope,
+                    "counts": ["totalItems": refs.count, "limit": limit],
+                    "nextSafeAction": "inspect_export_scope",
+                ],
+                safeNextCommands: [
+                    "cider-cli item owner-get folder \"\(folderPath)\" --json",
+                    "cider-cli export folder \"\(folderPath)\" --format json --limit \(refs.count) --json",
+                ]
+            )
+            return
+        }
+
+        let payload = exportPayload(
+            command: "export.folder",
+            format: format,
+            scope: scope,
+            refs: refs,
+            limit: limit,
+            safeNextCommands: [
+                "cider-cli export folder \"\(folderPath)\" --format json --limit \(limit) --json",
+                "cider-cli export folder \"\(folderPath)\" --format md --limit \(limit)",
+                "cider-cli item owner-get folder \"\(folderPath)\" --json",
+            ]
+        )
+        printExportPayload(payload, format: format)
+    }
+
+    static func handleItemExport(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        guard positional.count >= 2 else {
+            printExportError(command: "export.item", message: "Usage: cider-cli export item <type> <id-or-ref> --format json|md [--json]")
+            return
+        }
+        do {
+            let type = try ItemLinkService.entityType(from: positional[0])
+            let ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+            let format = exportFormat(from: args)
+            guard exportFormatIsSupported(format) else {
+                printExportError(command: "export.item", message: "--format must be json or md.")
+                return
+            }
+            let payload = exportPayload(
+                command: "export.item",
+                format: format,
+                scope: [
+                    "type": "item",
+                    "itemType": ref.type.rawValue,
+                    "id": ref.entityID.uuidString,
+                    "ref": "\(ref.type.rawValue):\(ref.entityID.uuidString)",
+                ],
+                refs: [ref],
+                limit: 1,
+                safeNextCommands: [
+                    "cider-cli item get \(ref.type.rawValue) \(ref.entityID.uuidString) --json",
+                    "cider-cli export item \(ref.type.rawValue) \(ref.entityID.uuidString) --format md",
+                ]
+            )
+            printExportPayload(payload, format: format)
+        } catch {
+            printExportError(command: "export.item", message: error.localizedDescription)
+        }
+    }
+
+    static func handleCardExport(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        guard let cardRef = positional.first else {
+            printExportError(command: "export.card", message: "Usage: cider-cli export card <board-id/card-id|card-id> --format json|md [--json]")
+            return
+        }
+        let format = exportFormat(from: args)
+        guard exportFormatIsSupported(format) else {
+            printExportError(command: "export.card", message: "--format must be json or md.")
+            return
+        }
+        do {
+            let detail = try resolveKanbanCardDetail(ref: cardRef)
+            let store = SecondBrainStore(database: .shared)
+            var cardPayload = try kanbanCardItemPayload(ref: "\(detail.board.id)/\(detail.card.id)", store: store)
+            cardPayload["command"] = "item.get"
+            let markdown = KanbanCardMarkdownExporter.markdown(
+                for: detail.card,
+                boardName: detail.board.name,
+                columnName: detail.column.name
+            )
+            let payload: [String: Any] = [
+                "ok": true,
+                "command": "export.card",
+                "readOnly": true,
+                "changed": false,
+                "format": format,
+                "scope": [
+                    "type": "card",
+                    "boardID": detail.board.id,
+                    "boardName": detail.board.name,
+                    "columnID": detail.column.id,
+                    "columnName": detail.column.name,
+                    "cardID": detail.card.id,
+                    "ref": "kanban_card:\(detail.board.id)/\(detail.card.id)",
+                ],
+                "counts": ["totalItems": 1, "includedItems": 1, "limit": 1, "truncated": false],
+                "card": cardPayload,
+                "markdown": markdown,
+                "safeNextCommands": [
+                    "cider-cli board card inspect \(detail.board.id) --card \(detail.card.id) --json",
+                    "cider-cli item get card \(detail.card.id) --json",
+                    "cider-cli export card \(detail.board.id)/\(detail.card.id) --format md",
+                ],
+            ]
+            if format == "md" && !jsonOutput {
+                print(markdown)
+            } else {
+                outputJSON(payload)
+            }
+        } catch {
+            printExportError(command: "export.card", message: error.localizedDescription)
+        }
+    }
+
+    static func handleProjectExport(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        guard let projectRef = positional.first else {
+            printExportError(command: "export.project", message: "Usage: cider-cli export project <project-id-or-name> --format json|md [--limit <n>] [--json]")
+            return
+        }
+        guard let limit = exportLimit(from: args) else {
+            printExportError(command: "export.project", message: "--limit must be a positive integer.")
+            return
+        }
+        let format = exportFormat(from: args)
+        guard exportFormatIsSupported(format) else {
+            printExportError(command: "export.project", message: "--format must be json or md.")
+            return
+        }
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: KanbanStorage.shared.boards)
+        guard let workspace = projectWorkspace(ref: projectRef, catalog: catalog) else {
+            printExportError(command: "export.project", message: "No project found matching '\(projectRef)'.")
+            return
+        }
+        let refs = NotesStorage.shared.notes
+            .filter { $0.projectID == workspace.id }
+            .map { LibraryEntityRef(type: .note, entityID: $0.id) }
+        let payload = exportPayload(
+            command: "export.project",
+            format: format,
+            scope: ["type": "project", "id": workspace.id, "title": workspace.title],
+            refs: refs,
+            limit: limit,
+            safeNextCommands: [
+                "cider-cli item project-context \(workspace.id) --summary --json",
+                "cider-cli export project \(workspace.id) --format md --limit \(limit)",
+            ]
+        )
+        printExportPayload(payload, format: format)
+    }
+
+    static func exportFormat(from args: [String]) -> String {
+        let raw = parseFlag("--format", from: args)?.lowercased() ?? (jsonOutput ? "json" : "md")
+        return raw == "markdown" ? "md" : raw
+    }
+
+    static func exportFormatIsSupported(_ format: String) -> Bool {
+        format == "json" || format == "md"
+    }
+
+    static func exportLimit(from args: [String]) -> Int? {
+        let raw = parseFlag("--limit", from: args) ?? "100"
+        guard let limit = Int(raw), limit > 0 else { return nil }
+        return limit
+    }
+
+    static func exportRefs(inFolderIDs folderIDs: Set<UUID>, includeInbox: Bool) -> [LibraryEntityRef] {
+        func matches(_ folderID: UUID?) -> Bool {
+            includeInbox ? folderID == nil : folderID.map { folderIDs.contains($0) } == true
+        }
+        var refs: [LibraryEntityRef] = []
+        refs += VaultBookmarkService.shared.bookmarks.filter { matches($0.folderID) }.map { LibraryEntityRef(type: .bookmark, entityID: $0.id) }
+        refs += NotesStorage.shared.notes.filter { matches($0.folderID) }.map { LibraryEntityRef(type: .note, entityID: $0.id) }
+        refs += TodoCardStorage.shared.todoCards.filter { matches($0.folderID) }.map { LibraryEntityRef(type: .todo, entityID: $0.id) }
+        refs += DateCardStorage.shared.dateCards.filter { matches($0.folderID) }.map { LibraryEntityRef(type: .dateCard, entityID: $0.id) }
+        refs += ContactStorage.shared.contacts.filter { matches($0.folderID) }.map { LibraryEntityRef(type: .contact, entityID: $0.id) }
+        refs += VaultFileService.shared.files.filter { matches($0.folderID) }.map { LibraryEntityRef(type: .vaultFile, entityID: $0.id) }
+        return refs.sorted {
+            let left = ItemLinkService.shared.summary(for: $0)?.title ?? $0.entityID.uuidString
+            let right = ItemLinkService.shared.summary(for: $1)?.title ?? $1.entityID.uuidString
+            return left.localizedStandardCompare(right) == .orderedAscending
+        }
+    }
+
+    static func exportPayload(
+        command: String,
+        format: String,
+        scope: [String: Any],
+        refs: [LibraryEntityRef],
+        limit: Int,
+        safeNextCommands: [String]
+    ) -> [String: Any] {
+        let items = refs.prefix(limit).map(exportedItemDict)
+        return [
+            "ok": true,
+            "command": command,
+            "readOnly": true,
+            "changed": false,
+            "format": format,
+            "scope": scope,
+            "counts": [
+                "totalItems": refs.count,
+                "includedItems": items.count,
+                "limit": limit,
+                "truncated": refs.count > items.count,
+            ],
+            "items": items,
+            "markdown": exportMarkdown(scope: scope, items: items),
+            "safeNextCommands": safeNextCommands,
+        ]
+    }
+
+    static func exportedItemDict(_ ref: LibraryEntityRef) -> [String: Any] {
+        let store = SecondBrainStore(database: .shared)
+        let contextService = CiderItemContextService(database: .shared, secondBrainStore: store)
+        var dict: [String: Any] = [
+            "type": ref.type.rawValue,
+            "id": ref.entityID.uuidString,
+            "ref": "\(ref.type.rawValue):\(ref.entityID.uuidString)",
+            "owner": ownerToDict(SecondBrainOwnerRef(ownerType: ref.type.rawValue, ownerID: ref.entityID.uuidString)),
+        ]
+        if let summary = ItemLinkService.shared.summary(for: ref) {
+            dict["title"] = summary.title
+            dict["subtitle"] = summary.subtitle
+        }
+        switch ref.type {
+        case .bookmark:
+            if let item = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == ref.entityID }) { dict.merge(bookmarkToDict(item)) { _, new in new } }
+        case .note:
+            if let item = NotesStorage.shared.notes.first(where: { $0.id == ref.entityID }) {
+                dict.merge(noteToDict(item)) { _, new in new }
+                dict["content"] = item.resolvedContent
+            }
+        case .todo:
+            if let item = TodoCardStorage.shared.todoCard(for: ref.entityID) { dict.merge(todoToDict(item)) { _, new in new } }
+        case .dateCard:
+            if let item = DateCardStorage.shared.dateCard(for: ref.entityID) { dict.merge(eventToDict(item)) { _, new in new } }
+        case .contact:
+            if let item = ContactStorage.shared.contact(for: ref.entityID) { dict.merge(contactToDict(item)) { _, new in new } }
+        case .vaultFile:
+            if let item = VaultFileService.shared.file(for: ref.entityID) { dict.merge(vaultFileToDict(item)) { _, new in new } }
+        case .externalFile, .session:
+            break
+        }
+        if let bundle = try? contextService.context(for: ref) {
+            dict["item"] = itemSummaryToDict(bundle.item, ownerRelations: bundle.ownerRelations)
+            dict["related"] = bundle.related.map(itemLinkSummaryToDict)
+            dict["ownerRelations"] = bundle.ownerRelations.map(ownerRelationToDict)
+            dict["backlinks"] = bundle.backlinks.map(ownerRelationToDict)
+            dict["routingDecisions"] = bundle.routingDecisions.map(routingDecisionToDict)
+            dict["captureProvenance"] = bundle.captureProvenance.map(captureProvenanceToDict)
+        } else {
+            dict["related"] = []
+            dict["ownerRelations"] = []
+            dict["backlinks"] = []
+            dict["routingDecisions"] = []
+            dict["captureProvenance"] = []
+        }
+        return dict
+    }
+
+    static func printExportPayload(_ payload: [String: Any], format: String) {
+        if format == "md" && !jsonOutput {
+            print(payload["markdown"] as? String ?? "")
+        } else {
+            outputJSON(payload)
+        }
+    }
+
+    static func printExportError(
+        command: String,
+        message: String,
+        payload: [String: Any] = [:],
+        safeNextCommands: [String] = [
+            "cider-cli export folder <relative-path> --format json --limit 100 --json",
+            "cider-cli export item <type> <id-or-ref> --format json --json",
+        ]
+    ) {
+        processExitCode = 1
+        var dict = payload
+        dict["ok"] = false
+        dict["command"] = command
+        dict["readOnly"] = true
+        dict["changed"] = false
+        dict["error"] = message
+        dict["safeNextCommands"] = safeNextCommands
+        if jsonOutput {
+            outputJSON(dict)
+        } else {
+            print("Error: \(message)")
+        }
+    }
+
+    static func exportMarkdown(scope: [String: Any], items: [[String: Any]]) -> String {
+        let scopeType = scope["type"] as? String ?? "unknown"
+        let title = (scope["relativePath"] as? String) ?? (scope["title"] as? String) ?? (scope["ref"] as? String) ?? scopeType
+        var lines: [String] = [
+            "# Cider Export: \(title)",
+            "",
+            "- Scope: \(scopeType)",
+            "- Items: \(items.count)",
+            "",
+        ]
+        for item in items {
+            let itemTitle = item["title"] as? String ?? item["displayTitle"] as? String ?? item["id"] as? String ?? "Untitled"
+            lines.append("## \(itemTitle)")
+            lines.append("")
+            lines.append("- Type: \(item["type"] as? String ?? "")")
+            lines.append("- ID: \(item["id"] as? String ?? "")")
+            lines.append("- Ref: \(item["ref"] as? String ?? "")")
+            if let relativePath = item["relativePath"] as? String {
+                lines.append("- Path: \(relativePath)")
+            }
+            if let related = item["related"] as? [[String: Any]] {
+                lines.append("- Related: \(related.count)")
+            }
+            if let backlinks = item["backlinks"] as? [[String: Any]] {
+                lines.append("- Backlinks: \(backlinks.count)")
+            }
+            if let content = item["content"] as? String, !content.isEmpty {
+                lines.append("")
+                lines.append(content)
+            } else if let notes = item["notes"] as? String, !notes.isEmpty {
+                lines.append("")
+                lines.append(notes)
+            } else if let details = item["details"] as? String, !details.isEmpty {
+                lines.append("")
+                lines.append(details)
+            }
+            lines.append("")
+        }
+        return lines.joined(separator: "\n")
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -14969,6 +15421,13 @@ struct CiderCLI {
           cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
           cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
           cider-cli item doctor [--json]
+
+        EXPORT
+          cider-cli export folder <relative-path|id|Inbox> --format json|md [--limit <n>] [--json]
+          cider-cli export item <type> <id-or-ref> --format json|md [--json]
+          cider-cli export card <board-id/card-id|card-id> --format json|md [--json]
+          cider-cli export project <project-id-or-name> --format json|md [--limit <n>] [--json]
+            Whole-vault export is intentionally refused; export bounded scopes.
 
         REVIEW
           cider-cli review list [--include-deferred] [--limit <n>] [--json]

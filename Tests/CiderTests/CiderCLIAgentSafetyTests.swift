@@ -598,6 +598,91 @@ struct CiderCLIAgentSafetyTests {
         #expect(health["existsOnDisk"] as? Bool == true)
     }
 
+    @Test("export folder JSON is bounded read only and includes stable refs")
+    func exportFolderJSONIsBoundedReadOnlyAndIncludesStableRefs() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-export-folder-json-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceNoteID = try createNote(title: "Export Source", content: "Export body", vault: vault)
+        _ = try runCLI(args: ["item", "move", "note", sourceNoteID, "--path", "Projects/Cider/Exports", "--json"], vault: vault)
+        let targetNoteID = try createNote(title: "Export Target", content: "Linked body", vault: vault)
+        _ = try runCLI(args: ["item", "link", "note", sourceNoteID, "note", targetNoteID, "--json"], vault: vault)
+
+        let result = try runCLI(
+            args: ["export", "folder", "Projects/Cider/Exports", "--format", "json", "--limit", "10", "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "export.folder")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["format"] as? String == "json")
+        let scope = try #require(payload["scope"] as? [String: Any])
+        #expect(scope["type"] as? String == "folder")
+        #expect(scope["relativePath"] as? String == "Projects/Cider/Exports")
+        let counts = try #require(payload["counts"] as? [String: Any])
+        #expect(counts["includedItems"] as? Int == 1)
+        #expect(counts["totalItems"] as? Int == 1)
+        let items = try #require(payload["items"] as? [[String: Any]])
+        let exported = try #require(items.first)
+        #expect(exported["type"] as? String == "note")
+        #expect(exported["id"] as? String == sourceNoteID)
+        #expect(exported["ref"] as? String == "note:\(sourceNoteID)")
+        #expect(exported["relativePath"] as? String == "Projects/Cider/Exports/Export Source.md")
+        #expect(exported["content"] as? String == "Export body")
+        #expect(exported["owner"] as? [String: Any] != nil)
+        #expect(exported["backlinks"] as? [[String: Any]] != nil)
+        #expect(exported["captureProvenance"] as? [[String: Any]] != nil)
+        let related = try #require(exported["related"] as? [[String: Any]])
+        #expect(related.contains { $0["id"] as? String == targetNoteID })
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli export folder \"Projects/Cider/Exports\" --format md --limit 10"))
+        #expect(safeNextCommands.contains("cider-cli item owner-get folder \"Projects/Cider/Exports\" --json"))
+    }
+
+    @Test("export folder Markdown renders item metadata without JSON scraping")
+    func exportFolderMarkdownRendersItemMetadataWithoutJSONScraping() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-export-folder-md-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Markdown Export Source", content: "Markdown export body", vault: vault)
+        _ = try runCLI(args: ["item", "move", "note", noteID, "--path", "Projects/Cider/Exports", "--json"], vault: vault)
+
+        let result = try runCLI(
+            args: ["export", "folder", "Projects/Cider/Exports", "--format", "md", "--limit", "10"],
+            vault: vault
+        )
+
+        #expect(result.status == 0)
+        #expect(result.stdout.contains("# Cider Export: Projects/Cider/Exports"))
+        #expect(result.stdout.contains("Scope: folder"))
+        #expect(result.stdout.contains("Ref: note:\(noteID)"))
+        #expect(result.stdout.contains("Path: Projects/Cider/Exports/Markdown Export Source.md"))
+        #expect(result.stdout.contains("Markdown export body"))
+    }
+
+    @Test("export vault refuses unbounded dumps")
+    func exportVaultRefusesUnboundedDumps() throws {
+        let result = try runCLI(args: ["export", "vault", "--format", "json", "--json"])
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status != 0)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == "export.vault")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect((payload["error"] as? String)?.contains("Whole-vault export is not available") == true)
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli export folder <relative-path> --format json --limit 100 --json"))
+    }
+
     @Test("review enrich json waits with bounded lifecycle result")
     func reviewEnrichJSONWaitsWithBoundedLifecycleResult() throws {
         let vault = FileManager.default.temporaryDirectory
