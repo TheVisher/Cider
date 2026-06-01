@@ -69,12 +69,12 @@ struct SettingsPrimarySidebar: View {
                         }
 
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        Text(AuthService.shared.isLoggedIn ? AuthService.shared.accountEmail : "Sign In")
+                        Text(AuthService.shared.isLoggedIn ? AuthService.shared.accountEmail : "Account")
                             .font(CiderFont.labelSemibold)
                             .foregroundColor(CiderColors.primary)
                             .lineLimit(1)
 
-                        Text(AuthService.shared.isLoggedIn ? "Signed in" : "Sync across devices")
+                        Text(AuthService.shared.isLoggedIn ? "Legacy sign-in saved" : "Local storage only")
                             .font(CiderFont.body)
                             .foregroundColor(CiderColors.secondary)
                             .lineLimit(1)
@@ -236,7 +236,6 @@ struct SettingsSubcategoryChip: View {
 
 struct SettingsAccountOverviewView: View {
     @ObservedObject private var authService = AuthService.shared
-    @ObservedObject private var syncService = SyncService.shared
 
     @State private var isSignUp = false
     @State private var email = ""
@@ -296,59 +295,18 @@ struct SettingsAccountOverviewView: View {
             SettingsSection(title: "Sync") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     HStack(spacing: Spacing.sm) {
-                        if syncService.isSyncing {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Syncing...")
-                                .font(CiderFont.body)
-                                .foregroundColor(CiderColors.tertiary)
-                        } else if let error = syncService.lastError {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(CiderColors.warning)
-                                .font(CiderFont.label)
-                            Text(error)
-                                .font(CiderFont.caption)
-                                .foregroundColor(CiderColors.warning)
-                        } else if let lastSync = syncService.lastSyncedAt {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(CiderColors.success)
-                                .font(CiderFont.label)
-                            Text("Last synced \(lastSync.formatted(.relative(presentation: .named)))")
-                                .font(CiderFont.body)
-                                .foregroundColor(CiderColors.tertiary)
-                        } else {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .foregroundColor(CiderColors.tertiary)
-                                .font(CiderFont.label)
-                            Text("Sync is active")
-                                .font(CiderFont.body)
-                                .foregroundColor(CiderColors.tertiary)
-                        }
+                        Image(systemName: "externaldrive")
+                            .foregroundColor(CiderColors.tertiary)
+                            .font(CiderFont.label)
 
-                        Spacer()
-
-                        Button("Sync Now") {
-                            syncService.syncNow()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(syncService.isSyncing)
+                        Text("Local storage only")
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.tertiary)
                     }
 
-                    HStack(spacing: Spacing.sm) {
-                        Text("Bookmarks, notes, and folders sync automatically across all your devices.")
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.quaternary)
-
-                        Spacer()
-
-                        Button("Force Full Sync") {
-                            syncService.forceReconcile()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(syncService.isSyncing)
-                    }
+                    Text("Remote account sync is unavailable while the sync backend is rebuilt. Local bookmark, note, and folder changes still save normally.")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.quaternary)
                 }
             }
 
@@ -376,7 +334,7 @@ struct SettingsAccountOverviewView: View {
                                 .font(CiderFont.headingSemibold)
                                 .foregroundColor(CiderColors.primary)
 
-                            Text("Sync bookmarks, notes, and folders across all your devices")
+                            Text("Account sync is unavailable while the sync backend is rebuilt")
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
                         }
@@ -437,7 +395,8 @@ struct SettingsAccountOverviewView: View {
                             }
                         }
                         .buttonStyle(CiderAccentButtonStyle())
-                        .disabled(authService.isLoading || email.isEmpty || password.isEmpty)
+                        .disabled(true)
+                        .help("Account sync is unavailable while the sync backend is rebuilt")
 
                         Spacer()
 

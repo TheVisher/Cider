@@ -495,12 +495,12 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
                     }
 
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    Text(authService.isLoggedIn ? authService.accountEmail : "Sign In")
+                    Text(authService.isLoggedIn ? authService.accountEmail : "Account")
                         .font(CiderFont.labelMedium)
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
-                    Text(authService.isLoggedIn ? "Signed in" : "Sync across devices")
+                    Text(authService.isLoggedIn ? "Legacy sign-in saved" : "Local storage only")
                         .font(CiderFont.caption)
                         .foregroundColor(authService.isLoggedIn ? CiderColors.success : CiderColors.tertiary)
                         .lineLimit(1)
@@ -519,17 +519,10 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
                     action: onOpenSettings
                 )
                 HomeOverviewQuickActionButton(
-                    title: authService.isLoggedIn ? "Sync Now" : "Sign In",
-                    systemImage: authService.isLoggedIn ? "arrow.triangle.2.circlepath" : "person.crop.circle.badge.plus",
-                    detail: authService.isLoggedIn && syncService.isSyncing ? "Working" : nil,
-                    disabled: authService.isLoggedIn && syncService.isSyncing,
-                    action: {
-                        if authService.isLoggedIn {
-                            onSyncNow()
-                        } else {
-                            onOpenSettings()
-                        }
-                    }
+                    title: "Sync Unavailable",
+                    systemImage: "externaldrive.badge.xmark",
+                    disabled: true,
+                    action: {}
                 )
                 HomeOverviewQuickActionButton(
                     title: "New",
@@ -579,7 +572,7 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
                         }
 
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(authService.isLoggedIn ? authService.accountEmail : "Sign In")
+                        Text(authService.isLoggedIn ? authService.accountEmail : "Account")
                             .font(CiderFont.captionSemibold)
                             .foregroundColor(CiderColors.primary)
                             .lineLimit(1)
@@ -616,16 +609,10 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
                 )
 
                 compactIconButton(
-                    systemImage: authService.isLoggedIn ? "arrow.triangle.2.circlepath" : "person.crop.circle.badge.plus",
-                    help: authService.isLoggedIn ? "Sync Now" : "Sign In",
-                    disabled: authService.isLoggedIn && syncService.isSyncing,
-                    action: {
-                        if authService.isLoggedIn {
-                            onSyncNow()
-                        } else {
-                            onOpenSettings()
-                        }
-                    }
+                    systemImage: "externaldrive.badge.xmark",
+                    help: "Sync unavailable",
+                    disabled: true,
+                    action: {}
                 )
                 compactNewButton
                 compactAIButton
@@ -815,31 +802,15 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
     }
 
     private var compactSyncStatusText: String {
-        if syncService.isSyncing { return "Syncing now" }
-        if authService.isLoggedIn { return "Signed in" }
-        return "Sync across devices"
+        "Local storage only"
     }
 
     @ViewBuilder
     private var syncStatusBadge: some View {
         HStack(spacing: Spacing.xs) {
-            if syncService.isSyncing {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Syncing now")
-            } else if let lastSync = syncService.lastSyncedAt, authService.isLoggedIn {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(CiderColors.success)
-                Text("Synced \(lastSync.formatted(.relative(presentation: .named)))")
-            } else if authService.isLoggedIn {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .foregroundColor(CiderColors.tertiary)
-                Text("Sync is active")
-            } else {
-                Image(systemName: "icloud.slash")
-                    .foregroundColor(CiderColors.tertiary)
-                Text("Not signed in")
-            }
+            Image(systemName: "externaldrive")
+                .foregroundColor(CiderColors.tertiary)
+            Text("Local storage only")
         }
         .font(CiderFont.caption)
         .foregroundColor(CiderColors.tertiary)

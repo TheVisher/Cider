@@ -46,7 +46,7 @@ struct CiderConfigBackwardCompatTests {
         config.trashRetentionDays = 7
         config.enableSoundEffects = true
         config.syncEnabled = true
-        config.syncURL = "https://test.convex.site"
+        config.syncURL = "https://sync.example.test"
 
         let data = try JSONEncoder().encode(config)
         let decoded = try JSONDecoder().decode(CiderConfig.self, from: data)
@@ -57,7 +57,7 @@ struct CiderConfigBackwardCompatTests {
         #expect(decoded.trashRetentionDays == 7)
         #expect(decoded.enableSoundEffects == true)
         #expect(decoded.syncEnabled == true)
-        #expect(decoded.syncURL == "https://test.convex.site")
+        #expect(decoded.syncURL == "https://sync.example.test")
     }
 
     @Test("Old config without clipboard fields gets correct defaults")

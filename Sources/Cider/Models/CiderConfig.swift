@@ -284,7 +284,7 @@ struct CiderConfig: Codable {
 
     // Cider Web sync
     var syncEnabled: Bool  // Whether sync with Cider Web is active
-    var syncURL: String  // Convex deployment HTTP URL (e.g. https://foo-123.convex.site)
+    var syncURL: String  // Legacy remote sync URL; currently unused while sync is rebuilt.
     var syncToken: String  // Bearer token for authenticating with Cider Web
     var lastSyncTimestamp: Double  // Server timestamp of last successful pull (ms since epoch)
     var lastSuccessfulPushAt: Double  // Local timestamp of last successful push (seconds since epoch)

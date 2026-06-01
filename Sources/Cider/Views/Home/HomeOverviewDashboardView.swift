@@ -362,12 +362,12 @@ struct HomeOverviewDashboardView: View {
                     }
 
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    Text(authService.isLoggedIn ? authService.accountEmail : "Sign In")
+                    Text(authService.isLoggedIn ? authService.accountEmail : "Account")
                         .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
-                    Text(authService.isLoggedIn ? "Signed in" : "Sync across devices")
+                    Text(authService.isLoggedIn ? "Legacy sign-in saved" : "Local storage only")
                         .font(CiderFont.body)
                         .foregroundColor(authService.isLoggedIn ? CiderColors.success : CiderColors.tertiary)
                         .lineLimit(1)
@@ -383,17 +383,10 @@ struct HomeOverviewDashboardView: View {
                     action: onOpenSettings
                 )
                 HomeOverviewQuickActionButton(
-                    title: authService.isLoggedIn ? "Sync Now" : "Sign In",
-                    systemImage: authService.isLoggedIn ? "arrow.triangle.2.circlepath" : "person.crop.circle.badge.plus",
-                    detail: authService.isLoggedIn && syncService.isSyncing ? "Working" : nil,
-                    disabled: authService.isLoggedIn && syncService.isSyncing,
-                    action: {
-                        if authService.isLoggedIn {
-                            onSyncNow()
-                        } else {
-                            onOpenSettings()
-                        }
-                    }
+                    title: "Sync Unavailable",
+                    systemImage: "externaldrive.badge.xmark",
+                    disabled: true,
+                    action: {}
                 )
                 HomeOverviewQuickActionButton(
                     title: "New",
@@ -1085,23 +1078,9 @@ struct HomeOverviewDashboardView: View {
     @ViewBuilder
     private var syncStatusBadge: some View {
         HStack(spacing: Spacing.xs) {
-            if syncService.isSyncing {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Syncing now")
-            } else if let lastSync = syncService.lastSyncedAt, authService.isLoggedIn {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(CiderColors.success)
-                Text("Synced \(lastSync.formatted(.relative(presentation: .named)))")
-            } else if authService.isLoggedIn {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .foregroundColor(CiderColors.tertiary)
-                Text("Sync is active")
-            } else {
-                Image(systemName: "icloud.slash")
-                    .foregroundColor(CiderColors.tertiary)
-                Text("Not signed in")
-            }
+            Image(systemName: "externaldrive")
+                .foregroundColor(CiderColors.tertiary)
+            Text("Local storage only")
         }
         .font(CiderFont.caption)
         .foregroundColor(CiderColors.tertiary)

@@ -151,29 +151,55 @@ struct SyncServicePayloadTests {
         #expect(partition.unresolved.isEmpty)
     }
 
-    @Test("pull apply runs folder integrity diagnostics after merge")
-    func pullApplyRunsFolderIntegrityDiagnosticsAfterMerge() throws {
+    @Test("SyncService has no active Convex runtime references")
+    func syncServiceHasNoActiveConvexRuntimeReferences() throws {
         let source = try String(
             contentsOfFile: "Sources/Cider/Services/SyncService.swift",
             encoding: .utf8
         )
 
-        #expect(source.contains("VaultDoctor.shared.logStartupFolderIntegrity(origin: \"sync-pull\")"))
+        #expect(!source.contains(["Convex", "Mobile"].joined()))
+        #expect(!source.contains(["Convex", "Client"].joined()))
+        #expect(!source.contains(["Convex", "Encodable"].joined()))
+        #expect(!source.contains(["sync", "authenticate"].joined(separator: ":")))
+        #expect(!source.contains("webSyncRuntimeEnabled"))
     }
 
-    @Test("WebSync runtime is hard-disabled for desktop")
-    func webSyncRuntimeIsHardDisabledForDesktop() throws {
-        let source = try String(
-            contentsOfFile: "Sources/Cider/Services/SyncService.swift",
+    @Test("Package manifest no longer links Convex")
+    func packageManifestNoLongerLinksConvex() throws {
+        let manifest = try String(
+            contentsOfFile: "Package.swift",
             encoding: .utf8
         )
 
-        #expect(source.contains("static let webSyncRuntimeEnabled = false"))
-        #expect(source.contains("guard Self.webSyncRuntimeEnabled else"))
-        #expect(source.contains("WebSync disabled for desktop"))
+        #expect(!manifest.contains(["convex", "swift"].joined(separator: "-")))
+        #expect(!manifest.contains(["Convex", "Mobile"].joined()))
     }
 
-    @Test("note payload includes tags for web sync")
+    @Test("local mutation sync hooks remain callable no-ops")
+    @MainActor
+    func localMutationSyncHooksRemainCallableNoOps() {
+        let service = SyncService.shared
+        let bookmarkID = UUID()
+        let folderID = UUID()
+        let noteID = UUID()
+
+        service.startIfEnabled()
+        service.pushAfterLocalChange()
+        service.syncNow()
+        service.forceReconcile()
+        service.trackDeletion(of: bookmarkID)
+        service.cancelDeletion(of: bookmarkID)
+        service.trackFolderDeletion(of: folderID)
+        service.cancelFolderDeletion(of: folderID)
+        service.trackNoteDeletion(of: noteID)
+        service.cancelNoteDeletion(of: noteID)
+
+        #expect(service.isSyncing == false)
+        #expect(service.lastError == nil)
+    }
+
+    @Test("sync-neutral note payload preview includes tags")
     @MainActor
     func notePayloadIncludesTags() {
         let note = Note(
