@@ -42,8 +42,6 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             items: [.bookmark(bookmark), .note(note), .todo(todo), .dateCard(dateCard)],
             recentItems: [.note(note)],
             folders: [],
-            savedViews: [],
-            tabOrder: [],
             surfacingDays: 7,
             now: now
         )
@@ -80,8 +78,6 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             items: [.note(staleNote), .note(freshNote), .todo(completedTodo)],
             recentItems: [],
             folders: [],
-            savedViews: [],
-            tabOrder: [],
             surfacingDays: 7,
             now: now
         )
@@ -119,8 +115,6 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             items: [.note(untitledNote), .todo(dueTodayTodo), .dateCard(upcomingEvent)],
             recentItems: [.note(untitledNote)],
             folders: [],
-            savedViews: [],
-            tabOrder: [],
             surfacingDays: 7,
             now: now
         )
@@ -145,8 +139,6 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             items: [.todo(todo)],
             recentItems: [],
             folders: [],
-            savedViews: [],
-            tabOrder: [],
             surfacingDays: 7,
             now: now
         )
@@ -447,8 +439,6 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             items: [.bookmark(genericBookmark), .note(untitledNote), .bookmark(filedBookmark)],
             recentItems: [],
             folders: [],
-            savedViews: [],
-            tabOrder: [],
             surfacingDays: 7,
             now: now
         )
@@ -1144,63 +1134,4 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertTrue(snapshot.reviewCockpitItems.isEmpty)
     }
 
-    func testClosedTabsPreferRecentlyUpdatedViewsThatAreNotOpen() {
-        let now = Date(timeIntervalSince1970: 1_745_084_400)
-        let openView = SavedView(
-            id: UUID(),
-            name: "Inbox",
-            kind: .library,
-            updatedAt: now.addingTimeInterval(-100)
-        )
-        let closedNewer = SavedView(
-            id: UUID(),
-            name: "Bookmarks",
-            kind: .library,
-            updatedAt: now.addingTimeInterval(-50)
-        )
-        let closedOlder = SavedView(
-            id: UUID(),
-            name: "Board",
-            kind: .kanban(boardID: "board-1"),
-            updatedAt: now.addingTimeInterval(-500)
-        )
-
-        let snapshot = HomeOverviewDataProvider.makeSnapshot(
-            items: [],
-            recentItems: [],
-            folders: [],
-            savedViews: [openView, closedOlder, closedNewer],
-            tabOrder: [openView.id],
-            surfacingDays: 7,
-            now: now
-        )
-
-        XCTAssertEqual(snapshot.closedTabs.map(\.name), ["Bookmarks", "Board"])
-    }
-
-    func testClosedTabsAreNotCappedAtSixItems() {
-        let now = Date(timeIntervalSince1970: 1_745_084_400)
-        let closedViews = (0..<9).map { index in
-            SavedView(
-                id: UUID(),
-                name: "Closed \(index)",
-                kind: .library,
-                updatedAt: now.addingTimeInterval(TimeInterval(-index))
-            )
-        }
-
-        let snapshot = HomeOverviewDataProvider.makeSnapshot(
-            items: [],
-            recentItems: [],
-            folders: [],
-            savedViews: closedViews,
-            tabOrder: [],
-            surfacingDays: 7,
-            now: now
-        )
-
-        XCTAssertEqual(snapshot.closedTabs.count, 9)
-        XCTAssertEqual(snapshot.closedTabs.first?.name, "Closed 0")
-        XCTAssertEqual(snapshot.closedTabs.last?.name, "Closed 8")
-    }
 }

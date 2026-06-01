@@ -295,8 +295,6 @@ struct CiderCLI {
             handleBoard(subcommand: subcommand, args: remaining)
         case "label", "tag":
             handleLabel(subcommand: subcommand, args: remaining)
-        case "view", "saved-view":
-            handleSavedView(subcommand: subcommand, args: remaining)
         case "trash":
             handleTrash(subcommand: subcommand, args: remaining)
         case "db":
@@ -367,8 +365,6 @@ struct CiderCLI {
             return isMutationSubcommand(subcommand, in: ["move", "unfile", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "sync-project", "project-sync"])
         case "label", "tag":
             return isMutationSubcommand(subcommand, in: ["create", "rename", "delete", "rm"])
-        case "view", "saved-view":
-            return isMutationSubcommand(subcommand, in: ["create", "create-kanban", "rename", "delete", "rm", "pin", "unpin"])
         case "trash":
             return isMutationSubcommand(subcommand, in: ["restore", "empty", "purge"])
         case "reminder", "reminders":
@@ -15505,126 +15501,6 @@ struct CiderCLI {
         print("  Fields:       \(contact.customFields.count)")
         print("  Notes:")
         print(contact.notes.isEmpty ? "(empty)" : contact.notes)
-    }
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // MARK: - Saved View Commands
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    static func handleSavedView(subcommand: String?, args: [String]) {
-        let storage = SavedViewStorage.shared
-
-        switch subcommand {
-        case "list", "ls":
-            let views = storage.tabOrderedViews()
-            if jsonOutput {
-                outputJSON(views.map(savedViewToDict))
-            } else {
-                print("Saved views (\(views.count)):")
-                for (idx, view) in views.enumerated() {
-                    let kind: String
-                    switch view.kind {
-                    case .dashboard: kind = "dashboard"
-                    case .library: kind = "library"
-                    case .kanban: kind = "kanban"
-                    }
-                    let pinned = view.isTabPinned ? " [pinned]" : ""
-                    print("  [\(idx)] [\(view.id.uuidString.prefix(8))] \(view.name) (\(kind))\(pinned)")
-                }
-            }
-
-        case "get", "show":
-            guard let idPrefix = args.first else {
-                print("Error: ID prefix or name required")
-                return
-            }
-            guard let view = storage.savedViews.first(where: {
-                $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
-                $0.name.lowercased() == idPrefix.lowercased()
-            }) else {
-                print("Error: No saved view found matching '\(idPrefix)'")
-                return
-            }
-            if jsonOutput {
-                outputJSON(savedViewToDict(view))
-            } else {
-                print("Saved view: \(view.name)")
-                print("  ID:      \(view.id.uuidString)")
-                switch view.kind {
-                case .dashboard: print("  Kind:    dashboard")
-                case .library: print("  Kind:    library")
-                case .kanban(let bid): print("  Kind:    kanban (board: \(bid))")
-                }
-                print("  Pinned:  \(view.isTabPinned)")
-                if !view.filterSpec.entityTypes.isEmpty {
-                    print("  Types:   \(view.filterSpec.entityTypes.map(\.rawValue).joined(separator: ", "))")
-                }
-                if !view.filterSpec.labelIDs.isEmpty {
-                    print("  Labels:  \(view.filterSpec.labelIDs.count) label filter(s)")
-                }
-                if let fid = view.filterSpec.folderID {
-                    let name = VaultFolderService.shared.folder(for: fid)?.name ?? fid.uuidString
-                    print("  Folder:  \(name)")
-                }
-                if !view.filterSpec.textQuery.isEmpty {
-                    print("  Query:   \(view.filterSpec.textQuery)")
-                }
-                print("  Created: \(view.createdAt.formatted())")
-            }
-
-        case "create":
-            print("Error: Saved Views are legacy compatibility data. Use current Library routes, Spaces, or Project/Kanban routes instead.")
-
-        case "create-kanban":
-            print("Error: Kanban Saved Views are legacy compatibility data. Use cider-cli board create <name> [--project <project-id>] instead.")
-
-        case "rename":
-            guard let idPrefix = args.first else {
-                print("Error: Usage: cider-cli view rename <id|name> --to <new-name>")
-                return
-            }
-            guard let newName = parseFlag("--to", from: args) else {
-                print("Error: --to required")
-                return
-            }
-            guard let view = storage.savedViews.first(where: {
-                $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
-                $0.name.lowercased() == idPrefix.lowercased()
-            }) else {
-                print("Error: No saved view found matching '\(idPrefix)'")
-                return
-            }
-            storage.renameSavedView(view.id, to: newName)
-            print("Renamed '\(view.name)' → '\(newName)'")
-
-        case "delete", "rm":
-            guard let idPrefix = args.first else {
-                print("Error: Usage: cider-cli view delete <id|name>")
-                return
-            }
-            guard let view = storage.savedViews.first(where: {
-                $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
-                $0.name.lowercased() == idPrefix.lowercased()
-            }) else {
-                print("Error: No saved view found matching '\(idPrefix)'")
-                return
-            }
-            if storage.deleteSavedView(view.id) {
-                print("Deleted saved view '\(view.name)'")
-            } else {
-                print("Error: Failed to delete saved view")
-            }
-
-        case "pin":
-            print("Error: SavedView tab pinning is disabled. Saved Views are legacy compatibility data.")
-
-        case "unpin":
-            print("Error: SavedView tab pinning is disabled. Saved Views are legacy compatibility data.")
-
-        default:
-            print("Unknown view command: \(subcommand ?? "nil")")
-            print("Commands: list, get, rename, delete")
-        }
     }
 
     static func printUsage() {

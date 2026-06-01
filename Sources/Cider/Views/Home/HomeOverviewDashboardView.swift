@@ -4,7 +4,6 @@ struct HomeOverviewDashboardView: View {
     let snapshot: HomeOverviewSnapshot
     let onOpenItem: (LibraryItemV2) -> Void
     let onOpenTarget: (HomeOverviewActionTarget) -> Void
-    let onOpenTab: (HomeOverviewClosedTabSummary) -> Void
     let onOpenKanbanCard: (String, String) -> Void
     let onApproveReview: (HomeReviewCockpitItem) -> Bool
     let onDeferReview: (HomeReviewCockpitItem) -> Bool
@@ -100,13 +99,7 @@ struct HomeOverviewDashboardView: View {
                 kanbanPulsePanel(fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight)
                     .frame(width: tracks.third)
                 reviewQueuePanel(fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight)
-                    .frame(width: tracks.third)
-                closedTabsPanel(
-                    fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight,
-                    columnCount: 1,
-                    visibleCount: 5
-                )
-                    .frame(width: tracks.continueWidth)
+                    .frame(width: tracks.third + HomeOverviewDesign.columnSpacing + tracks.fourth)
             }
         }
     }
@@ -122,7 +115,6 @@ struct HomeOverviewDashboardView: View {
             }
             kanbanPulsePanel()
             reviewQueuePanel()
-            closedTabsPanel(columnCount: HomeOverviewDesign.closedTabsCompactColumnCount)
         }
     }
 
@@ -135,7 +127,6 @@ struct HomeOverviewDashboardView: View {
             recentActivityPanel()
             kanbanPulsePanel()
             reviewQueuePanel()
-            closedTabsPanel(columnCount: HomeOverviewDesign.closedTabsSingleColumnCount)
         }
     }
 
@@ -930,43 +921,6 @@ struct HomeOverviewDashboardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private func closedTabsPanel(
-        fixedHeight: CGFloat? = nil,
-        columnCount: Int = HomeOverviewDesign.closedTabsFullColumnCount,
-        visibleCount: Int? = nil
-    ) -> some View {
-        let fallbackCount = max(columnCount, 1) * HomeOverviewDesign.closedTabsVisibleRowCount
-        let visibleTabs = Array(snapshot.closedTabs.prefix(visibleCount ?? fallbackCount))
-
-        return HomeOverviewPanel(
-            title: "Continue",
-            minHeight: layoutMetrics.requiredHeight(for: .closedTabs),
-            fixedHeight: fixedHeight
-        ) {
-            if snapshot.closedTabs.isEmpty {
-                HomeOverviewEmptyStateCard(
-                    title: "Nothing to pick back up.",
-                    subtitle: "Recent tabs and boards will show up here when there is a useful thread to continue."
-                )
-            } else {
-                LazyVGrid(
-                    columns: Array(
-                        repeating: GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: Spacing.sm),
-                        count: max(columnCount, 1)
-                    ),
-                    spacing: Spacing.sm
-                ) {
-                    ForEach(visibleTabs) { tab in
-                        HomeOverviewContinueChip(tab: tab) {
-                            onOpenTab(tab)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-        }
     }
 
     private var currentWeekDates: [Date] {

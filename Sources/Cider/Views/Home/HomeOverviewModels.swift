@@ -100,13 +100,6 @@ struct HomeDailyBrief: Equatable {
     let focusItems: [HomeDailyBriefItem]
 }
 
-struct HomeOverviewClosedTabSummary: Equatable, Identifiable {
-    let id: UUID
-    let name: String
-    let kind: SavedViewKind
-    let updatedAt: Date
-}
-
 struct HomeTriageItem: Equatable, Identifiable {
     let id: String
     let item: LibraryItemV2
@@ -373,7 +366,6 @@ struct HomeOverviewSnapshot: Equatable {
     let reviewCockpitSummary: HomeReviewCockpitSummary
     let triageItems: [HomeTriageItem]
     let kanbanPulseItems: [HomeKanbanPulseItem]
-    let closedTabs: [HomeOverviewClosedTabSummary]
 }
 
 enum HomeOverviewPanelID {
@@ -388,7 +380,6 @@ enum HomeOverviewPanelID {
     case todos
     case triage
     case resurface
-    case closedTabs
 }
 
 struct HomeOverviewLayoutMetrics {
@@ -426,10 +417,6 @@ struct HomeOverviewLayoutMetrics {
                 HomeOverviewDesign.resurfacePanelMinHeight,
                 96 + (rowCount * HomeOverviewDesign.resurfacePanelRowHeightEstimate)
             )
-        case .closedTabs:
-            return snapshot.closedTabs.isEmpty
-                ? HomeOverviewDesign.closedTabsBaseMinHeight
-                : HomeOverviewDesign.closedTabsPanelMinHeight
         }
     }
 
@@ -449,10 +436,7 @@ struct HomeOverviewLayoutMetrics {
     }
 
     var bottomRowHeight: CGFloat {
-        max(
-            requiredHeight(for: .resurface),
-            requiredHeight(for: .closedTabs)
-        )
+        requiredHeight(for: .resurface)
     }
 }
 
@@ -483,7 +467,6 @@ struct HomeOverviewFullLayoutTracks {
     var recentWidth: CGFloat { first + gap + second }
     var upcomingWidth: CGFloat { third + gap + fourth }
     var captureTimelineWidth: CGFloat { first + gap + second + gap + third }
-    var continueWidth: CGFloat { fourth }
     var resurfaceWidth: CGFloat { first }
     var pinnedWidth: CGFloat { second + gap + third + gap + fourth }
 }

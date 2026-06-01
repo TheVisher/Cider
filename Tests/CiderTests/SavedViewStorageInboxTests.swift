@@ -7,19 +7,23 @@ final class SavedViewStorageInboxTests: XCTestCase {
         let savedViewURL = try makeSavedViewsFileURL()
         defer { try? FileManager.default.removeItem(at: savedViewURL.deletingLastPathComponent()) }
 
-        let storage = SavedViewStorage(storageFileURL: savedViewURL)
-        storage.createSavedView(
-            name: "Inbox",
-            filterSpec: SavedViewFilterSpec(
-                entityTypes: [.bookmark, .note],
-                onlyUnassigned: true
-            )
+        try writeLegacySavedViews(
+            [
+                SavedView(
+                    name: "Inbox",
+                    filterSpec: SavedViewFilterSpec(
+                        entityTypes: [.bookmark, .note],
+                        onlyUnassigned: true
+                    )
+                )
+            ],
+            to: savedViewURL
         )
 
-        let reloaded = SavedViewStorage(storageFileURL: savedViewURL)
+        let storage = SavedViewStorage(storageFileURL: savedViewURL)
 
-        XCTAssertEqual(reloaded.savedViews.first?.filterSpec.entityTypes, LibraryEntityType.activeCases)
-        XCTAssertTrue(reloaded.savedViews.first?.filterSpec.onlyUnassigned == true)
+        XCTAssertEqual(storage.savedViews.first?.filterSpec.entityTypes, LibraryEntityType.activeCases)
+        XCTAssertTrue(storage.savedViews.first?.filterSpec.onlyUnassigned == true)
     }
 
     @MainActor
@@ -27,18 +31,22 @@ final class SavedViewStorageInboxTests: XCTestCase {
         let savedViewURL = try makeSavedViewsFileURL()
         defer { try? FileManager.default.removeItem(at: savedViewURL.deletingLastPathComponent()) }
 
-        let storage = SavedViewStorage(storageFileURL: savedViewURL)
-        storage.createSavedView(
-            name: "Bookmark Inbox",
-            filterSpec: SavedViewFilterSpec(
-                entityTypes: [.bookmark],
-                onlyUnassigned: true
-            )
+        try writeLegacySavedViews(
+            [
+                SavedView(
+                    name: "Bookmark Inbox",
+                    filterSpec: SavedViewFilterSpec(
+                        entityTypes: [.bookmark],
+                        onlyUnassigned: true
+                    )
+                )
+            ],
+            to: savedViewURL
         )
 
-        let reloaded = SavedViewStorage(storageFileURL: savedViewURL)
+        let storage = SavedViewStorage(storageFileURL: savedViewURL)
 
-        XCTAssertEqual(reloaded.savedViews.first?.filterSpec.entityTypes, [.bookmark])
+        XCTAssertEqual(storage.savedViews.first?.filterSpec.entityTypes, [.bookmark])
     }
 
     private func makeSavedViewsFileURL() throws -> URL {
@@ -46,5 +54,21 @@ final class SavedViewStorageInboxTests: XCTestCase {
             .appendingPathComponent("cider-saved-view-storage-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         return tempDir.appendingPathComponent("_cider_saved_views.json")
+    }
+
+    private func writeLegacySavedViews(_ savedViews: [SavedView], to url: URL) throws {
+        struct LegacySavedViewsSnapshot: Codable {
+            var savedViews: [SavedView]
+            var tabOrder: [UUID]
+        }
+
+        let snapshot = LegacySavedViewsSnapshot(
+            savedViews: savedViews,
+            tabOrder: savedViews.map(\.id)
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(snapshot).write(to: url)
     }
 }

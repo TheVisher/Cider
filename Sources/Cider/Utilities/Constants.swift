@@ -750,13 +750,6 @@ enum HomeOverviewDesign {
     static let recentActivityBaseHeight: CGFloat = 160
     static let recentActivityRowHeightEstimate: CGFloat = 34
     static let upcomingPanelFixedHeight: CGFloat = 244
-    static let closedTabsBaseMinHeight: CGFloat = 124
-    static let closedTabsPanelMinHeight: CGFloat = 292
-    static let closedTabsVisibleRowCount: Int = 2
-    static let closedTabsFullColumnCount: Int = 4
-    static let closedTabsCompactColumnCount: Int = 3
-    static let closedTabsSingleColumnCount: Int = 2
-    static let closedTabCardHeight: CGFloat = 102
     static let resurfacePanelMinHeight: CGFloat = 208
     static let resurfacePanelRowHeightEstimate: CGFloat = 120
     static let resurfaceCardHeight: CGFloat = 72

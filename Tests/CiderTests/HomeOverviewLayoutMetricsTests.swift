@@ -34,14 +34,6 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
         XCTAssertEqual(metrics.requiredHeight(for: .activityTimeline), HomeOverviewDesign.activityTimelinePanelHeight)
     }
 
-    func testBottomRowHeightUsesStableClosedTabsBaselineForScrollableGrid() {
-        let metrics = HomeOverviewLayoutMetrics(snapshot: makeSnapshot(closedTabCount: 9))
-
-        XCTAssertEqual(metrics.bottomRowHeight, metrics.requiredHeight(for: .closedTabs))
-        XCTAssertGreaterThan(metrics.bottomRowHeight, metrics.requiredHeight(for: .resurface))
-        XCTAssertEqual(metrics.requiredHeight(for: .closedTabs), HomeOverviewDesign.closedTabsPanelMinHeight)
-    }
-
     func testFullLayoutTracksFillAvailableWidthWithSharedGutters() {
         let tracks = HomeOverviewFullLayoutTracks(availableWidth: 1200, gap: 12)
 
@@ -58,8 +50,7 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
     private func makeSnapshot(
         recentCount: Int = 4,
         upcomingCount: Int = 1,
-        resurfacedCount: Int = 2,
-        closedTabCount: Int = 2
+        resurfacedCount: Int = 2
     ) -> HomeOverviewSnapshot {
         HomeOverviewSnapshot(
             telemetry: [],
@@ -108,8 +99,7 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
                 generatedAt: Date(timeIntervalSince1970: 1_745_084_400)
             ),
             triageItems: [],
-            kanbanPulseItems: [],
-            closedTabs: Array(repeating: makeClosedTab(name: "Library"), count: closedTabCount)
+            kanbanPulseItems: []
         )
     }
 
@@ -151,12 +141,4 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
         )
     }
 
-    private func makeClosedTab(name: String) -> HomeOverviewClosedTabSummary {
-        HomeOverviewClosedTabSummary(
-            id: UUID(),
-            name: name,
-            kind: .library,
-            updatedAt: .now
-        )
-    }
 }

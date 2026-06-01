@@ -45,8 +45,6 @@ enum HomeOverviewDataProvider {
         items: [LibraryItemV2],
         recentItems: [LibraryItemV2],
         folders: [Folder],
-        savedViews: [SavedView] = [],
-        tabOrder: [UUID] = [],
         kanbanBoards: [KanbanBoard] = [],
         reviewQueueItems: [CiderReviewQueueItem] = [],
         reviewQueueSummary: CiderReviewQueueSummaryResult? = nil,
@@ -128,21 +126,6 @@ enum HomeOverviewDataProvider {
         )
         let triageItems = triageItems(from: items)
         let kanbanPulseItems = kanbanPulseItems(from: kanbanBoards)
-
-        let openTabIDs = Set(tabOrder)
-        let closedTabs = savedViews
-            .filter { savedView in
-                !openTabIDs.contains(savedView.id) && !savedView.isOnboarding
-            }
-            .sorted { $0.updatedAt > $1.updatedAt }
-            .map { savedView in
-                HomeOverviewClosedTabSummary(
-                    id: savedView.id,
-                    name: savedView.name,
-                    kind: savedView.kind,
-                    updatedAt: savedView.updatedAt
-                )
-            }
 
         let recentTarget = libraryTarget(
             name: "Recent Activity",
@@ -268,8 +251,7 @@ enum HomeOverviewDataProvider {
                 now: now
             ),
             triageItems: triageItems,
-            kanbanPulseItems: kanbanPulseItems,
-            closedTabs: closedTabs
+            kanbanPulseItems: kanbanPulseItems
         )
     }
 
