@@ -406,3 +406,186 @@ enum WorkspaceRouteTransitionPolicy {
         )
     }
 }
+
+struct WorkspaceRouterCompatibilityState: Equatable {
+    var selectedTab: CiderTab?
+    var selectedNavigationDomain: WorkspaceNavigationDomain?
+    var selectedDomainRouteKind: WorkspaceDomainRouteKind
+    var selectedFolderID: UUID?
+    var selectedTagIDs: Set<UUID>
+    var selectedProjectWorkspaceID: String?
+
+    init(
+        selectedTab: CiderTab? = nil,
+        selectedNavigationDomain: WorkspaceNavigationDomain? = nil,
+        selectedDomainRouteKind: WorkspaceDomainRouteKind = .overview,
+        selectedFolderID: UUID? = nil,
+        selectedTagIDs: Set<UUID> = [],
+        selectedProjectWorkspaceID: String? = nil
+    ) {
+        self.selectedTab = selectedTab
+        self.selectedNavigationDomain = selectedNavigationDomain
+        self.selectedDomainRouteKind = selectedDomainRouteKind
+        self.selectedFolderID = selectedFolderID
+        self.selectedTagIDs = selectedTagIDs
+        self.selectedProjectWorkspaceID = selectedProjectWorkspaceID
+    }
+}
+
+enum WorkspaceRouterCompatibility {
+    static func route(from state: WorkspaceRouterCompatibilityState) -> WorkspaceRoute {
+        if let tagID = state.selectedTagIDs.first {
+            return .library(.tag(tagID))
+        }
+        if let folderID = state.selectedFolderID {
+            return .library(.folder(folderID))
+        }
+        if case .domainDashboard(let domain) = state.selectedTab {
+            return route(
+                for: domain,
+                routeKind: state.selectedDomainRouteKind,
+                selectedProjectWorkspaceID: state.selectedProjectWorkspaceID
+            )
+        }
+        if let tabRoute = state.selectedTab.flatMap(route(from:)) {
+            return tabRoute
+        }
+        return route(
+            for: state.selectedNavigationDomain,
+            routeKind: state.selectedDomainRouteKind,
+            selectedProjectWorkspaceID: state.selectedProjectWorkspaceID
+        )
+    }
+
+    private static func route(from tab: CiderTab) -> WorkspaceRoute? {
+        switch tab {
+        case .search(_, let query):
+            return .library(.search(query))
+        case .tag:
+            return .library(.tags)
+        case .domainDashboard(let domain):
+            return route(for: domain, routeKind: .overview, selectedProjectWorkspaceID: nil)
+        case .projectOverview(let projectID, _):
+            return projectRoute(projectID: projectID, section: .overview)
+        case .projectInbox(let projectID, _):
+            return projectRoute(projectID: projectID, section: .inbox)
+        case .projectBoard(let projectID, let boardID, _):
+            return projectRoute(projectID: projectID, section: .board(boardID: boardID, milestoneCardID: nil))
+        case .projectSurface(let projectID, let surface, _):
+            return projectRoute(projectID: projectID, section: section(for: surface))
+        case .projectReferences(let projectID, _):
+            return projectRoute(projectID: projectID, section: .assets)
+        case .spaceOverview(let spaceID, _):
+            return .spaces(.overview(spaceID: spaceID))
+        case .spacesManager:
+            return .spaces(.manager)
+        case .aiAssistant:
+            return .ai
+        }
+    }
+
+    private static func route(
+        for domain: WorkspaceNavigationDomain?,
+        routeKind: WorkspaceDomainRouteKind,
+        selectedProjectWorkspaceID: String?
+    ) -> WorkspaceRoute {
+        guard let domain else { return .home }
+        switch domain {
+        case .mainDashboard:
+            return .home
+        case .browse:
+            return .library(libraryRoute(for: routeKind))
+        case .projects:
+            return projectRoute(projectID: selectedProjectWorkspaceID, section: .overview)
+        case .spaces:
+            return .spaces(.manager)
+        case .aiAssistant:
+            return .ai
+        case .bookmarks:
+            return .library(.bookmarks)
+        case .notes:
+            return .library(.notes)
+        case .files:
+            return .library(.files)
+        case .tasksEvents, .people, .media:
+            return .library(.overview)
+        }
+    }
+
+    private static func libraryRoute(for routeKind: WorkspaceDomainRouteKind) -> LibraryRoute {
+        switch routeKind {
+        case .overview, .recent, .chats:
+            return .overview
+        case .inbox:
+            return .inbox
+        case .all:
+            return .all
+        case .bookmarks:
+            return .bookmarks
+        case .notes:
+            return .notes
+        case .files:
+            return .files
+        case .folders:
+            return .folders
+        case .tags:
+            return .tags
+        }
+    }
+
+    private static func projectRoute(
+        projectID: String?,
+        section: ProjectSectionRoute
+    ) -> WorkspaceRoute {
+        guard let projectID else { return .projects(.home) }
+        if projectID == "browse-all-boards" {
+            return .projects(.browseAllBoards(section: section))
+        }
+        return .projects(.workspace(projectID: projectID, section: section))
+    }
+
+    private static func section(for surface: ProjectWorkspaceSurface) -> ProjectSectionRoute {
+        switch surface {
+        case .boards:
+            return .overview
+        case .milestones:
+            return .milestones
+        case .notes:
+            return .docs
+        case .decisions:
+            return .decisions
+        case .assets:
+            return .assets
+        case .qaAudits:
+            return .qa
+        case .plansHandoffs:
+            return .plans
+        }
+    }
+}
+
+struct WorkspaceRouter: Equatable {
+    private(set) var currentRoute: WorkspaceRoute
+    private(set) var companionState: WorkspaceRouteCompanionState
+
+    var presentation: WorkspaceRoutePresentation {
+        WorkspaceRoutePresentation.presentation(for: currentRoute)
+    }
+
+    init(
+        currentRoute: WorkspaceRoute = .home,
+        companionState: WorkspaceRouteCompanionState = WorkspaceRouteCompanionState()
+    ) {
+        self.currentRoute = currentRoute
+        self.companionState = companionState
+    }
+
+    mutating func navigate(to route: WorkspaceRoute) {
+        companionState = WorkspaceRouteTransitionPolicy.state(
+            afterNavigatingFrom: currentRoute,
+            to: route,
+            current: companionState
+        )
+        currentRoute = route
+    }
+}
