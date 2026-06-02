@@ -7618,7 +7618,7 @@ struct CiderCLI {
 
         case "add-card":
             guard let boardName = args.first else {
-                printCLIError("Usage: cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>] [--after <sibling-id>]")
+                printCLIError("Usage: cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>] [--after <sibling-id>] [--json]")
                 return
             }
             guard let colName = parseFlag("--column", from: args),
@@ -7702,7 +7702,7 @@ struct CiderCLI {
         case "update-card":
             guard let boardRef = args.first,
                   let cardID = parseFlag("--card", from: args) else {
-                printCLIError("Usage: cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes] [--priority low|medium|high|none] [--agent <name>] [--clear-agent] [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none] [--parent <card-id>] [--clear-parent]")
+                printCLIError("Usage: cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes] [--priority low|medium|high|none] [--agent <name>] [--clear-agent] [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none] [--parent <card-id>] [--clear-parent] [--json]")
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }

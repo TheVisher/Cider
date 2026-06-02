@@ -601,6 +601,23 @@ struct KanbanBoardFileLockingTests {
         #expect(output.contains("Usage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]"))
     }
 
+    @Test("board card mutation usage advertises JSON flag")
+    func boardCardMutationUsageAdvertisesJSONFlag() throws {
+        let cli = try #require(Self.ciderCLIURL())
+        let vault = try Self.makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let addCardResult = try Self.runCLIResult(cli, vault: vault, args: ["board", "add-card"])
+        let addCardOutput = String(data: addCardResult.output, encoding: .utf8) ?? ""
+        #expect(addCardResult.status == 1)
+        #expect(addCardOutput.contains("Usage: cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>] [--after <sibling-id>] [--json]"))
+
+        let updateCardResult = try Self.runCLIResult(cli, vault: vault, args: ["board", "update-card"])
+        let updateCardOutput = String(data: updateCardResult.output, encoding: .utf8) ?? ""
+        #expect(updateCardResult.status == 1)
+        #expect(updateCardOutput.contains("Usage: cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes] [--priority low|medium|high|none] [--agent <name>] [--clear-agent] [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none] [--parent <card-id>] [--clear-parent] [--json]"))
+    }
+
     @Test("board create rejects flag-like missing names")
     func boardCreateRejectsFlagLikeMissingNames() throws {
         let cli = try #require(Self.ciderCLIURL())
