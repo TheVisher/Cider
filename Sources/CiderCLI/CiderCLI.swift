@@ -52,6 +52,7 @@ struct CiderCLI {
         switch command {
         case "bookmark", "bm":
             if subcommand == "add" || subcommand == "create" { return nil }
+            if subcommand == "update" || subcommand == "set" { return nil }
             if subcommand == "move" {
                 return LegacyRemovedCommand(command: label, replacement: "cider-cli item move bookmark <id> --folder <name|path> --json")
             }
@@ -2128,7 +2129,7 @@ struct CiderCLI {
 
         case "update", "set":
             guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli bookmark update <id> [--title <t>] [--notes <n>] [--url <u>] [--ai-summary <text>] [--enrichment-status none|partial|complete] [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]")
+                print("Error: ID prefix required. Usage: cider-cli bookmark update <id> [--title <t>] [--notes <n>] [--url <u>] [--ai-summary <text>|--clear-ai-summary] [--enrichment-status none|partial|complete] [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]")
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
@@ -2136,6 +2137,11 @@ struct CiderCLI {
                 let newNotes = parseFlag("--notes", from: args) ?? bm.notes
                 let newURL = parseFlag("--url", from: args)
                 let newAISummary = parseFlag("--ai-summary", from: args)
+                let clearAISummary = args.contains("--clear-ai-summary")
+                if clearAISummary, newAISummary != nil {
+                    print("Error: Use either --ai-summary <text> or --clear-ai-summary, not both.")
+                    return
+                }
                 let newEnrichmentStatus = parseFlag("--enrichment-status", from: args)
                 let updated = service.updateDetails(
                     for: bm.id,
@@ -2147,6 +2153,7 @@ struct CiderCLI {
                 let enriched = service.updateEnrichment(
                     for: bm.id,
                     aiSummary: newAISummary,
+                    clearAISummary: clearAISummary,
                     enrichmentStatus: newEnrichmentStatus
                 )
                 if let mt = parseFlag("--media-type", from: args),

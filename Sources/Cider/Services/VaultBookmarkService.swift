@@ -889,12 +889,16 @@ final class VaultBookmarkService: ObservableObject {
     func updateEnrichment(
         for bookmarkID: UUID,
         aiSummary: String? = nil,
+        clearAISummary: Bool = false,
         enrichmentStatus: String? = nil
     ) -> Bool {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
 
         var changed = false
-        if let aiSummary, bookmarks[index].aiSummary != aiSummary {
+        if clearAISummary, bookmarks[index].aiSummary != nil {
+            bookmarks[index].aiSummary = nil
+            changed = true
+        } else if let aiSummary, bookmarks[index].aiSummary != aiSummary {
             bookmarks[index].aiSummary = aiSummary
             changed = true
         }

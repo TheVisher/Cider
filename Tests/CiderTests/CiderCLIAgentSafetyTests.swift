@@ -932,6 +932,14 @@ struct CiderCLIAgentSafetyTests {
         #expect(!result.stderr.contains("Source required"))
     }
 
+    @Test("bookmark update usage documents AI summary clear flag")
+    func bookmarkUpdateUsageDocumentsAISummaryClearFlag() throws {
+        let result = try runCLI(args: ["bookmark", "update"])
+
+        #expect(result.stdout.contains("Usage: cider-cli bookmark update <id>"))
+        #expect(result.stdout.contains("--ai-summary <text>|--clear-ai-summary"))
+    }
+
     @Test("cli help documents source path versus destination path flags")
     func cliHelpDocumentsSourcePathVersusDestinationPathFlags() throws {
         let captureHelp = try runCLI(args: ["capture", "add", "--help"])

@@ -673,6 +673,92 @@ struct BookmarkSQLiteTests {
         #expect(abs(loaded.lastEnrichedAt!.timeIntervalSince(enrichedDate)) < 0.001)
     }
 
+    @Test("Update enrichment clears AI summary explicitly and refreshes chunks")
+    func updateEnrichmentClearsAISummaryExplicitlyAndRefreshesChunks() throws {
+        try withIsolatedVault { db, service in
+            let bookmark = Bookmark(
+                title: "IGN X Clip",
+                urlString: "https://x.com/ign/status/2059500091849994699?s=12",
+                aiSummary: "Privacy extension troubleshooting should disappear.",
+                relativePath: "Inbox/Bookmarks/IGN X Clip.webloc"
+            )
+            service.persistBookmarkToDatabase(db, bookmark: bookmark)
+            service.loadBookmarksFromDatabase(db)
+            _ = try SecondBrainItemContentIndexingService(database: db).rebuild(
+                owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmark.id.uuidString)
+            )
+
+            let changed = service.updateEnrichment(for: bookmark.id, clearAISummary: true)
+
+            #expect(changed)
+            let updated = try #require(service.bookmarks.first)
+            #expect(updated.aiSummary == nil)
+            #expect(updated.lastEnrichedAt != nil)
+
+            let reloaded = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            reloaded.loadBookmarksFromDatabase(db)
+            #expect(reloaded.bookmarks.first?.aiSummary == nil)
+
+            let summaryStmt = try db.prepare("SELECT ai_summary FROM bookmarks WHERE item_id = ?;")
+            summaryStmt.bind(DatabaseHelpers.encode(bookmark.id), at: 1)
+            try #require(try summaryStmt.step())
+            #expect(summaryStmt.optionalString(at: 0) == nil)
+
+            let chunkStmt = try db.prepare("""
+                SELECT body
+                FROM content_chunks
+                WHERE owner_type = 'bookmark' AND owner_id = ?
+                LIMIT 1;
+                """)
+            chunkStmt.bind(DatabaseHelpers.encode(bookmark.id), at: 1)
+            try #require(try chunkStmt.step())
+            #expect(!chunkStmt.string(at: 0).contains("Privacy extension troubleshooting should disappear."))
+        }
+    }
+
+    @Test("Update enrichment leaves AI summary unchanged when summary is omitted")
+    func updateEnrichmentLeavesAISummaryUnchangedWhenSummaryIsOmitted() throws {
+        try withIsolatedVault { db, service in
+            let bookmark = Bookmark(
+                title: "Existing Summary",
+                urlString: "https://example.com/existing",
+                aiSummary: "Keep this useful summary.",
+                relativePath: "Inbox/Bookmarks/Existing Summary.webloc"
+            )
+            service.persistBookmarkToDatabase(bookmark)
+            service.loadBookmarksFromDatabase(db)
+
+            let changed = service.updateEnrichment(for: bookmark.id, enrichmentStatus: "complete")
+
+            #expect(changed)
+            let updated = try #require(service.bookmarks.first)
+            #expect(updated.aiSummary == "Keep this useful summary.")
+            #expect(updated.enrichmentStatus == "complete")
+        }
+    }
+
+    @Test("Update enrichment sets AI summary text")
+    func updateEnrichmentSetsAISummaryText() throws {
+        try withIsolatedVault { db, service in
+            let bookmark = Bookmark(
+                title: "Replacement Summary",
+                urlString: "https://example.com/replacement",
+                aiSummary: "Old summary.",
+                relativePath: "Inbox/Bookmarks/Replacement Summary.webloc"
+            )
+            service.persistBookmarkToDatabase(bookmark)
+            service.loadBookmarksFromDatabase(db)
+
+            let changed = service.updateEnrichment(
+                for: bookmark.id,
+                aiSummary: "New useful summary."
+            )
+
+            #expect(changed)
+            #expect(service.bookmarks.first?.aiSummary == "New useful summary.")
+        }
+    }
+
     @Test("OEmbed enrichment completion clears bookmark review issue")
     func oEmbedEnrichmentCompletionClearsBookmarkReviewIssue() throws {
         let (db, url) = try makeTestDB()
