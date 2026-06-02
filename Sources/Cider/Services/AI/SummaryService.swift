@@ -35,7 +35,7 @@ final class SummaryService {
     /// - Returns: Summary string, or nil on failure
     func summarize(articleText: String) async -> String? {
         if let summarizeArticleOverrideForTesting {
-            return await summarizeArticleOverrideForTesting(articleText)
+            return Self.sanitizedSummary(await summarizeArticleOverrideForTesting(articleText))
         }
         guard AIAvailability.isFoundationModelsAvailable else { return nil }
         // Stay within context window — ~4000 chars is safe for the on-device model
@@ -43,12 +43,25 @@ final class SummaryService {
         guard !truncated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         do {
             let response = try await makeSession().respond(to: truncated)
-            let summary = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            return summary.isEmpty ? nil : summary
+            return Self.sanitizedSummary(response.content)
         } catch {
             logger.error("Summary failed: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+
+    private static func sanitizedSummary(_ rawSummary: String?) -> String? {
+        guard let rawSummary else { return nil }
+        let summary = rawSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !summary.isEmpty else { return nil }
+
+        let normalized = summary.lowercased()
+        let looksLikeAccessTroubleshooting = normalized.contains("privacy-related issue")
+            && normalized.contains("disable")
+            && normalized.contains("privacy-related extension")
+        if looksLikeAccessTroubleshooting { return nil }
+
+        return summary
     }
 
     func _setSummarizeArticleOverrideForTesting(_ override: @escaping (String) async -> String?) {
