@@ -622,6 +622,9 @@ struct CiderCLI {
                     print("  Findings: \(report.findings.count)")
                     for finding in report.findings {
                         print("    [\(finding.severity)] \(finding.currentTitle)")
+                        if finding.proposedTitle != finding.currentTitle {
+                            print("      Proposed title: \(finding.proposedTitle)")
+                        }
                         print("      Item: \(finding.itemID)")
                         print("      Current path: \(finding.currentRelativePath)")
                         print("      Proposed path: \(finding.proposedRelativePath)")
@@ -653,6 +656,12 @@ struct CiderCLI {
                     print("  Mutating: \(report.isMutating ? "yes" : "no")")
                     print("  Approval required: \(report.approvalRequired ? "yes" : "no")")
                     print("  Item: \(report.itemID)")
+                    if let currentTitle = report.currentTitle {
+                        print("  Current title: \(currentTitle)")
+                    }
+                    if let proposedTitle = report.proposedTitle, proposedTitle != report.currentTitle {
+                        print("  Proposed title: \(proposedTitle)")
+                    }
                     if let current = report.currentRelativePath {
                         print("  Current path: \(current)")
                     }

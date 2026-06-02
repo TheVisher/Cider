@@ -312,6 +312,14 @@ final class BookmarkAIEnrichment {
            ) {
             cleaned = String(cleaned[...dateRange.upperBound])
         }
+        if let url = URL(string: urlString),
+           (url.host?.lowercased() ?? "").contains("tiktok.com"),
+           let questionRange = cleaned.range(
+                of: #"\s+(?:did\s+you\s+know|here(?:'|’)s|this\s+is|so\s+you)\b"#,
+                options: [.regularExpression, .caseInsensitive]
+           ) {
+            cleaned = String(cleaned[..<questionRange.lowerBound])
+        }
 
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }

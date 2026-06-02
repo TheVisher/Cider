@@ -666,7 +666,9 @@ struct CiderStorageAuditServiceTests {
         url: String = "https://github.com/AndrewPrifer/liquid-dom",
         relativePath: String = "Inbox/Bookmarks/Github.Com (2).webloc",
         chunkTitle: String = "Github.Com",
-        chunkBody: String = "Title: Github.Com\nURL: https://github.com/AndrewPrifer/liquid-dom\nPath: Inbox/Bookmarks/Github.Com (2).webloc"
+        chunkBody: String = "Title: Github.Com\nURL: https://github.com/AndrewPrifer/liquid-dom\nPath: Inbox/Bookmarks/Github.Com (2).webloc",
+        notes: String = "",
+        ocrText: String? = nil
     ) throws {
         let now = DatabaseHelpers.encode(Date(timeIntervalSince1970: 10))
         let itemStmt = try db.prepare("""
@@ -681,11 +683,13 @@ struct CiderStorageAuditServiceTests {
         try itemStmt.step()
 
         let bookmarkStmt = try db.prepare("""
-            INSERT INTO bookmarks (item_id, url, notes, notes_manually_set, title_manually_set)
-            VALUES (?, ?, '', 0, 0);
+            INSERT INTO bookmarks (item_id, url, notes, notes_manually_set, title_manually_set, ocr_text)
+            VALUES (?, ?, ?, 0, 0, ?);
             """)
         bookmarkStmt.bind(DatabaseHelpers.encode(id), at: 1)
             .bind(url, at: 2)
+            .bind(notes, at: 3)
+            .bind(ocrText, at: 4)
         try bookmarkStmt.step()
 
         let chunkStmt = try db.prepare("""
@@ -1335,6 +1339,79 @@ struct CiderStorageAuditServiceTests {
         let report = try service.bookmarkDriftAudit(limit: 10)
 
         #expect(report.findings.isEmpty)
+    }
+
+    @Test("bookmark drift audit proposes stored TikTok semantic title when current title is provider generic")
+    func bookmarkDriftAuditProposesStoredTikTokSemanticTitleWhenCurrentTitleIsProviderGeneric() throws {
+        let bookmarkID = UUID(uuidString: "57AAC094-0804-4FEC-B009-5CA9C32B99EC")!
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try makeDirectories(["Inbox/Bookmarks"], under: vault)
+        try "url".write(
+            to: vault.appendingPathComponent("Inbox/Bookmarks/Tiktok.Com (2).webloc"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try insertBookmarkDriftFixture(
+            db,
+            id: bookmarkID,
+            title: "TikTok - Make Your Day",
+            url: "https://www.tiktok.com/t/ZP8pWRSvc/",
+            relativePath: "Inbox/Bookmarks/Tiktok.Com (2).webloc",
+            chunkTitle: "Tiktok.Com",
+            chunkBody: "Title: Tiktok.Com\nURL: https://www.tiktok.com/t/ZP8pWRSvc/\nPath: Inbox/Bookmarks/Tiktok.Com (2).webloc",
+            notes: """
+            And it's FREE! Welcome to Seattle SummerMaxing Part 1 - Details Below! #seattle #seattleWashington
+            So you want to river tube? Here's all you need to know!
+            By George M
+            Via TikTok
+            """,
+            ocrText: "Seattle Summermaxing Part 1 did you know that you can do this in Seattle?"
+        )
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            doctorReportProvider: { VaultDoctor.Report(startedAt: Date(), finishedAt: Date(), findings: []) },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.bookmarkDriftAudit(limit: 10)
+
+        let finding = try #require(report.findings.first)
+        #expect(finding.itemID == bookmarkID.uuidString)
+        #expect(finding.currentTitle == "TikTok - Make Your Day")
+        #expect(finding.proposedTitle == "Seattle Summermaxing Part 1")
+        #expect(finding.proposedRelativePath == "Inbox/Bookmarks/Seattle Summermaxing Part 1.webloc")
+        #expect(finding.pathDrift == true)
+        #expect(finding.chunkDrift == true)
+        #expect(finding.reasons.contains("stored TikTok metadata has a richer semantic title than the provider-generic title"))
+
+        let repair = try service.repairBookmarkDrift(
+            itemID: bookmarkID.uuidString,
+            approvalToken: finding.approvalToken,
+            execute: true
+        )
+
+        #expect(repair.status == "applied")
+        #expect(repair.proposedTitle == "Seattle Summermaxing Part 1")
+        #expect(repair.proposedRelativePath == "Inbox/Bookmarks/Seattle Summermaxing Part 1.webloc")
+        #expect(repair.appliedActions.contains("update_bookmark_title"))
+        #expect(repair.appliedActions.contains("update_bookmark_relative_path"))
+        #expect(repair.appliedActions.contains("rebuild_bookmark_content_chunks"))
+
+        let itemStmt = try db.prepare("SELECT title, relative_path FROM items WHERE id = ?;")
+        itemStmt.bind(DatabaseHelpers.encode(bookmarkID), at: 1)
+        try #require(try itemStmt.step())
+        #expect(itemStmt.string(at: 0) == "Seattle Summermaxing Part 1")
+        #expect(itemStmt.string(at: 1) == "Inbox/Bookmarks/Seattle Summermaxing Part 1.webloc")
+
+        let chunk = try firstBookmarkChunk(db, ownerID: bookmarkID)
+        #expect(chunk.title == "Seattle Summermaxing Part 1")
+        #expect(chunk.body.contains("Path: Inbox/Bookmarks/Seattle Summermaxing Part 1.webloc"))
+        #expect(!chunk.body.contains("Tiktok.Com"))
     }
 
     @Test("bookmark drift audit treats canonically equivalent accented filenames as current")

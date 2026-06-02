@@ -416,6 +416,7 @@ func bookmarkDriftFindingToDict(_ finding: CiderBookmarkDriftFinding) -> [String
         "severity": finding.severity,
         "itemID": finding.itemID,
         "currentTitle": finding.currentTitle,
+        "proposedTitle": finding.proposedTitle,
         "url": finding.url,
         "currentRelativePath": finding.currentRelativePath,
         "proposedRelativePath": finding.proposedRelativePath,
@@ -557,6 +558,12 @@ func bookmarkDriftRepairReportToDict(_ report: CiderBookmarkDriftRepairReport) -
     ]
     if let requiredApprovalToken = report.requiredApprovalToken {
         dict["requiredApprovalToken"] = requiredApprovalToken
+    }
+    if let currentTitle = report.currentTitle {
+        dict["currentTitle"] = currentTitle
+    }
+    if let proposedTitle = report.proposedTitle {
+        dict["proposedTitle"] = proposedTitle
     }
     if let currentRelativePath = report.currentRelativePath {
         dict["currentRelativePath"] = currentRelativePath

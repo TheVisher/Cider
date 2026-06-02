@@ -132,6 +132,7 @@ struct CiderBookmarkDriftFinding: Equatable {
     var severity: String
     var itemID: String
     var currentTitle: String
+    var proposedTitle: String
     var url: String
     var currentRelativePath: String
     var proposedRelativePath: String
@@ -150,6 +151,8 @@ struct CiderBookmarkDriftRepairReport: Equatable {
     var isMutating: Bool
     var approvalRequired: Bool = true
     var requiredApprovalToken: String?
+    var currentTitle: String?
+    var proposedTitle: String?
     var currentRelativePath: String?
     var proposedRelativePath: String
     var plannedActions: [String]
@@ -482,13 +485,15 @@ final class CiderStorageAuditService {
     ) throws -> CiderBookmarkDriftRepairReport {
         let matchingFinding = try bookmarkDriftFindings().first { $0.itemID == itemID }
         let requiredApprovalToken = matchingFinding?.approvalToken
-        let plannedActions = ["rename_webloc_artifact", "update_bookmark_relative_path", "rebuild_bookmark_content_chunks", "record_mutation_audit"]
+        let plannedActions = ["rename_webloc_artifact", "update_bookmark_title", "update_bookmark_relative_path", "rebuild_bookmark_content_chunks", "record_mutation_audit"]
         var report = CiderBookmarkDriftRepairReport(
             generatedAt: nowProvider(),
             itemID: itemID,
             status: execute ? "refused" : "planned",
             isMutating: false,
             requiredApprovalToken: requiredApprovalToken,
+            currentTitle: matchingFinding?.currentTitle,
+            proposedTitle: matchingFinding?.proposedTitle,
             currentRelativePath: matchingFinding?.currentRelativePath,
             proposedRelativePath: matchingFinding?.proposedRelativePath ?? "",
             plannedActions: plannedActions,
@@ -500,6 +505,8 @@ final class CiderStorageAuditService {
             report.blockers.append("bookmark drift finding is not present in the current audit")
             return report
         }
+        report.currentTitle = finding.currentTitle
+        report.proposedTitle = finding.proposedTitle
         report.currentRelativePath = finding.currentRelativePath
         report.proposedRelativePath = finding.proposedRelativePath
 
@@ -530,7 +537,7 @@ final class CiderStorageAuditService {
         let bookmarkID = UUID(uuidString: itemID)
         let bookmark = Bookmark(
             id: bookmarkID ?? UUID(),
-            title: finding.currentTitle,
+            title: finding.proposedTitle,
             urlString: finding.url,
             updatedAt: nowProvider(),
             relativePath: finding.currentRelativePath
@@ -550,13 +557,17 @@ final class CiderStorageAuditService {
 
             let updateStmt = try database.prepare("""
                 UPDATE items
-                SET relative_path = ?, updated_at = ?
+                SET title = ?, relative_path = ?, updated_at = ?
                 WHERE id = ? AND type = 'bookmark';
                 """)
-            updateStmt.bind(newRelativePath, at: 1)
-                .bind(DatabaseHelpers.encode(nowProvider()), at: 2)
-                .bind(itemID, at: 3)
+            updateStmt.bind(finding.proposedTitle, at: 1)
+                .bind(newRelativePath, at: 2)
+                .bind(DatabaseHelpers.encode(nowProvider()), at: 3)
+                .bind(itemID, at: 4)
             try updateStmt.step()
+            if finding.proposedTitle != finding.currentTitle {
+                report.appliedActions.append("update_bookmark_title")
+            }
             report.appliedActions.append("update_bookmark_relative_path")
 
             let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: itemID)
@@ -569,9 +580,11 @@ final class CiderStorageAuditService {
                     itemType: "bookmark",
                     itemID: bookmarkID,
                     before: [
+                        "title": finding.currentTitle,
                         "relativePath": finding.currentRelativePath,
                     ],
                     after: [
+                        "title": finding.proposedTitle,
                         "relativePath": newRelativePath,
                     ],
                     metadata: [
@@ -1168,6 +1181,9 @@ final class CiderStorageAuditService {
         var title: String
         var url: String
         var relativePath: String
+        var notes: String
+        var ocrText: String?
+        var titleManuallySet: Bool
     }
 
     private func bookmarkDriftFindings() throws -> [CiderBookmarkDriftFinding] {
@@ -1178,7 +1194,8 @@ final class CiderStorageAuditService {
 
     private func bookmarkDriftCandidates() throws -> [BookmarkDriftCandidate] {
         let stmt = try database.prepare("""
-            SELECT i.id, i.title, b.url, COALESCE(i.relative_path, '')
+            SELECT i.id, i.title, b.url, COALESCE(i.relative_path, ''),
+                   COALESCE(b.notes, ''), b.ocr_text, b.title_manually_set
             FROM items i
             JOIN bookmarks b ON b.item_id = i.id
             WHERE i.type = 'bookmark'
@@ -1193,7 +1210,10 @@ final class CiderStorageAuditService {
                     itemID: stmt.string(at: 0),
                     title: stmt.string(at: 1),
                     url: stmt.string(at: 2),
-                    relativePath: stmt.string(at: 3)
+                    relativePath: stmt.string(at: 3),
+                    notes: stmt.string(at: 4),
+                    ocrText: stmt.optionalString(at: 5),
+                    titleManuallySet: stmt.int64(at: 6) != 0
                 )
             )
         }
@@ -1202,25 +1222,29 @@ final class CiderStorageAuditService {
 
     private func bookmarkDriftFinding(for candidate: BookmarkDriftCandidate) throws -> CiderBookmarkDriftFinding? {
         guard candidate.relativePath.lowercased().hasSuffix(".webloc"),
-              isSafeRelativePath(candidate.relativePath),
-              meaningfulBookmarkTitle(candidate.title, urlString: candidate.url) else {
+              isSafeRelativePath(candidate.relativePath) else {
+            return nil
+        }
+
+        let proposedTitle = proposedBookmarkTitle(for: candidate)
+        guard meaningfulBookmarkTitle(proposedTitle, urlString: candidate.url) else {
             return nil
         }
 
         let currentFilename = (candidate.relativePath as NSString).lastPathComponent
         let currentBase = stripDuplicateSuffix((currentFilename as NSString).deletingPathExtension)
-        let expectedBase = BookmarkFileService.shared.sanitizedFilename(candidate.title)
+        let expectedBase = BookmarkFileService.shared.sanitizedFilename(proposedTitle)
         let proposedRelativePath = proposedBookmarkRelativePath(
-            title: candidate.title,
+            title: proposedTitle,
             currentRelativePath: candidate.relativePath
         )
         let fileExists = FileManager.default.fileExists(atPath: vaultRoot.appendingPathComponent(candidate.relativePath).path)
         let pathDrift = fileExists
             && proposedRelativePath != candidate.relativePath
             && normalizedFilenameBase(currentBase) != normalizedFilenameBase(expectedBase)
-            && likelyStaleBookmarkFilename(currentBase, title: candidate.title, urlString: candidate.url)
+            && likelyStaleBookmarkFilename(currentBase, title: proposedTitle, urlString: candidate.url)
 
-        let chunkDrift = try bookmarkChunkDrift(candidate: candidate)
+        let chunkDrift = try bookmarkChunkDrift(candidate: candidate, proposedTitle: proposedTitle)
         guard pathDrift || chunkDrift else { return nil }
 
         let approvalToken = Self.bookmarkDriftApprovalToken(
@@ -1232,6 +1256,9 @@ final class CiderStorageAuditService {
         if pathDrift {
             reasons.append("bookmark title is rich but the .webloc filename still looks host-derived or stale")
         }
+        if proposedTitle != candidate.title {
+            reasons.append("stored TikTok metadata has a richer semantic title than the provider-generic title")
+        }
         if chunkDrift {
             reasons.append("bookmark content chunks still contain stale title/path text")
         }
@@ -1242,6 +1269,7 @@ final class CiderStorageAuditService {
             severity: "warning",
             itemID: candidate.itemID,
             currentTitle: candidate.title,
+            proposedTitle: proposedTitle,
             url: candidate.url,
             currentRelativePath: candidate.relativePath,
             proposedRelativePath: proposedRelativePath,
@@ -1270,7 +1298,7 @@ final class CiderStorageAuditService {
         return dirRelativePath.isEmpty ? filename : "\(dirRelativePath)/\(filename)"
     }
 
-    private func bookmarkChunkDrift(candidate: BookmarkDriftCandidate) throws -> Bool {
+    private func bookmarkChunkDrift(candidate: BookmarkDriftCandidate, proposedTitle: String) throws -> Bool {
         guard try tableExists("content_chunks") else { return false }
         let stmt = try database.prepare("""
             SELECT title, body
@@ -1285,12 +1313,12 @@ final class CiderStorageAuditService {
             sawChunk = true
             let chunkTitle = stmt.string(at: 0)
             let chunkBody = stmt.string(at: 1)
-            if chunkTitle != candidate.title {
+            if chunkTitle != proposedTitle {
                 return true
             }
             if chunkBody.contains(candidate.relativePath) {
                 let proposedPath = proposedBookmarkRelativePath(
-                    title: candidate.title,
+                    title: proposedTitle,
                     currentRelativePath: candidate.relativePath
                 )
                 if proposedPath != candidate.relativePath {
@@ -1299,6 +1327,27 @@ final class CiderStorageAuditService {
             }
         }
         return sawChunk == false ? false : false
+    }
+
+    private func proposedBookmarkTitle(for candidate: BookmarkDriftCandidate) -> String {
+        if let ocrText = candidate.ocrText,
+           let title = BookmarkAIEnrichment.suggestedTitleFromOCR(
+                ocrText,
+                currentTitle: candidate.title,
+                urlString: candidate.url,
+                titleManuallySet: candidate.titleManuallySet
+           ) {
+            return title
+        }
+        if let title = BookmarkAIEnrichment.suggestedTitleFromNotes(
+            candidate.notes,
+            currentTitle: candidate.title,
+            urlString: candidate.url,
+            titleManuallySet: candidate.titleManuallySet
+        ) {
+            return title
+        }
+        return candidate.title
     }
 
     private func meaningfulBookmarkTitle(_ title: String, urlString: String) -> Bool {
