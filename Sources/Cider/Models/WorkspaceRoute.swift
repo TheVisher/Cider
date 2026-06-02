@@ -378,6 +378,88 @@ enum WorkspaceRouteChromePolicy {
     }
 }
 
+struct WorkspaceRouteIntent: Equatable {
+    let route: WorkspaceRoute
+    let detail: WorkspaceRouteIntentDetail?
+}
+
+enum WorkspaceRouteIntentDetail: Equatable {
+    case kanbanCard(boardID: String, cardID: String)
+}
+
+enum WorkspaceRouteIntentPolicy {
+    static func intent(
+        forExternalTargetType targetType: String,
+        targetID: String,
+        boardID: String?
+    ) -> WorkspaceRouteIntent {
+        switch targetType {
+        case "card":
+            let routeBoardID = boardID ?? targetID
+            return WorkspaceRouteIntent(
+                route: browseAllBoardsRoute(boardID: routeBoardID),
+                detail: .kanbanCard(boardID: routeBoardID, cardID: targetID)
+            )
+        case "board":
+            return WorkspaceRouteIntent(route: browseAllBoardsRoute(boardID: targetID), detail: nil)
+        default:
+            return WorkspaceRouteIntent(route: .home, detail: nil)
+        }
+    }
+
+    static func intent(forDashboardTarget target: HomeOverviewActionTarget) -> WorkspaceRouteIntent {
+        switch target {
+        case .inbox:
+            return WorkspaceRouteIntent(route: .library(.inbox), detail: nil)
+        }
+    }
+
+    static func intent(
+        forQuickAction action: QuickAction,
+        selectedProjectID: String?,
+        createdBoardID: String?
+    ) -> WorkspaceRouteIntent? {
+        switch action {
+        case .newTab:
+            return WorkspaceRouteIntent(route: .library(.overview), detail: nil)
+        case .newTag:
+            return WorkspaceRouteIntent(route: .library(.tags), detail: nil)
+        case .newKanban:
+            guard let createdBoardID else { return nil }
+            return WorkspaceRouteIntent(
+                route: projectBoardRoute(projectID: selectedProjectID, boardID: createdBoardID),
+                detail: nil
+            )
+        case .newBookmark, .newNote, .newEvent, .newContact, .newTodo, .newFolder, .openSettings:
+            return nil
+        }
+    }
+
+    static func intent(forLibraryEntityTypes entityTypes: Set<LibraryEntityType>) -> WorkspaceRouteIntent {
+        if entityTypes == [.bookmark] {
+            return WorkspaceRouteIntent(route: .library(.bookmarks), detail: nil)
+        }
+        if entityTypes == [.note] {
+            return WorkspaceRouteIntent(route: .library(.notes), detail: nil)
+        }
+        if entityTypes == [.vaultFile] {
+            return WorkspaceRouteIntent(route: .library(.files), detail: nil)
+        }
+        return WorkspaceRouteIntent(route: .library(.all), detail: nil)
+    }
+
+    static func projectBoardRoute(projectID: String?, boardID: String) -> WorkspaceRoute {
+        if let projectID, projectID != "browse-all-boards" {
+            return .projects(.workspace(projectID: projectID, section: .board(boardID: boardID, milestoneCardID: nil)))
+        }
+        return browseAllBoardsRoute(boardID: boardID)
+    }
+
+    private static func browseAllBoardsRoute(boardID: String) -> WorkspaceRoute {
+        .projects(.browseAllBoards(section: .board(boardID: boardID, milestoneCardID: nil)))
+    }
+}
+
 struct WorkspaceRouteCompanionState: Equatable {
     var selectedFolderID: UUID?
     var selectedTagIDs: Set<UUID>

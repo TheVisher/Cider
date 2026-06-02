@@ -48,9 +48,21 @@ extension CiderPanelView {
             openVaultFileDetail(file)
         case "card":
             guard let boardID = userInfo[CiderExternalOpenBridge.Key.boardID] as? String else { return }
-            openKanbanCardDetail(boardID: boardID, cardID: targetID)
+            applyWorkspaceRouteIntent(
+                WorkspaceRouteIntentPolicy.intent(
+                    forExternalTargetType: targetType,
+                    targetID: targetID,
+                    boardID: boardID
+                )
+            )
         case "board":
-            openProjectBoard(targetID)
+            applyWorkspaceRouteIntent(
+                WorkspaceRouteIntentPolicy.intent(
+                    forExternalTargetType: targetType,
+                    targetID: targetID,
+                    boardID: nil
+                )
+            )
         default:
             break
         }

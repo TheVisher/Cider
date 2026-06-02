@@ -316,6 +316,16 @@ extension CiderPanelView {
         updateLivePerformanceContext()
     }
 
+    func applyWorkspaceRouteIntent(_ intent: WorkspaceRouteIntent) {
+        navigateToWorkspaceRoute(intent.route)
+        switch intent.detail {
+        case .kanbanCard(let boardID, let cardID):
+            openKanbanCardDetail(boardID: boardID, cardID: cardID)
+        case nil:
+            break
+        }
+    }
+
     private func defaultRouteKind(for domain: WorkspaceNavigationDomain) -> WorkspaceDomainRouteKind {
         WorkspaceDomainRoutePolicy.routes(for: domain).first?.kind ?? .overview
     }

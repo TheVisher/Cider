@@ -656,13 +656,7 @@ extension CiderPanelView {
     }
 
     func openDashboardTarget(_ target: HomeOverviewActionTarget) {
-        switch target {
-        case .inbox:
-            selectedNavigationDomain = .browse
-            selectedDomainRouteKind = .inbox
-            selectedFolderID = nil
-            selectedTab = .domainDashboard(.browse)
-        }
+        applyWorkspaceRouteIntent(WorkspaceRouteIntentPolicy.intent(forDashboardTarget: target))
     }
 
     func openProjectBoard(_ boardID: String, milestoneCardID: String? = nil) {
@@ -672,9 +666,19 @@ extension CiderPanelView {
         } else {
             kanbanMilestoneFilterByBoardID[boardID] = nil
         }
-        selectedFolderID = nil
-        let projectID = selectedProjectWorkspace?.id ?? projectWorkspaceCatalog.browseAllBoards.id
-        selectedTab = .projectBoard(projectID: projectID, boardID: board.id, name: board.name)
+        let projectID = selectedProjectWorkspace?.id
+        let route: WorkspaceRoute
+        if let projectID, projectID != projectWorkspaceCatalog.browseAllBoards.id {
+            route = .projects(.workspace(
+                projectID: projectID,
+                section: .board(boardID: board.id, milestoneCardID: milestoneCardID)
+            ))
+        } else {
+            route = .projects(.browseAllBoards(
+                section: .board(boardID: board.id, milestoneCardID: milestoneCardID)
+            ))
+        }
+        navigateToWorkspaceRoute(route)
     }
 
     func openMilestoneArtifact(_ link: ProjectWorkspaceMilestoneArtifactLink) {
@@ -772,9 +776,9 @@ extension CiderPanelView {
             projectID: project.id,
             associationStore: projectAssociationStore
         )
-        selectedProjectWorkspaceID = project.id
-        selectedFolderID = nil
-        selectedTab = .projectBoard(projectID: project.id, boardID: board.id, name: board.name)
+        navigateToWorkspaceRoute(
+            WorkspaceRouteIntentPolicy.projectBoardRoute(projectID: project.id, boardID: board.id)
+        )
     }
 
     func projectArtifactRelations(for project: ProjectWorkspace) -> [SecondBrainRelation] {

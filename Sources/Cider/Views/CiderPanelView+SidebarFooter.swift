@@ -181,18 +181,9 @@ extension CiderPanelView {
                 bvm.createFolder(name: name, parentID: parentID)
             },
             onCreateTab: { [self] name, entityTypes in
-                selectedFolderID = nil
-                if entityTypes == [.bookmark] {
-                    selectedDomainRouteKind = .bookmarks
-                } else if entityTypes == [.note] {
-                    selectedDomainRouteKind = .notes
-                } else if entityTypes == [.vaultFile] {
-                    selectedDomainRouteKind = .files
-                } else {
-                    selectedDomainRouteKind = .all
-                }
-                selectedNavigationDomain = .browse
-                selectedTab = .domainDashboard(.browse)
+                applyWorkspaceRouteIntent(
+                    WorkspaceRouteIntentPolicy.intent(forLibraryEntityTypes: entityTypes)
+                )
             },
             onCreateTag: { name, colorHex in
                 CardLabelStorage.shared.createLabel(name: name, colorHex: colorHex)

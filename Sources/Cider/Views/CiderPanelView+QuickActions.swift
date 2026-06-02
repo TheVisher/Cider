@@ -21,9 +21,21 @@ extension CiderPanelView {
         case .newFolder:
             NotificationCenter.default.post(name: .showFolderCreationField, object: nil)
         case .newTag:
-            openOrSelectTagTab()
+            if let intent = WorkspaceRouteIntentPolicy.intent(
+                forQuickAction: action,
+                selectedProjectID: selectedProjectWorkspaceID,
+                createdBoardID: nil
+            ) {
+                applyWorkspaceRouteIntent(intent)
+            }
         case .newTab:
-            openNavigationDomain(.browse)
+            if let intent = WorkspaceRouteIntentPolicy.intent(
+                forQuickAction: action,
+                selectedProjectID: selectedProjectWorkspaceID,
+                createdBoardID: nil
+            ) {
+                applyWorkspaceRouteIntent(intent)
+            }
         case .newKanban:
             let board = KanbanStorage.shared.createBoard(name: "Untitled Board")
             ProjectBoardRegistrationService.register(
@@ -31,9 +43,13 @@ extension CiderPanelView {
                 projectID: selectedProjectWorkspaceID,
                 associationStore: projectAssociationStore
             )
-            selectedFolderID = nil
-            let projectID = selectedProjectWorkspaceID ?? projectWorkspaceCatalog.browseAllBoards.id
-            selectedTab = .projectBoard(projectID: projectID, boardID: board.id, name: board.name)
+            if let intent = WorkspaceRouteIntentPolicy.intent(
+                forQuickAction: action,
+                selectedProjectID: selectedProjectWorkspaceID,
+                createdBoardID: board.id
+            ) {
+                applyWorkspaceRouteIntent(intent)
+            }
         case .openSettings:
             NotificationCenter.default.post(name: .openCiderSettings, object: nil)
         }
