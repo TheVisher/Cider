@@ -34,6 +34,14 @@ struct WorkspaceDomainRoute: Identifiable, Equatable {
     var id: String { kind.rawValue }
 }
 
+enum WorkspaceDomainRouteContentPresentation: Equatable {
+    case dashboard
+    case libraryFeed(onlyUnassigned: Bool, entityTypes: Set<LibraryEntityType>)
+    case folderBrowser
+    case tags
+    case assistantChats
+}
+
 enum WorkspaceDomainRoutePolicy {
     static func headerDefaultTab(for domain: WorkspaceNavigationDomain) -> CiderTab? {
         switch domain {
@@ -41,6 +49,39 @@ enum WorkspaceDomainRoutePolicy {
             return nil
         case .spaces, .media, .bookmarks, .notes, .projects, .tasksEvents, .files, .people, .aiAssistant, .browse:
             return .domainDashboard(domain)
+        }
+    }
+
+    static func contentPresentation(
+        for routeKind: WorkspaceDomainRouteKind,
+        in domain: WorkspaceNavigationDomain
+    ) -> WorkspaceDomainRouteContentPresentation {
+        switch routeKind {
+        case .overview:
+            return .dashboard
+        case .folders:
+            return .folderBrowser
+        case .tags:
+            return .tags
+        case .chats:
+            return .assistantChats
+        case .inbox:
+            if domain == .browse {
+                return .libraryFeed(onlyUnassigned: true, entityTypes: LibraryEntityType.activeCases)
+            }
+            return .dashboard
+        case .all:
+            if domain == .browse {
+                return .libraryFeed(onlyUnassigned: false, entityTypes: LibraryEntityType.activeCases)
+            }
+            return .dashboard
+        case .bookmarks, .notes, .files:
+            if domain == .browse, let entityTypes = routeKind.libraryEntityTypes {
+                return .libraryFeed(onlyUnassigned: false, entityTypes: entityTypes)
+            }
+            return .dashboard
+        case .recent:
+            return .dashboard
         }
     }
 

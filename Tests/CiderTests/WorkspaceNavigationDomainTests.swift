@@ -100,6 +100,33 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(WorkspaceDomainRouteKind.files.libraryEntityTypes, [.vaultFile])
     }
 
+    func testLibraryLeafRoutesResolveToScopedContentInsteadOfDashboard() {
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.contentPresentation(for: .overview, in: .browse),
+            .dashboard
+        )
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.contentPresentation(for: .all, in: .browse),
+            .libraryFeed(onlyUnassigned: false, entityTypes: LibraryEntityType.activeCases)
+        )
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.contentPresentation(for: .inbox, in: .browse),
+            .libraryFeed(onlyUnassigned: true, entityTypes: LibraryEntityType.activeCases)
+        )
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.contentPresentation(for: .bookmarks, in: .browse),
+            .libraryFeed(onlyUnassigned: false, entityTypes: [.bookmark])
+        )
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.contentPresentation(for: .notes, in: .browse),
+            .libraryFeed(onlyUnassigned: false, entityTypes: [.note])
+        )
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.contentPresentation(for: .files, in: .browse),
+            .libraryFeed(onlyUnassigned: false, entityTypes: [.vaultFile])
+        )
+    }
+
     func testHeaderDestinationsOpenSectionDashboardsInsteadOfFirstChildRoutes() {
         XCTAssertNil(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .mainDashboard))
         XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .browse), .domainDashboard(.browse))

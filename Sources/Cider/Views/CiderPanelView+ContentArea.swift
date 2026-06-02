@@ -137,6 +137,40 @@ extension CiderPanelView {
                     expandPathToFolder(folderID)
                 }
             )
+        } else if let libraryRouteFeed = selectedLibraryRouteFeed {
+            HomeDashboardView(
+                bookmarksViewModel: bookmarksViewModel,
+                notesViewModel: notesViewModel,
+                libraryViewModel: libraryViewModel,
+                selectedFolderID: nil,
+                displayMode: $homeDisplayMode,
+                cardSizeScale: $homeCardSizeScale,
+                continueSectionCollapsed: .constant(true),
+                selectedItemIDs: $selectedItemIDs,
+                sortMode: $homeSort,
+                entityFilter: .constant(libraryRouteFeed.entityTypes),
+                searchText: debouncedSearchText,
+                onOpenNote: { note in openNoteDetail(note) },
+                onShowBookmarkDetails: { openBookmarkDetails($0) },
+                onEditDateCard: { dateCard in
+                    newEventEditorContext = DateCardEditorContext(
+                        existingCard: dateCard,
+                        defaultDate: dateCard.startAt
+                    )
+                },
+                onEditContact: { contact in
+                    newContactEditorContext = ContactEditorContext(existingContact: contact)
+                },
+                onOpenDateCard: { openDateCardDetail($0) },
+                onOpenContact: { openContactDetail($0) },
+                onOpenTodo: { openTodoDetail($0) },
+                onOpenVaultFile: { openVaultFileDetail($0) },
+                onlyUnassigned: libraryRouteFeed.onlyUnassigned,
+                onToggleLabelBulk: { toggleTagOnSelected($0) },
+                showComingUp: LibraryFeedPresentationPolicy.showsComingUpSection(on: .library),
+                scrollToItemID: $scrollToItemID,
+                focusedItemID: focusedItemID
+            )
         } else if let tab = selectedTab {
             switch tab {
             case .domainDashboard(let domain):
@@ -472,6 +506,16 @@ extension CiderPanelView {
             } else {
                 noTabsEmptyState
             }
+        }
+    }
+
+    var selectedLibraryRouteFeed: (onlyUnassigned: Bool, entityTypes: Set<LibraryEntityType>)? {
+        guard let domain = selectedNavigationDomain, domain == .browse else { return nil }
+        switch WorkspaceDomainRoutePolicy.contentPresentation(for: selectedDomainRouteKind, in: domain) {
+        case .libraryFeed(let onlyUnassigned, let entityTypes):
+            return (onlyUnassigned, entityTypes)
+        case .dashboard, .folderBrowser, .tags, .assistantChats:
+            return nil
         }
     }
 
