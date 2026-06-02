@@ -432,6 +432,168 @@ struct WorkspaceRouterCompatibilityState: Equatable {
     }
 }
 
+struct WorkspaceRouteLegacyNavigationState: Equatable {
+    var selectedNavigationDomain: WorkspaceNavigationDomain?
+    var selectedDomainRouteKind: WorkspaceDomainRouteKind
+    var selectedFolderID: UUID?
+    var selectedTagIDs: Set<UUID>
+    var selectedTab: CiderTab?
+    var selectedProjectWorkspaceID: String?
+
+    init(
+        selectedNavigationDomain: WorkspaceNavigationDomain? = nil,
+        selectedDomainRouteKind: WorkspaceDomainRouteKind = .overview,
+        selectedFolderID: UUID? = nil,
+        selectedTagIDs: Set<UUID> = [],
+        selectedTab: CiderTab? = nil,
+        selectedProjectWorkspaceID: String? = nil
+    ) {
+        self.selectedNavigationDomain = selectedNavigationDomain
+        self.selectedDomainRouteKind = selectedDomainRouteKind
+        self.selectedFolderID = selectedFolderID
+        self.selectedTagIDs = selectedTagIDs
+        self.selectedTab = selectedTab
+        self.selectedProjectWorkspaceID = selectedProjectWorkspaceID
+    }
+}
+
+enum WorkspaceRouteLegacyProjection {
+    static func state(
+        for route: WorkspaceRoute,
+        searchTabID: UUID = UUID()
+    ) -> WorkspaceRouteLegacyNavigationState {
+        switch route {
+        case .home:
+            return WorkspaceRouteLegacyNavigationState(
+                selectedNavigationDomain: nil,
+                selectedTab: .domainDashboard(.mainDashboard)
+            )
+        case .library(let libraryRoute):
+            return libraryState(for: libraryRoute, searchTabID: searchTabID)
+        case .projects(let projectRoute):
+            return projectState(for: projectRoute)
+        case .spaces(let spaceRoute):
+            return spaceState(for: spaceRoute)
+        case .ai:
+            return WorkspaceRouteLegacyNavigationState(
+                selectedNavigationDomain: .aiAssistant,
+                selectedTab: .aiAssistant
+            )
+        }
+    }
+
+    private static func libraryState(
+        for route: LibraryRoute,
+        searchTabID: UUID
+    ) -> WorkspaceRouteLegacyNavigationState {
+        switch route {
+        case .overview:
+            return libraryState(routeKind: .overview)
+        case .inbox:
+            return libraryState(routeKind: .inbox)
+        case .all:
+            return libraryState(routeKind: .all)
+        case .bookmarks:
+            return libraryState(routeKind: .bookmarks)
+        case .notes:
+            return libraryState(routeKind: .notes)
+        case .files:
+            return libraryState(routeKind: .files)
+        case .folders:
+            return libraryState(routeKind: .folders)
+        case .folder(let folderID):
+            return libraryState(routeKind: .folders, selectedFolderID: folderID)
+        case .tags:
+            return libraryState(routeKind: .tags, selectedTab: .tag(id: searchTabID))
+        case .tag(let tagID):
+            return libraryState(routeKind: .tags, selectedTagIDs: [tagID])
+        case .search(let query):
+            return libraryState(
+                routeKind: .all,
+                selectedTab: .search(id: searchTabID, query: query)
+            )
+        }
+    }
+
+    private static func libraryState(
+        routeKind: WorkspaceDomainRouteKind,
+        selectedFolderID: UUID? = nil,
+        selectedTagIDs: Set<UUID> = [],
+        selectedTab: CiderTab = .domainDashboard(.browse)
+    ) -> WorkspaceRouteLegacyNavigationState {
+        WorkspaceRouteLegacyNavigationState(
+            selectedNavigationDomain: .browse,
+            selectedDomainRouteKind: routeKind,
+            selectedFolderID: selectedFolderID,
+            selectedTagIDs: selectedTagIDs,
+            selectedTab: selectedTab
+        )
+    }
+
+    private static func projectState(for route: ProjectRoute) -> WorkspaceRouteLegacyNavigationState {
+        switch route {
+        case .home:
+            return WorkspaceRouteLegacyNavigationState(
+                selectedNavigationDomain: .projects,
+                selectedTab: .domainDashboard(.projects)
+            )
+        case .workspace(let projectID, let section):
+            return projectWorkspaceState(projectID: projectID, section: section)
+        case .browseAllBoards(let section):
+            return projectWorkspaceState(projectID: "browse-all-boards", section: section)
+        }
+    }
+
+    private static func projectWorkspaceState(
+        projectID: String,
+        section: ProjectSectionRoute
+    ) -> WorkspaceRouteLegacyNavigationState {
+        WorkspaceRouteLegacyNavigationState(
+            selectedNavigationDomain: .projects,
+            selectedTab: projectTab(projectID: projectID, section: section),
+            selectedProjectWorkspaceID: projectID
+        )
+    }
+
+    private static func projectTab(projectID: String, section: ProjectSectionRoute) -> CiderTab {
+        switch section {
+        case .overview:
+            return .projectOverview(projectID: projectID, name: "Overview")
+        case .inbox:
+            return .projectInbox(projectID: projectID, name: "Inbox")
+        case .board(let boardID, _):
+            return .projectBoard(projectID: projectID, boardID: boardID, name: "Board")
+        case .milestones:
+            return .projectSurface(projectID: projectID, surface: .milestones, name: ProjectWorkspaceSurface.milestones.tabName)
+        case .docs:
+            return .projectSurface(projectID: projectID, surface: .notes, name: ProjectWorkspaceSurface.notes.tabName)
+        case .decisions:
+            return .projectSurface(projectID: projectID, surface: .decisions, name: ProjectWorkspaceSurface.decisions.tabName)
+        case .assets:
+            return .projectSurface(projectID: projectID, surface: .assets, name: ProjectWorkspaceSurface.assets.tabName)
+        case .qa:
+            return .projectSurface(projectID: projectID, surface: .qaAudits, name: ProjectWorkspaceSurface.qaAudits.tabName)
+        case .plans:
+            return .projectSurface(projectID: projectID, surface: .plansHandoffs, name: ProjectWorkspaceSurface.plansHandoffs.tabName)
+        }
+    }
+
+    private static func spaceState(for route: SpaceRoute) -> WorkspaceRouteLegacyNavigationState {
+        switch route {
+        case .overview(let spaceID):
+            return WorkspaceRouteLegacyNavigationState(
+                selectedNavigationDomain: .spaces,
+                selectedTab: .spaceOverview(id: spaceID, name: "Space")
+            )
+        case .manager:
+            return WorkspaceRouteLegacyNavigationState(
+                selectedNavigationDomain: .spaces,
+                selectedTab: .spacesManager
+            )
+        }
+    }
+}
+
 enum WorkspaceRouterCompatibility {
     static func route(from state: WorkspaceRouterCompatibilityState) -> WorkspaceRoute {
         if let tagID = state.selectedTagIDs.first {

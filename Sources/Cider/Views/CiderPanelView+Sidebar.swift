@@ -92,8 +92,7 @@ extension CiderPanelView {
                 if selectedTagIDs.contains(id) {
                     selectedTagIDs.remove(id)
                 } else {
-                    selectedTagIDs.insert(id)
-                    selectedFolderID = nil
+                    navigateToWorkspaceRoute(.library(.tag(id)))
                 }
             },
             onClearTags: {
@@ -130,11 +129,17 @@ extension CiderPanelView {
         closeAllDetails()
 
         if domain == .mainDashboard {
+            workspaceRouter.navigate(to: .home)
             selectedNavigationDomain = nil
             selectedProjectWorkspaceID = nil
             selectedDomainRouteKind = .overview
             folderContentScope = .allItems
             selectedTab = dashboardTab ?? allTabs.first
+            return
+        }
+
+        if domain == .browse {
+            navigateToWorkspaceRoute(.library(.overview))
             return
         }
 
@@ -225,6 +230,17 @@ extension CiderPanelView {
             )
         }
 
+        if domain == .browse {
+            navigateToWorkspaceRoute(
+                WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
+                    selectedTab: .domainDashboard(.browse),
+                    selectedNavigationDomain: .browse,
+                    selectedDomainRouteKind: route.kind
+                ))
+            )
+            return
+        }
+
         if selectedNavigationDomain != domain {
             selectedNavigationDomain = domain
             selectedProjectWorkspaceID = nil
@@ -274,6 +290,30 @@ extension CiderPanelView {
         case .recent:
             selectedTab = .domainDashboard(domain)
         }
+    }
+
+    func navigateToWorkspaceRoute(_ route: WorkspaceRoute) {
+        workspaceRouter.navigate(to: route)
+
+        let legacyState = WorkspaceRouteLegacyProjection.state(for: route)
+        selectedNavigationDomain = legacyState.selectedNavigationDomain
+        selectedProjectWorkspaceID = legacyState.selectedProjectWorkspaceID
+        selectedDomainRouteKind = legacyState.selectedDomainRouteKind
+        selectedFolderID = legacyState.selectedFolderID
+        selectedTagIDs = legacyState.selectedTagIDs
+        selectedTab = legacyState.selectedTab
+        selectedItemIDs.removeAll()
+        focusedItemID = nil
+        selectionAnchorID = nil
+        sidebarSearchText = ""
+        debouncedSearchText = ""
+        searchDebounceTask?.cancel()
+        closeAllDetails()
+        if let selectedNavigationDomain {
+            expandedNavigationDomains.insert(selectedNavigationDomain)
+            folderContentScope = WorkspaceDomainContentScope.defaultScope(for: selectedNavigationDomain)
+        }
+        updateLivePerformanceContext()
     }
 
     private func defaultRouteKind(for domain: WorkspaceNavigationDomain) -> WorkspaceDomainRouteKind {

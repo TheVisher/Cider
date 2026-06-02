@@ -73,6 +73,7 @@ struct CiderPanelView: View {
     @State var expandedNavigationDomains: Set<WorkspaceNavigationDomain> = []
     @State var selectedProjectWorkspaceID: String?
     @State var selectedDomainRouteKind: WorkspaceDomainRouteKind = .overview
+    @State var workspaceRouter = WorkspaceRouter()
 
     @State var selectedTagIDs: Set<UUID> = []
     @State var tagsCollapsed: Bool = CiderConfig.load().tagsCollapsed
@@ -192,6 +193,19 @@ struct CiderPanelView: View {
             updateLivePerformanceContext()
         }
         .onChange(of: selectedTab) { _, _ in
+            let compatibilityRoute = WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
+                selectedTab: selectedTab,
+                selectedNavigationDomain: selectedNavigationDomain,
+                selectedDomainRouteKind: selectedDomainRouteKind,
+                selectedFolderID: selectedFolderID,
+                selectedTagIDs: selectedTagIDs,
+                selectedProjectWorkspaceID: selectedProjectWorkspaceID
+            ))
+            if compatibilityRoute == workspaceRouter.currentRoute {
+                updateLivePerformanceContext()
+                return
+            }
+
             selectedFolderID = nil
             selectedTagIDs.removeAll()
             selectedItemIDs.removeAll()
@@ -204,6 +218,9 @@ struct CiderPanelView: View {
             updateLivePerformanceContext()
         }
         .onChange(of: selectedFolderID) { _, newFolderID in
+            if let newFolderID, selectedNavigationDomain == .browse {
+                workspaceRouter.navigate(to: .library(.folder(newFolderID)))
+            }
             selectedTagIDs.removeAll()
             selectedItemIDs.removeAll()
             focusedItemID = nil

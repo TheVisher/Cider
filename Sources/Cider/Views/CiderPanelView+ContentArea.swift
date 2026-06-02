@@ -557,6 +557,13 @@ extension CiderPanelView {
     }
 
     var selectedLibraryRouteFeed: (onlyUnassigned: Bool, entityTypes: Set<LibraryEntityType>)? {
+        let routePresentation = WorkspaceRoutePresentation.presentation(for: workspaceRouter.currentRoute)
+        if selectedNavigationDomain == .browse,
+           routePresentation.sidebarDomain == .browse,
+           case .libraryFeed(let entityTypes, let onlyUnassigned) = routePresentation.contentKind {
+            return (onlyUnassigned, entityTypes)
+        }
+
         guard let domain = selectedNavigationDomain, domain == .browse else { return nil }
         switch WorkspaceDomainRoutePolicy.contentPresentation(for: selectedDomainRouteKind, in: domain) {
         case .libraryFeed(let onlyUnassigned, let entityTypes):
