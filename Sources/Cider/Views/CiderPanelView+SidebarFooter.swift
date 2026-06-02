@@ -294,12 +294,9 @@ extension CiderPanelView {
     }
 
     var showFolderViewOptions: Bool {
-        if selectedNavigationDomain == .browse,
-           workspaceRouter.presentation.sidebarDomain == .browse,
-           workspaceRouter.presentation.showsLibraryViewOptions {
-            return true
-        }
         return CiderPanelViewOptionsPolicy.showsLibraryViewOptions(
+            routePresentation: workspaceRouter.presentation,
+            selectedNavigationDomain: selectedNavigationDomain,
             hasSelectedFolder: selectedFolderID != nil,
             hasSelectedTags: !selectedTagIDs.isEmpty,
             selectedTab: selectedTab,

@@ -77,6 +77,9 @@ extension CiderPanelView {
            let folder = bookmarksViewModel.folders.first(where: { $0.id == folderID }) {
             return folder.name
         }
+        if let routeChrome = activeWorkspaceRouteChrome {
+            return routeChrome.title
+        }
         if selectedDomainRouteKind == .folders, selectedNavigationDomain != nil {
             return "Folders"
         }
@@ -106,6 +109,9 @@ extension CiderPanelView {
             let domainTitle = selectedNavigationDomain?.title ?? "Library"
             return "\(domainTitle) / \(bookmarksViewModel.folderPath(to: folderID).map(\.name).joined(separator: " / "))"
         }
+        if let routeChrome = activeWorkspaceRouteChrome {
+            return routeChrome.subtitle
+        }
         if selectedDomainRouteKind == .folders, let domain = selectedNavigationDomain {
             return "\(domain.title) / Folder browser"
         }
@@ -131,6 +137,9 @@ extension CiderPanelView {
 
     private var currentLocationSystemImage: String {
         if selectedFolderID != nil { return "folder" }
+        if let routeChrome = activeWorkspaceRouteChrome {
+            return routeChrome.systemImage
+        }
         if selectedDomainRouteKind == .folders, selectedNavigationDomain != nil { return "folder" }
         if !selectedTagIDs.isEmpty { return "tag" }
         if let route = currentDomainRoute, selectedNavigationDomain == .browse {
@@ -153,6 +162,22 @@ extension CiderPanelView {
     private var currentDomainRoute: WorkspaceDomainRoute? {
         guard let domain = selectedNavigationDomain else { return nil }
         return WorkspaceDomainRoutePolicy.routes(for: domain).first { $0.kind == selectedDomainRouteKind }
+    }
+
+    private var activeWorkspaceRouteChrome: WorkspaceRouteChrome? {
+        switch workspaceRouter.currentRoute {
+        case .home:
+            guard selectedNavigationDomain == nil else { return nil }
+        case .library:
+            guard selectedNavigationDomain == .browse else { return nil }
+        case .projects:
+            guard selectedNavigationDomain == .projects else { return nil }
+        case .spaces:
+            guard selectedNavigationDomain == .spaces else { return nil }
+        case .ai:
+            guard selectedNavigationDomain == .aiAssistant else { return nil }
+        }
+        return WorkspaceRouteChromePolicy.chrome(for: workspaceRouter.currentRoute)
     }
 
     @ViewBuilder

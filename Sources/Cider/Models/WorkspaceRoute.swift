@@ -339,6 +339,45 @@ struct WorkspaceRoutePresentation: Equatable {
     }
 }
 
+struct WorkspaceRouteChrome: Equatable {
+    let title: String
+    let subtitle: String?
+    let systemImage: String
+    let showsLibraryViewOptions: Bool
+}
+
+enum WorkspaceRouteChromePolicy {
+    static func chrome(for route: WorkspaceRoute) -> WorkspaceRouteChrome {
+        let presentation = WorkspaceRoutePresentation.presentation(for: route)
+        return WorkspaceRouteChrome(
+            title: presentation.title,
+            subtitle: subtitle(for: route, presentation: presentation),
+            systemImage: presentation.systemImage,
+            showsLibraryViewOptions: presentation.showsLibraryViewOptions
+        )
+    }
+
+    private static func subtitle(
+        for route: WorkspaceRoute,
+        presentation: WorkspaceRoutePresentation
+    ) -> String? {
+        switch route {
+        case .home:
+            return "Command center and active work"
+        case .library:
+            return "Library / \(presentation.title)"
+        case .projects:
+            return "Projects / \(presentation.title)"
+        case .spaces(.manager):
+            return "Create, pin, and manage Spaces"
+        case .spaces:
+            return "Space"
+        case .ai:
+            return WorkspaceNavigationDomain.aiAssistant.subtitle
+        }
+    }
+}
+
 struct WorkspaceRouteCompanionState: Equatable {
     var selectedFolderID: UUID?
     var selectedTagIDs: Set<UUID>
