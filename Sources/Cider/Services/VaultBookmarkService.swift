@@ -1629,6 +1629,11 @@ final class VaultBookmarkService: ObservableObject {
         guard bookmarks[index].aiSummary != summary else { return }
         bookmarks[index].aiSummary = summary
         persist()
+        SecondBrainItemMutationIndexer.rebuildAfterMutation(
+            database: resolvedDatabase,
+            ownerType: "bookmark",
+            ownerID: bookmarkID
+        )
     }
 
     /// Force re-fetch metadata and thumbnail from the web for a bookmark.
@@ -2095,6 +2100,11 @@ final class VaultBookmarkService: ObservableObject {
 
         if changed {
             persist()
+            SecondBrainItemMutationIndexer.rebuildAfterMutation(
+                database: resolvedDatabase,
+                ownerType: "bookmark",
+                ownerID: bookmarkID
+            )
         } else {
             objectWillChange.send()
         }

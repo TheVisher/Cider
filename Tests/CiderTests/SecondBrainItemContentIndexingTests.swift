@@ -46,6 +46,29 @@ struct SecondBrainItemContentIndexingTests {
         return try body(db, notes)
     }
 
+    private func withIsolatedVault<T>(_ body: (CiderDatabase, NotesStorage) async throws -> T) async throws -> T {
+        let previousOverride = StoragePaths.vaultOverride
+        let vault = try makeTempVault()
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        StoragePaths.ensureVaultStructure()
+        let dbURL = vault.appendingPathComponent(".cider/cider.db")
+        try FileManager.default.createDirectory(
+            at: dbURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let db = CiderDatabase()
+        try db.open(at: dbURL)
+        defer {
+            db.close()
+            StoragePaths.vaultOverride = previousOverride
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        let notes = NotesStorage(database: db)
+        return try await body(db, notes)
+    }
+
     private func makeTestDB() throws -> (CiderDatabase, URL) {
         let url = makeTempDBURL()
         let db = CiderDatabase()
@@ -237,6 +260,74 @@ struct SecondBrainItemContentIndexingTests {
         }
     }
 
+    @Test("bookmark AI summary application rebuilds searchable chunks")
+    func bookmarkAISummaryApplicationRebuildsSearchableChunks() throws {
+        try withIsolatedVault { db, _ in
+            let bookmark = Bookmark(
+                title: "Summary Bookmark",
+                urlString: "https://example.com/summary",
+                aiSummary: "obsolete-summary-token",
+                relativePath: "Inbox/Bookmarks/Summary Bookmark.webloc"
+            )
+            let seed = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            seed.persistBookmarkToDatabase(db, bookmark: bookmark)
+
+            let service = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            service.loadBookmarksFromDatabase(db)
+
+            let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmark.id.uuidString)
+            _ = try SecondBrainItemContentIndexingService(database: db).rebuild(owner: owner)
+
+            service.applyAISummary("fresh-summary-token", for: bookmark.id)
+
+            let store = SecondBrainStore(database: db)
+            #expect(try store.searchChunks(query: "obsolete-summary-token", limit: 5).isEmpty)
+            #expect(try store.searchChunks(query: "fresh-summary-token", limit: 5).first?.owner == owner)
+        }
+    }
+
+    @Test("native bookmark enrichment rebuilds stale store chunks")
+    func nativeBookmarkEnrichmentRebuildsStaleStoreChunks() async throws {
+        try await withIsolatedVault { db, _ in
+            let oldRelativePath = "Inbox/Bookmarks/Store.Steampowered.Com (3).webloc"
+            let sourceURL = "https://store.steampowered.com/app/1118520/Paralives/"
+            let oldFile = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(oldRelativePath)
+            let plist: [String: String] = ["URL": sourceURL]
+            let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            try data.write(to: oldFile, options: .atomic)
+
+            let bookmark = Bookmark(
+                title: "Store.Steampowered.Com",
+                urlString: sourceURL,
+                relativePath: oldRelativePath
+            )
+            let seed = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            seed.persistBookmarkToDatabase(db, bookmark: bookmark)
+
+            let service = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            service.loadBookmarksFromDatabase(db)
+
+            let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmark.id.uuidString)
+            _ = try SecondBrainItemContentIndexingService(database: db).rebuild(owner: owner)
+
+            await service.completeMetadataEnrichment(
+                for: bookmark.id,
+                sourceURL: try #require(URL(string: sourceURL)),
+                payload: BookmarkEnrichmentPayload(
+                    title: "Save 10% on Paralives on Steam",
+                    thumbnailURL: nil,
+                    screenshotData: nil
+                )
+            )
+
+            let store = SecondBrainStore(database: db)
+            #expect(try store.searchChunks(query: "Paralives", limit: 5).first?.owner == owner)
+            let chunks = try chunksForOwner(owner, in: db)
+            #expect(chunks.contains { $0.contains("Save 10% on Paralives on Steam") })
+            #expect(!chunks.contains { $0.contains(oldRelativePath) })
+        }
+    }
+
     private func insertItem(id: String, type: String, title: String, into db: CiderDatabase) throws {
         let stmt = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
@@ -319,5 +410,22 @@ struct SecondBrainItemContentIndexingTests {
             .bind(notes, at: 3)
             .bind(summary, at: 4)
         try stmt.step()
+    }
+
+    private func chunksForOwner(_ owner: SecondBrainOwnerRef, in db: CiderDatabase) throws -> [String] {
+        let stmt = try db.prepare("""
+            SELECT body
+            FROM content_chunks
+            WHERE owner_type = ? AND owner_id = ?
+            ORDER BY chunk_index ASC;
+            """)
+        stmt.bind(owner.ownerType, at: 1)
+            .bind(owner.ownerID, at: 2)
+
+        var chunks: [String] = []
+        while try stmt.step() {
+            chunks.append(stmt.string(at: 0))
+        }
+        return chunks
     }
 }
