@@ -1451,6 +1451,67 @@ struct CiderStorageAuditServiceTests {
         #expect(report.findings.isEmpty)
     }
 
+    @Test("bookmark drift repair aligns multiline X titles to single-line paths and chunks")
+    func bookmarkDriftRepairAlignsMultilineXTitlesToSingleLinePathsAndChunks() throws {
+        let bookmarkID = UUID(uuidString: "A78E6726-4D04-4AE9-80D3-E1F4D4AB4DC7")!
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try makeDirectories(["Inbox/Bookmarks"], under: vault)
+        let staleRelativePath = "Inbox/Bookmarks/X.Com (8).webloc"
+        try "url".write(
+            to: vault.appendingPathComponent(staleRelativePath),
+            atomically: true,
+            encoding: .utf8
+        )
+        let promotedTitle = """
+        IGN: Get your first look at Hands Over,
+        a multiplayer horror party game where you'll be playing your favorite childhood game
+        """
+        try insertBookmarkDriftFixture(
+            db,
+            id: bookmarkID,
+            title: promotedTitle,
+            url: "https://x.com/ign/status/2059500091849994699?s=12",
+            relativePath: staleRelativePath,
+            chunkTitle: promotedTitle,
+            chunkBody: "Title: \(promotedTitle)\nURL: https://x.com/ign/status/2059500091849994699?s=12\nPath: \(staleRelativePath)"
+        )
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            doctorReportProvider: { VaultDoctor.Report(startedAt: Date(), finishedAt: Date(), findings: []) },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let audit = try service.bookmarkDriftAudit(limit: 10)
+        let finding = try #require(audit.findings.first)
+        #expect(finding.currentRelativePath == staleRelativePath)
+        #expect(finding.proposedTitle == promotedTitle)
+        #expect(finding.proposedRelativePath == "Inbox/Bookmarks/IGN- Get your first look at Hands Over, a multiplayer horror party game where you'll be playing your favorite childhood game.webloc")
+        #expect(!finding.proposedRelativePath.contains("\n"))
+        #expect(finding.pathDrift == true)
+        #expect(finding.chunkDrift == true)
+
+        let repair = try service.repairBookmarkDrift(
+            itemID: bookmarkID.uuidString,
+            approvalToken: finding.approvalToken,
+            execute: true
+        )
+
+        #expect(repair.status == "applied")
+        #expect(repair.proposedRelativePath == "Inbox/Bookmarks/IGN- Get your first look at Hands Over, a multiplayer horror party game where you'll be playing your favorite childhood game.webloc")
+        #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent(repair.proposedRelativePath).path))
+        #expect(!FileManager.default.fileExists(atPath: vault.appendingPathComponent(staleRelativePath).path))
+
+        let chunk = try firstBookmarkChunk(db, ownerID: bookmarkID)
+        #expect(chunk.title == promotedTitle)
+        #expect(chunk.body.contains("Path: \(repair.proposedRelativePath)"))
+        #expect(!chunk.body.contains(staleRelativePath))
+    }
+
     @Test("bookmark drift repair refuses without approval and repairs path and chunks with approval")
     func bookmarkDriftRepairRefusesWithoutApprovalAndRepairsPathAndChunksWithApproval() throws {
         let bookmarkID = UUID(uuidString: "DE38FB8B-4910-489D-8DCD-C07C6DAACA6A")!

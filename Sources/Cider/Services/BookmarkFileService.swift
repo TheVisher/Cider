@@ -328,6 +328,10 @@ final class BookmarkFileService {
         // Remove leading dots (hidden files on macOS)
         while sanitized.hasPrefix(".") { sanitized = String(sanitized.dropFirst()) }
         sanitized = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+        sanitized = sanitized
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
         // Truncate to leave room for extension + collision suffix
         if sanitized.count > 200 {
             sanitized = String(sanitized.prefix(200))
