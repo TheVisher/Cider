@@ -37,9 +37,10 @@ final class SecondBrainItemContentIndexingService {
         guard supportedOwnerTypes.contains(normalized.ownerType) else {
             throw IndexingError.unsupportedOwnerType(owner.ownerType)
         }
-        guard let item = try itemContent(for: normalized) else {
+        guard var item = try itemContent(for: normalized) else {
             throw IndexingError.itemNotFound(normalized)
         }
+        item.fields.append(contentsOf: try captureProvenanceFields(for: normalized))
 
         let chunks = chunkDrafts(for: item)
         try store.replaceChunks(owner: normalized, chunks: chunks)
@@ -230,6 +231,59 @@ final class SecondBrainItemContentIndexingService {
         }
 
         return ItemContent(owner: owner, itemID: owner.ownerID, title: title, fields: values)
+    }
+
+    private func captureProvenanceFields(for owner: SecondBrainOwnerRef) throws -> [(label: String, value: String)] {
+        let stmt = try database.prepare("""
+            SELECT e.source_text, e.source_url, e.source_file, e.sender_name, e.channel
+            FROM owner_relations r
+            JOIN capture_events e
+              ON e.id = r.source_owner_id
+            WHERE r.target_owner_type = ?
+              AND r.target_owner_id = ?
+              AND r.source_owner_type = 'capture_event'
+              AND r.relation_type = 'produced_item'
+            ORDER BY e.created_at DESC;
+            """)
+        stmt.bind(owner.ownerType, at: 1)
+            .bind(owner.ownerID, at: 2)
+
+        var fields: [(label: String, value: String)] = []
+        var sourceTexts: [String] = []
+        var sourceRefs: [String] = []
+        var senders: [String] = []
+        var channels: [String] = []
+
+        while try stmt.step() {
+            appendUnique(stmt.optionalString(at: 0), to: &sourceTexts)
+            appendUnique(stmt.optionalString(at: 1), to: &sourceRefs)
+            appendUnique(stmt.optionalString(at: 2), to: &sourceRefs)
+            appendUnique(stmt.optionalString(at: 3), to: &senders)
+            appendUnique(stmt.optionalString(at: 4), to: &channels)
+        }
+
+        if !sourceTexts.isEmpty {
+            fields.append(("Capture source text", sourceTexts.joined(separator: "\n")))
+        }
+        if !sourceRefs.isEmpty {
+            fields.append(("Capture source", sourceRefs.joined(separator: "\n")))
+        }
+        if !senders.isEmpty {
+            fields.append(("Capture sender", senders.joined(separator: ", ")))
+        }
+        if !channels.isEmpty {
+            fields.append(("Capture channel", channels.joined(separator: ", ")))
+        }
+        return fields
+    }
+
+    private func appendUnique(_ raw: String?, to values: inout [String]) {
+        guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              !values.contains(value) else {
+            return
+        }
+        values.append(value)
     }
 
     private func readableTextFileContent(relativePath: String) -> String? {

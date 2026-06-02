@@ -77,6 +77,38 @@ struct SecondBrainItemContentIndexingTests {
         #expect(try SecondBrainStore(database: db).searchChunks(query: "Relation-graph", limit: 5).first?.owner.ownerType == "bookmark")
     }
 
+    @Test("todo content index includes capture provenance source text")
+    func todoContentIndexIncludesCaptureProvenanceSourceText() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let todoID = UUID().uuidString
+        let captureEventID = UUID().uuidString
+        try insertItem(id: todoID, type: "todo", title: "Let Baine choose next boys food outing", into: db)
+        try insertTodo(id: todoID, details: "", notes: "", into: db)
+        try insertCaptureEvent(
+            id: captureEventID,
+            sourceText: "Next time Visher and the boys go out for food, Baine gets to choose. Rhonin chose Burger King this time.",
+            into: db
+        )
+        try SecondBrainStore(database: db).recordRelation(SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: captureEventID),
+            targetOwner: SecondBrainOwnerRef(ownerType: "todo", ownerID: todoID),
+            relationType: "produced_item",
+            evidence: "Todo was created from chat capture source text.",
+            source: "capture.add",
+            actor: "test",
+            confidence: 1
+        ))
+
+        let owner = SecondBrainOwnerRef(ownerType: "todo", ownerID: todoID)
+        _ = try SecondBrainItemContentIndexingService(database: db).rebuild(owner: owner)
+
+        let store = SecondBrainStore(database: db)
+        #expect(try store.searchChunks(query: "Burger King", limit: 5).first?.owner == owner)
+        #expect(try store.searchChunks(query: "Rhonin", limit: 5).first?.owner == owner)
+    }
+
     @Test("item content index rebuild is idempotent and removes stale chunks")
     func itemContentIndexRebuildIsIdempotentAndRemovesStaleChunks() throws {
         let (db, url) = try makeTestDB()
@@ -256,6 +288,20 @@ struct SecondBrainItemContentIndexingTests {
         stmt.bind(id, at: 1)
             .bind(details, at: 2)
             .bind(notes, at: 3)
+        try stmt.step()
+    }
+
+    private func insertCaptureEvent(id: String, sourceText: String, into db: CiderDatabase) throws {
+        let stmt = try db.prepare("""
+            INSERT INTO capture_events (
+                id, source_kind, surface, channel, channel_id, thread_id, message_id,
+                sender_id, sender_name, source_url, source_file, source_text,
+                attachment_count, metadata, created_at
+            ) VALUES (?, 'chat', 'cli', 'discord', NULL, NULL, NULL, NULL, 'Visher', NULL, NULL, ?, 0, '{}', ?);
+            """)
+        stmt.bind(id, at: 1)
+            .bind(sourceText, at: 2)
+            .bind(DatabaseHelpers.encode(Date()), at: 3)
         try stmt.step()
     }
 
