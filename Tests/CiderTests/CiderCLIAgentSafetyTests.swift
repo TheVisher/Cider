@@ -3,7 +3,7 @@ import Testing
 @testable import Cider
 @testable import CiderCLI
 
-@Suite("Cider CLI Agent Safety Tests")
+@Suite("Cider CLI Agent Safety Tests", .serialized)
 @MainActor
 struct CiderCLIAgentSafetyTests {
     @Test("note JSON exposes project artifact metadata")
