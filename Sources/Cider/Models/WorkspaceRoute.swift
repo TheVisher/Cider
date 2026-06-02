@@ -73,15 +73,38 @@ enum WorkspaceRouteContentKind: Equatable {
 
 struct WorkspaceRoutePresentation: Equatable {
     let sidebarDomain: WorkspaceNavigationDomain?
+    let title: String
+    let systemImage: String
     let contentKind: WorkspaceRouteContentKind
     let visibleItemScope: WorkspaceVisibleItemScope
     let showsLibraryViewOptions: Bool
+    let selectedProjectLocalTabKind: ProjectWorkspaceLocalTabKind?
+
+    init(
+        sidebarDomain: WorkspaceNavigationDomain?,
+        title: String,
+        systemImage: String,
+        contentKind: WorkspaceRouteContentKind,
+        visibleItemScope: WorkspaceVisibleItemScope,
+        showsLibraryViewOptions: Bool,
+        selectedProjectLocalTabKind: ProjectWorkspaceLocalTabKind? = nil
+    ) {
+        self.sidebarDomain = sidebarDomain
+        self.title = title
+        self.systemImage = systemImage
+        self.contentKind = contentKind
+        self.visibleItemScope = visibleItemScope
+        self.showsLibraryViewOptions = showsLibraryViewOptions
+        self.selectedProjectLocalTabKind = selectedProjectLocalTabKind
+    }
 
     static func presentation(for route: WorkspaceRoute) -> WorkspaceRoutePresentation {
         switch route {
         case .home:
             return WorkspaceRoutePresentation(
                 sidebarDomain: nil,
+                title: "Home",
+                systemImage: WorkspaceNavigationDomain.mainDashboard.systemImage,
                 contentKind: .home,
                 visibleItemScope: .none,
                 showsLibraryViewOptions: false
@@ -95,6 +118,8 @@ struct WorkspaceRoutePresentation: Equatable {
         case .ai:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .aiAssistant,
+                title: WorkspaceNavigationDomain.aiAssistant.title,
+                systemImage: WorkspaceNavigationDomain.aiAssistant.systemImage,
                 contentKind: .aiAssistant,
                 visibleItemScope: .none,
                 showsLibraryViewOptions: false
@@ -107,6 +132,8 @@ struct WorkspaceRoutePresentation: Equatable {
         case .overview:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .browse,
+                title: "Library",
+                systemImage: WorkspaceNavigationDomain.browse.systemImage,
                 contentKind: .libraryDashboard,
                 visibleItemScope: .none,
                 showsLibraryViewOptions: false
@@ -124,6 +151,8 @@ struct WorkspaceRoutePresentation: Equatable {
         case .folders:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .browse,
+                title: "Folders",
+                systemImage: "folder",
                 contentKind: .folder,
                 visibleItemScope: .none,
                 showsLibraryViewOptions: false
@@ -131,6 +160,8 @@ struct WorkspaceRoutePresentation: Equatable {
         case .folder:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .browse,
+                title: "Folder",
+                systemImage: "folder",
                 contentKind: .folder,
                 visibleItemScope: .folder,
                 showsLibraryViewOptions: true
@@ -138,6 +169,8 @@ struct WorkspaceRoutePresentation: Equatable {
         case .tags:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .browse,
+                title: "Tags",
+                systemImage: "tag",
                 contentKind: .tag,
                 visibleItemScope: .none,
                 showsLibraryViewOptions: false
@@ -145,6 +178,8 @@ struct WorkspaceRoutePresentation: Equatable {
         case .tag:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .browse,
+                title: "Tag",
+                systemImage: "tag",
                 contentKind: .tag,
                 visibleItemScope: .tag,
                 showsLibraryViewOptions: true
@@ -152,6 +187,8 @@ struct WorkspaceRoutePresentation: Equatable {
         case .search:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .browse,
+                title: "Search",
+                systemImage: "magnifyingglass",
                 contentKind: .search,
                 visibleItemScope: .search,
                 showsLibraryViewOptions: true
@@ -165,10 +202,34 @@ struct WorkspaceRoutePresentation: Equatable {
     ) -> WorkspaceRoutePresentation {
         WorkspaceRoutePresentation(
             sidebarDomain: .browse,
+            title: libraryFeedTitle(entityTypes: entityTypes, onlyUnassigned: onlyUnassigned),
+            systemImage: libraryFeedSystemImage(entityTypes: entityTypes, onlyUnassigned: onlyUnassigned),
             contentKind: .libraryFeed(entityTypes: entityTypes, onlyUnassigned: onlyUnassigned),
             visibleItemScope: .libraryFeed(entityTypes: entityTypes, onlyUnassigned: onlyUnassigned),
             showsLibraryViewOptions: true
         )
+    }
+
+    private static func libraryFeedTitle(
+        entityTypes: Set<LibraryEntityType>,
+        onlyUnassigned: Bool
+    ) -> String {
+        if onlyUnassigned { return "Inbox" }
+        if entityTypes == [.bookmark] { return "Bookmarks" }
+        if entityTypes == [.note] { return "Notes" }
+        if entityTypes == [.vaultFile] { return "Files" }
+        return "All"
+    }
+
+    private static func libraryFeedSystemImage(
+        entityTypes: Set<LibraryEntityType>,
+        onlyUnassigned: Bool
+    ) -> String {
+        if onlyUnassigned { return "tray" }
+        if entityTypes == [.bookmark] { return "bookmark" }
+        if entityTypes == [.note] { return "note.text" }
+        if entityTypes == [.vaultFile] { return "doc.text" }
+        return "square.grid.2x2"
     }
 
     private static func projectPresentation(for route: ProjectRoute) -> WorkspaceRoutePresentation {
@@ -176,6 +237,8 @@ struct WorkspaceRoutePresentation: Equatable {
         case .home:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .projects,
+                title: WorkspaceNavigationDomain.projects.title,
+                systemImage: WorkspaceNavigationDomain.projects.systemImage,
                 contentKind: .projectsHome,
                 visibleItemScope: .none,
                 showsLibraryViewOptions: false
@@ -195,23 +258,32 @@ struct WorkspaceRoutePresentation: Equatable {
         case .overview:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .projects,
+                title: "Overview",
+                systemImage: "rectangle.3.group",
                 contentKind: .projectOverview(projectID: projectID),
                 visibleItemScope: .none,
-                showsLibraryViewOptions: false
+                showsLibraryViewOptions: false,
+                selectedProjectLocalTabKind: .overview
             )
         case .inbox:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .projects,
+                title: "Inbox",
+                systemImage: "tray",
                 contentKind: .projectInbox(projectID: projectID),
                 visibleItemScope: .none,
-                showsLibraryViewOptions: false
+                showsLibraryViewOptions: false,
+                selectedProjectLocalTabKind: .inbox
             )
         case .board(let boardID, let milestoneCardID):
             return WorkspaceRoutePresentation(
                 sidebarDomain: .projects,
+                title: "Board",
+                systemImage: "rectangle.split.3x1",
                 contentKind: .projectBoard(boardID: boardID, milestoneCardID: milestoneCardID),
                 visibleItemScope: .projectBoard(boardID: boardID),
-                showsLibraryViewOptions: false
+                showsLibraryViewOptions: false,
+                selectedProjectLocalTabKind: .board(boardID)
             )
         case .milestones:
             return projectSurfacePresentation(projectID: projectID, surface: .milestones)
@@ -234,9 +306,12 @@ struct WorkspaceRoutePresentation: Equatable {
     ) -> WorkspaceRoutePresentation {
         WorkspaceRoutePresentation(
             sidebarDomain: .projects,
+            title: surface.tabName,
+            systemImage: surface.systemImage,
             contentKind: .projectSurface(projectID: projectID, surface: surface),
             visibleItemScope: .none,
-            showsLibraryViewOptions: false
+            showsLibraryViewOptions: false,
+            selectedProjectLocalTabKind: .surface(surface)
         )
     }
 
@@ -245,6 +320,8 @@ struct WorkspaceRoutePresentation: Equatable {
         case .overview(let spaceID):
             return WorkspaceRoutePresentation(
                 sidebarDomain: .spaces,
+                title: "Space",
+                systemImage: WorkspaceNavigationDomain.spaces.systemImage,
                 contentKind: .spacesOverview(spaceID: spaceID),
                 visibleItemScope: .none,
                 showsLibraryViewOptions: false
@@ -252,6 +329,8 @@ struct WorkspaceRoutePresentation: Equatable {
         case .manager:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .spaces,
+                title: "Spaces",
+                systemImage: WorkspaceNavigationDomain.spaces.systemImage,
                 contentKind: .spacesManager,
                 visibleItemScope: .none,
                 showsLibraryViewOptions: false
