@@ -35,6 +35,7 @@ struct WorkspaceDomainRoute: Identifiable, Equatable {
 }
 
 enum WorkspaceDomainRouteContentPresentation: Equatable {
+    case homeOverviewDashboard
     case dashboard
     case libraryFeed(onlyUnassigned: Bool, entityTypes: Set<LibraryEntityType>)
     case folderBrowser
@@ -58,6 +59,9 @@ enum WorkspaceDomainRoutePolicy {
     ) -> WorkspaceDomainRouteContentPresentation {
         switch routeKind {
         case .overview:
+            if domain == .mainDashboard {
+                return .homeOverviewDashboard
+            }
             return .dashboard
         case .folders:
             return .folderBrowser

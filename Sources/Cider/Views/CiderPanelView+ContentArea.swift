@@ -174,7 +174,9 @@ extension CiderPanelView {
         } else if let tab = selectedTab {
             switch tab {
             case .domainDashboard(let domain):
-                if domain == .projects {
+                if domain == .mainDashboard {
+                    homeOverviewDashboard
+                } else if domain == .projects {
                     ProjectWorkspaceOverviewView(
                         model: ProjectWorkspaceOverviewProvider.model(
                             for: projectWorkspaceCatalog.home,
@@ -509,13 +511,99 @@ extension CiderPanelView {
         }
     }
 
+    var homeOverviewDashboard: some View {
+        let reviewQueue = CiderReviewQueueService()
+        let reviewItems = (try? reviewQueue.list(limit: 30).items) ?? []
+        let reviewSummary = try? reviewQueue.summary(batchEnrichmentSampleLimit: 5)
+        let dateSuggestionResults = HomeOverviewDataProvider.bookmarkDateSuggestionResults(
+            from: libraryViewModel.items
+        )
+
+        return HomeOverviewDashboardView(
+            snapshot: HomeOverviewDataProvider.makeSnapshot(
+                items: libraryViewModel.items,
+                recentItems: libraryViewModel.recentItems,
+                folders: bookmarksViewModel.folders,
+                kanbanBoards: kanbanStorage.boards,
+                reviewQueueItems: reviewItems,
+                reviewQueueSummary: reviewSummary,
+                bookmarkDateSuggestionResults: dateSuggestionResults,
+                surfacingDays: CiderConfig.load().dateCardSurfacingDays
+            ),
+            onOpenItem: { item in openDashboardItem(item) },
+            onOpenTarget: { target in openDashboardTarget(target) },
+            onOpenKanbanCard: { boardID, cardID in
+                openKanbanCardDetail(boardID: boardID, cardID: cardID)
+            },
+            onApproveReview: { reviewItem in
+                approveHomeReviewItem(reviewItem)
+            },
+            onDeferReview: { reviewItem in
+                deferHomeReviewItem(reviewItem)
+            },
+            onEnrichReviewBatch: {
+                enrichHomeReviewBatch()
+            },
+            onOpenSettings: {
+                NotificationCenter.default.post(name: .openCiderSettings, object: nil)
+            },
+            onSyncNow: {
+                SyncService.shared.syncNow()
+            },
+            onCreateNew: {
+                showNewItemPicker = true
+            }
+        )
+    }
+
     var selectedLibraryRouteFeed: (onlyUnassigned: Bool, entityTypes: Set<LibraryEntityType>)? {
         guard let domain = selectedNavigationDomain, domain == .browse else { return nil }
         switch WorkspaceDomainRoutePolicy.contentPresentation(for: selectedDomainRouteKind, in: domain) {
         case .libraryFeed(let onlyUnassigned, let entityTypes):
             return (onlyUnassigned, entityTypes)
-        case .dashboard, .folderBrowser, .tags, .assistantChats:
+        case .homeOverviewDashboard, .dashboard, .folderBrowser, .tags, .assistantChats:
             return nil
+        }
+    }
+
+    private func approveHomeReviewItem(_ reviewItem: HomeReviewCockpitItem) -> Bool {
+        do {
+            if let approval = reviewItem.dateSuggestionApproval {
+                _ = try CiderBookmarkDateSuggestionApprovalService().approve(
+                    bookmarkID: approval.bookmarkID,
+                    suggestionKey: approval.suggestionKey
+                )
+            } else {
+                _ = try CiderReviewQueueService().approve(itemID: reviewItem.itemID, actor: "user")
+            }
+            return true
+        } catch {
+            print("Failed to approve Home review item: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func deferHomeReviewItem(_ reviewItem: HomeReviewCockpitItem) -> Bool {
+        do {
+            _ = try CiderReviewQueueService().deferReview(
+                itemID: reviewItem.itemID,
+                reason: "Deferred from Home dashboard.",
+                actor: "user"
+            )
+            return true
+        } catch {
+            print("Failed to defer Home review item: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func enrichHomeReviewBatch() -> Bool {
+        do {
+            _ = try CiderReviewQueueService().enrichBatch(actor: "user")
+            return true
+        } catch {
+            print("Failed to schedule Home review enrichment batch: \(error.localizedDescription)")
+            return false
         }
     }
 

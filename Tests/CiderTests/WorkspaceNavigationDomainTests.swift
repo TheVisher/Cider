@@ -127,6 +127,13 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         )
     }
 
+    func testHomeRouteResolvesToOverviewDashboard() {
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.contentPresentation(for: .overview, in: .mainDashboard),
+            .homeOverviewDashboard
+        )
+    }
+
     func testHeaderDestinationsOpenSectionDashboardsInsteadOfFirstChildRoutes() {
         XCTAssertNil(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .mainDashboard))
         XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .browse), .domainDashboard(.browse))
