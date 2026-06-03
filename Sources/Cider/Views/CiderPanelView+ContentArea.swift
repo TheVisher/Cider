@@ -207,9 +207,6 @@ extension CiderPanelView {
                             bookmarks: bookmarksViewModel.bookmarks,
                             bookmarkFolders: bookmarksViewModel.folders
                         ),
-                        onOpenTab: { tab in
-                            openDomainDashboardTab(tab)
-                        },
                         onBrowseAll: {
                             openNavigationDomain(.browse)
                         }
@@ -496,9 +493,6 @@ extension CiderPanelView {
                         bookmarks: bookmarksViewModel.bookmarks,
                         bookmarkFolders: bookmarksViewModel.folders
                     ),
-                    onOpenTab: { tab in
-                        openDomainDashboardTab(tab)
-                    },
                     onBrowseAll: {
                         openNavigationDomain(.browse)
                     }

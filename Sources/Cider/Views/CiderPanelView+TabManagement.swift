@@ -17,17 +17,6 @@ extension CiderPanelView {
         navigateToWorkspaceRoute(.ai)
     }
 
-    func openDomainDashboardTab(_ tab: CiderTab) {
-        navigateToWorkspaceRoute(
-            WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
-                selectedTab: tab,
-                selectedNavigationDomain: selectedNavigationDomain,
-                selectedDomainRouteKind: selectedDomainRouteKind,
-                selectedProjectWorkspaceID: selectedProjectWorkspaceID
-            ))
-        )
-    }
-
     func reorderVisibleTabs(from sourceIndex: Int, to destinationIndex: Int) {
     }
 

@@ -2,7 +2,6 @@ import SwiftUI
 
 struct WorkspaceDomainDashboardView: View {
     let model: WorkspaceDomainDashboardModel
-    let onOpenTab: (CiderTab) -> Void
     let onBrowseAll: () -> Void
 
     var body: some View {
@@ -76,7 +75,7 @@ struct WorkspaceDomainDashboardView: View {
 
                 if let primaryAction = model.primaryAction {
                     Button {
-                        open(primaryAction.target)
+                        onBrowseAll()
                     } label: {
                         Label(primaryAction.title, systemImage: primaryAction.systemImage)
                             .font(CiderFont.captionSemibold)
@@ -120,16 +119,7 @@ struct WorkspaceDomainDashboardView: View {
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Spacing.sm)], spacing: Spacing.sm) {
                 ForEach(section.items) { item in
-                    if item.target != nil {
-                        Button {
-                            open(item.target)
-                        } label: {
-                            dashboardItemCard(item)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        dashboardItemCard(item)
-                    }
+                    dashboardItemCard(item)
                 }
             }
         }
@@ -170,11 +160,4 @@ struct WorkspaceDomainDashboardView: View {
         )
     }
 
-    private func open(_ target: CiderTab?) {
-        if let target {
-            onOpenTab(target)
-        } else {
-            onBrowseAll()
-        }
-    }
 }

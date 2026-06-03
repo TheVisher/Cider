@@ -133,7 +133,8 @@ final class LegacyViewQuarantineTests: XCTestCase {
                 "dynamicTabs.removeAll",
                 "allTabs",
                 "selectedTab == tab",
-                "selectedTab == nil"
+                "selectedTab == nil",
+                "openDomainDashboardTab("
             ],
             "Sources/Cider/Views/CiderPanelView+ContentArea.swift": [
                 "} else if let tab = selectedTab {",
@@ -178,7 +179,13 @@ final class LegacyViewQuarantineTests: XCTestCase {
             ],
             "Sources/Cider/Models/WorkspaceDomainDashboardModel.swift": [
                 "allTabs: [CiderTab]",
-                "WorkspaceContextualTabPolicy.tabs"
+                "WorkspaceContextualTabPolicy.tabs",
+                "target: CiderTab?",
+                "item(for tab:"
+            ],
+            "Sources/Cider/Views/Dashboard/WorkspaceDomainDashboardView.swift": [
+                "onOpenTab",
+                "CiderTab?"
             ]
         ]
 

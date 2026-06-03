@@ -23,13 +23,11 @@ struct WorkspaceDomainDashboardItem: Equatable, Identifiable {
     let title: String
     let subtitle: String?
     let systemImage: String
-    let target: CiderTab?
 }
 
 struct WorkspaceDomainDashboardAction: Equatable {
     let title: String
     let systemImage: String
-    let target: CiderTab?
 }
 
 enum WorkspaceDomainDashboardProvider {
@@ -45,7 +43,7 @@ enum WorkspaceDomainDashboardProvider {
             bookmarks: bookmarks,
             bookmarkFolders: bookmarkFolders
         ))
-        let primaryAction = primaryAction(for: domain, firstItem: items.first)
+        let primaryAction = primaryAction(for: domain)
 
         return WorkspaceDomainDashboardModel(
             domain: domain,
@@ -123,8 +121,7 @@ enum WorkspaceDomainDashboardProvider {
             id: "bookmark-\(bookmark.id.uuidString)-\(reason.replacingOccurrences(of: " ", with: "-"))",
             title: bookmark.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? bookmark.hostDisplay : bookmark.title,
             subtitle: "\(reason) · \(bookmark.hostDisplay)",
-            systemImage: bookmarkSystemImage(bookmark),
-            target: nil
+            systemImage: bookmarkSystemImage(bookmark)
         )
     }
 
@@ -183,101 +180,11 @@ enum WorkspaceDomainDashboardProvider {
         }
     }
 
-    private static func primaryAction(
-        for domain: WorkspaceNavigationDomain,
-        firstItem: WorkspaceDomainDashboardItem?
-    ) -> WorkspaceDomainDashboardAction? {
-        if let firstItem, let target = firstItem.target {
-            return WorkspaceDomainDashboardAction(
-                title: "Open \(firstItem.title)",
-                systemImage: firstItem.systemImage,
-                target: target
-            )
-        }
+    private static func primaryAction(for domain: WorkspaceNavigationDomain) -> WorkspaceDomainDashboardAction? {
         guard domain != .browse else { return nil }
         return WorkspaceDomainDashboardAction(
             title: "Open Library",
-            systemImage: WorkspaceNavigationDomain.browse.systemImage,
-            target: nil
+            systemImage: WorkspaceNavigationDomain.browse.systemImage
         )
-    }
-
-    private static func item(for tab: CiderTab) -> WorkspaceDomainDashboardItem? {
-        switch tab {
-        case .domainDashboard, .spacesManager:
-            return nil
-        case .spaceOverview(_, let name):
-            return WorkspaceDomainDashboardItem(
-                id: tab.id,
-                title: name,
-                subtitle: "Space overview",
-                systemImage: tab.systemImage,
-                target: tab
-            )
-        case .projectOverview(let projectID, let name):
-            return WorkspaceDomainDashboardItem(
-                id: tab.id,
-                title: name,
-                subtitle: "\(projectID) project overview",
-                systemImage: tab.systemImage,
-                target: tab
-            )
-        case .projectInbox(let projectID, let name):
-            return WorkspaceDomainDashboardItem(
-                id: tab.id,
-                title: name,
-                subtitle: "\(projectID) unread agent work and review queue",
-                systemImage: tab.systemImage,
-                target: tab
-            )
-        case .projectBoard(let projectID, _, let name):
-            return WorkspaceDomainDashboardItem(
-                id: tab.id,
-                title: name,
-                subtitle: "\(projectID) Kanban board",
-                systemImage: tab.systemImage,
-                target: tab
-            )
-        case .projectSurface(let projectID, let surface, let name):
-            return WorkspaceDomainDashboardItem(
-                id: tab.id,
-                title: name,
-                subtitle: "\(projectID) \(surface.title.localizedLowercase) workspace surface",
-                systemImage: tab.systemImage,
-                target: tab
-            )
-        case .projectReferences(let projectID, let name):
-            return WorkspaceDomainDashboardItem(
-                id: tab.id,
-                title: name,
-                subtitle: "\(projectID) references and inspiration",
-                systemImage: tab.systemImage,
-                target: tab
-            )
-        case .aiAssistant:
-            return WorkspaceDomainDashboardItem(
-                id: tab.id,
-                title: tab.displayName,
-                subtitle: "Ask questions and run agent workflows",
-                systemImage: "sparkles",
-                target: tab
-            )
-        case .search:
-            return WorkspaceDomainDashboardItem(
-                id: tab.id,
-                title: tab.displayName,
-                subtitle: "Search results",
-                systemImage: "magnifyingglass",
-                target: tab
-            )
-        case .tag:
-            return WorkspaceDomainDashboardItem(
-                id: tab.id,
-                title: tab.displayName,
-                subtitle: "Tags and labels",
-                systemImage: "tag",
-                target: tab
-            )
-        }
     }
 }
