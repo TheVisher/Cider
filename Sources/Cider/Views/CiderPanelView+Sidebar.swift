@@ -349,8 +349,12 @@ extension CiderPanelView {
     }
 
     func normalizeSelectedTabForCurrentDomain() {
-        let tabs = contextualTabs
-        if let selectedTab, tabs.contains(selectedTab) { return }
-        selectedTab = tabs.first
+        if selectedNavigationDomain == .mainDashboard {
+            selectedTab = .domainDashboard(.mainDashboard)
+        } else if selectedNavigationDomain == .aiAssistant {
+            selectedTab = .domainDashboard(.aiAssistant)
+        } else {
+            selectedTab = WorkspaceRouteLegacyProjection.state(for: workspaceRouter.currentRoute).selectedTab
+        }
     }
 }

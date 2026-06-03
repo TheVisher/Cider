@@ -43,8 +43,7 @@ extension CiderPanelView {
         }
 
         if wasSelected {
-            // Select adjacent tab, excluding the one just closed
-            selectedTab = allTabs.first { $0 != tab }
+            navigateToWorkspaceRoute(.home)
         }
     }
 

@@ -204,7 +204,6 @@ extension CiderPanelView {
                     WorkspaceDomainDashboardView(
                         model: WorkspaceDomainDashboardProvider.model(
                             for: domain,
-                            allTabs: allTabs,
                             bookmarks: bookmarksViewModel.bookmarks,
                             bookmarkFolders: bookmarksViewModel.folders
                         ),
@@ -494,7 +493,6 @@ extension CiderPanelView {
                 WorkspaceDomainDashboardView(
                     model: WorkspaceDomainDashboardProvider.model(
                         for: domain,
-                        allTabs: allTabs,
                         bookmarks: bookmarksViewModel.bookmarks,
                         bookmarkFolders: bookmarksViewModel.folders
                     ),

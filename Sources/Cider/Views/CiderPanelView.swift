@@ -84,19 +84,6 @@ struct CiderPanelView: View {
     @State var aiSectionExpanded: Bool = false
     @AppStorage("cider.sidebarProfileExpanded") var sidebarProfileExpanded: Bool = true
 
-    var allTabs: [CiderTab] {
-        []
-    }
-
-    var contextualTabs: [CiderTab] {
-        WorkspaceContextualTabPolicy.tabs(
-            for: selectedNavigationDomain,
-            selectedProject: selectedProjectWorkspace,
-            selectedTab: selectedTab,
-            allTabs: allTabs
-        )
-    }
-
     var projectWorkspaceCatalog: ProjectWorkspaceCatalog {
         ProjectWorkspaceCatalog.defaultCatalog(
             boards: kanbanStorage.boards,

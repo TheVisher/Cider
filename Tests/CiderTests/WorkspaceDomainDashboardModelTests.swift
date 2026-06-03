@@ -2,23 +2,20 @@ import XCTest
 @testable import Cider
 
 final class WorkspaceDomainDashboardModelTests: XCTestCase {
-    func testProviderBuildsReusableDashboardMetadataForExplicitProjectBoards() {
+    func testProjectsDashboardDoesNotBorrowProjectBoardTabs() {
         let model = WorkspaceDomainDashboardProvider.model(
-            for: .projects,
-            allTabs: [.projectBoard(projectID: "cider", boardID: "2afee0", name: "Cider Board")]
+            for: .projects
         )
 
         XCTAssertEqual(model.domain, .projects)
         XCTAssertEqual(model.title, "Projects")
-        XCTAssertEqual(model.primaryAction?.title, "Open Cider Board")
-        XCTAssertEqual(model.sections.first?.items.first?.id, "project-board-cider-2afee0")
-        XCTAssertEqual(model.sections.first?.items.first?.subtitle, "cider Kanban board")
+        XCTAssertEqual(model.primaryAction?.title, "Open Library")
+        XCTAssertTrue(model.sections.isEmpty)
     }
 
     func testProviderDoesNotBackfillDomainDashboardFromRetiredViews() {
         let model = WorkspaceDomainDashboardProvider.model(
-            for: .bookmarks,
-            allTabs: []
+            for: .bookmarks
         )
 
         XCTAssertEqual(model.domain, .bookmarks)
@@ -28,8 +25,7 @@ final class WorkspaceDomainDashboardModelTests: XCTestCase {
 
     func testProviderBuildsEmptyDashboardWithoutBorrowingGlobalTabs() {
         let model = WorkspaceDomainDashboardProvider.model(
-            for: .people,
-            allTabs: []
+            for: .people
         )
 
         XCTAssertEqual(model.domain, .people)
@@ -38,16 +34,14 @@ final class WorkspaceDomainDashboardModelTests: XCTestCase {
         XCTAssertTrue(model.sections.isEmpty)
     }
 
-    func testLibraryDashboardIsCatchAll() {
-        let searchID = UUID(uuidString: "00000000-0000-0000-0000-00000000D001")!
-
+    func testLibraryDashboardDoesNotBorrowRetiredSearchTabs() {
         let model = WorkspaceDomainDashboardProvider.model(
-            for: .browse,
-            allTabs: [.search(id: searchID, query: "cider")]
+            for: .browse
         )
 
         XCTAssertEqual(model.title, "Library")
-        XCTAssertEqual(model.sections.first?.items.map(\.title), ["cider"])
+        XCTAssertNil(model.primaryAction)
+        XCTAssertTrue(model.sections.isEmpty)
     }
 
     func testBookmarksDashboardAddsRecentTriageAndMetadataSections() {
@@ -95,7 +89,6 @@ final class WorkspaceDomainDashboardModelTests: XCTestCase {
 
         let model = WorkspaceDomainDashboardProvider.model(
             for: .bookmarks,
-            allTabs: [],
             bookmarks: bookmarks,
             bookmarkFolders: folders
         )

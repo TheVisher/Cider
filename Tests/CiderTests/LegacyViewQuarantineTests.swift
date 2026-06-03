@@ -121,13 +121,17 @@ final class LegacyViewQuarantineTests: XCTestCase {
         let forbiddenPatternsByPath: [String: [String]] = [
             "Sources/Cider/Views/CiderPanelView.swift": [
                 "@State var dynamicTabs",
-                "dynamicTabs"
+                "dynamicTabs",
+                "var allTabs",
+                "var contextualTabs",
+                "WorkspaceContextualTabPolicy.tabs"
             ],
             "Sources/Cider/Services/CiderWorkspaceTabStateStore.swift": [
                 "restoredDynamicTabs"
             ],
             "Sources/Cider/Views/CiderPanelView+TabManagement.swift": [
-                "dynamicTabs.removeAll"
+                "dynamicTabs.removeAll",
+                "allTabs"
             ],
             "Sources/Cider/Views/CiderPanelView+ContentArea.swift": [
                 "} else if let tab = selectedTab {",
@@ -161,6 +165,10 @@ final class LegacyViewQuarantineTests: XCTestCase {
                 "selectedTab?.displayName",
                 "selectedTab.displayName",
                 "selectedTab.systemImage"
+            ],
+            "Sources/Cider/Models/WorkspaceDomainDashboardModel.swift": [
+                "allTabs: [CiderTab]",
+                "WorkspaceContextualTabPolicy.tabs"
             ]
         ]
 
