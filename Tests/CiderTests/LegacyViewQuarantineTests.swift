@@ -143,7 +143,9 @@ final class LegacyViewQuarantineTests: XCTestCase {
                 "guard case .spaceOverview(let id, _) = selectedTab",
                 "selectedTab == .spacesManager",
                 "selectedTab == .aiAssistant",
-                "selectedTab: selectedTab"
+                "selectedTab: selectedTab",
+                "openLibraryView(",
+                "selectedTab = .domainDashboard(.browse)"
             ],
             "Sources/Cider/Views/Shared/ProjectsDomainSidebarView.swift": [
                 "let selectedTab: CiderTab?",

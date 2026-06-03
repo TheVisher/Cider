@@ -254,21 +254,9 @@ extension CiderPanelView {
         case .overview:
             selectedTab = .domainDashboard(domain)
         case .all:
-            if domain == .browse {
-                openLibraryView(onlyUnassigned: false)
-            } else {
-                selectedTab = .domainDashboard(domain)
-            }
+            selectedTab = .domainDashboard(domain)
         case .bookmarks, .notes, .files:
-            if domain == .browse, let entityTypes = route.kind.libraryEntityTypes {
-                openLibraryView(
-                    named: route.title,
-                    onlyUnassigned: false,
-                    entityTypes: entityTypes
-                )
-            } else {
-                selectedTab = .domainDashboard(domain)
-            }
+            selectedTab = .domainDashboard(domain)
         case .folders:
             selectedTab = .domainDashboard(domain)
         case .tags:
@@ -276,11 +264,7 @@ extension CiderPanelView {
         case .chats:
             openOrSelectAIAssistantTab()
         case .inbox:
-            if domain == .browse {
-                openLibraryView(onlyUnassigned: true)
-            } else {
-                selectedTab = .domainDashboard(domain)
-            }
+            selectedTab = .domainDashboard(domain)
         case .recent:
             selectedTab = .domainDashboard(domain)
         }
@@ -322,17 +306,6 @@ extension CiderPanelView {
 
     private func defaultRouteKind(for domain: WorkspaceNavigationDomain) -> WorkspaceDomainRouteKind {
         WorkspaceDomainRoutePolicy.routes(for: domain).first?.kind ?? .overview
-    }
-
-    private func openLibraryView(
-        named explicitName: String? = nil,
-        onlyUnassigned: Bool,
-        entityTypes: Set<LibraryEntityType> = LibraryEntityType.activeCases
-    ) {
-        if onlyUnassigned {
-            homeDisplayMode = LibraryInboxPresentationPolicy.preferredDisplayMode
-        }
-        selectedTab = .domainDashboard(.browse)
     }
 
     var dashboardTab: CiderTab? {
