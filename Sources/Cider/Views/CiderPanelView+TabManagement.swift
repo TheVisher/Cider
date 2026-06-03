@@ -2,42 +2,19 @@ import SwiftUI
 
 extension CiderPanelView {
 
-    // MARK: - Search Tab Management
+    // MARK: - Route Compatibility Management
 
-    func spawnSearchTab(_ query: String) {
-        let tab = CiderTab.search(id: UUID(), query: query)
-        dynamicTabs.append(tab)
-        selectedTab = tab
+    func openSearchRoute(_ query: String) {
+        navigateToWorkspaceRoute(.library(.search(query)))
     }
 
     func openOrSelectTagTab() {
-        // Check if a .tag tab already exists
-        if let existing = allTabs.first(where: { if case .tag = $0 { return true }; return false }) {
-            selectedFolderID = nil
-            selectedTagIDs.removeAll()
-            selectedTab = existing
-        } else {
-            let tab = CiderTab.tag(id: UUID())
-            dynamicTabs.append(tab)
-            selectedFolderID = nil
-            selectedTagIDs.removeAll()
-            selectedTab = tab
-        }
+        navigateToWorkspaceRoute(.library(.tags))
     }
 
     func openOrSelectAIAssistantTab() {
-        if let existing = allTabs.first(where: { $0 == .aiAssistant }) {
-            CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(true)
-            selectedFolderID = nil
-            selectedTagIDs.removeAll()
-            selectedTab = existing
-        } else {
-            dynamicTabs.append(.aiAssistant)
-            CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(true)
-            selectedFolderID = nil
-            selectedTagIDs.removeAll()
-            selectedTab = .aiAssistant
-        }
+        CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(true)
+        navigateToWorkspaceRoute(.ai)
     }
 
     func openDomainDashboardTab(_ tab: CiderTab) {
@@ -129,15 +106,12 @@ extension CiderPanelView {
     }
 
     func ensureDefaultTabs() {
-        restorePersistentDynamicTabsIfNeeded()
+        if let restoredRoute = CiderWorkspaceTabStateStore.shared.restoredWorkspaceRoute() {
+            navigateToWorkspaceRoute(restoredRoute)
+            return
+        }
         if selectedTab == nil {
             selectedTab = .domainDashboard(.mainDashboard)
-        }
-    }
-
-    private func restorePersistentDynamicTabsIfNeeded() {
-        for tab in CiderWorkspaceTabStateStore.shared.restoredDynamicTabs() where !dynamicTabs.contains(tab) {
-            dynamicTabs.append(tab)
         }
     }
 

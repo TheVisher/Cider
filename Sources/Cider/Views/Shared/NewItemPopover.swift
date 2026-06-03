@@ -11,7 +11,7 @@ struct NewItemPopover: View {
     var onCreateTodo: (TodoCard) -> Void
     var onOpenTodoEditor: () -> Void
     var onCreateFolder: (String, UUID?) -> Void
-    var onCreateTab: (String, Set<LibraryEntityType>) -> Void
+    var onCreateLibraryView: (String, Set<LibraryEntityType>) -> Void
     var onCreateTag: (String, String) -> Void
     var onDismiss: () -> Void
 
@@ -75,11 +75,11 @@ struct NewItemPopover: View {
                         onDismiss()
                     }
                 )
-            case .tab:
-                TabCreationForm(
+            case .libraryView:
+                LibraryViewCreationForm(
                     onBack: back,
                     onCreate: { name, entityTypes in
-                        onCreateTab(name, entityTypes)
+                        onCreateLibraryView(name, entityTypes)
                         onDismiss()
                     }
                 )
@@ -122,7 +122,7 @@ struct NewItemPopover: View {
                 typeCard(.contact)
                 typeCard(.todo)
                 typeCard(.folder)
-                typeCard(.tab)
+                typeCard(.libraryView)
                 typeCard(.tag)
             }
             .padding(.horizontal, Spacing.md)
@@ -162,7 +162,7 @@ struct NewItemPopover: View {
         case .contact:  step = .contact
         case .todo:     step = .todo
         case .folder:   step = .folder
-        case .tab:        step = .tab
+        case .libraryView: step = .libraryView
         case .tag:        step = .tag
         }
     }
@@ -171,13 +171,13 @@ struct NewItemPopover: View {
 // MARK: - Step
 
 private enum NewItemStep: Equatable {
-    case picker, bookmark, note, event, contact, todo, folder, tab, tag
+    case picker, bookmark, note, event, contact, todo, folder, libraryView, tag
 }
 
 // MARK: - Item Types
 
 enum NewItemType: String, CaseIterable, Identifiable {
-    case bookmark, note, event, contact, todo, folder, tab, tag
+    case bookmark, note, event, contact, todo, folder, libraryView, tag
 
     var id: String { rawValue }
 
@@ -189,7 +189,7 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .contact:  "Contact"
         case .todo:     "Todo"
         case .folder:     "Folder"
-        case .tab:        "Tab"
+        case .libraryView: "Library View"
         case .tag:        "Tag"
         }
     }
@@ -202,7 +202,7 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .contact:  "person.badge.plus"
         case .todo:     "checklist"
         case .folder:     "folder.badge.plus"
-        case .tab:        "rectangle.badge.plus"
+        case .libraryView: "rectangle.badge.plus"
         case .tag:        "tag"
         }
     }
@@ -795,9 +795,9 @@ private struct FolderCreationForm: View {
     }
 }
 
-// MARK: - Tab Form
+// MARK: - Library View Form
 
-private struct TabCreationForm: View {
+private struct LibraryViewCreationForm: View {
     let onBack: () -> Void
     let onCreate: (String, Set<LibraryEntityType>) -> Void
 
@@ -809,10 +809,10 @@ private struct TabCreationForm: View {
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
-            FormHeader(title: "New Tab", onBack: onBack)
+            FormHeader(title: "New View", onBack: onBack)
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                inputField("Tab name", text: $name, onSubmit: commit)
+                inputField("View name", text: $name, onSubmit: commit)
 
                 Text("Show")
                     .font(CiderFont.captionMedium)
@@ -840,7 +840,7 @@ private struct TabCreationForm: View {
             }
 
             AddButton(
-                label: "Create Tab",
+                label: "Create View",
                 disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                 action: commit
             )
@@ -975,4 +975,3 @@ private struct TagCreationForm: View {
         onCreate(trimmedName, selectedColorHex)
     }
 }
-

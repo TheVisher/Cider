@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Quick Action Model
 
 enum QuickAction: String, CaseIterable, Identifiable {
-    case newBookmark, newNote, newEvent, newContact, newTodo, newFolder, newTag, newTab, newKanban, openSettings
+    case newBookmark, newNote, newEvent, newContact, newTodo, newFolder, newTag, newLibraryView, newKanban, openSettings
 
     var id: String { rawValue }
 
@@ -16,7 +16,7 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTodo:      return "New Todo"
         case .newFolder:    return "New Folder"
         case .newTag:       return "New Tag"
-        case .newTab:        return "New Tab"
+        case .newLibraryView: return "Library View"
         case .newKanban:    return "New Board"
         case .openSettings: return "Open Settings"
         }
@@ -31,7 +31,7 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTodo:      return "checklist"
         case .newFolder:    return "folder.badge.plus"
         case .newTag:       return "tag"
-        case .newTab:        return "plus.square.on.square"
+        case .newLibraryView: return "rectangle.3.group"
         case .newKanban:    return "square.split.2x1"
         case .openSettings: return "gearshape"
         }
@@ -46,7 +46,7 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTodo:      return ["task", "checklist", "bills", "create", "add"]
         case .newFolder:    return ["organize", "create", "add"]
         case .newTag:       return ["label", "create", "add"]
-        case .newTab:        return ["view", "create", "add"]
+        case .newLibraryView: return ["new", "view", "library", "browse", "open", "create", "add"]
         case .newKanban:    return ["board", "kanban", "project", "columns", "create", "add"]
         case .openSettings: return ["preferences", "config", "set"]
         }
@@ -68,14 +68,14 @@ private enum SelectableItem: Identifiable {
     case action(QuickAction)
     case tag(CardLabel)
     case result(SearchResult)
-    case createTab(String)
+    case openSearch(String)
 
     var id: String {
         switch self {
         case .action(let a): return "action-\(a.id)"
         case .tag(let t): return "tag-\(t.id.uuidString)"
         case .result(let r): return "result-\(r.id.uuidString)"
-        case .createTab: return "createTab"
+        case .openSearch: return "openSearch"
         }
     }
 }
@@ -97,7 +97,7 @@ struct SearchPaletteView: View {
     var onOpenDateCard: ((DateCard) -> Void)? = nil
     var onOpenContact: ((ContactCard) -> Void)? = nil
     var onOpenTodo: ((TodoCard) -> Void)? = nil
-    let onSpawnSearchTab: ((String) -> Void)?
+    let onOpenSearchRoute: ((String) -> Void)?
     let onDismiss: () -> Void
     var onAction: ((QuickAction) -> Void)?
     var onSelectTag: ((CardLabel) -> Void)?
@@ -167,8 +167,8 @@ struct SearchPaletteView: View {
         var items: [SelectableItem] = filteredActions.map { .action($0) }
         items += filteredTags.map { .tag($0) }
         items += results.map { .result($0) }
-        if hasQuery, onSpawnSearchTab != nil {
-            items.append(.createTab(query))
+        if hasQuery, onOpenSearchRoute != nil {
+            items.append(.openSearch(query))
         }
         return items
     }
@@ -321,8 +321,8 @@ struct SearchPaletteView: View {
         case .tag(let label):
             onSelectTag?(label)
             onDismiss()
-        case .createTab(let q):
-            onSpawnSearchTab?(q)
+        case .openSearch(let q):
+            onOpenSearchRoute?(q)
             onDismiss()
         case .result(let result):
             switch result.type {
@@ -619,8 +619,8 @@ struct SearchPaletteView: View {
                         noResultsRow
                     }
 
-                    if onSpawnSearchTab != nil {
-                        createTabRow
+                    if onOpenSearchRoute != nil {
+                        openSearchRow
                     }
                 }
                 .padding(Spacing.md)
@@ -996,29 +996,29 @@ struct SearchPaletteView: View {
         return prefix + match + suffix
     }
 
-    // MARK: - Create Tab Row
+    // MARK: - Open Search Row
 
-    private var createTabRow: some View {
-        let isSelected = isItemSelected(.createTab(query))
+    private var openSearchRow: some View {
+        let isSelected = isItemSelected(.openSearch(query))
 
         return Button {
-            onSpawnSearchTab?(query)
+            onOpenSearchRoute?(query)
             onDismiss()
         } label: {
             HStack(spacing: Spacing.sm) {
-                Image(systemName: "plus.square.on.square")
+                Image(systemName: "magnifyingglass")
                     .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.secondary)
                     .frame(width: 16)
 
-                Text("Create tab: \(query.trimmingCharacters(in: .whitespacesAndNewlines))")
+                Text("Open search: \(query.trimmingCharacters(in: .whitespacesAndNewlines))")
                     .font(CiderFont.subheadingMedium)
                     .foregroundColor(CiderColors.secondary)
                     .lineLimit(1)
 
                 Spacer(minLength: Spacing.sm)
 
-                Text("New Tab")
+                Text("Search")
                     .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.quaternary)
                     .padding(.horizontal, Spacing.xs)
@@ -1037,7 +1037,7 @@ struct SearchPaletteView: View {
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .fill(isSelected ? CiderColors.selectedFill : Color.clear)
         )
-        .id(SelectableItem.createTab(query).id)
+        .id(SelectableItem.openSearch(query).id)
     }
 
     // MARK: - No Results

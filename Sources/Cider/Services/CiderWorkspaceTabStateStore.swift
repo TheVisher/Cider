@@ -18,7 +18,11 @@ final class CiderWorkspaceTabStateStore: @unchecked Sendable {
         defaults.set(isOpen, forKey: aiAssistantTabOpenKey)
     }
 
+    func restoredWorkspaceRoute() -> WorkspaceRoute? {
+        isAIAssistantTabOpen ? .ai : nil
+    }
+
     func restoredDynamicTabs() -> [CiderTab] {
-        isAIAssistantTabOpen ? [.aiAssistant] : []
+        []
     }
 }

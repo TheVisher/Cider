@@ -54,6 +54,82 @@ enum WorkspaceVisibleItemScope: Equatable {
     case projectBoard(boardID: String)
 }
 
+enum WorkspaceVisibleItemScopePolicy {
+    static func visibleItems(
+        for scope: WorkspaceVisibleItemScope,
+        items: [LibraryItemV2],
+        folderID: UUID?,
+        tagIDs: Set<UUID>,
+        searchText: String
+    ) -> [LibraryItemV2] {
+        switch scope {
+        case .none, .projectBoard:
+            return []
+        case .libraryFeed(let entityTypes, let onlyUnassigned):
+            return items.filter { item in
+                entityTypes.contains(item.entityType)
+                    && (!onlyUnassigned || item.isInboxItem)
+            }
+        case .folder:
+            guard let folderID else { return [] }
+            return items.filter { $0.folderID == folderID }
+        case .tag:
+            guard !tagIDs.isEmpty else { return [] }
+            return items.filter { !$0.labelIDs.isDisjoint(with: tagIDs) }
+        case .search:
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.isEmpty else { return [] }
+            return items.filter { matchesTextQuery(query, in: $0) }
+        }
+    }
+
+    static func visibleItemIDs(
+        for scope: WorkspaceVisibleItemScope,
+        items: [LibraryItemV2],
+        folderID: UUID?,
+        tagIDs: Set<UUID>,
+        searchText: String
+    ) -> [String] {
+        visibleItems(
+            for: scope,
+            items: items,
+            folderID: folderID,
+            tagIDs: tagIDs,
+            searchText: searchText
+        ).map(\.id)
+    }
+
+    private static func matchesTextQuery(_ query: String, in item: LibraryItemV2) -> Bool {
+        let tokens = query.split(separator: " ").map(String.init)
+        guard !tokens.isEmpty else { return true }
+
+        return tokens.allSatisfy { token in
+            searchableFields(for: item).contains { $0.localizedStandardContains(token) }
+        }
+    }
+
+    private static func searchableFields(for item: LibraryItemV2) -> [String] {
+        switch item {
+        case .bookmark(let bookmark):
+            var fields = [bookmark.title, bookmark.urlString, bookmark.notes] + bookmark.tags
+            if let ocrText = bookmark.ocrText { fields.append(ocrText) }
+            return fields
+        case .note(let note):
+            return [note.title, note.content] + note.tags
+        case .dateCard(let dateCard):
+            return [dateCard.title, dateCard.details, dateCard.location]
+        case .contact(let contact):
+            return [contact.displayName, contact.relationshipLabel, contact.notes]
+        case .todo(let todo):
+            return [todo.title, todo.details] + todo.checklist.map(\.title)
+        case .vaultFile(let file):
+            var fields = [file.filename, file.displayTitle, file.notes] + file.tags
+            if let ocrText = file.ocrText { fields.append(ocrText) }
+            return fields
+        }
+    }
+}
+
 enum WorkspaceRouteContentKind: Equatable {
     case home
     case libraryDashboard
@@ -420,7 +496,7 @@ enum WorkspaceRouteIntentPolicy {
         createdBoardID: String?
     ) -> WorkspaceRouteIntent? {
         switch action {
-        case .newTab:
+        case .newLibraryView:
             return WorkspaceRouteIntent(route: .library(.overview), detail: nil)
         case .newTag:
             return WorkspaceRouteIntent(route: .library(.tags), detail: nil)

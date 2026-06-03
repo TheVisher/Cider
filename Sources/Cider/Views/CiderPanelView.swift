@@ -480,15 +480,13 @@ struct CiderPanelView: View {
                 onOpenDateCard: { openDateCardDetail($0) },
                 onOpenContact: { openContactDetail($0) },
                 onOpenTodo: { openTodoDetail($0) },
-                onSpawnSearchTab: spawnSearchTab,
+                onOpenSearchRoute: openSearchRoute,
                 onDismiss: { isSearchPaletteVisible = false },
                 onAction: { action in
                     handleQuickAction(action)
                 },
                 onSelectTag: { tag in
-                    selectedFolderID = nil
-                    selectedTagIDs = [tag.id]
-                    selectedTab = .tag(id: UUID())
+                    navigateToWorkspaceRoute(.library(.tag(tag.id)))
                 }
             )
         }

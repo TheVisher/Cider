@@ -40,16 +40,6 @@ final class LegacyViewQuarantineTests: XCTestCase {
                 "sortModeBinding(for savedViewID",
                 "sortModeBinding(for legacyViewID"
             ],
-            "Sources/Cider/Views/Shared/CiderTabBar.swift": [
-                "SavedViewStorage.shared",
-                "LegacyViewStorage.shared",
-                "closedTabs",
-                "savedViewMenuItems",
-                "legacyViewMenuItems",
-                "onReopenTab",
-                ".savedView",
-                ".legacyView"
-            ],
             "Sources/Cider/Views/CiderPanelView+ContentArea.swift": [
                 "case .savedView",
                 "case .legacyView",

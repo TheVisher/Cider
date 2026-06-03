@@ -28,7 +28,7 @@ extension CiderPanelView {
             ) {
                 applyWorkspaceRouteIntent(intent)
             }
-        case .newTab:
+        case .newLibraryView:
             if let intent = WorkspaceRouteIntentPolicy.intent(
                 forQuickAction: action,
                 selectedProjectID: selectedProjectWorkspaceID,

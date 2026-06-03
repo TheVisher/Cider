@@ -27,7 +27,7 @@ final class WorkspaceRouteIntentPolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            WorkspaceRouteIntentPolicy.intent(forQuickAction: .newTab, selectedProjectID: nil, createdBoardID: nil),
+            WorkspaceRouteIntentPolicy.intent(forQuickAction: .newLibraryView, selectedProjectID: nil, createdBoardID: nil),
             WorkspaceRouteIntent(route: .library(.overview), detail: nil)
         )
 

@@ -5,20 +5,15 @@ extension CiderPanelView {
     // MARK: - Select All
 
     func selectAllVisibleItems() {
-        if let folderID = selectedFolderID {
-            let bookmarks = bookmarksViewModel.bookmarks.filter { $0.folderID == folderID }
-            let notes = notesViewModel.notes.filter { $0.folderID == folderID }
-            let dateCards = DateCardStorage.shared.dateCards.filter { $0.folderID == folderID }
-            let contacts = ContactStorage.shared.contacts.filter { $0.folderID == folderID }
-            for b in bookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
-            for n in notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
-            for dc in dateCards { selectedItemIDs.insert("datecard-\(dc.id.uuidString)") }
-            for c in contacts { selectedItemIDs.insert("contact-\(c.id.uuidString)") }
-        } else if selectedTab != nil {
-            for item in libraryViewModel.items {
-                selectedItemIDs.insert(item.id)
-            }
-        }
+        let scope = WorkspaceRoutePresentation.presentation(for: workspaceRouter.currentRoute).visibleItemScope
+        let ids = WorkspaceVisibleItemScopePolicy.visibleItemIDs(
+            for: scope,
+            items: libraryViewModel.items,
+            folderID: selectedFolderID,
+            tagIDs: selectedTagIDs,
+            searchText: currentRouteSearchText
+        )
+        selectedItemIDs.formUnion(ids)
     }
 
     // MARK: - Bulk Selection Actions

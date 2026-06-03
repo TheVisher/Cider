@@ -123,44 +123,20 @@ extension CiderPanelView {
 
     /// Ordered IDs of items in the current content area
     var navigableItemIDs: [String] {
-        if let folderID = selectedFolderID {
-            let bookmarks = bookmarksViewModel.bookmarks.filter { $0.folderID == folderID }
-                .map { LibraryItemV2.bookmark($0) }
-            let notes = notesViewModel.notes.filter { $0.folderID == folderID }
-                .map { LibraryItemV2.note($0) }
-            let dateCards = DateCardStorage.shared.dateCards.filter { $0.folderID == folderID }
-                .map { LibraryItemV2.dateCard($0) }
-            let contacts = ContactStorage.shared.contacts.filter { $0.folderID == folderID }
-                .map { LibraryItemV2.contact($0) }
-            var all = (bookmarks + notes + dateCards + contacts)
-                .sorted { $0.createdDate > $1.createdDate }
+        WorkspaceVisibleItemScopePolicy.visibleItemIDs(
+            for: WorkspaceRoutePresentation.presentation(for: workspaceRouter.currentRoute).visibleItemScope,
+            items: libraryViewModel.items,
+            folderID: selectedFolderID,
+            tagIDs: selectedTagIDs,
+            searchText: currentRouteSearchText
+        )
+    }
 
-            let query = debouncedSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !query.isEmpty {
-                let scope = SearchService.parseScope(from: query)
-                if let scopeTypes = scope.entityTypes {
-                    all = all.filter { item in
-                        switch item {
-                        case .bookmark:     return scopeTypes.contains(.bookmark)
-                        case .note:         return scopeTypes.contains(.note)
-                        case .dateCard:     return scopeTypes.contains(.dateCard)
-                        case .contact:      return scopeTypes.contains(.contact)
-                        case .todo:         return scopeTypes.contains(.todo)
-                        case .vaultFile: return false
-                        }
-                    }
-                }
-                if let labelID = scope.labelID {
-                    all = all.filter { $0.labelIDs.contains(labelID) }
-                }
-                if !scope.cleanQuery.isEmpty {
-                    all = all.filter { LibraryViewModel.matchesTextQuery(scope.cleanQuery, in: $0) }
-                }
-            }
-            return all.map(\.id)
-        } else {
-            return []
+    var currentRouteSearchText: String {
+        if case .library(.search(let query)) = workspaceRouter.currentRoute {
+            return query
         }
+        return debouncedSearchText
     }
 
     /// Column count for current display mode and content width

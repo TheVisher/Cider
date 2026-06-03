@@ -619,20 +619,20 @@ extension CiderPanelView {
         selectedTab = .domainDashboard(.mainDashboard)
     }
 
-    // MARK: - noTabsEmptyState
+    // MARK: - Empty Route State
 
     var noTabsEmptyState: some View {
         VStack(spacing: Spacing.lg) {
             Image(systemName: "rectangle.stack.badge.plus")
                 .font(CiderFont.emptyStateIconLarge)
                 .foregroundColor(CiderColors.tertiary)
-            Text("No tabs open")
+            Text("No view selected")
                 .font(CiderFont.headingSemibold)
                 .foregroundColor(CiderColors.secondary)
-            Text("Create a tab to start organizing")
+            Text("Create a library view to start organizing")
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
-            Button("New Tab") { showNewItemPicker = true }
+            Button("New View") { showNewItemPicker = true }
                 .buttonStyle(CiderAccentButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

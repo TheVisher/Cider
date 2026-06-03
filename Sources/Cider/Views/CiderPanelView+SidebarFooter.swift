@@ -180,7 +180,7 @@ extension CiderPanelView {
             onCreateFolder: { name, parentID in
                 bvm.createFolder(name: name, parentID: parentID)
             },
-            onCreateTab: { [self] name, entityTypes in
+            onCreateLibraryView: { [self] name, entityTypes in
                 applyWorkspaceRouteIntent(
                     WorkspaceRouteIntentPolicy.intent(forLibraryEntityTypes: entityTypes)
                 )
