@@ -227,7 +227,6 @@ extension CiderPanelView {
         if domain == .browse {
             navigateToWorkspaceRoute(
                 WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
-                    selectedTab: .domainDashboard(.browse),
                     selectedNavigationDomain: .browse,
                     selectedDomainRouteKind: route.kind
                 ))
