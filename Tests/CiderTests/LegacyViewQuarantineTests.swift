@@ -145,7 +145,8 @@ final class LegacyViewQuarantineTests: XCTestCase {
                 "selectedTab == .aiAssistant",
                 "selectedTab: selectedTab",
                 "openLibraryView(",
-                "selectedTab = .domainDashboard(.browse)"
+                "selectedTab = .domainDashboard(.browse)",
+                "selectedTab = .domainDashboard(domain)"
             ],
             "Sources/Cider/Views/Shared/ProjectsDomainSidebarView.swift": [
                 "let selectedTab: CiderTab?",

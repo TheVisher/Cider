@@ -252,21 +252,21 @@ extension CiderPanelView {
 
         switch route.kind {
         case .overview:
-            selectedTab = .domainDashboard(domain)
+            selectLegacyDomainDashboardTab(for: domain)
         case .all:
-            selectedTab = .domainDashboard(domain)
+            selectLegacyDomainDashboardTab(for: domain)
         case .bookmarks, .notes, .files:
-            selectedTab = .domainDashboard(domain)
+            selectLegacyDomainDashboardTab(for: domain)
         case .folders:
-            selectedTab = .domainDashboard(domain)
+            selectLegacyDomainDashboardTab(for: domain)
         case .tags:
             openOrSelectTagTab()
         case .chats:
             openOrSelectAIAssistantTab()
         case .inbox:
-            selectedTab = .domainDashboard(domain)
+            selectLegacyDomainDashboardTab(for: domain)
         case .recent:
-            selectedTab = .domainDashboard(domain)
+            selectLegacyDomainDashboardTab(for: domain)
         }
     }
 
@@ -306,6 +306,10 @@ extension CiderPanelView {
 
     private func defaultRouteKind(for domain: WorkspaceNavigationDomain) -> WorkspaceDomainRouteKind {
         WorkspaceDomainRoutePolicy.routes(for: domain).first?.kind ?? .overview
+    }
+
+    private func selectLegacyDomainDashboardTab(for domain: WorkspaceNavigationDomain) {
+        selectedTab = CiderTab.domainDashboard(domain)
     }
 
     var dashboardTab: CiderTab? {
