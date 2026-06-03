@@ -108,7 +108,7 @@ extension CiderPanelView {
 
     private func workspaceRouteMatchesLegacyTab(_ tab: CiderTab) -> Bool {
         WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
-            selectedTab: tab,
+            legacyTab: tab,
             selectedNavigationDomain: selectedNavigationDomain,
             selectedDomainRouteKind: selectedDomainRouteKind,
             selectedFolderID: selectedFolderID,

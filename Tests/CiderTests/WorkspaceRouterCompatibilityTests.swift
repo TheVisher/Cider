@@ -8,7 +8,7 @@ final class WorkspaceRouterCompatibilityTests: XCTestCase {
 
         XCTAssertEqual(
             WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
-                selectedTab: .domainDashboard(.browse),
+                legacyTab: .domainDashboard(.browse),
                 selectedNavigationDomain: .browse,
                 selectedDomainRouteKind: .files
             )),
@@ -17,7 +17,7 @@ final class WorkspaceRouterCompatibilityTests: XCTestCase {
 
         XCTAssertEqual(
             WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
-                selectedTab: .search(id: UUID(), query: "route"),
+                legacyTab: .search(id: UUID(), query: "route"),
                 selectedNavigationDomain: .browse,
                 selectedDomainRouteKind: .all,
                 selectedFolderID: folderID
@@ -27,7 +27,7 @@ final class WorkspaceRouterCompatibilityTests: XCTestCase {
 
         XCTAssertEqual(
             WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
-                selectedTab: .domainDashboard(.browse),
+                legacyTab: .domainDashboard(.browse),
                 selectedNavigationDomain: .browse,
                 selectedDomainRouteKind: .all,
                 selectedTagIDs: [tagID]
@@ -57,7 +57,7 @@ final class WorkspaceRouterCompatibilityTests: XCTestCase {
 
         for (tab, route) in expectations {
             XCTAssertEqual(
-                WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(selectedTab: tab)),
+                WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(legacyTab: tab)),
                 route,
                 "\(tab)"
             )

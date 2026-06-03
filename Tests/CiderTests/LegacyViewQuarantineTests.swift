@@ -120,6 +120,9 @@ final class LegacyViewQuarantineTests: XCTestCase {
     func testWorkspaceRouteShellDoesNotRestoreDynamicTabsOrContentSwitchOnSelectedTab() throws {
         let forbiddenPatternsByPath: [String: [String]] = [
             "Sources/Cider/Views/CiderPanelView.swift": [
+                "@State var selectedTab",
+                ".onChange(of: selectedTab)",
+                "selectedTab: selectedTab",
                 "@State var dynamicTabs",
                 "dynamicTabs",
                 "var allTabs",
@@ -139,7 +142,8 @@ final class LegacyViewQuarantineTests: XCTestCase {
             "Sources/Cider/Views/CiderPanelView+ContentArea.swift": [
                 "} else if let tab = selectedTab {",
                 "switch tab {",
-                "noTabsEmptyState"
+                "noTabsEmptyState",
+                "WorkspaceRouteLegacyProjection.state(for: workspaceRouter.currentRoute).selectedTab"
             ],
             "Sources/Cider/Views/CiderPanelView+Sidebar.swift": [
                 "guard case .spaceOverview(let id, _) = selectedTab",
@@ -154,7 +158,22 @@ final class LegacyViewQuarantineTests: XCTestCase {
                 "selectedTab = .domainDashboard(.mainDashboard)",
                 "selectedTab = .domainDashboard(.aiAssistant)",
                 "selectedTab = WorkspaceRouteLegacyProjection.state(for: workspaceRouter.currentRoute).selectedTab",
-                "selectedTab: .domainDashboard(.browse)"
+                "selectedTab: .domainDashboard(.browse)",
+                "applyLegacySelectedTab(",
+                "selectLegacyDomainDashboardTab("
+            ],
+            "Sources/Cider/Models/WorkspaceRoute.swift": [
+                "WorkspaceRouteLegacyNavigationState",
+                "WorkspaceRouteLegacyProjection",
+                "var selectedTab: CiderTab?",
+                "selectedTab: CiderTab?",
+                "selectedTab: .domainDashboard",
+                "selectedTab: .aiAssistant",
+                "selectedTab: .search",
+                "selectedTab: .tag",
+                "selectedTab: projectTab",
+                "selectedTab: .spaceOverview",
+                "selectedTab: .spacesManager"
             ],
             "Sources/Cider/Views/Shared/ProjectsDomainSidebarView.swift": [
                 "let selectedTab: CiderTab?",

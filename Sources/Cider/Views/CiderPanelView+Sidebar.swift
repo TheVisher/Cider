@@ -164,9 +164,6 @@ extension CiderPanelView {
 
         folderContentScope = WorkspaceDomainContentScope.defaultScope(for: domain)
 
-        if let headerTab = WorkspaceDomainRoutePolicy.headerDefaultTab(for: domain) {
-            applyLegacySelectedTab(headerTab)
-        }
     }
 
     func openSpace(_ space: CiderSpace) {
@@ -250,35 +247,24 @@ extension CiderPanelView {
         closeAllDetails()
 
         switch route.kind {
-        case .overview:
-            selectLegacyDomainDashboardTab(for: domain)
-        case .all:
-            selectLegacyDomainDashboardTab(for: domain)
-        case .bookmarks, .notes, .files:
-            selectLegacyDomainDashboardTab(for: domain)
-        case .folders:
-            selectLegacyDomainDashboardTab(for: domain)
+        case .overview, .all, .bookmarks, .notes, .files, .folders, .inbox, .recent:
+            break
         case .tags:
             openOrSelectTagTab()
         case .chats:
             openOrSelectAIAssistantTab()
-        case .inbox:
-            selectLegacyDomainDashboardTab(for: domain)
-        case .recent:
-            selectLegacyDomainDashboardTab(for: domain)
         }
     }
 
     func navigateToWorkspaceRoute(_ route: WorkspaceRoute) {
         workspaceRouter.navigate(to: route)
 
-        let legacyState = WorkspaceRouteLegacyProjection.state(for: route)
-        selectedNavigationDomain = legacyState.selectedNavigationDomain
-        selectedProjectWorkspaceID = legacyState.selectedProjectWorkspaceID
-        selectedDomainRouteKind = legacyState.selectedDomainRouteKind
-        selectedFolderID = legacyState.selectedFolderID
-        selectedTagIDs = legacyState.selectedTagIDs
-        applyLegacySelectedTab(legacyState.selectedTab)
+        let routeState = WorkspaceRouteSidebarProjection.state(for: route)
+        selectedNavigationDomain = routeState.selectedNavigationDomain
+        selectedProjectWorkspaceID = routeState.selectedProjectWorkspaceID
+        selectedDomainRouteKind = routeState.selectedDomainRouteKind
+        selectedFolderID = routeState.selectedFolderID
+        selectedTagIDs = routeState.selectedTagIDs
         selectedItemIDs.removeAll()
         focusedItemID = nil
         selectionAnchorID = nil
@@ -307,18 +293,6 @@ extension CiderPanelView {
         WorkspaceDomainRoutePolicy.routes(for: domain).first?.kind ?? .overview
     }
 
-    private func selectLegacyDomainDashboardTab(for domain: WorkspaceNavigationDomain) {
-        applyLegacySelectedTab(CiderTab.domainDashboard(domain))
-    }
-
-    private func applyLegacySelectedTab(_ tab: CiderTab?) {
-        selectedTab = tab
-    }
-
-    var dashboardTab: CiderTab? {
-        .domainDashboard(.mainDashboard)
-    }
-
     func selectProjectWorkspace(_ workspace: ProjectWorkspace) {
         navigateToWorkspaceRoute(ProjectWorkspaceRoutePolicy.route(for: workspace))
     }
@@ -328,14 +302,4 @@ extension CiderPanelView {
         navigateToWorkspaceRoute(ProjectWorkspaceRoutePolicy.route(for: destination, in: workspace))
     }
 
-    func normalizeSelectedTabForCurrentDomain() {
-        if selectedNavigationDomain == .mainDashboard {
-            applyLegacySelectedTab(.domainDashboard(.mainDashboard))
-        } else if selectedNavigationDomain == .aiAssistant {
-            applyLegacySelectedTab(.domainDashboard(.aiAssistant))
-        } else {
-            let legacyState = WorkspaceRouteLegacyProjection.state(for: workspaceRouter.currentRoute)
-            applyLegacySelectedTab(legacyState.selectedTab)
-        }
-    }
 }

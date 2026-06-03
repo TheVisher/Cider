@@ -171,48 +171,75 @@ extension CiderPanelView {
                 scrollToItemID: $scrollToItemID,
                 focusedItemID: focusedItemID
             )
-        } else if let routeContentTab = WorkspaceRouteLegacyProjection.state(for: workspaceRouter.currentRoute).selectedTab {
-            switch routeContentTab {
-            case .domainDashboard(let domain):
-                if domain == .mainDashboard {
-                    homeOverviewDashboard
-                } else if domain == .projects {
-                    ProjectWorkspaceOverviewView(
-                        model: ProjectWorkspaceOverviewProvider.model(
-                            for: projectWorkspaceCatalog.home,
-                            catalog: projectWorkspaceCatalog,
-                            boards: kanbanStorage.boards
-                        ),
-                        onOpenProject: { row in
-                            if let project = projectWorkspaceCatalog.workspace(id: row.projectID) {
-                                selectProjectWorkspace(project)
-                            }
-                        },
-                        onOpenBoard: { boardID in
-                            openProjectBoard(boardID)
-                        },
-                        onOpenMilestoneBoard: { milestone in
-                            openProjectBoard(milestone.boardID, milestoneCardID: milestone.cardID)
-                        },
-                        onOpenMilestoneArtifact: { link in
-                            openMilestoneArtifact(link)
-                        },
-                        onCreateBoard: {
+        } else if let standaloneDomain = selectedStandaloneDomainDashboard {
+            WorkspaceDomainDashboardView(
+                model: WorkspaceDomainDashboardProvider.model(
+                    for: standaloneDomain,
+                    bookmarks: bookmarksViewModel.bookmarks,
+                    bookmarkFolders: bookmarksViewModel.folders
+                ),
+                onBrowseAll: {
+                    openNavigationDomain(.browse)
+                }
+            )
+        } else {
+            switch WorkspaceRoutePresentation.presentation(for: workspaceRouter.currentRoute).contentKind {
+            case .home:
+                homeOverviewDashboard
+            case .libraryDashboard:
+                WorkspaceDomainDashboardView(
+                    model: WorkspaceDomainDashboardProvider.model(
+                        for: .browse,
+                        bookmarks: bookmarksViewModel.bookmarks,
+                        bookmarkFolders: bookmarksViewModel.folders
+                    ),
+                    onBrowseAll: {
+                        openNavigationDomain(.browse)
+                    }
+                )
+            case .libraryFeed:
+                emptyRouteState
+            case .folder:
+                if let selectedNavigationDomain {
+                    FolderBrowserView(
+                        folders: contextualFolders,
+                        bookmarks: bookmarksViewModel.bookmarks,
+                        notes: notesViewModel.notes,
+                        navigationDomain: selectedNavigationDomain,
+                        searchText: debouncedSearchText,
+                        onSelectFolder: { folderID in
+                            selectedFolderID = folderID
+                            expandPathToFolder(folderID)
                         }
                     )
                 } else {
-                    WorkspaceDomainDashboardView(
-                        model: WorkspaceDomainDashboardProvider.model(
-                            for: domain,
-                            bookmarks: bookmarksViewModel.bookmarks,
-                            bookmarkFolders: bookmarksViewModel.folders
-                        ),
-                        onBrowseAll: {
-                            openNavigationDomain(.browse)
-                        }
-                    )
+                    emptyRouteState
                 }
-            case .projectOverview(let projectID, _):
+            case .projectsHome:
+                ProjectWorkspaceOverviewView(
+                    model: ProjectWorkspaceOverviewProvider.model(
+                        for: projectWorkspaceCatalog.home,
+                        catalog: projectWorkspaceCatalog,
+                        boards: kanbanStorage.boards
+                    ),
+                    onOpenProject: { row in
+                        if let project = projectWorkspaceCatalog.workspace(id: row.projectID) {
+                            selectProjectWorkspace(project)
+                        }
+                    },
+                    onOpenBoard: { boardID in
+                        openProjectBoard(boardID)
+                    },
+                    onOpenMilestoneBoard: { milestone in
+                        openProjectBoard(milestone.boardID, milestoneCardID: milestone.cardID)
+                    },
+                    onOpenMilestoneArtifact: { link in
+                        openMilestoneArtifact(link)
+                    },
+                    onCreateBoard: {
+                    }
+                )
+            case .projectOverview(let projectID):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
                     projectWorkspaceContent(for: project, selectedKind: .overview) {
                         ProjectWorkspaceOverviewView(
@@ -243,7 +270,7 @@ extension CiderPanelView {
                         title: "Project not found"
                     )
                 }
-            case .projectInbox(let projectID, _):
+            case .projectInbox(let projectID):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
                     projectWorkspaceContent(for: project, selectedKind: .inbox) {
                         ProjectWorkspaceInboxView(
@@ -267,8 +294,8 @@ extension CiderPanelView {
                         title: "Project Inbox not found"
                     )
                 }
-            case .projectBoard(let projectID, let boardID, _):
-                if let project = projectWorkspaceCatalog.workspace(id: projectID),
+            case .projectBoard(let boardID, _):
+                if let project = selectedProjectWorkspace,
                    kanbanStorage.boards.contains(where: { $0.id == boardID }) {
                     projectWorkspaceContent(for: project, selectedKind: .board(boardID)) {
                         KanbanBoardView(
@@ -285,7 +312,7 @@ extension CiderPanelView {
                         title: "Project board not found"
                     )
                 }
-            case .projectSurface(let projectID, let surface, _):
+            case .projectSurface(let projectID, let surface):
                 if let project = projectWorkspaceCatalog.workspace(id: projectID) {
                     projectWorkspaceContent(for: project, selectedKind: .surface(surface)) {
                         if surface == .milestones {
@@ -345,38 +372,7 @@ extension CiderPanelView {
                         title: "Project surface not found"
                     )
                 }
-            case .projectReferences(let projectID, _):
-                if let project = projectWorkspaceCatalog.workspace(id: projectID) {
-                    projectWorkspaceContent(for: project, selectedKind: .surface(.assets)) {
-                        ProjectReferencesView(
-                            project: project,
-                            references: ProjectReferenceProvider.references(
-                                for: project,
-                                items: libraryViewModel.items,
-                                boards: kanbanStorage.boards
-                            ),
-                            boards: kanbanStorage.boards,
-                            onOpenItem: { item in
-                                openDashboardItem(item)
-                            },
-                            onOpenCard: { boardID, cardID in
-                                openKanbanCardDetail(boardID: boardID, cardID: cardID)
-                            },
-                            onLinkReferenceToCard: { ref, boardID, cardID in
-                                linkProjectReference(ref, toCardID: cardID, boardID: boardID)
-                            },
-                            onPromoteReference: { reference in
-                                promoteProjectReference(reference, in: project)
-                            }
-                        )
-                    }
-                } else {
-                    EmptyStateView(
-                        icon: "photo.on.rectangle",
-                        title: "Project references not found"
-                    )
-                }
-            case .spaceOverview(let spaceID, _):
+            case .spacesOverview(let spaceID):
                 if let space = spaceStorage.space(id: spaceID) {
                     let captureDashboard = try? CiderSpaceCaptureDashboardService().dashboard(for: space)
                     CiderSpaceOverviewView(
@@ -420,7 +416,13 @@ extension CiderPanelView {
                     presentationStyle: .embedded
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .search(_, let query):
+            case .search:
+                let query: String = {
+                    if case .library(.search(let query)) = workspaceRouter.currentRoute {
+                        return query
+                    }
+                    return debouncedSearchText
+                }()
                 HomeDashboardView(
                     bookmarksViewModel: bookmarksViewModel,
                     notesViewModel: notesViewModel,
@@ -485,22 +487,27 @@ extension CiderPanelView {
                     focusedItemID: focusedItemID
                 )
             }
-        } else {
-            if let domain = selectedNavigationDomain {
-                WorkspaceDomainDashboardView(
-                    model: WorkspaceDomainDashboardProvider.model(
-                        for: domain,
-                        bookmarks: bookmarksViewModel.bookmarks,
-                        bookmarkFolders: bookmarksViewModel.folders
-                    ),
-                    onBrowseAll: {
-                        openNavigationDomain(.browse)
-                    }
-                )
-            } else {
-                emptyRouteState
-            }
         }
+    }
+
+    var selectedStandaloneDomainDashboard: WorkspaceNavigationDomain? {
+        guard let domain = selectedNavigationDomain else { return nil }
+        switch domain {
+        case .mainDashboard, .browse, .projects, .spaces, .aiAssistant:
+            return nil
+        case .media, .bookmarks, .notes, .tasksEvents, .files, .people:
+            break
+        }
+        guard WorkspaceRoutePresentation.presentation(for: workspaceRouter.currentRoute).sidebarDomain != domain else {
+            return nil
+        }
+        guard WorkspaceDomainRoutePolicy.contentPresentation(
+            for: selectedDomainRouteKind,
+            in: domain
+        ) == .dashboard else {
+            return nil
+        }
+        return domain
     }
 
     var homeOverviewDashboard: some View {

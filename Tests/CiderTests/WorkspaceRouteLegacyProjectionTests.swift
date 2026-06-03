@@ -1,60 +1,54 @@
 import XCTest
 @testable import Cider
 
-final class WorkspaceRouteLegacyProjectionTests: XCTestCase {
-    func testLibraryRoutesProjectToLegacyShellState() {
+final class WorkspaceRouteSidebarProjectionTests: XCTestCase {
+    func testLibraryRoutesProjectToSidebarState() {
         let folderID = UUID()
         let tagID = UUID()
-        let searchTabID = UUID()
 
-        let expectations: [(WorkspaceRoute, WorkspaceRouteLegacyNavigationState)] = [
+        let expectations: [(WorkspaceRoute, WorkspaceRouteSidebarState)] = [
             (
                 .library(.files),
-                WorkspaceRouteLegacyNavigationState(
+                WorkspaceRouteSidebarState(
                     selectedNavigationDomain: .browse,
-                    selectedDomainRouteKind: .files,
-                    selectedTab: .domainDashboard(.browse)
+                    selectedDomainRouteKind: .files
                 )
             ),
             (
                 .library(.inbox),
-                WorkspaceRouteLegacyNavigationState(
+                WorkspaceRouteSidebarState(
                     selectedNavigationDomain: .browse,
-                    selectedDomainRouteKind: .inbox,
-                    selectedTab: .domainDashboard(.browse)
+                    selectedDomainRouteKind: .inbox
                 )
             ),
             (
                 .library(.folder(folderID)),
-                WorkspaceRouteLegacyNavigationState(
+                WorkspaceRouteSidebarState(
                     selectedNavigationDomain: .browse,
                     selectedDomainRouteKind: .folders,
-                    selectedFolderID: folderID,
-                    selectedTab: .domainDashboard(.browse)
+                    selectedFolderID: folderID
                 )
             ),
             (
                 .library(.tag(tagID)),
-                WorkspaceRouteLegacyNavigationState(
+                WorkspaceRouteSidebarState(
                     selectedNavigationDomain: .browse,
                     selectedDomainRouteKind: .tags,
-                    selectedTagIDs: [tagID],
-                    selectedTab: .domainDashboard(.browse)
+                    selectedTagIDs: [tagID]
                 )
             ),
             (
                 .library(.search("cider")),
-                WorkspaceRouteLegacyNavigationState(
+                WorkspaceRouteSidebarState(
                     selectedNavigationDomain: .browse,
-                    selectedDomainRouteKind: .all,
-                    selectedTab: .search(id: searchTabID, query: "cider")
+                    selectedDomainRouteKind: .all
                 )
             ),
         ]
 
         for (route, expected) in expectations {
             XCTAssertEqual(
-                WorkspaceRouteLegacyProjection.state(for: route, searchTabID: searchTabID),
+                WorkspaceRouteSidebarProjection.state(for: route),
                 expected,
                 "\(route)"
             )

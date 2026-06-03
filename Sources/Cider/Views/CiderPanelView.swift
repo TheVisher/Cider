@@ -12,7 +12,6 @@ struct CiderPanelView: View {
     @ObservedObject var spaceStorage = CiderSpaceStorage.shared
     @ObservedObject var mediaItemStorage = MediaItemStorage()
     @StateObject var libraryViewModel = LibraryViewModel()
-    @State var selectedTab: CiderTab?
     @State var isCollapsed = false
     @State var selectedFolderID: UUID?
     @State var selectedItemIDs: Set<String> = []
@@ -173,34 +172,6 @@ struct CiderPanelView: View {
         }
         .onChange(of: selectedNavigationDomain) { _, newDomain in
             folderContentScope = WorkspaceDomainContentScope.defaultScope(for: newDomain)
-            if newDomain == .mainDashboard || newDomain == .aiAssistant {
-                normalizeSelectedTabForCurrentDomain()
-            }
-            updateLivePerformanceContext()
-        }
-        .onChange(of: selectedTab) { _, _ in
-            let compatibilityRoute = WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
-                selectedTab: selectedTab,
-                selectedNavigationDomain: selectedNavigationDomain,
-                selectedDomainRouteKind: selectedDomainRouteKind,
-                selectedFolderID: selectedFolderID,
-                selectedTagIDs: selectedTagIDs,
-                selectedProjectWorkspaceID: selectedProjectWorkspaceID
-            ))
-            if compatibilityRoute == workspaceRouter.currentRoute {
-                updateLivePerformanceContext()
-                return
-            }
-
-            selectedFolderID = nil
-            selectedTagIDs.removeAll()
-            selectedItemIDs.removeAll()
-            focusedItemID = nil
-            selectionAnchorID = nil
-            searchDebounceTask?.cancel()
-            sidebarSearchText = ""
-            debouncedSearchText = ""
-            closeAllDetails()
             updateLivePerformanceContext()
         }
         .onChange(of: selectedFolderID) { _, newFolderID in

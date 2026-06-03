@@ -605,7 +605,7 @@ enum WorkspaceRouteTransitionPolicy {
 }
 
 struct WorkspaceRouterCompatibilityState: Equatable {
-    var selectedTab: CiderTab?
+    var legacyTab: CiderTab?
     var selectedNavigationDomain: WorkspaceNavigationDomain?
     var selectedDomainRouteKind: WorkspaceDomainRouteKind
     var selectedFolderID: UUID?
@@ -613,14 +613,14 @@ struct WorkspaceRouterCompatibilityState: Equatable {
     var selectedProjectWorkspaceID: String?
 
     init(
-        selectedTab: CiderTab? = nil,
+        legacyTab: CiderTab? = nil,
         selectedNavigationDomain: WorkspaceNavigationDomain? = nil,
         selectedDomainRouteKind: WorkspaceDomainRouteKind = .overview,
         selectedFolderID: UUID? = nil,
         selectedTagIDs: Set<UUID> = [],
         selectedProjectWorkspaceID: String? = nil
     ) {
-        self.selectedTab = selectedTab
+        self.legacyTab = legacyTab
         self.selectedNavigationDomain = selectedNavigationDomain
         self.selectedDomainRouteKind = selectedDomainRouteKind
         self.selectedFolderID = selectedFolderID
@@ -629,12 +629,11 @@ struct WorkspaceRouterCompatibilityState: Equatable {
     }
 }
 
-struct WorkspaceRouteLegacyNavigationState: Equatable {
+struct WorkspaceRouteSidebarState: Equatable {
     var selectedNavigationDomain: WorkspaceNavigationDomain?
     var selectedDomainRouteKind: WorkspaceDomainRouteKind
     var selectedFolderID: UUID?
     var selectedTagIDs: Set<UUID>
-    var selectedTab: CiderTab?
     var selectedProjectWorkspaceID: String?
 
     init(
@@ -642,47 +641,37 @@ struct WorkspaceRouteLegacyNavigationState: Equatable {
         selectedDomainRouteKind: WorkspaceDomainRouteKind = .overview,
         selectedFolderID: UUID? = nil,
         selectedTagIDs: Set<UUID> = [],
-        selectedTab: CiderTab? = nil,
         selectedProjectWorkspaceID: String? = nil
     ) {
         self.selectedNavigationDomain = selectedNavigationDomain
         self.selectedDomainRouteKind = selectedDomainRouteKind
         self.selectedFolderID = selectedFolderID
         self.selectedTagIDs = selectedTagIDs
-        self.selectedTab = selectedTab
         self.selectedProjectWorkspaceID = selectedProjectWorkspaceID
     }
 }
 
-enum WorkspaceRouteLegacyProjection {
+enum WorkspaceRouteSidebarProjection {
     static func state(
-        for route: WorkspaceRoute,
-        searchTabID: UUID = UUID()
-    ) -> WorkspaceRouteLegacyNavigationState {
+        for route: WorkspaceRoute
+    ) -> WorkspaceRouteSidebarState {
         switch route {
         case .home:
-            return WorkspaceRouteLegacyNavigationState(
-                selectedNavigationDomain: nil,
-                selectedTab: .domainDashboard(.mainDashboard)
-            )
+            return WorkspaceRouteSidebarState(selectedNavigationDomain: nil)
         case .library(let libraryRoute):
-            return libraryState(for: libraryRoute, searchTabID: searchTabID)
+            return libraryState(for: libraryRoute)
         case .projects(let projectRoute):
             return projectState(for: projectRoute)
         case .spaces(let spaceRoute):
             return spaceState(for: spaceRoute)
         case .ai:
-            return WorkspaceRouteLegacyNavigationState(
-                selectedNavigationDomain: .aiAssistant,
-                selectedTab: .aiAssistant
-            )
+            return WorkspaceRouteSidebarState(selectedNavigationDomain: .aiAssistant)
         }
     }
 
     private static func libraryState(
-        for route: LibraryRoute,
-        searchTabID: UUID
-    ) -> WorkspaceRouteLegacyNavigationState {
+        for route: LibraryRoute
+    ) -> WorkspaceRouteSidebarState {
         switch route {
         case .overview:
             return libraryState(routeKind: .overview)
@@ -701,39 +690,31 @@ enum WorkspaceRouteLegacyProjection {
         case .folder(let folderID):
             return libraryState(routeKind: .folders, selectedFolderID: folderID)
         case .tags:
-            return libraryState(routeKind: .tags, selectedTab: .tag(id: searchTabID))
+            return libraryState(routeKind: .tags)
         case .tag(let tagID):
             return libraryState(routeKind: .tags, selectedTagIDs: [tagID])
-        case .search(let query):
-            return libraryState(
-                routeKind: .all,
-                selectedTab: .search(id: searchTabID, query: query)
-            )
+        case .search:
+            return libraryState(routeKind: .all)
         }
     }
 
     private static func libraryState(
         routeKind: WorkspaceDomainRouteKind,
         selectedFolderID: UUID? = nil,
-        selectedTagIDs: Set<UUID> = [],
-        selectedTab: CiderTab = .domainDashboard(.browse)
-    ) -> WorkspaceRouteLegacyNavigationState {
-        WorkspaceRouteLegacyNavigationState(
+        selectedTagIDs: Set<UUID> = []
+    ) -> WorkspaceRouteSidebarState {
+        WorkspaceRouteSidebarState(
             selectedNavigationDomain: .browse,
             selectedDomainRouteKind: routeKind,
             selectedFolderID: selectedFolderID,
-            selectedTagIDs: selectedTagIDs,
-            selectedTab: selectedTab
+            selectedTagIDs: selectedTagIDs
         )
     }
 
-    private static func projectState(for route: ProjectRoute) -> WorkspaceRouteLegacyNavigationState {
+    private static func projectState(for route: ProjectRoute) -> WorkspaceRouteSidebarState {
         switch route {
         case .home:
-            return WorkspaceRouteLegacyNavigationState(
-                selectedNavigationDomain: .projects,
-                selectedTab: .domainDashboard(.projects)
-            )
+            return WorkspaceRouteSidebarState(selectedNavigationDomain: .projects)
         case .workspace(let projectID, let section):
             return projectWorkspaceState(projectID: projectID, section: section)
         case .browseAllBoards(let section):
@@ -744,49 +725,19 @@ enum WorkspaceRouteLegacyProjection {
     private static func projectWorkspaceState(
         projectID: String,
         section: ProjectSectionRoute
-    ) -> WorkspaceRouteLegacyNavigationState {
-        WorkspaceRouteLegacyNavigationState(
+    ) -> WorkspaceRouteSidebarState {
+        WorkspaceRouteSidebarState(
             selectedNavigationDomain: .projects,
-            selectedTab: projectTab(projectID: projectID, section: section),
             selectedProjectWorkspaceID: projectID
         )
     }
 
-    private static func projectTab(projectID: String, section: ProjectSectionRoute) -> CiderTab {
-        switch section {
-        case .overview:
-            return .projectOverview(projectID: projectID, name: "Overview")
-        case .inbox:
-            return .projectInbox(projectID: projectID, name: "Inbox")
-        case .board(let boardID, _):
-            return .projectBoard(projectID: projectID, boardID: boardID, name: "Board")
-        case .milestones:
-            return .projectSurface(projectID: projectID, surface: .milestones, name: ProjectWorkspaceSurface.milestones.tabName)
-        case .docs:
-            return .projectSurface(projectID: projectID, surface: .notes, name: ProjectWorkspaceSurface.notes.tabName)
-        case .decisions:
-            return .projectSurface(projectID: projectID, surface: .decisions, name: ProjectWorkspaceSurface.decisions.tabName)
-        case .assets:
-            return .projectSurface(projectID: projectID, surface: .assets, name: ProjectWorkspaceSurface.assets.tabName)
-        case .qa:
-            return .projectSurface(projectID: projectID, surface: .qaAudits, name: ProjectWorkspaceSurface.qaAudits.tabName)
-        case .plans:
-            return .projectSurface(projectID: projectID, surface: .plansHandoffs, name: ProjectWorkspaceSurface.plansHandoffs.tabName)
-        }
-    }
-
-    private static func spaceState(for route: SpaceRoute) -> WorkspaceRouteLegacyNavigationState {
+    private static func spaceState(for route: SpaceRoute) -> WorkspaceRouteSidebarState {
         switch route {
-        case .overview(let spaceID):
-            return WorkspaceRouteLegacyNavigationState(
-                selectedNavigationDomain: .spaces,
-                selectedTab: .spaceOverview(id: spaceID, name: "Space")
-            )
+        case .overview:
+            return WorkspaceRouteSidebarState(selectedNavigationDomain: .spaces)
         case .manager:
-            return WorkspaceRouteLegacyNavigationState(
-                selectedNavigationDomain: .spaces,
-                selectedTab: .spacesManager
-            )
+            return WorkspaceRouteSidebarState(selectedNavigationDomain: .spaces)
         }
     }
 }
@@ -799,14 +750,14 @@ enum WorkspaceRouterCompatibility {
         if let folderID = state.selectedFolderID {
             return .library(.folder(folderID))
         }
-        if case .domainDashboard(let domain) = state.selectedTab {
+        if case .domainDashboard(let domain) = state.legacyTab {
             return route(
                 for: domain,
                 routeKind: state.selectedDomainRouteKind,
                 selectedProjectWorkspaceID: state.selectedProjectWorkspaceID
             )
         }
-        if let tabRoute = state.selectedTab.flatMap(route(from:)) {
+        if let tabRoute = state.legacyTab.flatMap(route(from:)) {
             return tabRoute
         }
         return route(
