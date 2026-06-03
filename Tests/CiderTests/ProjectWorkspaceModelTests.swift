@@ -192,7 +192,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertTrue(catalog.home.surfaces.isEmpty)
     }
 
-    func testSidebarTreeHidesLegacyProjectBoardsFromProjectChildren() {
+    func testSidebarTreeExposesRouteBackedProjectChildren() {
         let cider = ProjectWorkspace(
             id: "cider",
             kind: .project,
@@ -211,7 +211,76 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             ]
         )
 
-        XCTAssertTrue(destinations.isEmpty)
+        XCTAssertEqual(destinations.map(\.title), [
+            "Overview",
+            "Inbox",
+            "Board",
+            "Milestones",
+            "Docs",
+            "Decisions",
+            "Assets",
+            "QA",
+            "Plans"
+        ])
+        XCTAssertEqual(destinations.map(\.kind), [
+            .overview,
+            .inbox,
+            .board("2afee0"),
+            .surface(.milestones),
+            .surface(.notes),
+            .surface(.decisions),
+            .surface(.assets),
+            .surface(.qaAudits),
+            .surface(.plansHandoffs)
+        ])
+        XCTAssertEqual(destinations.first(where: { $0.kind == .board("2afee0") })?.badge, "0")
+    }
+
+    func testProjectWorkspaceRoutePolicyMapsWorkspaceDestinationsAndLocalTabs() {
+        let cider = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0"],
+            referenceSearchTerms: ["cider"]
+        )
+        let browseAllBoards = ProjectWorkspace(
+            id: "browse-all-boards",
+            kind: .browseAllBoards,
+            title: "Browse All Boards",
+            subtitle: "All boards",
+            boardIDs: ["2afee0"],
+            referenceSearchTerms: []
+        )
+
+        XCTAssertEqual(ProjectWorkspaceRoutePolicy.route(for: cider), .projects(.workspace(projectID: "cider", section: .overview)))
+        XCTAssertEqual(ProjectWorkspaceRoutePolicy.route(for: browseAllBoards), .projects(.browseAllBoards(section: .overview)))
+        XCTAssertEqual(
+            ProjectWorkspaceRoutePolicy.route(
+                for: ProjectWorkspaceSidebarDestination(
+                    id: "board-2afee0",
+                    title: "Board",
+                    systemImage: "rectangle.split.3x1",
+                    kind: .board("2afee0"),
+                    isSelectable: true
+                ),
+                in: cider
+            ),
+            .projects(.workspace(projectID: "cider", section: .board(boardID: "2afee0", milestoneCardID: nil)))
+        )
+        XCTAssertEqual(
+            ProjectWorkspaceRoutePolicy.route(for: .surface(.qaAudits), in: cider),
+            .projects(.workspace(projectID: "cider", section: .qa))
+        )
+        XCTAssertEqual(
+            ProjectWorkspaceRoutePolicy.route(
+                forBoardID: "2afee0",
+                milestoneCardID: "milestone-1",
+                in: browseAllBoards
+            ),
+            .projects(.browseAllBoards(section: .board(boardID: "2afee0", milestoneCardID: "milestone-1")))
+        )
     }
 
     func testProjectLocalTabsUseCompactProjectNavigationLabels() {

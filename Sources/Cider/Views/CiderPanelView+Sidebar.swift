@@ -346,53 +346,12 @@ extension CiderPanelView {
     }
 
     func selectProjectWorkspace(_ workspace: ProjectWorkspace) {
-        selectedFolderID = nil
-        selectedTagIDs.removeAll()
-        selectedItemIDs.removeAll()
-        focusedItemID = nil
-        selectionAnchorID = nil
-        closeAllDetails()
-        selectedDomainRouteKind = .overview
-
-        switch workspace.kind {
-        case .home:
-            selectedProjectWorkspaceID = nil
-            selectedNavigationDomain = .projects
-            selectedTab = .domainDashboard(.projects)
-        case .project:
-            selectedProjectWorkspaceID = workspace.id
-            selectedNavigationDomain = .projects
-            selectedTab = .projectOverview(projectID: workspace.id, name: "Overview")
-        case .browseAllBoards:
-            selectedProjectWorkspaceID = workspace.id
-            selectedNavigationDomain = .projects
-            selectedTab = .projectOverview(projectID: workspace.id, name: "All Boards")
-        }
+        navigateToWorkspaceRoute(ProjectWorkspaceRoutePolicy.route(for: workspace))
     }
 
     func selectProjectWorkspaceDestination(_ destination: ProjectWorkspaceSidebarDestination, in workspace: ProjectWorkspace) {
-        selectedFolderID = nil
-        selectedTagIDs.removeAll()
-        selectedItemIDs.removeAll()
-        focusedItemID = nil
-        selectionAnchorID = nil
-        closeAllDetails()
-        selectedProjectWorkspaceID = workspace.id
-        selectedNavigationDomain = .projects
-        selectedDomainRouteKind = .overview
-
-        switch destination.kind {
-        case .overview:
-            selectedTab = .projectOverview(projectID: workspace.id, name: "Overview")
-        case .inbox:
-            selectedTab = .projectInbox(projectID: workspace.id, name: "Inbox")
-        case .boardsGroup:
-            break
-        case .board(let boardID):
-            openProjectBoard(boardID)
-        case .surface(let surface):
-            selectedTab = .projectSurface(projectID: workspace.id, surface: surface, name: surface.tabName)
-        }
+        guard destination.isSelectable else { return }
+        navigateToWorkspaceRoute(ProjectWorkspaceRoutePolicy.route(for: destination, in: workspace))
     }
 
     func normalizeSelectedTabForCurrentDomain() {

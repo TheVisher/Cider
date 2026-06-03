@@ -319,7 +319,127 @@ enum ProjectWorkspaceSidebarTree {
         boards: [KanbanBoard]
     ) -> [ProjectWorkspaceSidebarDestination] {
         guard workspace.kind == .project else { return [] }
-        return []
+        let localTabs = ProjectWorkspaceLocalTabs.tabs(
+            for: workspace,
+            boards: boards,
+            selectedKind: nil
+        )
+
+        return localTabs.map { tab in
+            ProjectWorkspaceSidebarDestination(
+                id: tab.id,
+                title: tab.title,
+                systemImage: tab.systemImage,
+                kind: ProjectWorkspaceSidebarDestinationKind(kind: tab.kind),
+                isSelectable: true,
+                badge: tab.badge
+            )
+        }
+    }
+}
+
+enum ProjectWorkspaceRoutePolicy {
+    static func route(for workspace: ProjectWorkspace) -> WorkspaceRoute {
+        switch workspace.kind {
+        case .home:
+            return .projects(.home)
+        case .project:
+            return .projects(.workspace(projectID: workspace.id, section: .overview))
+        case .browseAllBoards:
+            return .projects(.browseAllBoards(section: .overview))
+        }
+    }
+
+    static func route(
+        for destination: ProjectWorkspaceSidebarDestination,
+        in workspace: ProjectWorkspace
+    ) -> WorkspaceRoute {
+        switch destination.kind {
+        case .overview:
+            return route(for: .overview, in: workspace)
+        case .inbox:
+            return route(for: .inbox, in: workspace)
+        case .boardsGroup:
+            return route(for: workspace)
+        case .board(let boardID):
+            return route(forBoardID: boardID, milestoneCardID: nil, in: workspace)
+        case .surface(let surface):
+            return route(for: .surface(surface), in: workspace)
+        }
+    }
+
+    static func route(
+        for localTab: ProjectWorkspaceLocalTabKind,
+        in workspace: ProjectWorkspace
+    ) -> WorkspaceRoute {
+        switch localTab {
+        case .overview:
+            return projectRoute(for: workspace, section: .overview)
+        case .inbox:
+            return projectRoute(for: workspace, section: .inbox)
+        case .board(let boardID):
+            return route(forBoardID: boardID, milestoneCardID: nil, in: workspace)
+        case .surface(let surface):
+            return projectRoute(for: workspace, section: section(for: surface))
+        }
+    }
+
+    static func route(
+        forBoardID boardID: String,
+        milestoneCardID: String?,
+        in workspace: ProjectWorkspace?
+    ) -> WorkspaceRoute {
+        projectRoute(
+            for: workspace,
+            section: .board(boardID: boardID, milestoneCardID: milestoneCardID)
+        )
+    }
+
+    private static func projectRoute(
+        for workspace: ProjectWorkspace?,
+        section: ProjectSectionRoute
+    ) -> WorkspaceRoute {
+        guard let workspace, workspace.kind != .browseAllBoards else {
+            return .projects(.browseAllBoards(section: section))
+        }
+        guard workspace.kind == .project else {
+            return .projects(.home)
+        }
+        return .projects(.workspace(projectID: workspace.id, section: section))
+    }
+
+    private static func section(for surface: ProjectWorkspaceSurface) -> ProjectSectionRoute {
+        switch surface {
+        case .boards:
+            return .overview
+        case .milestones:
+            return .milestones
+        case .notes:
+            return .docs
+        case .decisions:
+            return .decisions
+        case .assets:
+            return .assets
+        case .qaAudits:
+            return .qa
+        case .plansHandoffs:
+            return .plans
+        }
+    }
+}
+
+private extension ProjectWorkspaceSidebarDestinationKind {
+    init(kind: ProjectWorkspaceLocalTabKind) {
+        switch kind {
+        case .overview:
+            self = .overview
+        case .inbox:
+            self = .inbox
+        case .board(let boardID):
+            self = .board(boardID)
+        case .surface(let surface):
+            self = .surface(surface)
+        }
     }
 }
 

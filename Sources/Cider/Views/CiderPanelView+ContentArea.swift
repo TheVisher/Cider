@@ -666,19 +666,13 @@ extension CiderPanelView {
         } else {
             kanbanMilestoneFilterByBoardID[boardID] = nil
         }
-        let projectID = selectedProjectWorkspace?.id
-        let route: WorkspaceRoute
-        if let projectID, projectID != projectWorkspaceCatalog.browseAllBoards.id {
-            route = .projects(.workspace(
-                projectID: projectID,
-                section: .board(boardID: board.id, milestoneCardID: milestoneCardID)
-            ))
-        } else {
-            route = .projects(.browseAllBoards(
-                section: .board(boardID: board.id, milestoneCardID: milestoneCardID)
-            ))
-        }
-        navigateToWorkspaceRoute(route)
+        navigateToWorkspaceRoute(
+            ProjectWorkspaceRoutePolicy.route(
+                forBoardID: board.id,
+                milestoneCardID: milestoneCardID,
+                in: selectedProjectWorkspace
+            )
+        )
     }
 
     func openMilestoneArtifact(_ link: ProjectWorkspaceMilestoneArtifactLink) {
@@ -687,21 +681,6 @@ extension CiderPanelView {
               let note = notesStorage.notes.first(where: { $0.id == noteID })
         else { return }
         openNoteDetail(note)
-    }
-
-    func projectHeaderTabs(for boardID: String) -> [ProjectWorkspaceLocalTab] {
-        guard selectedNavigationDomain == .projects,
-              let project = selectedProjectWorkspace,
-              project.kind == .project,
-              project.boardIDs.contains(boardID) else {
-            return []
-        }
-
-        return ProjectWorkspaceLocalTabs.tabs(
-            for: project,
-            boards: kanbanStorage.boards,
-            selectedKind: .board(boardID)
-        )
     }
 
     func projectHeaderTabs(
@@ -747,26 +726,7 @@ extension CiderPanelView {
 
     func selectProjectHeaderTab(_ kind: ProjectWorkspaceLocalTabKind) {
         guard let project = selectedProjectWorkspace else { return }
-        selectedFolderID = nil
-        selectedTagIDs.removeAll()
-        selectedItemIDs.removeAll()
-        focusedItemID = nil
-        selectionAnchorID = nil
-        closeAllDetails()
-        selectedProjectWorkspaceID = project.id
-        selectedNavigationDomain = .projects
-        selectedDomainRouteKind = .overview
-
-        switch kind {
-        case .overview:
-            selectedTab = .projectOverview(projectID: project.id, name: "Overview")
-        case .inbox:
-            selectedTab = .projectInbox(projectID: project.id, name: "Inbox")
-        case .board(let boardID):
-            openProjectBoard(boardID)
-        case .surface(let surface):
-            selectedTab = .projectSurface(projectID: project.id, surface: surface, name: surface.tabName)
-        }
+        navigateToWorkspaceRoute(ProjectWorkspaceRoutePolicy.route(for: kind, in: project))
     }
 
     func createProjectBoard(in project: ProjectWorkspace) {

@@ -57,7 +57,7 @@ extension CiderPanelView {
             fromProjectID: association.project.id
         )
         if selectedTab == tab {
-            selectedTab = .projectOverview(projectID: association.project.id, name: "Overview")
+            navigateToWorkspaceRoute(ProjectWorkspaceRoutePolicy.route(for: association.project))
         }
         return true
     }
@@ -97,8 +97,9 @@ extension CiderPanelView {
 
         projectAssociationStore.include(boardID: board.id, inProjectID: project.id)
 
-        selectedFolderID = nil
-        selectedTab = .projectBoard(projectID: project.id, boardID: board.id, name: board.name)
+        navigateToWorkspaceRoute(
+            ProjectWorkspaceRoutePolicy.route(forBoardID: board.id, milestoneCardID: nil, in: project)
+        )
     }
 
     func deleteTab(_ tab: CiderTab) {

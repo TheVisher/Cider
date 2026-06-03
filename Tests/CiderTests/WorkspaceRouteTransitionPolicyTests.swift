@@ -42,24 +42,31 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
     }
 
     func testProjectRoutesExposeSelectedLocalTabKind() {
-        XCTAssertEqual(
-            WorkspaceRoutePresentation.presentation(
-                for: .projects(.workspace(projectID: "cider", section: .overview))
-            ).selectedProjectLocalTabKind,
-            .overview
-        )
-        XCTAssertEqual(
-            WorkspaceRoutePresentation.presentation(
-                for: .projects(.workspace(projectID: "cider", section: .board(boardID: "2afee0", milestoneCardID: nil)))
-            ).selectedProjectLocalTabKind,
-            .board("2afee0")
-        )
-        XCTAssertEqual(
-            WorkspaceRoutePresentation.presentation(
-                for: .projects(.workspace(projectID: "cider", section: .qa))
-            ).selectedProjectLocalTabKind,
-            .surface(.qaAudits)
-        )
+        let expectations: [(ProjectSectionRoute, ProjectWorkspaceLocalTabKind, WorkspaceRouteContentKind)] = [
+            (.overview, .overview, .projectOverview(projectID: "cider")),
+            (.inbox, .inbox, .projectInbox(projectID: "cider")),
+            (
+                .board(boardID: "2afee0", milestoneCardID: "m1"),
+                .board("2afee0"),
+                .projectBoard(boardID: "2afee0", milestoneCardID: "m1")
+            ),
+            (.milestones, .surface(.milestones), .projectSurface(projectID: "cider", surface: .milestones)),
+            (.docs, .surface(.notes), .projectSurface(projectID: "cider", surface: .notes)),
+            (.decisions, .surface(.decisions), .projectSurface(projectID: "cider", surface: .decisions)),
+            (.assets, .surface(.assets), .projectSurface(projectID: "cider", surface: .assets)),
+            (.qa, .surface(.qaAudits), .projectSurface(projectID: "cider", surface: .qaAudits)),
+            (.plans, .surface(.plansHandoffs), .projectSurface(projectID: "cider", surface: .plansHandoffs)),
+        ]
+
+        for (section, selectedLocalTabKind, contentKind) in expectations {
+            let presentation = WorkspaceRoutePresentation.presentation(
+                for: .projects(.workspace(projectID: "cider", section: section))
+            )
+
+            XCTAssertEqual(presentation.selectedProjectLocalTabKind, selectedLocalTabKind, "\(section)")
+            XCTAssertEqual(presentation.contentKind, contentKind, "\(section)")
+        }
+
         XCTAssertNil(WorkspaceRoutePresentation.presentation(for: .library(.files)).selectedProjectLocalTabKind)
     }
 
