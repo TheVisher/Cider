@@ -146,7 +146,12 @@ final class LegacyViewQuarantineTests: XCTestCase {
                 "selectedTab: selectedTab",
                 "openLibraryView(",
                 "selectedTab = .domainDashboard(.browse)",
-                "selectedTab = .domainDashboard(domain)"
+                "selectedTab = .domainDashboard(domain)",
+                "selectedTab = headerTab",
+                "selectedTab = legacyState.selectedTab",
+                "selectedTab = .domainDashboard(.mainDashboard)",
+                "selectedTab = .domainDashboard(.aiAssistant)",
+                "selectedTab = WorkspaceRouteLegacyProjection.state(for: workspaceRouter.currentRoute).selectedTab"
             ],
             "Sources/Cider/Views/Shared/ProjectsDomainSidebarView.swift": [
                 "let selectedTab: CiderTab?",
