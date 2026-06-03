@@ -138,7 +138,8 @@ final class LegacyViewQuarantineTests: XCTestCase {
             ],
             "Sources/Cider/Views/CiderPanelView+ContentArea.swift": [
                 "} else if let tab = selectedTab {",
-                "switch tab {"
+                "switch tab {",
+                "noTabsEmptyState"
             ],
             "Sources/Cider/Views/CiderPanelView+Sidebar.swift": [
                 "guard case .spaceOverview(let id, _) = selectedTab",

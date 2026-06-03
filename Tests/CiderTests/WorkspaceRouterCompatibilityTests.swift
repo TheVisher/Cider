@@ -92,6 +92,30 @@ final class WorkspaceRouterCompatibilityTests: XCTestCase {
         )
     }
 
+    func testCompatibilityMapsBrowseRouteKindsWithoutSelectedTab() {
+        let cases: [(WorkspaceDomainRouteKind, WorkspaceRoute)] = [
+            (.overview, .library(.overview)),
+            (.inbox, .library(.inbox)),
+            (.all, .library(.all)),
+            (.bookmarks, .library(.bookmarks)),
+            (.notes, .library(.notes)),
+            (.files, .library(.files)),
+            (.folders, .library(.folders)),
+            (.tags, .library(.tags))
+        ]
+
+        for (routeKind, expectedRoute) in cases {
+            XCTAssertEqual(
+                WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
+                    selectedNavigationDomain: .browse,
+                    selectedDomainRouteKind: routeKind
+                )),
+                expectedRoute,
+                "\(routeKind)"
+            )
+        }
+    }
+
     func testWorkspaceRouterNavigateUpdatesCurrentRouteAndAppliesTransitionPolicy() {
         var router = WorkspaceRouter(
             currentRoute: .library(.folder(UUID())),

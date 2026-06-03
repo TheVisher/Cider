@@ -498,7 +498,7 @@ extension CiderPanelView {
                     }
                 )
             } else {
-                noTabsEmptyState
+                emptyRouteState
             }
         }
     }
@@ -612,18 +612,18 @@ extension CiderPanelView {
 
     // MARK: - Empty Route State
 
-    var noTabsEmptyState: some View {
+    var emptyRouteState: some View {
         VStack(spacing: Spacing.lg) {
-            Image(systemName: "rectangle.stack.badge.plus")
+            Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
                 .font(CiderFont.emptyStateIconLarge)
                 .foregroundColor(CiderColors.tertiary)
             Text("No view selected")
                 .font(CiderFont.headingSemibold)
                 .foregroundColor(CiderColors.secondary)
-            Text("Create a library view to start organizing")
+            Text("Choose a workspace route from the sidebar")
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
-            Button("New View") { showNewItemPicker = true }
+            Button("Open Home") { navigateToWorkspaceRoute(.home) }
                 .buttonStyle(CiderAccentButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
