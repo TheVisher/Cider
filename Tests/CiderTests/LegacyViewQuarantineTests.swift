@@ -147,6 +147,20 @@ final class LegacyViewQuarantineTests: XCTestCase {
                 "selectedTab?.displayName",
                 "guard let selectedTab",
                 "switch selectedTab"
+            ],
+            "Sources/Cider/Models/CiderPanelViewOptionsPolicy.swift": [
+                "selectedTab: CiderTab?",
+                "case .search = selectedTab"
+            ],
+            "Sources/Cider/Views/CiderPanelView+SidebarFooter.swift": [
+                "selectedTab: selectedTab"
+            ],
+            "Sources/Cider/Views/CiderPanelView+TitleBar.swift": [
+                "case .spaceOverview",
+                "selectedTab == .spacesManager",
+                "selectedTab?.displayName",
+                "selectedTab.displayName",
+                "selectedTab.systemImage"
             ]
         ]
 

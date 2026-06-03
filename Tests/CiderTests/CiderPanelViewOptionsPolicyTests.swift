@@ -8,7 +8,6 @@ final class CiderPanelViewOptionsPolicyTests: XCTestCase {
             selectedNavigationDomain: .browse,
             hasSelectedFolder: false,
             hasSelectedTags: false,
-            selectedTab: .domainDashboard(.browse),
             showsLibraryRouteFeed: true
         ))
     }
@@ -19,7 +18,6 @@ final class CiderPanelViewOptionsPolicyTests: XCTestCase {
             selectedNavigationDomain: .browse,
             hasSelectedFolder: false,
             hasSelectedTags: false,
-            selectedTab: .search(id: UUID(), query: "cider"),
             showsLibraryRouteFeed: false
         ))
         XCTAssertTrue(CiderPanelViewOptionsPolicy.showsLibraryViewOptions(
@@ -27,7 +25,6 @@ final class CiderPanelViewOptionsPolicyTests: XCTestCase {
             selectedNavigationDomain: .browse,
             hasSelectedFolder: false,
             hasSelectedTags: true,
-            selectedTab: .domainDashboard(.browse),
             showsLibraryRouteFeed: false
         ))
     }
@@ -38,7 +35,6 @@ final class CiderPanelViewOptionsPolicyTests: XCTestCase {
             selectedNavigationDomain: nil,
             hasSelectedFolder: false,
             hasSelectedTags: false,
-            selectedTab: .domainDashboard(.mainDashboard),
             showsLibraryRouteFeed: false
         ))
     }
@@ -49,7 +45,6 @@ final class CiderPanelViewOptionsPolicyTests: XCTestCase {
             selectedNavigationDomain: .projects,
             hasSelectedFolder: false,
             hasSelectedTags: false,
-            selectedTab: .domainDashboard(.projects),
             showsLibraryRouteFeed: false
         ))
     }

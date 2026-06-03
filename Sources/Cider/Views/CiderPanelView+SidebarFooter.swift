@@ -290,7 +290,6 @@ extension CiderPanelView {
             selectedNavigationDomain: selectedNavigationDomain,
             hasSelectedFolder: selectedFolderID != nil,
             hasSelectedTags: !selectedTagIDs.isEmpty,
-            selectedTab: selectedTab,
             showsLibraryRouteFeed: selectedLibraryRouteFeed != nil
         )
     }

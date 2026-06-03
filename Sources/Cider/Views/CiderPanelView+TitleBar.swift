@@ -89,19 +89,13 @@ extension CiderPanelView {
         if let route = currentDomainRoute, selectedNavigationDomain == .browse {
             return route.title
         }
-        if case .spaceOverview(_, let name) = selectedTab {
-            return name
-        }
-        if selectedTab == .spacesManager {
-            return "All Spaces"
-        }
         if selectedNavigationDomain == nil {
             return "Home"
         }
         if selectedNavigationDomain == .projects, let workspace = selectedProjectWorkspace {
             return workspace.title
         }
-        return selectedNavigationDomain?.title ?? selectedTab?.displayName ?? "Cider"
+        return selectedNavigationDomain?.title ?? "Cider"
     }
 
     private var currentLocationSubtitle: String? {
@@ -118,17 +112,6 @@ extension CiderPanelView {
         if let route = currentDomainRoute, selectedNavigationDomain == .browse {
             return "Library / \(route.title)"
         }
-        if selectedNavigationDomain == .projects,
-           selectedTab != .domainDashboard(.projects),
-           let selectedTab {
-            return "Projects / \(selectedTab.displayName)"
-        }
-        if case .spaceOverview(let spaceID, _) = selectedTab {
-            return spaceStorage.space(id: spaceID)?.purpose ?? "Space"
-        }
-        if selectedTab == .spacesManager {
-            return "Create, pin, and manage Spaces"
-        }
         if let domain = selectedNavigationDomain {
             return domain.subtitle
         }
@@ -144,17 +127,6 @@ extension CiderPanelView {
         if !selectedTagIDs.isEmpty { return "tag" }
         if let route = currentDomainRoute, selectedNavigationDomain == .browse {
             return route.systemImage
-        }
-        if selectedNavigationDomain == .projects,
-           selectedTab != .domainDashboard(.projects),
-           let selectedTab {
-            return selectedTab.systemImage
-        }
-        if case .spaceOverview(let spaceID, _) = selectedTab {
-            return spaceStorage.space(id: spaceID)?.systemImage ?? "square.grid.2x2"
-        }
-        if selectedTab == .spacesManager {
-            return "square.grid.2x2"
         }
         return selectedNavigationDomain?.systemImage ?? WorkspaceNavigationDomain.mainDashboard.systemImage
     }
