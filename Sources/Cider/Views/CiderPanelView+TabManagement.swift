@@ -36,7 +36,7 @@ extension CiderPanelView {
             return
         }
 
-        let wasSelected = selectedTab == tab
+        let wasSelected = workspaceRouteMatchesLegacyTab(tab)
 
         if tab == .aiAssistant {
             CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(false)
@@ -59,7 +59,7 @@ extension CiderPanelView {
             boardID: association.boardID,
             fromProjectID: association.project.id
         )
-        if selectedTab == tab {
+        if workspaceRouteMatchesLegacyTab(tab) {
             navigateToWorkspaceRoute(ProjectWorkspaceRoutePolicy.route(for: association.project))
         }
         return true
@@ -114,9 +114,18 @@ extension CiderPanelView {
             navigateToWorkspaceRoute(restoredRoute)
             return
         }
-        if selectedTab == nil {
-            navigateToWorkspaceRoute(.home)
-        }
+        navigateToWorkspaceRoute(.home)
+    }
+
+    private func workspaceRouteMatchesLegacyTab(_ tab: CiderTab) -> Bool {
+        WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
+            selectedTab: tab,
+            selectedNavigationDomain: selectedNavigationDomain,
+            selectedDomainRouteKind: selectedDomainRouteKind,
+            selectedFolderID: selectedFolderID,
+            selectedTagIDs: selectedTagIDs,
+            selectedProjectWorkspaceID: selectedProjectWorkspaceID
+        )) == workspaceRouter.currentRoute
     }
 
     func expandPathToFolder(_ folderID: UUID) {

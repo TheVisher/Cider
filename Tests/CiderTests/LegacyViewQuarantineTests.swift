@@ -131,7 +131,9 @@ final class LegacyViewQuarantineTests: XCTestCase {
             ],
             "Sources/Cider/Views/CiderPanelView+TabManagement.swift": [
                 "dynamicTabs.removeAll",
-                "allTabs"
+                "allTabs",
+                "selectedTab == tab",
+                "selectedTab == nil"
             ],
             "Sources/Cider/Views/CiderPanelView+ContentArea.swift": [
                 "} else if let tab = selectedTab {",
