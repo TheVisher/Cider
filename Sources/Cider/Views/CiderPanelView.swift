@@ -18,7 +18,6 @@ struct CiderPanelView: View {
     @State var selectedItemIDs: Set<String> = []
     @State var expandedFolderIDs: Set<UUID> = []
     @State var isSearchPaletteVisible = false
-    @State var dynamicTabs: [CiderTab] = []
     @State var isHomeViewOptionsVisible = false
     @State var showNewItemPicker = false
     @State var homeDisplayMode: LibraryDisplayMode = CiderConfig.load().homeDisplayMode
@@ -86,7 +85,7 @@ struct CiderPanelView: View {
     @AppStorage("cider.sidebarProfileExpanded") var sidebarProfileExpanded: Bool = true
 
     var allTabs: [CiderTab] {
-        dynamicTabs
+        []
     }
 
     var contextualTabs: [CiderTab] {

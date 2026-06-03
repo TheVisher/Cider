@@ -16,11 +16,10 @@ struct CiderWorkspaceTabStateStoreTests {
 
         #expect(second.isAIAssistantTabOpen)
         #expect(second.restoredWorkspaceRoute() == .ai)
-        #expect(second.restoredDynamicTabs().isEmpty)
     }
 
-    @Test("closed AI assistant tab is omitted from restored dynamic tabs")
-    func closedAIAssistantTabIsNotRestored() {
+    @Test("closed AI assistant state restores no workspace route")
+    func closedAIAssistantStateRestoresNoWorkspaceRoute() {
         let suiteName = "CiderWorkspaceTabStateStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -30,6 +29,6 @@ struct CiderWorkspaceTabStateStoreTests {
         store.setAIAssistantTabOpen(false)
 
         #expect(store.isAIAssistantTabOpen == false)
-        #expect(store.restoredDynamicTabs().isEmpty)
+        #expect(store.restoredWorkspaceRoute() == nil)
     }
 }

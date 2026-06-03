@@ -33,7 +33,6 @@ extension CiderPanelView {
 
         let wasSelected = selectedTab == tab
 
-        dynamicTabs.removeAll { $0 == tab }
         if tab == .aiAssistant {
             CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(false)
         }
