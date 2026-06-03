@@ -4,7 +4,7 @@ struct ProjectsDomainSidebarView: View {
     let catalog: ProjectWorkspaceCatalog
     let boards: [KanbanBoard]
     @Binding var selectedWorkspaceID: String?
-    let selectedTab: CiderTab?
+    let selectedLocalTabKind: ProjectWorkspaceLocalTabKind?
     var onSelectWorkspace: (ProjectWorkspace) -> Void
     var onSelectDestination: (ProjectWorkspaceSidebarDestination, ProjectWorkspace) -> Void
 
@@ -92,20 +92,16 @@ struct ProjectsDomainSidebarView: View {
     }
 
     private var selectedDestinationKind: ProjectWorkspaceSidebarDestinationKind? {
-        guard let selectedTab else { return nil }
-        switch selectedTab {
-        case .projectOverview:
+        guard let selectedLocalTabKind else { return nil }
+        switch selectedLocalTabKind {
+        case .overview:
             return .overview
-        case .projectInbox:
+        case .inbox:
             return .inbox
-        case .projectBoard(_, let boardID, _):
+        case .board(let boardID):
             return .board(boardID)
-        case .projectSurface(_, let surface, _):
+        case .surface(let surface):
             return .surface(surface)
-        case .projectReferences:
-            return .surface(.assets)
-        case .search, .tag, .domainDashboard, .spaceOverview, .spacesManager, .aiAssistant:
-            return nil
         }
     }
 }

@@ -171,8 +171,8 @@ extension CiderPanelView {
                 scrollToItemID: $scrollToItemID,
                 focusedItemID: focusedItemID
             )
-        } else if let tab = selectedTab {
-            switch tab {
+        } else if let routeContentTab = WorkspaceRouteLegacyProjection.state(for: workspaceRouter.currentRoute).selectedTab {
+            switch routeContentTab {
             case .domainDashboard(let domain):
                 if domain == .mainDashboard {
                     homeOverviewDashboard
@@ -615,8 +615,7 @@ extension CiderPanelView {
     }
 
     func openOrCreateOnboardingTab() {
-        selectedFolderID = nil
-        selectedTab = .domainDashboard(.mainDashboard)
+        navigateToWorkspaceRoute(.home)
     }
 
     // MARK: - Empty Route State

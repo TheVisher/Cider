@@ -24,7 +24,7 @@ extension CiderPanelView {
         CiderLivePerformanceNavigationSnapshot(
             domain: selectedNavigationDomain?.title,
             route: selectedDomainRouteKind.rawValue,
-            tab: selectedTab?.displayName,
+            tab: workspaceRouter.presentation.title,
             hasFolder: selectedFolderID != nil,
             tagCount: selectedTagIDs.count
         )
@@ -46,29 +46,37 @@ extension CiderPanelView {
             )
         }
 
-        guard let selectedTab else {
-            return CiderLivePerformanceContext(view: "No tab", visibleItemCount: nil)
-        }
-
-        switch selectedTab {
-        case .aiAssistant, .domainDashboard, .projectOverview, .projectInbox, .projectSurface, .projectReferences, .spaceOverview, .spacesManager:
-            return CiderLivePerformanceContext(view: selectedTab.displayName, visibleItemCount: nil)
-        case .projectBoard(_, let boardID, let name):
+        let presentation = workspaceRouter.presentation
+        switch presentation.contentKind {
+        case .projectBoard(let boardID, _):
             let visibleCards = KanbanStorage.shared.boards
                 .first(where: { $0.id == boardID })?
                 .allCards
                 .count
-            return CiderLivePerformanceContext(view: name, visibleItemCount: visibleCards)
-        case .search(_, let query):
+            return CiderLivePerformanceContext(view: presentation.title, visibleItemCount: visibleCards)
+        case .search:
+            let query: String
+            if case .library(.search(let routeQuery)) = workspaceRouter.currentRoute {
+                query = routeQuery
+            } else {
+                query = ""
+            }
             return CiderLivePerformanceContext(
                 view: query.isEmpty ? "Search" : "Search: \(query)",
                 visibleItemCount: libraryViewModel.items.count
             )
         case .tag:
             return CiderLivePerformanceContext(
-                view: selectedTab.displayName,
+                view: presentation.title,
                 visibleItemCount: libraryViewModel.items.count
             )
+        case .libraryFeed, .folder:
+            return CiderLivePerformanceContext(
+                view: presentation.title,
+                visibleItemCount: libraryViewModel.items.count
+            )
+        case .home, .libraryDashboard, .projectsHome, .projectOverview, .projectInbox, .projectSurface, .spacesOverview, .spacesManager, .aiAssistant:
+            return CiderLivePerformanceContext(view: presentation.title, visibleItemCount: nil)
         }
     }
 }

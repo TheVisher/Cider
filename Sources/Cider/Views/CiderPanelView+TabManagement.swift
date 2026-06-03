@@ -18,9 +18,14 @@ extension CiderPanelView {
     }
 
     func openDomainDashboardTab(_ tab: CiderTab) {
-        selectedFolderID = nil
-        selectedTagIDs.removeAll()
-        selectedTab = tab
+        navigateToWorkspaceRoute(
+            WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
+                selectedTab: tab,
+                selectedNavigationDomain: selectedNavigationDomain,
+                selectedDomainRouteKind: selectedDomainRouteKind,
+                selectedProjectWorkspaceID: selectedProjectWorkspaceID
+            ))
+        )
     }
 
     func reorderVisibleTabs(from sourceIndex: Int, to destinationIndex: Int) {
@@ -111,7 +116,7 @@ extension CiderPanelView {
             return
         }
         if selectedTab == nil {
-            selectedTab = .domainDashboard(.mainDashboard)
+            navigateToWorkspaceRoute(.home)
         }
     }
 

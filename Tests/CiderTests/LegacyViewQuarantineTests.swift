@@ -117,6 +117,42 @@ final class LegacyViewQuarantineTests: XCTestCase {
         try assertFilesDoNotContain(forbiddenPatternsByPath)
     }
 
+    func testWorkspaceRouteShellDoesNotRestoreDynamicTabsOrContentSwitchOnSelectedTab() throws {
+        let forbiddenPatternsByPath: [String: [String]] = [
+            "Sources/Cider/Views/CiderPanelView.swift": [
+                "@State var dynamicTabs",
+                "dynamicTabs"
+            ],
+            "Sources/Cider/Services/CiderWorkspaceTabStateStore.swift": [
+                "restoredDynamicTabs"
+            ],
+            "Sources/Cider/Views/CiderPanelView+TabManagement.swift": [
+                "dynamicTabs.removeAll"
+            ],
+            "Sources/Cider/Views/CiderPanelView+ContentArea.swift": [
+                "} else if let tab = selectedTab {",
+                "switch tab {"
+            ],
+            "Sources/Cider/Views/CiderPanelView+Sidebar.swift": [
+                "guard case .spaceOverview(let id, _) = selectedTab",
+                "selectedTab == .spacesManager",
+                "selectedTab == .aiAssistant",
+                "selectedTab: selectedTab"
+            ],
+            "Sources/Cider/Views/Shared/ProjectsDomainSidebarView.swift": [
+                "let selectedTab: CiderTab?",
+                "switch selectedTab"
+            ],
+            "Sources/Cider/Diagnostics/CiderPanelView+LivePerformanceContext.swift": [
+                "selectedTab?.displayName",
+                "guard let selectedTab",
+                "switch selectedTab"
+            ]
+        ]
+
+        try assertFilesDoNotContain(forbiddenPatternsByPath)
+    }
+
     func testFinalSavedViewNamesDoNotRemainInActiveCodeOrDocs() throws {
         let repositoryRoot = Self.repositoryRoot
         let removedFiles = [

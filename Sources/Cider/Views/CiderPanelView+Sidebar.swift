@@ -20,7 +20,7 @@ extension CiderPanelView {
             domains: WorkspaceNavigationDomain.allCases,
             spaces: spaceStorage.spaces,
             selectedSpaceID: selectedSpaceID,
-            isSpacesManagerSelected: selectedTab == .spacesManager,
+            isSpacesManagerSelected: workspaceRouter.currentRoute == .spaces(.manager),
             onTriggerSearch: { isSearchPaletteVisible = true },
             onSelectDomain: openNavigationDomain,
             onSelectSpace: openSpace,
@@ -32,15 +32,15 @@ extension CiderPanelView {
     }
 
     var selectedSpaceID: String? {
-        guard case .spaceOverview(let id, _) = selectedTab else { return nil }
-        return id
+        guard case .spaces(.overview(let spaceID)) = workspaceRouter.currentRoute else { return nil }
+        return spaceID
     }
 
     @ViewBuilder
     func domainSidebarContent(for domain: WorkspaceNavigationDomain) -> some View {
         if domain == .aiAssistant {
             AIAssistantDomainSidebarView(
-                isChatListActive: selectedNavigationDomain == .aiAssistant && selectedTab == .aiAssistant,
+                isChatListActive: workspaceRouter.currentRoute == .ai,
                 onOpenAssistant: openOrSelectAIAssistantTab
             )
         } else if domain == .projects {
@@ -48,7 +48,9 @@ extension CiderPanelView {
                 catalog: projectWorkspaceCatalog,
                 boards: kanbanStorage.boards,
                 selectedWorkspaceID: $selectedProjectWorkspaceID,
-                selectedTab: selectedTab,
+                selectedLocalTabKind: WorkspaceRoutePresentation.presentation(
+                    for: workspaceRouter.currentRoute
+                ).selectedProjectLocalTabKind,
                 onSelectWorkspace: selectProjectWorkspace,
                 onSelectDestination: selectProjectWorkspaceDestination
             )
@@ -129,17 +131,27 @@ extension CiderPanelView {
         closeAllDetails()
 
         if domain == .mainDashboard {
-            workspaceRouter.navigate(to: .home)
-            selectedNavigationDomain = nil
-            selectedProjectWorkspaceID = nil
-            selectedDomainRouteKind = .overview
-            folderContentScope = .allItems
-            selectedTab = dashboardTab ?? allTabs.first
+            navigateToWorkspaceRoute(.home)
             return
         }
 
         if domain == .browse {
             navigateToWorkspaceRoute(.library(.overview))
+            return
+        }
+
+        if domain == .projects {
+            navigateToWorkspaceRoute(.projects(.home))
+            return
+        }
+
+        if domain == .spaces {
+            navigateToWorkspaceRoute(.spaces(.manager))
+            return
+        }
+
+        if domain == .aiAssistant {
+            navigateToWorkspaceRoute(.ai)
             return
         }
 
@@ -166,16 +178,7 @@ extension CiderPanelView {
             )
         }
 
-        selectedNavigationDomain = .spaces
-        selectedProjectWorkspaceID = nil
-        selectedDomainRouteKind = .overview
-        selectedFolderID = nil
-        selectedTagIDs.removeAll()
-        selectedItemIDs.removeAll()
-        focusedItemID = nil
-        selectionAnchorID = nil
-        closeAllDetails()
-        selectedTab = .spaceOverview(id: space.id, name: space.name)
+        navigateToWorkspaceRoute(.spaces(.overview(spaceID: space.id)))
     }
 
     func openSpacesManager() {
@@ -187,16 +190,7 @@ extension CiderPanelView {
             )
         }
 
-        selectedNavigationDomain = .spaces
-        selectedProjectWorkspaceID = nil
-        selectedDomainRouteKind = .overview
-        selectedFolderID = nil
-        selectedTagIDs.removeAll()
-        selectedItemIDs.removeAll()
-        focusedItemID = nil
-        selectionAnchorID = nil
-        closeAllDetails()
-        selectedTab = .spacesManager
+        navigateToWorkspaceRoute(.spaces(.manager))
     }
 
     func createSpace(_ preset: CiderSpacePresetKind) {
