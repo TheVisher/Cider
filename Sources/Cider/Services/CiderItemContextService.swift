@@ -127,6 +127,33 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var title: String
     var snippet: String
     var rank: Double
+    var stage: String?
+    var matchedQuery: String?
+    var rankFactors: [String]
+
+    init(
+        id: String,
+        kind: CiderItemSearchResultKind,
+        owner: SecondBrainOwnerRef,
+        item: CiderItemSummary?,
+        title: String,
+        snippet: String,
+        rank: Double,
+        stage: String? = nil,
+        matchedQuery: String? = nil,
+        rankFactors: [String] = []
+    ) {
+        self.id = id
+        self.kind = kind
+        self.owner = owner
+        self.item = item
+        self.title = title
+        self.snippet = snippet
+        self.rank = rank
+        self.stage = stage
+        self.matchedQuery = matchedQuery
+        self.rankFactors = rankFactors
+    }
 }
 
 struct CiderItemSearchDiagnosticsWarning: Identifiable, Equatable {
@@ -177,6 +204,7 @@ struct CiderItemSearchDiagnosticsReport: Equatable {
     var query: String
     var generatedAt: Date
     var exactMatches: [CiderItemSearchResult]
+    var fallbackStages: [CiderItemSearchFallbackStage]
     var matchedChunks: [CiderItemSearchDiagnosticsChunkMatch]
     var candidateItems: [CiderItemSummary]
     var excludedItems: [CiderItemSearchDiagnosticsWarning]
@@ -185,6 +213,14 @@ struct CiderItemSearchDiagnosticsReport: Equatable {
     var warnings: [CiderItemSearchDiagnosticsWarning]
     var errors: [CiderItemSearchDiagnosticsWarning]
     var safeNextCommands: [String]
+}
+
+struct CiderItemSearchFallbackStage: Identifiable, Equatable {
+    var id: String { name }
+    var name: String
+    var query: String
+    var resultCount: Int
+    var explanation: String
 }
 
 enum CiderItemContextError: Error, LocalizedError {
@@ -289,32 +325,12 @@ final class CiderItemContextService {
         guard !trimmed.isEmpty else { return [] }
 
         let spaceRefs = try spaceID.map { Set(try spaceMembershipStore.itemRefs(inSpaceID: $0)) }
-        var results = try searchItems(trimmed, limit: limit, spaceRefs: spaceRefs)
-        let remainingLimit = max(1, limit - results.count)
-        let chunkMatches = try secondBrainStore.searchChunks(
-            query: trimmed,
-            limit: spaceRefs == nil ? remainingLimit : max(remainingLimit, limit * 5)
+        let plan = recallQueryPlan(for: trimmed)
+        return try rankedSearchResults(
+            queryPlan: plan,
+            limit: limit,
+            spaceRefs: spaceRefs
         )
-        for match in chunkMatches {
-            let item = try? itemSummary(owner: match.owner)
-            if let spaceRefs, let item {
-                let ref = LibraryEntityRef(type: item.type, entityID: item.id)
-                guard spaceRefs.contains(ref) else { continue }
-            }
-            results.append(
-                CiderItemSearchResult(
-                    id: "chunk-\(match.id)",
-                    kind: .chunk,
-                    owner: match.owner,
-                    item: item,
-                    title: match.title,
-                    snippet: match.snippet,
-                    rank: match.rank
-                )
-            )
-        }
-
-        return Array(results.prefix(max(1, limit)))
     }
 
     func searchDiagnostics(_ query: String, limit: Int = 20) throws -> CiderItemSearchDiagnosticsReport {
@@ -326,6 +342,7 @@ final class CiderItemContextService {
                 query: trimmed,
                 generatedAt: generatedAt,
                 exactMatches: [],
+                fallbackStages: [],
                 matchedChunks: [],
                 candidateItems: [],
                 excludedItems: [],
@@ -344,9 +361,14 @@ final class CiderItemContextService {
 
         var warnings: [CiderItemSearchDiagnosticsWarning] = []
         var errors: [CiderItemSearchDiagnosticsWarning] = []
+        let queryPlan = recallQueryPlan(for: trimmed)
         let exactMatches: [CiderItemSearchResult]
         do {
-            exactMatches = try search(trimmed, limit: boundedLimit)
+            exactMatches = try rankedSearchResults(
+                queryPlan: queryPlan,
+                limit: boundedLimit,
+                spaceRefs: nil
+            )
         } catch {
             exactMatches = try searchItems(trimmed, limit: boundedLimit)
             errors.append(
@@ -354,6 +376,14 @@ final class CiderItemContextService {
                     kind: "fts_search_unavailable",
                     message: error.localizedDescription
                 )
+            )
+        }
+        let fallbackStages = queryPlan.map { stage in
+            CiderItemSearchFallbackStage(
+                name: stage.name,
+                query: stage.query,
+                resultCount: exactMatches.filter { $0.stage == stage.name || $0.matchedQuery == stage.query }.count,
+                explanation: stage.explanation
             )
         }
 
@@ -384,7 +414,10 @@ final class CiderItemContextService {
                             item: item,
                             title: result.title,
                             snippet: result.snippet,
-                            rank: result.rank
+                            rank: result.rank,
+                            stage: "chunk_fts",
+                            matchedQuery: trimmed,
+                            rankFactors: ["original_chunk_fts"]
                         ),
                         chunk: chunk,
                         item: item,
@@ -433,6 +466,7 @@ final class CiderItemContextService {
             query: trimmed,
             generatedAt: generatedAt,
             exactMatches: exactMatches,
+            fallbackStages: fallbackStages,
             matchedChunks: matchedChunks,
             candidateItems: candidateItems,
             excludedItems: [],
@@ -506,6 +540,245 @@ final class CiderItemContextService {
             if spaceRefs != nil, results.count >= max(1, limit) { break }
         }
         return results
+    }
+
+    private struct RecallQueryStage: Equatable {
+        var name: String
+        var query: String
+        var explanation: String
+    }
+
+    private func recallQueryPlan(for query: String) -> [RecallQueryStage] {
+        var stages: [RecallQueryStage] = [
+            RecallQueryStage(
+                name: "original_query",
+                query: query,
+                explanation: "Original user query."
+            )
+        ]
+        let expansions = recallExpandedQueries(for: query)
+        for expanded in expansions where expanded.caseInsensitiveCompare(query) != .orderedSame {
+            stages.append(
+                RecallQueryStage(
+                    name: "human_query_expansion",
+                    query: expanded,
+                    explanation: "Expanded human recall terms for \(query), including \(expanded)."
+                )
+            )
+        }
+        return orderedUniqueStages(stages)
+    }
+
+    private func recallExpandedQueries(for query: String) -> [String] {
+        let tokens = recallTokens(query)
+        var expansions: [String] = []
+        let synonymMap: [String: [String]] = [
+            "adhd": ["ADHD", "evaluation", "symptoms", "Adderall", "document"],
+            "symptoms": ["symptoms", "evaluation"],
+            "document": ["document", "file", "pdf", "docx"],
+            "doc": ["doc", "document", "file", "docx"],
+            "pdf": ["pdf", "file", "document"],
+            "docx": ["docx", "file", "document"],
+            "resume": ["resume", "cv", "pdf", "docx", "file"],
+            "imdb": ["IMDb", "movie", "movies", "media"],
+            "movie": ["movie", "movies", "media", "IMDb"],
+            "movies": ["movies", "movie", "media", "IMDb"],
+            "tiktok": ["TikTok", "video", "recipe", "capture"],
+            "video": ["video", "TikTok", "capture"],
+            "recipe": ["recipe", "recipes", "TikTok"],
+            "steam": ["Steam", "game", "games", "media"],
+            "game": ["game", "games", "Steam", "media"],
+            "games": ["games", "game", "Steam", "media"],
+            "tl": ["TL", "team leader", "team lead", "work hub"],
+            "team": ["team leader", "team lead", "TL"],
+            "leader": ["team leader", "team lead", "TL"],
+            "lead": ["team lead", "team leader", "TL"],
+            "work": ["work", "team leader", "TL"],
+            "hub": ["hub", "work hub", "team leader"],
+        ]
+        for token in tokens {
+            expansions.append(token)
+            expansions.append(contentsOf: synonymMap[token.lowercased()] ?? [])
+        }
+        if tokens.contains(where: { $0.caseInsensitiveCompare("team") == .orderedSame })
+            && tokens.contains(where: { $0.caseInsensitiveCompare("leader") == .orderedSame }) {
+            expansions.append(contentsOf: ["team leader", "team lead", "TL"])
+        }
+        if tokens.contains(where: { $0.caseInsensitiveCompare("work") == .orderedSame })
+            && tokens.contains(where: { $0.caseInsensitiveCompare("hub") == .orderedSame }) {
+            expansions.append("work hub")
+        }
+        let filtered = orderedUnique(expansions)
+            .filter { $0.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 }
+        return Array(filtered[0..<min(filtered.count, 24)])
+    }
+
+    private func recallTokens(_ query: String) -> [String] {
+        query
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
+    private func orderedUniqueStages(_ stages: [RecallQueryStage]) -> [RecallQueryStage] {
+        var seen = Set<String>()
+        var output: [RecallQueryStage] = []
+        for stage in stages {
+            let key = stage.query.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            output.append(stage)
+        }
+        return output
+    }
+
+    private func rankedSearchResults(
+        queryPlan: [RecallQueryStage],
+        limit: Int,
+        spaceRefs: Set<LibraryEntityRef>? = nil
+    ) throws -> [CiderItemSearchResult] {
+        let boundedLimit = max(1, limit)
+        var bestByOwner: [String: CiderItemSearchResult] = [:]
+
+        for (stageIndex, stage) in queryPlan.enumerated() {
+            let stageLimit = max(boundedLimit, boundedLimit * 3)
+            let itemMatches = try searchItems(stage.query, limit: stageLimit, spaceRefs: spaceRefs)
+            for match in itemMatches {
+                var result = match
+                result.stage = stage.name
+                result.matchedQuery = stage.query
+                result.rank = recallRank(
+                    result: result,
+                    originalQuery: queryPlan.first?.query ?? stage.query,
+                    matchedQuery: stage.query,
+                    stageIndex: stageIndex
+                )
+                result.rankFactors = recallRankFactors(
+                    result: result,
+                    matchedQuery: stage.query,
+                    stageIndex: stageIndex
+                )
+                mergeRecallResult(result, into: &bestByOwner)
+            }
+
+            let chunkMatches = try secondBrainStore.searchChunks(query: stage.query, limit: stageLimit)
+            for match in chunkMatches {
+                let item = try? itemSummary(owner: match.owner)
+                if let spaceRefs, let item {
+                    let ref = LibraryEntityRef(type: item.type, entityID: item.id)
+                    guard spaceRefs.contains(ref) else { continue }
+                } else if spaceRefs != nil {
+                    continue
+                }
+                var result = CiderItemSearchResult(
+                    id: "chunk-\(match.id)",
+                    kind: .chunk,
+                    owner: match.owner,
+                    item: item,
+                    title: match.title,
+                    snippet: match.snippet,
+                    rank: match.rank,
+                    stage: stage.name,
+                    matchedQuery: stage.query
+                )
+                result.rank = recallRank(
+                    result: result,
+                    originalQuery: queryPlan.first?.query ?? stage.query,
+                    matchedQuery: stage.query,
+                    stageIndex: stageIndex
+                )
+                result.rankFactors = recallRankFactors(
+                    result: result,
+                    matchedQuery: stage.query,
+                    stageIndex: stageIndex
+                )
+                mergeRecallResult(result, into: &bestByOwner)
+            }
+        }
+
+        let hasExpandedRecallIntent = queryPlan.count > 1
+        let hasSavedItemMatch = bestByOwner.values.contains { $0.item != nil }
+        let candidates = bestByOwner.values.filter { result in
+            !(hasExpandedRecallIntent && hasSavedItemMatch && result.owner.ownerType == "kanban_card" && result.item == nil)
+        }
+
+        return Array(candidates)
+            .sorted { lhs, rhs in
+                if lhs.rank != rhs.rank { return lhs.rank > rhs.rank }
+                if (lhs.item != nil) != (rhs.item != nil) { return lhs.item != nil }
+                return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+            }
+            .prefix(boundedLimit)
+            .map { $0 }
+    }
+
+    private func mergeRecallResult(
+        _ result: CiderItemSearchResult,
+        into bestByOwner: inout [String: CiderItemSearchResult]
+    ) {
+        let key = result.item.map { "\($0.type.rawValue):\($0.id.uuidString)" }
+            ?? "\(result.owner.ownerType):\(result.owner.ownerID)"
+        guard var existing = bestByOwner[key] else {
+            bestByOwner[key] = result
+            return
+        }
+        let mergedFactors = orderedUnique(existing.rankFactors + result.rankFactors)
+        if result.rank > existing.rank || (result.item != nil && existing.item == nil) {
+            var replacement = result
+            replacement.rankFactors = mergedFactors
+            bestByOwner[key] = replacement
+        } else {
+            existing.rankFactors = mergedFactors
+            bestByOwner[key] = existing
+        }
+    }
+
+    private func recallRank(
+        result: CiderItemSearchResult,
+        originalQuery: String,
+        matchedQuery: String,
+        stageIndex: Int
+    ) -> Double {
+        var rank: Double = result.item == nil ? 100 : 900
+        if result.kind == .item { rank += 120 }
+        if result.owner.ownerType == "kanban_card" { rank -= 650 }
+        if let item = result.item {
+            rank += typeIntentBoost(item: item, query: originalQuery)
+            if item.title.localizedCaseInsensitiveContains(matchedQuery) { rank += 40 }
+            if item.relativePath?.localizedCaseInsensitiveContains(matchedQuery) == true { rank += 35 }
+        }
+        rank -= Double(stageIndex * 20)
+        return rank
+    }
+
+    private func recallRankFactors(
+        result: CiderItemSearchResult,
+        matchedQuery: String,
+        stageIndex: Int
+    ) -> [String] {
+        var factors: [String] = []
+        factors.append(result.item == nil ? "owner_only_chunk" : "saved_library_item")
+        factors.append(result.kind == .item ? "title_or_path_match" : "chunk_match")
+        if result.owner.ownerType == "kanban_card" { factors.append("kanban_demoted_for_saved_item_recall") }
+        if stageIndex > 0 { factors.append("human_query_expansion:\(matchedQuery)") }
+        if let item = result.item, typeIntentBoost(item: item, query: matchedQuery) > 0 {
+            factors.append("type_intent_match")
+        }
+        return orderedUnique(factors)
+    }
+
+    private func typeIntentBoost(item: CiderItemSummary, query: String) -> Double {
+        let lower = query.lowercased()
+        switch item.type {
+        case .vaultFile:
+            return ["file", "document", "doc", "pdf", "docx", "resume"].contains { lower.contains($0) } ? 70 : 0
+        case .bookmark:
+            return ["imdb", "movie", "tiktok", "steam", "game", "video", "capture"].contains { lower.contains($0) } ? 55 : 0
+        case .note:
+            return ["note", "hub", "work", "tl", "team leader"].contains { lower.contains($0) } ? 45 : 0
+        default:
+            return 0
+        }
     }
 
     private func chunk(id: String, owner: SecondBrainOwnerRef) throws -> CiderItemChunk? {

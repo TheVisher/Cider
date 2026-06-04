@@ -14494,6 +14494,15 @@ struct CiderCLI {
         if let item = result.item {
             dict["item"] = itemSummaryToDict(item)
         }
+        if let stage = result.stage {
+            dict["stage"] = stage
+        }
+        if let matchedQuery = result.matchedQuery {
+            dict["matchedQuery"] = matchedQuery
+        }
+        if !result.rankFactors.isEmpty {
+            dict["rankFactors"] = result.rankFactors
+        }
         return dict
     }
 
@@ -14506,6 +14515,7 @@ struct CiderCLI {
             "query": report.query,
             "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
             "exactMatches": report.exactMatches.map(itemSearchResultToDict),
+            "fallbackStages": report.fallbackStages.map(itemSearchFallbackStageToDict),
             "matchedChunks": report.matchedChunks.map(itemSearchDiagnosticsChunkMatchToDict),
             "candidateItems": report.candidateItems.map(itemSummaryToDict),
             "excludedItems": report.excludedItems.map(itemSearchDiagnosticsWarningToDict),
@@ -14514,6 +14524,15 @@ struct CiderCLI {
             "warnings": report.warnings.map(itemSearchDiagnosticsWarningToDict),
             "errors": report.errors.map(itemSearchDiagnosticsWarningToDict),
             "safeNextCommands": report.safeNextCommands,
+        ]
+    }
+
+    static func itemSearchFallbackStageToDict(_ stage: CiderItemSearchFallbackStage) -> [String: Any] {
+        [
+            "name": stage.name,
+            "query": stage.query,
+            "resultCount": stage.resultCount,
+            "explanation": stage.explanation,
         ]
     }
 

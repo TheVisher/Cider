@@ -245,14 +245,25 @@ func recallProbeCheckToDict(_ check: CiderRecallProbeCheck) -> [String: Any] {
 }
 
 func recallTopResultToDict(_ result: CiderRecallTopResult) -> [String: Any] {
-    [
+    var dict: [String: Any] = [
         "rank": result.rank,
+        "score": result.score,
         "kind": result.kind.rawValue,
         "owner": recallOwnerToDict(result.owner),
         "title": result.title,
         "snippet": result.snippet,
         "matchedExpected": result.matchedExpected,
     ]
+    if let stage = result.stage {
+        dict["stage"] = stage
+    }
+    if let matchedQuery = result.matchedQuery {
+        dict["matchedQuery"] = matchedQuery
+    }
+    if !result.rankFactors.isEmpty {
+        dict["rankFactors"] = result.rankFactors
+    }
+    return dict
 }
 
 private func recallLibraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {

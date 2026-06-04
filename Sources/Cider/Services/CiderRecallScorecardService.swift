@@ -40,10 +40,14 @@ struct CiderRecallProbeCheck: Equatable {
 
 struct CiderRecallTopResult: Equatable {
     var rank: Int
+    var score: Double
     var kind: CiderItemSearchResultKind
     var owner: SecondBrainOwnerRef
     var title: String
     var snippet: String
+    var stage: String?
+    var matchedQuery: String?
+    var rankFactors: [String]
     var matchedExpected: Bool
 }
 
@@ -171,10 +175,14 @@ final class CiderRecallScorecardService {
         let topResults = searchResults.enumerated().map { index, result in
             CiderRecallTopResult(
                 rank: index + 1,
+                score: result.rank,
                 kind: result.kind,
                 owner: result.owner,
                 title: result.title,
                 snippet: result.snippet,
+                stage: result.stage,
+                matchedQuery: result.matchedQuery,
+                rankFactors: result.rankFactors,
                 matchedExpected: matchesExpected(result, expectedRef: probe.expectedRef)
             )
         }

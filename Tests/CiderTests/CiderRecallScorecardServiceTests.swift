@@ -111,6 +111,9 @@ struct CiderRecallScorecardServiceTests {
         #expect(scorecard.capabilityScores[.reminderSurfacing]?.passed == 1)
         #expect(scorecard.results.allSatisfy { $0.passed })
         #expect(scorecard.results[0].topResults.first?.matchedExpected == true)
+        #expect(scorecard.results[0].topResults.first?.stage != nil)
+        #expect(scorecard.results[0].topResults.first?.matchedQuery != nil)
+        #expect(scorecard.results[0].topResults.first?.rankFactors.isEmpty == false)
         #expect(scorecard.results[1].checks.contains {
             $0.capability == .reminderSurfacing && $0.passed && $0.detail == "surfaceToday=true"
         })

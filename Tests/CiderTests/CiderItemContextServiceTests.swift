@@ -284,7 +284,8 @@ struct CiderItemContextServiceTests {
         let report = try service.searchDiagnostics("saffron diagnostic", limit: 10)
 
         #expect(report.query == "saffron diagnostic")
-        #expect(report.exactMatches.contains { $0.kind == .chunk && $0.item?.id == note.entityID })
+        #expect(report.exactMatches.contains { $0.item?.id == note.entityID })
+        #expect(report.fallbackStages.contains { $0.name == "original_query" })
         #expect(report.matchedChunks.contains {
             $0.chunk.owner == owner
                 && $0.item?.id == note.entityID
@@ -410,6 +411,85 @@ struct CiderItemContextServiceTests {
         let phraseMatches = try service.search("Cutover acceptance", limit: 10)
         #expect(phraseMatches.contains {
             $0.kind == .item && $0.item?.id == note.entityID
+        })
+    }
+
+    @Test("search dogfood paraphrases prefer saved items over Kanban audit chunks")
+    func searchDogfoodParaphrasesPreferSavedItemsOverKanbanAuditChunks() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let adhd = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        let resume = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        let imdb = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let tiktok = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let steam = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let tlHub = LibraryEntityRef(type: .note, entityID: UUID())
+
+        try insertItem(adhd, title: "Neuropsych intake scan", relativePath: "Medical/Evaluations/ADHD evaluation.pdf", into: db)
+        try insertItem(resume, title: "Vishal resume", relativePath: "Work/Resume/Vishal Resume.docx", into: db)
+        try insertItem(imdb, title: "The Matrix - IMDb", relativePath: "Media/Movies/The Matrix.webloc", into: db)
+        try insertItem(tiktok, title: "TikTok pasta recipe", relativePath: "Recipes/TikTok/Pasta.webloc", into: db)
+        try insertItem(steam, title: "Hades on Steam", relativePath: "Media/Games/Hades.webloc", into: db)
+        try insertItem(tlHub, title: "Work TL Hub", relativePath: "Work/TL/Hub.md", into: db)
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "vaultFile", ownerID: adhd.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: adhd.entityID.uuidString, source: "test", title: "ADHD evaluation body", body: "Symptoms notes mention Adderall and evaluation follow-up.", chunkIndex: 0)
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: tlHub.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: tlHub.entityID.uuidString, source: "test", title: "Team leader hub", body: "Team leader work hub notes for TL coaching and QA follow-up.", chunkIndex: 0)
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "kanban_card", ownerID: "board/audit"), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: nil,
+                source: "kanban_notes",
+                title: "Recall audit findings",
+                body: "Audit mentioned ADHD symptoms document Adderall, resume PDF DOCX, IMDb movie, TikTok captures, Steam game captures, and Work TL hub.",
+                chunkIndex: 0
+            )
+        ])
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let cases: [(query: String, expected: LibraryEntityRef)] = [
+            ("ADHD symptoms document Adderall", adhd),
+            ("resume PDF DOCX", resume),
+            ("IMDb movie", imdb),
+            ("TikTok video recipe", tiktok),
+            ("Steam game capture", steam),
+            ("team leader work hub", tlHub),
+        ]
+
+        for dogfoodCase in cases {
+            let results = try service.search(dogfoodCase.query, limit: 5)
+            #expect(results.first?.kind == .item, "Expected saved item first for \(dogfoodCase.query), got \(String(describing: results.first))")
+            #expect(results.first?.item?.id == dogfoodCase.expected.entityID, "Expected \(dogfoodCase.expected.id) first for \(dogfoodCase.query)")
+            #expect(!results.prefix(3).contains { $0.owner.ownerType == "kanban_card" }, "Kanban audit chunk should not outrank saved item recall for \(dogfoodCase.query)")
+        }
+    }
+
+    @Test("search diagnostics expose recall fallback stages")
+    func searchDiagnosticsExposeRecallFallbackStages() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let resume = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        try insertItem(resume, title: "Vishal resume", relativePath: "Work/Resume/Vishal Resume.docx", into: db)
+
+        let service = CiderItemContextService(database: db)
+        let report = try service.searchDiagnostics("resume PDF DOCX", limit: 5)
+
+        #expect(report.exactMatches.first?.item?.id == resume.entityID)
+        #expect(report.fallbackStages.contains {
+            $0.name == "human_query_expansion" && $0.query.contains("resume")
+        })
+
+        let dict = CiderCLI.itemSearchDiagnosticsReportToDict(report)
+        let stages = try #require(dict["fallbackStages"] as? [[String: Any]])
+        #expect(stages.contains {
+            $0["name"] as? String == "human_query_expansion"
+                && ($0["explanation"] as? String)?.contains("resume") == true
         })
     }
 
