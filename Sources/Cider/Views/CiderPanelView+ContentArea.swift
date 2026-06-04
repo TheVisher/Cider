@@ -82,10 +82,10 @@ extension CiderPanelView {
                 onOpenVaultFile: { openVaultFileDetail($0) },
 
                 onSelectTag: { id in
-                    selectedTagIDs = [id]
+                    navigateToWorkspaceRoute(.library(.tag(id)))
                 },
                 onBack: {
-                    selectedTagIDs.removeAll()
+                    navigateToWorkspaceRoute(.library(.tags))
                 },
                 onToggleLabelBulk: { toggleTagOnSelected($0) },
                 scrollToItemID: $scrollToItemID,
@@ -480,7 +480,7 @@ extension CiderPanelView {
                     onOpenVaultFile: { openVaultFileDetail($0) },
     
                     onSelectTag: { id in
-                        selectedTagIDs = [id]
+                        navigateToWorkspaceRoute(.library(.tag(id)))
                     },
                     onToggleLabelBulk: { toggleTagOnSelected($0) },
                     scrollToItemID: $scrollToItemID,

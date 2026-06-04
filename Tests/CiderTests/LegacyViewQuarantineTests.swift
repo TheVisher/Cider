@@ -143,7 +143,9 @@ final class LegacyViewQuarantineTests: XCTestCase {
                 "} else if let tab = selectedTab {",
                 "switch tab {",
                 "noTabsEmptyState",
-                "WorkspaceRouteLegacyProjection.state(for: workspaceRouter.currentRoute).selectedTab"
+                "WorkspaceRouteLegacyProjection.state(for: workspaceRouter.currentRoute).selectedTab",
+                "selectedTagIDs = [id]",
+                "selectedTagIDs.removeAll()"
             ],
             "Sources/Cider/Views/CiderPanelView+Sidebar.swift": [
                 "guard case .spaceOverview(let id, _) = selectedTab",
