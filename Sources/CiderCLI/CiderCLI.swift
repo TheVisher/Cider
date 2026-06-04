@@ -5347,6 +5347,59 @@ struct CiderCLI {
             let source = parseFlag("--source", from: args) ?? "cli"
             let targetID = parseFlag("--target-id", from: args)
             let targetPath = parseFlag("--target-path", from: args)
+            var resolvedTargetID = targetID
+            var resolvedTargetPath = targetPath
+            var resolvedTargetName = targetPath ?? targetID ?? normalizedTargetType
+            var resolvedTargetFolderID: UUID? = normalizedTargetType == "folder" ? targetID.flatMap(UUID.init(uuidString:)) : nil
+            if normalizedTargetType == "folder" {
+                guard let folderRef = (targetID ?? targetPath)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !folderRef.isEmpty else {
+                    printCLIError("Folder routes require --target-id <folder-id> or --target-path <folder-path>.")
+                    return
+                }
+                switch resolveFolderOwner(ref: folderRef) {
+                case .folder(let folder):
+                    resolvedTargetID = folder.id.uuidString
+                    resolvedTargetPath = folder.relativePath
+                    resolvedTargetName = folder.name
+                    resolvedTargetFolderID = folder.id
+                case .inbox:
+                    resolvedTargetID = "Inbox"
+                    resolvedTargetPath = "Inbox"
+                    resolvedTargetName = "Inbox"
+                    resolvedTargetFolderID = nil
+                case .missing:
+                    processExitCode = 1
+                    let payload = folderRouteResolutionFailurePayload(
+                        sourceRef: folderRef,
+                        targetType: normalizedTargetType,
+                        targetPath: targetPath ?? targetID,
+                        error: "No folder found matching '\(folderRef)'.",
+                        matches: []
+                    )
+                    if jsonOutput {
+                        outputJSON(payload)
+                    } else {
+                        print("Error: No folder found matching '\(folderRef)'.")
+                    }
+                    return
+                case .ambiguous(let matches):
+                    processExitCode = 1
+                    let payload = folderRouteResolutionFailurePayload(
+                        sourceRef: folderRef,
+                        targetType: normalizedTargetType,
+                        targetPath: targetPath ?? targetID,
+                        error: "Ambiguous folder reference '\(folderRef)'. Use one of the returned relativePath or id values.",
+                        matches: matches
+                    )
+                    if jsonOutput {
+                        outputJSON(payload)
+                    } else {
+                        print("Error: Ambiguous folder reference '\(folderRef)'.")
+                    }
+                    return
+                }
+            }
             do {
                 if let entityType = try? ItemLinkService.entityType(from: positional[0]) {
                     let ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
@@ -5418,9 +5471,9 @@ struct CiderCLI {
                     }
                     let target = CiderRoutingDecisionTarget(
                         kind: normalizedTargetType,
-                        name: targetPath ?? targetID ?? normalizedTargetType,
-                        relativePath: targetPath ?? targetID ?? normalizedTargetType,
-                        folderID: normalizedTargetType == "folder" ? targetID.flatMap(UUID.init(uuidString:)) : nil
+                        name: resolvedTargetName,
+                        relativePath: resolvedTargetPath ?? resolvedTargetID ?? normalizedTargetType,
+                        folderID: resolvedTargetFolderID
                     )
                     let routingDecision = try CiderRoutingDecisionService().recordDecision(
                         itemID: ref.entityID,
@@ -5465,8 +5518,8 @@ struct CiderCLI {
                 let decision = SecondBrainRoutingDecision(
                     owner: owner,
                     targetType: normalizedTargetType,
-                    targetID: targetID,
-                    targetPath: targetPath,
+                    targetID: resolvedTargetID,
+                    targetPath: resolvedTargetPath,
                     confidence: confidence,
                     reason: reason,
                     status: status,
@@ -12543,6 +12596,50 @@ struct CiderCLI {
             return .ambiguous(nameMatches)
         }
         return .missing
+    }
+
+    static func folderRouteResolutionFailurePayload(
+        sourceRef: String,
+        targetType: String,
+        targetPath: String?,
+        error: String,
+        matches: [VaultFolder]
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "ok": false,
+            "command": "item.route",
+            "readOnly": false,
+            "changed": false,
+            "targetType": targetType,
+            "error": error,
+            "sourceRef": [
+                "type": "folder",
+                "ref": sourceRef,
+            ],
+            "matches": matches
+                .sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
+                .map(folderOwnerMatchDict),
+            "safeNextCommands": [
+                "cider-cli item owner-get folder \"\(sourceRef)\" --json",
+                "cider-cli capture review-queue --json",
+            ],
+        ]
+        if let targetPath {
+            payload["targetPath"] = targetPath
+        }
+        CiderAgentDecisionContract.merge(
+            CiderAgentDecisionContract.dictionary(
+                saved: false,
+                needsReview: true,
+                needsRouting: true,
+                confidence: 0,
+                blockingIssues: ["folder_target_unresolved"],
+                recommendedNextAction: "review_route",
+                safeNextCommands: payload["safeNextCommands"] as? [String] ?? []
+            ),
+            into: &payload
+        )
+        return payload
     }
 
     static func folderOwnerInspectionPayload(folder: VaultFolder, sourceRef: String) -> [String: Any] {

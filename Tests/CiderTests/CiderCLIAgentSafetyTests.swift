@@ -598,6 +598,115 @@ struct CiderCLIAgentSafetyTests {
         #expect(health["existsOnDisk"] as? Bool == true)
     }
 
+    @Test("item route folder path records canonical folder id")
+    func itemRouteFolderPathRecordsCanonicalFolderID() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-route-folder-path-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Route Folder Source", content: "Route me", vault: vault)
+        _ = try runCLI(args: ["item", "move", "note", noteID, "--path", "Media/Games", "--json"], vault: vault)
+        let ownerGet = try runCLI(args: ["item", "owner-get", "folder", "Media/Games", "--json"], vault: vault)
+        let ownerPayload = try parseJSONObject(ownerGet.stdout)
+        let folder = try #require(ownerPayload["folder"] as? [String: Any])
+        let folderID = try #require(folder["id"] as? String)
+
+        let result = try runCLI(
+            args: [
+                "item", "route", "note", noteID,
+                "--target-type", "folder",
+                "--target-path", "Media/Games",
+                "--reason", "Games belong in Media/Games.",
+                "--json",
+            ],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["targetType"] as? String == "folder")
+        #expect(payload["targetPath"] as? String == "Media/Games")
+        #expect(payload["targetID"] as? String == folderID)
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { db.close() }
+        let stmt = try db.prepare("""
+            SELECT target_folder_id, target_relative_path
+            FROM routing_decisions
+            WHERE item_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1;
+            """)
+        stmt.bind(noteID, at: 1)
+        #expect(try stmt.step())
+        #expect(stmt.optionalString(at: 0) == folderID)
+        #expect(stmt.string(at: 1) == "Media/Games")
+    }
+
+    @Test("item route folder path fails closed when folder is missing")
+    func itemRouteFolderPathFailsClosedWhenFolderMissing() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-route-folder-missing-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Route Missing Folder Source", content: "Route me", vault: vault)
+        let result = try runCLI(
+            args: [
+                "item", "route", "note", noteID,
+                "--target-type", "folder",
+                "--target-path", "Media/Movies",
+                "--reason", "Movies should route to Media/Movies.",
+                "--json",
+            ],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status != 0)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["targetType"] as? String == "folder")
+        #expect(payload["targetPath"] as? String == "Media/Movies")
+        #expect(payload["recommendedNextAction"] as? String == "review_route")
+        #expect((payload["error"] as? String)?.contains("No folder found") == true)
+    }
+
+    @Test("item route folder name fails closed when folder name is ambiguous")
+    func itemRouteFolderNameFailsClosedWhenFolderNameAmbiguous() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-route-folder-ambiguous-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let first = try createNote(title: "Route First Shared", content: "First", vault: vault)
+        _ = try runCLI(args: ["item", "move", "note", first, "--path", "Alpha/Shared", "--json"], vault: vault)
+        let second = try createNote(title: "Route Second Shared", content: "Second", vault: vault)
+        _ = try runCLI(args: ["item", "move", "note", second, "--path", "Beta/Shared", "--json"], vault: vault)
+        let noteID = try createNote(title: "Ambiguous Route Source", content: "Route me", vault: vault)
+
+        let result = try runCLI(
+            args: [
+                "item", "route", "note", noteID,
+                "--target-type", "folder",
+                "--target-path", "Shared",
+                "--reason", "Shared folder route.",
+                "--json",
+            ],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status != 0)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["changed"] as? Bool == false)
+        #expect((payload["error"] as? String)?.contains("Ambiguous folder reference") == true)
+        let matches = try #require(payload["matches"] as? [[String: Any]])
+        #expect(Set(matches.compactMap { $0["relativePath"] as? String }) == ["Alpha/Shared", "Beta/Shared"])
+    }
+
     @Test("export folder JSON is bounded read only and includes stable refs")
     func exportFolderJSONIsBoundedReadOnlyAndIncludesStableRefs() throws {
         let vault = FileManager.default.temporaryDirectory
