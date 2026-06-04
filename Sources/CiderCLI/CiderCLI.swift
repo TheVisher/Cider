@@ -5906,7 +5906,24 @@ struct CiderCLI {
             if looksLikeVaultArtifactPath(path) {
                 return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_path_must_be_folder_path", itemRef: itemRef, targetFolder: nil, targetRelativePath: path, applySupported: false)
             }
-            guard let folder = findOrCreateFolderByPath(path) else {
+            let folder: VaultFolder?
+            if operation["folder"] as? String != nil,
+               operation["path"] == nil,
+               operation["targetPath"] == nil {
+                switch resolveFolderOwner(ref: path) {
+                case .folder(let resolvedFolder):
+                    folder = resolvedFolder
+                case .inbox:
+                    return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_folder_is_inbox", itemRef: itemRef, targetFolder: nil, targetRelativePath: path, applySupported: false)
+                case .ambiguous:
+                    return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_folder_ambiguous", itemRef: itemRef, targetFolder: nil, targetRelativePath: path, applySupported: false)
+                case .missing:
+                    return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_folder_not_found", itemRef: itemRef, targetFolder: nil, targetRelativePath: path, applySupported: false)
+                }
+            } else {
+                folder = findOrCreateFolderByPath(path)
+            }
+            guard let folder else {
                 return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_folder_not_found", itemRef: itemRef, targetFolder: nil, targetRelativePath: path, applySupported: false)
             }
             return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "valid", error: nil, itemRef: itemRef, targetFolder: folder, targetRelativePath: folder.relativePath, applySupported: true)
@@ -5937,7 +5954,25 @@ struct CiderCLI {
             guard confidence >= 0, confidence <= 1 else {
                 return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "confidence_must_be_between_0_and_1", itemRef: itemRef, targetType: targetType, targetID: targetID, targetFolder: nil, targetRelativePath: targetPath, reason: reason, routeStatus: routeStatus, applySupported: false)
             }
-            return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "valid", error: nil, itemRef: itemRef, targetType: targetType, targetID: targetID, targetFolder: nil, targetRelativePath: targetPath, reason: reason, confidence: confidence, routeStatus: routeStatus, applySupported: true)
+            var resolvedTargetID = targetID
+            var resolvedTargetPath = targetPath
+            var resolvedTargetFolder: VaultFolder?
+            if targetType == "folder" {
+                let folderRef = (targetID ?? targetPath ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                switch resolveFolderOwner(ref: folderRef) {
+                case .folder(let folder):
+                    resolvedTargetID = folder.id.uuidString
+                    resolvedTargetPath = folder.relativePath
+                    resolvedTargetFolder = folder
+                case .inbox:
+                    return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_folder_is_inbox", itemRef: itemRef, targetType: targetType, targetID: targetID, targetFolder: nil, targetRelativePath: targetPath, reason: reason, routeStatus: routeStatus, applySupported: false)
+                case .ambiguous:
+                    return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_folder_ambiguous", itemRef: itemRef, targetType: targetType, targetID: targetID, targetFolder: nil, targetRelativePath: targetPath, reason: reason, routeStatus: routeStatus, applySupported: false)
+                case .missing:
+                    return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_folder_not_found", itemRef: itemRef, targetType: targetType, targetID: targetID, targetFolder: nil, targetRelativePath: targetPath, reason: reason, routeStatus: routeStatus, applySupported: false)
+                }
+            }
+            return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "valid", error: nil, itemRef: itemRef, targetType: targetType, targetID: resolvedTargetID, targetFolder: resolvedTargetFolder, targetRelativePath: resolvedTargetPath, reason: reason, confidence: confidence, routeStatus: routeStatus, applySupported: true)
         }
 
         if action == "link" {
@@ -12700,7 +12735,10 @@ struct CiderCLI {
                 "isGhost": !existsOnDisk,
                 "missingDirectory": !existsOnDisk,
             ],
-            "safeNextCommands": folderOwnerSafeNextCommands(relativePath: folder.relativePath),
+            "safeNextCommands": folderOwnerSafeNextCommands(
+                relativePath: folder.relativePath,
+                folderID: folder.id.uuidString
+            ),
         ]
     }
 
@@ -12756,7 +12794,7 @@ struct CiderCLI {
                 "isGhost": false,
                 "missingDirectory": !inboxExistsOnDisk,
             ],
-            "safeNextCommands": folderOwnerSafeNextCommands(relativePath: "Inbox"),
+            "safeNextCommands": folderOwnerSafeNextCommands(relativePath: "Inbox", folderID: "Inbox"),
         ]
     }
 
@@ -12843,14 +12881,20 @@ struct CiderCLI {
         ) && isDirectory.boolValue
     }
 
-    static func folderOwnerSafeNextCommands(relativePath: String) -> [String] {
-        [
-            "cider-cli item search <query> --json",
-            "cider-cli item move <type> <id-or-ref> --path \"\(relativePath)\" --json",
-            "cider-cli item route <type> <id-or-ref> --target-type folder --target-path \"\(relativePath)\" --reason <reason> --json",
-            "cider-cli storage audit --json",
-            "cider-cli storage doctor-plan --json",
-        ]
+    static func folderOwnerSafeNextCommands(relativePath: String, folderID: String? = nil) -> [String] {
+        var commands = ["cider-cli item search <query> --json"]
+        if !looksLikeVaultArtifactPath(relativePath) && relativePath != "Inbox" {
+            commands.append("cider-cli item move <type> <id-or-ref> --folder \"\(folderID ?? relativePath)\" --json")
+            commands.append("cider-cli item move <type> <id-or-ref> --path \"\(relativePath)\" --json")
+        }
+        if let folderID, !folderID.isEmpty {
+            commands.append("cider-cli item route <type> <id-or-ref> --target-type folder --target-id \(folderID) --target-path \"\(relativePath)\" --reason <reason> --json")
+        } else {
+            commands.append("cider-cli item route <type> <id-or-ref> --target-type folder --target-path \"\(relativePath)\" --reason <reason> --json")
+        }
+        commands.append("cider-cli storage audit --json")
+        commands.append("cider-cli storage doctor-plan --json")
+        return commands
     }
 
     static func printOwnerInspection(
@@ -15036,6 +15080,69 @@ struct CiderCLI {
         case failed
     }
 
+    static func folderArgFailurePayload(
+        ref: String,
+        error: String,
+        matches: [VaultFolder] = [],
+        blockingIssue: String = "folder_unresolved"
+    ) -> [String: Any] {
+        let safeNextCommands = [
+            "cider-cli item owner-get folder \"\(ref)\" --json",
+            "cider-cli item search <query> --json",
+            "cider-cli storage audit --json",
+        ]
+        var payload: [String: Any] = [
+            "ok": false,
+            "command": "folder.resolve",
+            "readOnly": false,
+            "changed": false,
+            "error": error,
+            "sourceRef": [
+                "type": "folder",
+                "ref": ref,
+            ],
+            "matches": matches
+                .sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
+                .map(folderOwnerMatchDict),
+            "safeNextCommands": safeNextCommands,
+        ]
+        CiderAgentDecisionContract.merge(
+            CiderAgentDecisionContract.dictionary(
+                saved: false,
+                needsReview: true,
+                needsRouting: true,
+                confidence: 0,
+                blockingIssues: [blockingIssue],
+                recommendedNextAction: "review_route",
+                safeNextCommands: safeNextCommands
+            ),
+            into: &payload
+        )
+        return payload
+    }
+
+    static func printFolderArgResolutionFailure(
+        ref: String,
+        error: String,
+        matches: [VaultFolder] = [],
+        blockingIssue: String = "folder_unresolved"
+    ) {
+        processExitCode = 1
+        if jsonOutput {
+            outputJSON(folderArgFailurePayload(
+                ref: ref,
+                error: error,
+                matches: matches,
+                blockingIssue: blockingIssue
+            ))
+        } else {
+            print("Error: \(error)")
+            for match in matches.sorted(by: { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }) {
+                print("  \(match.relativePath) (\(match.id.uuidString))")
+            }
+        }
+    }
+
     /// Path-aware resolution of `--folder` / `--path`. `--path` intentionally
     /// creates missing components. `--folder` is read-only and only resolves
     /// folders already registered in canonical storage.
@@ -15055,21 +15162,32 @@ struct CiderCLI {
             return .failed
         }
         if let name = parseFlag("--folder", from: args) {
-            // Path-aware: anything containing '/' is treated as a vault-relative
-            // path and routed through the strict resolver (which prints its own
-            // not-found / ambiguity errors). Bare names use the legacy
-            // leaf-name lookup so existing scripts keep working.
-            if name.contains("/") {
-                if let folder = findFolderStrict(name) {
-                    return .resolved(folder)
-                }
+            switch resolveFolderOwner(ref: name) {
+            case .folder(let folder):
+                return .resolved(folder)
+            case .inbox:
+                printFolderArgResolutionFailure(
+                    ref: name,
+                    error: "`--folder \(name)` refers to Inbox. Use item unfile/review approve for Inbox workflows instead of moving to a synthetic Inbox folder.",
+                    blockingIssue: "folder_ref_is_inbox"
+                )
+                return .failed
+            case .ambiguous(let matches):
+                printFolderArgResolutionFailure(
+                    ref: name,
+                    error: "Ambiguous folder reference '\(name)'. Use one of the returned relativePath or id values.",
+                    matches: matches,
+                    blockingIssue: "folder_ref_ambiguous"
+                )
+                return .failed
+            case .missing:
+                printFolderArgResolutionFailure(
+                    ref: name,
+                    error: "No folder found matching '\(name)'. Use --path to create a folder path, or pass an existing folder id/relativePath.",
+                    blockingIssue: "folder_ref_missing"
+                )
                 return .failed
             }
-            if let folder = findFolder(named: name) {
-                return .resolved(folder)
-            }
-            print("Error: No folder found with name '\(name)'")
-            return .failed
         }
         return .unspecified
     }
@@ -15095,11 +15213,27 @@ struct CiderCLI {
             printCLIError("Could not resolve or create capture target folder '\(name)'")
             return .failed
         }
-        if let folder = findFolder(named: name) {
+        switch resolveFolderOwner(ref: name) {
+        case .folder(let folder):
             return .resolved(folder)
+        case .inbox:
+            return .unspecified
+        case .ambiguous(let matches):
+            printFolderArgResolutionFailure(
+                ref: name,
+                error: "Ambiguous folder reference '\(name)'. Use one of the returned relativePath or id values.",
+                matches: matches,
+                blockingIssue: "folder_ref_ambiguous"
+            )
+            return .failed
+        case .missing:
+            printFolderArgResolutionFailure(
+                ref: name,
+                error: "No folder found matching '\(name)'. Pass an existing folder id/relativePath.",
+                blockingIssue: "folder_ref_missing"
+            )
+            return .failed
         }
-        print("Error: No folder found with name '\(name)'")
-        return .failed
     }
 
     static func canonicalInboxPath(for source: CaptureAddSource) -> String {

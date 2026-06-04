@@ -360,6 +360,11 @@ struct CiderCLIAgentSafetyTests {
 
         let sourceNoteID = try createNote(title: "Batch Route Link Source", content: "Source", vault: vault)
         let targetNoteID = try createNote(title: "Batch Route Link Target", content: "Target", vault: vault)
+        _ = try runCLI(args: ["item", "move", "note", targetNoteID, "--path", "Projects/Cider/Routes", "--json"], vault: vault)
+        let ownerGet = try runCLI(args: ["item", "owner-get", "folder", "Projects/Cider/Routes", "--json"], vault: vault)
+        let ownerPayload = try parseJSONObject(ownerGet.stdout)
+        let targetFolder = try #require(ownerPayload["folder"] as? [String: Any])
+        let targetFolderID = try #require(targetFolder["id"] as? String)
 
         let request = """
         {
@@ -391,6 +396,9 @@ struct CiderCLIAgentSafetyTests {
         let plan = try parseJSONObject(planResult.stdout)
         let plannedOperations = try #require(plan["operations"] as? [[String: Any]])
         #expect(plannedOperations.allSatisfy { $0["applySupported"] as? Bool == true })
+        let plannedRoute = try #require(plannedOperations.first { $0["id"] as? String == "route-source" })
+        #expect(plannedRoute["targetID"] as? String == targetFolderID)
+        #expect(plannedRoute["targetRelativePath"] as? String == "Projects/Cider/Routes")
         let token = try #require(plan["requiredApprovalToken"] as? String)
 
         let applyResult = try runCLI(
@@ -419,6 +427,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(routingDecisions.contains {
             $0["targetType"] as? String == "folder"
                 && $0["targetPath"] as? String == "Projects/Cider/Routes"
+                && $0["targetID"] as? String == targetFolderID
                 && $0["reason"] as? String == "Batch route relation"
                 && $0["source"] as? String == "item.batch.apply"
         })
@@ -436,6 +445,8 @@ struct CiderCLIAgentSafetyTests {
         defer { try? FileManager.default.removeItem(at: vault) }
 
         let sourceNoteID = try createNote(title: "Batch Partial Route Source", content: "Source", vault: vault)
+        let folderSeedID = try createNote(title: "Batch Partial Folder Seed", content: "Folder", vault: vault)
+        _ = try runCLI(args: ["item", "move", "note", folderSeedID, "--path", "Projects/Cider/Partial", "--json"], vault: vault)
 
         let request = """
         {
@@ -542,6 +553,38 @@ struct CiderCLIAgentSafetyTests {
         let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
         #expect(safeNextCommands.contains("cider-cli item search <query> --json"))
         #expect(safeNextCommands.contains("cider-cli item move <type> <id-or-ref> --path \"Projects/Cider/Notes\" --json"))
+        #expect(safeNextCommands.contains("cider-cli item route <type> <id-or-ref> --target-type folder --target-id \(folder["id"] as? String ?? "") --target-path \"Projects/Cider/Notes\" --reason <reason> --json"))
+        #expect(safeNextCommands.contains("cider-cli storage audit --json"))
+    }
+
+    @Test("item owner get folder omits move path command for artifact-looking folder rows")
+    func itemOwnerGetFolderOmitsMovePathCommandForArtifactLookingFolderRows() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-folder-owner-artifact-path-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try createNote(title: "Initialize Folder DB", content: "Init", vault: vault)
+        try insertFolderRow(relativePath: "Projects/Cider/QA/Audit.md", vault: vault)
+        try FileManager.default.createDirectory(
+            at: vault.appendingPathComponent("Projects/Cider/QA/Audit.md"),
+            withIntermediateDirectories: true
+        )
+
+        let result = try runCLI(
+            args: ["item", "owner-get", "folder", "Projects/Cider/QA/Audit.md", "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        let folder = try #require(payload["folder"] as? [String: Any])
+        let folderID = try #require(folder["id"] as? String)
+        #expect(folder["relativePath"] as? String == "Projects/Cider/QA/Audit.md")
+
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(!safeNextCommands.contains("cider-cli item move <type> <id-or-ref> --path \"Projects/Cider/QA/Audit.md\" --json"))
+        #expect(safeNextCommands.contains("cider-cli item route <type> <id-or-ref> --target-type folder --target-id \(folderID) --target-path \"Projects/Cider/QA/Audit.md\" --reason <reason> --json"))
         #expect(safeNextCommands.contains("cider-cli storage audit --json"))
     }
 
@@ -567,6 +610,33 @@ struct CiderCLIAgentSafetyTests {
         let matches = try #require(payload["matches"] as? [[String: Any]])
         #expect(matches.count == 2)
         #expect(Set(matches.compactMap { $0["relativePath"] as? String }) == ["Alpha/Shared", "Beta/Shared"])
+    }
+
+    @Test("item move folder name fails closed when folder name is ambiguous")
+    func itemMoveFolderNameFailsClosedWhenFolderNameAmbiguous() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-move-folder-ambiguous-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let first = try createNote(title: "Move First Shared", content: "First", vault: vault)
+        _ = try runCLI(args: ["item", "move", "note", first, "--path", "Alpha/Shared", "--json"], vault: vault)
+        let second = try createNote(title: "Move Second Shared", content: "Second", vault: vault)
+        _ = try runCLI(args: ["item", "move", "note", second, "--path", "Beta/Shared", "--json"], vault: vault)
+        let noteID = try createNote(title: "Ambiguous Move Source", content: "Route me", vault: vault)
+
+        let result = try runCLI(args: ["item", "move", "note", noteID, "--folder", "Shared", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status != 0)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == "folder.resolve")
+        #expect(payload["changed"] as? Bool == false)
+        #expect((payload["error"] as? String)?.contains("Ambiguous folder reference") == true)
+        let matches = try #require(payload["matches"] as? [[String: Any]])
+        #expect(Set(matches.compactMap { $0["relativePath"] as? String }) == ["Alpha/Shared", "Beta/Shared"])
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item owner-get folder \"Shared\" --json"))
     }
 
     @Test("item owner get folder returns inbox metadata")
@@ -2377,6 +2447,24 @@ struct CiderCLIAgentSafetyTests {
         )
         let payload = try parseJSONObject(result.stdout)
         return try #require(payload["id"] as? String)
+    }
+
+    private func insertFolderRow(relativePath: String, vault: URL) throws {
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { db.close() }
+
+        let folderID = UUID().uuidString
+        let timestamp = Date().timeIntervalSince1970
+        let stmt = try db.prepare("""
+            INSERT INTO folders (id, relative_path, created_at, updated_at)
+            VALUES (?, ?, ?, ?);
+            """)
+        stmt.bind(folderID, at: 1)
+            .bind(relativePath, at: 2)
+            .bind(timestamp, at: 3)
+            .bind(timestamp, at: 4)
+        try stmt.step()
     }
 
     private func runCLI(args: [String], stdin: String? = nil) throws -> (stdout: String, stderr: String, status: Int32) {
