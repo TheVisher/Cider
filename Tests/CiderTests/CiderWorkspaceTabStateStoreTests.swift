@@ -3,8 +3,8 @@ import Testing
 @testable import Cider
 
 struct CiderWorkspaceTabStateStoreTests {
-    @Test("AI assistant open state restores as a workspace route")
-    func aiAssistantOpenStateRestoresAsWorkspaceRoute() {
+    @Test("Legacy AI assistant open state does not restore workspace navigation")
+    func legacyAIAssistantOpenStateDoesNotRestoreWorkspaceNavigation() {
         let suiteName = "CiderWorkspaceTabStateStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -15,7 +15,7 @@ struct CiderWorkspaceTabStateStoreTests {
         let second = CiderWorkspaceTabStateStore(defaults: defaults)
 
         #expect(second.isAIAssistantTabOpen)
-        #expect(second.restoredWorkspaceRoute() == .ai)
+        #expect(second.restoredWorkspaceRoute() == nil)
     }
 
     @Test("closed AI assistant state restores no workspace route")

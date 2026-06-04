@@ -19,6 +19,6 @@ final class CiderWorkspaceTabStateStore: @unchecked Sendable {
     }
 
     func restoredWorkspaceRoute() -> WorkspaceRoute? {
-        isAIAssistantTabOpen ? .ai : nil
+        nil
     }
 }

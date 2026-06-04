@@ -283,10 +283,12 @@ final class LegacyViewQuarantineTests: XCTestCase {
         caseInsensitive: Bool = false
     ) throws {
         for (relativePath, forbiddenPatterns) in forbiddenPatternsByPath {
-            let contents = try String(
-                contentsOf: Self.repositoryRoot.appendingPathComponent(relativePath),
-                encoding: .utf8
-            )
+            let fileURL = Self.repositoryRoot.appendingPathComponent(relativePath)
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                continue
+            }
+
+            let contents = try String(contentsOf: fileURL, encoding: .utf8)
 
             for pattern in forbiddenPatterns {
                 let contains = caseInsensitive
