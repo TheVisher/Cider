@@ -91,13 +91,34 @@ struct CiderRoutingExplanation: Equatable {
     var nextSafeAction: String
 
     func toDictionary() -> [String: Any] {
+        let confidence = latestDecision?.confidence
+        let needsRouting = reviewNeeded || latestDecision?.reviewState == "needs_review"
+        let blockingIssues = reviewNeeded ? ["routing_needs_review"] : []
         var dictionary: [String: Any] = [
+            "ok": true,
             "command": command,
+            "readOnly": true,
+            "changed": false,
             "item": item.toDictionary(),
             "history": history.map { $0.toDictionary() },
             "reviewNeeded": reviewNeeded,
             "nextSafeAction": nextSafeAction,
         ]
+        CiderAgentDecisionContract.merge(
+            CiderAgentDecisionContract.dictionary(
+                saved: true,
+                needsReview: reviewNeeded,
+                needsRouting: needsRouting,
+                confidence: confidence,
+                blockingIssues: blockingIssues,
+                recommendedNextAction: reviewNeeded ? "review_route" : nextSafeAction,
+                safeNextCommands: [
+                    "cider-cli item get \(item.type) \(item.id.uuidString) --json",
+                    "cider-cli item context \(item.type) \(item.id.uuidString) --json",
+                ]
+            ),
+            into: &dictionary
+        )
         if let latestDecision {
             dictionary["routing"] = latestDecision.toDictionary()
         } else {

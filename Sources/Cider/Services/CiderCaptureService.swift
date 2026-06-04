@@ -246,6 +246,7 @@ struct CiderCaptureResult {
             "nextSafeAction": nextSafeAction,
             "safeNextCommands": safeNextCommands(),
         ]
+        CiderAgentDecisionContract.merge(agentDecisionDictionary(), into: &dict)
         if let partialSuccess = partialSuccess ?? canonicalSideEffectPartialSuccess() {
             var partialDict: [String: Any] = [
                 "status": partialSuccess.status,
@@ -271,6 +272,38 @@ struct CiderCaptureResult {
             dict["sourceContext"] = sourceContext.toDictionary()
         }
         return dict
+    }
+
+    private func agentDecisionDictionary() -> [String: Any] {
+        let safeCommands = safeNextCommands()
+        let needsReview = routing.reviewNeeded || routing.reviewState == "needs_review" || routing.needsAgentRouteReview
+        let needsRouting = needsReview || routing.candidateTarget != nil || item.relativePath?.hasPrefix("Inbox/") == true
+        let needsEnrichment = enrichment.isEnriching
+            || enrichment.status == "pending"
+            || enrichment.status == "failed"
+            || nextSafeAction == "enrich"
+        var blockingIssues: [String] = []
+        if needsReview {
+            blockingIssues.append("routing_needs_review")
+        }
+        if enrichment.status == "failed" {
+            blockingIssues.append("enrichment_failed")
+        } else if needsEnrichment {
+            blockingIssues.append("enrichment_pending")
+        }
+        if canonicalSideEffectPartialSuccess() != nil {
+            blockingIssues.append("canonical_side_effects_incomplete")
+        }
+        return CiderAgentDecisionContract.dictionary(
+            saved: true,
+            needsReview: needsReview,
+            needsEnrichment: needsEnrichment,
+            needsRouting: needsRouting,
+            confidence: routing.confidence,
+            blockingIssues: blockingIssues,
+            recommendedNextAction: needsReview ? "review_route" : nextSafeAction,
+            safeNextCommands: safeCommands
+        )
     }
 
     private func safeNextCommands() -> [String] {

@@ -97,7 +97,7 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
             dictionary["relativePath"] = relativePath
         }
         if let routingState {
-            dictionary["routingState"] = routingState
+            dictionary["routingState"] = routingStateDictionary(from: routingState)
         }
         if let indexingStatus {
             dictionary["indexingStatus"] = indexingStatus
@@ -108,7 +108,38 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
         if let attachmentSummary {
             dictionary["attachmentSummary"] = attachmentSummary
         }
+        CiderAgentDecisionContract.merge(agentDecisionDictionary(), into: &dictionary)
         return dictionary
+    }
+
+    private func routingStateDictionary(from state: [String: String]) -> [String: Any] {
+        var dictionary: [String: Any] = state
+        if let confidence = state["confidence"].flatMap(Double.init) {
+            dictionary["confidence"] = confidence
+        }
+        return dictionary
+    }
+
+    private func agentDecisionDictionary() -> [String: Any] {
+        let needsReview = reviewState == "needs_review"
+        let needsRouting = kind == "low_confidence_routing"
+            || reasonCodes.contains(where: { $0.hasPrefix("routing_") || $0 == "inbox_unrouted" })
+            || routingState != nil
+        let needsEnrichment = kind == "enrichment"
+            || reasonCodes.contains(where: { $0.hasPrefix("enrichment_") })
+            || enrichmentStatus == "needs_review"
+        let confidence = routingState?["confidence"].flatMap(Double.init)
+        let recommendedAction = needsReview ? "review_route" : "inspect_item"
+        return CiderAgentDecisionContract.dictionary(
+            saved: true,
+            needsReview: needsReview,
+            needsEnrichment: needsEnrichment,
+            needsRouting: needsRouting,
+            confidence: confidence,
+            blockingIssues: reasonCodes,
+            recommendedNextAction: recommendedAction,
+            safeNextCommands: safeNextCommands
+        )
     }
 }
 

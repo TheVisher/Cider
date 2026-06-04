@@ -583,6 +583,54 @@ struct SecondBrainFoundationTests {
         #expect(bookmarkItem["type"] as? String == "bookmark")
         try requireAgentFacingCaptureState(bookmarkPayload, expectedOriginalText: "https://example.com/capture?x=1&price=$500")
 
+        let bookmarkID = try #require(bookmarkItem["id"] as? String)
+        let contextPayload = try jsonObject(from: runCLI([
+            "item", "context", "bookmark", bookmarkID,
+            "--json",
+        ], vaultURL: vault))
+        #expect(contextPayload["ok"] as? Bool == true)
+        #expect(contextPayload["command"] as? String == "item.context")
+        #expect(contextPayload["readOnly"] as? Bool == true)
+        #expect(contextPayload["changed"] as? Bool == false)
+        #expect(contextPayload["saved"] as? Bool == true)
+        #expect(contextPayload["needsReview"] as? Bool == true)
+        #expect(contextPayload["requiresHumanReview"] as? Bool == true)
+        #expect(contextPayload["agentMayRoute"] as? Bool == false)
+        #expect(contextPayload["recommendedNextAction"] as? String == "review_route")
+        let contextNextActions = try #require(contextPayload["nextActions"] as? [[String: Any]])
+        #expect(contextNextActions.first?["action"] as? String == "review_route")
+        #expect(contextNextActions.first?["readOnly"] as? Bool == true)
+        #expect(contextNextActions.first?["requiresApproval"] as? Bool == true)
+
+        let whyPayload = try jsonObject(from: runCLI([
+            "item", "why-surfaced", "bookmark", bookmarkID,
+            "--json",
+        ], vaultURL: vault))
+        #expect(whyPayload["ok"] as? Bool == true)
+        #expect(whyPayload["command"] as? String == "item.why-surfaced")
+        #expect(whyPayload["readOnly"] as? Bool == true)
+        #expect(whyPayload["changed"] as? Bool == false)
+        #expect(whyPayload["needsReview"] as? Bool == true)
+        #expect(whyPayload["recommendedNextAction"] as? String == "review_route")
+        let whyNextActions = try #require(whyPayload["nextActions"] as? [[String: Any]])
+        #expect(whyNextActions.first?["action"] as? String == "review_route")
+        #expect(whyNextActions.first?["requiresApproval"] as? Bool == true)
+
+        let explainPayload = try jsonObject(from: runCLI([
+            "routing", "explain", bookmarkID,
+            "--json",
+        ], vaultURL: vault))
+        #expect(explainPayload["ok"] as? Bool == true)
+        #expect(explainPayload["command"] as? String == "routing.explain")
+        #expect(explainPayload["readOnly"] as? Bool == true)
+        #expect(explainPayload["changed"] as? Bool == false)
+        #expect(explainPayload["needsReview"] as? Bool == true)
+        #expect(explainPayload["confidence"] as? Double == 0)
+        #expect(explainPayload["recommendedNextAction"] as? String == "review_route")
+        let explainNextActions = try #require(explainPayload["nextActions"] as? [[String: Any]])
+        #expect(explainNextActions.first?["action"] as? String == "review_route")
+        #expect(explainNextActions.first?["requiresApproval"] as? Bool == true)
+
         let sourceURL = vault.appendingPathComponent("path with spaces.txt")
         try "file body".write(to: sourceURL, atomically: true, encoding: .utf8)
         let filePayload = try jsonObject(from: runCLI([

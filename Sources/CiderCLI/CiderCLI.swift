@@ -4782,6 +4782,9 @@ struct CiderCLI {
                     let packet = try kanbanCardAgentContextPayload(ref: positional[1], args: args, store: store)
                     var payload: [String: Any] = [
                         "ok": true,
+                        "command": "item.why-surfaced",
+                        "readOnly": true,
+                        "changed": false,
                         "sourceRef": [
                             "type": "card",
                             "ref": positional[1],
@@ -4806,8 +4809,11 @@ struct CiderCLI {
                 let type = try ItemLinkService.entityType(from: positional[0])
                 let ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
                 let packet = try contextService.agentContext(for: ref, limits: itemAgentContextLimits(from: args))
-                let payload: [String: Any] = [
+                var payload: [String: Any] = [
                     "ok": true,
+                    "command": "item.why-surfaced",
+                    "readOnly": true,
+                    "changed": false,
                     "sourceRef": [
                         "type": positional[0],
                         "ref": positional[1],
@@ -4817,6 +4823,7 @@ struct CiderCLI {
                     "safeCommands": packet.safeCommands,
                     "summary": packet.summary,
                 ]
+                CiderAgentDecisionContract.merge(itemAgentDecisionDictionary(for: packet), into: &payload)
                 if jsonOutput {
                     outputJSON(payload)
                 } else {
@@ -14213,6 +14220,10 @@ struct CiderCLI {
 
     static func itemAgentContextPacketToDict(_ packet: CiderItemAgentContextPacket) -> [String: Any] {
         var dict: [String: Any] = [
+            "ok": true,
+            "command": "item.context",
+            "readOnly": true,
+            "changed": false,
             "item": itemSummaryToDict(packet.item),
             "owner": ownerToDict(packet.owner),
             "summary": packet.summary,
@@ -14234,10 +14245,31 @@ struct CiderCLI {
                 "maxBodyCharacters": packet.limits.maxBodyCharacters,
             ],
         ]
+        CiderAgentDecisionContract.merge(itemAgentDecisionDictionary(for: packet), into: &dict)
         if let review = packet.review {
             dict["review"] = itemAgentReviewStateToDict(review)
         }
         return dict
+    }
+
+    static func itemAgentDecisionDictionary(for packet: CiderItemAgentContextPacket) -> [String: Any] {
+        let reviewStatus = packet.review?.status ?? packet.surfacing.reviewState
+        let needsReview = reviewStatus == "needs_review"
+        let needsRouting = needsReview || packet.review?.targetPath != nil
+        var blockingIssues: [String] = []
+        if needsReview {
+            blockingIssues.append("routing_needs_review")
+        }
+        return CiderAgentDecisionContract.dictionary(
+            saved: true,
+            needsReview: needsReview,
+            needsEnrichment: false,
+            needsRouting: needsRouting,
+            confidence: packet.review?.confidence,
+            blockingIssues: blockingIssues,
+            recommendedNextAction: needsReview ? "review_route" : packet.surfacing.suggestedAction,
+            safeNextCommands: packet.safeCommands
+        )
     }
 
     static func itemSpaceMembershipToDict(_ membership: CiderSpaceMembership) -> [String: Any] {

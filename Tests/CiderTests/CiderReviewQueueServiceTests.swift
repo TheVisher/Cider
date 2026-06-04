@@ -581,6 +581,23 @@ struct CiderReviewQueueServiceTests {
         #expect(item.safeNextCommands.contains("cider-cli item get bookmark \(itemID.uuidString) --json"))
         #expect(item.safeNextCommands.contains { $0.contains("review approve") } == false)
         #expect(result.countsByReasonCode["routing_low_confidence"] == 1)
+
+        let dictionary = item.toDictionary()
+        #expect(dictionary["saved"] as? Bool == true)
+        #expect(dictionary["useful"] as? Bool == false)
+        #expect(dictionary["needsReview"] as? Bool == true)
+        #expect(dictionary["requiresHumanReview"] as? Bool == true)
+        #expect(dictionary["needsRouting"] as? Bool == true)
+        #expect(dictionary["agentMayRoute"] as? Bool == false)
+        #expect(dictionary["confidence"] as? Double == 0.1)
+        #expect(dictionary["recommendedNextAction"] as? String == "review_route")
+        #expect((dictionary["blockingIssues"] as? [String]) == ["routing_low_confidence"])
+        let nextActions = try #require(dictionary["nextActions"] as? [[String: Any]])
+        #expect(nextActions.first?["action"] as? String == "review_route")
+        #expect(nextActions.first?["readOnly"] as? Bool == true)
+        #expect(nextActions.first?["requiresApproval"] as? Bool == true)
+        let routingState = try #require(dictionary["routingState"] as? [String: Any])
+        #expect(routingState["confidence"] as? Double == 0.1)
     }
 
     @Test("capture review worklist surfaces unsupported attachment capture events")
