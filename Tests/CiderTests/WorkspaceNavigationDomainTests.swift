@@ -2,6 +2,13 @@ import XCTest
 @testable import Cider
 
 final class WorkspaceNavigationDomainTests: XCTestCase {
+    private static var repositoryRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
     func testDomainMetadataIncludesRequiredShellDestinations() {
         let domains = WorkspaceNavigationDomain.allCases
 
@@ -178,6 +185,21 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(WorkspaceSidebarNestedRowMetrics.horizontalPadding, Spacing.sm)
         XCTAssertEqual(WorkspaceSidebarNestedRowMetrics.verticalPadding, Spacing.xxs)
         XCTAssertEqual(WorkspaceSidebarNestedRowMetrics.childIndent, Spacing.lg)
+    }
+
+    func testSidebarSelectionChangesAreNotImplicitlyAnimated() throws {
+        let sourceURL = Self.repositoryRoot
+            .appendingPathComponent("Sources/Cider/Views/Shared/WorkspaceDomainSidebarView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertFalse(
+            source.contains("value: selectedDomain"),
+            "Sidebar selection should update immediately; keep animation scoped to expansion/layout changes."
+        )
+        XCTAssertTrue(
+            source.contains("value: expandedDomains"),
+            "Domain expansion can remain animated independently of route selection feedback."
+        )
     }
 
     func testDomainExpansionStateCanOpenMultipleDomainsWithoutNavigationSelection() {

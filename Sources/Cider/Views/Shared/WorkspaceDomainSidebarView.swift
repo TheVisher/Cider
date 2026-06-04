@@ -19,7 +19,6 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
 
     var body: some View {
         persistentDomainList
-        .animation(reduceMotion ? .none : CiderAnimation.snappy, value: selectedDomain)
         .animation(reduceMotion ? .none : CiderAnimation.snappy, value: expandedDomains)
     }
 
