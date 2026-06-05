@@ -1775,4 +1775,58 @@ struct CiderCaptureServiceTests {
             #expect(matches.first?.owner == SecondBrainOwnerRef(ownerType: "vaultFile", ownerID: result.item.id.uuidString))
         }
     }
+
+    @Test("DOCX file capture reports semantic indexing gap explicitly")
+    func docxFileCaptureReportsSemanticIndexingGapExplicitly() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
+            )
+            let sourceURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cider-ai-strategy-\(UUID().uuidString).docx")
+            try Data([0x50, 0x4B, 0x03, 0x04]).write(to: sourceURL)
+            defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+            let result = try service.addFileCapture(
+                sourcePath: sourceURL.path,
+                title: "Cider AI Strategy",
+                folderID: nil
+            )
+            let dict = result.toDictionary()
+
+            let item = try #require(dict["item"] as? [String: Any])
+            #expect(item["title"] as? String == "Cider AI Strategy")
+
+            let duplicate = try #require(dict["duplicate"] as? [String: Any])
+            #expect(duplicate["status"] as? String == "unsupported")
+            #expect(duplicate["reason"] as? String == "duplicate_check_not_implemented_for_file_capture")
+
+            let quality = try #require(dict["captureQuality"] as? [String: Any])
+            #expect(quality["semanticStatus"] as? String == "degraded")
+            #expect(quality["bodyExtractionStatus"] as? String == "unsupported")
+            #expect(quality["bodyIndexed"] as? Bool == false)
+            #expect(quality["indexedTextStatus"] as? String == "metadata_only")
+            #expect(quality["safeNextAction"] as? String == "report_file_indexing_gap")
+            #expect(quality["duplicateStatus"] as? String == "unsupported")
+            let degradedReasons = try #require(quality["degradedReasons"] as? [String])
+            #expect(degradedReasons.contains("file_body_not_extracted"))
+            #expect(degradedReasons.contains("file_body_not_indexed"))
+
+            #expect(dict["saved"] as? Bool == true)
+            #expect(dict["useful"] as? Bool == false)
+            #expect(dict["needsEnrichment"] as? Bool == true)
+            #expect(dict["recommendedNextAction"] as? String == "report_file_indexing_gap")
+            let blockingIssues = try #require(dict["blockingIssues"] as? [String])
+            #expect(blockingIssues.contains("file_body_not_extracted"))
+            #expect(blockingIssues.contains("file_body_not_indexed"))
+
+            let commands = try #require(dict["safeNextCommands"] as? [String])
+            #expect(commands == ["cider-cli item get vaultFile \(result.item.id.uuidString) --json"])
+        }
+    }
 }

@@ -31,7 +31,7 @@ struct ChatCaptureInput: Codable, Equatable, Sendable {
     var metadata: [String: String] = [:]
 }
 
-struct ChatCaptureIntakeResult {
+struct ChatCaptureIntakeResult: @unchecked Sendable {
     enum Status: String, Equatable {
         case captured
         case needsReview

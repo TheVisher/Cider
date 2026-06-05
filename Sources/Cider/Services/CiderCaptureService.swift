@@ -76,6 +76,8 @@ struct CiderCaptureResult {
     struct Duplicate {
         var status: String
         var existingItemID: UUID?
+        var reason: String? = nil
+        var evidence: String? = nil
     }
 
     struct Target {
@@ -174,6 +176,7 @@ struct CiderCaptureResult {
         ownerID: nil,
         captureEventID: nil
     )
+    var captureQuality: [String: Any]? = nil
 
     var captureEventOwner: SecondBrainOwnerRef? {
         captureEventID.map { SecondBrainOwnerRef(ownerType: "capture_event", ownerID: $0.uuidString) }
@@ -214,6 +217,8 @@ struct CiderCaptureResult {
         if let existingItemID = duplicate.existingItemID {
             duplicateDict["existingItemID"] = existingItemID.uuidString
         }
+        if let reason = duplicate.reason { duplicateDict["reason"] = reason }
+        if let evidence = duplicate.evidence { duplicateDict["evidence"] = evidence }
 
         var routingDict: [String: Any] = [
             "reviewNeeded": routing.reviewNeeded,
@@ -246,6 +251,9 @@ struct CiderCaptureResult {
             "nextSafeAction": nextSafeAction,
             "safeNextCommands": safeNextCommands(),
         ]
+        if let captureQuality {
+            dict["captureQuality"] = captureQuality
+        }
         CiderAgentDecisionContract.merge(agentDecisionDictionary(), into: &dict)
         if let partialSuccess = partialSuccess ?? canonicalSideEffectPartialSuccess() {
             var partialDict: [String: Any] = [
@@ -278,22 +286,27 @@ struct CiderCaptureResult {
         let safeCommands = safeNextCommands()
         let needsReview = routing.reviewNeeded || routing.reviewState == "needs_review" || routing.needsAgentRouteReview
         let needsRouting = needsReview || routing.candidateTarget != nil || item.relativePath?.hasPrefix("Inbox/") == true
-        let needsEnrichment = enrichment.isEnriching
+        let qualityNeedsEnrichment = captureQuality?["needsEnrichment"] as? Bool ?? false
+        let qualityBlockingIssues = captureQuality?["degradedReasons"] as? [String] ?? []
+        let qualityRecommendedAction = captureQuality?["safeNextAction"] as? String
+        let nativeNeedsEnrichment = enrichment.isEnriching
             || enrichment.status == "pending"
             || enrichment.status == "failed"
             || nextSafeAction == "enrich"
+        let needsEnrichment = nativeNeedsEnrichment || qualityNeedsEnrichment
         var blockingIssues: [String] = []
         if needsReview {
             blockingIssues.append("routing_needs_review")
         }
         if enrichment.status == "failed" {
             blockingIssues.append("enrichment_failed")
-        } else if needsEnrichment {
+        } else if nativeNeedsEnrichment {
             blockingIssues.append("enrichment_pending")
         }
         if canonicalSideEffectPartialSuccess() != nil {
             blockingIssues.append("canonical_side_effects_incomplete")
         }
+        blockingIssues.append(contentsOf: qualityBlockingIssues)
         return CiderAgentDecisionContract.dictionary(
             saved: true,
             needsReview: needsReview,
@@ -301,7 +314,7 @@ struct CiderCaptureResult {
             needsRouting: needsRouting,
             confidence: routing.confidence,
             blockingIssues: blockingIssues,
-            recommendedNextAction: needsReview ? "review_route" : nextSafeAction,
+            recommendedNextAction: qualityRecommendedAction ?? (needsReview ? "review_route" : nextSafeAction),
             safeNextCommands: safeCommands
         )
     }
@@ -550,6 +563,97 @@ struct CiderCaptureResult {
             "cider-cli review enrich \(bookmark.id.uuidString) --actor agent --timeout 20 --json",
             "cider-cli item rebuild-chunks bookmark \(bookmark.id.uuidString) --json",
         ]
+    }
+
+    fileprivate static func fileCaptureQualityDictionary(for file: VaultFile) -> [String: Any] {
+        let readableText = readableTextFileContent(relativePath: file.relativePath)
+        let fileType = file.fileType.rawValue
+        let bodyExtractionStatus: String
+        let bodyIndexed: Bool
+        let indexedTextStatus: String
+        var degradedReasons: [String] = []
+
+        if let readableText, !readableText.isEmpty {
+            bodyExtractionStatus = "not_required"
+            bodyIndexed = true
+            indexedTextStatus = "body_text_indexed"
+        } else if fileBodyExtractionIsApplicable(file) {
+            bodyExtractionStatus = "unsupported"
+            bodyIndexed = false
+            indexedTextStatus = "metadata_only"
+            degradedReasons.append("file_body_not_extracted")
+            degradedReasons.append("file_body_not_indexed")
+        } else {
+            bodyExtractionStatus = "not_applicable"
+            bodyIndexed = false
+            indexedTextStatus = "metadata_only"
+        }
+
+        let semanticStatus = degradedReasons.isEmpty ? "complete" : "degraded"
+        return [
+            "kind": "file",
+            "lifecycleStatus": "stored",
+            "semanticStatus": semanticStatus,
+            "fileType": fileType,
+            "bodyExtractionStatus": bodyExtractionStatus,
+            "bodyIndexed": bodyIndexed,
+            "indexedTextStatus": indexedTextStatus,
+            "metadataIndexed": true,
+            "degraded": !degradedReasons.isEmpty,
+            "degradedReasons": degradedReasons,
+            "needsEnrichment": !degradedReasons.isEmpty,
+            "duplicateStatus": "unsupported",
+            "safeNextAction": degradedReasons.isEmpty ? "inspect_item" : "report_file_indexing_gap",
+        ]
+    }
+
+    private static func fileBodyExtractionIsApplicable(_ file: VaultFile) -> Bool {
+        switch file.fileType {
+        case .document, .pdf:
+            return true
+        case .image:
+            return file.ocrText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true
+        case .video, .audio, .archive, .unknown:
+            return false
+        }
+    }
+
+    private static func readableTextFileContent(relativePath: String) -> String? {
+        guard isReadableTextFile(relativePath: relativePath) else { return nil }
+
+        let fileURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(relativePath)
+        guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+              let data = try? Data(contentsOf: fileURL) else {
+            return nil
+        }
+
+        for encoding in [String.Encoding.utf8, .utf16, .ascii, .isoLatin1] {
+            guard let text = String(data: data, encoding: encoding) else { continue }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        return nil
+    }
+
+    private static func isReadableTextFile(relativePath: String) -> Bool {
+        let ext = URL(fileURLWithPath: relativePath).pathExtension.lowercased()
+        return [
+            "txt",
+            "text",
+            "md",
+            "markdown",
+            "csv",
+            "tsv",
+            "json",
+            "jsonl",
+            "yaml",
+            "yml",
+            "xml",
+            "html",
+            "htm",
+            "log",
+        ].contains(ext)
     }
 
     @MainActor
@@ -1322,9 +1426,11 @@ final class CiderCaptureService {
             folderName: target.name,
             enrichmentStatus: fileType == .image ? "pending" : "not_applicable",
             titleState: file.title == nil ? "filename_derived" : "manual",
-            duplicateStatus: "not_checked",
+            duplicateStatus: "unsupported",
+            duplicateReason: "duplicate_check_not_implemented_for_file_capture",
             routing: routing,
             nextSafeAction: routing.defaultNextSafeAction,
+            captureQuality: CiderCaptureResult.fileCaptureQualityDictionary(for: file),
             sourceContext: sourceContext
         )
     }
@@ -1408,12 +1514,15 @@ final class CiderCaptureService {
         titleState: String,
         duplicateStatus: String,
         duplicateExistingItemID: UUID? = nil,
+        duplicateReason: String? = nil,
+        duplicateEvidence: String? = nil,
         routing: CiderCaptureResult.Routing,
         nextSafeAction: String,
         partialSuccess: CiderCaptureResult.PartialSuccess? = nil,
+        captureQuality: [String: Any]? = nil,
         sourceContext: CaptureSourceContext? = nil
     ) -> CiderCaptureResult {
-        let result = CiderCaptureResult(
+        var result = CiderCaptureResult(
             command: "capture.add",
             source: .init(
                 kind: sourceKind,
@@ -1439,12 +1548,15 @@ final class CiderCaptureService {
             ),
             duplicate: .init(
                 status: duplicateStatus,
-                existingItemID: duplicateExistingItemID
+                existingItemID: duplicateExistingItemID,
+                reason: duplicateReason,
+                evidence: duplicateEvidence
             ),
             routing: routing,
             nextSafeAction: nextSafeAction,
             partialSuccess: partialSuccess
         )
+        result.captureQuality = captureQuality
         return indexCapturedItem(attachCaptureEvent(to: result, sourceContext: sourceContext))
     }
 
