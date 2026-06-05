@@ -2276,6 +2276,19 @@ final class NotesStorage: ObservableObject {
             guard fm.fileExists(atPath: sourceURL.path) else { continue }
             do {
                 try fm.removeItem(at: sourceURL)
+                MutationAuditService(database: resolvedDatabase).record(
+                    action: "scanner.note.delete_exact_duplicate_file",
+                    itemType: LibraryEntityType.note.rawValue,
+                    itemID: note.id,
+                    before: MutationAuditSnapshots.note(note),
+                    metadata: [
+                        "scanner": "NotesStorage.rescan",
+                        "operation": "delete_exact_duplicate_file",
+                        "source": MutationAuditSource.filesystem.rawValue,
+                        "relativePath": note.relativePath
+                    ],
+                    source: .filesystem
+                )
                 logger.info("Deleted exact duplicate note file: \(sourceURL.path, privacy: .public)")
             } catch {
                 logger.error("Failed to delete duplicate note file \(sourceURL.path, privacy: .public): \(error.localizedDescription)")

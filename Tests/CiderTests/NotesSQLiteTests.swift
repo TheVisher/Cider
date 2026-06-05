@@ -543,6 +543,17 @@ struct NotesSQLiteTests {
         reloaded.loadNotesFromDatabase(db)
         #expect(reloaded.notes.count == 1)
         #expect(reloaded.notes.first?.relativePath == "Inbox/Notes/Games Library.md")
+
+        let auditEntries = MutationAuditService(database: db).loadEntries()
+        let pruneEntry = auditEntries.first { entry in
+            entry.action == "scanner.note.delete_exact_duplicate_file"
+                && entry.beforeState["relativePath"] == "Inbox/Notes/Games Library 2.md"
+        }
+        #expect(pruneEntry?.itemType == "note")
+        #expect(pruneEntry?.source == .filesystem)
+        #expect(pruneEntry?.metadata["operation"] == "delete_exact_duplicate_file")
+        #expect(pruneEntry?.metadata["scanner"] == "NotesStorage.rescan")
+        #expect(pruneEntry?.metadata["relativePath"] == "Inbox/Notes/Games Library 2.md")
     }
 
     @Test("Sync pull skips exact duplicate note instead of creating suffixed Markdown")
