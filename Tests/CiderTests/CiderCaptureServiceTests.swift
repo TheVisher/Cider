@@ -1710,6 +1710,68 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("event capture stages Space and project intent without folder routing")
+    func eventCaptureStagesSpaceAndProjectIntentWithoutFolderRouting() throws {
+        try withIsolatedVaultDomains { db, bookmarks, notes, todos, dateCards, contacts, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                dateCardStorage: dateCards,
+                contactStorage: contacts,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
+            )
+            let startAt = Date(timeIntervalSince1970: 1_779_000_000)
+
+            let watchParty = try service.addDateCardCapture(
+                title: "The Vampire Lestat watch party",
+                sourceText: "TV premiere night and Rotten Tomatoes discussion.",
+                startAt: startAt,
+                endAt: nil,
+                allDay: false,
+                location: "Living room",
+                folderID: nil
+            ).toDictionary()
+            let watchIntent = try #require(watchParty["spaceIntent"] as? [String: Any])
+            #expect(watchIntent["spaceName"] as? String == "Media")
+            #expect(watchIntent["area"] as? String == "Shows")
+            #expect(watchIntent["storageDestination"] as? String == "Inbox/Date Cards")
+
+            let projectMeeting = try service.addDateCardCapture(
+                title: "Cider iOS planning meeting",
+                sourceText: "Codex iOS capture loop review.",
+                startAt: startAt.addingTimeInterval(3600),
+                endAt: nil,
+                allDay: false,
+                location: nil,
+                folderID: nil
+            ).toDictionary()
+            let projectIntent = try #require(projectMeeting["projectIntent"] as? [String: Any])
+            #expect(projectIntent["projectName"] as? String == "Cider iOS")
+            #expect(projectIntent["storageDestination"] as? String == "Inbox/Date Cards")
+            #expect(projectMeeting["recommendedNextAction"] as? String == "review_intent")
+
+            let appointment = try service.addDateCardCapture(
+                title: "Dentist appointment",
+                sourceText: "Routine cleaning.",
+                startAt: startAt.addingTimeInterval(7200),
+                endAt: nil,
+                allDay: false,
+                location: "Dental office",
+                folderID: nil
+            ).toDictionary()
+            #expect(appointment["intentStaging"] == nil)
+            #expect(appointment["spaceIntent"] == nil)
+            #expect(appointment["projectIntent"] == nil)
+            #expect(appointment["recommendedNextAction"] as? String == "review_route")
+            let routing = try #require(appointment["routing"] as? [String: Any])
+            let target = try #require(routing["candidateTarget"] as? [String: Any])
+            #expect(target["relativePath"] as? String == "Inbox/Date Cards")
+        }
+    }
+
     @Test("contact quick capture returns the shared result shape")
     func contactQuickCaptureReturnsSharedResultShape() throws {
         try withIsolatedVaultDomains { db, bookmarks, notes, todos, dateCards, contacts, files in

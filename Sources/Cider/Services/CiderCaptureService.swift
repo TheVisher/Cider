@@ -929,6 +929,29 @@ enum CiderCaptureIntentStagingService {
                 )
             ]
         }
+        if haystack.contains("watch party")
+            || haystack.contains("watch-party")
+            || haystack.contains("movie night")
+            || haystack.contains("tv night")
+            || haystack.contains("premiere night")
+            || haystack.contains("trailer night") {
+            let area: String
+            if haystack.contains("tv") || haystack.contains("show") || haystack.contains("season") {
+                area = "Shows"
+            } else if haystack.contains("trailer") {
+                area = "Trailers"
+            } else {
+                area = "Movies"
+            }
+            return [
+                .init(
+                    kind: .space(spaceName: "Media", area: area),
+                    confidence: 0.64,
+                    reason: "The capture text looks like a media watch event, so keep it in Inbox for review while preserving the likely Media intent.",
+                    source: "capture.intent.text_signal"
+                )
+            ]
+        }
         if haystack.contains("recipe") || haystack.contains("ingredients") {
             return [
                 .init(
@@ -1521,7 +1544,17 @@ final class CiderCaptureService {
             routing: routing,
             nextSafeAction: routing.defaultNextSafeAction,
             partialSuccess: partialSuccess,
-            sourceContext: sourceContext
+            sourceContext: sourceContext,
+            stagedIntents: CiderCaptureIntentStagingService.stagedIntents(for: .init(
+                title: stored.title,
+                urlString: nil,
+                sourceFile: nil,
+                sourceText: [
+                    details,
+                    trimmedLocation
+                ].compactMap { $0 }.joined(separator: " "),
+                sourceContext: sourceContext
+            ))
         )
     }
 
