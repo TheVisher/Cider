@@ -1078,8 +1078,8 @@ struct BookmarkSQLiteTests {
         #expect(service2.bookmarks.first?.id == existingID)
     }
 
-    @Test("Orphan adoption deletes exact duplicate .webloc whose URL is already tracked")
-    func orphanAdoptionDeletesCanonicalDuplicateURLArtifact() throws {
+    @Test("Orphan adoption preserves exact duplicate .webloc as review candidate")
+    func orphanAdoptionPreservesCanonicalDuplicateURLArtifactForReview() throws {
         let (db, url) = try makeTestDB()
         let fm = FileManager.default
         let vault = fm.temporaryDirectory.appendingPathComponent("cider-orphan-duplicate-bookmark-\(UUID().uuidString)", isDirectory: true)
@@ -1121,19 +1121,28 @@ struct BookmarkSQLiteTests {
         service.loadBookmarksFromDatabase(db)
         service.adoptOrphanedVaultFiles()
 
-        #expect(service.bookmarks.count == 1)
-        #expect(service.bookmarks.first?.id == existing.id)
-        #expect(service.bookmarks.first?.relativePath == "Inbox/Bookmarks/Stonewards on Steam.webloc")
+        #expect(service.bookmarks.count == 2)
+        #expect(service.bookmarks.contains {
+            $0.id == existing.id && $0.relativePath == "Inbox/Bookmarks/Stonewards on Steam.webloc"
+        })
+        #expect(service.bookmarks.contains {
+            $0.id != existing.id && $0.relativePath == "Inbox/Bookmarks/Store.Steampowered.Com (2).webloc"
+        })
         #expect(fm.fileExists(atPath: inbox.appendingPathComponent("Stonewards on Steam.webloc").path))
-        #expect(!fm.fileExists(atPath: inbox.appendingPathComponent("Store.Steampowered.Com (2).webloc").path))
+        #expect(fm.fileExists(atPath: inbox.appendingPathComponent("Store.Steampowered.Com (2).webloc").path))
 
         let itemStmt = try db.prepare("SELECT COUNT(*) FROM items WHERE type = 'bookmark';")
         try itemStmt.step()
-        #expect(itemStmt.int(at: 0) == 1)
+        #expect(itemStmt.int(at: 0) == 2)
 
         let bookmarkStmt = try db.prepare("SELECT COUNT(*) FROM bookmarks;")
         try bookmarkStmt.step()
-        #expect(bookmarkStmt.int(at: 0) == 1)
+        #expect(bookmarkStmt.int(at: 0) == 2)
+
+        let duplicateFindings = VaultDuplicateAuditor.findDuplicateBookmarks(service.bookmarks)
+        #expect(duplicateFindings.contains {
+            $0.kind == .canonicalURL && $0.items.count == 2
+        })
     }
 
     @Test("Orphan .webloc adoption preserves filesystem creation date")
@@ -1173,8 +1182,8 @@ struct BookmarkSQLiteTests {
         #expect(abs(adoptedDates.createdAt.timeIntervalSince(fileDate)) < 0.01)
     }
 
-    @Test("Duplicate .webloc adoption keeps canonical row and deletes duplicate file")
-    func duplicateWeblocAdoptionKeepsCanonicalRowAndDeletesDuplicateFile() throws {
+    @Test("Duplicate .webloc adoption keeps canonical row and promotes duplicate file")
+    func duplicateWeblocAdoptionKeepsCanonicalRowAndPromotesDuplicateFile() throws {
         let (db, url) = try makeTestDB()
         let fm = FileManager.default
         let vault = fm.temporaryDirectory.appendingPathComponent("cider-duplicate-bookmark-date-\(UUID().uuidString)", isDirectory: true)
@@ -1217,15 +1226,27 @@ struct BookmarkSQLiteTests {
         service.loadBookmarksFromDatabase(db)
         service.adoptOrphanedVaultFiles()
 
-        #expect(service.bookmarks.count == 1)
-        let canonical = try #require(service.bookmarks.first)
-        #expect(canonical.id == existing.id)
-        #expect(canonical.relativePath == "Inbox/Bookmarks/Fatty Fish Sushi Everett review.webloc")
-        #expect(!fm.fileExists(atPath: vault.appendingPathComponent(duplicateRelativePath).path))
+        #expect(service.bookmarks.count == 2)
+        #expect(service.bookmarks.contains {
+            $0.id == existing.id && $0.relativePath == "Inbox/Bookmarks/Fatty Fish Sushi Everett review.webloc"
+        })
+        #expect(service.bookmarks.contains {
+            $0.id != existing.id && $0.relativePath == duplicateRelativePath
+        })
+        #expect(fm.fileExists(atPath: vault.appendingPathComponent(duplicateRelativePath).path))
 
         let itemStmt = try db.prepare("SELECT COUNT(*) FROM items WHERE type = 'bookmark';")
         try itemStmt.step()
-        #expect(itemStmt.int(at: 0) == 1)
+        #expect(itemStmt.int(at: 0) == 2)
+
+        let bookmarkStmt = try db.prepare("SELECT COUNT(*) FROM bookmarks;")
+        try bookmarkStmt.step()
+        #expect(bookmarkStmt.int(at: 0) == 2)
+
+        let duplicateFindings = VaultDuplicateAuditor.findDuplicateBookmarks(service.bookmarks)
+        #expect(duplicateFindings.contains {
+            $0.kind == .canonicalURL && $0.items.count == 2
+        })
     }
 
     @Test("SQLite load repairs adoption-created bookmark date from older .webloc date")

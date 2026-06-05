@@ -681,8 +681,10 @@ struct SecondBrainFoundationTests {
         #expect(item["type"] as? String == "event")
         #expect(item["title"] as? String == "Cider v1 review")
         #expect(routing["reviewState"] as? String == "needs_review")
-        #expect(capture["nextSafeAction"] as? String == "review_route")
-        #expect(capture["safeNextCommands"] as? [String] != nil)
+        #expect(capture["nextSafeAction"] as? String == "inspect_item")
+        #expect(capture["recommendedNextAction"] as? String == "review_route")
+        let safeNextCommands = try #require(capture["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.first == "cider-cli item get event \(item["id"] as? String ?? "") --json")
         try requireAgentFacingCaptureState(capture, expectedOriginalText: raw)
     }
 
@@ -720,8 +722,10 @@ struct SecondBrainFoundationTests {
         #expect(item["type"] as? String == "contact")
         #expect(item["title"] as? String == "Avery Stone")
         #expect(routing["reviewState"] as? String == "needs_review")
-        #expect(capture["nextSafeAction"] as? String == "review_route")
-        #expect(capture["safeNextCommands"] as? [String] != nil)
+        #expect(capture["nextSafeAction"] as? String == "inspect_item")
+        #expect(capture["recommendedNextAction"] as? String == "review_route")
+        let safeNextCommands = try #require(capture["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.first == "cider-cli item get contact \(item["id"] as? String ?? "") --json")
         try requireAgentFacingCaptureState(capture, expectedOriginalText: raw)
     }
 
@@ -2345,15 +2349,16 @@ struct SecondBrainFoundationTests {
             "--dry-run",
             "--json",
         ], vaultURL: vaultURL))
+        let dryRunSummary = try #require(dryRun["parentSummary"] as? [String: Any])
 
-        #expect(dryRun["applied"] as? Bool == false)
-        let stale = try #require(dryRun["staleParentText"] as? [String: Any])
+        #expect(dryRunSummary["applied"] as? Bool == false)
+        let stale = try #require(dryRunSummary["staleParentText"] as? [String: Any])
         let findings = try #require(stale["findings"] as? [[String: Any]])
         #expect(findings.contains {
             $0["section"] as? String == "Next Step"
                 && ($0["referencedDoneChildID"] as? String) != nil
         })
-        let proposed = try #require(dryRun["proposedSections"] as? [String: String])
+        let proposed = try #require(dryRunSummary["proposedSections"] as? [String: String])
         #expect(proposed["Next Step"] == "Queue Open child.")
 
         let applied = try jsonObject(from: runCLI([
@@ -2363,7 +2368,8 @@ struct SecondBrainFoundationTests {
             "--confirm",
             "--json",
         ], vaultURL: vaultURL))
-        #expect(applied["applied"] as? Bool == true)
+        let appliedSummary = try #require(applied["parentSummary"] as? [String: Any])
+        #expect(appliedSummary["applied"] as? Bool == true)
 
         let inspected = try jsonObject(from: runCLI([
             "board", "card", "inspect", "Parent Summary Smoke",
@@ -2538,21 +2544,22 @@ struct SecondBrainFoundationTests {
             "board", "testing-summary", "Testing Summary Smoke",
             "--json",
         ], vaultURL: vaultURL))
+        let testingSummary = try #require(summary["testingSummary"] as? [String: Any])
 
-        let counts = try #require(summary["counts"] as? [String: Any])
+        let counts = try #require(testingSummary["counts"] as? [String: Any])
         #expect(counts["total"] as? Int == 3)
         #expect(counts["needsErik"] as? Int == 1)
         #expect(counts["agentCanVerify"] as? Int == 1)
         #expect(counts["mixed"] as? Int == 1)
 
-        let needsErik = try #require(summary["needsErik"] as? [[String: Any]])
+        let needsErik = try #require(testingSummary["needsErik"] as? [[String: Any]])
         let manual = try #require(needsErik.first { $0["id"] as? String == manualID })
         #expect(manual["owner"] as? String == "needs_erik")
 
-        let agentCanVerify = try #require(summary["agentCanVerify"] as? [[String: Any]])
+        let agentCanVerify = try #require(testingSummary["agentCanVerify"] as? [[String: Any]])
         let agentIDs = agentCanVerify.compactMap { $0["id"] as? String }
         #expect(agentIDs.contains(agentID))
-        let mixed = try #require(summary["mixed"] as? [[String: Any]])
+        let mixed = try #require(testingSummary["mixed"] as? [[String: Any]])
         let allTestingCards = needsErik + agentCanVerify + mixed
         let passedQA = try #require(allTestingCards.first { $0["title"] as? String == "Passed QA wording smoke" })
         #expect((passedQA["failedQASteps"] as? [String])?.isEmpty == true)

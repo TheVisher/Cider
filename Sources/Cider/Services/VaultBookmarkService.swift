@@ -1360,8 +1360,16 @@ final class VaultBookmarkService: ObservableObject {
                                 bookmarks[idx] = merged
                                 externalURLUpdates += 1
                             }
-                            deleteDuplicateBookmarkArtifact(bookmark)
-                            logger.warning("Deleted duplicate bookmark URL artifact at \(bookmark.relativePath ?? "?", privacy: .public); kept canonical bookmark \(existingID.uuidString, privacy: .public)")
+                            // Preserve the second .webloc by adopting as separate duplicate candidate.
+                            // The duplicate auditor/review queue can then surface both artifacts for
+                            // human review instead of the scanner silently deleting user-visible data.
+                            bookmark.folderID = folderID
+                            adopted.append(bookmark)
+                            existingIDs.insert(bookmark.id)
+                            if let relativePath = bookmark.relativePath {
+                                existingIDByRelativePath[relativePath] = bookmark.id
+                            }
+                            logger.warning("Adopted duplicate bookmark URL artifact at \(bookmark.relativePath ?? "?", privacy: .public) as a reviewable duplicate candidate alongside canonical bookmark \(existingID.uuidString, privacy: .public)")
                         } else if bookmarks[idx].folderID != folderID || bookmarks[idx].relativePath != bookmark.relativePath {
                             bookmarks[idx].folderID = folderID
                             bookmarks[idx].relativePath = bookmark.relativePath
