@@ -854,6 +854,13 @@ enum CiderCaptureIntentStagingService {
         return providerIntents + stagedProjectIntents(in: input.combinedText)
     }
 
+    static func stagedContactIntents(for input: Input) -> [CiderCaptureResult.StagedIntent] {
+        stagedIntents(for: input).filter { intent in
+            if case .project = intent.kind { return true }
+            return false
+        }
+    }
+
     private static func stagedProviderIntents(for input: Input) -> [CiderCaptureResult.StagedIntent] {
         guard let urlString = input.urlString ?? firstURLString(in: input.combinedText),
               let components = URLComponents(string: urlString),
@@ -1640,7 +1647,18 @@ final class CiderCaptureService {
             routing: routing,
             nextSafeAction: routing.defaultNextSafeAction,
             partialSuccess: partialSuccess,
-            sourceContext: sourceContext
+            sourceContext: sourceContext,
+            stagedIntents: CiderCaptureIntentStagingService.stagedContactIntents(for: .init(
+                title: stored.displayName,
+                urlString: nil,
+                sourceFile: nil,
+                sourceText: [
+                    sourceText?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    relationship,
+                    trimmedEmail
+                ].compactMap { $0 }.joined(separator: " "),
+                sourceContext: sourceContext
+            ))
         )
     }
 

@@ -1817,6 +1817,64 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("contact capture stages project intent without over-routing people to Spaces")
+    func contactCaptureStagesProjectIntentWithoutOverRoutingPeopleToSpaces() throws {
+        try withIsolatedVaultDomains { db, bookmarks, notes, todos, dateCards, contacts, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                dateCardStorage: dateCards,
+                contactStorage: contacts,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
+            )
+
+            let collaborator = try service.addContactCapture(
+                displayName: "Jordan Lee",
+                sourceText: "Cider iOS collaborator from the Codex iOS capture loop.",
+                relationshipLabel: "Cider iOS collaborator",
+                email: "jordan@example.com",
+                phone: nil,
+                folderID: nil
+            ).toDictionary()
+            let projectIntent = try #require(collaborator["projectIntent"] as? [String: Any])
+            #expect(projectIntent["projectName"] as? String == "Cider iOS")
+            #expect(projectIntent["storageDestination"] as? String == "Inbox/Contacts")
+            #expect(collaborator["spaceIntent"] == nil)
+            #expect(collaborator["recommendedNextAction"] as? String == "review_intent")
+
+            let generic = try service.addContactCapture(
+                displayName: "Avery Stone",
+                sourceText: "Met at the neighborhood coffee meetup.",
+                relationshipLabel: "Friend",
+                email: "avery@example.com",
+                phone: "555-0100",
+                folderID: nil
+            ).toDictionary()
+            #expect(generic["intentStaging"] == nil)
+            #expect(generic["spaceIntent"] == nil)
+            #expect(generic["projectIntent"] == nil)
+            #expect(generic["recommendedNextAction"] as? String == "review_route")
+
+            let hobby = try service.addContactCapture(
+                displayName: "Sam Patel",
+                sourceText: "Likes Steam games and Paralives.",
+                relationshipLabel: "Friend",
+                email: "sam@example.com",
+                phone: nil,
+                folderID: nil
+            ).toDictionary()
+            #expect(hobby["intentStaging"] == nil)
+            #expect(hobby["spaceIntent"] == nil)
+            #expect(hobby["projectIntent"] == nil)
+            let routing = try #require(hobby["routing"] as? [String: Any])
+            let target = try #require(routing["candidateTarget"] as? [String: Any])
+            #expect(target["relativePath"] as? String == "Inbox/Contacts")
+        }
+    }
+
     @Test("event capture reports partial success when folder update fails")
     func eventCaptureReportsPartialSuccessWhenFolderUpdateFails() throws {
         try withIsolatedVaultDomains { db, bookmarks, notes, todos, dateCards, contacts, files in
