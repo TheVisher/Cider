@@ -855,7 +855,7 @@ enum CiderCaptureIntentStagingService {
     }
 
     private static func stagedProviderIntents(for input: Input) -> [CiderCaptureResult.StagedIntent] {
-        guard let urlString = input.urlString,
+        guard let urlString = input.urlString ?? firstURLString(in: input.combinedText),
               let components = URLComponents(string: urlString),
               let host = components.host?.lowercased() else {
             return stagedTextIntents(in: input.combinedText)
@@ -906,6 +906,16 @@ enum CiderCaptureIntentStagingService {
         }
 
         return intents.isEmpty ? stagedTextIntents(in: text) : intents
+    }
+
+    private static func firstURLString(in text: String) -> String? {
+        let pattern = #"https?://[^\s<>"')\]]+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let range = Range(match.range, in: text) else {
+            return nil
+        }
+        return String(text[range])
     }
 
     private static func stagedTextIntents(in haystack: String) -> [CiderCaptureResult.StagedIntent] {
@@ -1173,7 +1183,14 @@ final class CiderCaptureService {
             routing: routing,
             nextSafeAction: routing.defaultNextSafeAction,
             partialSuccess: partialSuccess,
-            sourceContext: sourceContext
+            sourceContext: sourceContext,
+            stagedIntents: CiderCaptureIntentStagingService.stagedIntents(for: .init(
+                title: stored.title,
+                urlString: nil,
+                sourceFile: nil,
+                sourceText: content,
+                sourceContext: sourceContext
+            ))
         )
     }
 
@@ -1239,7 +1256,14 @@ final class CiderCaptureService {
             routing: routing,
             nextSafeAction: routing.defaultNextSafeAction,
             partialSuccess: partialSuccess,
-            sourceContext: sourceContext
+            sourceContext: sourceContext,
+            stagedIntents: CiderCaptureIntentStagingService.stagedIntents(for: .init(
+                title: stored.title,
+                urlString: sourceURL,
+                sourceFile: nil,
+                sourceText: ocrText,
+                sourceContext: sourceContext
+            ))
         )
     }
 
@@ -1770,7 +1794,8 @@ final class CiderCaptureService {
         nextSafeAction: String,
         partialSuccess: CiderCaptureResult.PartialSuccess? = nil,
         captureQuality: [String: Any]? = nil,
-        sourceContext: CaptureSourceContext? = nil
+        sourceContext: CaptureSourceContext? = nil,
+        stagedIntents: [CiderCaptureResult.StagedIntent] = []
     ) -> CiderCaptureResult {
         var result = CiderCaptureResult(
             command: "capture.add",
@@ -1807,6 +1832,7 @@ final class CiderCaptureService {
             partialSuccess: partialSuccess
         )
         result.captureQuality = captureQuality
+        result.stagedIntents = stagedIntents
         return indexCapturedItem(attachCaptureEvent(to: result, sourceContext: sourceContext))
     }
 

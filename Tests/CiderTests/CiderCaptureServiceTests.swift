@@ -1338,6 +1338,62 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("note and screen capture stage Space and project intent without folder routing")
+    func noteAndScreenCaptureStageSpaceAndProjectIntentWithoutFolderRouting() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
+            )
+
+            let gameNote = try service.addNoteCapture(
+                title: "Paralives backlog",
+                content: "Steam reference for Paralives and game backlog notes.",
+                folderID: nil
+            ).toDictionary()
+            let gameIntent = try #require(gameNote["spaceIntent"] as? [String: Any])
+            #expect(gameIntent["spaceName"] as? String == "Media")
+            #expect(gameIntent["area"] as? String == "Games")
+            #expect(gameIntent["storageDestination"] as? String == "Inbox/Notes")
+
+            let providerURLNote = try service.addNoteCapture(
+                title: "Watch later",
+                content: "Save https://www.rottentomatoes.com/tv/the_vampire_lestat/s01 for TV night.",
+                folderID: nil
+            ).toDictionary()
+            let providerIntent = try #require(providerURLNote["spaceIntent"] as? [String: Any])
+            #expect(providerIntent["spaceName"] as? String == "Media")
+            #expect(providerIntent["area"] as? String == "Shows")
+
+            let projectNote = try service.addNoteCapture(
+                title: "Cider iOS capture loop",
+                content: "Codex iOS and Cider iOS implementation notes.",
+                folderID: nil
+            ).toDictionary()
+            let projectIntent = try #require(projectNote["projectIntent"] as? [String: Any])
+            #expect(projectIntent["projectName"] as? String == "Cider iOS")
+            #expect(projectNote["recommendedNextAction"] as? String == "review_intent")
+
+            let screen = try service.addScreenCaptureNoteCapture(
+                title: "Screen grab",
+                ocrText: "IMDb trailer page for Lucky and media backlog",
+                screenshot: nil,
+                sourceURL: "https://www.imdb.com/video/vi3463695129/",
+                folderID: nil
+            ).toDictionary()
+            let screenIntent = try #require(screen["spaceIntent"] as? [String: Any])
+            #expect(screenIntent["spaceName"] as? String == "Media")
+            #expect(screenIntent["area"] as? String == "Trailers")
+            let routing = try #require(screen["routing"] as? [String: Any])
+            let target = try #require(routing["candidateTarget"] as? [String: Any])
+            #expect(target["relativePath"] as? String == "Inbox/Notes")
+        }
+    }
+
     @Test("screen capture note capture works when OCR and screenshot are unavailable")
     func screenCaptureNoteCaptureWorksWithoutOCRAndScreenshot() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in
