@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Cider
 
-@Suite("Vault File SQLite Tests")
+@Suite("Vault File SQLite Tests", .serialized)
 @MainActor
 struct VaultFileSQLiteTests {
 
@@ -31,6 +31,11 @@ struct VaultFileSQLiteTests {
 
     private func makeService(_ db: CiderDatabase) -> VaultFileStorage {
         VaultFileStorage(database: db)
+    }
+
+    private func makeTempVaultURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-vaultfile-scan-\(UUID().uuidString)", isDirectory: true)
     }
 
     private func makeFile(
@@ -63,6 +68,139 @@ struct VaultFileSQLiteTests {
             ocrText: ocrText,
             dominantColors: dominantColors
         )
+    }
+
+    private func withSharedTempVault(
+        _ body: (_ vault: URL, _ db: CiderDatabase) throws -> Void
+    ) throws {
+        let fm = FileManager.default
+        let vault = makeTempVaultURL()
+        let dbURL = vault
+            .appendingPathComponent(".cider", isDirectory: true)
+            .appendingPathComponent("cider.db")
+        let previousOverride = StoragePaths.vaultOverride
+
+        if CiderDatabase.shared.isOpen {
+            CiderDatabase.shared.close()
+        }
+        defer {
+            CiderDatabase.shared.close()
+            StoragePaths.vaultOverride = previousOverride
+            StoragePaths.invalidateCachedDirectory()
+            VaultFileService.shared._resetIDMapForTesting()
+            VaultFileService.shared._setFilesForTesting([])
+            try? fm.removeItem(at: vault)
+        }
+
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+        try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try CiderDatabase.shared.open(at: dbURL)
+        VaultFileService.shared._resetIDMapForTesting()
+        VaultFileService.shared._setFilesForTesting([])
+
+        try body(vault, CiderDatabase.shared)
+    }
+
+    private func itemCount(_ db: CiderDatabase, type: String) throws -> Int {
+        let stmt = try db.prepare("SELECT COUNT(*) FROM items WHERE type = ?;")
+        stmt.bind(type, at: 1)
+        try stmt.step()
+        return stmt.int(at: 0)
+    }
+
+    // MARK: - Scanner ownership for native extensions
+
+    @Test("Generic native Markdown artifacts are ignored by VaultFile scan")
+    func genericNativeMarkdownArtifactsAreIgnoredByVaultFileScan() throws {
+        try withSharedTempVault { vault, db in
+            let genericQA = vault.appendingPathComponent("Projects/Cider/QA/Generic QA.md")
+            let genericPlan = vault.appendingPathComponent("Projects/Cider/Plans/Generic Plan.md")
+            try FileManager.default.createDirectory(at: genericQA.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: genericPlan.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try "# Generic QA\nThis belongs to notes/project scanners."
+                .write(to: genericQA, atomically: true, encoding: .utf8)
+            try "# Generic Plan\nThis belongs to notes/project scanners."
+                .write(to: genericPlan, atomically: true, encoding: .utf8)
+
+            VaultFileService.shared.scan()
+
+            #expect(VaultFileService.shared.files.isEmpty)
+            let vaultFileCount = try itemCount(db, type: "vaultFile")
+            #expect(vaultFileCount == 0)
+            #expect(FileManager.default.fileExists(atPath: genericQA.path))
+            #expect(FileManager.default.fileExists(atPath: genericPlan.path))
+        }
+    }
+
+    @Test("Explicit native Markdown vaultFile survives scan with SQLite-owned ID")
+    func explicitNativeMarkdownVaultFileSurvivesScanWithSQLiteOwnedID() throws {
+        try withSharedTempVault { vault, db in
+            let fileID = UUID()
+            let relativePath = "Research/Explicit Native.md"
+            let fileURL = vault.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try "# Explicit Native\nCaptured as a vault file."
+                .write(to: fileURL, atomically: true, encoding: .utf8)
+
+            makeService(db).persistVaultFileToDatabase(
+                db,
+                file: makeFile(
+                    id: fileID,
+                    filename: fileURL.lastPathComponent,
+                    relativePath: relativePath,
+                    fileType: .unknown,
+                    fileSize: Int64((try? Data(contentsOf: fileURL).count) ?? 0),
+                    title: "Explicit Native"
+                )
+            )
+            VaultFileService.shared._resetIDMapForTesting()
+
+            VaultFileService.shared.scan()
+
+            #expect(VaultFileService.shared.files.map(\.id) == [fileID])
+            #expect(VaultFileService.shared._idMapEntryForTesting(path: relativePath) == fileID)
+            let vaultFileCount = try itemCount(db, type: "vaultFile")
+            #expect(vaultFileCount == 1)
+        }
+    }
+
+    @Test("Missing explicit native Markdown vaultFile prunes with audit")
+    func missingExplicitNativeMarkdownVaultFilePrunesWithAudit() throws {
+        try withSharedTempVault { _, db in
+            let fileID = UUID()
+            let relativePath = "Research/Missing Explicit Native.md"
+            makeService(db).persistVaultFileToDatabase(
+                db,
+                file: makeFile(
+                    id: fileID,
+                    filename: "Missing Explicit Native.md",
+                    relativePath: relativePath,
+                    fileType: .unknown,
+                    fileSize: 1,
+                    title: "Missing Explicit Native"
+                )
+            )
+            VaultFileService.shared._resetIDMapForTesting()
+
+            VaultFileService.shared.scan()
+
+            #expect(VaultFileService.shared.files.isEmpty)
+            #expect(VaultFileService.shared._idMapEntryForTesting(path: relativePath) == nil)
+            let vaultFileCount = try itemCount(db, type: "vaultFile")
+            #expect(vaultFileCount == 0)
+
+            let auditEntries = MutationAuditService(database: db).loadEntries()
+            let prune = auditEntries.first { entry in
+                entry.action == "scanner.vaultFile.prune_missing_file"
+                    && entry.itemID == fileID
+                    && entry.beforeState["relativePath"] == relativePath
+            }
+            #expect(prune?.itemType == "vaultFile")
+            #expect(prune?.source == .filesystem)
+            #expect(prune?.metadata["operation"] == "prune_missing_file")
+            #expect(prune?.metadata["relativePath"] == relativePath)
+        }
     }
 
     // MARK: - 1. Basic round-trip

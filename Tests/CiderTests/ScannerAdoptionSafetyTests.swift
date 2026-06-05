@@ -168,6 +168,29 @@ struct ScannerAdoptionSafetyTests {
         #expect(violations.isEmpty, "Startup reconcile harness regressions:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("vault file scanner has native extension ownership regressions")
+    func vaultFileScannerHasNativeExtensionOwnershipRegressions() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let source = try String(
+            contentsOf: repoRoot.appendingPathComponent("Tests/CiderTests/VaultFileSQLiteTests.swift"),
+            encoding: .utf8
+        )
+
+        var violations: [String] = []
+        for testName in [
+            "genericNativeMarkdownArtifactsAreIgnoredByVaultFileScan",
+            "explicitNativeMarkdownVaultFileSurvivesScanWithSQLiteOwnedID",
+            "missingExplicitNativeMarkdownVaultFilePrunesWithAudit",
+        ] where !source.contains(testName) {
+            violations.append("missing \(testName)")
+        }
+        if !source.contains(#"@Suite("Vault File SQLite Tests", .serialized)"#) {
+            violations.append("VaultFileSQLiteTests must serialize shared CiderDatabase scanner coverage")
+        }
+
+        #expect(violations.isEmpty, "Vault-file native extension scanner regressions:\n\(violations.joined(separator: "\n"))")
+    }
+
     private func block(named marker: String, in source: String) -> String? {
         guard let markerRange = source.range(of: marker) else { return nil }
         let tail = source[markerRange.lowerBound...]
