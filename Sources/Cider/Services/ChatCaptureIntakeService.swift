@@ -74,7 +74,11 @@ extension ChatCaptureIntakeResult {
         if results.count > 1 {
             let type = pluralItemType(for: first.item.type, count: results.count)
             let firstTitle = sanitized(first.item.title, fallback: "Untitled")
-            return "Saved \(results.count) \(type). First: \(firstTitle). Review each receipt if routing looks off."
+            var acknowledgement = "Saved \(results.count) \(type). First: \(firstTitle). Review each receipt if routing looks off."
+            if let attachmentReviewSentence {
+                acknowledgement += " \(attachmentReviewSentence)"
+            }
+            return acknowledgement
         }
 
         let receipt = UICaptureReceipt(result: first)
@@ -102,6 +106,9 @@ extension ChatCaptureIntakeResult {
            receipt.state != .duplicate {
             parts.insert("\(destination).", at: min(1, parts.count))
         }
+        if let attachmentReviewSentence {
+            parts.append(attachmentReviewSentence)
+        }
 
         return parts.joined(separator: " ")
     }
@@ -116,6 +123,15 @@ extension ChatCaptureIntakeResult {
         }
 
         return "Needs review: \(sentence(reason))"
+    }
+
+    private var attachmentReviewSentence: String? {
+        guard captureEventID != nil else { return nil }
+        var parts = ["Attachment review needed."]
+        if let command = safeNextCommands.first {
+            parts.append("Next: \(command)")
+        }
+        return parts.joined(separator: " ")
     }
 
     private func partialReason(for receipt: UICaptureReceipt) -> String {
@@ -212,6 +228,7 @@ final class ChatCaptureIntakeService {
             return localPath.isEmpty ? nil : (attachment, localPath)
         }
         if !localAttachments.isEmpty {
+            let unsupportedAttachments = unsupportedAttachments(from: input.attachments)
             let results = try localAttachments.map { attachment, localPath in
                 try captureService.addFileCapture(
                     sourcePath: localPath,
@@ -220,13 +237,26 @@ final class ChatCaptureIntakeService {
                     sourceContext: sourceContext(for: input)
                 )
             }
+            let reviewEventID: UUID?
+            if unsupportedAttachments.isEmpty {
+                reviewEventID = nil
+            } else {
+                var reviewInput = input
+                reviewInput.attachments = unsupportedAttachments
+                reviewEventID = try recordUnsupportedAttachmentReview(for: reviewInput)
+            }
+            let safeNextCommands = reviewEventID.map {
+                ["cider-cli item backlinks capture_event \($0.uuidString) --json"]
+            } ?? []
             return ChatCaptureIntakeResult(
                 status: .captured,
                 reason: localAttachments.count == 1
                     ? "Captured local chat attachment through canonical capture service."
                     : "Captured \(localAttachments.count) local chat attachments through canonical capture service.",
                 captureResult: results.first,
-                captureResults: results
+                captureResults: results,
+                captureEventID: reviewEventID,
+                safeNextCommands: safeNextCommands
             )
         }
 
@@ -275,6 +305,13 @@ final class ChatCaptureIntakeService {
 
     private var resolvedDatabase: CiderDatabase? {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
+    }
+
+    private func unsupportedAttachments(from attachments: [ChatAttachment]) -> [ChatAttachment] {
+        attachments.filter { attachment in
+            let localPath = attachment.localPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return localPath.isEmpty
+        }
     }
 
     private func recordUnsupportedAttachmentReview(for input: ChatCaptureInput) throws -> UUID? {

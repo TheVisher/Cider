@@ -623,7 +623,8 @@ struct ChatCaptureIntakeServiceTests {
                     notesStorage: notes,
                     vaultFileStorage: files,
                     database: db
-                )
+                ),
+                database: db
             )
 
             let result = try service.capture(ChatCaptureInput(
@@ -659,6 +660,15 @@ struct ChatCaptureIntakeServiceTests {
             #expect(result.captureResults.count == 1)
             #expect(try captureAttachmentCount(db, eventID: eventID) == 2)
             #expect(try captureAttachmentRemoteURLs(db, eventID: eventID).contains("https://cdn.discordapp.example/remote-only.pdf"))
+
+            let reviewEventID = try #require(result.captureEventID)
+            #expect(reviewEventID != eventID)
+            #expect(result.safeNextCommands.contains("cider-cli item backlinks capture_event \(reviewEventID.uuidString) --json"))
+            #expect(try captureAttachmentCount(db, eventID: reviewEventID) == 1)
+            #expect(try captureAttachmentRemoteURLs(db, eventID: reviewEventID) == ["https://cdn.discordapp.example/remote-only.pdf"])
+            #expect(try unsupportedAttachmentReviewOutputCount(db, eventID: reviewEventID) == 1)
+            #expect(result.compactAcknowledgement.contains("Attachment review needed."))
+            #expect(result.compactAcknowledgement.contains("cider-cli item backlinks capture_event"))
         }
     }
 
