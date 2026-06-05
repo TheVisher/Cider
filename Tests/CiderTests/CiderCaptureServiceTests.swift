@@ -361,6 +361,10 @@ struct CiderCaptureServiceTests {
             #expect(staging["reviewNeeded"] as? Bool == true)
             #expect(projectReference["needsIntentApproval"] as? Bool == true)
             #expect(projectReference["recommendedNextAction"] as? String == "review_intent")
+            let projectItem = try #require(projectReference["item"] as? [String: Any])
+            let projectItemID = try #require(projectItem["id"] as? String)
+            let projectCommands = try #require(projectReference["safeNextCommands"] as? [String])
+            #expect(projectCommands.contains("cider-cli item apply-intent bookmark \(projectItemID) --intent project --json"))
 
             let recipeReference = try service.addBookmarkCapture(
                 urlString: "https://www.allrecipes.com/recipe/24074/alysias-basic-meat-lasagna/",

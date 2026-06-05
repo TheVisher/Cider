@@ -4495,7 +4495,7 @@ struct CiderCLI {
               cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
                 Do not pass artifact filenames such as Example.webloc to item move --path.
               cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
-              cider-cli item apply-intent <type> <id-or-ref> --intent space [--actor <name>] [--json]
+              cider-cli item apply-intent <type> <id-or-ref> --intent space|project [--actor <name>] [--json]
               cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
               cider-cli item backfill-kanban [--board <name-or-id>] [--json]
               cider-cli item doctor [--json]
@@ -4737,22 +4737,35 @@ struct CiderCLI {
 
         case "apply-intent":
             let positional = leadingPositionalArgs(from: args)
+            let intent = (parseFlag("--intent", from: args) ?? "").lowercased()
             guard positional.count >= 2,
-                  (parseFlag("--intent", from: args) ?? "").lowercased() == "space" else {
-                printCLIError("Usage: cider-cli item apply-intent <type> <id-or-ref> --intent space [--actor <name>] [--json]")
+                  ["space", "project"].contains(intent) else {
+                printCLIError("Usage: cider-cli item apply-intent <type> <id-or-ref> --intent space|project [--actor <name>] [--json]")
                 return
             }
             do {
-                let payload = try itemApplySpaceIntentPayload(
-                    type: positional[0],
-                    ref: positional[1],
-                    actor: parseFlag("--actor", from: args) ?? "agent",
-                    source: parseFlag("--source", from: args) ?? "item.apply-intent"
-                )
+                let actor = parseFlag("--actor", from: args) ?? "agent"
+                let source = parseFlag("--source", from: args) ?? "item.apply-intent"
+                let payload: [String: Any]
+                if intent == "space" {
+                    payload = try itemApplySpaceIntentPayload(
+                        type: positional[0],
+                        ref: positional[1],
+                        actor: actor,
+                        source: source
+                    )
+                } else {
+                    payload = try itemApplyProjectIntentPayload(
+                        type: positional[0],
+                        ref: positional[1],
+                        actor: actor,
+                        source: source
+                    )
+                }
                 if jsonOutput {
                     outputJSON(payload)
                 } else if let intent = payload["approvedIntent"] as? [String: Any] {
-                    print("Applied staged Space intent: \(intent["spaceName"] ?? "Space")")
+                    print("Applied staged \(payload["intent"] ?? "intent") intent: \(intent["spaceName"] ?? intent["projectName"] ?? "Intent")")
                 }
             } catch {
                 printCLIError(error.localizedDescription)
@@ -12474,6 +12487,104 @@ struct CiderCLI {
             "approvedIntent": approvedIntent,
             "routing": explanation.toDictionary(),
             "safeNextCommands": [
+                "cider-cli item context \(resolved.type.rawValue) \(resolved.entityID.uuidString) --json",
+                "cider-cli item get \(resolved.type.rawValue) \(resolved.entityID.uuidString) --json",
+            ],
+        ]
+    }
+
+    static func itemApplyProjectIntentPayload(
+        type rawType: String,
+        ref rawRef: String,
+        actor: String,
+        source: String
+    ) throws -> [String: Any] {
+        let entityType = try ItemLinkService.entityType(from: rawType)
+        guard entityType == .bookmark else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Staged project intent approval currently supports bookmark items only."]
+            )
+        }
+        let resolved = try ItemLinkService.shared.resolve(type: entityType, ref: rawRef)
+        guard let bookmark = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == resolved.entityID }) else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "No bookmark found matching '\(rawRef)'."]
+            )
+        }
+        let stagedProjectIntent = CiderCaptureIntentStagingService
+            .stagedIntents(for: bookmark)
+            .first { $0.isProjectIntent }
+        guard let stagedProjectIntent,
+              case let .project(projectName) = stagedProjectIntent.kind else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "No staged project intent is available for this item."]
+            )
+        }
+
+        let projectService = SecondBrainProjectGraphService(database: .shared)
+        let project = try projectService.upsertProject(
+            id: projectName,
+            title: projectName,
+            metadata: ["intentSource": stagedProjectIntent.source]
+        )
+        let owner = SecondBrainOwnerRef(ownerType: resolved.type.rawValue, ownerID: resolved.entityID.uuidString)
+        let reason = "\(stagedProjectIntent.reason) Approved staged capture intent for project \(project.title)."
+        let relation = SecondBrainRelation(
+            sourceOwner: owner,
+            targetOwner: project.owner,
+            relationType: "artifact_of",
+            evidence: reason,
+            source: source,
+            actor: actor,
+            confidence: stagedProjectIntent.confidence,
+            metadata: ["intent": "project", "projectName": projectName]
+        )
+        let store = SecondBrainStore(database: .shared)
+        try store.recordRelation(relation)
+        try store.recordAgentAction(
+            SecondBrainAgentAction(
+                owner: owner,
+                itemID: resolved.entityID.uuidString,
+                toolName: "item.apply-intent",
+                actionType: "apply.project_intent",
+                source: source,
+                status: "succeeded",
+                summary: reason
+            )
+        )
+
+        let storageDestination = bookmark.relativePath?.hasPrefix("Inbox/") == true
+            ? bookmark.relativePath?.components(separatedBy: "/").prefix(2).joined(separator: "/")
+            : bookmark.relativePath
+        var approvedIntent = stagedProjectIntent.toDictionary(storageDestination: storageDestination)
+        approvedIntent["projectID"] = project.id
+        approvedIntent["projectName"] = project.title
+        var item: [String: Any] = [
+            "id": resolved.entityID.uuidString,
+            "type": resolved.type.rawValue,
+            "title": bookmark.title,
+        ]
+        if let relativePath = bookmark.relativePath {
+            item["relativePath"] = relativePath
+        }
+
+        return [
+            "ok": true,
+            "command": "item.apply-intent",
+            "changed": true,
+            "intent": "project",
+            "item": item,
+            "approvedIntent": approvedIntent,
+            "project": projectToDict(project),
+            "relation": ownerRelationToDict(relation),
+            "safeNextCommands": [
+                "cider-cli item project-context \(project.id) --json",
                 "cider-cli item context \(resolved.type.rawValue) \(resolved.entityID.uuidString) --json",
                 "cider-cli item get \(resolved.type.rawValue) \(resolved.entityID.uuidString) --json",
             ],

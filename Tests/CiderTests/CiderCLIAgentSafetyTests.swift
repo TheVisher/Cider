@@ -1808,6 +1808,67 @@ struct CiderCLIAgentSafetyTests {
         #expect(contextItem["relativePath"] as? String == originalPath)
     }
 
+    @Test("item apply-intent approves staged project intent without moving bookmark files")
+    func itemApplyIntentApprovesStagedProjectIntentWithoutMovingBookmarkFiles() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-apply-project-intent-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "bookmark",
+                "--url", "https://x.com/openaidevs/status/2062599291479478275?s=12",
+                "--title", "OpenAI Developers Codex iOS app loop",
+                "--no-wait",
+                "--json",
+            ],
+            vault: vault
+        )
+        let capture = try parseJSONObject(captureResult.stdout)
+        #expect(captureResult.status == 0)
+        let item = try #require(capture["item"] as? [String: Any])
+        let itemID = try #require(item["id"] as? String)
+        let originalPath = try #require(item["relativePath"] as? String)
+        #expect(originalPath.hasPrefix("Inbox/Bookmarks/"))
+
+        let projectIntent = try #require(capture["projectIntent"] as? [String: Any])
+        #expect(projectIntent["projectName"] as? String == "Cider iOS")
+        #expect(capture["recommendedNextAction"] as? String == "review_intent")
+        let safeCommands = try #require(capture["safeNextCommands"] as? [String])
+        #expect(safeCommands.contains("cider-cli item apply-intent bookmark \(itemID) --intent project --json"))
+
+        let applyResult = try runCLI(
+            args: ["item", "apply-intent", "bookmark", itemID, "--intent", "project", "--json"],
+            vault: vault
+        )
+        let apply = try parseJSONObject(applyResult.stdout)
+        #expect(applyResult.status == 0)
+        #expect(apply["ok"] as? Bool == true)
+        #expect(apply["changed"] as? Bool == true)
+        #expect(apply["intent"] as? String == "project")
+        let approvedIntent = try #require(apply["approvedIntent"] as? [String: Any])
+        #expect(approvedIntent["projectName"] as? String == "Cider iOS")
+        #expect(approvedIntent["projectID"] as? String == "cider-ios")
+        #expect(approvedIntent["wouldRouteWithoutReview"] as? Bool == false)
+
+        let projectContextResult = try runCLI(args: ["item", "project-context", "cider-ios", "--json"], vault: vault)
+        let projectContext = try parseJSONObject(projectContextResult.stdout)
+        let backlinks = try #require(projectContext["backlinks"] as? [[String: Any]])
+        #expect(backlinks.contains { relation in
+            guard let source = relation["sourceOwner"] as? [String: Any] else { return false }
+            return source["ownerType"] as? String == "bookmark"
+                && source["ownerID"] as? String == itemID
+                && relation["relationType"] as? String == "artifact_of"
+        })
+
+        let contextResult = try runCLI(args: ["item", "context", "bookmark", itemID, "--json"], vault: vault)
+        let context = try parseJSONObject(contextResult.stdout)
+        let contextItem = try #require(context["item"] as? [String: Any])
+        #expect(contextItem["relativePath"] as? String == originalPath)
+    }
+
     @Test("capture add accepts nested target folder paths through folder flag")
     func captureAddAcceptsNestedTargetFolderPathsThroughFolderFlag() throws {
         let vault = FileManager.default.temporaryDirectory

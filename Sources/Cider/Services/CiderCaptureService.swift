@@ -123,6 +123,11 @@ struct CiderCaptureResult {
             return false
         }
 
+        var isProjectIntent: Bool {
+            if case .project = kind { return true }
+            return false
+        }
+
         func toDictionary(storageDestination: String?) -> [String: Any] {
             var dict: [String: Any] = [
                 "status": "staged",
@@ -410,6 +415,9 @@ struct CiderCaptureResult {
         }
         if stagedIntents.contains(where: { $0.isSpaceIntent }) {
             commands.append("cider-cli item apply-intent \(item.type) \(item.id.uuidString) --intent space --json")
+        }
+        if stagedIntents.contains(where: { $0.isProjectIntent }) {
+            commands.append("cider-cli item apply-intent \(item.type) \(item.id.uuidString) --intent project --json")
         }
         if routing.needsAgentRouteReview {
             commands.append("cider-cli routing explain \(item.id.uuidString) --json")
