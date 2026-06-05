@@ -715,6 +715,36 @@ struct CiderItemContextServiceTests {
         }
     }
 
+    @Test("provider rank factors distinguish query intent from candidate evidence")
+    func providerRankFactorsDistinguishQueryIntentFromCandidateEvidence() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let cases: [(query: String, title: String, provider: String)] = [
+            ("IMDb movie Sinners cast notes", "Sinners cast notes", "imdb"),
+            ("Steam game Blue Prince capture notes", "Blue Prince capture notes", "steam"),
+            ("TikTok social video modular shelf notes", "Modular shelf notes", "tiktok"),
+            ("Rotten Tomatoes movie rating watchlist", "Movie rating watchlist", "rottentomatoes"),
+        ]
+
+        for recallCase in cases {
+            let item = LibraryEntityRef(type: .bookmark, entityID: UUID())
+            try insertItem(
+                item,
+                title: recallCase.title,
+                relativePath: "Inbox/\(recallCase.title).webloc",
+                into: db
+            )
+
+            let service = CiderItemContextService(database: db)
+            let results = try service.search(recallCase.query, limit: 5)
+            let first = try #require(results.first)
+            #expect(first.item?.id == item.entityID)
+            #expect(first.rankFactors.contains("query_provider_intent:\(recallCase.provider)"))
+            #expect(!first.rankFactors.contains("provider_signal:\(recallCase.provider)"))
+        }
+    }
+
     @Test("space listing and search use native membership rather than folder paths")
     func spaceListingAndSearchUseNativeMembership() throws {
         let (db, url) = try makeTestDB()

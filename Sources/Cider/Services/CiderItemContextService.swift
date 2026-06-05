@@ -903,7 +903,12 @@ final class CiderItemContextService {
             factors.append("distinctive_terms:\(uniqueDistinctive.joined(separator: ","))")
         }
 
-        let providerSignals = recallProviderSignals(in: combined, query: originalQuery)
+        let queryProviderIntents = recallProviderSignals(in: originalQuery)
+        for provider in queryProviderIntents {
+            factors.append("query_provider_intent:\(provider)")
+        }
+
+        let providerSignals = recallProviderSignals(in: combined)
         for provider in providerSignals {
             contribution += 32
             factors.append("provider_signal:\(provider)")
@@ -951,8 +956,8 @@ final class CiderItemContextService {
         return recallTokens(text).map { normalizedRecallToken($0) }.contains(token)
     }
 
-    private func recallProviderSignals(in text: String, query: String) -> [String] {
-        let lower = "\(text) \(query)".lowercased()
+    private func recallProviderSignals(in text: String) -> [String] {
+        let lower = text.lowercased()
         var providers: [String] = []
         let signals: [(String, [String])] = [
             ("tiktok", ["tiktok"]),
