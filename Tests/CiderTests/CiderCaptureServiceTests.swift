@@ -1843,6 +1843,70 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("file capture stages Space and project intent without folder routing")
+    func fileCaptureStagesSpaceAndProjectIntentWithoutFolderRouting() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
+            )
+
+            let projectSource = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cider-ios-codex-loop-\(UUID().uuidString).txt")
+            try Data("Notes for the Cider iOS Codex loop and review backlog.".utf8).write(to: projectSource)
+            defer { try? FileManager.default.removeItem(at: projectSource) }
+
+            let projectResult = try service.addFileCapture(
+                sourcePath: projectSource.path,
+                title: "Cider iOS Codex loop notes",
+                folderID: nil
+            ).toDictionary()
+            let projectIntent = try #require(projectResult["projectIntent"] as? [String: Any])
+            #expect(projectIntent["projectName"] as? String == "Cider iOS")
+            #expect(projectIntent["storageDestination"] as? String == "Inbox/Files")
+            #expect(projectResult["recommendedNextAction"] as? String == "review_intent")
+
+            let gameSource = FileManager.default.temporaryDirectory
+                .appendingPathComponent("paralives-steam-reference-\(UUID().uuidString).txt")
+            try Data("Steam page notes for Paralives and the game backlog.".utf8).write(to: gameSource)
+            defer { try? FileManager.default.removeItem(at: gameSource) }
+
+            let gameResult = try service.addFileCapture(
+                sourcePath: gameSource.path,
+                title: nil,
+                folderID: nil
+            ).toDictionary()
+            let gameIntent = try #require(gameResult["spaceIntent"] as? [String: Any])
+            #expect(gameIntent["spaceName"] as? String == "Media")
+            #expect(gameIntent["area"] as? String == "Games")
+            #expect(gameIntent["storageDestination"] as? String == "Inbox/Files")
+
+            let recipeSource = FileManager.default.temporaryDirectory
+                .appendingPathComponent("lasagna-recipe-\(UUID().uuidString).md")
+            try Data("Ingredients: pasta, tomato, cheese. Recipe steps go here.".utf8).write(to: recipeSource)
+            defer { try? FileManager.default.removeItem(at: recipeSource) }
+
+            let recipeResult = try service.addFileCapture(
+                sourcePath: recipeSource.path,
+                title: "Lasagna recipe draft",
+                folderID: nil
+            ).toDictionary()
+            let recipeIntent = try #require(recipeResult["spaceIntent"] as? [String: Any])
+            #expect(recipeIntent["spaceName"] as? String == "Recipes")
+            #expect(recipeIntent["storageDestination"] as? String == "Inbox/Files")
+
+            let routing = try #require(gameResult["routing"] as? [String: Any])
+            let target = try #require(routing["candidateTarget"] as? [String: Any])
+            #expect(target["relativePath"] as? String == "Inbox/Files")
+            let commands = try #require(gameResult["safeNextCommands"] as? [String])
+            #expect(commands.allSatisfy { !$0.contains(" item move ") && !$0.contains("--folder") })
+        }
+    }
+
     @Test("file capture records canonical provenance relation and indexing trace")
     func fileCaptureRecordsCanonicalProvenanceRelationAndIndexingTrace() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in

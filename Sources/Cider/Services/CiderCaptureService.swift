@@ -718,7 +718,7 @@ struct CiderCaptureResult {
         }
     }
 
-    private static func readableTextFileContent(relativePath: String) -> String? {
+    fileprivate static func readableTextFileContent(relativePath: String) -> String? {
         guard isReadableTextFile(relativePath: relativePath) else { return nil }
 
         let fileURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(relativePath)
@@ -1655,7 +1655,7 @@ final class CiderCaptureService {
             reviewReason: "Cider imported the file and kept it in \(target.relativePath) for review."
         )
 
-        return sharedResult(
+        var result = sharedResult(
             sourceKind: "file",
             sourceURL: nil,
             sourceFile: sourceURL.path,
@@ -1675,6 +1675,14 @@ final class CiderCaptureService {
             captureQuality: CiderCaptureResult.fileCaptureQualityDictionary(for: file),
             sourceContext: sourceContext
         )
+        result.stagedIntents = CiderCaptureIntentStagingService.stagedIntents(for: .init(
+            title: file.displayTitle,
+            urlString: nil,
+            sourceFile: "\(sourceURL.path) \(file.relativePath)",
+            sourceText: CiderCaptureResult.readableTextFileContent(relativePath: file.relativePath),
+            sourceContext: sourceContext
+        ))
+        return result
     }
 
     private func enrichmentStatus(for bookmark: Bookmark) -> String {
