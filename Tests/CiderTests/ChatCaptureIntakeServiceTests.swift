@@ -791,6 +791,23 @@ struct ChatCaptureIntakeServiceTests {
             #expect(try captureAttachmentCount(db, eventID: eventID) == 1)
             #expect(try captureAttachmentRemoteURLs(db, eventID: eventID) == ["https://cdn.discordapp.example/remote.pdf"])
             #expect(try unsupportedAttachmentReviewOutputCount(db, eventID: eventID) == 1)
+
+            let store = SecondBrainStore(database: db)
+            let relations = try store.outgoingRelations(for: SecondBrainOwnerRef(
+                ownerType: "capture_event",
+                ownerID: eventID.uuidString
+            ))
+            let attachmentRelation = try #require(relations.first { relation in
+                relation.relationType == "had_attachment"
+                    && relation.targetOwner.ownerType == "capture_attachment"
+            })
+            #expect(attachmentRelation.metadata["capture_event_id"] == eventID.uuidString)
+            #expect(attachmentRelation.metadata["attachment_index"] == "0")
+            #expect(attachmentRelation.metadata["source_attachment_id"] == "attachment-remote")
+            #expect(attachmentRelation.metadata["filename"] == "remote.pdf")
+            #expect(attachmentRelation.metadata["mime_type"] == "application/pdf")
+            #expect(attachmentRelation.metadata["remote_url"] == "https://cdn.discordapp.example/remote.pdf")
+            #expect(attachmentRelation.metadata["review_state"] == "needs_review")
         }
     }
 

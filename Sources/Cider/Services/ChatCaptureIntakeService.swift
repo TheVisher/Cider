@@ -376,6 +376,11 @@ final class ChatCaptureIntakeService {
         database: CiderDatabase
     ) throws {
         let now = DatabaseHelpers.encode(Date())
+        let store = SecondBrainStore(database: database)
+        let captureOwner = SecondBrainOwnerRef(
+            ownerType: "capture_event",
+            ownerID: eventID.uuidString
+        )
         for (index, attachment) in attachments.enumerated() {
             let attachmentID = UUID()
             let metadata = DatabaseHelpers.encodeJSON([
@@ -402,7 +407,44 @@ final class ChatCaptureIntakeService {
                 .bind(metadata, at: 10)
                 .bind(now, at: 11)
             try stmt.step()
+
+            let attachmentOwner = SecondBrainOwnerRef(
+                ownerType: "capture_attachment",
+                ownerID: attachmentID.uuidString
+            )
+            try store.recordRelation(SecondBrainRelation(
+                sourceOwner: captureOwner,
+                targetOwner: attachmentOwner,
+                relationType: "had_attachment",
+                evidence: attachment.filename.map { "Unsupported chat capture attachment \($0) needs review." }
+                    ?? "Unsupported chat capture attachment needs review.",
+                source: "chat.capture",
+                actor: "system",
+                confidence: 1,
+                metadata: unsupportedAttachmentRelationMetadata(
+                    attachment: attachment,
+                    eventID: eventID,
+                    attachmentIndex: index
+                )
+            ))
         }
+    }
+
+    private func unsupportedAttachmentRelationMetadata(
+        attachment: CaptureSourceContext.Attachment,
+        eventID: UUID,
+        attachmentIndex: Int
+    ) -> [String: String] {
+        var metadata: [String: String] = [
+            "capture_event_id": eventID.uuidString,
+            "attachment_index": String(attachmentIndex),
+            "review_state": "needs_review",
+        ]
+        if let id = attachment.id { metadata["source_attachment_id"] = id }
+        if let filename = attachment.filename { metadata["filename"] = filename }
+        if let mimeType = attachment.mimeType { metadata["mime_type"] = mimeType }
+        if let remoteURL = attachment.remoteURL { metadata["remote_url"] = remoteURL }
+        return metadata
     }
 
     private func unsupportedAttachmentValue(for input: ChatCaptureInput) -> String {
