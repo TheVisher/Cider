@@ -484,6 +484,7 @@ final class NotesViewModel: ObservableObject {
         else {
             return
         }
+        postCaptureToast(result: result, successMessage: "Created note")
         selectedNote = note
         editingContent = ""
         editingTitle = note.title
@@ -509,6 +510,17 @@ final class NotesViewModel: ObservableObject {
                 _ = try? await webView.evaluateJavaScript("window.editorAPI.focus()")
             }
         }
+    }
+
+    private func postCaptureToast(result: CiderCaptureResult, successMessage: String) {
+        NotificationCenter.default.post(
+            name: .showBookmarkCaptureToast,
+            object: nil,
+            userInfo: [
+                "receipt": UICaptureReceipt(result: result),
+                "successMessage": successMessage,
+            ]
+        )
     }
 
     func deleteCurrentNote() {

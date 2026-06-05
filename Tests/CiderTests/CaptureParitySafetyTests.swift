@@ -418,6 +418,69 @@ struct CaptureParitySafetyTests {
         #expect(violations.isEmpty, "Bookmark-like capture surfaces should post UICaptureReceipt payloads:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("screen capture and editor create receipts post rich toast payloads")
+    func screenCaptureAndEditorCreateReceiptsPostRichToastPayloads() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let expectations: [(file: String, requiredSnippets: [String])] = [
+            (
+                "Sources/Cider/App/AppDelegate+ScreenCapture.swift",
+                [
+                    "showBookmarkCaptureToast(",
+                    "receipt: UICaptureReceipt(result: result)",
+                    "successMessage: \"Saved screen capture\"",
+                ]
+            ),
+            (
+                "Sources/Cider/Views/CiderPanelView.swift",
+                [
+                    "postCaptureToast(result: result, successMessage:",
+                    "successMessage: \"Created event\"",
+                    "successMessage: \"Created contact\"",
+                    "successMessage: \"Created todo\"",
+                    "successMessage: \"Created note\"",
+                ]
+            ),
+            (
+                "Sources/Cider/Views/CiderPanelView+SidebarFooter.swift",
+                [
+                    "postCaptureToast(result: result, successMessage:",
+                    "\"successMessage\": \"Created bookmark\"",
+                    "successMessage: \"Created event\"",
+                    "successMessage: \"Created contact\"",
+                    "successMessage: \"Created todo\"",
+                ]
+            ),
+            (
+                "Sources/Cider/Views/CiderPanelView+QuickActions.swift",
+                [
+                    "postCaptureToast(result: result, successMessage: \"Created note\")",
+                ]
+            ),
+            (
+                "Sources/Cider/ViewModels/NotesViewModel.swift",
+                [
+                    "postCaptureToast(result: result, successMessage: \"Created note\")",
+                ]
+            ),
+        ]
+        var violations: [String] = []
+
+        for expectation in expectations {
+            let source = try String(contentsOf: repoRoot.appendingPathComponent(expectation.file), encoding: .utf8)
+            if source.contains("receipt.toastMessage(success:") {
+                violations.append("\(expectation.file): still flattens a capture receipt into a toast message")
+            }
+            if source.contains("= CaptureReceipt(result:") || source.contains("let receipt = CaptureReceipt(result:") {
+                violations.append("\(expectation.file): still builds legacy CaptureReceipt from a rich capture result")
+            }
+            for snippet in expectation.requiredSnippets where !source.contains(snippet) {
+                violations.append("\(expectation.file): missing \(snippet)")
+            }
+        }
+
+        #expect(violations.isEmpty, "Screen capture and editor create surfaces should post UICaptureReceipt payloads:\n\(violations.joined(separator: "\n"))")
+    }
+
     @Test("derived create wrappers record create provenance")
     func derivedCreateWrappersRecordCreateProvenance() throws {
         let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)

@@ -126,7 +126,15 @@ extension CiderPanelView {
         return NewItemPopover(
             folders: bvm.folders,
             onCreateBookmark: { urlString, title in
-                _ = bvm.addBookmark(urlString: urlString, title: title)
+                let receipt = bvm.captureBookmark(urlString: urlString, title: title)
+                NotificationCenter.default.post(
+                    name: .showBookmarkCaptureToast,
+                    object: nil,
+                    userInfo: [
+                        "receipt": receipt,
+                        "successMessage": "Created bookmark",
+                    ]
+                )
             },
             onCreateNote: { [self] title, content in
                 createNoteAndOpen(title: title, content: content)
@@ -143,6 +151,7 @@ extension CiderPanelView {
                 ),
                 let card = DateCardStorage.shared.dateCards.first(where: { $0.id == result.item.id })
                 else { return }
+                postCaptureToast(result: result, successMessage: "Created event")
                 DispatchQueue.main.async {
                     self.newEventEditorContext = DateCardEditorContext(
                         existingCard: card,
@@ -161,18 +170,20 @@ extension CiderPanelView {
                 ),
                 let contact = ContactStorage.shared.contacts.first(where: { $0.id == result.item.id })
                 else { return }
+                postCaptureToast(result: result, successMessage: "Created contact")
                 DispatchQueue.main.async {
                     self.newContactEditorContext = ContactEditorContext(existingContact: contact)
                 }
             },
             onCreateTodo: { card in
-                _ = try? CiderCaptureService().addTodoCapture(
+                guard let result = try? CiderCaptureService().addTodoCapture(
                     title: card.title,
                     sourceText: card.title,
                     dueDate: card.dueDate,
                     priority: card.priority,
                     folderID: nil
-                )
+                ) else { return }
+                postCaptureToast(result: result, successMessage: "Created todo")
             },
             onOpenTodoEditor: {
                 newTodoEditorContext = TodoEditorContext(existingCard: nil)

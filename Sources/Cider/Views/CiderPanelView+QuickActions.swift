@@ -64,6 +64,7 @@ extension CiderPanelView {
                 content: content,
                 folderID: selectedFolderID
             )
+            postCaptureToast(result: result, successMessage: "Created note")
             if let note = NotesStorage.shared.notes.first(where: { $0.id == result.item.id }) {
                 openNoteDetail(note)
             }
@@ -71,6 +72,17 @@ extension CiderPanelView {
             Logger(subsystem: "com.cider.app", category: "QuickActions")
                 .error("Failed to capture note from quick action: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    func postCaptureToast(result: CiderCaptureResult, successMessage: String) {
+        NotificationCenter.default.post(
+            name: .showBookmarkCaptureToast,
+            object: nil,
+            userInfo: [
+                "receipt": UICaptureReceipt(result: result),
+                "successMessage": successMessage,
+            ]
+        )
     }
 
     // MARK: - Note Detail

@@ -95,7 +95,6 @@ extension AppDelegate {
             },
             onCreateNote: { [weak self] in
                 self?.dismissScreenCaptureToast()
-                let receipt: CaptureReceipt
                 if let result = try? CiderCaptureService().addScreenCaptureNoteCapture(
                         title: route.suggestedTitle.isEmpty ? "Screen Capture" : route.suggestedTitle,
                         ocrText: ocrText ?? "",
@@ -110,17 +109,13 @@ extension AppDelegate {
                             ]
                         )
                     ) {
-                    receipt = CaptureReceipt(result: result)
-                } else {
-                    receipt = .failed("Could not save screen capture")
-                }
-                self?.showBookmarkCaptureToast(
-                    message: receipt.toastMessage(success: "Saved screen capture"),
-                    isSuccess: receipt.isSuccess
-                )
-                if receipt.didPersist {
+                    self?.showBookmarkCaptureToast(
+                        receipt: UICaptureReceipt(result: result),
+                        successMessage: "Saved screen capture"
+                    )
                     self?.transitionToCiderMainWindow()
                 } else {
+                    self?.showBookmarkCaptureToast(message: "Could not save screen capture", isSuccess: false)
                     let shouldRestorePanel = self?.screenCaptureWasVisible ?? false
                     if shouldRestorePanel { self?.transitionToCiderMainWindow() }
                 }

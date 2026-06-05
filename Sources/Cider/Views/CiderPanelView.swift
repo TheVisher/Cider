@@ -258,6 +258,7 @@ struct CiderPanelView: View {
                 ),
                       let note = NotesStorage.shared.notes.first(where: { $0.id == result.item.id })
                 else { return }
+                postCaptureToast(result: result, successMessage: "Created note")
                 openNoteDetail(note)
             }
         }
@@ -303,6 +304,7 @@ struct CiderPanelView: View {
                 ),
                 let card = DateCardStorage.shared.dateCards.first(where: { $0.id == result.item.id })
                 else { return }
+                postCaptureToast(result: result, successMessage: "Created event")
                 newEventEditorContext = DateCardEditorContext(existingCard: card, defaultDate: date)
                 return
             }
@@ -320,6 +322,7 @@ struct CiderPanelView: View {
                 ),
                 let contact = ContactStorage.shared.contacts.first(where: { $0.id == result.item.id })
                 else { return }
+                postCaptureToast(result: result, successMessage: "Created contact")
                 newContactEditorContext = ContactEditorContext(existingContact: contact)
                 return
             }
@@ -408,6 +411,7 @@ struct CiderPanelView: View {
                     created.labelIDs = card.labelIDs
                     created.rules = card.rules
                     _ = TodoCardStorage.shared.updateTodoCard(created)
+                    postCaptureToast(result: result, successMessage: "Created todo")
                 }
             },
             onDelete: { todoCard in
