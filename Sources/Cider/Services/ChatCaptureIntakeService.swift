@@ -1,8 +1,16 @@
 import Foundation
 
-enum ChatCaptureChannel: String, Codable, Equatable, Sendable {
-    case telegram
-    case discord
+struct ChatCaptureChannel: RawRepresentable, Codable, Equatable, Sendable {
+    var rawValue: String
+
+    static let telegram = ChatCaptureChannel(rawValue: "telegram")!
+    static let discord = ChatCaptureChannel(rawValue: "discord")!
+
+    init?(rawValue: String) {
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        self.rawValue = normalized
+    }
 }
 
 enum ChatCaptureIntent: String, Codable, Equatable, Sendable {

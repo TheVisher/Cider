@@ -293,6 +293,103 @@ struct ChatCaptureIntakeServiceTests {
         }
     }
 
+    @Test("future chat channel text capture preserves raw channel identity")
+    func futureChatChannelTextCapturePreservesRawChannelIdentity() throws {
+        try withIsolatedVault { db, notes, _ in
+            let service = ChatCaptureIntakeService(
+                captureService: CiderCaptureService(notesStorage: notes, database: db)
+            )
+            let channel = try #require(ChatCaptureChannel(rawValue: "matrix"))
+
+            let result = try service.capture(ChatCaptureInput(
+                channel: channel,
+                channelID: "room-42",
+                threadID: "thread-99",
+                messageID: "matrix-event-123",
+                senderID: "matrix-user-7",
+                senderName: "Erik",
+                text: "Remember future chat capture provenance.",
+                intent: .capture,
+                metadata: ["runtime": "matrix-test"]
+            ))
+
+            let capture = try #require(result.captureResult)
+            let eventID = try #require(capture.captureEventID)
+            #expect(capture.sourceContext?.channel == "matrix")
+
+            let stmt = try db.prepare("""
+                SELECT surface, channel, channel_id, thread_id, message_id, sender_id, metadata
+                FROM capture_events
+                WHERE id = ?;
+                """)
+            stmt.bind(eventID.uuidString, at: 1)
+            #expect(try stmt.step())
+            #expect(stmt.string(at: 0) == "chat")
+            #expect(stmt.string(at: 1) == "matrix")
+            #expect(stmt.string(at: 2) == "room-42")
+            #expect(stmt.string(at: 3) == "thread-99")
+            #expect(stmt.string(at: 4) == "matrix-event-123")
+            #expect(stmt.string(at: 5) == "matrix-user-7")
+            #expect(stmt.string(at: 6).contains("matrix-test"))
+        }
+    }
+
+    @Test("future chat channel remote attachment review preserves raw channel identity")
+    func futureChatChannelRemoteAttachmentReviewPreservesRawChannelIdentity() throws {
+        try withIsolatedVault { db, notes, files in
+            let service = ChatCaptureIntakeService(
+                captureService: CiderCaptureService(
+                    notesStorage: notes,
+                    vaultFileStorage: files,
+                    database: db
+                ),
+                database: db
+            )
+            let channel = try #require(ChatCaptureChannel(rawValue: "matrix"))
+
+            let result = try service.capture(ChatCaptureInput(
+                channel: channel,
+                channelID: "room-attachments",
+                threadID: nil,
+                messageID: "matrix-event-remote",
+                senderID: "matrix-user-8",
+                senderName: "Erik",
+                text: "   ",
+                attachments: [
+                    ChatAttachment(
+                        id: "matrix-file-1",
+                        filename: "future.pdf",
+                        mimeType: "application/pdf",
+                        localPath: nil,
+                        remoteURL: "mxc://server/future"
+                    )
+                ],
+                intent: .capture,
+                metadata: ["runtime": "matrix-test"]
+            ))
+
+            #expect(result.status == .needsReview)
+            let eventID = try #require(result.captureEventID)
+            #expect(result.safeNextCommands.contains("cider-cli item backlinks capture_event \(eventID.uuidString) --json"))
+            #expect(try captureAttachmentSourceIDs(db, eventID: eventID) == ["matrix-file-1"])
+            #expect(try captureAttachmentRemoteURLs(db, eventID: eventID) == ["mxc://server/future"])
+
+            let stmt = try db.prepare("""
+                SELECT source_kind, surface, channel, channel_id, message_id, metadata
+                FROM capture_events
+                WHERE id = ?;
+                """)
+            stmt.bind(eventID.uuidString, at: 1)
+            #expect(try stmt.step())
+            #expect(stmt.string(at: 0) == "chat_unsupported_attachment")
+            #expect(stmt.string(at: 1) == "chat")
+            #expect(stmt.string(at: 2) == "matrix")
+            #expect(stmt.string(at: 3) == "room-attachments")
+            #expect(stmt.string(at: 4) == "matrix-event-remote")
+            #expect(stmt.string(at: 5).contains("matrix-test"))
+        }
+    }
+
     @Test("discord local attachment capture imports file through canonical capture service")
     func discordLocalAttachmentCaptureImportsFileThroughCanonicalCaptureService() throws {
         try withIsolatedVault { db, notes, files in
