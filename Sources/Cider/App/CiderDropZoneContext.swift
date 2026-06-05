@@ -61,19 +61,33 @@ final class CiderDropZoneContext: ObservableObject {
         let detail: String
         let didPersist: Bool
         let bookmarkID: UUID?
+        let receipt: UICaptureReceipt?
 
         init(
             kind: Kind,
             title: String,
             detail: String,
             didPersist: Bool,
-            bookmarkID: UUID? = nil
+            bookmarkID: UUID? = nil,
+            receipt: UICaptureReceipt? = nil
         ) {
             self.kind = kind
             self.title = title
             self.detail = detail
             self.didPersist = didPersist
             self.bookmarkID = bookmarkID
+            self.receipt = receipt
+        }
+
+        var destinationText: String {
+            receipt?.item.folderName
+                ?? receipt?.item.relativePath?.split(separator: "/").dropLast().last.map(String.init)
+                ?? detail
+        }
+
+        func receiptBadges(successMessage: String) -> [String] {
+            guard let receipt else { return didPersist ? ["Saved"] : ["Needs attention"] }
+            return BookmarkCaptureToastContent(receipt: receipt, successMessage: successMessage).badges
         }
 
         func resolvedTitle(from bookmarks: [Bookmark]) -> String {
@@ -243,13 +257,14 @@ final class CiderDropZoneContext: ObservableObject {
         status = .processing("Saving text as a note...")
         do {
             let result = try noteCaptureHandler(trimmed)
-            let receipt = CaptureReceipt(result: result)
+            let receipt = UICaptureReceipt(result: result)
             droppedItems.insert(
                 DroppedItem(
                     kind: .text,
                     title: result.item.title,
                     detail: result.item.relativePath ?? trimmed,
-                    didPersist: receipt.didPersist
+                    didPersist: receipt.didPersist,
+                    receipt: receipt
                 ),
                 at: 0
             )
@@ -298,13 +313,14 @@ final class CiderDropZoneContext: ObservableObject {
 
         do {
             let result = try fileCaptureHandler(url)
-            let receipt = CaptureReceipt(result: result)
+            let receipt = UICaptureReceipt(result: result)
             droppedItems.insert(
                 DroppedItem(
                     kind: VaultFileType.from(extension: url.pathExtension) == .image ? .image : .file,
                     title: result.item.title,
                     detail: result.item.relativePath ?? url.lastPathComponent,
-                    didPersist: receipt.didPersist
+                    didPersist: receipt.didPersist,
+                    receipt: receipt
                 ),
                 at: 0
             )
@@ -338,7 +354,7 @@ final class CiderDropZoneContext: ObservableObject {
             )
             return
         }
-        let receipt = CaptureReceipt(result: result)
+        let receipt = UICaptureReceipt(result: result)
 
         droppedItems.insert(
             DroppedItem(
@@ -348,7 +364,8 @@ final class CiderDropZoneContext: ObservableObject {
                     ? "Created image bookmark, but follow-up repair is needed."
                     : "Saved as an image bookmark.",
                 didPersist: receipt.didPersist,
-                bookmarkID: result.item.id
+                bookmarkID: result.item.id,
+                receipt: receipt
             ),
             at: 0
         )
@@ -358,8 +375,8 @@ final class CiderDropZoneContext: ObservableObject {
             name: .showBookmarkCaptureToast,
             object: nil,
             userInfo: [
-                "message": receipt.toastMessage(success: "Saved dropped image"),
-                "isSuccess": receipt.isSuccess
+                "receipt": receipt,
+                "successMessage": "Saved dropped image"
             ]
         )
     }
@@ -419,7 +436,7 @@ final class CiderDropZoneContext: ObservableObject {
             status = .failure("That URL could not be saved.")
             return true
         }
-        let receipt = CaptureReceipt(result: result.captureResult)
+        let receipt = UICaptureReceipt(result: result.captureResult)
         let bookmark = result.bookmark
 
         droppedItems.insert(
@@ -428,7 +445,8 @@ final class CiderDropZoneContext: ObservableObject {
                 title: bookmark.title,
                 detail: bookmark.urlString,
                 didPersist: receipt.didPersist,
-                bookmarkID: bookmark.id
+                bookmarkID: bookmark.id,
+                receipt: receipt
             ),
             at: 0
         )
@@ -437,21 +455,21 @@ final class CiderDropZoneContext: ObservableObject {
             name: .showBookmarkCaptureToast,
             object: nil,
             userInfo: [
-                "message": receipt.toastMessage(success: "Saved dropped URL"),
-                "isSuccess": receipt.isSuccess
+                "receipt": receipt,
+                "successMessage": "Saved dropped URL"
             ]
         )
         return true
     }
 
-    private func dropStatus(for receipt: CaptureReceipt, success: String) -> DropStatus {
+    private func dropStatus(for receipt: UICaptureReceipt, success: String) -> DropStatus {
         switch receipt.state {
         case .saved, .savedWithReview, .duplicate:
-            return .success(receipt.toastMessage(success: success))
+            return .success(receipt.shortToastMessage(success: success))
         case .partialSideEffects:
-            return .fallback(receipt.toastMessage(success: success))
+            return .fallback(receipt.shortToastMessage(success: success))
         case .failed:
-            return .failure(receipt.toastMessage(success: success))
+            return .failure(receipt.shortToastMessage(success: success))
         }
     }
 

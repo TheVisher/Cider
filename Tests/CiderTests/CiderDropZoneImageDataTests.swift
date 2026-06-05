@@ -13,14 +13,16 @@ struct CiderDropZoneImageDataTests {
                 captureResult(
                     itemType: "note",
                     title: String(text.prefix(60)),
-                    relativePath: "Inbox/Notes/Test.md"
+                    relativePath: "Inbox/Notes/Test.md",
+                    routingReviewNeeded: false
                 )
             },
             fileCaptureHandler: { url in
                 captureResult(
                     itemType: "vaultFile",
                     title: url.lastPathComponent,
-                    relativePath: "Inbox/Files/\(url.lastPathComponent)"
+                    relativePath: "Inbox/Files/\(url.lastPathComponent)",
+                    routingReviewNeeded: false
                 )
             }
         )
@@ -29,7 +31,11 @@ struct CiderDropZoneImageDataTests {
     private func captureResult(
         itemType: String,
         title: String,
-        relativePath: String
+        relativePath: String,
+        duplicate: CiderCaptureResult.Duplicate = .init(status: "not_checked", existingItemID: nil),
+        routingReviewNeeded: Bool = true,
+        partialSuccess: CiderCaptureResult.PartialSuccess? = nil,
+        captureQuality: [String: Any]? = nil
     ) -> CiderCaptureResult {
         let id = UUID()
         let target = CiderCaptureResult.Target(
@@ -43,9 +49,18 @@ struct CiderDropZoneImageDataTests {
             source: .init(kind: "text", url: nil, file: nil, text: title, itemID: id, itemType: itemType),
             item: .init(id: id, type: itemType, title: title, relativePath: relativePath, folderID: nil, folderName: target.name),
             enrichment: .init(status: "not_applicable", isEnriching: false, titleState: "manual", lastEnrichedAt: nil),
-            duplicate: .init(status: "not_checked", existingItemID: nil),
-            routing: .init(decisionID: UUID(), candidateTarget: target, reviewNeeded: true, confidence: 0, reason: "test", reviewState: "needs_review"),
-            nextSafeAction: "review_route"
+            duplicate: duplicate,
+            routing: .init(
+                decisionID: routingReviewNeeded ? UUID() : nil,
+                candidateTarget: routingReviewNeeded ? target : nil,
+                reviewNeeded: routingReviewNeeded,
+                confidence: routingReviewNeeded ? 0 : 1,
+                reason: routingReviewNeeded ? "test" : "confident",
+                reviewState: routingReviewNeeded ? "needs_review" : "not_needed"
+            ),
+            nextSafeAction: routingReviewNeeded ? "review_route" : "inspect_item",
+            partialSuccess: partialSuccess,
+            captureQuality: captureQuality
         )
     }
 
@@ -164,6 +179,104 @@ struct CiderDropZoneImageDataTests {
         context.saveDroppedText("plain note from drop zone")
 
         #expect(context.dismissProgress == 1)
+    }
+
+    @Test("dropped note row carries saved receipt")
+    @MainActor
+    func droppedNoteRowCarriesSavedReceipt() throws {
+        let context = makeContext()
+
+        context.saveDroppedText("plain note from drop zone")
+        let item = try #require(context.droppedItems.first)
+
+        #expect(item.receipt?.item.type == "note")
+        #expect(item.receipt?.state == .saved)
+        #expect(item.receiptBadges(successMessage: "Saved text as note.").contains("Saved text as note."))
+        #expect(item.destinationText == "Inbox")
+    }
+
+    @Test("dropped file row carries partial receipt")
+    @MainActor
+    func droppedFileRowCarriesPartialReceipt() throws {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("drop-zone-partial.txt")
+        try "hello".write(to: tempURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+        let context = CiderDropZoneContext(
+            fileCaptureHandler: { url in
+                captureResult(
+                    itemType: "vaultFile",
+                    title: url.lastPathComponent,
+                    relativePath: "Inbox/Files/\(url.lastPathComponent)",
+                    routingReviewNeeded: false,
+                    partialSuccess: .init(
+                        status: "indexing_failed",
+                        reason: "Indexing failed.",
+                        requestedFolderID: nil,
+                        actualFolderID: nil
+                    )
+                )
+            }
+        )
+
+        context.saveDroppedFile(tempURL)
+        let item = try #require(context.droppedItems.first)
+
+        #expect(item.receipt?.state == .partialSideEffects)
+        #expect(item.receiptBadges(successMessage: "Saved file").contains("Needs repair"))
+        #expect(item.destinationText == "Inbox")
+    }
+
+    @Test("dropped image row carries degraded quality receipt")
+    @MainActor
+    func droppedImageRowCarriesDegradedQualityReceipt() throws {
+        let context = CiderDropZoneContext(
+            imageBookmarkCaptureHandler: { title, _, _, _ in
+                captureResult(
+                    itemType: "bookmark",
+                    title: title,
+                    relativePath: "Inbox/Bookmarks/\(title).webloc",
+                    routingReviewNeeded: true,
+                    captureQuality: [
+                        "degraded": true,
+                        "needsEnrichment": true,
+                    ]
+                )
+            }
+        )
+
+        context.saveDroppedImageData(Data([1, 2, 3]), title: "Dropped Image")
+        let item = try #require(context.droppedItems.first)
+
+        #expect(item.receipt?.routing.reviewNeeded == true)
+        #expect(item.receiptBadges(successMessage: "Saved dropped image.").contains("Review needed"))
+        #expect(item.receiptBadges(successMessage: "Saved dropped image.").contains("Quality warning"))
+    }
+
+    @Test("dropped bookmark row can expose duplicate receipt")
+    func droppedBookmarkRowCanExposeDuplicateReceipt() throws {
+        let receipt = UICaptureReceipt(result: captureResult(
+            itemType: "bookmark",
+            title: "Example",
+            relativePath: "Inbox/Bookmarks/Example.webloc",
+            duplicate: .init(
+                status: "duplicate",
+                existingItemID: UUID(),
+                reason: "URL already exists",
+                evidence: "normalized_url"
+            )
+        ))
+        let item = CiderDropZoneContext.DroppedItem(
+            kind: .bookmark,
+            title: "Example",
+            detail: "https://example.com",
+            didPersist: true,
+            bookmarkID: receipt.item.id,
+            receipt: receipt
+        )
+
+        #expect(item.receipt?.state == .duplicate)
+        #expect(item.receiptBadges(successMessage: "Saved dropped URL").contains("Duplicate"))
+        #expect(item.destinationText == "Inbox")
     }
 
     @Test("completed drops ignore stale targeted updates from the drop delegate")

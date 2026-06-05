@@ -377,10 +377,19 @@ private struct CiderDropZoneRecentRow: View {
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(1)
 
-                Text(item.detail)
+                Text(item.destinationText)
                     .font(CiderFont.micro)
                     .foregroundColor(CiderColors.tertiary)
                     .lineLimit(1)
+
+                HStack(spacing: Spacing.xxs) {
+                    ForEach(item.receiptBadges(successMessage: "Saved").prefix(2), id: \.self) { badge in
+                        Text(badge)
+                            .font(CiderFont.micro)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(1)
+                    }
+                }
             }
 
             Spacer(minLength: 0)
