@@ -382,7 +382,7 @@ final class CiderItemContextService {
             CiderItemSearchFallbackStage(
                 name: stage.name,
                 query: stage.query,
-                resultCount: exactMatches.filter { $0.stage == stage.name || $0.matchedQuery == stage.query }.count,
+                resultCount: exactMatches.filter { diagnosticResult($0, matches: stage) }.count,
                 explanation: stage.explanation
             )
         }
@@ -540,6 +540,15 @@ final class CiderItemContextService {
             if spaceRefs != nil, results.count >= max(1, limit) { break }
         }
         return results
+    }
+
+    private func diagnosticResult(
+        _ result: CiderItemSearchResult,
+        matches stage: RecallQueryStage
+    ) -> Bool {
+        result.stage == stage.name
+            || result.matchedQuery == stage.query
+            || result.rankFactors.contains("matched_query:\(stage.query)")
     }
 
     private struct RecallQueryStage: Equatable {

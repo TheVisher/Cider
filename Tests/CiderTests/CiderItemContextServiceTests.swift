@@ -598,8 +598,16 @@ struct CiderItemContextServiceTests {
         #expect(first.rankFactors.contains("provider_signal:tiktok"))
         #expect(first.rankFactors.contains("space_intent:Media"))
         #expect(first.rankFactors.contains { $0.hasPrefix("distinctive_terms:") })
+        #expect(first.rankFactors.contains("stage:original_query"))
+        #expect(report.fallbackStages.contains {
+            $0.name == "original_query"
+                && $0.query == query
+                && $0.resultCount > 0
+        })
 
         let dict = CiderCLI.itemSearchDiagnosticsReportToDict(report)
+        let rankedResults = try #require(dict["rankedResults"] as? [[String: Any]])
+        #expect(rankedResults.first?["title"] as? String == "My Completely 3D Printed And Modular Shelf System")
         let exactMatches = try #require(dict["exactMatches"] as? [[String: Any]])
         let firstFactors = try #require(exactMatches.first?["rankFactors"] as? [String])
         #expect(firstFactors.contains("provider_signal:tiktok"))

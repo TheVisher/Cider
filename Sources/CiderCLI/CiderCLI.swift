@@ -4553,7 +4553,7 @@ struct CiderCLI {
                     outputJSON(itemSearchDiagnosticsReportToDict(report))
                 } else {
                     print("Item search diagnostics for '\(report.query)':")
-                    print("  Exact matches: \(report.exactMatches.count)")
+                    print("  Ranked results: \(report.exactMatches.count)")
                     print("  Matched chunks: \(report.matchedChunks.count)")
                     print("  Index warnings: \(report.indexWarnings.count)")
                     print("  Semantic: \(report.semanticStatus.status)")
@@ -14754,14 +14754,16 @@ struct CiderCLI {
     }
 
     static func itemSearchDiagnosticsReportToDict(_ report: CiderItemSearchDiagnosticsReport) -> [String: Any] {
-        [
+        let rankedResults = report.exactMatches.map(itemSearchResultToDict)
+        return [
             "ok": report.errors.isEmpty,
             "command": report.command,
             "readOnly": true,
             "changed": false,
             "query": report.query,
             "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
-            "exactMatches": report.exactMatches.map(itemSearchResultToDict),
+            "rankedResults": rankedResults,
+            "exactMatches": rankedResults,
             "fallbackStages": report.fallbackStages.map(itemSearchFallbackStageToDict),
             "matchedChunks": report.matchedChunks.map(itemSearchDiagnosticsChunkMatchToDict),
             "candidateItems": report.candidateItems.map(itemSummaryToDict),
