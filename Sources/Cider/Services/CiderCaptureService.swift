@@ -106,6 +106,47 @@ struct CiderCaptureResult {
         }
     }
 
+    struct StagedIntent {
+        enum Kind {
+            case space(spaceName: String, area: String?)
+            case project(projectName: String)
+            case entity(entityName: String, entityType: String)
+        }
+
+        var kind: Kind
+        var confidence: Double
+        var reason: String
+        var source: String
+
+        func toDictionary(storageDestination: String?) -> [String: Any] {
+            var dict: [String: Any] = [
+                "status": "staged",
+                "confidence": confidence,
+                "reason": reason,
+                "source": source,
+                "wouldRouteWithoutReview": false,
+            ]
+            if let storageDestination {
+                dict["storageDestination"] = storageDestination
+            }
+            switch kind {
+            case let .space(spaceName, area):
+                dict["kind"] = "space"
+                dict["spaceName"] = spaceName
+                dict["rootRelativePath"] = "Spaces/\(spaceName)"
+                if let area { dict["area"] = area }
+            case let .project(projectName):
+                dict["kind"] = "project"
+                dict["projectName"] = projectName
+            case let .entity(entityName, entityType):
+                dict["kind"] = "entity"
+                dict["entityName"] = entityName
+                dict["entityType"] = entityType
+            }
+            return dict
+        }
+    }
+
     struct PartialSuccess {
         var status: String
         var reason: String
@@ -177,6 +218,7 @@ struct CiderCaptureResult {
         captureEventID: nil
     )
     var captureQuality: [String: Any]? = nil
+    var stagedIntents: [StagedIntent] = []
 
     var captureEventOwner: SecondBrainOwnerRef? {
         captureEventID.map { SecondBrainOwnerRef(ownerType: "capture_event", ownerID: $0.uuidString) }
@@ -254,6 +296,7 @@ struct CiderCaptureResult {
         if let captureQuality {
             dict["captureQuality"] = captureQuality
         }
+        addStagedIntentDictionaries(to: &dict)
         CiderAgentDecisionContract.merge(agentDecisionDictionary(), into: &dict)
         if let partialSuccess = partialSuccess ?? canonicalSideEffectPartialSuccess() {
             var partialDict: [String: Any] = [
@@ -280,6 +323,31 @@ struct CiderCaptureResult {
             dict["sourceContext"] = sourceContext.toDictionary()
         }
         return dict
+    }
+
+    private func addStagedIntentDictionaries(to dict: inout [String: Any]) {
+        guard !stagedIntents.isEmpty else { return }
+        let storageDestination = item.relativePath?.hasPrefix("Inbox/") == true
+            ? item.relativePath?.components(separatedBy: "/").prefix(2).joined(separator: "/")
+            : item.relativePath
+        let intentDictionaries = stagedIntents.map {
+            $0.toDictionary(storageDestination: storageDestination)
+        }
+        dict["intentStaging"] = [
+            "status": "staged",
+            "reviewNeeded": true,
+            "safeNextAction": "review_intent",
+            "intents": intentDictionaries,
+        ]
+        if let spaceIntent = intentDictionaries.first(where: { $0["kind"] as? String == "space" }) {
+            dict["spaceIntent"] = spaceIntent
+        }
+        if let projectIntent = intentDictionaries.first(where: { $0["kind"] as? String == "project" }) {
+            dict["projectIntent"] = projectIntent
+        }
+        if let entityIntent = intentDictionaries.first(where: { $0["kind"] as? String == "entity" }) {
+            dict["entityIntent"] = entityIntent
+        }
     }
 
     private func agentDecisionDictionary() -> [String: Any] {
@@ -834,7 +902,7 @@ final class CiderCaptureService {
             reviewState: reviewState
         )
 
-        let result = CiderCaptureResult(
+        var result = CiderCaptureResult(
             command: "capture.add",
             source: .init(
                 kind: "url",
@@ -874,6 +942,7 @@ final class CiderCaptureService {
             ),
             nextSafeAction: isDuplicate ? "inspect_existing_item" : "enrich"
         )
+        result.stagedIntents = stagedIntents(for: bookmark)
         return indexCapturedItem(attachCaptureEvent(to: result, sourceContext: sourceContext))
     }
 
@@ -1481,6 +1550,68 @@ final class CiderCaptureService {
         case note
         case todo
         case file
+    }
+
+    private func stagedIntents(for bookmark: Bookmark) -> [CiderCaptureResult.StagedIntent] {
+        guard let components = URLComponents(string: bookmark.urlString),
+              let host = components.host?.lowercased() else {
+            return stagedProjectIntents(forTitle: bookmark.title, urlString: bookmark.urlString)
+        }
+
+        var intents: [CiderCaptureResult.StagedIntent] = []
+        let path = components.path.lowercased()
+        let title = bookmark.title.lowercased()
+        if host.matchesDomain("rottentomatoes.com") {
+            let area = path.contains("/tv/") ? "Shows" : "Movies"
+            intents.append(.init(
+                kind: .space(spaceName: "Media", area: area),
+                confidence: 0.78,
+                reason: "Rotten Tomatoes URLs are media references; keep the capture in Inbox for review while preserving the likely Media intent.",
+                source: "capture.intent.url_provider"
+            ))
+        } else if host.matchesDomain("imdb.com") {
+            let area = path.contains("/video") || title.contains("trailer") ? "Trailers" : "Movies"
+            intents.append(.init(
+                kind: .space(spaceName: "Media", area: area),
+                confidence: 0.78,
+                reason: "IMDb URLs are media references; keep the capture in Inbox for review while preserving the likely Media intent.",
+                source: "capture.intent.url_provider"
+            ))
+        } else if host.matchesDomain("steampowered.com") || host.matchesDomain("steamcommunity.com") {
+            intents.append(.init(
+                kind: .space(spaceName: "Media", area: "Games"),
+                confidence: 0.82,
+                reason: "Steam URLs are game references; keep the capture in Inbox for review while preserving the likely Games intent.",
+                source: "capture.intent.url_provider"
+            ))
+        } else if host.matchesDomain("tiktok.com") {
+            intents.append(.init(
+                kind: .space(spaceName: "Media", area: "Social Video"),
+                confidence: 0.62,
+                reason: "TikTok URLs are social video references; keep the capture in Inbox for review while preserving the likely media intent.",
+                source: "capture.intent.url_provider"
+            ))
+        }
+
+        intents.append(contentsOf: stagedProjectIntents(forTitle: bookmark.title, urlString: bookmark.urlString))
+        return intents
+    }
+
+    private func stagedProjectIntents(forTitle title: String, urlString: String) -> [CiderCaptureResult.StagedIntent] {
+        let haystack = "\(title) \(urlString)".lowercased()
+        guard haystack.contains("cider ios")
+            || haystack.contains("codex ios")
+            || haystack.contains("openaidevs") else {
+            return []
+        }
+        return [
+            .init(
+                kind: .project(projectName: "Cider iOS"),
+                confidence: 0.68,
+                reason: "The capture mentions Codex/OpenAI Developers in an iOS app context, so it likely belongs with Cider iOS project references.",
+                source: "capture.intent.project_reference"
+            )
+        ]
     }
 
     private func inferredKind(for source: String) -> CaptureKind {
@@ -2154,5 +2285,11 @@ private extension CiderCaptureResult.Target {
             relativePath: relativePath,
             folderID: folderID
         )
+    }
+}
+
+private extension String {
+    func matchesDomain(_ domain: String) -> Bool {
+        self == domain || hasSuffix(".\(domain)")
     }
 }

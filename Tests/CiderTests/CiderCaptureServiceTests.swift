@@ -310,6 +310,58 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("bookmark capture stages obvious Space and project intent without routing")
+    func bookmarkCaptureStagesObviousSpaceAndProjectIntentWithoutRouting() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
+            )
+
+            let rottenTomatoes = try service.addBookmarkCapture(
+                urlString: "https://www.rottentomatoes.com/tv/the_vampire_lestat/s01",
+                title: "The Vampire Lestat: Season 1 | Rotten Tomatoes",
+                folderID: nil
+            ).toDictionary()
+            let rottenIntent = try #require(rottenTomatoes["spaceIntent"] as? [String: Any])
+            #expect(rottenIntent["status"] as? String == "staged")
+            #expect(rottenIntent["spaceName"] as? String == "Media")
+            #expect(rottenIntent["area"] as? String == "Shows")
+            #expect(rottenIntent["storageDestination"] as? String == "Inbox/Bookmarks")
+            #expect(rottenIntent["wouldRouteWithoutReview"] as? Bool == false)
+            let rottenRouting = try #require(rottenTomatoes["routing"] as? [String: Any])
+            #expect((rottenRouting["candidateTarget"] as? [String: Any])?["relativePath"] as? String == "Inbox/Bookmarks")
+            #expect(rottenRouting["reviewNeeded"] as? Bool == true)
+
+            let steam = try service.addBookmarkCapture(
+                urlString: "https://store.steampowered.com/app/1118520/Paralives/",
+                title: "Paralives on Steam",
+                folderID: nil
+            ).toDictionary()
+            let steamIntent = try #require(steam["spaceIntent"] as? [String: Any])
+            #expect(steamIntent["spaceName"] as? String == "Media")
+            #expect(steamIntent["area"] as? String == "Games")
+
+            let projectReference = try service.addBookmarkCapture(
+                urlString: "https://x.com/openaidevs/status/2062599291479478275?s=12",
+                title: "OpenAI Developers Codex iOS app loop",
+                folderID: nil
+            ).toDictionary()
+            let projectIntent = try #require(projectReference["projectIntent"] as? [String: Any])
+            #expect(projectIntent["status"] as? String == "staged")
+            #expect(projectIntent["projectName"] as? String == "Cider iOS")
+            #expect(projectIntent["storageDestination"] as? String == "Inbox/Bookmarks")
+            #expect(projectIntent["wouldRouteWithoutReview"] as? Bool == false)
+            let staging = try #require(projectReference["intentStaging"] as? [String: Any])
+            #expect(staging["status"] as? String == "staged")
+            #expect(staging["reviewNeeded"] as? Bool == true)
+        }
+    }
+
     @Test("url capture immediately indexes searchable chunks")
     func urlCaptureImmediatelyIndexesSearchableChunks() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in
