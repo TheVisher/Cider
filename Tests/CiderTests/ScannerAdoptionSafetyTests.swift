@@ -93,6 +93,53 @@ struct ScannerAdoptionSafetyTests {
         #expect(violations.isEmpty, "Bookmark duplicate artifact regressions:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("bookmark and vault file scanners audit missing file pruning")
+    func bookmarkAndVaultFileScannersAuditMissingFilePruning() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let files: [(path: String, blockMarker: String, expectedAction: String)] = [
+            (
+                "Sources/Cider/Services/VaultBookmarkService.swift",
+                "private func pruneMissingBookmarksFromDisk",
+                "scanner.bookmark.prune_missing_file"
+            ),
+            (
+                "Sources/Cider/Services/VaultFileService.swift",
+                "if !staleKeys.isEmpty",
+                "scanner.vaultFile.prune_missing_file"
+            ),
+        ]
+        var violations: [String] = []
+
+        for file in files {
+            let fileURL = repoRoot.appendingPathComponent(file.path)
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            let pruneBlock = try #require(
+                block(named: file.blockMarker, in: source),
+                "Could not find prune block in \(file.path)"
+            )
+
+            guard pruneBlock.contains("DELETE FROM items")
+                || pruneBlock.contains("deleteVaultFileFromDatabase") else {
+                violations.append("\(file.path): scanner prune block no longer appears to remove canonical rows")
+                continue
+            }
+            if !pruneBlock.contains("MutationAuditService") {
+                violations.append("\(file.path): scanner pruning removes canonical rows without mutation audit")
+            }
+            if !pruneBlock.contains(file.expectedAction) {
+                violations.append("\(file.path): scanner pruning missing expected action \(file.expectedAction)")
+            }
+            if !pruneBlock.contains(#"source: .filesystem"#) {
+                violations.append("\(file.path): scanner pruning does not mark audit source as filesystem")
+            }
+            if !pruneBlock.contains(#""operation": "prune_missing_file""#) {
+                violations.append("\(file.path): scanner pruning audit lacks prune_missing_file operation metadata")
+            }
+        }
+
+        #expect(violations.isEmpty, "Missing-file scanner prune audit regressions:\n\(violations.joined(separator: "\n"))")
+    }
+
     private func block(named marker: String, in source: String) -> String? {
         guard let markerRange = source.range(of: marker) else { return nil }
         let tail = source[markerRange.lowerBound...]

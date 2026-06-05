@@ -247,11 +247,12 @@ final class VaultBookmarkService: ObservableObject {
         // Identify stale bookmarks WITHOUT mutating the in-memory array — if the
         // DB delete fails, we want memory and SQLite to stay consistent. Only
         // prune the array after the transaction commits successfully.
-        let removedIDs: [UUID] = bookmarks.compactMap { bookmark in
+        let removedBookmarks: [Bookmark] = bookmarks.compactMap { bookmark in
             guard let relativePath = bookmark.relativePath else { return nil }
             let fileURL = vaultRoot.appendingPathComponent(relativePath)
-            return FileManager.default.fileExists(atPath: fileURL.path) ? nil : bookmark.id
+            return FileManager.default.fileExists(atPath: fileURL.path) ? nil : bookmark
         }
+        let removedIDs = removedBookmarks.map(\.id)
         guard !removedIDs.isEmpty else { return }
 
         do {
@@ -262,6 +263,21 @@ final class VaultBookmarkService: ObservableObject {
                     stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
                     try stmt.step()
                 }
+            }
+            for bookmark in removedBookmarks {
+                MutationAuditService(database: db).record(
+                    action: "scanner.bookmark.prune_missing_file",
+                    itemType: LibraryEntityType.bookmark.rawValue,
+                    itemID: bookmark.id,
+                    before: MutationAuditSnapshots.bookmark(bookmark),
+                    metadata: [
+                        "scanner": "pruneMissingBookmarksFromDisk",
+                        "operation": "prune_missing_file",
+                        "source": "filesystem",
+                        "relativePath": bookmark.relativePath ?? "",
+                    ],
+                    source: .filesystem
+                )
             }
             // Transaction committed — now it's safe to drop the stale rows from
             // the published array.

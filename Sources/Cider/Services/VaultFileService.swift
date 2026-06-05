@@ -218,21 +218,44 @@ final class VaultFileService: ObservableObject {
             return !fm.fileExists(atPath: absPath)
         }
         if !staleKeys.isEmpty {
-            let orphanedIDs: [UUID] = staleKeys.compactMap { idMap[$0] }
-            for key in staleKeys { idMap.removeValue(forKey: key) }
-            idMapDirty = true
+            let staleEntries: [(relativePath: String, id: UUID)] = staleKeys.compactMap { key in
+                guard let id = idMap[key] else { return nil }
+                return (relativePath: key, id: id)
+            }
 
             // Delete orphaned rows in a single transaction.
-            if !orphanedIDs.isEmpty, let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil {
+            if !staleEntries.isEmpty, let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil {
                 do {
                     try db.withTransaction {
-                        for uuid in orphanedIDs {
-                            VaultFileStorage.shared.deleteVaultFileFromDatabase(db, fileID: uuid)
+                        for entry in staleEntries {
+                            VaultFileStorage.shared.deleteVaultFileFromDatabase(db, fileID: entry.id)
                         }
                     }
+                    for entry in staleEntries {
+                        MutationAuditService(database: db).record(
+                            action: "scanner.vaultFile.prune_missing_file",
+                            itemType: LibraryEntityType.vaultFile.rawValue,
+                            itemID: entry.id,
+                            before: ["id": entry.id.uuidString, "relativePath": entry.relativePath],
+                            metadata: [
+                                "scanner": "VaultFileService.scan",
+                                "operation": "prune_missing_file",
+                                "source": "filesystem",
+                                "relativePath": entry.relativePath,
+                            ],
+                            source: .filesystem
+                        )
+                    }
+                    for entry in staleEntries {
+                        idMap.removeValue(forKey: entry.relativePath)
+                    }
+                    idMapDirty = true
                 } catch {
                     logger.error("Failed to delete orphaned vault file rows: \(error.localizedDescription)")
                 }
+            } else {
+                for key in staleKeys { idMap.removeValue(forKey: key) }
+                idMapDirty = true
             }
         }
 
