@@ -412,67 +412,23 @@ actor TelegramBridge: ChannelBridge {
     }
 
     private func handleCommandIfNeeded(_ update: TelegramUpdateEnvelope) async -> String? {
-        let text = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.hasPrefix("/") else { return nil }
-
-        let parts = text.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard let command = parts.first?.lowercased() else { return nil }
-
-        switch command {
-        case "/help", "/agent":
-            logger.info("Handling Telegram command \(command, privacy: .public)")
-            return """
-            Cider Telegram commands:
-            /status — show bridge and runtime health
-            /runtime — show active runtime
-            /runtime apple|local — switch runtime
-            /restart — restart the active runtime
-            """
-
-        case "/status":
-            logger.info("Handling Telegram command /status")
-            return await statusSummary()
-
-        case "/runtime":
-            logger.info("Handling Telegram command /runtime")
-            if parts.count == 1 {
-                return await runtimeSummary()
-            }
-            guard let selection = parseRuntimeSelection(parts[1]) else {
-                return "Unknown runtime. Use /runtime apple or /runtime local. Codex CLI is only available from the local Cider UI."
-            }
-            await AIAssistantViewModel.shared.switchRuntimeFromExternalCommand(to: selection)
-            let summary = await runtimeSummary()
-            return "Switched runtime.\n\(summary)"
-
-        case "/restart":
-            logger.info("Handling Telegram command /restart")
-            await AgentOrchestrator.shared.stopRuntimeIfNeeded()
-            do {
+        let response = await RemoteChatCommandRouter.response(
+            for: update.text,
+            channelDisplayName: "Telegram",
+            bridgeStatusSummary: { await self.bridgeSummary() },
+            runtimeSummary: { await self.runtimeSummary() },
+            switchRuntime: { selection in
+                await AIAssistantViewModel.shared.switchRuntimeFromExternalCommand(to: selection)
+            },
+            restartRuntime: {
+                await AgentOrchestrator.shared.stopRuntimeIfNeeded()
                 try await AgentOrchestrator.shared.startRuntimeIfNeeded()
-            } catch {
-                return "Failed to restart runtime: \(error.localizedDescription)"
             }
-            return "Runtime restarted.\n\(await runtimeSummary())"
-
-        default:
-            return "Unknown command. Send /help for available Telegram commands."
+        )
+        if response != nil {
+            logger.info("Handling Telegram remote command")
         }
-    }
-
-    private func parseRuntimeSelection(_ raw: String) -> AIAgentRuntimeSelection? {
-        switch raw.lowercased() {
-        case "codex", "codexcli", "codex-cli":
-            return nil
-        case "apple", "appleintelligence", "foundation":
-            return .appleIntelligence
-        case "local", "mlx", "qwen":
-            return .localModel
-        case "hermes":
-            return .hermes
-        default:
-            return nil
-        }
+        return response
     }
 
     private func runtimeSummary() async -> String {
@@ -495,14 +451,12 @@ actor TelegramBridge: ChannelBridge {
         return lines.joined(separator: "\n")
     }
 
-    private func statusSummary() async -> String {
+    private func bridgeSummary() async -> String {
         let bridgeHealth = await health()
-        let runtime = await runtimeSummary()
-        let bridgeLines = [
+        return [
             "Telegram bridge: \(bridgeHealth.status.rawValue)",
             "Bridge detail: \(bridgeHealth.detail)"
-        ]
-        return (bridgeLines + ["", runtime]).joined(separator: "\n")
+        ].joined(separator: "\n")
     }
 
     private func runtimeLabel(for selection: AIAgentRuntimeSelection) -> String {
