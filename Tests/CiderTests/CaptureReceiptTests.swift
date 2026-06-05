@@ -67,7 +67,137 @@ struct CaptureReceiptTests {
         #expect(receipt.toastMessage(success: "Saved as note") == "Could not save note")
     }
 
+    @Test("UI receipt preserves saved item destination and compatible toast message")
+    func uiReceiptPreservesSavedItemDestinationAndCompatibleToast() {
+        let itemID = UUID()
+        let receipt = UICaptureReceipt(result: makeCaptureResult(itemID: itemID))
+
+        #expect(receipt.state == .saved)
+        #expect(receipt.item.id == itemID)
+        #expect(receipt.item.type == "bookmark")
+        #expect(receipt.item.title == "Example")
+        #expect(receipt.item.relativePath == "Inbox/Example.md")
+        #expect(receipt.item.folderName == "Inbox")
+        #expect(receipt.shortToastMessage(success: "Saved copied URL") == "Saved copied URL")
+    }
+
+    @Test("UI receipt preserves duplicate evidence")
+    func uiReceiptPreservesDuplicateEvidence() {
+        let existingID = UUID()
+        let receipt = UICaptureReceipt(result: makeCaptureResult(
+            duplicate: .init(
+                status: "duplicate",
+                existingItemID: existingID,
+                reason: "URL already exists",
+                evidence: "normalized_url"
+            )
+        ))
+
+        #expect(receipt.state == .duplicate)
+        #expect(receipt.duplicate.isDuplicate)
+        #expect(receipt.duplicate.existingItemID == existingID)
+        #expect(receipt.duplicate.reason == "URL already exists")
+        #expect(receipt.duplicate.evidence == "normalized_url")
+        #expect(receipt.shortToastMessage(success: "Saved copied URL") == "Already saved")
+    }
+
+    @Test("UI receipt preserves review route details and safe action label")
+    func uiReceiptPreservesReviewRouteDetails() {
+        let receipt = UICaptureReceipt(result: makeCaptureResult(
+            routingReviewNeeded: true,
+            nextSafeAction: "review_route"
+        ))
+
+        #expect(receipt.state == .savedWithReview)
+        #expect(receipt.routing.reviewNeeded)
+        #expect(receipt.routing.reason == "Needs review.")
+        #expect(receipt.routing.reviewState == "needs_review")
+        #expect(receipt.routing.status == "recorded")
+        #expect(receipt.routing.candidateTarget?.name == "Inbox")
+        #expect(receipt.routing.candidateTarget?.relativePath == "Inbox")
+        #expect(receipt.safeNextActionLabel == "Review route")
+    }
+
+    @Test("UI receipt preserves partial side effect status")
+    func uiReceiptPreservesPartialSideEffectStatus() {
+        let receipt = UICaptureReceipt(result: makeCaptureResult(
+            provenance: .init(
+                status: "failed",
+                reason: "Provenance write failed.",
+                ownerType: "bookmark",
+                ownerID: UUID().uuidString,
+                captureEventID: nil
+            ),
+            indexing: .init(
+                status: "indexed",
+                reason: nil,
+                ownerType: "bookmark",
+                ownerID: UUID().uuidString,
+                captureEventID: UUID()
+            )
+        ))
+
+        #expect(receipt.state == .partialSideEffects)
+        #expect(receipt.provenance.status == "failed")
+        #expect(receipt.provenance.reason == "Provenance write failed.")
+        #expect(receipt.provenance.isIncomplete)
+        #expect(receipt.indexing.status == "indexed")
+        #expect(!receipt.indexing.isIncomplete)
+    }
+
+    @Test("UI receipt preserves degraded quality reasons")
+    func uiReceiptPreservesDegradedQualityReasons() {
+        let receipt = UICaptureReceipt(result: makeCaptureResult(
+            nextSafeAction: "enrich",
+            captureQuality: [
+                "degraded": true,
+                "degradedReasons": ["missing_title", "missing_preview"],
+                "needsEnrichment": true,
+                "safeNextAction": "enrich",
+            ]
+        ))
+
+        #expect(receipt.captureQuality?.degraded == true)
+        #expect(receipt.captureQuality?.needsEnrichment == true)
+        #expect(receipt.captureQuality?.degradedReasons == ["missing_title", "missing_preview"])
+        #expect(receipt.safeNextActionLabel == "Enrich")
+    }
+
+    @Test("UI receipt preserves staged intent summary")
+    func uiReceiptPreservesStagedIntentSummary() {
+        let receipt = UICaptureReceipt(result: makeCaptureResult(
+            routingReviewNeeded: true,
+            nextSafeAction: "review_intent",
+            stagedIntents: [
+                .init(
+                    kind: .space(spaceName: "Garden", area: "Research"),
+                    confidence: 0.82,
+                    reason: "Mentions the Garden space.",
+                    source: "agent"
+                ),
+            ]
+        ))
+
+        #expect(receipt.stagedIntents.count == 1)
+        #expect(receipt.stagedIntents[0].kind == "space")
+        #expect(receipt.stagedIntents[0].name == "Garden")
+        #expect(receipt.stagedIntents[0].detail == "Research")
+        #expect(receipt.stagedIntents[0].confidence == 0.82)
+        #expect(receipt.stagedIntents[0].reason == "Mentions the Garden space.")
+        #expect(receipt.safeNextActionLabel == "Review intent")
+    }
+
+    @Test("UI receipt can bridge from legacy failed receipt")
+    func uiReceiptCanBridgeFromLegacyFailedReceipt() {
+        let receipt = UICaptureReceipt(receipt: .failed("Could not save clipboard text"))
+
+        #expect(receipt.state == .failed)
+        #expect(receipt.item.id == nil)
+        #expect(receipt.shortToastMessage(success: "Saved note") == "Could not save clipboard text")
+    }
+
     private func makeCaptureResult(
+        itemID: UUID = UUID(),
         duplicate: CiderCaptureResult.Duplicate = .init(status: "new", existingItemID: nil),
         routingReviewNeeded: Bool = false,
         nextSafeAction: String = "none",
@@ -85,9 +215,10 @@ struct CaptureReceiptTests {
             ownerType: "bookmark",
             ownerID: UUID().uuidString,
             captureEventID: UUID()
-        )
+        ),
+        captureQuality: [String: Any]? = nil,
+        stagedIntents: [CiderCaptureResult.StagedIntent] = []
     ) -> CiderCaptureResult {
-        let id = UUID()
         let target = CiderCaptureResult.Target(
             kind: "folder",
             name: "Inbox",
@@ -101,11 +232,11 @@ struct CaptureReceiptTests {
                 url: "https://example.com",
                 file: nil,
                 text: nil,
-                itemID: id,
+                itemID: itemID,
                 itemType: "bookmark"
             ),
             item: .init(
-                id: id,
+                id: itemID,
                 type: "bookmark",
                 title: "Example",
                 relativePath: "Inbox/Example.md",
@@ -134,7 +265,9 @@ struct CaptureReceiptTests {
             captureEventID: UUID(),
             sourceContext: nil,
             provenance: provenance,
-            indexing: indexing
+            indexing: indexing,
+            captureQuality: captureQuality,
+            stagedIntents: stagedIntents
         )
     }
 }
