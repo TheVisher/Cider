@@ -226,9 +226,18 @@ final class VaultFileService: ObservableObject {
             // Delete orphaned rows in a single transaction.
             if !staleEntries.isEmpty, let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil {
                 do {
+                    let secondBrainStore = SecondBrainStore(database: db)
+                    for entry in staleEntries {
+                        try secondBrainStore.deleteOwnerFootprint(
+                            for: SecondBrainOwnerRef(ownerType: "vaultFile", ownerID: entry.id.uuidString)
+                        )
+                    }
                     try db.withTransaction {
+                        let deleteStmt = try db.prepare("DELETE FROM items WHERE id = ?;")
                         for entry in staleEntries {
-                            VaultFileStorage.shared.deleteVaultFileFromDatabase(db, fileID: entry.id)
+                            deleteStmt.reset()
+                            deleteStmt.bind(DatabaseHelpers.encode(entry.id), at: 1)
+                            try deleteStmt.step()
                         }
                     }
                     for entry in staleEntries {

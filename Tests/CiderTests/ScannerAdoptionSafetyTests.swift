@@ -140,6 +140,34 @@ struct ScannerAdoptionSafetyTests {
         #expect(violations.isEmpty, "Missing-file scanner prune audit regressions:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("startup reconcile has isolated shared database scanner harness")
+    func startupReconcileHasIsolatedSharedDatabaseScannerHarness() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let source = try String(
+            contentsOf: repoRoot.appendingPathComponent("Tests/CiderTests/VaultReconcilerTests.swift"),
+            encoding: .utf8
+        )
+
+        var violations: [String] = []
+        if !source.contains(#"@Suite("VaultReconciler Tests", .serialized)"#) {
+            violations.append("VaultReconciler tests that touch shared singletons must be serialized")
+        }
+        if !source.contains("startupReconcileScansTempVaultThroughSharedDatabase") {
+            violations.append("missing temp-vault shared CiderDatabase startup reconcile regression")
+        }
+        if !source.contains("CiderDatabase.shared.open(at:") {
+            violations.append("startup reconcile harness does not open CiderDatabase.shared on an isolated temp DB")
+        }
+        if !source.contains("StoragePaths.vaultOverride = vault") {
+            violations.append("startup reconcile harness does not redirect StoragePaths.vaultOverride")
+        }
+        if source.contains("Full integration of reconcile() against a temp vault is covered by the") {
+            violations.append("VaultReconcilerTests still document shared-DB reconcile integration as manual-only")
+        }
+
+        #expect(violations.isEmpty, "Startup reconcile harness regressions:\n\(violations.joined(separator: "\n"))")
+    }
+
     private func block(named marker: String, in source: String) -> String? {
         guard let markerRange = source.range(of: marker) else { return nil }
         let tail = source[markerRange.lowerBound...]

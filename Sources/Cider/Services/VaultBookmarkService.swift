@@ -101,6 +101,12 @@ final class VaultBookmarkService: ObservableObject {
         self.schedulesEnrichment = schedulesEnrichment
     }
 
+    /// Testing-only: clear the orphan adoption debounce so shared-singleton
+    /// integration tests can run deterministically after other scanner tests.
+    func _resetAdoptionDebounceForTesting() {
+        lastAdoptionScan = .distantPast
+    }
+
     // MARK: - Load
 
     /// Loads bookmarks: tries SQLite first, then index cache, then full vault scan.
