@@ -28,7 +28,9 @@ struct CiderItemContextServiceTests {
         _ ref: LibraryEntityRef,
         title: String,
         relativePath: String?,
-        into db: CiderDatabase
+        into db: CiderDatabase,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
     ) throws {
         let stmt = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
@@ -37,8 +39,8 @@ struct CiderItemContextServiceTests {
         stmt.bind(DatabaseHelpers.encode(ref.entityID), at: 1)
             .bind(ItemLinkService.databaseItemType(for: ref.type), at: 2)
             .bind(title, at: 3)
-            .bind(DatabaseHelpers.encode(Date()), at: 4)
-            .bind(DatabaseHelpers.encode(Date()), at: 5)
+            .bind(DatabaseHelpers.encode(createdAt), at: 4)
+            .bind(DatabaseHelpers.encode(updatedAt), at: 5)
             .bind(relativePath, at: 6)
         try stmt.step()
     }
@@ -491,6 +493,179 @@ struct CiderItemContextServiceTests {
             $0["name"] as? String == "human_query_expansion"
                 && ($0["explanation"] as? String)?.contains("resume") == true
         })
+    }
+
+    @Test("human recall ranks distinctive crowded provider matches above generic matches")
+    func humanRecallRanksDistinctiveCrowdedProviderMatchesAboveGenericMatches() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let olderGeneric = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let intended = LibraryEntityRef(type: .bookmark, entityID: UUID(uuidString: "7D3C21E6-0D38-489A-83C8-8B9AF8176213")!)
+        let newerWeak = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let oldDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let targetDate = Date(timeIntervalSince1970: 1_780_000_000)
+        let newerDate = Date(timeIntervalSince1970: 1_790_000_000)
+
+        try insertItem(
+            olderGeneric,
+            title: "Anycubic TikTok 3D printing roundup",
+            relativePath: "Media/TikTok/Anycubic 3D printing roundup.webloc",
+            into: db,
+            createdAt: oldDate,
+            updatedAt: oldDate
+        )
+        try insertItem(
+            intended,
+            title: "My Completely 3D Printed And Modular Shelf System",
+            relativePath: "Inbox/Bookmarks/TikTok/My Completely 3D Printed And Modular Shelf System.webloc",
+            into: db,
+            createdAt: targetDate,
+            updatedAt: targetDate
+        )
+        try insertItem(
+            newerWeak,
+            title: "TikTok social video inbox save",
+            relativePath: "Inbox/Bookmarks/TikTok/social video inbox save.webloc",
+            into: db,
+            createdAt: newerDate,
+            updatedAt: newerDate
+        )
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: olderGeneric.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: olderGeneric.entityID.uuidString,
+                source: "bookmark-provider",
+                title: "TikTok Anycubic 3D printing",
+                body: "Older TikTok social video about 3D printed Anycubic printer calibration and generic Kobra setup.",
+                chunkIndex: 0
+            )
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: intended.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: intended.entityID.uuidString,
+                source: "bookmark-enrichment",
+                title: "My Completely 3D Printed And Modular Shelf System",
+                body: "TikTok social video showing a modular shelf system made from 3D printed parts on an Anycubic Kobra S1 Max.",
+                chunkIndex: 0
+            )
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: newerWeak.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: newerWeak.entityID.uuidString,
+                source: "bookmark-provider",
+                title: "TikTok social video",
+                body: "Fresh provider-only TikTok social video capture with no useful maker project detail.",
+                chunkIndex: 0
+            )
+        ])
+        let spaceStore = CiderSpaceMembershipStore(database: db)
+        try spaceStore.assign(
+            item: intended,
+            toSpaceID: "space-media",
+            spaceName: "Media",
+            reason: "TikTok 3D printed shelf system belongs in Media.",
+            confidence: 0.91,
+            source: "space.fixture",
+            actor: "agent"
+        )
+
+        let service = CiderItemContextService(
+            database: db,
+            secondBrainStore: store,
+            spaceMembershipStore: spaceStore,
+            nowProvider: { newerDate }
+        )
+
+        let query = "TikTok social video 3d printed modular shelf Anycubic Kobra"
+        let results = try service.search(query, limit: 5)
+        #expect(results.first?.item?.id == intended.entityID)
+        #expect(results.first?.rankFactors.contains { $0 == "matched_field:chunk_title" || $0 == "matched_field:chunk_body" } == true)
+        #expect(results.first?.rankFactors.contains { $0.hasPrefix("distinctive_terms:") && $0.contains("modular") && $0.contains("shelf") } == true)
+        #expect(results.first?.rankFactors.contains("provider_signal:tiktok") == true)
+        #expect(results.first?.rankFactors.contains("space_intent:Media") == true)
+        #expect(results.first?.rankFactors.contains { $0.hasPrefix("recency_contribution:") } == true)
+        #expect(results.first?.rankFactors.contains("stage:original_query") == true)
+        #expect(results.first?.rankFactors.contains { $0.hasPrefix("matched_query:") } == true)
+
+        let report = try service.searchDiagnostics(query, limit: 5)
+        let first = try #require(report.exactMatches.first)
+        #expect(first.item?.id == intended.entityID)
+        #expect(first.rankFactors.contains("provider_signal:tiktok"))
+        #expect(first.rankFactors.contains("space_intent:Media"))
+        #expect(first.rankFactors.contains { $0.hasPrefix("distinctive_terms:") })
+
+        let dict = CiderCLI.itemSearchDiagnosticsReportToDict(report)
+        let exactMatches = try #require(dict["exactMatches"] as? [[String: Any]])
+        let firstFactors = try #require(exactMatches.first?["rankFactors"] as? [String])
+        #expect(firstFactors.contains("provider_signal:tiktok"))
+        #expect(firstFactors.contains("space_intent:Media"))
+        #expect(firstFactors.contains { $0.hasPrefix("recency_contribution:") })
+    }
+
+    @Test("human recall ranking covers media game and document providers without overfitting TikTok")
+    func humanRecallRankingCoversMediaGameAndDocumentProvidersWithoutOverfittingTikTok() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let targetDate = Date(timeIntervalSince1970: 1_760_000_000)
+        let newerDate = Date(timeIntervalSince1970: 1_790_000_000)
+        let imdb = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let imdbWeak = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let steam = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let steamWeak = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let docx = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        let docxWeak = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+
+        try insertItem(imdb, title: "Sinners - IMDb", relativePath: "Media/Movies/Sinners IMDb.webloc", into: db, createdAt: targetDate, updatedAt: targetDate)
+        try insertItem(imdbWeak, title: "Rotten Tomatoes media links", relativePath: "Media/Movies/Rotten Tomatoes links.webloc", into: db, createdAt: newerDate, updatedAt: newerDate)
+        try insertItem(steam, title: "Blue Prince on Steam", relativePath: "Media/Games/Blue Prince Steam.webloc", into: db, createdAt: targetDate, updatedAt: targetDate)
+        try insertItem(steamWeak, title: "Steam game sale roundup", relativePath: "Media/Games/Steam sale roundup.webloc", into: db, createdAt: newerDate, updatedAt: newerDate)
+        try insertItem(docx, title: "Insurance appeal packet", relativePath: "Files/Health/Insurance Appeal Packet.docx", into: db, createdAt: targetDate, updatedAt: targetDate)
+        try insertItem(docxWeak, title: "Recent DOCX file", relativePath: "Files/Recent/Recent Document.docx", into: db, createdAt: newerDate, updatedAt: newerDate)
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: imdb.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: imdb.entityID.uuidString, source: "bookmark-enrichment", title: "Sinners IMDb Rotten Tomatoes", body: "Media recall for Sinners ratings across IMDb and Rotten Tomatoes.", chunkIndex: 0)
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: imdbWeak.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: imdbWeak.entityID.uuidString, source: "bookmark-provider", title: "Rotten Tomatoes media", body: "Newer generic Rotten Tomatoes and IMDb media bookmark.", chunkIndex: 0)
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: steam.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: steam.entityID.uuidString, source: "bookmark-enrichment", title: "Blue Prince Steam", body: "Steam game recall for Blue Prince puzzle roguelite mansion notes.", chunkIndex: 0)
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: steamWeak.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: steamWeak.entityID.uuidString, source: "bookmark-provider", title: "Steam game sale", body: "Newer generic Steam game sale capture.", chunkIndex: 0)
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "vaultFile", ownerID: docx.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: docx.entityID.uuidString, source: "file-text", title: "Insurance appeal packet DOCX", body: "DOCX file recall for insurance appeal packet with denial letter and supporting evidence.", chunkIndex: 0)
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "vaultFile", ownerID: docxWeak.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: docxWeak.entityID.uuidString, source: "file-metadata", title: "Recent DOCX file", body: "Newer generic document file without insurance appeal details.", chunkIndex: 0)
+        ])
+
+        let service = CiderItemContextService(
+            database: db,
+            secondBrainStore: store,
+            nowProvider: { newerDate }
+        )
+
+        let cases: [(query: String, expected: LibraryEntityRef, provider: String)] = [
+            ("IMDb Rotten Tomatoes media Sinners", imdb, "imdb"),
+            ("Steam game Blue Prince puzzle", steam, "steam"),
+            ("DOCX file insurance appeal packet", docx, "docx"),
+        ]
+
+        for recallCase in cases {
+            let results = try service.search(recallCase.query, limit: 5)
+            #expect(results.first?.item?.id == recallCase.expected.entityID, "Expected \(recallCase.expected.id) first for \(recallCase.query)")
+            #expect(results.first?.rankFactors.contains { $0.hasPrefix("distinctive_terms:") } == true)
+            #expect(results.first?.rankFactors.contains { $0 == "provider_signal:\(recallCase.provider)" || $0 == "type_signal:vaultFile" } == true)
+        }
     }
 
     @Test("space listing and search use native membership rather than folder paths")

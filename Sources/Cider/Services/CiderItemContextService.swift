@@ -548,6 +548,11 @@ final class CiderItemContextService {
         var explanation: String
     }
 
+    private struct RecallRankEvidence {
+        var rankContribution: Double
+        var factors: [String]
+    }
+
     private func recallQueryPlan(for query: String) -> [RecallQueryStage] {
         var stages: [RecallQueryStage] = [
             RecallQueryStage(
@@ -647,16 +652,26 @@ final class CiderItemContextService {
                 var result = match
                 result.stage = stage.name
                 result.matchedQuery = stage.query
+                let evidence = try recallRankEvidence(
+                    result: result,
+                    chunk: nil,
+                    originalQuery: queryPlan.first?.query ?? stage.query,
+                    matchedQuery: stage.query,
+                    stage: stage
+                )
                 result.rank = recallRank(
                     result: result,
                     originalQuery: queryPlan.first?.query ?? stage.query,
                     matchedQuery: stage.query,
-                    stageIndex: stageIndex
+                    stageIndex: stageIndex,
+                    evidence: evidence
                 )
                 result.rankFactors = recallRankFactors(
                     result: result,
                     matchedQuery: stage.query,
-                    stageIndex: stageIndex
+                    stage: stage,
+                    stageIndex: stageIndex,
+                    evidence: evidence
                 )
                 mergeRecallResult(result, into: &bestByOwner)
             }
@@ -681,16 +696,27 @@ final class CiderItemContextService {
                     stage: stage.name,
                     matchedQuery: stage.query
                 )
+                let matchedChunk = try? chunk(id: match.id, owner: match.owner)
+                let evidence = try recallRankEvidence(
+                    result: result,
+                    chunk: matchedChunk,
+                    originalQuery: queryPlan.first?.query ?? stage.query,
+                    matchedQuery: stage.query,
+                    stage: stage
+                )
                 result.rank = recallRank(
                     result: result,
                     originalQuery: queryPlan.first?.query ?? stage.query,
                     matchedQuery: stage.query,
-                    stageIndex: stageIndex
+                    stageIndex: stageIndex,
+                    evidence: evidence
                 )
                 result.rankFactors = recallRankFactors(
                     result: result,
                     matchedQuery: stage.query,
-                    stageIndex: stageIndex
+                    stage: stage,
+                    stageIndex: stageIndex,
+                    evidence: evidence
                 )
                 mergeRecallResult(result, into: &bestByOwner)
             }
@@ -723,6 +749,29 @@ final class CiderItemContextService {
             return
         }
         let mergedFactors = orderedUnique(existing.rankFactors + result.rankFactors)
+        if existing.kind == .item, result.item?.id == existing.item?.id {
+            existing.rank = max(existing.rank, result.rank)
+            if result.kind == .chunk && result.snippet.count > existing.snippet.count {
+                existing.snippet = result.snippet
+            }
+            existing.rankFactors = mergedFactors
+            if existing.stage == nil { existing.stage = result.stage }
+            if existing.matchedQuery == nil { existing.matchedQuery = result.matchedQuery }
+            bestByOwner[key] = existing
+            return
+        }
+        if result.kind == .item, result.item?.id == existing.item?.id {
+            var replacement = result
+            replacement.rank = max(existing.rank, result.rank)
+            if existing.kind == .chunk && existing.snippet.count > replacement.snippet.count {
+                replacement.snippet = existing.snippet
+            }
+            replacement.rankFactors = mergedFactors
+            if replacement.stage == nil { replacement.stage = existing.stage }
+            if replacement.matchedQuery == nil { replacement.matchedQuery = existing.matchedQuery }
+            bestByOwner[key] = replacement
+            return
+        }
         if result.rank > existing.rank || (result.item != nil && existing.item == nil) {
             var replacement = result
             replacement.rankFactors = mergedFactors
@@ -737,7 +786,8 @@ final class CiderItemContextService {
         result: CiderItemSearchResult,
         originalQuery: String,
         matchedQuery: String,
-        stageIndex: Int
+        stageIndex: Int,
+        evidence: RecallRankEvidence
     ) -> Double {
         var rank: Double = result.item == nil ? 100 : 900
         if result.kind == .item { rank += 120 }
@@ -747,6 +797,7 @@ final class CiderItemContextService {
             if item.title.localizedCaseInsensitiveContains(matchedQuery) { rank += 40 }
             if item.relativePath?.localizedCaseInsensitiveContains(matchedQuery) == true { rank += 35 }
         }
+        rank += evidence.rankContribution
         rank -= Double(stageIndex * 20)
         return rank
     }
@@ -754,17 +805,139 @@ final class CiderItemContextService {
     private func recallRankFactors(
         result: CiderItemSearchResult,
         matchedQuery: String,
-        stageIndex: Int
+        stage: RecallQueryStage,
+        stageIndex: Int,
+        evidence: RecallRankEvidence
     ) -> [String] {
         var factors: [String] = []
         factors.append(result.item == nil ? "owner_only_chunk" : "saved_library_item")
         factors.append(result.kind == .item ? "title_or_path_match" : "chunk_match")
         if result.owner.ownerType == "kanban_card" { factors.append("kanban_demoted_for_saved_item_recall") }
+        factors.append("stage:\(stage.name)")
+        factors.append("matched_query:\(matchedQuery)")
         if stageIndex > 0 { factors.append("human_query_expansion:\(matchedQuery)") }
         if let item = result.item, typeIntentBoost(item: item, query: matchedQuery) > 0 {
             factors.append("type_intent_match")
         }
+        factors += evidence.factors
         return orderedUnique(factors)
+    }
+
+    private func recallRankEvidence(
+        result: CiderItemSearchResult,
+        chunk: CiderItemChunk?,
+        originalQuery: String,
+        matchedQuery: String,
+        stage: RecallQueryStage
+    ) throws -> RecallRankEvidence {
+        let queryTokens = recallTokens(originalQuery).map { normalizedRecallToken($0) }
+        let distinctiveTokens = orderedUnique(queryTokens)
+            .filter { isDistinctiveRecallToken($0) }
+        let title = result.item?.title ?? result.title
+        let path = result.item?.relativePath ?? ""
+        let snippet = result.snippet
+        let chunkTitle = chunk?.title ?? (result.kind == .chunk ? result.title : "")
+        let chunkBody = chunk?.body ?? (result.kind == .chunk ? result.snippet : "")
+        let source = chunk?.source ?? ""
+        let combined = [title, path, snippet, chunkTitle, chunkBody, source].joined(separator: " ")
+
+        var contribution: Double = 0
+        var factors: [String] = []
+        var matchedDistinctive: [String] = []
+        let fieldMatches: [(name: String, text: String, weight: Double)] = [
+            ("item_title", title, 50),
+            ("relative_path", path, 18),
+            ("chunk_title", chunkTitle, 40),
+            ("chunk_body", chunkBody, 30),
+            ("snippet", snippet, 12),
+        ]
+        for field in fieldMatches {
+            let matched = distinctiveTokens.filter { containsRecallToken($0, in: field.text) }
+            guard !matched.isEmpty else { continue }
+            factors.append("matched_field:\(field.name)")
+            contribution += Double(matched.count) * field.weight
+            matchedDistinctive += matched
+        }
+
+        let uniqueDistinctive = orderedUnique(matchedDistinctive)
+        if !uniqueDistinctive.isEmpty {
+            contribution += Double(uniqueDistinctive.count * uniqueDistinctive.count) * 8
+            factors.append("distinctive_terms:\(uniqueDistinctive.joined(separator: ","))")
+        }
+
+        let providerSignals = recallProviderSignals(in: combined, query: originalQuery)
+        for provider in providerSignals {
+            contribution += 32
+            factors.append("provider_signal:\(provider)")
+        }
+
+        if let item = result.item {
+            if item.type == .vaultFile {
+                contribution += 28
+                factors.append("type_signal:vaultFile")
+            }
+            let memberships = try spaceMembershipStore.memberships(for: LibraryEntityRef(type: item.type, entityID: item.id))
+            for membership in memberships {
+                contribution += 24
+                factors.append("space_intent:\(membership.spaceName)")
+            }
+            let recency = recallRecencyContribution(for: item)
+            contribution += recency
+            factors.append("recency_contribution:\(Int(recency.rounded()))")
+        }
+
+        if stage.name == "original_query" && matchedQuery == originalQuery {
+            contribution += 12
+        }
+
+        return RecallRankEvidence(rankContribution: contribution, factors: orderedUnique(factors))
+    }
+
+    private func normalizedRecallToken(_ token: String) -> String {
+        token.trimmingCharacters(in: CharacterSet.alphanumerics.inverted).lowercased()
+    }
+
+    private func isDistinctiveRecallToken(_ token: String) -> Bool {
+        guard token.count >= 3 else { return false }
+        let generic: Set<String> = [
+            "and", "the", "for", "with", "from", "this", "that",
+            "capture", "saved", "item", "social", "video", "media",
+            "file", "document", "doc", "pdf", "movie", "game", "games",
+            "tiktok", "imdb", "steam", "rottentomatoes", "rotten", "tomatoes",
+        ]
+        return !generic.contains(token)
+    }
+
+    private func containsRecallToken(_ token: String, in text: String) -> Bool {
+        guard !token.isEmpty else { return false }
+        return recallTokens(text).map { normalizedRecallToken($0) }.contains(token)
+    }
+
+    private func recallProviderSignals(in text: String, query: String) -> [String] {
+        let lower = "\(text) \(query)".lowercased()
+        var providers: [String] = []
+        let signals: [(String, [String])] = [
+            ("tiktok", ["tiktok"]),
+            ("imdb", ["imdb"]),
+            ("rottentomatoes", ["rotten tomatoes", "rottentomatoes"]),
+            ("steam", ["steam"]),
+            ("docx", ["docx"]),
+            ("pdf", ["pdf"]),
+        ]
+        for (provider, aliases) in signals where aliases.contains(where: { lower.contains($0) }) {
+            providers.append(provider)
+        }
+        return orderedUnique(providers)
+    }
+
+    private func recallRecencyContribution(for item: CiderItemSummary) -> Double {
+        let age = max(0, nowProvider().timeIntervalSince(item.updatedAt))
+        let day = 86_400.0
+        if age <= day { return 25 }
+        if age <= day * 7 { return 18 }
+        if age <= day * 30 { return 10 }
+        if age <= day * 120 { return 4 }
+        return 0
     }
 
     private func typeIntentBoost(item: CiderItemSummary, query: String) -> Double {

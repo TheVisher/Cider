@@ -86,7 +86,7 @@ struct AgentRecallUnifiedSearchTests {
             limit: 10
         )
 
-        #expect(response.contains("Found 3 result(s) through unified item search:"))
+        #expect(response.contains("Found 2 result(s) through unified item search:"))
         #expect(response.contains("note \(note.entityID.uuidString)"))
         #expect(response.contains("bookmark \(bookmark.entityID.uuidString)"))
         #expect(response.contains("Path: Inbox/Notes/Dental follow-up.md"))
