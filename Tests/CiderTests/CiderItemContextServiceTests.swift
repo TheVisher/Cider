@@ -495,6 +495,45 @@ struct CiderItemContextServiceTests {
         })
     }
 
+    @Test("search diagnostics filter low signal natural language expansions")
+    func searchDiagnosticsFilterLowSignalNaturalLanguageExpansions() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let recipe = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        try insertItem(
+            recipe,
+            title: "Chickpea tahini dinner recipe",
+            relativePath: "Recipes/Chickpea tahini dinner.webloc",
+            into: db
+        )
+
+        let service = CiderItemContextService(database: db)
+        let query = "recipe using chickpeas and tahini but I forgot the title"
+        let report = try service.searchDiagnostics(query, limit: 5)
+        let expansionQueries = report.fallbackStages
+            .filter { $0.name == "human_query_expansion" }
+            .map(\.query)
+
+        #expect(expansionQueries.contains("recipe"))
+        #expect(expansionQueries.contains("chickpeas"))
+        #expect(expansionQueries.contains("tahini"))
+        for lowSignal in ["using", "and", "but", "the", "title"] {
+            #expect(!expansionQueries.contains(lowSignal), "\(lowSignal) should not become a fallback stage")
+        }
+        #expect(report.warnings.contains {
+            $0.kind == "low_signal_terms_filtered"
+                && $0.message.contains("using")
+                && $0.message.contains("title")
+        })
+
+        let dict = CiderCLI.itemSearchDiagnosticsReportToDict(report)
+        let warnings = try #require(dict["warnings"] as? [[String: Any]])
+        #expect(warnings.contains {
+            $0["kind"] as? String == "low_signal_terms_filtered"
+        })
+    }
+
     @Test("human recall ranks distinctive crowded provider matches above generic matches")
     func humanRecallRanksDistinctiveCrowdedProviderMatchesAboveGenericMatches() throws {
         let (db, url) = try makeTestDB()

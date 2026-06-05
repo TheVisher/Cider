@@ -362,6 +362,15 @@ final class CiderItemContextService {
         var warnings: [CiderItemSearchDiagnosticsWarning] = []
         var errors: [CiderItemSearchDiagnosticsWarning] = []
         let queryPlan = recallQueryPlan(for: trimmed)
+        let filteredLowSignalTerms = lowSignalRecallTerms(in: trimmed)
+        if !filteredLowSignalTerms.isEmpty {
+            warnings.append(
+                CiderItemSearchDiagnosticsWarning(
+                    kind: "low_signal_terms_filtered",
+                    message: "Ignored low-signal fallback terms: \(filteredLowSignalTerms.joined(separator: ", "))."
+                )
+            )
+        }
         let exactMatches: [CiderItemSearchResult]
         do {
             exactMatches = try rankedSearchResults(
@@ -611,6 +620,7 @@ final class CiderItemContextService {
             "hub": ["hub", "work hub", "team leader"],
         ]
         for token in tokens {
+            guard !isLowSignalRecallExpansion(token) else { continue }
             expansions.append(token)
             expansions.append(contentsOf: synonymMap[token.lowercased()] ?? [])
         }
@@ -625,6 +635,25 @@ final class CiderItemContextService {
         let filtered = orderedUnique(expansions)
             .filter { $0.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 }
         return Array(filtered[0..<min(filtered.count, 24)])
+    }
+
+    private func lowSignalRecallTerms(in query: String) -> [String] {
+        orderedUnique(
+            recallTokens(query)
+                .map { normalizedRecallToken($0) }
+                .filter(isLowSignalRecallExpansion)
+        )
+    }
+
+    private func isLowSignalRecallExpansion(_ token: String) -> Bool {
+        let normalized = normalizedRecallToken(token)
+        let lowSignal: Set<String> = [
+            "a", "an", "and", "are", "as", "at", "be", "but", "by",
+            "for", "forgot", "from", "i", "in", "into", "is", "it",
+            "me", "of", "on", "or", "that", "the", "this", "title",
+            "to", "using", "with",
+        ]
+        return lowSignal.contains(normalized)
     }
 
     private func recallTokens(_ query: String) -> [String] {
