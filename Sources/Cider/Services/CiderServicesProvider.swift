@@ -28,6 +28,7 @@ final class CiderServicesProvider: NSObject {
     private let noteCaptureHandler: (String) throws -> CiderCaptureResult
     private let imageCaptureHandler: (Data, String?, String?) throws -> CiderCaptureResult
     private let toastHandler: (String, Bool) -> Void
+    private let receiptToastHandler: (UICaptureReceipt, String) -> Void
 
     init(
         urlCaptureHandler: @escaping (String) throws -> CiderCaptureResult = {
@@ -59,12 +60,23 @@ final class CiderServicesProvider: NSObject {
                 object: nil,
                 userInfo: ["message": message, "isSuccess": isSuccess]
             )
+        },
+        receiptToastHandler: @escaping (UICaptureReceipt, String) -> Void = { receipt, successMessage in
+            NotificationCenter.default.post(
+                name: .showBookmarkCaptureToast,
+                object: nil,
+                userInfo: [
+                    "receipt": receipt,
+                    "successMessage": successMessage,
+                ]
+            )
         }
     ) {
         self.urlCaptureHandler = urlCaptureHandler
         self.noteCaptureHandler = noteCaptureHandler
         self.imageCaptureHandler = imageCaptureHandler
         self.toastHandler = toastHandler
+        self.receiptToastHandler = receiptToastHandler
         super.init()
     }
 
@@ -91,26 +103,23 @@ final class CiderServicesProvider: NSObject {
         if let url = URL(string: trimmed),
            let scheme = url.scheme?.lowercased(),
            scheme == "http" || scheme == "https" {
-            let receipt: CaptureReceipt
             if let result = try? urlCaptureHandler(url.absoluteString) {
-                receipt = CaptureReceipt(result: result)
+                postToast(
+                    receipt: UICaptureReceipt(result: result),
+                    successMessage: "Saved from Services"
+                )
             } else {
-                receipt = .failed("Could not save URL")
+                postToast(message: "Could not save URL", isSuccess: false)
             }
-            postToast(
-                message: receipt.toastMessage(success: "Saved from Services"),
-                isSuccess: receipt.isSuccess
-            )
             return
         }
 
         // Plain text → new note
         do {
             let result = try noteCaptureHandler(trimmed)
-            let receipt = CaptureReceipt(result: result)
             postToast(
-                message: receipt.toastMessage(success: "Created note from Services"),
-                isSuccess: receipt.isSuccess
+                receipt: UICaptureReceipt(result: result),
+                successMessage: "Created note from Services"
             )
         } catch {
             postToast(message: "Could not create note from Services", isSuccess: false)
@@ -137,10 +146,9 @@ final class CiderServicesProvider: NSObject {
         guard let data else { return }
         do {
             let result = try imageCaptureHandler(data, nil, nil)
-            let receipt = CaptureReceipt(result: result)
             postToast(
-                message: receipt.toastMessage(success: "Saved image from Services"),
-                isSuccess: receipt.isSuccess
+                receipt: UICaptureReceipt(result: result),
+                successMessage: "Saved image from Services"
             )
         } catch {
             postToast(message: "Could not save image from Services", isSuccess: false)
@@ -151,5 +159,9 @@ final class CiderServicesProvider: NSObject {
 
     private func postToast(message: String, isSuccess: Bool) {
         toastHandler(message, isSuccess)
+    }
+
+    private func postToast(receipt: UICaptureReceipt, successMessage: String) {
+        receiptToastHandler(receipt, successMessage)
     }
 }

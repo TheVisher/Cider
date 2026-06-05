@@ -440,17 +440,16 @@ struct ClipboardViewerView: View {
                         sourceContext: CaptureSourceContext(
                             surface: "clipboard_viewer",
                             channel: "pasteboard",
-                            originalText: urlString
+                        originalText: urlString
                         )
                     ) {
-                    let receipt = CaptureReceipt(result: result.captureResult)
-                    resultID = receipt.itemID
+                    resultID = result.captureResult.item.id
                     NotificationCenter.default.post(
                         name: .showBookmarkCaptureToast,
                         object: nil,
                         userInfo: [
-                            "message": receipt.toastMessage(success: "Saved as bookmark"),
-                            "isSuccess": receipt.isSuccess
+                            "receipt": UICaptureReceipt(result: result.captureResult),
+                            "successMessage": "Saved as bookmark"
                         ]
                     )
                 }
@@ -481,15 +480,14 @@ struct ClipboardViewerView: View {
                         ]
                     )
                 ) else { return }
-                let receipt = CaptureReceipt(result: result)
                 clipboardStorage.markSaved(itemID, savedItemID: result.item.id)
                 flashSaved(itemID)
                 NotificationCenter.default.post(
                     name: .showBookmarkCaptureToast,
                     object: nil,
                     userInfo: [
-                        "message": receipt.toastMessage(success: "Saved as image bookmark"),
-                        "isSuccess": receipt.isSuccess
+                        "receipt": UICaptureReceipt(result: result),
+                        "successMessage": "Saved as image bookmark"
                     ]
                 )
             }
@@ -523,13 +521,12 @@ struct ClipboardViewerView: View {
             )
             return nil
         }
-        let receipt = CaptureReceipt(result: result)
         NotificationCenter.default.post(
             name: .showBookmarkCaptureToast,
             object: nil,
             userInfo: [
-                "message": receipt.toastMessage(success: "Saved as note"),
-                "isSuccess": receipt.isSuccess
+                "receipt": UICaptureReceipt(result: result),
+                "successMessage": "Saved as note"
             ]
         )
         return result.item.id

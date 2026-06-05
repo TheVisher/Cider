@@ -98,16 +98,16 @@ final class BookmarksViewModel: ObservableObject {
         title: String?,
         folderID: UUID? = nil,
         sourceContext: CaptureSourceContext? = nil
-    ) -> CaptureReceipt {
+    ) -> UICaptureReceipt {
         guard let result = try? CiderBookmarkCaptureAdapter().addURLBookmark(
             urlString: urlString,
             title: title,
             folderID: folderID,
             sourceContext: sourceContext
         ) else {
-            return .failed("Could not save bookmark")
+            return UICaptureReceipt(receipt: .failed("Could not save bookmark"))
         }
-        return CaptureReceipt(result: result.captureResult)
+        return UICaptureReceipt(result: result.captureResult)
     }
 
     @discardableResult
@@ -116,7 +116,7 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     @discardableResult
-    func captureBookmarkFromPasteboard() -> CaptureReceipt {
+    func captureBookmarkFromPasteboard() -> UICaptureReceipt {
         let pasteboard = NSPasteboard.general
         if let string = pasteboard.string(forType: .string) {
             return captureBookmark(
@@ -141,7 +141,7 @@ final class BookmarksViewModel: ObservableObject {
                 )
             )
         }
-        return .failed("Clipboard does not contain a URL")
+        return UICaptureReceipt(receipt: .failed("Clipboard does not contain a URL"))
     }
 
     @discardableResult
@@ -158,8 +158,8 @@ final class BookmarksViewModel: ObservableObject {
                 )
             )
             postCaptureToast(
-                message: receipt.toastMessage(success: "Saved from active browser"),
-                isSuccess: receipt.isSuccess
+                receipt: receipt,
+                successMessage: "Saved from active browser"
             )
             return receipt.didPersist
         }
@@ -395,6 +395,17 @@ final class BookmarksViewModel: ObservableObject {
             userInfo: [
                 "message": message,
                 "isSuccess": isSuccess,
+            ]
+        )
+    }
+
+    private func postCaptureToast(receipt: UICaptureReceipt, successMessage: String) {
+        NotificationCenter.default.post(
+            name: .showBookmarkCaptureToast,
+            object: nil,
+            userInfo: [
+                "receipt": receipt,
+                "successMessage": successMessage,
             ]
         )
     }

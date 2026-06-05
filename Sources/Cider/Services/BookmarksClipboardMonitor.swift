@@ -117,13 +117,12 @@ final class BookmarksClipboardMonitor {
                     originalText: value
                 )
             ) {
-                let receipt = CaptureReceipt(result: result.captureResult)
                 NotificationCenter.default.post(
                     name: .showBookmarkCaptureToast,
                     object: nil,
                     userInfo: [
-                        "message": receipt.toastMessage(success: "Saved copied URL"),
-                        "isSuccess": receipt.isSuccess,
+                        "receipt": UICaptureReceipt(result: result.captureResult),
+                        "successMessage": "Saved copied URL",
                     ]
                 )
                 return

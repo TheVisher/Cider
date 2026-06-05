@@ -250,6 +250,19 @@ struct UICaptureReceipt: Equatable {
         return Self.humanizeAction(nextSafeAction)
     }
 
+    var didPersist: Bool {
+        state != .failed
+    }
+
+    var isSuccess: Bool {
+        switch state {
+        case .saved, .savedWithReview, .duplicate:
+            return true
+        case .partialSideEffects, .failed:
+            return false
+        }
+    }
+
     func shortToastMessage(success: String) -> String {
         legacyReceipt.toastMessage(success: success)
     }

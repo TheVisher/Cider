@@ -242,10 +242,9 @@ extension AppDelegate {
                 if let urlString = browserCapture?.urlString {
                     VaultBookmarkService.shared.updateURL(for: result.item.id, urlString: urlString)
                 }
-                let receipt = CaptureReceipt(result: result)
                 self.showBookmarkCaptureToast(
-                    message: receipt.toastMessage(success: "Saved copied image"),
-                    isSuccess: receipt.isSuccess
+                    receipt: UICaptureReceipt(result: result),
+                    successMessage: "Saved copied image"
                 )
             },
             onDiscard: { [weak self] in
@@ -283,7 +282,6 @@ extension AppDelegate {
             },
             onSave: { [weak self] in
                 guard let self else { return }
-                let receipt: CaptureReceipt
                 if let result = try? CiderBookmarkCaptureAdapter().addURLBookmark(
                     urlString: normalized,
                     sourceContext: CaptureSourceContext(
@@ -292,14 +290,13 @@ extension AppDelegate {
                         originalText: normalized
                     )
                 ) {
-                    receipt = CaptureReceipt(result: result.captureResult)
+                    self.showBookmarkCaptureToast(
+                        receipt: UICaptureReceipt(result: result.captureResult),
+                        successMessage: "Saved copied URL"
+                    )
                 } else {
-                    receipt = .failed("Could not save copied URL")
+                    self.showBookmarkCaptureToast(message: "Could not save copied URL", isSuccess: false)
                 }
-                self.showBookmarkCaptureToast(
-                    message: receipt.toastMessage(success: "Saved copied URL"),
-                    isSuccess: receipt.isSuccess
-                )
             },
             onDiscard: { [weak self] in
                 self?.dismissBookmarkCaptureToast()

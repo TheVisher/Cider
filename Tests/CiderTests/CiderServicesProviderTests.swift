@@ -8,7 +8,8 @@ struct CiderServicesProviderTests {
     @Test("Services text intake saves plain text through capture service")
     func servicesTextIntakeSavesPlainTextThroughCaptureService() throws {
         var capturedText: String?
-        var toasts: [(message: String, isSuccess: Bool)] = []
+        var failureToasts: [(message: String, isSuccess: Bool)] = []
+        var receiptToasts: [(receipt: UICaptureReceipt, successMessage: String)] = []
         let provider = CiderServicesProvider(
             noteCaptureHandler: { text in
                 capturedText = text
@@ -24,21 +25,64 @@ struct CiderServicesProviderTests {
                 return Self.captureResult(sourceKind: "image", itemType: "bookmark", title: "Image", relativePath: "Inbox/Bookmarks/Image.webloc")
             },
             toastHandler: { message, isSuccess in
-                toasts.append((message, isSuccess))
+                failureToasts.append((message, isSuccess))
+            },
+            receiptToastHandler: { receipt, successMessage in
+                receiptToasts.append((receipt, successMessage))
             }
         )
 
         provider.handleText("  Save this from Services  ")
-        let toast = try #require(toasts.first)
+        let toast = try #require(receiptToasts.first)
 
         #expect(capturedText == "Save this from Services")
-        #expect(toast.message == "Created note from Services - review needed")
-        #expect(toast.isSuccess == true)
+        #expect(failureToasts.isEmpty)
+        #expect(toast.successMessage == "Created note from Services")
+        #expect(toast.receipt.item.type == "note")
+        #expect(toast.receipt.shortToastMessage(success: toast.successMessage) == "Created note from Services - review needed")
+        #expect(toast.receipt.isSuccess)
+    }
+
+    @Test("Services URL intake posts rich receipt")
+    func servicesURLIntakePostsRichReceipt() throws {
+        var capturedURL: String?
+        var receiptToasts: [(receipt: UICaptureReceipt, successMessage: String)] = []
+        let provider = CiderServicesProvider(
+            urlCaptureHandler: { url in
+                capturedURL = url
+                return Self.captureResult(
+                    sourceKind: "url",
+                    itemType: "bookmark",
+                    title: "Service URL",
+                    relativePath: "Inbox/Bookmarks/Service URL.webloc"
+                )
+            },
+            noteCaptureHandler: { _ in
+                Issue.record("note capture should not run for URL intake")
+                return Self.captureResult(sourceKind: "text", itemType: "note", title: "Note", relativePath: "Inbox/Notes/Note.md")
+            },
+            imageCaptureHandler: { _, _, _ in
+                Issue.record("image capture should not run for URL intake")
+                return Self.captureResult(sourceKind: "image", itemType: "bookmark", title: "Image", relativePath: "Inbox/Bookmarks/Image.webloc")
+            },
+            receiptToastHandler: { receipt, successMessage in
+                receiptToasts.append((receipt, successMessage))
+            }
+        )
+
+        provider.handleText("https://example.com")
+        let toast = try #require(receiptToasts.first)
+
+        #expect(capturedURL == "https://example.com")
+        #expect(toast.successMessage == "Saved from Services")
+        #expect(toast.receipt.item.type == "bookmark")
+        #expect(toast.receipt.shortToastMessage(success: toast.successMessage) == "Saved from Services - review needed")
     }
 
     @Test("Services image intake reports thumbnail partial success")
     func servicesImageIntakeReportsThumbnailPartialSuccess() throws {
-        var toasts: [(message: String, isSuccess: Bool)] = []
+        var failureToasts: [(message: String, isSuccess: Bool)] = []
+        var receiptToasts: [(receipt: UICaptureReceipt, successMessage: String)] = []
         let provider = CiderServicesProvider(
             noteCaptureHandler: { _ in
                 Issue.record("note capture should not run for image intake")
@@ -62,15 +106,20 @@ struct CiderServicesProviderTests {
                 )
             },
             toastHandler: { message, isSuccess in
-                toasts.append((message, isSuccess))
+                failureToasts.append((message, isSuccess))
+            },
+            receiptToastHandler: { receipt, successMessage in
+                receiptToasts.append((receipt, successMessage))
             }
         )
 
         provider.handleImage(Data([1, 2, 3]))
-        let toast = try #require(toasts.first)
+        let toast = try #require(receiptToasts.first)
 
-        #expect(toast.message == "Saved image from Services - needs repair")
-        #expect(toast.isSuccess == false)
+        #expect(failureToasts.isEmpty)
+        #expect(toast.successMessage == "Saved image from Services")
+        #expect(toast.receipt.shortToastMessage(success: toast.successMessage) == "Saved image from Services - needs repair")
+        #expect(!toast.receipt.isSuccess)
     }
 
     @Test("Services empty text intake is ignored")

@@ -392,6 +392,32 @@ struct CaptureParitySafetyTests {
         #expect(violations.isEmpty, "Bookmark URL intake must preserve source context:\n\(violations.joined(separator: "\n"))")
     }
 
+    @Test("bookmark-like capture receipts post rich toast payloads")
+    func bookmarkLikeCaptureReceiptsPostRichToastPayloads() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let files = [
+            "Sources/Cider/ViewModels/BookmarksViewModel.swift",
+            "Sources/Cider/Views/CiderPanelView+URLDrop.swift",
+            "Sources/Cider/Services/BookmarksClipboardMonitor.swift",
+            "Sources/Cider/Views/Shared/ClipboardViewerView.swift",
+            "Sources/Cider/Services/CiderServicesProvider.swift",
+            "Sources/Cider/App/AppDelegate+Toasts.swift",
+        ]
+        var violations: [String] = []
+
+        for file in files {
+            let source = try String(contentsOf: repoRoot.appendingPathComponent(file), encoding: .utf8)
+            if source.contains("receipt.toastMessage(success:") {
+                violations.append("\(file): still flattens a capture receipt into a toast message")
+            }
+            if source.contains("= CaptureReceipt(result:") || source.contains("let receipt = CaptureReceipt(result:") {
+                violations.append("\(file): still builds legacy CaptureReceipt from a rich capture result")
+            }
+        }
+
+        #expect(violations.isEmpty, "Bookmark-like capture surfaces should post UICaptureReceipt payloads:\n\(violations.joined(separator: "\n"))")
+    }
+
     @Test("derived create wrappers record create provenance")
     func derivedCreateWrappersRecordCreateProvenance() throws {
         let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
