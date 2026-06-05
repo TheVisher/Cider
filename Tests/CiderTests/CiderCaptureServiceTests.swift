@@ -496,6 +496,60 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("final bookmark receipt refreshes indexing and separates intent approval from enrichment")
+    func finalBookmarkReceiptRefreshesIndexingAndSeparatesIntentApprovalFromEnrichment() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db
+            )
+
+            let result = try service.add(
+                "https://www.tiktok.com/@maker/video/12345",
+                title: "Tiktok.Com"
+            )
+            let thumbnailPath = ".thumbnails/tiktok-modular-shelf.png"
+            let thumbnailURL = StoragePaths.cachedDirectoryURL(for: .bookmarks)
+                .appendingPathComponent(thumbnailPath)
+            try FileManager.default.createDirectory(
+                at: thumbnailURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data("thumbnail".utf8).write(to: thumbnailURL)
+            let enrichedAt = Date(timeIntervalSince1970: 1_775_000_000)
+            let finalBookmark = Bookmark(
+                id: result.item.id,
+                title: "3D printed modular shelf for Anycubic Kobra",
+                urlString: "https://www.tiktok.com/@maker/video/12345",
+                createdAt: Date(timeIntervalSince1970: 1_774_999_000),
+                updatedAt: Date(timeIntervalSince1970: 1_774_999_500),
+                notes: "3D printed modular shelf for Anycubic Kobra\n\nBy maker\nVia TikTok",
+                tags: ["tiktok", "3d-printing"],
+                thumbnailRemoteURLString: "https://example.com/tiktok.jpg",
+                thumbnailRelativePath: thumbnailPath,
+                metadataUpdatedAt: enrichedAt,
+                relativePath: "Inbox/Bookmarks/3D printed modular shelf for Anycubic Kobra.webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: enrichedAt
+            )
+
+            let dict = result.toDictionary(finalBookmark: finalBookmark)
+            let indexing = try #require(dict["indexing"] as? [String: Any])
+            let chunks = try #require(indexing["chunks"] as? [[String: Any]])
+            let safeNextCommands = try #require(dict["safeNextCommands"] as? [String])
+
+            #expect(dict["needsEnrichment"] as? Bool == false)
+            #expect(dict["needsIntentApproval"] as? Bool == true)
+            #expect(dict["recommendedNextAction"] as? String == "review_intent")
+            #expect(chunks.first?["title"] as? String == "3D printed modular shelf for Anycubic Kobra")
+            #expect(chunks.allSatisfy { $0["title"] as? String != "Tiktok.Com" })
+            #expect(safeNextCommands.contains("cider-cli item apply-intent bookmark \(result.item.id.uuidString) --intent space --json"))
+        }
+    }
+
     @Test("capture result dictionary reports visible bookmark quality")
     func captureResultDictionaryReportsVisibleBookmarkQuality() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in

@@ -72,7 +72,7 @@ enum CiderAgentDecisionContract {
     }
 
     private static func nextActionDictionary(action: String, requiresHumanReview: Bool) -> [String: Any] {
-        let readOnlyActions = Set(["inspect_item", "review_route", "inspect_existing_item", "report_file_indexing_gap"])
+        let readOnlyActions = Set(["inspect_item", "review_route", "review_intent", "inspect_existing_item", "report_file_indexing_gap"])
         let readOnly = readOnlyActions.contains(action)
         var dict: [String: Any] = [
             "action": action,

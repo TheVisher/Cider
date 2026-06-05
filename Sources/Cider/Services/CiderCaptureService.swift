@@ -362,14 +362,20 @@ struct CiderCaptureResult {
         let qualityNeedsEnrichment = captureQuality?["needsEnrichment"] as? Bool ?? false
         let qualityBlockingIssues = captureQuality?["degradedReasons"] as? [String] ?? []
         let qualityRecommendedAction = captureQuality?["safeNextAction"] as? String
+        let enrichmentComplete = !enrichment.isEnriching
+            && ["complete", "metadata_complete", "not_applicable"].contains(enrichment.status)
         let nativeNeedsEnrichment = enrichment.isEnriching
             || enrichment.status == "pending"
             || enrichment.status == "failed"
-            || nextSafeAction == "enrich"
+            || (nextSafeAction == "enrich" && !enrichmentComplete)
         let needsEnrichment = nativeNeedsEnrichment || qualityNeedsEnrichment
+        let needsIntentApproval = stagedIntents.contains(where: { $0.isSpaceIntent }) && needsReview
         var blockingIssues: [String] = []
         if needsReview {
             blockingIssues.append("routing_needs_review")
+        }
+        if needsIntentApproval {
+            blockingIssues.append("intent_approval_needed")
         }
         if enrichment.status == "failed" {
             blockingIssues.append("enrichment_failed")
@@ -380,16 +386,21 @@ struct CiderCaptureResult {
             blockingIssues.append("canonical_side_effects_incomplete")
         }
         blockingIssues.append(contentsOf: qualityBlockingIssues)
-        return CiderAgentDecisionContract.dictionary(
+        let recommendedNextAction = needsIntentApproval
+            ? "review_intent"
+            : (qualityRecommendedAction ?? (needsReview ? "review_route" : nextSafeAction))
+        var dict = CiderAgentDecisionContract.dictionary(
             saved: true,
             needsReview: needsReview,
             needsEnrichment: needsEnrichment,
             needsRouting: needsRouting,
             confidence: routing.confidence,
             blockingIssues: blockingIssues,
-            recommendedNextAction: qualityRecommendedAction ?? (needsReview ? "review_route" : nextSafeAction),
+            recommendedNextAction: recommendedNextAction,
             safeNextCommands: safeCommands
         )
+        dict["needsIntentApproval"] = needsIntentApproval
+        return dict
     }
 
     private func safeNextCommands() -> [String] {
@@ -435,36 +446,26 @@ struct CiderCaptureResult {
 
     @MainActor
     func toDictionary(finalBookmark: Bookmark?) -> [String: Any] {
-        var dict = toDictionary()
-        guard item.type == "bookmark", let finalBookmark else { return dict }
+        guard item.type == "bookmark", let finalBookmark else { return toDictionary() }
 
-        var itemDict = (dict["item"] as? [String: Any]) ?? [:]
-        itemDict["title"] = finalBookmark.title
-        itemDict["folderName"] = finalBookmark.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
-        if let relativePath = finalBookmark.relativePath {
-            itemDict["relativePath"] = relativePath
-        } else {
-            itemDict.removeValue(forKey: "relativePath")
-        }
-        if let folderID = finalBookmark.folderID {
-            itemDict["folderID"] = folderID.uuidString
-        } else {
-            itemDict.removeValue(forKey: "folderID")
-        }
-        dict["item"] = itemDict
-
-        var enrichmentDict = (dict["enrichment"] as? [String: Any]) ?? [:]
-        enrichmentDict["status"] = Self.enrichmentStatus(for: finalBookmark)
-        enrichmentDict["isEnriching"] = finalBookmark.isEnriching
-        enrichmentDict["titleState"] = Self.titleState(for: finalBookmark)
-        if let lastEnrichedAt = finalBookmark.lastEnrichedAt {
-            enrichmentDict["lastEnrichedAt"] = ISO8601DateFormatter().string(from: lastEnrichedAt)
-        } else {
-            enrichmentDict.removeValue(forKey: "lastEnrichedAt")
-        }
-        dict["enrichment"] = enrichmentDict
-
+        var finalResult = self
+        finalResult.item.title = finalBookmark.title
+        finalResult.item.relativePath = finalBookmark.relativePath
+        finalResult.item.folderID = finalBookmark.folderID
+        finalResult.item.folderName = finalBookmark.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+        finalResult.enrichment.status = Self.enrichmentStatus(for: finalBookmark)
+        finalResult.enrichment.isEnriching = finalBookmark.isEnriching
+        finalResult.enrichment.titleState = Self.titleState(for: finalBookmark)
+        finalResult.enrichment.lastEnrichedAt = finalBookmark.lastEnrichedAt
+        finalResult.stagedIntents = CiderCaptureIntentStagingService.stagedIntents(for: finalBookmark)
         let captureQuality = Self.captureQualityDictionary(for: finalBookmark)
+        finalResult.captureQuality = captureQuality
+        finalResult.indexing = Self.finalBookmarkIndexingStatus(
+            from: finalResult.indexing,
+            finalBookmark: finalBookmark
+        )
+
+        var dict = finalResult.toDictionary()
         dict["captureQuality"] = captureQuality
         if captureQuality["degraded"] as? Bool == true {
             let repairCommands = Self.bookmarkCaptureRepairCommands(for: finalBookmark)
@@ -476,6 +477,24 @@ struct CiderCaptureResult {
         }
 
         return dict
+    }
+
+    private static func finalBookmarkIndexingStatus(
+        from indexing: SideEffectStatus,
+        finalBookmark: Bookmark
+    ) -> SideEffectStatus {
+        guard indexing.status == "indexed" else { return indexing }
+        var refreshed = indexing
+        refreshed.chunks = indexing.chunks.map { chunk in
+            var chunk = chunk
+            if chunk.ownerType == "bookmark",
+               chunk.ownerID == finalBookmark.id.uuidString,
+               bookmarkTitleQuality(finalBookmark) == "rich" {
+                chunk.title = finalBookmark.title
+            }
+            return chunk
+        }
+        return refreshed
     }
 
     private static func enrichmentStatus(for bookmark: Bookmark) -> String {
