@@ -34,6 +34,24 @@ struct VaultFolder: Identifiable, Hashable, Codable {
         return scalar.value > 127
     }
 
+    var looksLikeArtifactPath: Bool {
+        Self.looksLikeVaultArtifactPath(relativePath)
+    }
+
+    static func looksLikeVaultArtifactPath(_ path: String) -> Bool {
+        let trimmed = path.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        guard let leaf = trimmed.split(separator: "/").last else { return false }
+        guard let dot = leaf.lastIndex(of: ".") else { return false }
+        let ext = leaf[leaf.index(after: dot)...].lowercased()
+        return knownArtifactExtensions.contains(String(ext))
+    }
+
+    private static let knownArtifactExtensions: Set<String> = [
+        "webloc", "md", "markdown", "ics", "vcf",
+        "png", "jpg", "jpeg", "gif", "heic", "webp",
+        "pdf", "txt", "rtf", "doc", "docx",
+    ]
+
     init(
         id: UUID = UUID(),
         relativePath: String,

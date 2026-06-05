@@ -557,8 +557,8 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeNextCommands.contains("cider-cli storage audit --json"))
     }
 
-    @Test("item owner get folder omits move path command for artifact-looking folder rows")
-    func itemOwnerGetFolderOmitsMovePathCommandForArtifactLookingFolderRows() throws {
+    @Test("item owner get folder omits write commands for artifact-looking folder rows")
+    func itemOwnerGetFolderOmitsWriteCommandsForArtifactLookingFolderRows() throws {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-cli-folder-owner-artifact-path-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
@@ -584,8 +584,48 @@ struct CiderCLIAgentSafetyTests {
 
         let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
         #expect(!safeNextCommands.contains("cider-cli item move <type> <id-or-ref> --path \"Projects/Cider/QA/Audit.md\" --json"))
-        #expect(safeNextCommands.contains("cider-cli item route <type> <id-or-ref> --target-type folder --target-id \(folderID) --target-path \"Projects/Cider/QA/Audit.md\" --reason <reason> --json"))
+        #expect(!safeNextCommands.contains("cider-cli item move <type> <id-or-ref> --folder \"\(folderID)\" --json"))
+        #expect(!safeNextCommands.contains("cider-cli item route <type> <id-or-ref> --target-type folder --target-id \(folderID) --target-path \"Projects/Cider/QA/Audit.md\" --reason <reason> --json"))
         #expect(safeNextCommands.contains("cider-cli storage audit --json"))
+        #expect(safeNextCommands.contains("cider-cli storage doctor-plan --json"))
+    }
+
+    @Test("storage audit reports artifact-looking registered folder rows")
+    func storageAuditReportsArtifactLookingRegisteredFolderRows() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-storage-audit-artifact-folder-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try createNote(title: "Initialize Folder DB", content: "Init", vault: vault)
+        try insertFolderRow(relativePath: "Projects/Cider/QA/Audit.md", vault: vault)
+        try insertFolderRow(relativePath: "[Media]/[Games]/Paralives.webloc", vault: vault)
+        try FileManager.default.createDirectory(
+            at: vault.appendingPathComponent("Projects/Cider/QA/Audit.md"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: vault.appendingPathComponent("[Media]/[Games]/Paralives.webloc"),
+            withIntermediateDirectories: true
+        )
+
+        let result = try runCLI(args: ["storage", "audit", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        let groups = try #require(payload["doctorFindingGroups"] as? [String: Int])
+        #expect(groups["warning:artifactLookingFolderRow"] == 2)
+        let samples = try #require(payload["doctorFindingSamples"] as? [[String: Any]])
+        #expect(samples.contains {
+            $0["kind"] as? String == "artifactLookingFolderRow" &&
+            $0["relativePath"] as? String == "Projects/Cider/QA/Audit.md" &&
+            $0["isFixable"] as? Bool == false
+        })
+        #expect(samples.contains {
+            $0["kind"] as? String == "artifactLookingFolderRow" &&
+            $0["relativePath"] as? String == "[Media]/[Games]/Paralives.webloc" &&
+            $0["isFixable"] as? Bool == false
+        })
     }
 
     @Test("item owner get folder reports ambiguous name matches")

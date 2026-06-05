@@ -193,7 +193,7 @@ struct ItemMetadataActionButton: View {
 
 struct ItemMetadataFolderPicker: View {
     var folderID: UUID?
-    var folders: [Folder] = VaultFolderService.shared.legacyFolders
+    var folders: [Folder] = VaultFolderService.shared.legacySelectableFolders
     var onFolderChanged: (UUID?) -> Void
 
     @Environment(\.textScale) private var textScale
@@ -231,7 +231,7 @@ struct ItemMetadataFolderPicker: View {
 
     private var currentFolderName: String {
         guard let folderID else { return "No Folder" }
-        return folders.first(where: { $0.id == folderID })?.name ?? "No Folder"
+        return VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "No Folder"
     }
 }
 

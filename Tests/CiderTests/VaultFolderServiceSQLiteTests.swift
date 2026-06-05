@@ -61,6 +61,44 @@ struct VaultFolderServiceSQLiteTests {
         #expect(loaded2?.name == "Projects")
     }
 
+    @Test("Selectable destination folders omit artifact-looking rows")
+    func selectableDestinationFoldersOmitArtifactLookingRows() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = VaultFolderService(database: db)
+        let spaceFolder = VaultFolder(relativePath: "Media/Games/World of Warcraft")
+        let bookmarkArtifact = VaultFolder(relativePath: "Media/Games/World of Warcraft.webloc")
+        let qaArtifact = VaultFolder(relativePath: "Projects/Cider/QA/Audit.md")
+        service.persistToDatabase(db, folder: spaceFolder)
+        service.persistToDatabase(db, folder: bookmarkArtifact)
+        service.persistToDatabase(db, folder: qaArtifact)
+
+        let service2 = VaultFolderService(database: db)
+        #expect(service2.folders.map(\.relativePath).sorted() == [
+            "Media/Games/World of Warcraft",
+            "Media/Games/World of Warcraft.webloc",
+            "Projects/Cider/QA/Audit.md",
+        ])
+        #expect(service2.selectableFolders.map(\.relativePath) == ["Media/Games/World of Warcraft"])
+        #expect(service2.legacySelectableFolders.map(\.name) == ["World of Warcraft"])
+    }
+
+    @Test("Folder writes reject artifact-looking names")
+    func folderWritesRejectArtifactLookingNames() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = VaultFolderService(database: db)
+        let decision = service.applyFolderWrite(.init(
+            name: "Paralives.webloc",
+            source: .test
+        ))
+
+        #expect(decision == .rejected(reason: "artifact_looking_path"))
+        #expect(service.folders.isEmpty)
+    }
+
     @Test("Folder with all metadata fields survives round-trip")
     func fullMetadataRoundTrip() throws {
         let (db, url) = try makeTestDB()

@@ -1563,6 +1563,8 @@ final class CiderStorageAuditService {
         }
 
         switch finding.kind {
+        case .artifactLookingFolderRow:
+            return "Inspect this folder row as storage drift. Do not route or move items into artifact-looking paths; create or use a real Space/entity container instead."
         case .suspiciousFlattenedFolderDuplicate:
             return "Inspect the listed folder paths and choose a manual merge, move, or delete plan; do not run automatic repair."
         case .duplicateNoteContent, .duplicateBookmarkURL, .duplicateContactEmail, .duplicateContactPhone:

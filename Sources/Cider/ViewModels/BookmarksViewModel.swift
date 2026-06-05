@@ -63,7 +63,7 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     var folders: [Folder] {
-        VaultFolderService.shared.legacyFolders
+        VaultFolderService.shared.legacySelectableFolders
     }
 
     var filteredBookmarks: [Bookmark] {

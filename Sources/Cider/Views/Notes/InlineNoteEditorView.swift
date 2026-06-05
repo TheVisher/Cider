@@ -1022,7 +1022,7 @@ struct NoteMetadataSidebar: View {
             sectionHeader("Folder", isExpanded: $isFolderExpanded)
 
             if isFolderExpanded {
-                let folders = folderService.legacyFolders
+                let folders = folderService.legacySelectableFolders
                 Menu {
                     Button("No Folder") {
                         viewModel.updateNoteFolder(nil)

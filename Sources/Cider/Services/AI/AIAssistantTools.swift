@@ -124,9 +124,9 @@ struct ListFoldersTool: Tool {
     struct Arguments {}
 
     nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
-        let folders = VaultFolderService.shared.folders
+        let folders = VaultFolderService.shared.selectableFolders
         if folders.isEmpty {
-            return ("No folders exist yet.")
+            return ("No selectable folders exist yet.")
         }
 
         let bookmarks = VaultBookmarkService.shared.bookmarks
@@ -424,7 +424,7 @@ struct GetFolderContentsTool: Tool {
 
     nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
         let name = arguments.folderName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let folders = VaultFolderService.shared.folders
+        let folders = VaultFolderService.shared.selectableFolders
 
         guard let folder = folders.first(where: {
             $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
@@ -499,10 +499,11 @@ struct CreateFolderTool: Tool {
         var parentID: UUID?
         if let parentName = arguments.parentFolderName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !parentName.isEmpty {
-            guard let parent = VaultFolderService.shared.folders.first(where: {
+            let folders = VaultFolderService.shared.selectableFolders
+            guard let parent = folders.first(where: {
                 $0.name.localizedCaseInsensitiveCompare(parentName) == .orderedSame
             }) else {
-                let available = VaultFolderService.shared.folders.map(\.name).joined(separator: ", ")
+                let available = folders.map(\.name).joined(separator: ", ")
                 return "Parent folder \"\(parentName)\" not found. Available folders: \(available)"
             }
             parentID = parent.id
@@ -539,13 +540,14 @@ struct MoveToFolderTool: Tool {
     nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
         let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let folderName = arguments.folderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let folders = VaultFolderService.shared.selectableFolders
 
-        guard let folder = VaultFolderService.shared.folders.first(where: {
+        guard let folder = folders.first(where: {
             $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
-        }) ?? VaultFolderService.shared.folders.first(where: {
+        }) ?? folders.first(where: {
             $0.name.localizedStandardContains(folderName)
         }) else {
-            let available = VaultFolderService.shared.folders.map(\.name).joined(separator: ", ")
+            let available = folders.map(\.name).joined(separator: ", ")
             return "Folder \"\(folderName)\" not found. Available folders: \(available)"
         }
 
@@ -1208,10 +1210,11 @@ struct RenameFolderTool: Tool {
         let newName = arguments.newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !newName.isEmpty else { return "New name cannot be empty." }
 
-        guard let folder = VaultFolderService.shared.folders.first(where: {
+        let folders = VaultFolderService.shared.selectableFolders
+        guard let folder = folders.first(where: {
             $0.name.localizedCaseInsensitiveCompare(current) == .orderedSame
         }) else {
-            let available = VaultFolderService.shared.folders.map(\.name).joined(separator: ", ")
+            let available = folders.map(\.name).joined(separator: ", ")
             return "No folder named \"\(current)\". Available folders: \(available)"
         }
 

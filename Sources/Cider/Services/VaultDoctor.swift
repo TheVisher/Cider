@@ -65,6 +65,7 @@ final class VaultDoctor {
             case duplicateFolderPath   // multiple folders rows with same relative_path (schema invariant violation)
             case staleFolderSyncAlias  // sync alias decision points at a nonexistent local folder
             case folderPathOutsideVault // folders.relative_path is not a safe relative vault path
+            case artifactLookingFolderRow // folders row path looks like a durable file artifact
             case orphanBreadcrumb      // old .cider/folders/.trash/*-breadcrumbs.json > 30 days old
             case reservedPathInFolders // folders row for a reserved top dir (legacy drift)
             case suspiciousFlattenedFolderDuplicate // root folder duplicates an existing nested folder name, often with numeric suffix
@@ -162,6 +163,7 @@ final class VaultDoctor {
         findings.append(contentsOf: scanDuplicateFolderPaths())
         findings.append(contentsOf: scanStaleFolderSyncAliasFindings())
         findings.append(contentsOf: scanFolderPathSafetyFindings())
+        findings.append(contentsOf: scanArtifactLookingFolderRows())
         findings.append(contentsOf: scanReservedPathsInFolders())
         findings.append(contentsOf: scanSuspiciousFlattenedFolderDuplicates())
         return findings
@@ -503,6 +505,30 @@ final class VaultDoctor {
         return out
     }
 
+    private func scanArtifactLookingFolderRows() -> [Finding] {
+        var out: [Finding] = []
+        let folders = VaultFolderService.shared.folders
+        for folder in folders where folder.looksLikeArtifactPath {
+            let directItemCount = countItemsReferencingFolder(folder.id)
+            let childFolderCount = folders.filter { $0.parentRelativePath == folder.relativePath }.count
+            let parentDescription = folder.parentRelativePath.map { " Parent folder: \($0)." } ?? ""
+            out.append(Finding(
+                id: "artifact-looking-folder-\(folder.id.uuidString)",
+                kind: .artifactLookingFolderRow,
+                severity: .warning,
+                summary: "Artifact-looking folder row: \(folder.relativePath)",
+                detail: "Folder row path ends with a known file artifact extension, but folders should represent containers, not saved item files.\(parentDescription) Direct items: \(directItemCount). Child folders: \(childFolderCount). Review before routing anything here.",
+                isFixable: false,
+                fixLabel: nil,
+                payload: Finding.Payload(
+                    folderID: folder.id,
+                    relativePath: folder.relativePath
+                )
+            ))
+        }
+        return out
+    }
+
     /// Check 8: root folder looks like a flattened duplicate of a nested folder.
     /// This is intentionally conservative and read-only. It catches sync/adoption
     /// drift where a child folder was created at the vault root after its remote
@@ -802,6 +828,7 @@ final class VaultDoctor {
              .duplicateFolderPath,
              .staleFolderSyncAlias,
              .folderPathOutsideVault,
+             .artifactLookingFolderRow,
              .suspiciousFlattenedFolderDuplicate,
              .duplicateNoteContent,
              .duplicateBookmarkURL,

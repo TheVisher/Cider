@@ -13016,14 +13016,17 @@ struct CiderCLI {
 
     static func folderOwnerSafeNextCommands(relativePath: String, folderID: String? = nil) -> [String] {
         var commands = ["cider-cli item search <query> --json"]
-        if !looksLikeVaultArtifactPath(relativePath) && relativePath != "Inbox" {
+        let artifactLooking = looksLikeVaultArtifactPath(relativePath)
+        if !artifactLooking && relativePath != "Inbox" {
             commands.append("cider-cli item move <type> <id-or-ref> --folder \"\(folderID ?? relativePath)\" --json")
             commands.append("cider-cli item move <type> <id-or-ref> --path \"\(relativePath)\" --json")
         }
-        if let folderID, !folderID.isEmpty {
-            commands.append("cider-cli item route <type> <id-or-ref> --target-type folder --target-id \(folderID) --target-path \"\(relativePath)\" --reason <reason> --json")
-        } else {
-            commands.append("cider-cli item route <type> <id-or-ref> --target-type folder --target-path \"\(relativePath)\" --reason <reason> --json")
+        if !artifactLooking {
+            if let folderID, !folderID.isEmpty {
+                commands.append("cider-cli item route <type> <id-or-ref> --target-type folder --target-id \(folderID) --target-path \"\(relativePath)\" --reason <reason> --json")
+            } else {
+                commands.append("cider-cli item route <type> <id-or-ref> --target-type folder --target-path \"\(relativePath)\" --reason <reason> --json")
+            }
         }
         commands.append("cider-cli storage audit --json")
         commands.append("cider-cli storage doctor-plan --json")
@@ -15422,16 +15425,7 @@ struct CiderCLI {
     }
 
     static func looksLikeVaultArtifactPath(_ path: String) -> Bool {
-        let trimmed = path.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
-        guard let leaf = trimmed.split(separator: "/").last else { return false }
-        guard let dot = leaf.lastIndex(of: ".") else { return false }
-        let ext = leaf[leaf.index(after: dot)...].lowercased()
-        let knownArtifactExtensions: Set<String> = [
-            "webloc", "md", "markdown", "ics", "vcf",
-            "png", "jpg", "jpeg", "gif", "heic", "webp",
-            "pdf", "txt", "rtf", "doc", "docx",
-        ]
-        return knownArtifactExtensions.contains(ext)
+        VaultFolder.looksLikeVaultArtifactPath(path)
     }
 
     static func parentFolderPath(forArtifactPath path: String) -> String? {

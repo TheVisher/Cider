@@ -144,8 +144,8 @@ enum MLXToolExecutor {
     }
 
     private static func listFolders() -> String {
-        let folders = VaultFolderService.shared.folders
-        if folders.isEmpty { return "No folders exist yet." }
+        let folders = VaultFolderService.shared.selectableFolders
+        if folders.isEmpty { return "No selectable folders exist yet." }
 
         let bookmarks = VaultBookmarkService.shared.bookmarks
         let notes = NotesStorage.shared.notes
@@ -331,7 +331,7 @@ enum MLXToolExecutor {
 
     private static func getFolderContents(_ args: [String: Any]) -> String {
         let name = string("folderName", from: args)
-        let folders = VaultFolderService.shared.folders
+        let folders = VaultFolderService.shared.selectableFolders
 
         guard let folder = folders.first(where: {
             $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
@@ -448,10 +448,11 @@ enum MLXToolExecutor {
 
         var parentID: UUID?
         if let parentName = optString("parentFolderName", from: args) {
-            guard let parent = VaultFolderService.shared.folders.first(where: {
+            let folders = VaultFolderService.shared.selectableFolders
+            guard let parent = folders.first(where: {
                 $0.name.localizedCaseInsensitiveCompare(parentName) == .orderedSame
             }) else {
-                return "Parent folder \"\(parentName)\" not found. Available folders: \(VaultFolderService.shared.folders.map(\.name).joined(separator: ", "))"
+                return "Parent folder \"\(parentName)\" not found. Available folders: \(folders.map(\.name).joined(separator: ", "))"
             }
             parentID = parent.id
         }
@@ -468,13 +469,14 @@ enum MLXToolExecutor {
         MutationAuditContext.withSource(.agent) {
         let query = string("searchQuery", from: args)
         let folderName = string("folderName", from: args)
+        let folders = VaultFolderService.shared.selectableFolders
 
-        guard let folder = VaultFolderService.shared.folders.first(where: {
+        guard let folder = folders.first(where: {
             $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
-        }) ?? VaultFolderService.shared.folders.first(where: {
+        }) ?? folders.first(where: {
             $0.name.localizedStandardContains(folderName)
         }) else {
-            return "Folder \"\(folderName)\" not found. Available folders: \(VaultFolderService.shared.folders.map(\.name).joined(separator: ", "))"
+            return "Folder \"\(folderName)\" not found. Available folders: \(folders.map(\.name).joined(separator: ", "))"
         }
 
         var moved: [String] = []
@@ -764,10 +766,11 @@ enum MLXToolExecutor {
         let newName = string("newName", from: args)
         guard !newName.isEmpty else { return "New name cannot be empty." }
 
-        guard let folder = VaultFolderService.shared.folders.first(where: {
+        let folders = VaultFolderService.shared.selectableFolders
+        guard let folder = folders.first(where: {
             $0.name.localizedCaseInsensitiveCompare(current) == .orderedSame
         }) else {
-            return "No folder named \"\(current)\". Available folders: \(VaultFolderService.shared.folders.map(\.name).joined(separator: ", "))"
+            return "No folder named \"\(current)\". Available folders: \(folders.map(\.name).joined(separator: ", "))"
         }
 
         let success = VaultFolderService.shared.renameFolder(folder.id, to: newName)

@@ -338,7 +338,7 @@ private struct FloatingBookmarkDetailContent: View {
             draft: $draft,
             bookmark: bookmark,
             errorMessage: nil,
-            folders: folderService.legacyFolders,
+            folders: folderService.legacySelectableFolders,
             width: FloatingBookmarkDetailLayout.metadataSidebarWidth,
             showBackground: false,
             onDelete: nil,

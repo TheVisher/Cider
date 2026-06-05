@@ -242,6 +242,17 @@ final class VaultFolderService: ObservableObject {
         }
 
         let requestedRelativePath = parentPath.map { "\($0)/\(sanitized)" } ?? sanitized
+        guard !VaultFolder.looksLikeVaultArtifactPath(requestedRelativePath) else {
+            recordFolderWriteProposalDecision(
+                action: "folder.write.rejected",
+                request: request,
+                reason: "artifact_looking_path",
+                requestedPath: requestedRelativePath
+            )
+            logger.warning("createFolder: rejected artifact-looking folder path '\(requestedRelativePath, privacy: .public)'")
+            return .rejected(reason: "artifact_looking_path")
+        }
+
         if let existing = index.values.first(where: { $0.relativePath == requestedRelativePath }) {
             switch request.duplicatePolicy {
             case .aliasExisting:
@@ -1334,6 +1345,16 @@ final class VaultFolderService: ObservableObject {
     /// Returns all folders converted to the legacy Folder type.
     var legacyFolders: [Folder] {
         folders.map { toLegacyFolder($0) }
+    }
+
+    /// Folders that are safe to offer as item destinations in menus and agent tools.
+    var selectableFolders: [VaultFolder] {
+        folders.filter { !$0.looksLikeArtifactPath }
+    }
+
+    /// Legacy UI projection of folders that are safe to offer as item destinations.
+    var legacySelectableFolders: [Folder] {
+        selectableFolders.map { toLegacyFolder($0) }
     }
 
     // MARK: - Sync Operations
