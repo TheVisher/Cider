@@ -14855,7 +14855,28 @@ struct CiderCLI {
             "available": status.available,
             "status": status.status,
             "reason": status.reason,
+            "mode": status.mode,
+            "candidateCount": status.candidateCount,
+            "candidates": status.candidates.map(itemSearchSemanticCandidateToDict),
+            "requiresRebuild": status.requiresRebuild,
+            "safeNextCommands": status.safeNextCommands,
         ]
+    }
+
+    static func itemSearchSemanticCandidateToDict(_ candidate: CiderItemSearchSemanticCandidate) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": candidate.id,
+            "score": candidate.score,
+            "rationale": candidate.rationale,
+            "rankFactors": candidate.rankFactors,
+        ]
+        if let item = candidate.item {
+            dict["item"] = itemSummaryToDict(item)
+        }
+        if let owner = candidate.owner {
+            dict["owner"] = ownerToDict(owner)
+        }
+        return dict
     }
 
     static func routingDecisionToDict(_ decision: SecondBrainRoutingDecision) -> [String: Any] {

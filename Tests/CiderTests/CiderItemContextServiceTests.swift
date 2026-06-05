@@ -308,6 +308,35 @@ struct CiderItemContextServiceTests {
         #expect((dict["safeNextCommands"] as? [String])?.contains("cider-cli item rebuild-chunks note \(note.entityID.uuidString) --json") == true)
     }
 
+    @Test("search diagnostics explain unavailable semantic recall surface")
+    func searchDiagnosticsExplainUnavailableSemanticRecallSurface() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = CiderItemContextService(database: db)
+        let report = try service.searchDiagnostics("paperwork I saved for executive function help", limit: 5)
+
+        #expect(report.semanticStatus.available == false)
+        #expect(report.semanticStatus.status == "unavailable")
+        #expect(report.semanticStatus.mode == "supplemental")
+        #expect(report.semanticStatus.candidateCount == 0)
+        #expect(report.semanticStatus.candidates.isEmpty)
+        #expect(report.semanticStatus.requiresRebuild == true)
+        #expect(report.semanticStatus.safeNextCommands.contains("cider-cli item doctor --json"))
+        #expect(report.warnings.contains {
+            $0.kind == "semantic_recall_unavailable"
+                && $0.message.contains("semantic/vector recall")
+        })
+
+        let dict = CiderCLI.itemSearchDiagnosticsReportToDict(report)
+        let semantic = try #require(dict["semanticStatus"] as? [String: Any])
+        #expect(semantic["mode"] as? String == "supplemental")
+        #expect(semantic["candidateCount"] as? Int == 0)
+        #expect(semantic["requiresRebuild"] as? Bool == true)
+        #expect((semantic["candidates"] as? [[String: Any]])?.isEmpty == true)
+        #expect((semantic["safeNextCommands"] as? [String])?.contains("cider-cli item doctor --json") == true)
+    }
+
     @Test("search diagnostics return machine readable no match warnings")
     func searchDiagnosticsReturnNoMatchWarnings() throws {
         let (db, url) = try makeTestDB()

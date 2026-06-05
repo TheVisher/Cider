@@ -168,6 +168,20 @@ struct CiderItemSearchSemanticStatus: Equatable {
     var available: Bool
     var status: String
     var reason: String
+    var mode: String
+    var candidateCount: Int
+    var candidates: [CiderItemSearchSemanticCandidate]
+    var requiresRebuild: Bool
+    var safeNextCommands: [String]
+}
+
+struct CiderItemSearchSemanticCandidate: Identifiable, Equatable {
+    var id: String
+    var item: CiderItemSummary?
+    var owner: SecondBrainOwnerRef?
+    var score: Double
+    var rationale: String
+    var rankFactors: [String]
 }
 
 struct CiderItemSearchIndexFreshness: Equatable {
@@ -455,6 +469,12 @@ final class CiderItemContextService {
                 CiderItemSearchDiagnosticsWarning(
                     kind: "no_matches",
                     message: "No title/path or FTS chunk matches were found for '\(trimmed)'."
+                )
+            )
+            warnings.append(
+                CiderItemSearchDiagnosticsWarning(
+                    kind: "semantic_recall_unavailable",
+                    message: "No lexical matches were found, and supplemental semantic/vector recall is unavailable. Exact item/chunk provenance remains canonical; run item doctor and rebuild stale chunks before relying on semantic recall."
                 )
             )
         }
@@ -1116,7 +1136,14 @@ final class CiderItemContextService {
         CiderItemSearchSemanticStatus(
             available: false,
             status: "unavailable",
-            reason: "Semantic/vector recall is not configured for item search-debug yet."
+            reason: "Semantic/vector recall is not configured for item search-debug yet.",
+            mode: "supplemental",
+            candidateCount: 0,
+            candidates: [],
+            requiresRebuild: true,
+            safeNextCommands: [
+                "cider-cli item doctor --json",
+            ]
         )
     }
 
