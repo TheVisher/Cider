@@ -211,6 +211,110 @@ struct ChatCaptureIntakeServiceTests {
         #expect(ChatRuntimeCaptureAdapter.input(fromTelegram: update) == nil)
     }
 
+    @Test("discord runtime update maps explicit save intent into canonical chat capture input")
+    func discordRuntimeUpdateMapsExplicitSaveIntentIntoCanonicalChatCaptureInput() throws {
+        let update = DiscordUpdateEnvelope(
+            messageID: "discord-msg-100",
+            channelID: "discord-channel-100",
+            threadID: "discord-thread-100",
+            senderID: "discord-user-100",
+            senderDisplayName: "Erik",
+            text: "save this https://example.com/discord-capture",
+            attachments: []
+        )
+
+        let input = ChatRuntimeCaptureAdapter.input(fromDiscord: update)
+
+        #expect(input?.channel == .discord)
+        #expect(input?.channelID == "discord-channel-100")
+        #expect(input?.threadID == "discord-thread-100")
+        #expect(input?.messageID == "discord:discord-msg-100")
+        #expect(input?.senderID == "discord-user-100")
+        #expect(input?.senderName == "Erik")
+        #expect(input?.intent == .capture)
+        #expect(input?.text == "https://example.com/discord-capture")
+        #expect(input?.metadata["source_message_id"] == "discord-msg-100")
+        #expect(input?.metadata["runtime"] == "discord")
+    }
+
+    @Test("discord runtime local attachment save intent preserves attachment metadata")
+    func discordRuntimeLocalAttachmentSaveIntentPreservesAttachmentMetadata() throws {
+        let update = DiscordUpdateEnvelope(
+            messageID: "discord-msg-101",
+            channelID: "discord-channel-101",
+            threadID: nil,
+            senderID: "discord-user-101",
+            senderDisplayName: "Erik",
+            text: "save this",
+            attachments: [
+                DiscordAttachmentEnvelope(
+                    id: "discord-attachment-101",
+                    filename: "receipt.png",
+                    mimeType: "image/png",
+                    localPath: "/tmp/discord-receipt.png",
+                    remoteURL: "https://cdn.discordapp.example/receipt.png"
+                )
+            ]
+        )
+
+        let input = ChatRuntimeCaptureAdapter.input(fromDiscord: update)
+
+        #expect(input?.intent == .capture)
+        #expect(input?.text == "")
+        let attachment = try #require(input?.attachments.first)
+        #expect(attachment.id == "discord-attachment-101")
+        #expect(attachment.filename == "receipt.png")
+        #expect(attachment.mimeType == "image/png")
+        #expect(attachment.localPath == "/tmp/discord-receipt.png")
+        #expect(attachment.remoteURL == "https://cdn.discordapp.example/receipt.png")
+    }
+
+    @Test("discord runtime remote attachment save intent records unsupported attachment review")
+    func discordRuntimeRemoteAttachmentSaveIntentRecordsUnsupportedAttachmentReview() throws {
+        try withIsolatedVault { db, notes, files in
+            let service = ChatCaptureIntakeService(
+                captureService: CiderCaptureService(
+                    notesStorage: notes,
+                    vaultFileStorage: files,
+                    database: db
+                ),
+                database: db
+            )
+            let update = DiscordUpdateEnvelope(
+                messageID: "discord-msg-102",
+                channelID: "discord-channel-102",
+                threadID: nil,
+                senderID: "discord-user-102",
+                senderDisplayName: "Erik",
+                text: "save this",
+                attachments: [
+                    DiscordAttachmentEnvelope(
+                        id: "discord-attachment-102",
+                        filename: "remote.pdf",
+                        mimeType: "application/pdf",
+                        localPath: nil,
+                        remoteURL: "https://cdn.discordapp.example/remote.pdf",
+                        downloadFailedReason: "discord_attachment_download_failed"
+                    )
+                ]
+            )
+
+            let input = try #require(ChatRuntimeCaptureAdapter.input(fromDiscord: update))
+            #expect(input.metadata["attachment_failure_reason"] == "discord_attachment_download_failed")
+            let result = try ChatRuntimeCaptureAdapter.captureIfNeeded(
+                fromDiscord: update,
+                intakeService: service
+            )
+
+            #expect(result?.status == .needsReview)
+            let eventID = try #require(result?.captureEventID)
+            #expect(result?.safeNextCommands.contains("cider-cli item backlinks capture_event \(eventID.uuidString) --json") == true)
+            #expect(try captureAttachmentSourceIDs(db, eventID: eventID) == ["discord-attachment-102"])
+            #expect(try captureAttachmentRemoteURLs(db, eventID: eventID) == ["https://cdn.discordapp.example/remote.pdf"])
+            #expect(try unsupportedAttachmentReviewOutputCount(db, eventID: eventID) == 1)
+        }
+    }
+
     @Test("telegram chat capture creates canonical capture event provenance")
     func telegramChatCaptureCreatesCanonicalCaptureEventProvenance() throws {
         try withIsolatedVault { db, notes, _ in
