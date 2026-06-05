@@ -4495,6 +4495,7 @@ struct CiderCLI {
               cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
                 Do not pass artifact filenames such as Example.webloc to item move --path.
               cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
+              cider-cli item apply-intent <type> <id-or-ref> --intent space [--actor <name>] [--json]
               cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
               cider-cli item backfill-kanban [--board <name-or-id>] [--json]
               cider-cli item doctor [--json]
@@ -4729,6 +4730,29 @@ struct CiderCLI {
                             print("    \(command)")
                         }
                     }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "apply-intent":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2,
+                  (parseFlag("--intent", from: args) ?? "").lowercased() == "space" else {
+                printCLIError("Usage: cider-cli item apply-intent <type> <id-or-ref> --intent space [--actor <name>] [--json]")
+                return
+            }
+            do {
+                let payload = try itemApplySpaceIntentPayload(
+                    type: positional[0],
+                    ref: positional[1],
+                    actor: parseFlag("--actor", from: args) ?? "agent",
+                    source: parseFlag("--source", from: args) ?? "item.apply-intent"
+                )
+                if jsonOutput {
+                    outputJSON(payload)
+                } else if let intent = payload["approvedIntent"] as? [String: Any] {
+                    print("Applied staged Space intent: \(intent["spaceName"] ?? "Space")")
                 }
             } catch {
                 printCLIError(error.localizedDescription)
@@ -12355,6 +12379,115 @@ struct CiderCLI {
         }
 
         return SecondBrainOwnerRef(ownerType: normalizedType, ownerID: rawRef)
+    }
+
+    static func itemApplySpaceIntentPayload(
+        type rawType: String,
+        ref rawRef: String,
+        actor: String,
+        source: String
+    ) throws -> [String: Any] {
+        let entityType = try ItemLinkService.entityType(from: rawType)
+        guard entityType == .bookmark else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Staged Space intent approval currently supports bookmark items only."]
+            )
+        }
+        let resolved = try ItemLinkService.shared.resolve(type: entityType, ref: rawRef)
+        guard let bookmark = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == resolved.entityID }) else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "No bookmark found matching '\(rawRef)'."]
+            )
+        }
+        let stagedSpaceIntent = CiderCaptureIntentStagingService
+            .stagedIntents(for: bookmark)
+            .first { $0.isSpaceIntent }
+        guard let stagedSpaceIntent else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "No staged Space intent is available for this item."]
+            )
+        }
+        guard case let .space(spaceName, area) = stagedSpaceIntent.kind else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "No staged Space intent is available for this item."]
+            )
+        }
+
+        let existingSpace = resolveSpaceTarget(targetID: nil, targetPath: spaceName)
+        let finalSpaceID = existingSpace?.id ?? normalizedIntentSpaceID(spaceName)
+        let finalSpaceName = existingSpace?.name ?? spaceName
+        let areaClause = area.map { " / \($0)" } ?? ""
+        let reason = "\(stagedSpaceIntent.reason) Approved staged capture intent for \(finalSpaceName)\(areaClause)."
+        let explanation = try CiderRoutingDecisionService().recordSpaceAssignment(
+            itemID: resolved.entityID,
+            spaceID: finalSpaceID,
+            spaceName: finalSpaceName,
+            reason: reason,
+            confidence: stagedSpaceIntent.confidence,
+            actor: actor,
+            source: source
+        )
+
+        let owner = SecondBrainOwnerRef(ownerType: resolved.type.rawValue, ownerID: resolved.entityID.uuidString)
+        try SecondBrainStore(database: .shared).recordAgentAction(
+            SecondBrainAgentAction(
+                owner: owner,
+                itemID: resolved.entityID.uuidString,
+                toolName: "item.apply-intent",
+                actionType: "apply.space_intent",
+                source: source,
+                status: "succeeded",
+                summary: reason
+            )
+        )
+
+        let storageDestination = bookmark.relativePath?.hasPrefix("Inbox/") == true
+            ? bookmark.relativePath?.components(separatedBy: "/").prefix(2).joined(separator: "/")
+            : bookmark.relativePath
+        var approvedIntent = stagedSpaceIntent.toDictionary(storageDestination: storageDestination)
+        approvedIntent["spaceID"] = finalSpaceID
+        approvedIntent["spaceName"] = finalSpaceName
+        if let area { approvedIntent["area"] = area }
+        var item: [String: Any] = [
+            "id": resolved.entityID.uuidString,
+            "type": resolved.type.rawValue,
+            "title": bookmark.title,
+        ]
+        if let relativePath = bookmark.relativePath {
+            item["relativePath"] = relativePath
+        }
+
+        return [
+            "ok": true,
+            "command": "item.apply-intent",
+            "changed": true,
+            "intent": "space",
+            "item": item,
+            "approvedIntent": approvedIntent,
+            "routing": explanation.toDictionary(),
+            "safeNextCommands": [
+                "cider-cli item context \(resolved.type.rawValue) \(resolved.entityID.uuidString) --json",
+                "cider-cli item get \(resolved.type.rawValue) \(resolved.entityID.uuidString) --json",
+            ],
+        ]
+    }
+
+    static func normalizedIntentSpaceID(_ name: String) -> String {
+        let normalized = name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        return normalized.isEmpty ? "space" : normalized
     }
 
     static func projectWorkspace(ref: String, catalog: ProjectWorkspaceCatalog) -> ProjectWorkspace? {

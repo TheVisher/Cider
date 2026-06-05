@@ -1712,6 +1712,62 @@ struct CiderCLIAgentSafetyTests {
         })
     }
 
+    @Test("item apply-intent approves staged Space intent without moving bookmark files")
+    func itemApplyIntentApprovesStagedSpaceIntentWithoutMovingBookmarkFiles() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-apply-space-intent-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "bookmark",
+                "--url", "https://www.rottentomatoes.com/tv/the_vampire_lestat/s01",
+                "--title", "The Vampire Lestat: Season 1 | Rotten Tomatoes",
+                "--no-wait",
+                "--json",
+            ],
+            vault: vault
+        )
+        let capture = try parseJSONObject(captureResult.stdout)
+        #expect(captureResult.status == 0)
+        let item = try #require(capture["item"] as? [String: Any])
+        let itemID = try #require(item["id"] as? String)
+        let originalPath = try #require(item["relativePath"] as? String)
+        #expect(originalPath.hasPrefix("Inbox/Bookmarks/"))
+
+        let spaceIntent = try #require(capture["spaceIntent"] as? [String: Any])
+        #expect(spaceIntent["spaceName"] as? String == "Media")
+        #expect(spaceIntent["area"] as? String == "Shows")
+        let safeCommands = try #require(capture["safeNextCommands"] as? [String])
+        #expect(safeCommands.contains("cider-cli item apply-intent bookmark \(itemID) --intent space --json"))
+
+        let applyResult = try runCLI(
+            args: ["item", "apply-intent", "bookmark", itemID, "--intent", "space", "--json"],
+            vault: vault
+        )
+        let apply = try parseJSONObject(applyResult.stdout)
+        #expect(applyResult.status == 0)
+        #expect(apply["ok"] as? Bool == true)
+        #expect(apply["command"] as? String == "item.apply-intent")
+        #expect(apply["changed"] as? Bool == true)
+        let approvedIntent = try #require(apply["approvedIntent"] as? [String: Any])
+        #expect(approvedIntent["spaceName"] as? String == "Media")
+        #expect(approvedIntent["area"] as? String == "Shows")
+        #expect(approvedIntent["wouldRouteWithoutReview"] as? Bool == false)
+
+        let contextResult = try runCLI(args: ["item", "context", "bookmark", itemID, "--json"], vault: vault)
+        let context = try parseJSONObject(contextResult.stdout)
+        let memberships = try #require(context["spaceMemberships"] as? [[String: Any]])
+        #expect(memberships.contains {
+            $0["spaceName"] as? String == "Media"
+                && (($0["reason"] as? String)?.contains("Rotten Tomatoes") == true)
+        })
+        let contextItem = try #require(context["item"] as? [String: Any])
+        #expect(contextItem["relativePath"] as? String == originalPath)
+    }
+
     @Test("capture add accepts nested target folder paths through folder flag")
     func captureAddAcceptsNestedTargetFolderPathsThroughFolderFlag() throws {
         let vault = FileManager.default.temporaryDirectory

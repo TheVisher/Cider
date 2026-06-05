@@ -118,6 +118,11 @@ struct CiderCaptureResult {
         var reason: String
         var source: String
 
+        var isSpaceIntent: Bool {
+            if case .space = kind { return true }
+            return false
+        }
+
         func toDictionary(storageDestination: String?) -> [String: Any] {
             var dict: [String: Any] = [
                 "status": "staged",
@@ -391,6 +396,9 @@ struct CiderCaptureResult {
         var commands = ["cider-cli item get \(item.type) \(item.id.uuidString) --json"]
         if let existingItemID = duplicate.existingItemID {
             commands.append("cider-cli item get \(item.type) \(existingItemID.uuidString) --json")
+        }
+        if stagedIntents.contains(where: { $0.isSpaceIntent }) {
+            commands.append("cider-cli item apply-intent \(item.type) \(item.id.uuidString) --intent space --json")
         }
         if routing.needsAgentRouteReview {
             commands.append("cider-cli routing explain \(item.id.uuidString) --json")
@@ -789,6 +797,70 @@ enum CiderCaptureError: LocalizedError {
     }
 }
 
+enum CiderCaptureIntentStagingService {
+    static func stagedIntents(for bookmark: Bookmark) -> [CiderCaptureResult.StagedIntent] {
+        guard let components = URLComponents(string: bookmark.urlString),
+              let host = components.host?.lowercased() else {
+            return stagedProjectIntents(forTitle: bookmark.title, urlString: bookmark.urlString)
+        }
+
+        var intents: [CiderCaptureResult.StagedIntent] = []
+        let path = components.path.lowercased()
+        let title = bookmark.title.lowercased()
+        if host.matchesDomain("rottentomatoes.com") {
+            let area = path.contains("/tv/") ? "Shows" : "Movies"
+            intents.append(.init(
+                kind: .space(spaceName: "Media", area: area),
+                confidence: 0.78,
+                reason: "Rotten Tomatoes URLs are media references; keep the capture in Inbox for review while preserving the likely Media intent.",
+                source: "capture.intent.url_provider"
+            ))
+        } else if host.matchesDomain("imdb.com") {
+            let area = path.contains("/video") || title.contains("trailer") ? "Trailers" : "Movies"
+            intents.append(.init(
+                kind: .space(spaceName: "Media", area: area),
+                confidence: 0.78,
+                reason: "IMDb URLs are media references; keep the capture in Inbox for review while preserving the likely Media intent.",
+                source: "capture.intent.url_provider"
+            ))
+        } else if host.matchesDomain("steampowered.com") || host.matchesDomain("steamcommunity.com") {
+            intents.append(.init(
+                kind: .space(spaceName: "Media", area: "Games"),
+                confidence: 0.82,
+                reason: "Steam URLs are game references; keep the capture in Inbox for review while preserving the likely Games intent.",
+                source: "capture.intent.url_provider"
+            ))
+        } else if host.matchesDomain("tiktok.com") {
+            intents.append(.init(
+                kind: .space(spaceName: "Media", area: "Social Video"),
+                confidence: 0.62,
+                reason: "TikTok URLs are social video references; keep the capture in Inbox for review while preserving the likely media intent.",
+                source: "capture.intent.url_provider"
+            ))
+        }
+
+        intents.append(contentsOf: stagedProjectIntents(forTitle: bookmark.title, urlString: bookmark.urlString))
+        return intents
+    }
+
+    private static func stagedProjectIntents(forTitle title: String, urlString: String) -> [CiderCaptureResult.StagedIntent] {
+        let haystack = "\(title) \(urlString)".lowercased()
+        guard haystack.contains("cider ios")
+            || haystack.contains("codex ios")
+            || haystack.contains("openaidevs") else {
+            return []
+        }
+        return [
+            .init(
+                kind: .project(projectName: "Cider iOS"),
+                confidence: 0.68,
+                reason: "The capture mentions Codex/OpenAI Developers in an iOS app context, so it likely belongs with Cider iOS project references.",
+                source: "capture.intent.project_reference"
+            )
+        ]
+    }
+}
+
 @MainActor
 final class CiderCaptureService {
     private let bookmarkService: VaultBookmarkService
@@ -942,7 +1014,7 @@ final class CiderCaptureService {
             ),
             nextSafeAction: isDuplicate ? "inspect_existing_item" : "enrich"
         )
-        result.stagedIntents = stagedIntents(for: bookmark)
+        result.stagedIntents = CiderCaptureIntentStagingService.stagedIntents(for: bookmark)
         return indexCapturedItem(attachCaptureEvent(to: result, sourceContext: sourceContext))
     }
 
@@ -1550,68 +1622,6 @@ final class CiderCaptureService {
         case note
         case todo
         case file
-    }
-
-    private func stagedIntents(for bookmark: Bookmark) -> [CiderCaptureResult.StagedIntent] {
-        guard let components = URLComponents(string: bookmark.urlString),
-              let host = components.host?.lowercased() else {
-            return stagedProjectIntents(forTitle: bookmark.title, urlString: bookmark.urlString)
-        }
-
-        var intents: [CiderCaptureResult.StagedIntent] = []
-        let path = components.path.lowercased()
-        let title = bookmark.title.lowercased()
-        if host.matchesDomain("rottentomatoes.com") {
-            let area = path.contains("/tv/") ? "Shows" : "Movies"
-            intents.append(.init(
-                kind: .space(spaceName: "Media", area: area),
-                confidence: 0.78,
-                reason: "Rotten Tomatoes URLs are media references; keep the capture in Inbox for review while preserving the likely Media intent.",
-                source: "capture.intent.url_provider"
-            ))
-        } else if host.matchesDomain("imdb.com") {
-            let area = path.contains("/video") || title.contains("trailer") ? "Trailers" : "Movies"
-            intents.append(.init(
-                kind: .space(spaceName: "Media", area: area),
-                confidence: 0.78,
-                reason: "IMDb URLs are media references; keep the capture in Inbox for review while preserving the likely Media intent.",
-                source: "capture.intent.url_provider"
-            ))
-        } else if host.matchesDomain("steampowered.com") || host.matchesDomain("steamcommunity.com") {
-            intents.append(.init(
-                kind: .space(spaceName: "Media", area: "Games"),
-                confidence: 0.82,
-                reason: "Steam URLs are game references; keep the capture in Inbox for review while preserving the likely Games intent.",
-                source: "capture.intent.url_provider"
-            ))
-        } else if host.matchesDomain("tiktok.com") {
-            intents.append(.init(
-                kind: .space(spaceName: "Media", area: "Social Video"),
-                confidence: 0.62,
-                reason: "TikTok URLs are social video references; keep the capture in Inbox for review while preserving the likely media intent.",
-                source: "capture.intent.url_provider"
-            ))
-        }
-
-        intents.append(contentsOf: stagedProjectIntents(forTitle: bookmark.title, urlString: bookmark.urlString))
-        return intents
-    }
-
-    private func stagedProjectIntents(forTitle title: String, urlString: String) -> [CiderCaptureResult.StagedIntent] {
-        let haystack = "\(title) \(urlString)".lowercased()
-        guard haystack.contains("cider ios")
-            || haystack.contains("codex ios")
-            || haystack.contains("openaidevs") else {
-            return []
-        }
-        return [
-            .init(
-                kind: .project(projectName: "Cider iOS"),
-                confidence: 0.68,
-                reason: "The capture mentions Codex/OpenAI Developers in an iOS app context, so it likely belongs with Cider iOS project references.",
-                source: "capture.intent.project_reference"
-            )
-        ]
     }
 
     private func inferredKind(for source: String) -> CaptureKind {
