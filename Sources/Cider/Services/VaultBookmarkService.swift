@@ -3492,7 +3492,7 @@ final class VaultBookmarkService: ObservableObject {
                 }
             }
             for bookmark in artifactDeletionCandidates {
-                deleteDuplicateBookmarkArtifact(bookmark)
+                deleteDuplicateBookmarkArtifact(bookmark, database: db)
             }
             logger.info("Repaired \(removedRowBookmarks.count) duplicate canonical bookmark row(s)")
         } catch {
@@ -3593,10 +3593,33 @@ final class VaultBookmarkService: ObservableObject {
             .first
     }
 
-    private func deleteDuplicateBookmarkArtifact(_ bookmark: Bookmark) {
+    private func deleteDuplicateBookmarkArtifact(_ bookmark: Bookmark, database db: CiderDatabase) {
         guard let relativePath = bookmark.relativePath,
               relativePath.lowercased().hasSuffix(".webloc") else { return }
-        deleteWeblocFileOnly(for: bookmark)
+        let fileURL = vaultRoot.appendingPathComponent(relativePath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        let filename = fileURL.lastPathComponent
+        let dirURL = fileURL.deletingLastPathComponent()
+
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+            BookmarkFileService.shared.removeSidecarEntry(at: dirURL, filename: filename)
+            MutationAuditService(database: db).record(
+                action: "scanner.bookmark.delete_duplicate_artifact",
+                itemType: LibraryEntityType.bookmark.rawValue,
+                itemID: bookmark.id,
+                before: MutationAuditSnapshots.bookmark(bookmark),
+                metadata: [
+                    "scanner": "VaultBookmarkService.loadBookmarksFromDatabase",
+                    "operation": "delete_duplicate_artifact",
+                    "source": MutationAuditSource.filesystem.rawValue,
+                    "relativePath": relativePath,
+                ],
+                source: .filesystem
+            )
+        } catch {
+            logger.error("Failed to delete duplicate bookmark artifact \(relativePath, privacy: .public): \(error.localizedDescription)")
+        }
     }
 
     private static func pathHasNumericDuplicateSuffix(_ relativePath: String) -> Bool {

@@ -1496,6 +1496,18 @@ struct BookmarkSQLiteTests {
         let itemStmt = try db.prepare("SELECT COUNT(*) FROM items WHERE type = 'bookmark';")
         try itemStmt.step()
         #expect(itemStmt.int(at: 0) == 1)
+
+        let auditEntries = MutationAuditService(database: db).loadEntries()
+        let cleanupEntry = auditEntries.first { entry in
+            entry.action == "scanner.bookmark.delete_duplicate_artifact"
+                && entry.itemID == duplicateID
+                && entry.beforeState["relativePath"] == "Inbox/Bookmarks/Wyldheart co-op RPG for busy schedules — Furo (2).webloc"
+        }
+        #expect(cleanupEntry?.itemType == "bookmark")
+        #expect(cleanupEntry?.source == .filesystem)
+        #expect(cleanupEntry?.metadata["operation"] == "delete_duplicate_artifact")
+        #expect(cleanupEntry?.metadata["scanner"] == "VaultBookmarkService.loadBookmarksFromDatabase")
+        #expect(cleanupEntry?.metadata["relativePath"] == "Inbox/Bookmarks/Wyldheart co-op RPG for busy schedules — Furo (2).webloc")
     }
 
     @Test("SQLite duplicate URL repair keeps clean artifact path even when suffix row is richer")
