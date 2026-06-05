@@ -369,7 +369,7 @@ struct CiderCaptureResult {
             || enrichment.status == "failed"
             || (nextSafeAction == "enrich" && !enrichmentComplete)
         let needsEnrichment = nativeNeedsEnrichment || qualityNeedsEnrichment
-        let needsIntentApproval = stagedIntents.contains(where: { $0.isSpaceIntent }) && needsReview
+        let needsIntentApproval = !stagedIntents.isEmpty && needsReview
         var blockingIssues: [String] = []
         if needsReview {
             blockingIssues.append("routing_needs_review")
@@ -817,15 +817,53 @@ enum CiderCaptureError: LocalizedError {
 }
 
 enum CiderCaptureIntentStagingService {
+    struct Input {
+        var title: String?
+        var urlString: String?
+        var sourceFile: String?
+        var sourceText: String?
+        var sourceContext: CaptureSourceContext?
+
+        var combinedText: String {
+            [
+                title,
+                urlString,
+                sourceFile,
+                sourceText,
+                sourceContext?.originalText,
+                sourceContext?.metadata.values.joined(separator: " "),
+            ]
+                .compactMap { $0 }
+                .joined(separator: " ")
+                .lowercased()
+        }
+    }
+
     static func stagedIntents(for bookmark: Bookmark) -> [CiderCaptureResult.StagedIntent] {
-        guard let components = URLComponents(string: bookmark.urlString),
+        stagedIntents(for: Input(
+            title: bookmark.title,
+            urlString: bookmark.urlString,
+            sourceFile: nil,
+            sourceText: bookmark.notes,
+            sourceContext: nil
+        ))
+    }
+
+    static func stagedIntents(for input: Input) -> [CiderCaptureResult.StagedIntent] {
+        let providerIntents = stagedProviderIntents(for: input)
+        return providerIntents + stagedProjectIntents(in: input.combinedText)
+    }
+
+    private static func stagedProviderIntents(for input: Input) -> [CiderCaptureResult.StagedIntent] {
+        guard let urlString = input.urlString,
+              let components = URLComponents(string: urlString),
               let host = components.host?.lowercased() else {
-            return stagedProjectIntents(forTitle: bookmark.title, urlString: bookmark.urlString)
+            return stagedTextIntents(in: input.combinedText)
         }
 
         var intents: [CiderCaptureResult.StagedIntent] = []
         let path = components.path.lowercased()
-        let title = bookmark.title.lowercased()
+        let text = input.combinedText
         if host.matchesDomain("rottentomatoes.com") {
             let area = path.contains("/tv/") ? "Shows" : "Movies"
             intents.append(.init(
@@ -835,7 +873,7 @@ enum CiderCaptureIntentStagingService {
                 source: "capture.intent.url_provider"
             ))
         } else if host.matchesDomain("imdb.com") {
-            let area = path.contains("/video") || title.contains("trailer") ? "Trailers" : "Movies"
+            let area = path.contains("/video") || text.contains("trailer") ? "Trailers" : "Movies"
             intents.append(.init(
                 kind: .space(spaceName: "Media", area: area),
                 confidence: 0.78,
@@ -856,14 +894,45 @@ enum CiderCaptureIntentStagingService {
                 reason: "TikTok URLs are social video references; keep the capture in Inbox for review while preserving the likely media intent.",
                 source: "capture.intent.url_provider"
             ))
+        } else if host.matchesDomain("allrecipes.com")
+                    || host.matchesDomain("seriouseats.com")
+                    || host.matchesDomain("smittenkitchen.com") {
+            intents.append(.init(
+                kind: .space(spaceName: "Recipes", area: nil),
+                confidence: 0.76,
+                reason: "Recipe-site URLs are recipe references; keep the capture in Inbox for review while preserving the likely Recipes intent.",
+                source: "capture.intent.url_provider"
+            ))
         }
 
-        intents.append(contentsOf: stagedProjectIntents(forTitle: bookmark.title, urlString: bookmark.urlString))
-        return intents
+        return intents.isEmpty ? stagedTextIntents(in: text) : intents
     }
 
-    private static func stagedProjectIntents(forTitle title: String, urlString: String) -> [CiderCaptureResult.StagedIntent] {
-        let haystack = "\(title) \(urlString)".lowercased()
+    private static func stagedTextIntents(in haystack: String) -> [CiderCaptureResult.StagedIntent] {
+        if haystack.contains("steam") || haystack.contains("steampowered") {
+            return [
+                .init(
+                    kind: .space(spaceName: "Media", area: "Games"),
+                    confidence: 0.66,
+                    reason: "The capture text mentions Steam, so it may be a game reference; keep it in Inbox for review while preserving the likely Games intent.",
+                    source: "capture.intent.text_signal"
+                )
+            ]
+        }
+        if haystack.contains("recipe") || haystack.contains("ingredients") {
+            return [
+                .init(
+                    kind: .space(spaceName: "Recipes", area: nil),
+                    confidence: 0.62,
+                    reason: "The capture text looks recipe-related; keep it in Inbox for review while preserving the likely Recipes intent.",
+                    source: "capture.intent.text_signal"
+                )
+            ]
+        }
+        return []
+    }
+
+    private static func stagedProjectIntents(in haystack: String) -> [CiderCaptureResult.StagedIntent] {
         guard haystack.contains("cider ios")
             || haystack.contains("codex ios")
             || haystack.contains("openaidevs") else {
@@ -1199,7 +1268,7 @@ final class CiderCaptureService {
             reviewReason: "Cider captured an image bookmark and kept it in Inbox/Bookmarks for review."
         )
 
-        return sharedResult(
+        var result = sharedResult(
             sourceKind: "image",
             sourceURL: nil,
             sourceFile: sourceFile,
@@ -1218,6 +1287,14 @@ final class CiderCaptureService {
             partialSuccess: thumbnailPartialSuccess(didAssignThumbnail: didAssignThumbnail),
             sourceContext: sourceContext
         )
+        result.stagedIntents = CiderCaptureIntentStagingService.stagedIntents(for: .init(
+            title: bookmark.title,
+            urlString: bookmark.urlString,
+            sourceFile: sourceFile,
+            sourceText: bookmark.notes,
+            sourceContext: sourceContext
+        ))
+        return result
     }
 
     private func addTodo(

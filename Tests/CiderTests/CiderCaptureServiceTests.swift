@@ -359,6 +359,18 @@ struct CiderCaptureServiceTests {
             let staging = try #require(projectReference["intentStaging"] as? [String: Any])
             #expect(staging["status"] as? String == "staged")
             #expect(staging["reviewNeeded"] as? Bool == true)
+            #expect(projectReference["needsIntentApproval"] as? Bool == true)
+            #expect(projectReference["recommendedNextAction"] as? String == "review_intent")
+
+            let recipeReference = try service.addBookmarkCapture(
+                urlString: "https://www.allrecipes.com/recipe/24074/alysias-basic-meat-lasagna/",
+                title: "Alysia's Basic Meat Lasagna Recipe",
+                folderID: nil
+            ).toDictionary()
+            let recipeIntent = try #require(recipeReference["spaceIntent"] as? [String: Any])
+            #expect(recipeIntent["spaceName"] as? String == "Recipes")
+            #expect(recipeIntent["rootRelativePath"] as? String == "Spaces/Recipes")
+            #expect(recipeIntent["storageDestination"] as? String == "Inbox/Bookmarks")
         }
     }
 
@@ -1402,7 +1414,7 @@ struct CiderCaptureServiceTests {
             let data = try #require(image.tiffRepresentation)
 
             let result = try service.addImageBookmarkCapture(
-                title: "Clipboard Image",
+                title: "Paralives on Steam screenshot",
                 imageData: data,
                 preferredFileExtension: "png",
                 sourceFile: nil
@@ -1412,7 +1424,7 @@ struct CiderCaptureServiceTests {
             #expect(result.source.kind == "image")
             #expect(result.source.itemType == "bookmark")
             #expect(result.item.type == "bookmark")
-            #expect(result.item.title == "Clipboard Image")
+            #expect(result.item.title == "Paralives on Steam screenshot")
             #expect(result.item.relativePath?.hasPrefix("Inbox/Bookmarks/") == true)
             #expect(result.enrichment.status == "not_applicable")
             #expect(result.duplicate.status == "not_checked")
@@ -1420,6 +1432,12 @@ struct CiderCaptureServiceTests {
             #expect(result.routing.candidateTarget?.relativePath == "Inbox/Bookmarks")
             #expect(result.nextSafeAction == "inspect_item")
             #expect(result.partialSuccess == nil)
+            let dict = result.toDictionary()
+            let spaceIntent = try #require(dict["spaceIntent"] as? [String: Any])
+            #expect(spaceIntent["spaceName"] as? String == "Media")
+            #expect(spaceIntent["area"] as? String == "Games")
+            #expect(spaceIntent["storageDestination"] as? String == "Inbox/Bookmarks")
+            #expect((dict["routing"] as? [String: Any]).flatMap { $0["candidateTarget"] as? [String: Any] }?["relativePath"] as? String == "Inbox/Bookmarks")
 
             let stored = try #require(bookmarks.bookmarks.first(where: { $0.id == result.item.id }))
             #expect(stored.thumbnailRelativePath != nil)
