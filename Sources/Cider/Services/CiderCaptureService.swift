@@ -549,13 +549,18 @@ struct CiderCaptureResult {
     private static func localCaptureAssetExists(relativePath: String) -> Bool {
         let trimmed = relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        let url = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(trimmed)
-        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
-              values.isRegularFile == true,
-              let fileSize = values.fileSize else {
-            return false
+        let candidateURLs = [
+            StoragePaths.cachedDirectoryURL(for: .bookmarks).appendingPathComponent(trimmed),
+            StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(trimmed),
+        ]
+        return candidateURLs.contains { url in
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true,
+                  let fileSize = values.fileSize else {
+                return false
+            }
+            return fileSize > 0
         }
-        return fileSize > 0
     }
 
     private static func bookmarkCaptureRepairCommands(for bookmark: Bookmark) -> [String] {

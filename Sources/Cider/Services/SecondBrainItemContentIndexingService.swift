@@ -106,7 +106,7 @@ final class SecondBrainItemContentIndexingService {
                 ]
             )
         case "bookmark":
-            return try singleDetail(
+            var content = try singleDetail(
                 owner: owner,
                 sql: """
                 SELECT i.title, b.url, b.notes, b.ai_summary, b.ocr_text, b.media_type, i.relative_path
@@ -122,6 +122,10 @@ final class SecondBrainItemContentIndexingService {
                     (6, "Path"),
                 ]
             )
+            if let url = content?.fields.first(where: { $0.label == "URL" })?.value {
+                content?.fields.append(contentsOf: bookmarkProviderFields(urlString: url))
+            }
+            return content
         case "todo":
             return try singleDetail(
                 owner: owner,
@@ -286,6 +290,33 @@ final class SecondBrainItemContentIndexingService {
         values.append(value)
     }
 
+    private func bookmarkProviderFields(urlString: String) -> [(label: String, value: String)] {
+        guard let components = URLComponents(string: urlString),
+              let host = components.host?.lowercased() else {
+            return []
+        }
+
+        var fields: [(label: String, value: String)] = []
+        if host.matchesDomain("imdb.com") {
+            fields.append(("Provider", "IMDb"))
+            fields.append(("Media category", "movie"))
+        } else if host.matchesDomain("rottentomatoes.com") {
+            fields.append(("Provider", "Rotten Tomatoes"))
+            let path = components.path.lowercased()
+            fields.append(("Media category", path.contains("/tv/") ? "show tv season" : "movie"))
+        } else if host.matchesDomain("steampowered.com") || host.matchesDomain("steamcommunity.com") {
+            fields.append(("Provider", "Steam"))
+            fields.append(("Media category", "game"))
+        } else if host.matchesDomain("tiktok.com") {
+            fields.append(("Provider", "TikTok"))
+            fields.append(("Media category", "social video"))
+        } else if host.matchesDomain("x.com") || host.matchesDomain("twitter.com") {
+            fields.append(("Provider", "X Twitter"))
+            fields.append(("Media category", "social post"))
+        }
+        return fields
+    }
+
     private func readableTextFileContent(relativePath: String) -> String? {
         guard isReadableTextFile(relativePath: relativePath) else { return nil }
 
@@ -344,5 +375,11 @@ final class SecondBrainItemContentIndexingService {
                 ]
             )
         ]
+    }
+}
+
+private extension String {
+    func matchesDomain(_ domain: String) -> Bool {
+        self == domain || hasSuffix(".\(domain)")
     }
 }

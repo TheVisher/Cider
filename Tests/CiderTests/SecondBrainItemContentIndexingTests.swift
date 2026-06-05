@@ -132,6 +132,60 @@ struct SecondBrainItemContentIndexingTests {
         #expect(try store.searchChunks(query: "Rhonin", limit: 5).first?.owner == owner)
     }
 
+    @Test("bookmark content index includes provider and media recall terms")
+    func bookmarkContentIndexIncludesProviderAndMediaRecallTerms() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let imdbID = UUID().uuidString
+        let rottenTomatoesID = UUID().uuidString
+        let steamID = UUID().uuidString
+        try insertItem(id: imdbID, type: "bookmark", title: "Saving Private Ryan", into: db)
+        try insertBookmark(
+            id: imdbID,
+            url: "https://www.imdb.com/title/tt0120815/",
+            notes: "",
+            summary: "Steven Spielberg World War II film.",
+            mediaType: nil,
+            into: db
+        )
+        try insertItem(id: rottenTomatoesID, type: "bookmark", title: "The Vampire Lestat: Season 1 | Rotten Tomatoes", into: db)
+        try insertBookmark(
+            id: rottenTomatoesID,
+            url: "https://www.rottentomatoes.com/tv/the_vampire_lestat/s01",
+            notes: "",
+            summary: "TV season page for The Vampire Lestat.",
+            mediaType: nil,
+            into: db
+        )
+        try insertItem(id: steamID, type: "bookmark", title: "Paralives on Steam", into: db)
+        try insertBookmark(
+            id: steamID,
+            url: "https://store.steampowered.com/app/1118520/Paralives/",
+            notes: "",
+            summary: "Life simulation game store page.",
+            mediaType: nil,
+            into: db
+        )
+
+        let indexer = SecondBrainItemContentIndexingService(database: db)
+        _ = try indexer.rebuild(owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: imdbID))
+        _ = try indexer.rebuild(owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: rottenTomatoesID))
+        _ = try indexer.rebuild(owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: steamID))
+
+        let store = SecondBrainStore(database: db)
+        #expect(try store.searchChunks(query: "IMDb movie", limit: 5).first?.owner == SecondBrainOwnerRef(ownerType: "bookmark", ownerID: imdbID))
+        #expect(try store.searchChunks(query: "Rotten Tomatoes show", limit: 5).first?.owner == SecondBrainOwnerRef(ownerType: "bookmark", ownerID: rottenTomatoesID))
+        #expect(try store.searchChunks(query: "Steam game", limit: 5).first?.owner == SecondBrainOwnerRef(ownerType: "bookmark", ownerID: steamID))
+
+        let imdbChunks = try chunksForOwner(SecondBrainOwnerRef(ownerType: "bookmark", ownerID: imdbID), in: db)
+        #expect(imdbChunks.contains { $0.contains("Provider: IMDb") })
+        #expect(imdbChunks.contains { $0.contains("Media category: movie") })
+        let steamChunks = try chunksForOwner(SecondBrainOwnerRef(ownerType: "bookmark", ownerID: steamID), in: db)
+        #expect(steamChunks.contains { $0.contains("Provider: Steam") })
+        #expect(steamChunks.contains { $0.contains("Media category: game") })
+    }
+
     @Test("item content index rebuild is idempotent and removes stale chunks")
     func itemContentIndexRebuildIsIdempotentAndRemovesStaleChunks() throws {
         let (db, url) = try makeTestDB()
@@ -396,19 +450,27 @@ struct SecondBrainItemContentIndexingTests {
         try stmt.step()
     }
 
-    private func insertBookmark(id: String, url: String, notes: String, summary: String, into db: CiderDatabase) throws {
+    private func insertBookmark(
+        id: String,
+        url: String,
+        notes: String,
+        summary: String,
+        mediaType: String? = "article",
+        into db: CiderDatabase
+    ) throws {
         let stmt = try db.prepare("""
             INSERT INTO bookmarks (
                 item_id, url, notes, notes_manually_set, title_manually_set,
                 ai_summary, enrichment_status, last_enriched_at, ocr_text, dominant_colors,
                 media_type, thumbnail_relative_path, thumbnail_remote_url, original_image_path,
                 carousel_image_paths, reader_unavailable, preferred_hero_mode
-            ) VALUES (?, ?, ?, 0, 0, ?, 'complete', NULL, NULL, NULL, 'article', NULL, NULL, NULL, NULL, NULL, NULL);
+            ) VALUES (?, ?, ?, 0, 0, ?, 'complete', NULL, NULL, NULL, ?, NULL, NULL, NULL, NULL, NULL, NULL);
             """)
         stmt.bind(id, at: 1)
             .bind(url, at: 2)
             .bind(notes, at: 3)
             .bind(summary, at: 4)
+            .bind(mediaType, at: 5)
         try stmt.step()
     }
 
