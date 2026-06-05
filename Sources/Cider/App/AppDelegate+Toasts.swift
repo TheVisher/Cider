@@ -160,7 +160,15 @@ extension AppDelegate {
     // MARK: - Bookmark Capture Toast
 
     func showBookmarkCaptureToast(message: String, isSuccess: Bool) {
-        if isSuccess { CiderSoundEffect.save.play() }
+        showBookmarkCaptureToast(content: BookmarkCaptureToastContent(message: message, isSuccess: isSuccess))
+    }
+
+    func showBookmarkCaptureToast(receipt: UICaptureReceipt, successMessage: String) {
+        showBookmarkCaptureToast(content: BookmarkCaptureToastContent(receipt: receipt, successMessage: successMessage))
+    }
+
+    private func showBookmarkCaptureToast(content: BookmarkCaptureToastContent) {
+        if content.isSuccess { CiderSoundEffect.save.play() }
         stopBookmarkClipboardReviewTimer()
         bookmarkClipboardReviewIsHovering = false
         bookmarkClipboardReviewToastModel.progress = 1
@@ -169,10 +177,10 @@ extension AppDelegate {
 
         let panel = resolveBookmarkCaptureToastPanel()
 
-        let toastView = BookmarkCaptureToastView(message: message, isSuccess: isSuccess)
+        let toastView = BookmarkCaptureToastView(content: content)
         let hostingView = BookmarkCaptureToastHostingView(rootView: toastView)
         panel.contentView = hostingView
-        showBookmarkToastPanel(panel, contentHeight: BookmarksToastDesign.height)
+        showBookmarkToastPanel(panel, contentHeight: content.contentHeight)
 
         let hideWork = DispatchWorkItem { [weak self, weak panel] in
             panel?.orderOut(nil)

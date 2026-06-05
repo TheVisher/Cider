@@ -697,6 +697,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.publisher(for: .showBookmarkCaptureToast)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
+                if let receipt = notification.userInfo?["receipt"] as? UICaptureReceipt {
+                    let successMessage = notification.userInfo?["successMessage"] as? String ?? "Saved"
+                    self?.showBookmarkCaptureToast(receipt: receipt, successMessage: successMessage)
+                    return
+                }
                 let message = notification.userInfo?["message"] as? String ?? "Bookmark updated"
                 let isSuccess = notification.userInfo?["isSuccess"] as? Bool ?? true
                 self?.showBookmarkCaptureToast(message: message, isSuccess: isSuccess)

@@ -367,6 +367,7 @@ enum BookmarksDesign {
 enum BookmarksToastDesign {
     static let width: CGFloat = 320
     static let height: CGFloat = 56
+    static let richHeight: CGFloat = 104
     static let reviewHeight: CGFloat = 96
     static let cornerRadius: CGFloat = Radius.md
     static let shadowPadding: CGFloat = 0
