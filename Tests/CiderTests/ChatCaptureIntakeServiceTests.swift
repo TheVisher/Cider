@@ -583,6 +583,91 @@ struct ChatCaptureIntakeServiceTests {
         }
     }
 
+    @Test("chat capture acknowledgement includes saved item type title and destination")
+    func chatCaptureAcknowledgementIncludesSavedItemTypeTitleAndDestination() {
+        let result = ChatCaptureIntakeResult(
+            status: .captured,
+            reason: "Captured through canonical capture service.",
+            captureResult: makeCaptureResult(itemType: "note", title: "Graph-safe chat intake", relativePath: "Inbox/Notes/Graph-safe chat intake.md"),
+            captureResults: [
+                makeCaptureResult(itemType: "note", title: "Graph-safe chat intake", relativePath: "Inbox/Notes/Graph-safe chat intake.md")
+            ]
+        )
+
+        #expect(result.compactAcknowledgement == "Saved note: Graph-safe chat intake. Inbox/Notes/Graph-safe chat intake.md.")
+    }
+
+    @Test("chat capture acknowledgement calls out duplicate and partial states")
+    func chatCaptureAcknowledgementCallsOutDuplicateAndPartialStates() {
+        let duplicate = ChatCaptureIntakeResult(
+            status: .captured,
+            reason: "Captured through canonical capture service.",
+            captureResult: makeCaptureResult(
+                itemType: "bookmark",
+                title: "Cider",
+                relativePath: "Inbox/Cider.md",
+                duplicate: .init(status: "duplicate", existingItemID: UUID(), reason: "URL already exists", evidence: "normalized_url")
+            ),
+            captureResults: []
+        )
+        let partial = ChatCaptureIntakeResult(
+            status: .captured,
+            reason: "Captured through canonical capture service.",
+            captureResult: makeCaptureResult(
+                itemType: "vaultFile",
+                title: "scan.pdf",
+                relativePath: "Inbox/Files/scan.pdf",
+                indexing: .init(status: "failed", reason: "Could not index PDF", ownerType: "vaultFile", ownerID: UUID().uuidString, captureEventID: UUID())
+            ),
+            captureResults: []
+        )
+
+        #expect(duplicate.compactAcknowledgement.contains("Duplicate bookmark: Cider."))
+        #expect(partial.compactAcknowledgement.contains("Saved file: scan.pdf."))
+        #expect(partial.compactAcknowledgement.contains("Partial save: Could not index PDF."))
+    }
+
+    @Test("chat capture acknowledgement summarizes multiple local attachments")
+    func chatCaptureAcknowledgementSummarizesMultipleLocalAttachments() {
+        let first = makeCaptureResult(itemType: "vaultFile", title: "first-upload.txt", relativePath: "Inbox/Files/first-upload.txt")
+        let second = makeCaptureResult(itemType: "vaultFile", title: "second-upload.txt", relativePath: "Inbox/Files/second-upload.txt")
+        let result = ChatCaptureIntakeResult(
+            status: .captured,
+            reason: "Captured 2 local chat attachments through canonical capture service.",
+            captureResult: first,
+            captureResults: [first, second]
+        )
+
+        #expect(result.compactAcknowledgement == "Saved 2 files. First: first-upload.txt. Review each receipt if routing looks off.")
+    }
+
+    @Test("chat capture acknowledgement includes review event context for unsupported attachments")
+    func chatCaptureAcknowledgementIncludesReviewEventContextForUnsupportedAttachments() {
+        let eventID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let result = ChatCaptureIntakeResult(
+            status: .needsReview,
+            reason: "Chat message contains unsupported attachment content without a local file path; Cider recorded it for review.",
+            captureResult: nil,
+            captureEventID: eventID,
+            safeNextCommands: ["cider-cli item backlinks capture_event \(eventID.uuidString) --json"]
+        )
+
+        #expect(result.compactAcknowledgement.contains("Needs review: unsupported chat attachment recorded."))
+        #expect(result.compactAcknowledgement.contains(eventID.uuidString))
+        #expect(result.compactAcknowledgement.contains("cider-cli item backlinks capture_event"))
+    }
+
+    @Test("chat capture acknowledgement keeps no-capture review compact")
+    func chatCaptureAcknowledgementKeepsNoCaptureReviewCompact() {
+        let result = ChatCaptureIntakeResult(
+            status: .needsReview,
+            reason: "No captureable text or supported attachment content was provided.",
+            captureResult: nil
+        )
+
+        #expect(result.compactAcknowledgement == "Needs review: No captureable text or supported attachment content was provided.")
+    }
+
     private func captureAttachmentCount(_ db: CiderDatabase, eventID: UUID) throws -> Int {
         let stmt = try db.prepare("SELECT count(*) FROM capture_attachments WHERE capture_event_id = ?;")
         stmt.bind(eventID.uuidString, at: 1)
@@ -636,5 +721,67 @@ struct ChatCaptureIntakeServiceTests {
         stmt.bind(eventID.uuidString, at: 1)
         try stmt.step()
         return stmt.int(at: 0)
+    }
+
+    private func makeCaptureResult(
+        itemType: String,
+        title: String,
+        relativePath: String,
+        duplicate: CiderCaptureResult.Duplicate = .init(status: "new", existingItemID: nil),
+        indexing: CiderCaptureResult.SideEffectStatus = .init(
+            status: "indexed",
+            reason: nil,
+            ownerType: "note",
+            ownerID: UUID().uuidString,
+            captureEventID: UUID()
+        )
+    ) -> CiderCaptureResult {
+        let itemID = UUID()
+        return CiderCaptureResult(
+            command: "capture.add",
+            source: .init(
+                kind: itemType == "bookmark" ? "url" : itemType,
+                url: itemType == "bookmark" ? "https://example.com" : nil,
+                file: itemType == "vaultFile" ? "/tmp/\(title)" : nil,
+                text: itemType == "note" ? title : nil,
+                itemID: itemID,
+                itemType: itemType
+            ),
+            item: .init(
+                id: itemID,
+                type: itemType,
+                title: title,
+                relativePath: relativePath,
+                folderID: nil,
+                folderName: "Inbox"
+            ),
+            enrichment: .init(
+                status: "not_applicable",
+                isEnriching: false,
+                titleState: "manual",
+                lastEnrichedAt: nil
+            ),
+            duplicate: duplicate,
+            routing: .init(
+                decisionID: nil,
+                candidateTarget: nil,
+                reviewNeeded: false,
+                confidence: 1,
+                reason: "Confident route.",
+                reviewState: "not_needed",
+                status: "not_applicable",
+                statusReason: nil
+            ),
+            nextSafeAction: "inspect_item",
+            captureEventID: UUID(),
+            provenance: .init(
+                status: "recorded",
+                reason: nil,
+                ownerType: itemType,
+                ownerID: itemID.uuidString,
+                captureEventID: UUID()
+            ),
+            indexing: indexing
+        )
     }
 }

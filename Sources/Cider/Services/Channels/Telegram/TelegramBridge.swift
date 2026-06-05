@@ -342,10 +342,10 @@ actor TelegramBridge: ChannelBridge {
                 switch captureResult.status {
                 case .captured:
                     logger.info("Captured Telegram message through canonical chat intake")
-                    try await sendMessage("Saved to Cider.", to: update.chatID)
+                    try await sendMessage(captureResult.compactAcknowledgement, to: update.chatID)
                 case .needsReview:
                     logger.info("Telegram capture intent needs review: \(captureResult.reason, privacy: .public)")
-                    try await sendMessage("I couldn't save that directly: \(captureResult.reason)", to: update.chatID)
+                    try await sendMessage(captureResult.compactAcknowledgement, to: update.chatID)
                 }
                 return
             }

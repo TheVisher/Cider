@@ -45,6 +45,124 @@ struct ChatCaptureIntakeResult: @unchecked Sendable {
     var safeNextCommands: [String] = []
 }
 
+extension ChatCaptureIntakeResult {
+    var compactAcknowledgement: String {
+        switch status {
+        case .captured:
+            return capturedAcknowledgement
+        case .needsReview:
+            return reviewAcknowledgement
+        }
+    }
+
+    private var capturedAcknowledgement: String {
+        let results = captureResults.isEmpty
+            ? captureResult.map { [$0] } ?? []
+            : captureResults
+        guard let first = results.first else {
+            return "Saved to Cider."
+        }
+
+        if results.count > 1 {
+            let type = pluralItemType(for: first.item.type, count: results.count)
+            let firstTitle = sanitized(first.item.title, fallback: "Untitled")
+            return "Saved \(results.count) \(type). First: \(firstTitle). Review each receipt if routing looks off."
+        }
+
+        let receipt = UICaptureReceipt(result: first)
+        var parts: [String] = []
+        let type = itemTypeLabel(for: receipt.item.type)
+        let title = sanitized(receipt.item.title, fallback: "Untitled")
+
+        switch receipt.state {
+        case .duplicate:
+            parts.append("Duplicate \(type): \(title).")
+        case .savedWithReview:
+            parts.append("Saved \(type): \(title).")
+            parts.append("Needs review: \(sanitized(receipt.routing.reason, fallback: receipt.safeNextActionLabel)).")
+        case .partialSideEffects:
+            parts.append("Saved \(type): \(title).")
+            parts.append("Partial save: \(partialReason(for: receipt)).")
+        case .saved:
+            parts.append("Saved \(type): \(title).")
+        case .failed:
+            parts.append("Could not save \(type): \(title).")
+        }
+
+        if let destination = receipt.item.relativePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !destination.isEmpty,
+           receipt.state != .duplicate {
+            parts.insert("\(destination).", at: min(1, parts.count))
+        }
+
+        return parts.joined(separator: " ")
+    }
+
+    private var reviewAcknowledgement: String {
+        if let captureEventID {
+            var parts = ["Needs review: unsupported chat attachment recorded.", "Event: \(captureEventID.uuidString)."]
+            if let command = safeNextCommands.first {
+                parts.append("Next: \(command)")
+            }
+            return parts.joined(separator: " ")
+        }
+
+        return "Needs review: \(sentence(reason))"
+    }
+
+    private func partialReason(for receipt: UICaptureReceipt) -> String {
+        let reason = [
+            receipt.indexing.reason,
+            receipt.provenance.reason,
+            receipt.routing.statusReason,
+            receipt.routing.reason,
+        ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        return sentence(reason ?? receipt.safeNextActionLabel)
+    }
+
+    private func sentence(_ value: String) -> String {
+        let trimmed = sanitized(value, fallback: "Review needed")
+        return trimmed.hasSuffix(".") ? trimmed : "\(trimmed)."
+    }
+
+    private func sanitized(_ value: String?, fallback: String) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private func itemTypeLabel(for type: String?) -> String {
+        switch type {
+        case "bookmark":
+            return "bookmark"
+        case "note":
+            return "note"
+        case "todo":
+            return "todo"
+        case "dateCard":
+            return "event"
+        case "contact":
+            return "contact"
+        case "vaultFile":
+            return "file"
+        default:
+            return "item"
+        }
+    }
+
+    private func pluralItemType(for type: String?, count: Int) -> String {
+        let singular = itemTypeLabel(for: type)
+        guard count != 1 else { return singular }
+        switch singular {
+        case "todo":
+            return "todos"
+        default:
+            return "\(singular)s"
+        }
+    }
+}
+
 @MainActor
 final class ChatCaptureIntakeService {
     private let captureService: CiderCaptureService
