@@ -1136,10 +1136,18 @@ final class BookmarksStorage: ObservableObject {
 
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
+            let hasUsableLocalThumbnail = self.bookmarks
+                .first(where: { $0.id == bookmarkID })
+                .map { self.localThumbnailExists(relativePath: $0.thumbnailRelativePath) } ?? false
+
+            let allowsThumbnailReplacement = BookmarkNativeCapturePolicy
+                .allowsAutomaticThumbnailReplacement(hasUsableLocalThumbnail: hasUsableLocalThumbnail)
 
             // Direct image URL — skip HTML parsing and download image as-is
             if Self.isDirectImageURL(url) {
-                let imageAssets = await self.cacheImageAssets(from: url, for: bookmarkID)
+                let imageAssets = allowsThumbnailReplacement
+                    ? await self.cacheImageAssets(from: url, for: bookmarkID)
+                    : nil
                 await self.completeEnrichment(
                     for: bookmarkID,
                     sourceURL: url,
@@ -1156,13 +1164,9 @@ final class BookmarksStorage: ObservableObject {
             }
 
             var imageAssets: BookmarkImageAssets?
-            if let thumbnailURL = trustedThumbnailURL {
+            if allowsThumbnailReplacement, let thumbnailURL = trustedThumbnailURL {
                 imageAssets = await self.cacheImageAssets(from: thumbnailURL, for: bookmarkID, pageURL: url)
             }
-
-            let hasUsableLocalThumbnail = self.bookmarks
-                .first(where: { $0.id == bookmarkID })
-                .map { self.localThumbnailExists(relativePath: $0.thumbnailRelativePath) } ?? false
 
             // Screenshot fallback only when metadata did not find a provider
             // thumbnail and no usable local thumbnail exists.
@@ -1444,6 +1448,7 @@ final class BookmarksStorage: ObservableObject {
     ) -> BookmarkImageAssets? {
         guard data.count > 128, data.count < 12_000_000 else { return nil }
         guard NSImage(data: data) != nil else { return nil }
+        guard !BookmarkImageQuality.isLowInformationImageData(data) else { return nil }
 
         // Detect animated images: GIF magic bytes, file extension, or multi-frame image data
         let isAnimated = preferredFileExtension?.lowercased() == "gif"

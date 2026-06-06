@@ -1964,10 +1964,18 @@ final class VaultBookmarkService: ObservableObject {
 
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
+            let hasUsableLocalThumbnail = self.bookmarks
+                .first(where: { $0.id == bookmarkID })
+                .map { self.localThumbnailExists(relativePath: $0.thumbnailRelativePath) } ?? false
+
+            let allowsThumbnailReplacement = BookmarkNativeCapturePolicy
+                .allowsAutomaticThumbnailReplacement(hasUsableLocalThumbnail: hasUsableLocalThumbnail)
 
             // Direct image URL
             if Self.isDirectImageURL(url) {
-                let imageAssets = await self.cacheImageAssets(from: url, for: bookmarkID)
+                let imageAssets = allowsThumbnailReplacement
+                    ? await self.cacheImageAssets(from: url, for: bookmarkID)
+                    : nil
                 await self.completeEnrichment(
                     for: bookmarkID,
                     sourceURL: url,
@@ -1983,11 +1991,12 @@ final class VaultBookmarkService: ObservableObject {
             }
 
             var imageAssets: BookmarkImageAssets?
-            if let thumbnailURL = trustedThumbnailURL {
+            if allowsThumbnailReplacement, let thumbnailURL = trustedThumbnailURL {
                 imageAssets = await self.cacheImageAssets(from: thumbnailURL, for: bookmarkID, pageURL: url)
             }
 
-            if imageAssets == nil,
+            if allowsThumbnailReplacement,
+               imageAssets == nil,
                let fallbackData = payload?.thumbnailFallbackData {
                 imageAssets = self.cacheImageAssets(
                     from: fallbackData,
@@ -1995,10 +2004,6 @@ final class VaultBookmarkService: ObservableObject {
                     preferredFileExtension: "png"
                 )
             }
-
-            let hasUsableLocalThumbnail = self.bookmarks
-                .first(where: { $0.id == bookmarkID })
-                .map { self.localThumbnailExists(relativePath: $0.thumbnailRelativePath) } ?? false
 
             // Screenshot fallback only when native metadata did not find a provider
             // thumbnail and no usable local thumbnail exists. If a bookmark already

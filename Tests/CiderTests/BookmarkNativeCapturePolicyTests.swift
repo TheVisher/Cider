@@ -18,4 +18,14 @@ struct BookmarkNativeCapturePolicyTests {
             hasUsableLocalThumbnail: true
         ))
     }
+
+    @Test("automatic enrichment does not replace an existing usable local thumbnail")
+    func automaticEnrichmentDoesNotReplaceExistingLocalThumbnail() {
+        #expect(BookmarkNativeCapturePolicy.allowsAutomaticThumbnailReplacement(
+            hasUsableLocalThumbnail: false
+        ))
+        #expect(!BookmarkNativeCapturePolicy.allowsAutomaticThumbnailReplacement(
+            hasUsableLocalThumbnail: true
+        ))
+    }
 }
