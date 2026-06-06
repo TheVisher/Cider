@@ -30,7 +30,15 @@ struct CiderStorageAuditDoctorFindingSample: Codable, Equatable {
     var fixLabel: String?
     var relativePath: String?
     var relatedRelativePaths: [String]
+    var directItemCount: Int = 0
+    var representativeItems: [CiderStorageAuditRepresentativeItem] = []
     var nextSafeAction: String
+}
+
+struct CiderStorageAuditRepresentativeItem: Codable, Equatable {
+    var id: String
+    var type: String
+    var title: String
 }
 
 struct CiderStorageAuditReport: Equatable {
@@ -272,7 +280,8 @@ final class CiderStorageAuditService {
         let modelCounts = modelCountsProvider()
         let sqliteCounts = try sqliteCountsByEntity()
         let fileArtifactCounts = fileArtifactCountsByKind()
-        let doctorReport = doctorReportProvider()
+        let noncanonicalFolderFamilyFindings = noncanonicalRegisteredFolderFamilyFindings()
+        let doctorFindings = noncanonicalFolderFamilyFindings + doctorReportProvider().findings
         let duplicateFindings = duplicateFindingsProvider()
 
         return CiderStorageAuditReport(
@@ -280,13 +289,13 @@ final class CiderStorageAuditService {
             modelCounts: modelCounts,
             sqliteCounts: sqliteCounts,
             fileArtifactCounts: fileArtifactCounts,
-            doctorFindingGroups: groupedDoctorFindings(doctorReport.findings),
+            doctorFindingGroups: groupedDoctorFindings(doctorFindings),
             duplicateFindingGroups: groupedDuplicateFindings(duplicateFindings),
-            totalDoctorFindings: doctorReport.findings.count,
-            fixableDoctorFindings: doctorReport.fixableCount,
+            totalDoctorFindings: doctorFindings.count,
+            fixableDoctorFindings: doctorFindings.filter(\.isFixable).count,
             doctorFindingSampleLimit: doctorFindingSampleLimit,
             doctorFindingSamples: doctorFindingSamples(
-                doctorReport.findings,
+                doctorFindings,
                 limit: doctorFindingSampleLimit
             ),
             schemaFindings: try schemaFindings(),
@@ -1542,7 +1551,8 @@ final class CiderStorageAuditService {
         limit: Int
     ) -> [CiderStorageAuditDoctorFindingSample] {
         findings.prefix(max(0, limit)).map { finding in
-            CiderStorageAuditDoctorFindingSample(
+            let directItems = representativeItems(for: finding.payload.relativePath)
+            return CiderStorageAuditDoctorFindingSample(
                 id: finding.id,
                 severity: finding.severity.rawValue,
                 kind: finding.kind.rawValue,
@@ -1552,6 +1562,8 @@ final class CiderStorageAuditService {
                 fixLabel: finding.fixLabel,
                 relativePath: finding.payload.relativePath,
                 relatedRelativePaths: finding.payload.relatedRelativePaths ?? [],
+                directItemCount: directItemCount(for: finding.payload.relativePath),
+                representativeItems: directItems,
                 nextSafeAction: nextSafeAction(for: finding)
             )
         }
@@ -1565,12 +1577,179 @@ final class CiderStorageAuditService {
         switch finding.kind {
         case .artifactLookingFolderRow:
             return "Inspect this folder row as storage drift. Do not route or move items into artifact-looking paths; create or use a real Space/entity container instead."
+        case .noncanonicalFolderFamily:
+            return "read-only cleanup plan: inspect all listed folder paths and attached items, then choose a manual merge or move plan; no automatic repair is advertised."
         case .suspiciousFlattenedFolderDuplicate:
             return "Inspect the listed folder paths and choose a manual merge, move, or delete plan; do not run automatic repair."
         case .duplicateNoteContent, .duplicateBookmarkURL, .duplicateContactEmail, .duplicateContactPhone:
             return "Review the listed duplicate candidates manually before merging, deleting, or changing any vault item."
         default:
             return "Review this finding manually; no automatic repair is advertised for this issue."
+        }
+    }
+
+    private struct RegisteredFolderRow {
+        var id: UUID
+        var relativePath: String
+    }
+
+    private func noncanonicalRegisteredFolderFamilyFindings() -> [VaultDoctor.Finding] {
+        guard (try? tableExists("folders")) == true else { return [] }
+
+        let rows: [RegisteredFolderRow]
+        do {
+            let stmt = try database.prepare("""
+                SELECT id, relative_path
+                FROM folders
+                ORDER BY relative_path COLLATE NOCASE ASC;
+                """)
+            var loaded: [RegisteredFolderRow] = []
+            while try stmt.step() {
+                guard let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+                loaded.append(RegisteredFolderRow(id: id, relativePath: stmt.string(at: 1)))
+            }
+            rows = loaded
+        } catch {
+            return []
+        }
+
+        let rowsByCanonicalPath = Dictionary(grouping: rows) { row in
+            Self.unbracketedFolderPath(row.relativePath)
+        }
+        let childPathsByPrefix = rows.reduce(into: [String: [String]]()) { partial, row in
+            let components = row.relativePath.split(separator: "/").map(String.init)
+            guard components.count > 1 else { return }
+            for depth in 1..<components.count {
+                let prefix = components.prefix(depth).joined(separator: "/")
+                partial[prefix, default: []].append(row.relativePath)
+            }
+        }
+
+        return rows.compactMap { row in
+            guard Self.containsBracketedPathComponent(row.relativePath) else { return nil }
+            let canonicalPath = Self.unbracketedFolderPath(row.relativePath)
+            let canonicalSiblings = (rowsByCanonicalPath[canonicalPath] ?? [])
+                .map(\.relativePath)
+                .filter { $0 != row.relativePath }
+                .sorted()
+            let childRows = (childPathsByPrefix[row.relativePath] ?? [])
+                .filter { $0 != row.relativePath }
+                .sorted()
+            let relatedPaths = (canonicalSiblings + childRows).deduplicatedSorted()
+            guard !relatedPaths.isEmpty else { return nil }
+
+            let detail = noncanonicalFolderFamilyDetail(
+                relativePath: row.relativePath,
+                canonicalPath: canonicalPath,
+                relatedPaths: relatedPaths
+            )
+            return VaultDoctor.Finding(
+                id: "noncanonical-folder-family-\(row.id.uuidString)",
+                kind: .noncanonicalFolderFamily,
+                severity: .warning,
+                summary: "Noncanonical folder family: \(row.relativePath)",
+                detail: detail,
+                isFixable: false,
+                fixLabel: nil,
+                payload: VaultDoctor.Finding.Payload(
+                    folderID: row.id,
+                    relativePath: row.relativePath,
+                    relatedRelativePaths: relatedPaths
+                )
+            )
+        }
+    }
+
+    private func noncanonicalFolderFamilyDetail(
+        relativePath: String,
+        canonicalPath: String,
+        relatedPaths: [String]
+    ) -> String {
+        let affectedPaths = ([relativePath] + relatedPaths).deduplicatedSorted()
+        let summaries = affectedPaths.map { path in
+            let count = directItemCount(for: path)
+            let titles = representativeItems(for: path)
+                .map(\.title)
+                .joined(separator: ", ")
+            if titles.isEmpty {
+                return "\(path) has \(count) direct item(s)"
+            }
+            return "\(path) has \(count) direct item(s): \(titles)"
+        }
+        return "Registered folder family uses bracketed legacy/sync drift path components. Canonical comparison path: \(canonicalPath). Related paths: \(relatedPaths.joined(separator: ", ")). \(summaries.joined(separator: "; ")). Project artifact folders and Spaces/product surface folders should be reviewed separately, not merged or deleted by this audit."
+    }
+
+    private static func containsBracketedPathComponent(_ relativePath: String) -> Bool {
+        relativePath
+            .split(separator: "/")
+            .contains { component in
+                component.hasPrefix("[") && component.hasSuffix("]") && component.count > 2
+            }
+    }
+
+    private static func unbracketedFolderPath(_ relativePath: String) -> String {
+        relativePath
+            .split(separator: "/")
+            .map { component -> String in
+                let text = String(component)
+                guard text.hasPrefix("["),
+                      text.hasSuffix("]"),
+                      text.count > 2 else { return text }
+                return String(text.dropFirst().dropLast())
+            }
+            .joined(separator: "/")
+    }
+
+    private func directItemCount(for relativePath: String?) -> Int {
+        guard let relativePath,
+              let folderID = folderID(for: relativePath),
+              (try? tableExists("items")) == true else { return 0 }
+        do {
+            let stmt = try database.prepare("SELECT COUNT(*) FROM items WHERE folder_id = ?;")
+            stmt.bind(DatabaseHelpers.encode(folderID), at: 1)
+            return try stmt.step() ? stmt.int(at: 0) : 0
+        } catch {
+            return 0
+        }
+    }
+
+    private func representativeItems(for relativePath: String?, limit: Int = 3) -> [CiderStorageAuditRepresentativeItem] {
+        guard let relativePath,
+              let folderID = folderID(for: relativePath),
+              (try? tableExists("items")) == true else { return [] }
+        do {
+            let stmt = try database.prepare("""
+                SELECT id, type, title
+                FROM items
+                WHERE folder_id = ?
+                ORDER BY updated_at DESC, title COLLATE NOCASE ASC
+                LIMIT ?;
+                """)
+            stmt.bind(DatabaseHelpers.encode(folderID), at: 1)
+                .bind(limit, at: 2)
+            var items: [CiderStorageAuditRepresentativeItem] = []
+            while try stmt.step() {
+                items.append(CiderStorageAuditRepresentativeItem(
+                    id: stmt.string(at: 0),
+                    type: stmt.string(at: 1),
+                    title: stmt.string(at: 2)
+                ))
+            }
+            return items
+        } catch {
+            return []
+        }
+    }
+
+    private func folderID(for relativePath: String) -> UUID? {
+        guard (try? tableExists("folders")) == true else { return nil }
+        do {
+            let stmt = try database.prepare("SELECT id FROM folders WHERE relative_path = ? LIMIT 1;")
+            stmt.bind(relativePath, at: 1)
+            guard try stmt.step() else { return nil }
+            return DatabaseHelpers.decodeUUID(stmt.string(at: 0))
+        } catch {
+            return nil
         }
     }
 

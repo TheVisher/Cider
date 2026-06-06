@@ -326,6 +326,8 @@ func storageAuditDoctorFindingSampleToDict(_ sample: CiderStorageAuditDoctorFind
         "detail": sample.detail,
         "isFixable": sample.isFixable,
         "relatedRelativePaths": sample.relatedRelativePaths,
+        "directItemCount": sample.directItemCount,
+        "representativeItems": sample.representativeItems.map(storageAuditRepresentativeItemToDict),
         "nextSafeAction": sample.nextSafeAction,
     ]
     if let fixLabel = sample.fixLabel {
@@ -335,6 +337,14 @@ func storageAuditDoctorFindingSampleToDict(_ sample: CiderStorageAuditDoctorFind
         dict["relativePath"] = relativePath
     }
     return dict
+}
+
+func storageAuditRepresentativeItemToDict(_ item: CiderStorageAuditRepresentativeItem) -> [String: Any] {
+    [
+        "id": item.id,
+        "type": item.type,
+        "title": item.title,
+    ]
 }
 
 func storageAuditSchemaFindingToDict(_ finding: CiderStorageAuditSchemaFinding) -> [String: Any] {

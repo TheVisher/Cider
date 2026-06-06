@@ -66,6 +66,7 @@ final class VaultDoctor {
             case staleFolderSyncAlias  // sync alias decision points at a nonexistent local folder
             case folderPathOutsideVault // folders.relative_path is not a safe relative vault path
             case artifactLookingFolderRow // folders row path looks like a durable file artifact
+            case noncanonicalFolderFamily // bracketed or otherwise noncanonical registered folder family
             case orphanBreadcrumb      // old .cider/folders/.trash/*-breadcrumbs.json > 30 days old
             case reservedPathInFolders // folders row for a reserved top dir (legacy drift)
             case suspiciousFlattenedFolderDuplicate // root folder duplicates an existing nested folder name, often with numeric suffix
@@ -829,6 +830,7 @@ final class VaultDoctor {
              .staleFolderSyncAlias,
              .folderPathOutsideVault,
              .artifactLookingFolderRow,
+             .noncanonicalFolderFamily,
              .suspiciousFlattenedFolderDuplicate,
              .duplicateNoteContent,
              .duplicateBookmarkURL,

@@ -74,6 +74,29 @@ struct CiderStorageAuditServiceTests {
         try stmt.step()
     }
 
+    private func insertItem(
+        _ db: CiderDatabase,
+        id: UUID,
+        type: String,
+        title: String,
+        relativePath: String?,
+        folderID: UUID
+    ) throws {
+        let now = DatabaseHelpers.encode(Date(timeIntervalSince1970: 10))
+        let stmt = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """)
+        stmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(type, at: 2)
+            .bind(title, at: 3)
+            .bind(now, at: 4)
+            .bind(now, at: 5)
+            .bind(DatabaseHelpers.encode(folderID), at: 6)
+            .bind(relativePath, at: 7)
+        try stmt.step()
+    }
+
     private func insertFolderSyncDecision(
         _ db: CiderDatabase,
         remoteFolderID: UUID,
@@ -263,6 +286,56 @@ struct CiderStorageAuditServiceTests {
             duplicateFindingsProvider: { [] },
             nowProvider: { Date(timeIntervalSince1970: 12) }
         )
+    }
+
+    @Test("storage audit reports bracketed Media folder drift with attached item samples")
+    func storageAuditReportsBracketedMediaFolderDriftWithAttachedItemSamples() throws {
+        let (db, url) = try makeTestDB()
+        defer { cleanup(url) }
+
+        let mediaID = UUID()
+        let gamesID = UUID()
+        let bracketedMediaID = UUID()
+        let bracketedGamesID = UUID()
+        let artifactChildID = UUID()
+        try insertFolder(db, id: mediaID, relativePath: "Media")
+        try insertFolder(db, id: gamesID, relativePath: "Media/Games")
+        try insertFolder(db, id: bracketedMediaID, relativePath: "[Media]")
+        try insertFolder(db, id: bracketedGamesID, relativePath: "[Media]/[Games]")
+        try insertFolder(db, id: artifactChildID, relativePath: "[Media]/[Games]/Paralives.webloc")
+        try insertFolder(db, id: UUID(), relativePath: "Projects/Cider/QA")
+        try insertFolder(db, id: UUID(), relativePath: "Spaces/Media")
+
+        try insertItem(db, id: UUID(), type: "bookmark", title: "Steam", relativePath: "Media/Games/Steam.webloc", folderID: gamesID)
+        try insertItem(db, id: UUID(), type: "bookmark", title: "Paralives", relativePath: "[Media]/[Games]/Paralives.webloc", folderID: bracketedGamesID)
+        try insertItem(db, id: UUID(), type: "bookmark", title: "Skate Story", relativePath: "[Media]/[Games]/Skate Story.webloc", folderID: bracketedGamesID)
+
+        let service = makeStorageAuditService(db: db)
+
+        let report = try service.audit()
+
+        #expect(report.doctorFindingGroups["warning:noncanonicalFolderFamily"] == 2)
+        let mediaFinding = try #require(report.doctorFindingSamples.first {
+            $0.kind == "noncanonicalFolderFamily" && $0.relativePath == "[Media]/[Games]"
+        })
+        #expect(mediaFinding.isFixable == false)
+        #expect(mediaFinding.relatedRelativePaths.contains("Media/Games"))
+        #expect(mediaFinding.relatedRelativePaths.contains("[Media]/[Games]/Paralives.webloc"))
+        #expect(mediaFinding.detail.contains("bracketed legacy/sync drift"))
+        #expect(mediaFinding.detail.contains("[Media]/[Games] has 2 direct item(s)"))
+        #expect(mediaFinding.detail.contains("Paralives"))
+        #expect(mediaFinding.detail.contains("Skate Story"))
+        #expect(mediaFinding.nextSafeAction.contains("read-only"))
+
+        let dict = storageAuditReportToDict(report)
+        let samples = try #require(dict["doctorFindingSamples"] as? [[String: Any]])
+        let jsonSample = try #require(samples.first {
+            $0["kind"] as? String == "noncanonicalFolderFamily"
+                && $0["relativePath"] as? String == "[Media]/[Games]"
+        })
+        #expect(jsonSample["directItemCount"] as? Int == 2)
+        let representativeItems = try #require(jsonSample["representativeItems"] as? [[String: Any]])
+        #expect(representativeItems.map { $0["title"] as? String }.contains("Paralives"))
     }
 
     @Test("active duplicate invariant check reports duplicate candidates and count drift read-only")
