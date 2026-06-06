@@ -8,6 +8,24 @@ extension CiderPanelView {
         navigateToWorkspaceRoute(.library(.search(query)))
     }
 
+    func submitSidebarSearch() {
+        if let route = SidebarSearchSubmitPolicy.route(for: sidebarSearchText) {
+            searchDebounceTask?.cancel()
+            let query: String
+            if case .library(.search(let submittedQuery)) = route {
+                query = submittedQuery
+            } else {
+                query = sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            sidebarSearchText = query
+            debouncedSearchText = query
+            isSearchPaletteVisible = false
+            navigateToWorkspaceRoute(route)
+        } else {
+            isSearchPaletteVisible = true
+        }
+    }
+
     func openOrSelectTagTab() {
         navigateToWorkspaceRoute(.library(.tags))
     }

@@ -1372,6 +1372,66 @@ struct NotesSQLiteTests {
         #expect(try projectNoteRelationRowCount(db, id: adopted.id, relativePath: relativePath) == 1)
     }
 
+    @Test("Rescan adopts project artifact by existing note path before dangling relation")
+    func rescanAdoptsProjectArtifactByExistingNotePathBeforeDanglingRelation() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = makeTempVaultURL()
+        defer {
+            cleanup(vault)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let service = makeService(db)
+        let relativePath = "Projects/Cider/QA/Relation Drift Audit.md"
+        let fileURL = vault.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "# Relation Drift Audit\n\nCanonical file body.\n".write(
+            to: fileURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let pathOwnerID = UUID(uuidString: "B2E81346-2B16-41D5-8863-978AFC4C9474")!
+        let danglingRelationID = UUID(uuidString: "6B482882-2EB1-495F-A5E2-A57B0672B0ED")!
+        try db.runSQL("""
+            INSERT INTO items (id, type, title, created_at, updated_at, relative_path)
+            VALUES ('\(pathOwnerID.uuidString)', 'note', 'Relation Drift Audit', 1, 1, '\(relativePath)');
+            INSERT INTO notes (item_id, content, summary, is_pinned)
+            VALUES ('\(pathOwnerID.uuidString)', 'Existing DB body', NULL, 0);
+            """)
+        try SecondBrainStore(database: db).recordRelation(SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: danglingRelationID.uuidString),
+            targetOwner: SecondBrainProjectGraphService.owner(projectID: "cider"),
+            relationType: "artifact_of",
+            evidence: "Stale relation left behind by an earlier failed rescan.",
+            source: "project_notes",
+            actor: "test",
+            confidence: 1,
+            metadata: [
+                "title": "Relation Drift Audit",
+                "artifactType": "qa",
+                "path": relativePath
+            ]
+        ))
+
+        service.loadNotesFromDatabase(db)
+        service.rescan()
+
+        let adopted = try #require(service.notes.first { $0.relativePath == relativePath })
+        #expect(adopted.id == pathOwnerID)
+        #expect(try noteItemExists(db, id: pathOwnerID, title: "Relation Drift Audit", relativePath: relativePath))
+        #expect(try noteRowCount(db, id: pathOwnerID) == 1)
+        #expect(try projectNoteRelationRowCount(db, id: pathOwnerID, relativePath: relativePath) == 1)
+        #expect(try projectNotePathRelationRowCount(db, relativePath: relativePath) == 1)
+    }
+
     @Test("Rescan restores SQLite-backed notes when sync fails")
     func rescanRestoresSQLiteBackedNotesWhenSyncFails() throws {
         let (db, url) = try makeTestDB()

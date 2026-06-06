@@ -130,6 +130,14 @@ enum WorkspaceVisibleItemScopePolicy {
     }
 }
 
+enum SidebarSearchSubmitPolicy {
+    static func route(for rawQuery: String) -> WorkspaceRoute? {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return nil }
+        return .library(.search(query))
+    }
+}
+
 enum WorkspaceRouteContentKind: Equatable {
     case home
     case libraryDashboard

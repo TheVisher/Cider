@@ -13,6 +13,7 @@ LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchS
 VERIFY=0
 STREAM_LOGS=0
 TELEMETRY=0
+QA_VISIBLE=0
 LOG_DIR=""
 WATCHDOG_PID=""
 
@@ -28,9 +29,12 @@ for arg in "$@"; do
       STREAM_LOGS=1
       TELEMETRY=1
       ;;
+    --qa-visible)
+      QA_VISIBLE=1
+      ;;
     *)
       echo "Unknown option: $arg" >&2
-      echo "Usage: $0 [--verify] [--logs|--telemetry]" >&2
+      echo "Usage: $0 [--verify] [--logs|--telemetry] [--qa-visible]" >&2
       exit 2
       ;;
   esac
@@ -124,15 +128,28 @@ if [[ "$STREAM_LOGS" -eq 1 ]]; then
 fi
 
 if [[ "$TELEMETRY" -eq 1 ]]; then
-  /usr/bin/open \
-    --stdout "$LOG_DIR/stdout.log" \
-    --stderr "$LOG_DIR/stderr.log" \
-    --env "CIDER_PERF_MONITOR=1" \
-    --env "CIDER_PERF_LOG_PATH=$LOG_DIR/performance.log" \
-    --env "CIDER_QA_VISIBLE_WINDOW=1" \
-    "$APP_PATH"
+  if [[ "$QA_VISIBLE" -eq 1 ]]; then
+    /usr/bin/open \
+      --stdout "$LOG_DIR/stdout.log" \
+      --stderr "$LOG_DIR/stderr.log" \
+      --env "CIDER_PERF_MONITOR=1" \
+      --env "CIDER_PERF_LOG_PATH=$LOG_DIR/performance.log" \
+      --env "CIDER_QA_VISIBLE_WINDOW=1" \
+      "$APP_PATH"
+  else
+    /usr/bin/open \
+      --stdout "$LOG_DIR/stdout.log" \
+      --stderr "$LOG_DIR/stderr.log" \
+      --env "CIDER_PERF_MONITOR=1" \
+      --env "CIDER_PERF_LOG_PATH=$LOG_DIR/performance.log" \
+      "$APP_PATH"
+  fi
 else
-  /usr/bin/open "$APP_PATH"
+  if [[ "$QA_VISIBLE" -eq 1 ]]; then
+    /usr/bin/open --env "CIDER_QA_VISIBLE_WINDOW=1" "$APP_PATH"
+  else
+    /usr/bin/open "$APP_PATH"
+  fi
 fi
 
 if [[ "$VERIFY" -eq 1 || "$STREAM_LOGS" -eq 1 ]]; then

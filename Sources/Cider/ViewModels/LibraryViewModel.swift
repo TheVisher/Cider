@@ -2,6 +2,26 @@ import Foundation
 import Combine
 
 @MainActor
+final class LibraryRebuildCoalescer {
+    private var isScheduled = false
+    private let rebuild: @MainActor () -> Void
+
+    init(rebuild: @escaping @MainActor () -> Void) {
+        self.rebuild = rebuild
+    }
+
+    func requestRebuild() {
+        guard !isScheduled else { return }
+        isScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.isScheduled = false
+            self.rebuild()
+        }
+    }
+}
+
+@MainActor
 final class LibraryViewModel: ObservableObject {
     @Published private(set) var items: [LibraryItemV2] = []
     /// Top 8 most recently updated items — pre-sorted during rebuildItems().
@@ -11,6 +31,9 @@ final class LibraryViewModel: ObservableObject {
     private var filteredItemsCache: (filter: LibraryFilterSpec, sort: LibrarySortSpec, result: [LibraryItemV2])?
 
     private var cancellables = Set<AnyCancellable>()
+    private lazy var rebuildCoalescer = LibraryRebuildCoalescer { [weak self] in
+        self?.rebuildItems()
+    }
 
     init() {
         bindStorages()
@@ -133,32 +156,32 @@ final class LibraryViewModel: ObservableObject {
     private func bindStorages() {
         VaultBookmarkService.shared.$bookmarks
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.rebuildItems() }
+            .sink { [weak self] _ in self?.rebuildCoalescer.requestRebuild() }
             .store(in: &cancellables)
 
         NotesStorage.shared.$notes
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.rebuildItems() }
+            .sink { [weak self] _ in self?.rebuildCoalescer.requestRebuild() }
             .store(in: &cancellables)
 
         DateCardStorage.shared.$dateCards
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.rebuildItems() }
+            .sink { [weak self] _ in self?.rebuildCoalescer.requestRebuild() }
             .store(in: &cancellables)
 
         ContactStorage.shared.$contacts
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.rebuildItems() }
+            .sink { [weak self] _ in self?.rebuildCoalescer.requestRebuild() }
             .store(in: &cancellables)
 
         TodoCardStorage.shared.$todoCards
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.rebuildItems() }
+            .sink { [weak self] _ in self?.rebuildCoalescer.requestRebuild() }
             .store(in: &cancellables)
 
         VaultFileService.shared.$files
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.rebuildItems() }
+            .sink { [weak self] _ in self?.rebuildCoalescer.requestRebuild() }
             .store(in: &cancellables)
 
     }

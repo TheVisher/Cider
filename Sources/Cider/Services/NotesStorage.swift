@@ -566,8 +566,8 @@ final class NotesStorage: ObservableObject {
                     let attrs = try? fm.attributesOfItem(atPath: file.path)
                     let modDate = attrs?[.modificationDate] as? Date ?? Date()
                     let createDate = attrs?[.creationDate] as? Date ?? modDate
-                    let uuid = projectNoteIDFromExistingRelation(relativePath: relativePath)
-                        ?? noteIDFromExistingItem(relativePath: relativePath)
+                    let uuid = noteIDFromExistingItem(relativePath: relativePath)
+                        ?? projectNoteIDFromExistingRelation(relativePath: relativePath)
                         ?? UUID()
                     index[uuid] = NoteIndexEntry(filename: file.lastPathComponent, folderID: nil, createdAt: createDate)
                     notes.append(Note(
@@ -2761,6 +2761,9 @@ final class NotesStorage: ObservableObject {
         }
 
         try replaceProjectArtifactRelationIfNeeded(db, note: note)
+        if note.isProjectArtifact {
+            removeDuplicateProjectNoteRelations(relativePath: note.relativePath, keeping: note.id)
+        }
     }
 
     private struct ProjectArtifactDirectory {
