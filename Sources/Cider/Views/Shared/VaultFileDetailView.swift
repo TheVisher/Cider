@@ -11,6 +11,7 @@ struct VaultFileDetailView: View {
     @State private var image: NSImage?
     @State private var pdfDocument: PDFDocument?
     @State private var avPlayer: AVPlayer?
+    @State private var textPreview: String?
     @State private var zoomScale: CGFloat = 1
 
     var body: some View {
@@ -82,13 +83,21 @@ struct VaultFileDetailView: View {
             }
 
         case .document, .archive, .unknown:
-            QuickLookPreview(url: file.absoluteURL, zoomScale: zoomScale)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            if VaultFileTextPreview.canPreview(file) {
+                InlineTextFilePreview(text: textPreview)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            } else {
+                QuickLookPreview(url: file.absoluteURL, zoomScale: zoomScale)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            }
         }
     }
 
     private var supportsZoom: Bool {
+        if VaultFileTextPreview.canPreview(file) {
+            return false
+        }
         switch file.fileType {
         case .image, .pdf, .document, .archive, .unknown:
             return true
@@ -200,9 +209,58 @@ struct VaultFileDetailView: View {
         case .video, .audio:
             avPlayer = AVPlayer(url: url)
 
+        case .document, .unknown:
+            guard VaultFileTextPreview.canPreview(file) else { break }
+            let loaded = try? await Task.detached(priority: .userInitiated) {
+                try VaultFileTextPreview.loadText(from: url)
+            }.value
+            textPreview = loaded
+
         default:
             break
         }
+    }
+}
+
+enum VaultFileTextPreview {
+    private static let previewableExtensions: Set<String> = [
+        "txt", "text", "md", "markdown", "csv", "tsv", "json", "jsonl", "yaml", "yml", "xml",
+        "log", "rtf", "ics", "vcf"
+    ]
+
+    static let maxPreviewBytes = 512 * 1024
+
+    static func canPreview(_ file: VaultFile) -> Bool {
+        guard file.fileType == .document || file.fileType == .unknown else { return false }
+        let ext = (file.filename as NSString).pathExtension.lowercased()
+        return previewableExtensions.contains(ext)
+    }
+
+    static func loadText(from url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: maxPreviewBytes + 1) ?? Data()
+        let clipped = data.count > maxPreviewBytes
+        let previewData = clipped ? data.prefix(maxPreviewBytes) : data[...]
+        let text = String(decoding: previewData, as: UTF8.self)
+        return clipped ? text + "\n\n[Preview truncated]" : text
+    }
+}
+
+private struct InlineTextFilePreview: View {
+    let text: String?
+
+    var body: some View {
+        ScrollView([.horizontal, .vertical]) {
+            Text(text ?? "")
+                .font(.system(.body, design: .monospaced))
+                .foregroundColor(CiderColors.primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(Spacing.md)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(CiderColors.surfaceInput)
     }
 }
 
