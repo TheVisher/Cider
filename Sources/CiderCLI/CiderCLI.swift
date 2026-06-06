@@ -300,6 +300,8 @@ struct CiderCLI {
             handleLink(subcommand: subcommand, args: remaining)
         case "item":
             handleItem(subcommand: subcommand, args: remaining)
+        case "test-run", "testrun":
+            handleTestRun(subcommand: subcommand, args: remaining)
         case "export":
             handleExport(subcommand: subcommand, args: remaining)
         case "file":
@@ -378,6 +380,8 @@ struct CiderCLI {
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
         case "item":
             return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "sync-project", "project-sync"])
+        case "test-run", "testrun":
+            return isMutationSubcommand(subcommand, in: ["cleanup"])
         case "label", "tag":
             return isMutationSubcommand(subcommand, in: ["create", "rename", "delete", "rm"])
         case "trash":
@@ -1197,6 +1201,8 @@ struct CiderCLI {
                 let service = CiderCaptureService(bookmarkService: bookmarkService, database: database)
                 let title = parseFlag("--title", from: args)
                 let sourceContext = captureSourceContext(from: args, originalText: source.originalText)
+                let testRunID = parseFlag("--test-run", from: args)
+                let testMarker = parseFlag("--test-marker", from: args)
                 let result: CiderCaptureResult
                 switch source {
                 case .inferred(let raw):
@@ -1259,7 +1265,29 @@ struct CiderCLI {
                         sourceContext: sourceContext
                     )
                 case .journal(let raw):
-                    let payload = try captureAddJournalPayload(rawContent: raw, args: args, storage: NotesStorage.shared)
+                    var payload = try captureAddJournalPayload(rawContent: raw, args: args, storage: NotesStorage.shared)
+                    if let testRunID,
+                       let item = payload["item"] as? [String: Any],
+                       let id = item["id"] as? String,
+                       let title = item["title"] as? String {
+                        let testRun = try CiderCLITestRunManifestStore.recordItem(
+                            runID: testRunID,
+                            marker: testMarker,
+                            type: item["type"] as? String ?? "note",
+                            id: id,
+                            title: title,
+                            relativePath: item["relativePath"] as? String,
+                            captureEventID: payload["captureEventID"] as? String,
+                            sourceKind: "journal"
+                        )
+                        payload["testRun"] = testRun
+                        var commands = (payload["safeNextCommands"] as? [String]) ?? []
+                        let cleanupCommand = "cider-cli test-run cleanup \(testRunID) --dry-run --json"
+                        if !commands.contains(cleanupCommand) {
+                            commands.append(cleanupCommand)
+                        }
+                        payload["safeNextCommands"] = commands
+                    }
                     if jsonOutput {
                         outputJSON(payload)
                     } else {
@@ -1286,6 +1314,22 @@ struct CiderCLI {
                     ?? bookmarkService.bookmarks.first(where: { $0.id == result.item.id })
                 if jsonOutput {
                     var dict = result.toDictionary(finalBookmark: finalBookmark)
+                    if let testRunID {
+                        let testRun = try CiderCLITestRunManifestStore.recordCapture(
+                            runID: testRunID,
+                            marker: testMarker,
+                            result: result,
+                            finalTitle: finalBookmark?.title,
+                            finalRelativePath: finalBookmark?.relativePath
+                        )
+                        dict["testRun"] = testRun
+                        var commands = (dict["safeNextCommands"] as? [String]) ?? []
+                        let cleanupCommand = "cider-cli test-run cleanup \(testRunID) --dry-run --json"
+                        if !commands.contains(cleanupCommand) {
+                            commands.append(cleanupCommand)
+                        }
+                        dict["safeNextCommands"] = commands
+                    }
                     if let waitResult {
                         dict["nativeCaptureStatus"] = waitResult.timedOut ? "timedOut" : "settled"
                         dict["nativeCaptureElapsedSeconds"] = waitResult.elapsedSeconds
@@ -1302,6 +1346,16 @@ struct CiderCLI {
                     }
                     outputJSON(dict)
                 } else {
+                    var testRun: [String: Any]?
+                    if let testRunID {
+                        testRun = try CiderCLITestRunManifestStore.recordCapture(
+                            runID: testRunID,
+                            marker: testMarker,
+                            result: result,
+                            finalTitle: finalBookmark?.title,
+                            finalRelativePath: finalBookmark?.relativePath
+                        )
+                    }
                     let title = finalBookmark?.title ?? result.item.title
                     print("Captured: \(title) (\(result.item.id.uuidString.prefix(8)))")
                     print("  Type: \(result.item.type)")
@@ -1321,6 +1375,9 @@ struct CiderCLI {
                     }
                     print("  Review needed: \(result.routing.reviewNeeded)")
                     print("  Next safe action: \(result.nextSafeAction)")
+                    if let cleanupCommand = testRun?["cleanupCommand"] as? String {
+                        print("  Test run cleanup: \(cleanupCommand)")
+                    }
                 }
             } catch {
                 printCLIError(error.localizedDescription)
@@ -1379,7 +1436,7 @@ struct CiderCLI {
     }
 
     static func printCaptureUsage() {
-        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]")
         print("       cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]")
         print("       Example destination: --folder \"Inbox/Notes\". In capture add, --path is always a source file, not a destination.")
         print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
@@ -10144,7 +10201,7 @@ struct CiderCLI {
             throw CaptureAddArgumentError.message("Unsupported --kind '\(unsupported)'. Use note, todo, bookmark, file, event, contact, or journal.")
         }
 
-        throw CaptureAddArgumentError.message("Source required. Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--timeout <seconds>|--no-wait] [--json]")
+        throw CaptureAddArgumentError.message("Source required. Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]")
     }
 
     static func capturePositionalArguments(from args: [String]) -> [String] {
@@ -10153,7 +10210,7 @@ struct CiderCLI {
             "--surface", "--channel", "--channel-id", "--thread-id", "--message-id",
             "--sender-id", "--sender-name", "--timeout", "--wait-timeout", "--capture-timeout",
             "--source-meta", "--date", "--time", "--location", "--details", "--name",
-            "--relationship", "--email", "--phone",
+            "--relationship", "--email", "--phone", "--test-run", "--test-marker",
         ]
         let booleanFlags: Set<String> = [
             "--stdin", "--json", "--no-wait", "--all-day", "--help", "-h",
@@ -14757,6 +14814,272 @@ struct CiderCLI {
         }
     }
 
+    static func handleTestRun(subcommand: String?, args: [String]) {
+        switch subcommand {
+        case "cleanup":
+            handleTestRunCleanup(args: args)
+        case nil, "help", "--help", "-h":
+            print("""
+            Test-run commands:
+              cider-cli test-run cleanup <run-id> --dry-run --json
+              cider-cli test-run cleanup <run-id> --approve <token> --execute --json
+            """)
+        default:
+            printCLIError("Unknown test-run command: \(subcommand ?? "nil")")
+        }
+    }
+
+    static func handleTestRunCleanup(args: [String]) {
+        guard let runID = leadingPositionalArgs(from: args).first else {
+            printTestRunCleanupError(
+                runID: nil,
+                reason: "missing_run_id",
+                message: "Usage: cider-cli test-run cleanup <run-id> --dry-run --json"
+            )
+            return
+        }
+
+        do {
+            guard try CiderCLITestRunManifestStore.exists(runID: runID) else {
+                printTestRunCleanupError(
+                    runID: runID,
+                    reason: "manifest_not_found",
+                    message: "No test-run manifest exists for \(runID). Cleanup by search is intentionally refused."
+                )
+                return
+            }
+
+            var manifest = try CiderCLITestRunManifestStore.load(runID: runID)
+            let resolvedItems = manifest.items.map { testRunCleanupItem(from: $0, runID: runID) }
+            let token = testRunCleanupApprovalToken(runID: runID, items: manifest.items)
+            let execute = args.contains("--execute")
+            let approval = parseFlag("--approve", from: args)
+
+            if !execute || approval != token {
+                let payload = testRunCleanupEnvelope(
+                    runID: runID,
+                    manifest: manifest,
+                    items: resolvedItems,
+                    readOnly: true,
+                    changed: false,
+                    approvalToken: token
+                )
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Test-run cleanup preview: \(runID)")
+                    print("  Manifest items: \(manifest.items.count)")
+                    print("  Approve with: cider-cli test-run cleanup \(runID) --approve \(token) --execute --json")
+                }
+                return
+            }
+
+            var trashed: [[String: Any]] = []
+            var verifiedGone = 0
+            var indexRemoved = 0
+            let store = SecondBrainStore(database: .shared)
+            let contextService = CiderItemContextService(database: .shared, secondBrainStore: store)
+            for item in manifest.items {
+                guard let type = try? ItemLinkService.entityType(from: item.type),
+                      let id = UUID(uuidString: item.id),
+                      let ref = try? ItemLinkService.shared.resolve(type: type, ref: id.uuidString),
+                      let before = try? contextService.context(for: ref).item else {
+                    continue
+                }
+                let trashItem = try trashItem(ref: ref)
+                VaultIndexService.shared.remove(id: ref.entityID)
+                indexRemoved += 1
+                CiderUndoManager.shared.record(.deletedToTrash(itemType: trashItem.itemType, trashItem: trashItem))
+
+                let auditEntry = MutationAuditService(database: .shared).record(
+                    action: "test_run_cleanup",
+                    itemType: ref.type.rawValue,
+                    itemID: ref.entityID,
+                    before: itemDeleteSummarySnapshot(before),
+                    after: MutationAuditSnapshots.trashItem(trashItem),
+                    metadata: [
+                        "command": "test-run.cleanup",
+                        "runID": runID,
+                        "marker": manifest.marker ?? "",
+                        "trashItemID": trashItem.id.uuidString,
+                    ],
+                    source: .agent
+                )
+                let actionID = UUID().uuidString
+                try store.recordAgentAction(
+                    SecondBrainAgentAction(
+                        id: actionID,
+                        owner: SecondBrainOwnerRef(ownerType: ref.type.rawValue, ownerID: ref.entityID.uuidString),
+                        itemID: nil,
+                        toolName: "test-run.cleanup",
+                        actionType: "test-run.cleanup",
+                        source: "cli.test-run.cleanup",
+                        status: "succeeded",
+                        summary: "Trashed \(ref.type.rawValue):\(ref.entityID.uuidString) from test-run manifest \(runID).",
+                        argumentsJSON: DatabaseHelpers.encodeJSON([
+                            "runID": runID,
+                            "marker": manifest.marker ?? "",
+                        ]),
+                        resultJSON: DatabaseHelpers.encodeJSON([
+                            "trashItemID": trashItem.id.uuidString,
+                            "mutationAuditEntryID": auditEntry?.id.uuidString ?? "",
+                        ])
+                    )
+                )
+                if (try? ItemLinkService.shared.resolve(type: ref.type, ref: ref.entityID.uuidString)) == nil {
+                    verifiedGone += 1
+                }
+                var trashedItem: [String: Any] = [
+                    "type": ref.type.rawValue,
+                    "id": ref.entityID.uuidString,
+                    "title": before.title,
+                    "trashItemID": trashItem.id.uuidString,
+                    "agentActionID": actionID,
+                ]
+                if let auditID = auditEntry?.id.uuidString {
+                    trashedItem["mutationAuditEntryID"] = auditID
+                }
+                if let relativePath = before.relativePath {
+                    trashedItem["relativePath"] = relativePath
+                }
+                trashed.append(trashedItem)
+                if let manifestIndex = manifest.items.firstIndex(where: { $0.type == item.type && $0.id == item.id }) {
+                    manifest.items[manifestIndex].cleanupStatus = "trashed"
+                    manifest.items[manifestIndex].trashItemID = trashItem.id.uuidString
+                }
+            }
+
+            let beforeIDs = Set(VaultIndexService.shared.entries.keys)
+            VaultIndexService.shared.rebuildFromCurrentState()
+            let afterIDs = Set(VaultIndexService.shared.entries.keys)
+            let prunedIDs = beforeIDs.subtracting(afterIDs).map(\.uuidString).sorted()
+            manifest.cleanupStatus = "complete"
+            manifest.updatedAt = ISO8601DateFormatter().string(from: Date())
+            try CiderCLITestRunManifestStore.save(manifest)
+
+            var payload = testRunCleanupEnvelope(
+                runID: runID,
+                manifest: manifest,
+                items: resolvedItems,
+                readOnly: false,
+                changed: !trashed.isEmpty || !prunedIDs.isEmpty,
+                approvalToken: token
+            )
+            payload["trashedCount"] = trashed.count
+            payload["trashedItems"] = trashed
+            payload["verifiedGoneCount"] = verifiedGone
+            payload["indexRemovedCount"] = indexRemoved + prunedIDs.count
+            payload["removedStaleIDs"] = prunedIDs
+            payload["nextSafeAction"] = "verify_cleanup"
+            payload["safeNextCommands"] = [
+                "cider-cli item search \"\(manifest.marker ?? runID)\" --limit 20 --json",
+                "cider-cli item rebuild-index --json",
+                "cider-cli storage audit --json",
+            ]
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("Cleaned test-run \(runID): \(trashed.count) item(s) moved to trash.")
+            }
+        } catch {
+            printTestRunCleanupError(
+                runID: runID,
+                reason: "cleanup_failed",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    static func testRunCleanupItem(from item: CiderCLITestRunManifest.Item, runID: String) -> [String: Any] {
+        var dict: [String: Any] = [
+            "type": item.type,
+            "id": item.id,
+            "title": item.title,
+            "status": "missing",
+            "reason": "Recorded in test-run manifest \(runID).",
+        ]
+        if let relativePath = item.relativePath { dict["relativePath"] = relativePath }
+        if let captureEventID = item.captureEventID { dict["captureEventID"] = captureEventID }
+        if let type = try? ItemLinkService.entityType(from: item.type),
+           let ref = try? ItemLinkService.shared.resolve(type: type, ref: item.id),
+           let summary = ItemLinkService.shared.summary(for: ref) {
+            dict["status"] = "present"
+            dict["title"] = summary.title
+        }
+        return dict
+    }
+
+    static func testRunCleanupApprovalToken(runID: String, items: [CiderCLITestRunManifest.Item]) -> String {
+        let seed = ([runID] + items.map { "\($0.type):\($0.id)" }.sorted()).joined(separator: "|")
+        var hash: UInt64 = 1469598103934665603
+        for byte in seed.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1099511628211
+        }
+        return "CLEANUP_TEST_RUN_" + String(hash, radix: 16).uppercased()
+    }
+
+    static func testRunCleanupEnvelope(
+        runID: String,
+        manifest: CiderCLITestRunManifest,
+        items: [[String: Any]],
+        readOnly: Bool,
+        changed: Bool,
+        approvalToken: String
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "ok": true,
+            "command": "test-run.cleanup",
+            "readOnly": readOnly,
+            "changed": changed,
+            "approvalRequired": readOnly,
+            "requiredApprovalToken": approvalToken,
+            "runID": runID,
+            "manifestPath": CiderCLITestRunManifestStore.manifestRelativePath(runID: runID),
+            "itemCount": manifest.items.count,
+            "items": items,
+            "manualReviewRequired": false,
+            "nextSafeAction": readOnly ? "approve_test_run_cleanup" : "verify_cleanup",
+            "safeNextCommands": [
+                "cider-cli test-run cleanup \(runID) --approve \(approvalToken) --execute --json",
+            ],
+            "safetyRule": "Cleanup only mutates items recorded in the test-run manifest; fuzzy marker search is report-only.",
+        ]
+        if let marker = manifest.marker {
+            payload["marker"] = marker
+        }
+        return payload
+    }
+
+    static func printTestRunCleanupError(runID: String?, reason: String, message: String) {
+        processExitCode = 1
+        let commands = runID.map {
+            [
+                "cider-cli test-run cleanup \($0) --dry-run --json",
+                "cider-cli item search <marker> --json",
+            ]
+        } ?? ["cider-cli test-run cleanup <run-id> --dry-run --json"]
+        var payload: [String: Any] = [
+            "ok": false,
+            "command": "test-run.cleanup",
+            "readOnly": true,
+            "changed": false,
+            "reason": reason,
+            "error": message,
+            "manualReviewRequired": true,
+            "safeNextCommands": commands,
+            "safetyRule": "No manifest means no automatic cleanup; inspect search results manually.",
+        ]
+        if let runID {
+            payload["runID"] = runID
+        }
+        if jsonOutput {
+            outputJSON(payload)
+        } else {
+            print("Error: \(message)")
+        }
+    }
+
     static func similarityCandidateToDict(_ candidate: SecondBrainSimilarityCandidate) -> [String: Any] {
         var dict: [String: Any] = [
             "id": candidate.id,
@@ -16261,8 +16584,12 @@ struct CiderCLI {
         CiderCLI — Second Brain v1 agent API
 
         CAPTURE
-          cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--url <url>|--path <source-file-path>|--content <text>) [--title <title>] [--date yyyy-MM-dd|today] [--details <text>] [--name <name>] [--folder <target-folder-path>] [--timeout <seconds>|--no-wait] [--json]
+          cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--url <url>|--path <source-file-path>|--content <text>) [--title <title>] [--date yyyy-MM-dd|today] [--details <text>] [--name <name>] [--folder <target-folder-path>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]
           cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]
+
+        TEST RUN
+          cider-cli test-run cleanup <run-id> --dry-run [--json]
+          cider-cli test-run cleanup <run-id> --approve <token> --execute [--json]
 
         ITEM
           cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]

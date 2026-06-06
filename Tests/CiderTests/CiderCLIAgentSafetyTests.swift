@@ -1455,6 +1455,7 @@ struct CiderCLIAgentSafetyTests {
 
         #expect(visibleSectionHeaders == [
             "CAPTURE",
+            "TEST RUN",
             "ITEM",
             "EXPORT",
             "REVIEW",
@@ -1841,6 +1842,194 @@ struct CiderCLIAgentSafetyTests {
         let indexObject = try #require(JSONSerialization.jsonObject(with: indexData) as? [String: Any])
         let items = try #require(indexObject["items"] as? [String: Any])
         #expect(items[staleID] == nil)
+    }
+
+    @Test("capture add with test run records manifest and cleanup command")
+    func captureAddWithTestRunRecordsManifestAndCleanupCommand() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-test-run-manifest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let runID = "cid451-\(UUID().uuidString)"
+        let result = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "note",
+                "--title", "CID451 cleanup manifest fixture",
+                "--test-run", runID,
+                "--test-marker", "CID-451 cleanup-safe fixture",
+                "--stdin",
+                "--json",
+            ],
+            vault: vault,
+            stdin: "Temporary agent test content."
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        let testRun = try #require(payload["testRun"] as? [String: Any])
+        #expect(testRun["runID"] as? String == runID)
+        #expect(testRun["manifestPath"] as? String == ".cider/test-runs/\(runID).json")
+        #expect(testRun["cleanupCommand"] as? String == "cider-cli test-run cleanup \(runID) --dry-run --json")
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli test-run cleanup \(runID) --dry-run --json"))
+
+        let manifestURL = vault.appendingPathComponent(".cider/test-runs/\(runID).json")
+        let manifestData = try Data(contentsOf: manifestURL)
+        let manifest = try #require(JSONSerialization.jsonObject(with: manifestData) as? [String: Any])
+        #expect(manifest["runID"] as? String == runID)
+        #expect(manifest["marker"] as? String == "CID-451 cleanup-safe fixture")
+        let items = try #require(manifest["items"] as? [[String: Any]])
+        #expect(items.count == 1)
+        #expect(items.first?["type"] as? String == "note")
+        #expect(items.first?["title"] as? String == "CID451 cleanup manifest fixture")
+        #expect(items.first?["captureEventID"] as? String != nil)
+    }
+
+    @Test("test run cleanup previews and trashes only manifest items")
+    func testRunCleanupPreviewsAndTrashesOnlyManifestItems() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-test-run-cleanup-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let runID = "cid451-\(UUID().uuidString)"
+        let captured = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "note",
+                "--title", "CID451 cleanup execute fixture",
+                "--test-run", runID,
+                "--test-marker", "CID-451 cleanup execute fixture",
+                "--stdin",
+                "--json",
+            ],
+            vault: vault,
+            stdin: "Temporary agent test content."
+        )
+        let capturePayload = try parseJSONObject(captured.stdout)
+        let noteID = try #require((capturePayload["item"] as? [String: Any])?["id"] as? String)
+
+        let bookmark = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "bookmark",
+                "--url", "https://example.com/cid451-cleanup",
+                "--title", "CID451 cleanup bookmark fixture",
+                "--test-run", runID,
+                "--test-marker", "CID-451 cleanup execute fixture",
+                "--no-wait",
+                "--json",
+            ],
+            vault: vault
+        )
+        let bookmarkPayload = try parseJSONObject(bookmark.stdout)
+        let bookmarkID = try #require((bookmarkPayload["item"] as? [String: Any])?["id"] as? String)
+
+        let sourceFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cid451-cleanup-file-\(UUID().uuidString).txt")
+        try "Temporary agent test file.".write(to: sourceFile, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: sourceFile) }
+        let fileCapture = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "file",
+                "--path", sourceFile.path,
+                "--title", "CID451 cleanup file fixture",
+                "--test-run", runID,
+                "--test-marker", "CID-451 cleanup execute fixture",
+                "--json",
+            ],
+            vault: vault
+        )
+        let filePayload = try parseJSONObject(fileCapture.stdout)
+        let fileID = try #require((filePayload["item"] as? [String: Any])?["id"] as? String)
+
+        let keeper = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "note",
+                "--title", "Real note that must survive",
+                "--stdin",
+                "--json",
+            ],
+            vault: vault,
+            stdin: "This is not in the test-run manifest."
+        )
+        let keeperPayload = try parseJSONObject(keeper.stdout)
+        let keeperID = try #require((keeperPayload["item"] as? [String: Any])?["id"] as? String)
+
+        let previewResult = try runCLI(
+            args: ["test-run", "cleanup", runID, "--dry-run", "--json"],
+            vault: vault
+        )
+        let preview = try parseJSONObject(previewResult.stdout)
+        #expect(preview["ok"] as? Bool == true)
+        #expect(preview["command"] as? String == "test-run.cleanup")
+        #expect(preview["readOnly"] as? Bool == true)
+        #expect(preview["changed"] as? Bool == false)
+        #expect(preview["approvalRequired"] as? Bool == true)
+        let token = try #require(preview["requiredApprovalToken"] as? String)
+        #expect(token.hasPrefix("CLEANUP_TEST_RUN_"))
+        let items = try #require(preview["items"] as? [[String: Any]])
+        #expect(items.count == 3)
+        #expect(Set(items.compactMap { $0["id"] as? String }) == [noteID, bookmarkID, fileID])
+        #expect(items.allSatisfy { $0["reason"] as? String == "Recorded in test-run manifest \(runID)." })
+
+        let cleanupResult = try runCLI(
+            args: [
+                "test-run", "cleanup", runID,
+                "--approve", token,
+                "--execute",
+                "--json",
+            ],
+            vault: vault
+        )
+        let cleanup = try parseJSONObject(cleanupResult.stdout)
+        #expect(cleanup["ok"] as? Bool == true)
+        #expect(cleanup["readOnly"] as? Bool == false)
+        #expect(cleanup["changed"] as? Bool == true)
+        #expect(cleanup["trashedCount"] as? Int == 3)
+        #expect(cleanup["verifiedGoneCount"] as? Int == 3)
+        #expect(cleanup["indexRemovedCount"] as? Int == 3)
+
+        let deletedGet = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
+        #expect(deletedGet.status != 0)
+        let bookmarkGet = try runCLI(args: ["item", "get", "bookmark", bookmarkID, "--json"], vault: vault)
+        #expect(bookmarkGet.status != 0)
+        let fileGet = try runCLI(args: ["item", "get", "vaultFile", fileID, "--json"], vault: vault)
+        #expect(fileGet.status != 0)
+
+        let keeperGet = try runCLI(args: ["item", "get", "note", keeperID, "--json"], vault: vault)
+        #expect(keeperGet.status == 0)
+    }
+
+    @Test("test run cleanup refuses missing manifest")
+    func testRunCleanupRefusesMissingManifest() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-test-run-cleanup-missing-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(
+            args: [
+                "test-run", "cleanup", "missing-cid451",
+                "--approve", "CLEANUP_TEST_RUN_FAKE",
+                "--execute",
+                "--json",
+            ],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status != 0)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == "test-run.cleanup")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["reason"] as? String == "manifest_not_found")
+        #expect(payload["manualReviewRequired"] as? Bool == true)
     }
 
     @Test("file capture returns a canonical vault file id resolvable by item commands")

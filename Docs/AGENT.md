@@ -199,6 +199,8 @@ When the user sends a bare URL, use the full capture loop:
 When an agent saves a bookmark, note, contact, todo, date card, journal entry, or file:
 
 - Use `cider-cli capture add --kind ... --json`; use `--stdin` or `--text-file` for exact raw text, `--url` for bookmarks, and `--path` for files.
+- For dogfood, QA, or agent tests that create real vault items, include `--test-run <run-id> --test-marker <text>` on `capture add`. The CLI records a manifest at `.cider/test-runs/<run-id>.json` and returns `cider-cli test-run cleanup <run-id> --dry-run --json`.
+- Clean test items with `cider-cli test-run cleanup <run-id> --dry-run --json`, then execute only with the returned approval token. Do not clean by fuzzy marker search when the manifest is missing; list those candidates for manual review instead.
 - For journal-style memory intake, use `cider-cli capture add --kind journal --date today --stdin --json`; this appends to the daily journal and returns normal capture JSON.
 - Successful journal captures should be verified through `safeNextCommands` such as `item get` or `item context`, not sent through folder-route review chores.
 - Route obvious items before creation when the destination is clear.
