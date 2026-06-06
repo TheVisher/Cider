@@ -1,15 +1,22 @@
 import Foundation
 
 enum BookmarkNativeCapturePolicy {
-    static func allowsAutomaticThumbnailReplacement(hasUsableLocalThumbnail: Bool) -> Bool {
-        !hasUsableLocalThumbnail
+    static func allowsThumbnailReplacement(
+        hasUsableLocalThumbnail: Bool,
+        isExplicitUserRefresh: Bool = false
+    ) -> Bool {
+        isExplicitUserRefresh || !hasUsableLocalThumbnail
     }
 
     static func allowsScreenshotFallback(
         thumbnailURL: URL?,
-        hasUsableLocalThumbnail: Bool = false
+        hasUsableLocalThumbnail: Bool = false,
+        isExplicitUserRefresh: Bool = false
     ) -> Bool {
         thumbnailURL == nil
-            && allowsAutomaticThumbnailReplacement(hasUsableLocalThumbnail: hasUsableLocalThumbnail)
+            && allowsThumbnailReplacement(
+                hasUsableLocalThumbnail: hasUsableLocalThumbnail,
+                isExplicitUserRefresh: isExplicitUserRefresh
+            )
     }
 }

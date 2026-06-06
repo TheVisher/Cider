@@ -180,7 +180,12 @@ struct BookmarkCard: View {
             folders: folders,
             onOpen: onOpen,
             onShowDetails: onShowDetails,
-            onRefetchMetadata: { VaultBookmarkService.shared.refetchMetadata(for: bookmark.id) },
+            onRefetchMetadata: {
+                VaultBookmarkService.shared.refetchMetadata(
+                    for: bookmark.id,
+                    allowThumbnailReplacement: true
+                )
+            },
             onMoveToFolder: { folderID in onMoveToFolder?(folderID) },
             onDelete: onDelete,
             onToggleLabel: { labelID in

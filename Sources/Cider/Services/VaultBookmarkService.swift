@@ -1667,9 +1667,13 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     /// Force re-fetch metadata and thumbnail from the web for a bookmark.
-    func refetchMetadata(for bookmarkID: UUID) {
+    func refetchMetadata(for bookmarkID: UUID, allowThumbnailReplacement: Bool = false) {
         cancelEnrichment(for: bookmarkID)
-        startEnrichmentIfNeeded(for: bookmarkID, force: true)
+        startEnrichmentIfNeeded(
+            for: bookmarkID,
+            force: true,
+            allowThumbnailReplacement: allowThumbnailReplacement
+        )
     }
 
     // MARK: - Carousel Image Management
@@ -1950,7 +1954,11 @@ final class VaultBookmarkService: ObservableObject {
         logger.info("Recovered thumbnail for bookmark \(bookmarkID)")
     }
 
-    private func startEnrichmentIfNeeded(for bookmarkID: UUID, force: Bool = false) {
+    private func startEnrichmentIfNeeded(
+        for bookmarkID: UUID,
+        force: Bool = false,
+        allowThumbnailReplacement: Bool = false
+    ) {
         guard schedulesEnrichment else { return }
         guard enrichmentTasks[bookmarkID] == nil else { return }
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
@@ -1968,8 +1976,10 @@ final class VaultBookmarkService: ObservableObject {
                 .first(where: { $0.id == bookmarkID })
                 .map { self.localThumbnailExists(relativePath: $0.thumbnailRelativePath) } ?? false
 
-            let allowsThumbnailReplacement = BookmarkNativeCapturePolicy
-                .allowsAutomaticThumbnailReplacement(hasUsableLocalThumbnail: hasUsableLocalThumbnail)
+            let allowsThumbnailReplacement = BookmarkNativeCapturePolicy.allowsThumbnailReplacement(
+                hasUsableLocalThumbnail: hasUsableLocalThumbnail,
+                isExplicitUserRefresh: allowThumbnailReplacement
+            )
 
             // Direct image URL
             if Self.isDirectImageURL(url) {
@@ -2011,7 +2021,8 @@ final class VaultBookmarkService: ObservableObject {
             if imageAssets == nil,
                BookmarkNativeCapturePolicy.allowsScreenshotFallback(
                 thumbnailURL: trustedThumbnailURL,
-                hasUsableLocalThumbnail: hasUsableLocalThumbnail
+                hasUsableLocalThumbnail: hasUsableLocalThumbnail,
+                isExplicitUserRefresh: allowThumbnailReplacement
                ),
                let screenshotData = payload?.screenshotData {
                 imageAssets = self.cacheImageAssets(
