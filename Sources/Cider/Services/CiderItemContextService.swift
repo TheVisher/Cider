@@ -874,8 +874,8 @@ final class CiderItemContextService {
         factors.append("stage:\(stage.name)")
         factors.append("matched_query:\(matchedQuery)")
         if stageIndex > 0 { factors.append("human_query_expansion:\(matchedQuery)") }
-        if let item = result.item, typeIntentBoost(item: item, query: matchedQuery) > 0 {
-            factors.append("type_intent_match")
+        if let item = result.item {
+            factors += typeIntentFactors(item: item, query: matchedQuery)
         }
         factors += evidence.factors
         return orderedUnique(factors)
@@ -1011,10 +1011,35 @@ final class CiderItemContextService {
         case .bookmark:
             return ["imdb", "movie", "tiktok", "steam", "game", "video", "capture"].contains { lower.contains($0) } ? 55 : 0
         case .note:
+            if isDailyJournal(item),
+               ["journal", "reflection", "voice", "driving", "parked"].contains(where: lower.contains) {
+                return 520
+            }
             return ["note", "hub", "work", "tl", "team leader"].contains { lower.contains($0) } ? 45 : 0
+        case .contact:
+            return ["contact", "person", "people", "vcf", "vcard"].contains { lower.contains($0) } ? 220 : 0
         default:
             return 0
         }
+    }
+
+    private func typeIntentFactors(item: CiderItemSummary, query: String) -> [String] {
+        guard typeIntentBoost(item: item, query: query) > 0 else { return [] }
+        let lower = query.lowercased()
+        switch item.type {
+        case .note where isDailyJournal(item)
+            && ["journal", "reflection", "voice", "driving", "parked"].contains(where: lower.contains):
+            return ["journal_intent_match", "type_intent_match"]
+        case .contact:
+            return ["contact_intent_match", "type_intent_match"]
+        default:
+            return ["type_intent_match"]
+        }
+    }
+
+    private func isDailyJournal(_ item: CiderItemSummary) -> Bool {
+        item.title.localizedCaseInsensitiveContains("Daily Journal")
+            || item.relativePath?.localizedCaseInsensitiveContains("Daily Journal") == true
     }
 
     private func chunk(id: String, owner: SecondBrainOwnerRef) throws -> CiderItemChunk? {

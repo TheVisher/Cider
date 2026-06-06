@@ -1667,6 +1667,75 @@ struct CiderCLIAgentSafetyTests {
         #expect(unfiledAfter["folderID"] == nil)
     }
 
+    @Test("item delete previews then trashes through approved item API")
+    func itemDeletePreviewsThenTrashesThroughApprovedItemAPI() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-item-delete-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "note",
+                "--title", "Dogfood cleanup delete fixture",
+                "--stdin",
+                "--json",
+            ],
+            vault: vault,
+            stdin: "Temporary cleanup-safe item."
+        )
+        let capture = try parseJSONObject(captureResult.stdout)
+        let noteID = try #require(
+            (capture["item"] as? [String: Any])?["id"] as? String
+                ?? (capture["note"] as? [String: Any])?["id"] as? String
+                ?? capture["id"] as? String
+        )
+
+        let previewResult = try runCLI(
+            args: ["item", "delete", "note", noteID, "--reason", "cleanup regression", "--json"],
+            vault: vault
+        )
+        let preview = try parseJSONObject(previewResult.stdout)
+        #expect(preview["ok"] as? Bool == true)
+        #expect(preview["command"] as? String == "item.delete")
+        #expect(preview["readOnly"] as? Bool == true)
+        #expect(preview["changed"] as? Bool == false)
+        #expect(preview["approvalRequired"] as? Bool == true)
+        #expect(preview["nextSafeAction"] as? String == "approve_delete")
+        let token = try #require(preview["requiredApprovalToken"] as? String)
+        #expect(token.hasPrefix("DELETE_ITEM_"))
+
+        let inspectBefore = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
+        let before = try parseJSONObject(inspectBefore.stdout)
+        #expect(before["ok"] as? Bool == true)
+
+        let deleteResult = try runCLI(
+            args: [
+                "item", "delete", "note", noteID,
+                "--reason", "cleanup regression",
+                "--approve", token,
+                "--execute",
+                "--json",
+            ],
+            vault: vault
+        )
+        let deleted = try parseJSONObject(deleteResult.stdout)
+        #expect(deleted["ok"] as? Bool == true)
+        #expect(deleted["readOnly"] as? Bool == false)
+        #expect(deleted["changed"] as? Bool == true)
+        #expect(deleted["trashItemID"] as? String != nil)
+        #expect(deleted["mutationAuditEntryID"] as? String != nil)
+        #expect(deleted["agentActionID"] as? String != nil)
+
+        let searchResult = try runCLI(
+            args: ["item", "search", "Dogfood cleanup delete fixture", "--limit", "5", "--json"],
+            vault: vault
+        )
+        let search = try parseJSONArray(searchResult.stdout)
+        #expect(search.isEmpty)
+    }
+
     @Test("file capture returns a canonical vault file id resolvable by item commands")
     func fileCaptureReturnsCanonicalVaultFileIDResolvableByItemCommands() throws {
         let vault = FileManager.default.temporaryDirectory

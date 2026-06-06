@@ -377,7 +377,7 @@ struct CiderCLI {
         case "review":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
         case "item":
-            return isMutationSubcommand(subcommand, in: ["move", "unfile", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "sync-project", "project-sync"])
+            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "sync-project", "project-sync"])
         case "label", "tag":
             return isMutationSubcommand(subcommand, in: ["create", "rename", "delete", "rm"])
         case "trash":
@@ -4495,6 +4495,7 @@ struct CiderCLI {
               cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
                 Do not pass artifact filenames such as Example.webloc to item move --path.
               cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
+              cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]
               cider-cli item apply-intent <type> <id-or-ref> --intent space|project [--actor <name>] [--json]
               cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
               cider-cli item backfill-kanban [--board <name-or-id>] [--json]
@@ -5356,6 +5357,9 @@ struct CiderCLI {
             } catch {
                 printCLIError(error.localizedDescription)
             }
+
+        case "delete", "rm":
+            handleItemDelete(args: args, contextService: contextService, store: store)
 
         case "route":
             let positional = leadingPositionalArgs(from: args)
@@ -14497,6 +14501,221 @@ struct CiderCLI {
         return commands.filter { seen.insert($0).inserted }
     }
 
+    static func handleItemDelete(
+        args: [String],
+        contextService: CiderItemContextService,
+        store: SecondBrainStore
+    ) {
+        let positional = leadingPositionalArgs(from: args)
+        guard positional.count >= 2, let reason = parseFlag("--reason", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty else {
+            printCLIError("Usage: cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]")
+            return
+        }
+        do {
+            let entityType = try ItemLinkService.entityType(from: positional[0])
+            guard LibraryEntityType.activeCases.contains(entityType) else {
+                printCLIError("item delete does not support \(entityType.rawValue).")
+                return
+            }
+            let ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
+            let before = try contextService.context(for: ref).item
+            let token = itemDeleteApprovalToken(ref: ref, reason: reason)
+            let execute = args.contains("--execute")
+            let approval = parseFlag("--approve", from: args)
+            let actor = parseFlag("--actor", from: args) ?? "agent"
+            let source = parseFlag("--source", from: args) ?? "cli.item.delete"
+
+            if !execute || approval != token {
+                let payload = itemDeleteEnvelope(
+                    ref: ref,
+                    before: before,
+                    reason: reason,
+                    readOnly: true,
+                    changed: false,
+                    approvalToken: token,
+                    actor: actor,
+                    source: source
+                )
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("About to trash \(before.type.rawValue): \(before.title)")
+                    print("  Path: \(before.relativePath ?? "(none)")")
+                    print("  Reason: \(reason)")
+                    print("  Approve with: cider-cli item delete \(ref.type.rawValue) \(ref.entityID.uuidString) --reason \"\(reason)\" --approve \(token) --execute")
+                }
+                return
+            }
+
+            let trashItem = try trashItem(ref: ref)
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: trashItem.itemType, trashItem: trashItem))
+
+            let auditEntry = MutationAuditService(database: .shared).record(
+                action: "item_delete",
+                itemType: ref.type.rawValue,
+                itemID: ref.entityID,
+                before: itemDeleteSummarySnapshot(before),
+                after: MutationAuditSnapshots.trashItem(trashItem),
+                metadata: [
+                    "command": "item.delete",
+                    "actor": actor,
+                    "source": source,
+                    "reason": reason,
+                    "trashItemID": trashItem.id.uuidString,
+                ],
+                source: source == "cli" || source.hasPrefix("cli.") ? .cli : .agent
+            )
+
+            let actionID = UUID().uuidString
+            try store.recordAgentAction(
+                SecondBrainAgentAction(
+                    id: actionID,
+                    owner: SecondBrainOwnerRef(ownerType: ref.type.rawValue, ownerID: ref.entityID.uuidString),
+                    itemID: nil,
+                    toolName: "item.delete",
+                    actionType: "item.delete",
+                    source: source,
+                    status: "succeeded",
+                    summary: "Trashed \(ref.type.rawValue):\(ref.entityID.uuidString) through approved item delete.",
+                    argumentsJSON: DatabaseHelpers.encodeJSON([
+                        "actor": actor,
+                        "reason": reason,
+                    ]),
+                    resultJSON: DatabaseHelpers.encodeJSON([
+                        "trashItemID": trashItem.id.uuidString,
+                        "mutationAuditEntryID": auditEntry?.id.uuidString ?? "",
+                    ])
+                )
+            )
+
+            var payload = itemDeleteEnvelope(
+                ref: ref,
+                before: before,
+                reason: reason,
+                readOnly: false,
+                changed: true,
+                approvalToken: token,
+                actor: actor,
+                source: source
+            )
+            payload["trashItemID"] = trashItem.id.uuidString
+            payload["mutationAuditEntryID"] = auditEntry?.id.uuidString
+            payload["agentActionID"] = actionID
+            payload["nextSafeAction"] = "inspect_trash"
+            payload["safeNextCommands"] = [
+                "cider-cli item search \"\(before.title)\" --limit 5 --json",
+                "cider-cli storage audit --json",
+            ]
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("Deleted: \(before.title) (moved to trash)")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func itemDeleteApprovalToken(ref: LibraryEntityRef, reason: String) -> String {
+        let seed = "\(ref.type.rawValue)|\(ref.entityID.uuidString)|\(reason)"
+        var hash: UInt64 = 1469598103934665603
+        for byte in seed.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1099511628211
+        }
+        return "DELETE_ITEM_" + String(hash, radix: 16).uppercased()
+    }
+
+    static func itemDeleteEnvelope(
+        ref: LibraryEntityRef,
+        before: CiderItemSummary,
+        reason: String,
+        readOnly: Bool,
+        changed: Bool,
+        approvalToken: String,
+        actor: String,
+        source: String
+    ) -> [String: Any] {
+        [
+            "ok": true,
+            "command": "item.delete",
+            "readOnly": readOnly,
+            "changed": changed,
+            "approvalRequired": readOnly,
+            "requiredApprovalToken": approvalToken,
+            "item": [
+                "type": ref.type.rawValue,
+                "id": ref.entityID.uuidString,
+            ],
+            "before": itemSummaryToDict(before),
+            "reason": reason,
+            "actor": actor,
+            "source": source,
+            "nextSafeAction": readOnly ? "approve_delete" : "inspect_trash",
+            "safeNextCommands": [
+                "cider-cli item delete \(ref.type.rawValue) \(ref.entityID.uuidString) --reason \"\(reason)\" --approve \(approvalToken) --execute --json",
+            ],
+            "rollbackGuidance": readOnly
+                ? "No mutation has happened. Execute only after verifying the item is safe to trash."
+                : "The item was moved to Cider trash and can be restored through Cider trash flows while retained.",
+        ]
+    }
+
+    static func trashItem(ref: LibraryEntityRef) throws -> TrashItem {
+        switch ref.type {
+        case .bookmark:
+            guard let bookmark = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == ref.entityID }),
+                  let item = VaultBookmarkService.shared.removeAll([bookmark]).first else {
+                throw CaptureAddArgumentError.message("No bookmark found for \(ref.entityID.uuidString).")
+            }
+            return item
+        case .note:
+            guard let note = NotesStorage.shared.notes.first(where: { $0.id == ref.entityID }) else {
+                throw CaptureAddArgumentError.message("No note found for \(ref.entityID.uuidString).")
+            }
+            return NotesStorage.shared.delete(note: note)
+        case .todo:
+            guard let item = TodoCardStorage.shared.deleteTodoCard(ref.entityID) else {
+                throw CaptureAddArgumentError.message("No todo found for \(ref.entityID.uuidString).")
+            }
+            return item
+        case .dateCard:
+            guard let item = DateCardStorage.shared.deleteDateCard(ref.entityID) else {
+                throw CaptureAddArgumentError.message("No event found for \(ref.entityID.uuidString).")
+            }
+            return item
+        case .contact:
+            guard let item = ContactStorage.shared.deleteContact(ref.entityID) else {
+                throw CaptureAddArgumentError.message("No contact found for \(ref.entityID.uuidString).")
+            }
+            return item
+        case .vaultFile:
+            guard let file = VaultFileService.shared.file(for: ref.entityID) else {
+                throw CaptureAddArgumentError.message("No vaultFile found for \(ref.entityID.uuidString).")
+            }
+            return TrashStorage.shared.trashVaultFile(file)
+        case .externalFile, .session:
+            throw CaptureAddArgumentError.message("item delete does not support \(ref.type.rawValue).")
+        }
+    }
+
+    static func itemDeleteSummarySnapshot(_ item: CiderItemSummary) -> [String: String] {
+        var snapshot: [String: String] = [
+            "id": item.id.uuidString,
+            "type": item.type.rawValue,
+            "title": item.title,
+            "createdAt": ISO8601DateFormatter().string(from: item.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: item.updatedAt),
+        ]
+        if let folderID = item.folderID {
+            snapshot["folderID"] = folderID.uuidString
+        }
+        if let relativePath = item.relativePath {
+            snapshot["relativePath"] = relativePath
+        }
+        return snapshot
+    }
+
     static func similarityCandidateToDict(_ candidate: SecondBrainSimilarityCandidate) -> [String: Any] {
         var dict: [String: Any] = [
             "id": candidate.id,
@@ -16025,6 +16244,7 @@ struct CiderCLI {
           cider-cli item batch-apply --stdin --approve <token> --execute [--actor <name>] [--json]
           cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
           cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
+          cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]
           cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
           cider-cli item doctor [--json]
 

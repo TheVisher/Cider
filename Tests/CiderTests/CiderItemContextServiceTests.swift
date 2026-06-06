@@ -744,6 +744,159 @@ struct CiderItemContextServiceTests {
         }
     }
 
+    @Test("journal phrase recall ranks recent daily journal body matches above generic voice titles")
+    func journalPhraseRecallRanksRecentDailyJournalBodyMatches() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let oldDate = Date(timeIntervalSince1970: 1_760_000_000)
+        let recentDate = Date(timeIntervalSince1970: 1_790_000_000)
+        let journal = LibraryEntityRef(type: .note, entityID: UUID())
+        let genericVoice = LibraryEntityRef(type: .note, entityID: UUID())
+        let voiceTitleCompetitor = LibraryEntityRef(type: .note, entityID: UUID())
+
+        try insertItem(
+            journal,
+            title: "Daily Journal 2026-06-05",
+            relativePath: "Inbox/Notes/Daily Journal 2026-06-05.md",
+            into: db,
+            createdAt: recentDate,
+            updatedAt: recentDate
+        )
+        try insertItem(
+            genericVoice,
+            title: "Voice memo archive",
+            relativePath: "Inbox/Notes/Voice memo archive.md",
+            into: db,
+            createdAt: oldDate,
+            updatedAt: oldDate
+        )
+        try insertItem(
+            voiceTitleCompetitor,
+            title: "Voice-derived reflection archive",
+            relativePath: "Inbox/Notes/Voice-derived reflection archive.md",
+            into: db,
+            createdAt: recentDate,
+            updatedAt: recentDate
+        )
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: journal.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: journal.entityID.uuidString,
+                source: "item_index.note",
+                title: "Daily Journal 2026-06-05",
+                body: "Dogfood QA 2026-06-05: Driving reflection. Voice-derived reflection phrase brake-light-moon-118.",
+                chunkIndex: 0
+            )
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: genericVoice.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: genericVoice.entityID.uuidString,
+                source: "item_index.note",
+                title: "Voice memo archive",
+                body: "Older generic voice notes without the daily journal reflection phrase.",
+                chunkIndex: 0
+            )
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: voiceTitleCompetitor.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: voiceTitleCompetitor.entityID.uuidString,
+                source: "item_index.note",
+                title: "Voice-derived reflection archive",
+                body: "Recent standalone voice note title competitor without daily journal append semantics.",
+                chunkIndex: 0
+            )
+        ])
+
+        let service = CiderItemContextService(
+            database: db,
+            secondBrainStore: store,
+            nowProvider: { recentDate }
+        )
+
+        let results = try service.search("voice-derived reflection", limit: 8)
+        #expect(results.first?.item?.id == journal.entityID)
+        #expect(results.first?.rankFactors.contains("journal_intent_match") == true)
+        #expect(results.first?.rankFactors.contains("matched_field:chunk_body") == true)
+
+        let report = try service.searchDiagnostics("voice-derived reflection", limit: 8)
+        let first = try #require(report.exactMatches.first)
+        #expect(first.item?.id == journal.entityID)
+        #expect(first.rankFactors.contains("journal_intent_match"))
+        #expect(first.rankFactors.contains("matched_field:chunk_body"))
+    }
+
+    @Test("broad new contact recall boosts recent contacts above unrelated new items")
+    func broadNewContactRecallBoostsRecentContacts() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let oldDate = Date(timeIntervalSince1970: 1_760_000_000)
+        let recentDate = Date(timeIntervalSince1970: 1_790_000_000)
+        let contact = LibraryEntityRef(type: .contact, entityID: UUID())
+        let unrelatedNew = LibraryEntityRef(type: .bookmark, entityID: UUID())
+
+        try insertItem(
+            contact,
+            title: "Avery Tester",
+            relativePath: "Inbox/Contacts/Avery Tester.vcf",
+            into: db,
+            createdAt: recentDate,
+            updatedAt: recentDate
+        )
+        try insertItem(
+            unrelatedNew,
+            title: "New controller bookmark",
+            relativePath: "Inbox/Bookmarks/New controller bookmark.webloc",
+            into: db,
+            createdAt: oldDate,
+            updatedAt: oldDate
+        )
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "contact", ownerID: contact.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: contact.entityID.uuidString,
+                source: "item_index.contact",
+                title: "Avery Tester",
+                body: "Recently captured contact vCard for Avery Tester.",
+                chunkIndex: 0
+            )
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: unrelatedNew.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: unrelatedNew.entityID.uuidString,
+                source: "item_index.bookmark",
+                title: "New controller bookmark",
+                body: "New product bookmark with no person or vCard context.",
+                chunkIndex: 0
+            )
+        ])
+
+        let service = CiderItemContextService(
+            database: db,
+            secondBrainStore: store,
+            nowProvider: { recentDate }
+        )
+
+        let results = try service.search("new contact", limit: 12)
+        #expect(results.first?.item?.id == contact.entityID)
+        #expect(results.first?.rankFactors.contains("contact_intent_match") == true)
+        #expect(results.first?.rankFactors.contains { $0.hasPrefix("recency_contribution:") } == true)
+
+        let report = try service.searchDiagnostics("new contact", limit: 12)
+        let first = try #require(report.exactMatches.first)
+        #expect(first.item?.id == contact.entityID)
+        #expect(first.rankFactors.contains("contact_intent_match"))
+        #expect(first.rankFactors.contains { $0.hasPrefix("recency_contribution:") })
+    }
+
     @Test("provider rank factors distinguish query intent from candidate evidence")
     func providerRankFactorsDistinguishQueryIntentFromCandidateEvidence() throws {
         let (db, url) = try makeTestDB()
