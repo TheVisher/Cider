@@ -247,6 +247,7 @@ struct BookmarkThumbnailView: View {
             let width = CGFloat(cgImage.width)
             let height = CGFloat(cgImage.height)
             guard width > 0, height > 0 else { return nil }
+            guard !BookmarkImageQuality.isLowInformationImage(cgImage) else { return nil }
 
             let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
 

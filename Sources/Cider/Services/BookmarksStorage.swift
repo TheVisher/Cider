@@ -1365,7 +1365,10 @@ final class BookmarksStorage: ObservableObject {
     }
 
     private func localThumbnailExists(relativePath: String?) -> Bool {
-        localImageExists(relativePath: relativePath)
+        guard localImageExists(relativePath: relativePath) else { return false }
+        guard let relativePath, !relativePath.isEmpty else { return false }
+        let url = directoryURL.appendingPathComponent(relativePath)
+        return !BookmarkImageQuality.isLowInformationImage(at: url)
     }
 
     private func localImageExists(relativePath: String?) -> Bool {
@@ -1730,6 +1733,7 @@ final class BookmarksStorage: ObservableObject {
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
             return nil
         }
+        guard !BookmarkImageQuality.isLowInformationImage(cgImage) else { return nil }
 
         let destinationData = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(

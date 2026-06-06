@@ -2257,7 +2257,10 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     private func localThumbnailExists(relativePath: String?) -> Bool {
-        localImageExists(relativePath: relativePath)
+        guard localImageExists(relativePath: relativePath) else { return false }
+        guard let relativePath, !relativePath.isEmpty else { return false }
+        let url = bookmarksMetaDir.appendingPathComponent(relativePath)
+        return !BookmarkImageQuality.isLowInformationImage(at: url)
     }
 
     private func localImageExists(relativePath: String?) -> Bool {
@@ -2328,6 +2331,7 @@ final class VaultBookmarkService: ObservableObject {
     ) -> BookmarkImageAssets? {
         guard data.count > 128, data.count < 12_000_000 else { return nil }
         guard NSImage(data: data) != nil else { return nil }
+        guard !BookmarkImageQuality.isLowInformationImageData(data) else { return nil }
 
         let isAnimated = preferredFileExtension?.lowercased() == "gif"
             || Self.isGIFData(data)
@@ -2957,6 +2961,7 @@ final class VaultBookmarkService: ObservableObject {
         ]
 
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else { return nil }
+        guard !BookmarkImageQuality.isLowInformationImage(cgImage) else { return nil }
 
         let destinationData = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
