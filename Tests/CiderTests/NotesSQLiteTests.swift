@@ -502,6 +502,102 @@ struct NotesSQLiteTests {
         #expect(Set(reloaded.notes.map(\.content)) == Set(["Legacy body", "Inbox body"]))
     }
 
+    @Test("Markdown rescan ignores directories with md suffix")
+    func markdownRescanIgnoresDirectoriesWithMDSuffix() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let inboxDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
+        try fm.createDirectory(at: inboxDir, withIntermediateDirectories: true)
+        let directoryNamedLikeNote = inboxDir.appendingPathComponent("Voice journal - Ute-Janine trains.md", isDirectory: true)
+        try fm.createDirectory(at: directoryNamedLikeNote, withIntermediateDirectories: true)
+
+        let reconciler = makeService(db)
+        reconciler.rescan()
+
+        #expect(reconciler.notes.isEmpty)
+
+        let countStmt = try db.prepare("""
+            SELECT count(*)
+            FROM items
+            WHERE type = 'note'
+              AND relative_path = 'Inbox/Notes/Voice journal - Ute-Janine trains.md';
+            """)
+        try countStmt.step()
+        #expect(countStmt.int(at: 0) == 0)
+    }
+
+    @Test("Project artifact rescan reuses existing item row by relative path")
+    func projectArtifactRescanReusesExistingItemRowByRelativePath() throws {
+        let (db, url) = try makeTestDB()
+        let vault = makeTempVaultURL()
+        let fm = FileManager.default
+        defer {
+            db.close()
+            cleanup(url)
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? fm.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let projectNoteRelativePath = "Projects/Cider/QA/Runtime Hang Audit.md"
+        let projectNoteURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(projectNoteRelativePath)
+        try fm.createDirectory(at: projectNoteURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "Runtime evidence".write(to: projectNoteURL, atomically: true, encoding: .utf8)
+        let newProjectNoteRelativePath = "Projects/Cider/QA/Fresh Runtime Finding.md"
+        let newProjectNoteURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(newProjectNoteRelativePath)
+        try "Fresh evidence".write(to: newProjectNoteURL, atomically: true, encoding: .utf8)
+
+        let existingID = UUID()
+        let seeded = makeService(db)
+        seeded.persistNoteToDatabase(
+            db,
+            note: Note(
+                id: existingID,
+                title: "Runtime Hang Audit",
+                content: "Runtime evidence",
+                createdAt: Date(timeIntervalSince1970: 1_000),
+                modifiedAt: Date(timeIntervalSince1970: 2_000),
+                relativePath: projectNoteRelativePath
+            )
+        )
+
+        let reconciler = makeService(db)
+        reconciler.loadNotesFromDatabase(db)
+        reconciler.rescan()
+
+        let reloaded = makeService(db)
+        reloaded.loadNotesFromDatabase(db)
+
+        let matchingNotes = reloaded.notes.filter { $0.relativePath == projectNoteRelativePath }
+        #expect(matchingNotes.map(\.id) == [existingID])
+        #expect(matchingNotes.first?.projectID == "cider")
+        #expect(matchingNotes.first?.artifactType == "qa")
+        #expect(reloaded.notes.contains { $0.relativePath == newProjectNoteRelativePath })
+
+        let countStmt = try db.prepare("""
+            SELECT count(*)
+            FROM items
+            WHERE type = 'note'
+              AND relative_path = ?;
+            """)
+        countStmt.bind(projectNoteRelativePath, at: 1)
+        try countStmt.step()
+        #expect(countStmt.int(at: 0) == 1)
+    }
+
     @Test("Markdown rescan collapses exact duplicate note artifacts")
     func markdownRescanCollapsesExactDuplicateNoteArtifacts() throws {
         let (db, url) = try makeTestDB()

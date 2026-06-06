@@ -213,17 +213,22 @@ final class NotesStorage: ObservableObject {
 
     // MARK: - Scanning
 
+    private nonisolated static func isRegularMarkdownFile(_ url: URL) -> Bool {
+        guard url.pathExtension.localizedCaseInsensitiveCompare("md") == .orderedSame else { return false }
+        return (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+    }
+
     func scanNotes() {
         contentCache.removeAll()
         let fm = FileManager.default
 
         // Scan both .cider/notes/ (legacy) and Inbox/Notes/ for unfiled notes
         var allFiles: [(url: URL, relativePrefix: String?)] = []
-        if let files = try? fm.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]) {
+        if let files = try? fm.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .isRegularFileKey]) {
             for f in files { allFiles.append((f, nil)) }
         }
         let inboxDir = inboxNotesDirectoryURL
-        if let inboxFiles = try? fm.contentsOfDirectory(at: inboxDir, includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]) {
+        if let inboxFiles = try? fm.contentsOfDirectory(at: inboxDir, includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .isRegularFileKey]) {
             for f in inboxFiles { allFiles.append((f, "\(StoragePaths.inboxDir)/Notes")) }
         }
 
@@ -247,7 +252,7 @@ final class NotesStorage: ObservableObject {
 
         var scannedNotes: [Note] = []
         for (fileURL, relativePrefix) in allFiles {
-            guard fileURL.pathExtension == "md" else { continue }
+            guard Self.isRegularMarkdownFile(fileURL) else { continue }
             let filename = fileURL.lastPathComponent
             guard filename != indexFileName else { continue }
 
@@ -322,7 +327,7 @@ final class NotesStorage: ObservableObject {
             if let vaultFolder = VaultFolderService.shared.folder(for: entryFolderID) {
                 let filePath = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
                     .appendingPathComponent(entry.filename).path
-                if fm.fileExists(atPath: filePath) {
+                if Self.isRegularMarkdownFile(URL(fileURLWithPath: filePath)) {
                     rebuiltIndex[uuid] = entry
                     let fileAttrs = try? fm.attributesOfItem(atPath: filePath)
                     let modDate = (fileAttrs?[.modificationDate] as? Date) ?? Date()
@@ -483,10 +488,10 @@ final class NotesStorage: ObservableObject {
             let folderDir = vaultRoot.appendingPathComponent(folder.relativePath)
             guard let files = try? fm.contentsOfDirectory(
                 at: folderDir,
-                includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]
+                includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .isRegularFileKey]
             ) else { continue }
 
-            for file in files where file.pathExtension == "md" {
+            for file in files where Self.isRegularMarkdownFile(file) {
                 let filename = file.lastPathComponent
                 if knownFolderFiles.contains("\(folder.id.uuidString):\(filename)") { continue }
 
@@ -549,11 +554,11 @@ final class NotesStorage: ObservableObject {
                 let artifactDir = projectDir.appendingPathComponent(artifactDirectory.name, isDirectory: true)
                 guard let files = try? fm.contentsOfDirectory(
                     at: artifactDir,
-                    includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey],
+                    includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey, .isRegularFileKey],
                     options: [.skipsHiddenFiles]
                 ) else { continue }
 
-                for file in files where file.pathExtension.localizedCaseInsensitiveCompare("md") == .orderedSame {
+                for file in files where Self.isRegularMarkdownFile(file) {
                     let relativePath = "Projects/\(projectDir.lastPathComponent)/\(artifactDirectory.name)/\(file.lastPathComponent)"
                     let normalizedPath = Self.normalizedNoteRelativePath(relativePath)
                     guard !knownRelativePaths.contains(normalizedPath) else { continue }
@@ -561,7 +566,9 @@ final class NotesStorage: ObservableObject {
                     let attrs = try? fm.attributesOfItem(atPath: file.path)
                     let modDate = attrs?[.modificationDate] as? Date ?? Date()
                     let createDate = attrs?[.creationDate] as? Date ?? modDate
-                    let uuid = projectNoteIDFromExistingRelation(relativePath: relativePath) ?? UUID()
+                    let uuid = projectNoteIDFromExistingRelation(relativePath: relativePath)
+                        ?? noteIDFromExistingItem(relativePath: relativePath)
+                        ?? UUID()
                     index[uuid] = NoteIndexEntry(filename: file.lastPathComponent, folderID: nil, createdAt: createDate)
                     notes.append(Note(
                         id: uuid,
@@ -617,6 +624,25 @@ final class NotesStorage: ObservableObject {
         return nil
     }
 
+    private func noteIDFromExistingItem(relativePath: String) -> UUID? {
+        guard let db = resolvedDatabase else { return nil }
+        do {
+            let stmt = try db.prepare("""
+                SELECT id
+                FROM items
+                WHERE type = 'note'
+                  AND relative_path = ?
+                LIMIT 1;
+                """)
+            stmt.bind(relativePath, at: 1)
+            guard try stmt.step() else { return nil }
+            return DatabaseHelpers.decodeUUID(stmt.string(at: 0))
+        } catch {
+            logger.error("Failed to inspect existing note item by relative path: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     private func removeDuplicateProjectNoteRelations(relativePath: String, keeping keptID: UUID) {
         guard let db = resolvedDatabase else { return }
         do {
@@ -660,7 +686,7 @@ final class NotesStorage: ObservableObject {
 
             let filePath = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
                 .appendingPathComponent(entry.filename)
-            guard fm.fileExists(atPath: filePath.path) else { continue }
+            guard Self.isRegularMarkdownFile(filePath) else { continue }
 
             let attrs = try? fm.attributesOfItem(atPath: filePath.path)
             let modDate = attrs?[.modificationDate] as? Date ?? Date()
@@ -703,7 +729,7 @@ final class NotesStorage: ObservableObject {
         var allFiles: [(url: URL, relativePrefix: String?)] = []
         if let files = try? fm.contentsOfDirectory(
             at: directoryURL,
-            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]
+            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .isRegularFileKey]
         ) {
             for f in files { allFiles.append((f, nil)) }
         }
@@ -716,7 +742,7 @@ final class NotesStorage: ObservableObject {
             .appendingPathComponent("Notes")
         if let inboxFiles = try? fm.contentsOfDirectory(
             at: inboxNotesDir,
-            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]
+            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .isRegularFileKey]
         ) {
             for f in inboxFiles { allFiles.append((f, "\(StoragePaths.inboxDir)/Notes")) }
         }
@@ -737,7 +763,7 @@ final class NotesStorage: ObservableObject {
         var scannedNotes: [Note] = []
 
         for (fileURL, relativePrefix) in allFiles {
-            guard fileURL.pathExtension == "md" else { continue }
+            guard Self.isRegularMarkdownFile(fileURL) else { continue }
             let filename = fileURL.lastPathComponent
             guard filename != indexFileName else { continue }
 
