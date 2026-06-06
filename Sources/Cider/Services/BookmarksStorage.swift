@@ -1160,28 +1160,23 @@ final class BookmarksStorage: ObservableObject {
                 imageAssets = await self.cacheImageAssets(from: thumbnailURL, for: bookmarkID, pageURL: url)
             }
 
-            // Screenshot fallback — if og:image download failed but we have a page screenshot
-            if imageAssets == nil, let screenshotData = payload?.screenshotData {
+            let hasUsableLocalThumbnail = self.bookmarks
+                .first(where: { $0.id == bookmarkID })
+                .map { self.localThumbnailExists(relativePath: $0.thumbnailRelativePath) } ?? false
+
+            // Screenshot fallback only when metadata did not find a provider
+            // thumbnail and no usable local thumbnail exists.
+            if imageAssets == nil,
+               BookmarkNativeCapturePolicy.allowsScreenshotFallback(
+                thumbnailURL: trustedThumbnailURL,
+                hasUsableLocalThumbnail: hasUsableLocalThumbnail
+               ),
+               let screenshotData = payload?.screenshotData {
                 imageAssets = self.cacheImageAssets(
                     from: screenshotData,
                     for: bookmarkID,
                     preferredFileExtension: "jpg"
                 )
-            }
-
-            // WebView screenshot fallback — if thumbnail URL was found but download
-            // failed (e.g., Cloudflare blocking image requests), capture a screenshot
-            if imageAssets == nil, payload?.thumbnailURL != nil {
-                let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
-                enrichLog.info("Thumbnail download failed, trying WebView screenshot for \(url.host ?? "?", privacy: .public)")
-                let extracted = await WebViewMetadataExtractor.extract(from: url)
-                if let screenshotData = extracted.screenshotData {
-                    imageAssets = self.cacheImageAssets(
-                        from: screenshotData,
-                        for: bookmarkID,
-                        preferredFileExtension: "jpg"
-                    )
-                }
             }
 
             await self.completeEnrichment(

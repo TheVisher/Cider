@@ -10,4 +10,12 @@ struct BookmarkNativeCapturePolicyTests {
         #expect(BookmarkNativeCapturePolicy.allowsScreenshotFallback(thumbnailURL: nil))
         #expect(!BookmarkNativeCapturePolicy.allowsScreenshotFallback(thumbnailURL: providerThumbnail))
     }
+
+    @Test("screenshots do not replace an existing usable local thumbnail")
+    func screenshotsDoNotReplaceExistingLocalThumbnail() {
+        #expect(!BookmarkNativeCapturePolicy.allowsScreenshotFallback(
+            thumbnailURL: nil,
+            hasUsableLocalThumbnail: true
+        ))
+    }
 }

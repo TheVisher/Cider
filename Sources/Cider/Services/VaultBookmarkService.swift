@@ -1996,11 +1996,18 @@ final class VaultBookmarkService: ObservableObject {
                 )
             }
 
+            let hasUsableLocalThumbnail = self.bookmarks
+                .first(where: { $0.id == bookmarkID })
+                .map { self.localThumbnailExists(relativePath: $0.thumbnailRelativePath) } ?? false
+
             // Screenshot fallback only when native metadata did not find a provider
-            // thumbnail. If a provider thumbnail URL exists but downloading it fails,
-            // keep the remote URL for retry instead of locking in a generic page shell.
+            // thumbnail and no usable local thumbnail exists. If a bookmark already
+            // has a good preview, a rendered fallback must not replace it.
             if imageAssets == nil,
-               BookmarkNativeCapturePolicy.allowsScreenshotFallback(thumbnailURL: trustedThumbnailURL),
+               BookmarkNativeCapturePolicy.allowsScreenshotFallback(
+                thumbnailURL: trustedThumbnailURL,
+                hasUsableLocalThumbnail: hasUsableLocalThumbnail
+               ),
                let screenshotData = payload?.screenshotData {
                 imageAssets = self.cacheImageAssets(
                     from: screenshotData,
