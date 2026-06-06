@@ -1736,6 +1736,113 @@ struct CiderCLIAgentSafetyTests {
         #expect(search.isEmpty)
     }
 
+    @Test("item delete removes stale all library index entries")
+    func itemDeleteRemovesStaleAllLibraryIndexEntries() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-item-delete-index-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "note",
+                "--title", "Dogfood cleanup stale index fixture",
+                "--stdin",
+                "--json",
+            ],
+            vault: vault,
+            stdin: "Temporary cleanup-safe item."
+        )
+        let capture = try parseJSONObject(captureResult.stdout)
+        let noteID = try #require(
+            (capture["item"] as? [String: Any])?["id"] as? String
+                ?? (capture["note"] as? [String: Any])?["id"] as? String
+                ?? capture["id"] as? String
+        )
+
+        let ciderDir = vault.appendingPathComponent(".cider", isDirectory: true)
+        try FileManager.default.createDirectory(at: ciderDir, withIntermediateDirectories: true)
+        let indexURL = ciderDir.appendingPathComponent("index.json")
+        let staleIndex: [String: Any] = [
+            "version": 1,
+            "items": [
+                noteID: [
+                    "type": "note",
+                    "path": "Inbox/Notes/\(noteID).md",
+                    "title": "Dogfood cleanup stale index fixture",
+                    "createdAt": "2026-06-06T00:00:00Z",
+                    "updatedAt": "2026-06-06T00:00:00Z",
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: staleIndex, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: indexURL)
+
+        let previewResult = try runCLI(
+            args: ["item", "delete", "note", noteID, "--reason", "cleanup stale index regression", "--json"],
+            vault: vault
+        )
+        let preview = try parseJSONObject(previewResult.stdout)
+        let token = try #require(preview["requiredApprovalToken"] as? String)
+
+        _ = try runCLI(
+            args: [
+                "item", "delete", "note", noteID,
+                "--reason", "cleanup stale index regression",
+                "--approve", token,
+                "--execute",
+                "--json",
+            ],
+            vault: vault
+        )
+
+        let indexData = try Data(contentsOf: indexURL)
+        let indexObject = try #require(JSONSerialization.jsonObject(with: indexData) as? [String: Any])
+        let items = try #require(indexObject["items"] as? [String: Any])
+        #expect(items[noteID] == nil)
+    }
+
+    @Test("item rebuild index prunes stale all library entries")
+    func itemRebuildIndexPrunesStaleAllLibraryEntries() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-item-rebuild-index-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let staleID = UUID().uuidString
+        let ciderDir = vault.appendingPathComponent(".cider", isDirectory: true)
+        try FileManager.default.createDirectory(at: ciderDir, withIntermediateDirectories: true)
+        let indexURL = ciderDir.appendingPathComponent("index.json")
+        let staleIndex: [String: Any] = [
+            "version": 1,
+            "items": [
+                staleID: [
+                    "type": "bookmark",
+                    "path": "Inbox/Bookmarks/\(staleID).json",
+                    "title": "Dogfood cleanup stale all-library card",
+                    "createdAt": "2026-06-06T00:00:00Z",
+                    "updatedAt": "2026-06-06T00:00:00Z",
+                    "url": "https://example.invalid/dogfood",
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: staleIndex, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: indexURL)
+
+        let result = try runCLI(args: ["item", "rebuild-index", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.rebuild-index")
+        #expect(payload["changed"] as? Bool == true)
+        #expect(payload["removedStaleCount"] as? Int == 1)
+
+        let indexData = try Data(contentsOf: indexURL)
+        let indexObject = try #require(JSONSerialization.jsonObject(with: indexData) as? [String: Any])
+        let items = try #require(indexObject["items"] as? [String: Any])
+        #expect(items[staleID] == nil)
+    }
+
     @Test("file capture returns a canonical vault file id resolvable by item commands")
     func fileCaptureReturnsCanonicalVaultFileIDResolvableByItemCommands() throws {
         let vault = FileManager.default.temporaryDirectory

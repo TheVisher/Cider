@@ -31,6 +31,12 @@ struct VaultFile: Identifiable, Hashable, Codable {
         return (filename as NSString).deletingPathExtension
     }
 
+    var isProjectArtifact: Bool {
+        let components = relativePath.split(separator: "/").map(String.init)
+        guard components.count >= 3, components[0] == "Projects" else { return false }
+        return ["QA", "Plans", "Handoffs", "Decisions", "Notes"].contains(components[2])
+    }
+
     // MARK: - Codable
 
     private enum CodingKeys: String, CodingKey {

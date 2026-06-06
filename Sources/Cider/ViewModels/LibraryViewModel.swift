@@ -25,7 +25,9 @@ final class LibraryViewModel: ObservableObject {
         let dateCardItems = DateCardStorage.shared.dateCards.map { LibraryItemV2.dateCard($0) }
         let contactItems = ContactStorage.shared.contacts.map { LibraryItemV2.contact($0) }
         let todoItems = TodoCardStorage.shared.todoCards.map { LibraryItemV2.todo($0) }
-        let vaultFileItems = VaultFileService.shared.files.map { LibraryItemV2.vaultFile($0) }
+        let vaultFileItems = VaultFileService.shared.files
+            .filter { !$0.isProjectArtifact }
+            .map { LibraryItemV2.vaultFile($0) }
 
         let all = bookmarkItems + noteItems + dateCardItems + contactItems + todoItems + vaultFileItems
         items = all

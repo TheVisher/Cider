@@ -377,7 +377,7 @@ struct CiderCLI {
         case "review":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
         case "item":
-            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "sync-project", "project-sync"])
+            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "sync-project", "project-sync"])
         case "label", "tag":
             return isMutationSubcommand(subcommand, in: ["create", "rename", "delete", "rm"])
         case "trash":
@@ -4496,6 +4496,7 @@ struct CiderCLI {
                 Do not pass artifact filenames such as Example.webloc to item move --path.
               cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
               cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]
+              cider-cli item rebuild-index [--json]
               cider-cli item apply-intent <type> <id-or-ref> --intent space|project [--actor <name>] [--json]
               cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
               cider-cli item backfill-kanban [--board <name-or-id>] [--json]
@@ -5360,6 +5361,9 @@ struct CiderCLI {
 
         case "delete", "rm":
             handleItemDelete(args: args, contextService: contextService, store: store)
+
+        case "rebuild-index", "rebuild-vault-index":
+            handleItemRebuildIndex()
 
         case "route":
             let positional = leadingPositionalArgs(from: args)
@@ -14548,6 +14552,7 @@ struct CiderCLI {
             }
 
             let trashItem = try trashItem(ref: ref)
+            VaultIndexService.shared.remove(id: ref.entityID)
             CiderUndoManager.shared.record(.deletedToTrash(itemType: trashItem.itemType, trashItem: trashItem))
 
             let auditEntry = MutationAuditService(database: .shared).record(
@@ -14714,6 +14719,42 @@ struct CiderCLI {
             snapshot["relativePath"] = relativePath
         }
         return snapshot
+    }
+
+    static func handleItemRebuildIndex() {
+        VaultIndexService.shared.updateVaultRoot()
+        let beforeIDs = Set(VaultIndexService.shared.entries.keys)
+        let beforeCount = beforeIDs.count
+        VaultIndexService.shared.rebuildFromCurrentState()
+        let afterIDs = Set(VaultIndexService.shared.entries.keys)
+        let afterCount = afterIDs.count
+        let removedStaleIDs = beforeIDs.subtracting(afterIDs).map(\.uuidString).sorted()
+        let addedIDs = afterIDs.subtracting(beforeIDs).map(\.uuidString).sorted()
+        let payload: [String: Any] = [
+            "ok": true,
+            "command": "item.rebuild-index",
+            "readOnly": false,
+            "changed": beforeIDs != afterIDs,
+            "mutationReason": "Rebuilt the all-library vault index cache from current typed storage services.",
+            "beforeCount": beforeCount,
+            "afterCount": afterCount,
+            "removedStaleCount": removedStaleIDs.count,
+            "addedCount": addedIDs.count,
+            "removedStaleIDs": removedStaleIDs,
+            "addedIDs": addedIDs,
+            "safeNextCommands": [
+                "cider-cli item search <query> --json",
+                "cider-cli storage audit --json",
+            ],
+        ]
+        if jsonOutput {
+            outputJSON(payload)
+        } else {
+            print("Rebuilt all-library index: \(beforeCount) -> \(afterCount) entries.")
+            if !removedStaleIDs.isEmpty {
+                print("Removed stale entries: \(removedStaleIDs.count)")
+            }
+        }
     }
 
     static func similarityCandidateToDict(_ candidate: SecondBrainSimilarityCandidate) -> [String: Any] {
@@ -16245,6 +16286,7 @@ struct CiderCLI {
           cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
           cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
           cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]
+          cider-cli item rebuild-index [--json]
           cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
           cider-cli item doctor [--json]
 

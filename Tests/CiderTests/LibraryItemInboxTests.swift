@@ -48,4 +48,30 @@ final class LibraryItemInboxTests: XCTestCase {
         XCTAssertTrue(LibraryItemV2.contact(ContactCard(displayName: "Unfiled")).isInboxItem)
         XCTAssertFalse(LibraryItemV2.contact(ContactCard(displayName: "Filed", folderID: folderID)).isInboxItem)
     }
+
+    func testProjectQaVaultFilesAreProjectArtifacts() {
+        let evidence = VaultFile(
+            id: UUID(),
+            filename: "sample.txt",
+            relativePath: "Projects/Cider/QA/2026-06-06-runtime-evidence/sample.txt",
+            fileType: .document,
+            fileSize: 10,
+            createdAt: Date(),
+            modifiedAt: Date(),
+            folderID: nil
+        )
+        let regular = VaultFile(
+            id: UUID(),
+            filename: "sample.txt",
+            relativePath: "Inbox/Files/sample.txt",
+            fileType: .document,
+            fileSize: 10,
+            createdAt: Date(),
+            modifiedAt: Date(),
+            folderID: nil
+        )
+
+        XCTAssertTrue(evidence.isProjectArtifact)
+        XCTAssertFalse(regular.isProjectArtifact)
+    }
 }
