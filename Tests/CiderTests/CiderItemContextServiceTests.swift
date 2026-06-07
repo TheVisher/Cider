@@ -557,6 +557,56 @@ struct CiderItemContextServiceTests {
         })
     }
 
+    @Test("life memory search scope suppresses QA artifacts while QA scope keeps them searchable")
+    func searchScopesSeparateLifeMemoryFromQAArtifacts() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let event = LibraryEntityRef(type: .dateCard, entityID: UUID())
+        let qaFile = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        let qaNote = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(event, title: "Warhorse reveal event", relativePath: "Events/Warhorse reveal.event", into: db)
+        try insertItem(qaFile, title: "Event search QA screenshot", relativePath: "Projects/Cider/QA/event-search.png", into: db)
+        try insertItem(qaNote, title: "Event search audit", relativePath: "Projects/Cider/QA/Event search audit.md", into: db)
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "vaultFile", ownerID: qaFile.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: qaFile.entityID.uuidString, source: "file-ocr", title: "Event search QA screenshot", body: "event QA artifact screenshot", chunkIndex: 0)
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: qaNote.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: qaNote.entityID.uuidString, source: "note", title: "Event search audit", body: "event QA artifact audit", chunkIndex: 0)
+        ])
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let lifeResults = try service.search("event", limit: 10, scope: .personalMemory)
+        let qaResults = try service.search("event", limit: 10, scope: .qaArtifacts)
+
+        #expect(lifeResults.first?.item?.id == event.entityID)
+        #expect(lifeResults.allSatisfy { $0.item?.relativePath?.contains("/QA/") != true })
+        let qaResultIDs = qaResults.compactMap { $0.item?.id }
+        #expect(qaResultIDs.contains(qaFile.entityID))
+        #expect(qaResultIDs.contains(qaNote.entityID))
+        #expect(qaResults.allSatisfy { $0.item?.relativePath?.contains("/QA/") == true })
+    }
+
+    @Test("item search result JSON can expose selected search scope")
+    func itemSearchJSONExposesSelectedScope() throws {
+        let result = CiderItemSearchResult(
+            id: "item-\(UUID().uuidString)",
+            kind: .item,
+            owner: SecondBrainOwnerRef(ownerType: "dateCard", ownerID: UUID().uuidString),
+            item: nil,
+            title: "Family event",
+            snippet: "event",
+            rank: 100,
+            searchScope: .personalMemory
+        )
+
+        let dict = CiderCLI.itemSearchResultToDict(result)
+
+        #expect(dict["searchScope"] as? String == "personalMemory")
+    }
+
     @Test("search diagnostics filter low signal natural language expansions")
     func searchDiagnosticsFilterLowSignalNaturalLanguageExpansions() throws {
         let (db, url) = try makeTestDB()

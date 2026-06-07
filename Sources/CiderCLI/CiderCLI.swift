@@ -4588,7 +4588,7 @@ struct CiderCLI {
         case nil, "help", "--help", "-h":
             print("""
             Item graph commands:
-              cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]
+              cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--space <space-id|name>] [--limit <n>] [--json]
               cider-cli item search-debug <query> [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
@@ -4627,19 +4627,29 @@ struct CiderCLI {
         case "search":
             let query = leadingPositionalArgs(from: args).joined(separator: " ")
             guard !query.isEmpty else {
-                printCLIError("Usage: cider-cli item search <query> [--limit <n>] [--json]")
+                printCLIError("Usage: cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--limit <n>] [--json]")
                 return
             }
             let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 20
             do {
                 let space = resolveOptionalSpaceFlag(from: args)
                 if parseFlag("--space", from: args) != nil, space == nil { return }
-                let results = try contextService.search(query, limit: limit, inSpaceID: space?.id)
+                guard let scope = parseItemSearchScope(from: args) else { return }
+                let results = try contextService.search(query, limit: limit, inSpaceID: space?.id, scope: scope)
                 if jsonOutput {
                     if let space {
                         outputJSON([
                             "ok": true,
+                            "query": query,
+                            "searchScope": scope.rawValue,
                             "space": spaceToDict(space),
+                            "results": results.map(itemSearchResultToDict),
+                        ])
+                    } else if parseFlag("--scope", from: args) != nil {
+                        outputJSON([
+                            "ok": true,
+                            "query": query,
+                            "searchScope": scope.rawValue,
                             "results": results.map(itemSearchResultToDict),
                         ])
                     } else {
@@ -4653,7 +4663,8 @@ struct CiderCLI {
                     }
                 } else {
                     let scope = space.map { " in Space \($0.name)" } ?? ""
-                    print("Item graph search '\(query)'\(scope) (\(results.count) results):")
+                    let searchScope = parseFlag("--scope", from: args).map { " [scope: \($0)]" } ?? ""
+                    print("Item graph search '\(query)'\(scope)\(searchScope) (\(results.count) results):")
                     for result in results {
                         let label = result.kind == .item ? "item" : "chunk"
                         print("  [\(label) \(result.owner.ownerType):\(result.owner.ownerID)] \(result.title) — \(result.snippet)")
@@ -9917,6 +9928,16 @@ struct CiderCLI {
         guard let flagIndex = args.firstIndex(of: flag),
               flagIndex + 1 < args.count else { return nil }
         return args[flagIndex + 1]
+    }
+
+    static func parseItemSearchScope(from args: [String]) -> CiderItemSearchScope? {
+        guard let rawScope = parseFlag("--scope", from: args) else { return .all }
+        if let scope = CiderItemSearchScope(rawValue: rawScope) {
+            return scope
+        }
+        let supported = CiderItemSearchScope.allCases.map(\.rawValue).joined(separator: ", ")
+        printCLIError("Unsupported item search scope '\(rawScope)'. Supported scopes: \(supported)")
+        return nil
     }
 
     static func firstPositionalArgument(from args: [String], valueFlags: Set<String> = []) -> String? {
@@ -15384,6 +15405,7 @@ struct CiderCLI {
             "title": result.title,
             "snippet": result.snippet,
             "rank": result.rank,
+            "searchScope": result.searchScope.rawValue,
         ]
         if let item = result.item {
             dict["item"] = itemSummaryToDict(item)
@@ -16656,7 +16678,7 @@ struct CiderCLI {
           cider-cli test-run cleanup <run-id> --approve <token> --execute [--json]
 
         ITEM
-          cider-cli item search <query> [--space <space-id|name>] [--limit <n>] [--json]
+          cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--space <space-id|name>] [--limit <n>] [--json]
           cider-cli item search-debug <query> [--limit <n>] [--json]
           cider-cli item get <type> <id-or-ref> [--json]
           cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]

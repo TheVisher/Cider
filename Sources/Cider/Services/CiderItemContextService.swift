@@ -119,6 +119,14 @@ enum CiderItemSearchResultKind: String, Codable {
     case chunk
 }
 
+enum CiderItemSearchScope: String, Codable, CaseIterable, Equatable {
+    case all
+    case personalMemory
+    case projectKanban
+    case qaArtifacts
+    case files
+}
+
 struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var id: String
     var kind: CiderItemSearchResultKind
@@ -130,6 +138,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var stage: String?
     var matchedQuery: String?
     var rankFactors: [String]
+    var searchScope: CiderItemSearchScope
 
     init(
         id: String,
@@ -141,7 +150,8 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         rank: Double,
         stage: String? = nil,
         matchedQuery: String? = nil,
-        rankFactors: [String] = []
+        rankFactors: [String] = [],
+        searchScope: CiderItemSearchScope = .all
     ) {
         self.id = id
         self.kind = kind
@@ -153,6 +163,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         self.stage = stage
         self.matchedQuery = matchedQuery
         self.rankFactors = rankFactors
+        self.searchScope = searchScope
     }
 }
 
@@ -334,7 +345,12 @@ final class CiderItemContextService {
         }
     }
 
-    func search(_ query: String, limit: Int = 20, inSpaceID spaceID: String? = nil) throws -> [CiderItemSearchResult] {
+    func search(
+        _ query: String,
+        limit: Int = 20,
+        inSpaceID spaceID: String? = nil,
+        scope: CiderItemSearchScope = .all
+    ) throws -> [CiderItemSearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
@@ -343,7 +359,8 @@ final class CiderItemContextService {
         return try rankedSearchResults(
             queryPlan: plan,
             limit: limit,
-            spaceRefs: spaceRefs
+            spaceRefs: spaceRefs,
+            scope: scope
         )
     }
 
@@ -716,7 +733,8 @@ final class CiderItemContextService {
     private func rankedSearchResults(
         queryPlan: [RecallQueryStage],
         limit: Int,
-        spaceRefs: Set<LibraryEntityRef>? = nil
+        spaceRefs: Set<LibraryEntityRef>? = nil,
+        scope: CiderItemSearchScope = .all
     ) throws -> [CiderItemSearchResult] {
         let boundedLimit = max(1, limit)
         var bestByOwner: [String: CiderItemSearchResult] = [:]
@@ -828,6 +846,7 @@ final class CiderItemContextService {
         let hasSavedItemMatch = bestByOwner.values.contains { $0.item != nil }
         let candidates = bestByOwner.values.filter { result in
             !(hasExpandedRecallIntent && hasSavedItemMatch && result.owner.ownerType == "kanban_card" && result.item == nil)
+                && searchResult(result, isIncludedIn: scope)
         }
 
         return Array(candidates)
@@ -837,7 +856,49 @@ final class CiderItemContextService {
                 return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
             }
             .prefix(boundedLimit)
-            .map { $0 }
+            .map { result in
+                var scoped = result
+                scoped.searchScope = scope
+                return scoped
+            }
+    }
+
+    private func searchResult(
+        _ result: CiderItemSearchResult,
+        isIncludedIn scope: CiderItemSearchScope
+    ) -> Bool {
+        switch scope {
+        case .all:
+            return true
+        case .personalMemory:
+            return !isProjectOrQAArtifact(result)
+        case .projectKanban:
+            return result.owner.ownerType == "kanban_card" || isProjectArtifact(result)
+        case .qaArtifacts:
+            return isQAArtifact(result)
+        case .files:
+            return result.item?.type == .vaultFile || result.owner.ownerType == "vaultFile"
+        }
+    }
+
+    private func isProjectOrQAArtifact(_ result: CiderItemSearchResult) -> Bool {
+        result.owner.ownerType == "kanban_card" || isProjectArtifact(result) || isQAArtifact(result)
+    }
+
+    private func isProjectArtifact(_ result: CiderItemSearchResult) -> Bool {
+        guard let path = result.item?.relativePath else {
+            return result.owner.ownerType == "kanban_card"
+        }
+        return normalizedPathComponents(path).first == "projects"
+    }
+
+    private func isQAArtifact(_ result: CiderItemSearchResult) -> Bool {
+        let components = normalizedPathComponents(result.item?.relativePath ?? "")
+        return components.contains("qa") || components.contains("audits")
+    }
+
+    private func normalizedPathComponents(_ path: String) -> [String] {
+        path.split(separator: "/").map { $0.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase }
     }
 
     private func searchTagFacetItems(
