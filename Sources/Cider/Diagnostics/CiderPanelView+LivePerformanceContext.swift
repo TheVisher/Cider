@@ -16,6 +16,10 @@ extension CiderPanelView {
             from: previous,
             to: livePerformanceNavigationSnapshot
         )
+        CiderUsageAuditService.shared.recordAppRouteOpen(
+            domain: livePerformanceNavigationSnapshot.domain,
+            route: livePerformanceNavigationSnapshot.route
+        )
         updateLivePerformanceContext()
     }
 

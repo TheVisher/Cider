@@ -217,6 +217,7 @@ struct CiderCLI {
 
         // Initialize storage services
         StoragePaths.ensureVaultStructure()
+        CiderUsageAuditService.shared.recordCLI(command: command, subcommand: subcommand)
 
         // Open SQLite before any storage service is touched — services check
         // CiderDatabase.shared.isOpen and use it as the primary store when available.
@@ -332,6 +333,8 @@ struct CiderCLI {
             handleRecall(subcommand: subcommand, args: remaining)
         case "storage":
             handleStorage(subcommand: subcommand, args: remaining)
+        case "usage":
+            handleUsage(subcommand: subcommand, args: remaining)
         case "duplicate-check", "dupecheck":
             handleDuplicateCheck(args: Array(args.dropFirst()))
         case "help", "--help", "-h":
@@ -404,6 +407,49 @@ struct CiderCLI {
     static func isMutationSubcommand(_ subcommand: String?, in mutationSubcommands: Set<String>) -> Bool {
         guard let subcommand else { return false }
         return mutationSubcommands.contains(subcommand)
+    }
+
+    static func handleUsage(subcommand: String?, args: [String]) {
+        switch subcommand {
+        case nil, "help", "--help", "-h":
+            print("""
+            Usage audit commands:
+              cider-cli usage report [--days <n>] [--limit <n>] [--json]
+
+            Privacy: local-only JSONL under .cider/usage-audit.jsonl. CLI records command family only, never arguments. App route events record surface/domain/route only, never queries, URLs, titles, note bodies, or private values.
+            """)
+        case "report", "audit":
+            let days = Int(parseFlag("--days", from: args) ?? "") ?? 30
+            let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 20
+            let report = CiderUsageAuditService.shared.report(days: days, limit: limit)
+            if jsonOutput {
+                outputJSON(CiderUsageAuditService.reportToDict(report))
+            } else {
+                print("Usage audit report")
+                print("  Events since \(ISO8601DateFormatter().string(from: report.since)): \(report.eventCount)")
+                printUsageAuditGroups("  Surfaces", report.surfaceCounts)
+                printUsageAuditGroups("  Domains", report.domainCounts)
+                printUsageAuditGroups("  Routes", report.routeCounts)
+                printUsageAuditGroups("  CLI command families", report.commandFamilyCounts)
+                print("  Privacy:")
+                for rule in report.privacy {
+                    print("    - \(rule)")
+                }
+            }
+        default:
+            printCLIError("Unknown usage command: \(subcommand ?? "nil"). Commands: report")
+        }
+    }
+
+    static func printUsageAuditGroups(_ title: String, _ groups: [CiderUsageAuditGroup]) {
+        print(title)
+        if groups.isEmpty {
+            print("    (none)")
+            return
+        }
+        for group in groups {
+            print("    \(group.key): \(group.count)")
+        }
     }
 
     static func commandDescription(command: String, subcommand: String?) -> String {
@@ -16755,6 +16801,10 @@ struct CiderCLI {
           cider-cli item graph-health [--json]
           cider-cli storage audit [--json]
           cider-cli db integrity
+
+        USAGE
+          cider-cli usage report [--days <n>] [--limit <n>] [--json]
+            Local-only dogfood usage audit. Records command family and route/domain categories only; never CLI arguments, queries, URLs, titles, note bodies, or private values.
 
         BOARD WORKFLOW
           cider-cli board list
