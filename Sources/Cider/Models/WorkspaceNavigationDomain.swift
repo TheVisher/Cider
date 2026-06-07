@@ -3,6 +3,7 @@ import Foundation
 enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identifiable {
     case mainDashboard
     case spaces
+    case review
     case media
     case bookmarks
     case notes
@@ -19,6 +20,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         switch self {
         case .mainDashboard: "Home"
         case .spaces: "Spaces"
+        case .review: "Review"
         case .media: "Media"
         case .bookmarks: "Bookmarks"
         case .notes: "Notes"
@@ -35,6 +37,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         switch self {
         case .mainDashboard: "Command center, inbox, and active work"
         case .spaces: "Domain contexts and pinned spaces"
+        case .review: "Trust boundary and review queue"
         case .media: "Movies, TV, games, and references"
         case .bookmarks: "Saved links and web captures"
         case .notes: "Notes and writing"
@@ -51,6 +54,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         switch self {
         case .mainDashboard: "house"
         case .spaces: "square.grid.2x2"
+        case .review: "checklist.checked"
         case .media: "play.rectangle"
         case .bookmarks: "bookmark"
         case .notes: "note.text"

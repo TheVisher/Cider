@@ -140,6 +140,11 @@ extension CiderPanelView {
             return
         }
 
+        if domain == .review {
+            navigateToWorkspaceRoute(.review)
+            return
+        }
+
         if domain == .projects {
             navigateToWorkspaceRoute(.projects(.home))
             return

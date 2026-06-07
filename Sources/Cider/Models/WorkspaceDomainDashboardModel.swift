@@ -168,6 +168,7 @@ enum WorkspaceDomainDashboardProvider {
         switch domain {
         case .mainDashboard: "Dashboard"
         case .spaces: "Spaces"
+        case .review: "Review"
         case .media: "Media views"
         case .bookmarks: "Bookmark views"
         case .notes: "Note views"

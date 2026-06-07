@@ -16,6 +16,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertTrue(domains.contains(.spaces))
         XCTAssertTrue(domains.contains(.media))
         XCTAssertTrue(domains.contains(.projects))
+        XCTAssertTrue(domains.contains(.review))
         XCTAssertTrue(domains.contains(.aiAssistant))
         XCTAssertTrue(domains.contains(.browse))
         XCTAssertEqual(WorkspaceNavigationDomain.aiAssistant.title, "AI Assistant")
@@ -55,6 +56,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(domains, [
             .mainDashboard,
             .browse,
+            .review,
             .spaces,
             .projects,
             .tasksEvents,
@@ -89,6 +91,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(domains, [
             .mainDashboard,
             .browse,
+            .review,
             .spaces,
             .projects,
             .tasksEvents,
@@ -146,6 +149,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .browse), .domainDashboard(.browse))
         XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .spaces), .domainDashboard(.spaces))
         XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .projects), .domainDashboard(.projects))
+        XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .review), .domainDashboard(.review))
         XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .tasksEvents), .domainDashboard(.tasksEvents))
         XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .people), .domainDashboard(.people))
         XCTAssertEqual(WorkspaceDomainRoutePolicy.headerDefaultTab(for: .aiAssistant), .domainDashboard(.aiAssistant))
@@ -168,6 +172,10 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .spaces).map(\.kind),
+            []
+        )
+        XCTAssertEqual(
+            WorkspaceDomainRoutePolicy.routes(for: .review).map(\.kind),
             []
         )
         XCTAssertEqual(

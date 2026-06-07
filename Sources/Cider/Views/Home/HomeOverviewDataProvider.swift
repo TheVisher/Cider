@@ -153,6 +153,18 @@ enum HomeOverviewDataProvider {
             sortMode: .updatedDescending
         )
 
+        let reviewCount = reviewQueueSummary?.totalCount ?? visibleReviewQueueItems.count
+        let attentionMetrics = primaryAttentionMetrics(
+            reviewCount: reviewCount,
+            unfiledCount: unfiledCount,
+            urgentCount: urgentCount,
+            dueTodayCount: dueTodayCount,
+            untitledNotesCount: untitledNotesCount,
+            urgentTarget: urgentTarget,
+            upcomingTarget: upcomingTarget,
+            notesTarget: notesTarget
+        )
+
         return HomeOverviewSnapshot(
             telemetry: telemetry,
             dailyBrief: HomeDailyBrief(
@@ -217,27 +229,7 @@ enum HomeOverviewDataProvider {
                     target: resurfaceTarget
                 )
             ],
-            attentionMetrics: [
-                HomeAttentionMetric(id: "unfiled", title: "Unfiled", value: unfiledCount, target: .inbox),
-                HomeAttentionMetric(
-                    id: "urgent",
-                    title: "Urgent",
-                    value: urgentCount,
-                    target: urgentTarget
-                ),
-                HomeAttentionMetric(
-                    id: "dueToday",
-                    title: "Due Today",
-                    value: dueTodayCount,
-                    target: upcomingTarget
-                ),
-                HomeAttentionMetric(
-                    id: "untitledNotes",
-                    title: "Untitled Notes",
-                    value: untitledNotesCount,
-                    target: notesTarget
-                )
-            ],
+            attentionMetrics: attentionMetrics,
             recentItems: Array(recentItems.prefix(6)),
             recentCaptureItems: recentCaptureItems(from: recentItems, folders: folders),
             upcomingItems: Array(upcomingItems.prefix(4)),
@@ -253,6 +245,44 @@ enum HomeOverviewDataProvider {
             triageItems: triageItems,
             kanbanPulseItems: kanbanPulseItems
         )
+    }
+
+    private static func primaryAttentionMetrics(
+        reviewCount: Int,
+        unfiledCount: Int,
+        urgentCount: Int,
+        dueTodayCount: Int,
+        untitledNotesCount: Int,
+        urgentTarget: HomeOverviewActionTarget,
+        upcomingTarget: HomeOverviewActionTarget,
+        notesTarget: HomeOverviewActionTarget
+    ) -> [HomeAttentionMetric] {
+        var metrics: [HomeAttentionMetric] = []
+        if reviewCount > 0 {
+            metrics.append(HomeAttentionMetric(id: "review", title: "Review", value: reviewCount, target: .review))
+        }
+        metrics.append(contentsOf: [
+            HomeAttentionMetric(id: "unfiled", title: "Unfiled", value: unfiledCount, target: .inbox),
+            HomeAttentionMetric(
+                id: "urgent",
+                title: "Urgent",
+                value: urgentCount,
+                target: urgentTarget
+            ),
+            HomeAttentionMetric(
+                id: "dueToday",
+                title: "Due Today",
+                value: dueTodayCount,
+                target: upcomingTarget
+            ),
+            HomeAttentionMetric(
+                id: "untitledNotes",
+                title: "Untitled Notes",
+                value: untitledNotesCount,
+                target: notesTarget
+            )
+        ])
+        return Array(metrics.prefix(4))
     }
 
     private static func todoQueueItems(from items: [LibraryItemV2], now: Date) -> [TodoCard] {

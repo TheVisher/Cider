@@ -52,6 +52,15 @@ final class WorkspaceRouteChromePolicyTests: XCTestCase {
                 )
             ),
             (
+                .review,
+                WorkspaceRouteChrome(
+                    title: "Review",
+                    subtitle: "Trust boundary and review queue",
+                    systemImage: "checklist.checked",
+                    showsLibraryViewOptions: false
+                )
+            ),
+            (
                 .projects(.workspace(projectID: "cider", section: .board(boardID: "2afee0", milestoneCardID: nil))),
                 WorkspaceRouteChrome(
                     title: "Board",

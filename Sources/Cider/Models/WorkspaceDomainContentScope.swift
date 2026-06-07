@@ -9,7 +9,7 @@ enum WorkspaceDomainContentScope: String, CaseIterable, Hashable {
         switch domain {
         case .bookmarks, .notes, .tasksEvents, .files, .people:
             return .domainOnly
-        case .mainDashboard, .spaces, .media, .projects, .aiAssistant, .browse:
+        case .mainDashboard, .spaces, .review, .media, .projects, .aiAssistant, .browse:
             return .allItems
         }
     }
@@ -30,7 +30,7 @@ enum WorkspaceDomainContentScope: String, CaseIterable, Hashable {
             return [.vaultFile]
         case .people:
             return [.contact]
-        case .mainDashboard, .spaces, .media, .projects, .aiAssistant, .browse:
+        case .mainDashboard, .spaces, .review, .media, .projects, .aiAssistant, .browse:
             return LibraryEntityType.activeCases
         }
     }
@@ -48,7 +48,7 @@ enum WorkspaceDomainContentScope: String, CaseIterable, Hashable {
             return "Files Only"
         case .people:
             return "People Only"
-        case .mainDashboard, .spaces, .media, .projects, .aiAssistant, .browse:
+        case .mainDashboard, .spaces, .review, .media, .projects, .aiAssistant, .browse:
             return "Domain Only"
         }
     }

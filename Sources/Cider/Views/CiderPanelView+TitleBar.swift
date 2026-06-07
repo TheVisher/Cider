@@ -142,6 +142,8 @@ extension CiderPanelView {
             guard selectedNavigationDomain == nil else { return nil }
         case .library:
             guard selectedNavigationDomain == .browse else { return nil }
+        case .review:
+            guard selectedNavigationDomain == .review else { return nil }
         case .projects:
             guard selectedNavigationDomain == .projects else { return nil }
         case .spaces:

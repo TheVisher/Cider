@@ -2,6 +2,7 @@ import Foundation
 
 enum WorkspaceRoute: Hashable, Codable {
     case home
+    case review
     case library(LibraryRoute)
     case projects(ProjectRoute)
     case spaces(SpaceRoute)
@@ -140,6 +141,7 @@ enum SidebarSearchSubmitPolicy {
 
 enum WorkspaceRouteContentKind: Equatable {
     case home
+    case reviewQueue
     case libraryDashboard
     case libraryFeed(entityTypes: Set<LibraryEntityType>, onlyUnassigned: Bool)
     case folder
@@ -190,6 +192,15 @@ struct WorkspaceRoutePresentation: Equatable {
                 title: "Home",
                 systemImage: WorkspaceNavigationDomain.mainDashboard.systemImage,
                 contentKind: .home,
+                visibleItemScope: .none,
+                showsLibraryViewOptions: false
+            )
+        case .review:
+            return WorkspaceRoutePresentation(
+                sidebarDomain: .review,
+                title: WorkspaceNavigationDomain.review.title,
+                systemImage: WorkspaceNavigationDomain.review.systemImage,
+                contentKind: .reviewQueue,
                 visibleItemScope: .none,
                 showsLibraryViewOptions: false
             )
@@ -448,6 +459,8 @@ enum WorkspaceRouteChromePolicy {
         switch route {
         case .home:
             return "Command center and active work"
+        case .review:
+            return WorkspaceNavigationDomain.review.subtitle
         case .library:
             return "Library / \(presentation.title)"
         case .projects:
@@ -495,6 +508,8 @@ enum WorkspaceRouteIntentPolicy {
         switch target {
         case .inbox:
             return WorkspaceRouteIntent(route: .library(.inbox), detail: nil)
+        case .review:
+            return WorkspaceRouteIntent(route: .review, detail: nil)
         }
     }
 
@@ -666,6 +681,8 @@ enum WorkspaceRouteSidebarProjection {
         switch route {
         case .home:
             return WorkspaceRouteSidebarState(selectedNavigationDomain: nil)
+        case .review:
+            return WorkspaceRouteSidebarState(selectedNavigationDomain: .review)
         case .library(let libraryRoute):
             return libraryState(for: libraryRoute)
         case .projects(let projectRoute):
@@ -817,6 +834,8 @@ enum WorkspaceRouterCompatibility {
             return projectRoute(projectID: selectedProjectWorkspaceID, section: .overview)
         case .spaces:
             return .spaces(.manager)
+        case .review:
+            return .review
         case .aiAssistant:
             return .ai
         case .bookmarks:

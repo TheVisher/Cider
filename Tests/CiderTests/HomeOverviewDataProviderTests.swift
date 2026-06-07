@@ -124,6 +124,32 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.overviewChips.map(\.id), ["recent", "unfiled", "dueToday", "resurfaced"])
     }
 
+    func testAttentionMetricsPromoteReviewQueueCountFromSummary() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [],
+            recentItems: [],
+            folders: [],
+            reviewQueueSummary: CiderReviewQueueSummaryResult(
+                command: "review.summary",
+                generatedAt: now,
+                totalCount: 144,
+                countsByKind: ["low_confidence_routing": 94, "enrichment_failed": 50],
+                countsByItemType: ["bookmark": 144],
+                countsByReviewState: ["needs_review": 144],
+                countsBySafeAction: ["approve": 94, "enrich": 50]
+            ),
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.attentionMetrics.first?.id, "review")
+        XCTAssertEqual(snapshot.attentionMetrics.first?.title, "Review")
+        XCTAssertEqual(snapshot.attentionMetrics.first?.value, 144)
+        XCTAssertEqual(snapshot.attentionMetrics.first?.target, .review)
+    }
+
     func testDailyBriefFocusUsesAgendaReasonsFromRealItems() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let todo = TodoCard(

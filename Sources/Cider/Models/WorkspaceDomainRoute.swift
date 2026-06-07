@@ -48,7 +48,7 @@ enum WorkspaceDomainRoutePolicy {
         switch domain {
         case .mainDashboard:
             return nil
-        case .spaces, .media, .bookmarks, .notes, .projects, .tasksEvents, .files, .people, .aiAssistant, .browse:
+        case .spaces, .review, .media, .bookmarks, .notes, .projects, .tasksEvents, .files, .people, .aiAssistant, .browse:
             return .domainDashboard(domain)
         }
     }
@@ -98,6 +98,8 @@ enum WorkspaceDomainRoutePolicy {
         case .mainDashboard:
             return []
         case .spaces:
+            return []
+        case .review:
             return []
         case .browse:
             return [.inbox, .all, .bookmarks, .notes, .files, .folders, .tags]
@@ -154,6 +156,7 @@ enum WorkspaceDomainSidebarModel {
         let domains: [WorkspaceNavigationDomain] = [
             .mainDashboard,
             .browse,
+            .review,
             .spaces,
             .projects,
             .tasksEvents,

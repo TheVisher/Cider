@@ -22,6 +22,7 @@ enum HomeTelemetryMetricKind: String, CaseIterable, Equatable {
 
 enum HomeOverviewActionTarget: Equatable {
     case inbox
+    case review
 }
 
 struct HomeTelemetryMetric: Equatable, Identifiable {

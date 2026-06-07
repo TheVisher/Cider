@@ -186,6 +186,8 @@ extension CiderPanelView {
             switch WorkspaceRoutePresentation.presentation(for: workspaceRouter.currentRoute).contentKind {
             case .home:
                 homeOverviewDashboard
+            case .reviewQueue:
+                reviewQueueDashboard
             case .libraryDashboard:
                 WorkspaceDomainDashboardView(
                     model: WorkspaceDomainDashboardProvider.model(
@@ -493,7 +495,7 @@ extension CiderPanelView {
     var selectedStandaloneDomainDashboard: WorkspaceNavigationDomain? {
         guard let domain = selectedNavigationDomain else { return nil }
         switch domain {
-        case .mainDashboard, .browse, .projects, .spaces, .aiAssistant:
+        case .mainDashboard, .browse, .review, .projects, .spaces, .aiAssistant:
             return nil
         case .media, .bookmarks, .notes, .tasksEvents, .files, .people:
             break
@@ -551,6 +553,40 @@ extension CiderPanelView {
             },
             onCreateNew: {
                 showNewItemPicker = true
+            }
+        )
+    }
+
+    var reviewQueueDashboard: some View {
+        let reviewQueue = CiderReviewQueueService()
+        let reviewItems = (try? reviewQueue.list(limit: 60).items) ?? []
+        let reviewSummary = try? reviewQueue.summary(batchEnrichmentSampleLimit: 8)
+        let dateSuggestionResults = HomeOverviewDataProvider.bookmarkDateSuggestionResults(
+            from: libraryViewModel.items
+        )
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: libraryViewModel.items,
+            recentItems: libraryViewModel.recentItems,
+            folders: bookmarksViewModel.folders,
+            kanbanBoards: kanbanStorage.boards,
+            reviewQueueItems: reviewItems,
+            reviewQueueSummary: reviewSummary,
+            bookmarkDateSuggestionResults: dateSuggestionResults,
+            surfacingDays: CiderConfig.load().dateCardSurfacingDays
+        )
+
+        return ReviewQueueDashboardView(
+            items: snapshot.reviewCockpitItems,
+            summary: snapshot.reviewCockpitSummary,
+            onOpenItem: { item in openDashboardItem(item) },
+            onApproveReview: { reviewItem in
+                approveHomeReviewItem(reviewItem)
+            },
+            onDeferReview: { reviewItem in
+                deferHomeReviewItem(reviewItem)
+            },
+            onEnrichReviewBatch: {
+                enrichHomeReviewBatch()
             }
         )
     }
