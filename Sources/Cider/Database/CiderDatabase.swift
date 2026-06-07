@@ -52,6 +52,7 @@ final class CiderDatabase {
         databaseURL = url
 
         do {
+            sqlite3_busy_timeout(handle, 5000)
             // Enable WAL mode for concurrent reads
             try runSQL("PRAGMA journal_mode=WAL;")
             // Enable foreign key enforcement

@@ -41,6 +41,21 @@ struct CiderDatabaseTests {
         #expect(stmt.int(at: 0) == DatabaseMigrations.latestVersion)
     }
 
+    @Test("Open configures a busy timeout for writer contention")
+    func openConfiguresBusyTimeout() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+
+        let stmt = try db.prepare("PRAGMA busy_timeout;")
+        let hasRow = try stmt.step()
+        #expect(hasRow)
+        #expect(stmt.int(at: 0) == 5000)
+    }
+
     @Test("Items table exists after schema creation")
     func itemsTableExists() throws {
         let url = makeTempDBURL()

@@ -271,7 +271,10 @@ final class NotesStorage: ObservableObject {
             // and persist it back into the index during this scan.
             let relativePathKey = Self.normalizedNoteRelativePath(relativePath)
             let matchedByPath = idByRelativePath[relativePathKey]
-            var uuid = matchedByPath ?? filenameToUUID[filename] ?? UUID()
+            var uuid = matchedByPath
+                ?? itemIDFromExistingRelativePath(relativePath: relativePath)
+                ?? filenameToUUID[filename]
+                ?? UUID()
             if scannedUUIDs.contains(uuid), matchedByPath != uuid {
                 uuid = UUID()
             }
@@ -370,6 +373,7 @@ final class NotesStorage: ObservableObject {
     /// Idempotent and safe to call multiple times.
     func rescan() {
         let previousIDs = Set(notes.map(\.id))
+        restoreMissingProjectArtifactFilesFromDatabaseBackedNotes()
 
         // 1. Rebuild Notes/Inbox state from disk. Also preserves already-indexed
         //    vault-folder notes that still exist on disk.
@@ -409,6 +413,14 @@ final class NotesStorage: ObservableObject {
             index = rebuiltNoteIndex(from: notes)
             return
         }
+        let missingFileIDs = Set(notes.compactMap { note -> UUID? in
+            guard note.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return Self.isRegularMarkdownFile(noteFileURL(for: note)) ? nil : note.id
+        })
+        if !missingFileIDs.isEmpty {
+            notes.removeAll { missingFileIDs.contains($0.id) }
+        }
+
         for i in notes.indices {
             if notes[i].content.isEmpty {
                 let diskContent = loadContent(for: notes[i])
@@ -448,19 +460,21 @@ final class NotesStorage: ObservableObject {
         //    file content and DB-only fields before upsert so rescan cannot
         //    erase note bodies, tags, or summaries.
         let currentIDs = Set(notes.map(\.id))
+        let staleMissingIDs = staleMissingNoteItemIDs(db, excluding: currentIDs)
         let removedIDs = previousIDs
             .subtracting(currentIDs)
             .union(Set(canonicalized.removedNotes.map(\.id)))
+            .union(staleMissingIDs)
         do {
             try db.withTransaction {
-                for note in self.notes {
-                    try self.persistNoteToDatabaseInner(db, note: note)
-                }
                 let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
                 for removedID in removedIDs {
                     stmt.reset()
                     stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
                     try stmt.step()
+                }
+                for note in self.notes {
+                    try self.persistNoteToDatabaseInner(db, note: note)
                 }
             }
             logger.info("Rescan synced \(self.notes.count, privacy: .public) notes to SQLite (removed \(removedIDs.count, privacy: .public); projectCiderNotes=\(self.projectArtifactNoteCount(projectID: "cider"), privacy: .public))")
@@ -468,6 +482,59 @@ final class NotesStorage: ObservableObject {
             logger.error("Failed to sync rescan to SQLite: \(error.localizedDescription, privacy: .public)")
             contentCache.removeAll()
             loadNotesFromDatabase(db)
+        }
+    }
+
+    private func staleMissingNoteItemIDs(_ db: CiderDatabase, excluding currentIDs: Set<UUID>) -> Set<UUID> {
+        do {
+            let stmt = try db.prepare("""
+                SELECT id, relative_path
+                FROM items
+                WHERE type = 'note'
+                  AND relative_path IS NOT NULL
+                  AND relative_path != '';
+                """)
+            var staleIDs = Set<UUID>()
+            while try stmt.step() {
+                guard let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)),
+                      !currentIDs.contains(id) else { continue }
+                let relativePath = stmt.string(at: 1)
+                let fileURL = relativePath.contains("/")
+                    ? vaultRoot.appendingPathComponent(relativePath)
+                    : directoryURL.appendingPathComponent(relativePath)
+                var isDirectory: ObjCBool = false
+                if !FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory) || isDirectory.boolValue {
+                    staleIDs.insert(id)
+                }
+            }
+            return staleIDs
+        } catch {
+            logger.error("Failed to inspect stale note item rows: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    private func restoreMissingProjectArtifactFilesFromDatabaseBackedNotes() {
+        let fm = FileManager.default
+        for note in notes where note.isProjectArtifact {
+            guard note.relativePath.contains("/"),
+                  !note.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            let fileURL = vaultRoot.appendingPathComponent(note.relativePath)
+            var isDirectory: ObjCBool = false
+            if fm.fileExists(atPath: fileURL.path, isDirectory: &isDirectory) {
+                if isDirectory.boolValue {
+                    logger.error("Cannot restore project artifact note over directory: \(fileURL.path, privacy: .public)")
+                }
+                continue
+            }
+
+            do {
+                try fm.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try note.content.write(to: fileURL, atomically: true, encoding: .utf8)
+                logger.info("Restored missing project artifact note file from SQLite: \(note.relativePath, privacy: .public)")
+            } catch {
+                logger.error("Failed to restore missing project artifact note file \(note.relativePath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
@@ -566,7 +633,8 @@ final class NotesStorage: ObservableObject {
                     let attrs = try? fm.attributesOfItem(atPath: file.path)
                     let modDate = attrs?[.modificationDate] as? Date ?? Date()
                     let createDate = attrs?[.creationDate] as? Date ?? modDate
-                    let uuid = noteIDFromExistingItem(relativePath: relativePath)
+                    let uuid = itemIDFromExistingRelativePath(relativePath: relativePath)
+                        ?? noteIDFromExistingItem(relativePath: relativePath)
                         ?? projectNoteIDFromExistingRelation(relativePath: relativePath)
                         ?? UUID()
                     index[uuid] = NoteIndexEntry(filename: file.lastPathComponent, folderID: nil, createdAt: createDate)
@@ -639,6 +707,24 @@ final class NotesStorage: ObservableObject {
             return DatabaseHelpers.decodeUUID(stmt.string(at: 0))
         } catch {
             logger.error("Failed to inspect existing note item by relative path: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func itemIDFromExistingRelativePath(relativePath: String) -> UUID? {
+        guard let db = resolvedDatabase else { return nil }
+        do {
+            let stmt = try db.prepare("""
+                SELECT id
+                FROM items
+                WHERE relative_path = ?
+                LIMIT 1;
+                """)
+            stmt.bind(relativePath, at: 1)
+            guard try stmt.step() else { return nil }
+            return DatabaseHelpers.decodeUUID(stmt.string(at: 0))
+        } catch {
+            logger.error("Failed to inspect existing item by relative path: \(error.localizedDescription)")
             return nil
         }
     }
@@ -2209,6 +2295,45 @@ final class NotesStorage: ObservableObject {
         return exists ? encoded : nil
     }
 
+    private func existingItemType(_ db: CiderDatabase, itemID: UUID) throws -> String? {
+        let stmt = try db.prepare("SELECT type FROM items WHERE id = ? LIMIT 1;")
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        guard try stmt.step() else { return nil }
+        return stmt.optionalString(at: 0)
+    }
+
+    private func prepareExistingItemForNotePersist(_ db: CiderDatabase, note: Note) throws {
+        guard let existingType = try existingItemType(db, itemID: note.id),
+              existingType != "note" else { return }
+
+        let itemID = DatabaseHelpers.encode(note.id)
+        for table in ["bookmarks", "todos", "events", "contacts", "vault_files"] {
+            let stmt = try db.prepare("DELETE FROM \(table) WHERE item_id = ?;")
+            stmt.bind(itemID, at: 1)
+            try stmt.step()
+        }
+
+        let ownerID = note.id.uuidString
+        for table in ["item_sections", "content_chunks", "agent_actions"] {
+            let stmt = try db.prepare("DELETE FROM \(table) WHERE owner_type = ? AND owner_id = ?;")
+            stmt.bind(existingType, at: 1)
+                .bind(ownerID, at: 2)
+            try stmt.step()
+        }
+
+        let sourceRelations = try db.prepare("DELETE FROM owner_relations WHERE source_owner_type = ? AND source_owner_id = ?;")
+        sourceRelations.bind(existingType, at: 1)
+            .bind(ownerID, at: 2)
+        try sourceRelations.step()
+
+        let targetRelations = try db.prepare("DELETE FROM owner_relations WHERE target_owner_type = ? AND target_owner_id = ?;")
+        targetRelations.bind(existingType, at: 1)
+            .bind(ownerID, at: 2)
+        try targetRelations.step()
+
+        logger.info("Rehomed existing \(existingType, privacy: .public) item \(note.id.uuidString, privacy: .public) to note for \(note.relativePath, privacy: .public)")
+    }
+
     // Internal for testing
     /// Number of entries currently in the in-memory UUID→metadata index.
     /// Used by tests to verify `loadNotesFromDatabase` rehydrates the index.
@@ -2217,6 +2342,12 @@ final class NotesStorage: ObservableObject {
     // Internal for testing
     /// Returns the filename tracked by the index for a given note ID, if any.
     func indexFilename(for noteID: UUID) -> String? { index[noteID]?.filename }
+
+    // Internal for testing
+    /// Exercises the same duplicate repair path used by rescan before SQLite sync.
+    func canonicalizedScannedNotesForTesting(_ loaded: [Note]) -> (notes: [Note], removedNotes: [Note]) {
+        canonicalizedScannedNotes(loaded)
+    }
 
     // Internal for testing
     /// SELECT all notes from the database (items JOIN notes), loading
@@ -2330,10 +2461,29 @@ final class NotesStorage: ObservableObject {
     }
 
     private func canonicalizedNoteGroups(_ loaded: [Note]) -> (notes: [Note], mergedNotes: [Note], removedIDs: [UUID]) {
+        let pathCollapsed = collapsedDuplicateNotes(loaded) { note in
+            let normalizedPath = Self.normalizedNoteRelativePath(note.relativePath)
+            return normalizedPath.isEmpty ? "" : "path:\(normalizedPath)"
+        }
+        let exactCollapsed = collapsedDuplicateNotes(pathCollapsed.notes) { note in
+            noteDedupKey(note)
+        }
+
+        return (
+            notes: exactCollapsed.notes,
+            mergedNotes: pathCollapsed.mergedNotes + exactCollapsed.mergedNotes,
+            removedIDs: pathCollapsed.removedIDs + exactCollapsed.removedIDs
+        )
+    }
+
+    private func collapsedDuplicateNotes(
+        _ loaded: [Note],
+        keyForNote: (Note) -> String
+    ) -> (notes: [Note], mergedNotes: [Note], removedIDs: [UUID]) {
         var groups: [String: [Note]] = [:]
         var orderedKeys: [String] = []
         for note in loaded {
-            let key = noteDedupKey(note)
+            let key = keyForNote(note)
             guard !key.isEmpty else {
                 let uniqueKey = "id:\(note.id.uuidString)"
                 orderedKeys.append(uniqueKey)
@@ -2398,15 +2548,15 @@ final class NotesStorage: ObservableObject {
         guard !removedIDs.isEmpty else { return }
         do {
             try db.withTransaction {
-                for note in mergedNotes {
-                    try persistNoteToDatabaseInner(db, note: note)
-                }
-
                 let deleteStmt = try db.prepare("DELETE FROM items WHERE id = ?;")
                 for id in removedIDs {
                     deleteStmt.reset()
                     deleteStmt.bind(DatabaseHelpers.encode(id), at: 1)
                     try deleteStmt.step()
+                }
+
+                for note in mergedNotes {
+                    try persistNoteToDatabaseInner(db, note: note)
                 }
             }
             logger.info("Repaired \(removedIDs.count) duplicate note row(s)")
@@ -2673,12 +2823,14 @@ final class NotesStorage: ObservableObject {
         // Scrub folder_id against target DB to defuse FK failures during the
         // first-run migration (or any drift between in-memory state and DB).
         let folderIDText = try resolveSafeFolderID(db, folderID: note.folderID)
+        try prepareExistingItemForNotePersist(db, note: note)
 
         // 1. UPSERT into items (ON CONFLICT avoids DELETE+INSERT that triggers CASCADE)
         let itemStmt = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
             VALUES (?, 'note', ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                type = 'note',
                 title = excluded.title,
                 updated_at = excluded.updated_at,
                 folder_id = excluded.folder_id,
