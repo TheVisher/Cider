@@ -45,6 +45,39 @@ struct CiderItemContextServiceTests {
         try stmt.step()
     }
 
+    private func tagItem(
+        _ ref: LibraryEntityRef,
+        tags: [String],
+        in db: CiderDatabase
+    ) throws {
+        let findTag = try db.prepare("SELECT id FROM tags WHERE name = ?;")
+        let createTag = try db.prepare("INSERT INTO tags (id, name) VALUES (?, ?);")
+        let insertItemTag = try db.prepare("INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?);")
+
+        for tag in tags {
+            let tagName = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !tagName.isEmpty else { continue }
+
+            findTag.reset()
+            findTag.bind(tagName, at: 1)
+            let tagID: String
+            if try findTag.step() {
+                tagID = findTag.string(at: 0)
+            } else {
+                tagID = UUID().uuidString
+                createTag.reset()
+                createTag.bind(tagID, at: 1)
+                    .bind(tagName, at: 2)
+                try createTag.step()
+            }
+
+            insertItemTag.reset()
+            insertItemTag.bind(DatabaseHelpers.encode(ref.entityID), at: 1)
+                .bind(tagID, at: 2)
+            try insertItemTag.step()
+        }
+    }
+
     @Test("context bundle includes item identity, sections, chunks, and related items")
     func contextBundleIncludesIdentitySectionsChunksAndRelatedItems() throws {
         let (db, url) = try makeTestDB()
@@ -742,6 +775,64 @@ struct CiderItemContextServiceTests {
             #expect(results.first?.rankFactors.contains { $0.hasPrefix("distinctive_terms:") } == true)
             #expect(results.first?.rankFactors.contains { $0 == "provider_signal:\(recallCase.provider)" || $0 == "type_signal:vaultFile" } == true)
         }
+    }
+
+    @Test("tag facet recall intersects broad type and focused topic tags")
+    func tagFacetRecallIntersectsBroadTypeAndFocusedTopicTags() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let target = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        let noteCompetitor = LibraryEntityRef(type: .note, entityID: UUID())
+        let fileCompetitor = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+
+        try insertItem(
+            target,
+            title: "Evaluation paperwork",
+            relativePath: "Files/Health/Evaluation paperwork.pdf",
+            into: db,
+            createdAt: now,
+            updatedAt: now
+        )
+        try insertItem(
+            noteCompetitor,
+            title: "ADHD evaluation notes",
+            relativePath: "Inbox/Notes/ADHD evaluation notes.md",
+            into: db,
+            createdAt: now,
+            updatedAt: now
+        )
+        try insertItem(
+            fileCompetitor,
+            title: "Trip packing file",
+            relativePath: "Files/Travel/Trip packing file.pdf",
+            into: db,
+            createdAt: now,
+            updatedAt: now
+        )
+
+        try tagItem(target, tags: ["type/file", "topic/ADHD"], in: db)
+        try tagItem(noteCompetitor, tags: ["type/note", "topic/ADHD"], in: db)
+        try tagItem(fileCompetitor, tags: ["type/file", "topic/trip"], in: db)
+
+        let service = CiderItemContextService(database: db, nowProvider: { now })
+        let results = try service.search("type:file tag:ADHD", limit: 5)
+
+        #expect(results.map(\.item?.id) == [target.entityID])
+        let first = try #require(results.first)
+        #expect(first.rankFactors.contains("tag_filter:type/file"))
+        #expect(first.rankFactors.contains("tag_filter:topic/ADHD"))
+        #expect(first.rankFactors.contains("tag_facet:type"))
+        #expect(first.rankFactors.contains("tag_facet:topic"))
+
+        let report = try service.searchDiagnostics("type:file tag:ADHD", limit: 5)
+        #expect(report.exactMatches.map(\.item?.id) == [target.entityID])
+        #expect(report.fallbackStages.contains {
+            $0.name == "tag_facet_filter"
+                && $0.query == "type:file tag:ADHD"
+                && $0.resultCount == 1
+        })
     }
 
     @Test("journal phrase recall ranks recent daily journal body matches above generic voice titles")

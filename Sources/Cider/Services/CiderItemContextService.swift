@@ -591,6 +591,15 @@ final class CiderItemContextService {
         var factors: [String]
     }
 
+    private struct TagFacetFilter: Equatable {
+        var itemTypes: [LibraryEntityType] = []
+        var tagQueries: [String] = []
+
+        var hasFilters: Bool {
+            !itemTypes.isEmpty || !tagQueries.isEmpty
+        }
+    }
+
     private func recallQueryPlan(for query: String) -> [RecallQueryStage] {
         var stages: [RecallQueryStage] = [
             RecallQueryStage(
@@ -599,6 +608,15 @@ final class CiderItemContextService {
                 explanation: "Original user query."
             )
         ]
+        if parseTagFacetFilter(from: query).hasFilters {
+            stages.append(
+                RecallQueryStage(
+                    name: "tag_facet_filter",
+                    query: query,
+                    explanation: "Intersected broad type/source facets with focused tag facets for recall filtering."
+                )
+            )
+        }
         let expansions = recallExpandedQueries(for: query)
         for expanded in expansions where expanded.caseInsensitiveCompare(query) != .orderedSame {
             stages.append(
@@ -687,7 +705,7 @@ final class CiderItemContextService {
         var seen = Set<String>()
         var output: [RecallQueryStage] = []
         for stage in stages {
-            let key = stage.query.lowercased()
+            let key = "\(stage.name):\(stage.query.lowercased())"
             guard !seen.contains(key) else { continue }
             seen.insert(key)
             output.append(stage)
@@ -702,11 +720,31 @@ final class CiderItemContextService {
     ) throws -> [CiderItemSearchResult] {
         let boundedLimit = max(1, limit)
         var bestByOwner: [String: CiderItemSearchResult] = [:]
+        let tagFilter = parseTagFacetFilter(from: queryPlan.first?.query ?? "")
+
+        if tagFilter.hasFilters {
+            let tagMatches = try searchTagFacetItems(
+                query: queryPlan.first?.query ?? "",
+                filter: tagFilter,
+                limit: max(boundedLimit, boundedLimit * 3),
+                spaceRefs: spaceRefs
+            )
+            for match in tagMatches {
+                mergeRecallResult(match, into: &bestByOwner)
+            }
+        }
 
         for (stageIndex, stage) in queryPlan.enumerated() {
+            if stage.name == "tag_facet_filter" { continue }
             let stageLimit = max(boundedLimit, boundedLimit * 3)
             let itemMatches = try searchItems(stage.query, limit: stageLimit, spaceRefs: spaceRefs)
             for match in itemMatches {
+                if tagFilter.hasFilters {
+                    guard let item = match.item,
+                          try self.item(item, matches: tagFilter) != nil else {
+                        continue
+                    }
+                }
                 var result = match
                 result.stage = stage.name
                 result.matchedQuery = stage.query
@@ -737,6 +775,12 @@ final class CiderItemContextService {
             let chunkMatches = try secondBrainStore.searchChunks(query: stage.query, limit: stageLimit)
             for match in chunkMatches {
                 let item = try? itemSummary(owner: match.owner)
+                if tagFilter.hasFilters {
+                    guard let item,
+                          try self.item(item, matches: tagFilter) != nil else {
+                        continue
+                    }
+                }
                 if let spaceRefs, let item {
                     let ref = LibraryEntityRef(type: item.type, entityID: item.id)
                     guard spaceRefs.contains(ref) else { continue }
@@ -794,6 +838,59 @@ final class CiderItemContextService {
             }
             .prefix(boundedLimit)
             .map { $0 }
+    }
+
+    private func searchTagFacetItems(
+        query: String,
+        filter: TagFacetFilter,
+        limit: Int,
+        spaceRefs: Set<LibraryEntityRef>?
+    ) throws -> [CiderItemSearchResult] {
+        let activeDatabaseTypes = LibraryEntityType.activeCases.map(ItemLinkService.databaseItemType(for:))
+        guard !activeDatabaseTypes.isEmpty else { return [] }
+        let placeholders = Array(repeating: "?", count: activeDatabaseTypes.count).joined(separator: ", ")
+        let stmt = try database.prepare("""
+            SELECT id, type, title, created_at, updated_at, folder_id, relative_path
+            FROM items
+            WHERE type IN (\(placeholders))
+            ORDER BY updated_at DESC, title COLLATE NOCASE ASC;
+            """)
+        for (index, type) in activeDatabaseTypes.enumerated() {
+            stmt.bind(type, at: Int32(index + 1))
+        }
+
+        var results: [CiderItemSearchResult] = []
+        while try stmt.step() {
+            let summary = try itemSummary(from: stmt)
+            if let spaceRefs {
+                let ref = LibraryEntityRef(type: summary.type, entityID: summary.id)
+                guard spaceRefs.contains(ref) else { continue }
+            }
+            guard let tagEvidence = try item(summary, matches: filter) else { continue }
+
+            let owner = owner(for: summary)
+            var factors = [
+                "saved_library_item",
+                "stage:tag_facet_filter",
+                "matched_query:\(query)",
+            ]
+            factors += tagEvidence
+            let result = CiderItemSearchResult(
+                id: "item-\(summary.id.uuidString)",
+                kind: .item,
+                owner: owner,
+                item: summary,
+                title: summary.title,
+                snippet: summary.relativePath ?? summary.type.rawValue,
+                rank: 1_400 + recallRecencyContribution(for: summary),
+                stage: "tag_facet_filter",
+                matchedQuery: query,
+                rankFactors: orderedUnique(factors)
+            )
+            results.append(result)
+            if results.count >= max(1, limit) { break }
+        }
+        return results
     }
 
     private func mergeRecallResult(
@@ -1040,6 +1137,143 @@ final class CiderItemContextService {
     private func isDailyJournal(_ item: CiderItemSummary) -> Bool {
         item.title.localizedCaseInsensitiveContains("Daily Journal")
             || item.relativePath?.localizedCaseInsensitiveContains("Daily Journal") == true
+    }
+
+    private func parseTagFacetFilter(from query: String) -> TagFacetFilter {
+        var filter = TagFacetFilter()
+        let tokens = query.split { $0.isWhitespace }.map(String.init)
+        for token in tokens {
+            let parts = token.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { continue }
+            let key = parts[0].lowercased()
+            let value = parts[1].trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+            guard !value.isEmpty else { continue }
+
+            switch key {
+            case "type", "source":
+                if let itemType = itemTypeFacet(value) {
+                    filter.itemTypes.append(itemType)
+                }
+            case "tag", "topic":
+                filter.tagQueries.append(value)
+            default:
+                continue
+            }
+        }
+        filter.itemTypes = orderedUnique(filter.itemTypes.map(\.rawValue)).compactMap(LibraryEntityType.init(rawValue:))
+        filter.tagQueries = orderedUnique(filter.tagQueries)
+        return filter
+    }
+
+    private func itemTypeFacet(_ raw: String) -> LibraryEntityType? {
+        switch raw.lowercased() {
+        case "bookmark", "bookmarks", "link", "links":
+            return .bookmark
+        case "note", "notes", "journal":
+            return .note
+        case "file", "files", "document", "documents", "pdf", "docx":
+            return .vaultFile
+        case "contact", "contacts", "person", "people":
+            return .contact
+        case "todo", "todos", "task", "tasks":
+            return .todo
+        case "event", "events", "date", "dates":
+            return .dateCard
+        default:
+            return nil
+        }
+    }
+
+    private func item(
+        _ item: CiderItemSummary,
+        matches filter: TagFacetFilter
+    ) throws -> [String]? {
+        var factors: [String] = []
+
+        if !filter.itemTypes.isEmpty {
+            guard filter.itemTypes.contains(item.type) else { return nil }
+        }
+
+        let tags = try itemTags(for: item.id)
+        for type in filter.itemTypes {
+            let expectedTypeTag = canonicalTypeTag(for: type)
+            if let matched = tags.first(where: { tagMatches($0, query: expectedTypeTag) }) {
+                factors.append("tag_filter:\(matched)")
+                factors.append("tag_facet:type")
+            } else {
+                factors.append("type_filter:\(type.rawValue)")
+            }
+        }
+
+        for query in filter.tagQueries {
+            guard let matched = tags.first(where: { tagMatches($0, query: query) }) else {
+                return nil
+            }
+            factors.append("tag_filter:\(matched)")
+            factors.append("tag_facet:\(facetName(for: matched) ?? "tag")")
+        }
+
+        return orderedUnique(factors)
+    }
+
+    private func itemTags(for itemID: UUID) throws -> [String] {
+        let stmt = try database.prepare("""
+            SELECT t.name
+            FROM item_tags it
+            JOIN tags t ON t.id = it.tag_id
+            WHERE it.item_id = ?
+            ORDER BY t.name COLLATE NOCASE ASC;
+            """)
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+
+        var tags: [String] = []
+        while try stmt.step() {
+            tags.append(stmt.string(at: 0))
+        }
+        return tags
+    }
+
+    private func tagMatches(_ tag: String, query: String) -> Bool {
+        let normalizedTag = normalizedTagFacet(tag)
+        let normalizedQuery = normalizedTagFacet(query)
+        guard !normalizedQuery.isEmpty else { return false }
+        if normalizedTag == normalizedQuery { return true }
+        return normalizedTag.split(separator: "/").last.map(String.init) == normalizedQuery
+    }
+
+    private func normalizedTagFacet(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "/-_")).inverted)
+            .replacingOccurrences(of: "_", with: "-")
+            .lowercased()
+    }
+
+    private func canonicalTypeTag(for type: LibraryEntityType) -> String {
+        switch type {
+        case .bookmark:
+            return "type/bookmark"
+        case .note:
+            return "type/note"
+        case .vaultFile:
+            return "type/file"
+        case .contact:
+            return "type/contact"
+        case .todo:
+            return "type/todo"
+        case .dateCard:
+            return "type/event"
+        case .externalFile:
+            return "type/file"
+        case .session:
+            return "type/session"
+        }
+    }
+
+    private func facetName(for tag: String) -> String? {
+        let parts = tag.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return nil }
+        let normalized = normalizedTagFacet(parts[0])
+        return normalized.isEmpty ? nil : normalized
     }
 
     private func chunk(id: String, owner: SecondBrainOwnerRef) throws -> CiderItemChunk? {
