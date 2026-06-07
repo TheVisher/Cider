@@ -579,14 +579,64 @@ struct CiderItemContextServiceTests {
 
         let service = CiderItemContextService(database: db, secondBrainStore: store)
         let lifeResults = try service.search("event", limit: 10, scope: .personalMemory)
+        let allResults = try service.search("event", limit: 10, scope: .all)
         let qaResults = try service.search("event", limit: 10, scope: .qaArtifacts)
 
         #expect(lifeResults.first?.item?.id == event.entityID)
         #expect(lifeResults.allSatisfy { $0.item?.relativePath?.contains("/QA/") != true })
+        #expect(allResults.first?.item?.id == event.entityID)
+        let allResultIDs = allResults.compactMap { $0.item?.id }
+        let eventIndex = try #require(allResultIDs.firstIndex(of: event.entityID))
+        let qaFileIndex = try #require(allResultIDs.firstIndex(of: qaFile.entityID))
+        #expect(eventIndex < qaFileIndex)
         let qaResultIDs = qaResults.compactMap { $0.item?.id }
         #expect(qaResultIDs.contains(qaFile.entityID))
         #expect(qaResultIDs.contains(qaNote.entityID))
         #expect(qaResults.allSatisfy { $0.item?.relativePath?.contains("/QA/") == true })
+    }
+
+    @Test("natural file intent keeps personal memory search free of QA evidence artifacts")
+    func naturalFileIntentKeepsPersonalMemorySearchFreeOfQAEvidenceArtifacts() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let file = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        let qaEvidence = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        try insertItem(
+            file,
+            title: "ADHD evaluation file",
+            relativePath: "Health/ADHD/Evaluation.pdf",
+            into: db
+        )
+        try insertItem(
+            note,
+            title: "ADHD file reminder preference",
+            relativePath: "Inbox/Notes/ADHD file reminder preference.md",
+            into: db
+        )
+        try insertItem(
+            qaEvidence,
+            title: "ADHD file QA evidence",
+            relativePath: "Projects/Cider/QA/ADHD file evidence.png",
+            into: db
+        )
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "vaultFile", ownerID: qaEvidence.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: qaEvidence.entityID.uuidString, source: "file-ocr", title: "ADHD file QA evidence", body: "ADHD file QA evidence screenshot", chunkIndex: 0)
+        ])
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let personalResults = try service.search("ADHD file", limit: 10, scope: .personalMemory)
+        let qaResults = try service.search("ADHD file", limit: 10, scope: .qaArtifacts)
+        let personalResultIDs = Set(personalResults.compactMap { $0.item?.id })
+        let qaResultIDs = Set(qaResults.compactMap { $0.item?.id })
+
+        #expect(personalResultIDs.contains(file.entityID))
+        #expect(personalResultIDs.contains(note.entityID))
+        #expect(!personalResultIDs.contains(qaEvidence.entityID))
+        #expect(qaResultIDs.contains(qaEvidence.entityID))
     }
 
     @Test("personal memory search suppresses parked project plans while project scope can recall them")

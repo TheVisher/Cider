@@ -78,6 +78,11 @@ struct SearchScope: Equatable {
 
 @MainActor
 enum SearchService {
+    private struct GenericTypeIntent {
+        var type: SearchResultType
+        var contentTokens: [String]
+    }
+
     struct Snapshot {
         var query: String
         var bookmarks: [Bookmark]
@@ -284,7 +289,12 @@ enum SearchService {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
-        let scope = parseScope(from: trimmed, folders: folders, labels: labels)
+        var scope = parseScope(from: trimmed, folders: folders, labels: labels)
+        let genericTypeIntent = scope.entityTypes == nil ? parseGenericTypeIntent(from: scope.cleanQuery) : nil
+        if let genericTypeIntent {
+            scope.entityTypes = [genericTypeIntent.type]
+            scope.cleanQuery = genericTypeIntent.contentTokens.joined(separator: " ")
+        }
 
         // If clean query is empty but we have scopes, show all items matching scope
         let tokens: [String]
@@ -395,6 +405,29 @@ enum SearchService {
         }
 
         return results
+    }
+
+    private nonisolated static func parseGenericTypeIntent(from query: String) -> GenericTypeIntent? {
+        let tokens = query
+            .split { !$0.isLetter && !$0.isNumber }
+            .map { String($0).lowercased() }
+        guard !tokens.isEmpty else { return nil }
+        let aliases: [(type: SearchResultType, names: Set<String>)] = [
+            (.dateCard, ["event", "events", "date", "dates", "calendar"]),
+            (.todo, ["todo", "todos", "task", "tasks"]),
+            (.contact, ["contact", "contacts", "person", "people"]),
+            (.vaultFile, ["file", "files", "document", "documents", "doc", "docs", "pdf", "docx"]),
+            (.bookmark, ["bookmark", "bookmarks", "link", "links"]),
+            (.note, ["note", "notes", "journal", "journals"]),
+        ]
+        for alias in aliases {
+            guard tokens.contains(where: alias.names.contains) else { continue }
+            return GenericTypeIntent(
+                type: alias.type,
+                contentTokens: tokens.filter { !alias.names.contains($0) }
+            )
+        }
+        return nil
     }
 
     // MARK: - Scope Filtering Helpers

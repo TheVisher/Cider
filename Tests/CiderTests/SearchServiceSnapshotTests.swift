@@ -82,6 +82,61 @@ struct SearchServiceSnapshotTests {
         #expect(journalResult.snippet?.match.localizedCaseInsensitiveContains("planning") == true)
     }
 
+    @Test("snapshot search treats generic life item type words as type intent")
+    func snapshotSearchTreatsGenericLifeItemTypeWordsAsTypeIntent() async {
+        let now = Date()
+        let note = Note(
+            title: "Event QA evidence note",
+            content: "Project evidence about event search behavior.",
+            modifiedAt: now.addingTimeInterval(10)
+        )
+        let dateCard = DateCard(
+            title: "Dentist appointment",
+            details: "Routine cleaning",
+            startAt: now,
+            updatedAt: now
+        )
+        let file = VaultFile(
+            id: UUID(),
+            filename: "adhd-evaluation.pdf",
+            relativePath: "Health/ADHD/adhd-evaluation.pdf",
+            fileType: .pdf,
+            fileSize: 1,
+            createdAt: now,
+            modifiedAt: now,
+            folderID: nil,
+            title: "ADHD evaluation"
+        )
+
+        let eventResults = await SearchService.search(snapshot: SearchService.Snapshot(
+            query: "event",
+            bookmarks: [],
+            notes: [note],
+            dateCards: [dateCard],
+            contacts: [],
+            todos: [],
+            vaultFiles: [],
+            folders: [],
+            labels: []
+        ))
+        let fileResults = await SearchService.search(snapshot: SearchService.Snapshot(
+            query: "ADHD file",
+            bookmarks: [],
+            notes: [note],
+            dateCards: [],
+            contacts: [],
+            todos: [],
+            vaultFiles: [file],
+            folders: [],
+            labels: []
+        ))
+
+        #expect(eventResults.map(\.type) == [.dateCard])
+        #expect(eventResults.first?.id == dateCard.id)
+        #expect(fileResults.map(\.type) == [.vaultFile])
+        #expect(fileResults.first?.id == file.id)
+    }
+
     private static func bookmark(index: Int, labelID: UUID, folderID: UUID, now: Date) -> Bookmark {
         Bookmark(
             title: index == 123 ? "Needle bookmark" : "Bookmark \(index)",

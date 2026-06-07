@@ -617,6 +617,15 @@ final class CiderItemContextService {
         }
     }
 
+    private struct LifeMemoryTypeIntent: Equatable {
+        var itemType: LibraryEntityType
+        var contentTokens: [String]
+
+        var isBroadTypeOnly: Bool {
+            contentTokens.isEmpty
+        }
+    }
+
     private func recallQueryPlan(for query: String) -> [RecallQueryStage] {
         var stages: [RecallQueryStage] = [
             RecallQueryStage(
@@ -738,11 +747,33 @@ final class CiderItemContextService {
     ) throws -> [CiderItemSearchResult] {
         let boundedLimit = max(1, limit)
         var bestByOwner: [String: CiderItemSearchResult] = [:]
-        let tagFilter = parseTagFacetFilter(from: queryPlan.first?.query ?? "")
+        let originalQuery = queryPlan.first?.query ?? ""
+        let tagFilter = parseTagFacetFilter(from: originalQuery)
+        let lifeMemoryTypeIntent = lifeMemoryTypeIntent(in: originalQuery)
+
+        if tagFilter.hasFilters == false,
+           let lifeMemoryTypeIntent,
+           lifeMemoryTypeIntent.isBroadTypeOnly {
+            let typeMatches = try searchTagFacetItems(
+                query: originalQuery,
+                filter: TagFacetFilter(itemTypes: [lifeMemoryTypeIntent.itemType]),
+                limit: max(boundedLimit, boundedLimit * 3),
+                spaceRefs: spaceRefs
+            )
+            for var match in typeMatches {
+                match.stage = "generic_type_intent"
+                match.matchedQuery = originalQuery
+                match.rankFactors = orderedUnique(match.rankFactors + [
+                    "generic_life_memory_type_intent",
+                    "type_intent_match",
+                ])
+                mergeRecallResult(match, into: &bestByOwner)
+            }
+        }
 
         if tagFilter.hasFilters {
             let tagMatches = try searchTagFacetItems(
-                query: queryPlan.first?.query ?? "",
+                query: originalQuery,
                 filter: tagFilter,
                 limit: max(boundedLimit, boundedLimit * 3),
                 spaceRefs: spaceRefs
@@ -769,15 +800,16 @@ final class CiderItemContextService {
                 let evidence = try recallRankEvidence(
                     result: result,
                     chunk: nil,
-                    originalQuery: queryPlan.first?.query ?? stage.query,
+                    originalQuery: originalQuery,
                     matchedQuery: stage.query,
                     stage: stage
                 )
                 result.rank = recallRank(
                     result: result,
-                    originalQuery: queryPlan.first?.query ?? stage.query,
+                    originalQuery: originalQuery,
                     matchedQuery: stage.query,
                     stageIndex: stageIndex,
+                    scope: scope,
                     evidence: evidence
                 )
                 result.rankFactors = recallRankFactors(
@@ -785,6 +817,7 @@ final class CiderItemContextService {
                     matchedQuery: stage.query,
                     stage: stage,
                     stageIndex: stageIndex,
+                    scope: scope,
                     evidence: evidence
                 )
                 mergeRecallResult(result, into: &bestByOwner)
@@ -820,15 +853,16 @@ final class CiderItemContextService {
                 let evidence = try recallRankEvidence(
                     result: result,
                     chunk: matchedChunk,
-                    originalQuery: queryPlan.first?.query ?? stage.query,
+                    originalQuery: originalQuery,
                     matchedQuery: stage.query,
                     stage: stage
                 )
                 result.rank = recallRank(
                     result: result,
-                    originalQuery: queryPlan.first?.query ?? stage.query,
+                    originalQuery: originalQuery,
                     matchedQuery: stage.query,
                     stageIndex: stageIndex,
+                    scope: scope,
                     evidence: evidence
                 )
                 result.rankFactors = recallRankFactors(
@@ -836,6 +870,7 @@ final class CiderItemContextService {
                     matchedQuery: stage.query,
                     stage: stage,
                     stageIndex: stageIndex,
+                    scope: scope,
                     evidence: evidence
                 )
                 mergeRecallResult(result, into: &bestByOwner)
@@ -1003,6 +1038,7 @@ final class CiderItemContextService {
         originalQuery: String,
         matchedQuery: String,
         stageIndex: Int,
+        scope: CiderItemSearchScope,
         evidence: RecallRankEvidence
     ) -> Double {
         var rank: Double = result.item == nil ? 100 : 900
@@ -1014,6 +1050,11 @@ final class CiderItemContextService {
             if item.relativePath?.localizedCaseInsensitiveContains(matchedQuery) == true { rank += 35 }
         }
         rank += evidence.rankContribution
+        if scope == .all,
+           shouldDemoteArtifacts(forLifeMemoryQuery: originalQuery),
+           isProjectOrQAArtifact(result) {
+            rank -= 700
+        }
         rank -= Double(stageIndex * 20)
         return rank
     }
@@ -1023,6 +1064,7 @@ final class CiderItemContextService {
         matchedQuery: String,
         stage: RecallQueryStage,
         stageIndex: Int,
+        scope: CiderItemSearchScope,
         evidence: RecallRankEvidence
     ) -> [String] {
         var factors: [String] = []
@@ -1034,6 +1076,11 @@ final class CiderItemContextService {
         if stageIndex > 0 { factors.append("human_query_expansion:\(matchedQuery)") }
         if let item = result.item {
             factors += typeIntentFactors(item: item, query: matchedQuery)
+        }
+        if scope == .all,
+           shouldDemoteArtifacts(forLifeMemoryQuery: matchedQuery),
+           isProjectOrQAArtifact(result) {
+            factors.append("artifact_demoted_for_life_memory_type_intent")
         }
         factors += evidence.factors
         return orderedUnique(factors)
@@ -1167,7 +1214,7 @@ final class CiderItemContextService {
         case .vaultFile:
             return ["file", "document", "doc", "pdf", "docx", "resume"].contains { lower.contains($0) } ? 70 : 0
         case .bookmark:
-            return ["imdb", "movie", "tiktok", "steam", "game", "video", "capture"].contains { lower.contains($0) } ? 55 : 0
+            return ["bookmark", "link", "recipe", "imdb", "movie", "tiktok", "steam", "game", "video", "capture"].contains { lower.contains($0) } ? 55 : 0
         case .note:
             if isDailyJournal(item),
                ["journal", "reflection", "voice", "driving", "parked"].contains(where: lower.contains) {
@@ -1176,6 +1223,10 @@ final class CiderItemContextService {
             return ["note", "hub", "work", "tl", "team leader"].contains { lower.contains($0) } ? 45 : 0
         case .contact:
             return ["contact", "person", "people", "vcf", "vcard"].contains { lower.contains($0) } ? 220 : 0
+        case .todo:
+            return ["todo", "todos", "task", "tasks"].contains { lower.contains($0) } ? 220 : 0
+        case .dateCard:
+            return ["event", "events", "date", "dates", "calendar"].contains { lower.contains($0) } ? 240 : 0
         default:
             return 0
         }
@@ -1190,9 +1241,41 @@ final class CiderItemContextService {
             return ["journal_intent_match", "type_intent_match"]
         case .contact:
             return ["contact_intent_match", "type_intent_match"]
+        case .todo:
+            return ["todo_intent_match", "type_intent_match"]
+        case .dateCard:
+            return ["event_intent_match", "type_intent_match"]
         default:
             return ["type_intent_match"]
         }
+    }
+
+    private func lifeMemoryTypeIntent(in query: String) -> LifeMemoryTypeIntent? {
+        let normalizedTokens = recallTokens(query).map(normalizedRecallToken)
+        guard !normalizedTokens.isEmpty else { return nil }
+        let typeAliases: [(type: LibraryEntityType, aliases: Set<String>)] = [
+            (.dateCard, ["event", "events", "date", "dates", "calendar"]),
+            (.todo, ["todo", "todos", "task", "tasks"]),
+            (.contact, ["contact", "contacts", "person", "people"]),
+            (.vaultFile, ["file", "files", "document", "documents", "doc", "docs", "pdf", "docx"]),
+            (.bookmark, ["bookmark", "bookmarks", "link", "links"]),
+            (.note, ["note", "notes", "journal", "journals"]),
+        ]
+        for entry in typeAliases {
+            guard normalizedTokens.contains(where: entry.aliases.contains) else { continue }
+            let contentTokens = normalizedTokens.filter { !entry.aliases.contains($0) }
+            return LifeMemoryTypeIntent(itemType: entry.type, contentTokens: contentTokens)
+        }
+        return nil
+    }
+
+    private func shouldDemoteArtifacts(forLifeMemoryQuery query: String) -> Bool {
+        guard lifeMemoryTypeIntent(in: query) != nil else { return false }
+        let lower = query.lowercased()
+        let explicitArtifactSignals = [
+            "qa", "audit", "screenshot", "evidence", "artifact", "project", "kanban", "plan", "acceptance"
+        ]
+        return !explicitArtifactSignals.contains(where: lower.contains)
     }
 
     private func isDailyJournal(_ item: CiderItemSummary) -> Bool {
