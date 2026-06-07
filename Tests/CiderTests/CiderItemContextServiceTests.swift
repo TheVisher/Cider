@@ -589,6 +589,45 @@ struct CiderItemContextServiceTests {
         #expect(qaResults.allSatisfy { $0.item?.relativePath?.contains("/QA/") == true })
     }
 
+    @Test("personal memory search suppresses parked project plans while project scope can recall them")
+    func personalMemorySearchSuppressesParkedProjectPlans() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let personal = LibraryEntityRef(type: .note, entityID: UUID())
+        let parkedPlan = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(
+            personal,
+            title: "Native AI assistant dinner thought",
+            relativePath: "Inbox/Notes/Native AI assistant dinner thought.md",
+            into: db
+        )
+        try insertItem(
+            parkedPlan,
+            title: "Parked Native AI Assistant idea plan",
+            relativePath: "Projects/Cider/Plans/Parked Native AI Assistant idea plan.md",
+            into: db
+        )
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: personal.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: personal.entityID.uuidString, source: "note", title: "Native AI assistant dinner thought", body: "native AI assistant came up during dinner", chunkIndex: 0)
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: parkedPlan.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: parkedPlan.entityID.uuidString, source: "note", title: "Parked Native AI Assistant idea plan", body: "native AI assistant parked Cider project plan", chunkIndex: 0)
+        ])
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let personalResults = try service.search("native AI assistant", limit: 10, scope: .personalMemory)
+        let projectResults = try service.search("native AI assistant", limit: 10, scope: .projectKanban)
+        let personalResultIDs = Set(personalResults.compactMap { $0.item?.id })
+        let projectResultIDs = Set(projectResults.compactMap { $0.item?.id })
+
+        #expect(personalResultIDs.contains(personal.entityID))
+        #expect(!personalResultIDs.contains(parkedPlan.entityID))
+        #expect(projectResultIDs.contains(parkedPlan.entityID))
+    }
+
     @Test("item search result JSON can expose selected search scope")
     func itemSearchJSONExposesSelectedScope() throws {
         let result = CiderItemSearchResult(

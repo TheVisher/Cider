@@ -221,13 +221,15 @@ struct ProjectWorkspaceNoteRow: Identifiable, Equatable {
     let path: String
     let linkedCardLabels: [String]
     let agentLabels: [String]
+    let planMetadata: ProjectPlanMetadata?
 
     init(
         note: Note,
         owner: SecondBrainOwnerRef,
         path: String,
         linkedCardLabels: [String] = [],
-        agentLabels: [String] = []
+        agentLabels: [String] = [],
+        planMetadata: ProjectPlanMetadata? = nil
     ) {
         self.id = note.id
         self.note = note
@@ -235,6 +237,7 @@ struct ProjectWorkspaceNoteRow: Identifiable, Equatable {
         self.path = path
         self.linkedCardLabels = linkedCardLabels
         self.agentLabels = agentLabels
+        self.planMetadata = planMetadata
     }
 
     var title: String { note.title }
@@ -258,6 +261,46 @@ struct ProjectWorkspaceNoteRow: Identifiable, Equatable {
             parts.append("agents: \(agentLabels.joined(separator: ", "))")
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+enum ProjectPlanScope: String, CaseIterable, Equatable, Identifiable {
+    case active
+    case parkedIdeas
+    case templates
+    case all
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .active: return "Active"
+        case .parkedIdeas: return "Parked"
+        case .templates: return "Templates"
+        case .all: return "All"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .active: return "list.bullet.clipboard"
+        case .parkedIdeas: return "archivebox"
+        case .templates: return "doc.on.doc"
+        case .all: return "tray.full"
+        }
+    }
+
+    func includes(_ metadata: ProjectPlanMetadata?) -> Bool {
+        switch self {
+        case .active:
+            return metadata?.isActive ?? true
+        case .parkedIdeas:
+            return metadata?.isIdeaPlan == true && metadata?.isParked == true
+        case .templates:
+            return metadata?.isTemplate == true
+        case .all:
+            return true
+        }
     }
 }
 
@@ -295,7 +338,8 @@ enum ProjectWorkspaceSurfaceProvider {
         for workspace: ProjectWorkspace,
         surface: ProjectWorkspaceSurface,
         notes: [Note],
-        artifactRelations: [SecondBrainRelation] = []
+        artifactRelations: [SecondBrainRelation] = [],
+        planScope: ProjectPlanScope = .active
     ) -> ProjectWorkspaceSurfaceModel {
         let rows: [ProjectWorkspaceNoteRow]
         switch surface {
@@ -322,7 +366,8 @@ enum ProjectWorkspaceSurfaceProvider {
                 allowedArtifactTypes: ["plan"],
                 includeNilArtifactType: false,
                 requiredFolderName: "Plans",
-                artifactRelations: artifactRelations
+                artifactRelations: artifactRelations,
+                planScope: planScope
             )
             logger.info("Project plans/handoffs surface model workspace=\(workspace.id, privacy: .public) renderedArtifacts=\(rows.count, privacy: .public) totalNotes=\(notes.count, privacy: .public)")
         case .decisions:
@@ -366,7 +411,8 @@ enum ProjectWorkspaceSurfaceProvider {
         allowedArtifactTypes: Set<String>,
         includeNilArtifactType: Bool,
         requiredFolderName: String? = nil,
-        artifactRelations: [SecondBrainRelation]
+        artifactRelations: [SecondBrainRelation],
+        planScope: ProjectPlanScope? = nil
     ) -> [ProjectWorkspaceNoteRow] {
         let projectID = SecondBrainProjectGraphService.normalizedProjectID(workspace.id)
         let relationsBySourceOwner = Dictionary(grouping: artifactRelations, by: \.sourceOwner)
@@ -384,7 +430,11 @@ enum ProjectWorkspaceSurfaceProvider {
                 guard let artifactType = note.artifactType?.localizedLowercase else {
                     return includeNilArtifactType
                 }
-                return allowedArtifactTypes.contains(artifactType)
+                guard allowedArtifactTypes.contains(artifactType) else { return false }
+                if artifactType == "plan", let planScope {
+                    return planScope.includes(note.projectPlanMetadata)
+                }
+                return true
             }
             .sorted { lhs, rhs in
                 if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
@@ -398,7 +448,8 @@ enum ProjectWorkspaceSurfaceProvider {
                     owner: owner,
                     path: note.relativePath,
                     linkedCardLabels: linkedCardLabels(from: relations),
-                    agentLabels: agentLabels(from: relations)
+                    agentLabels: agentLabels(from: relations),
+                    planMetadata: note.projectPlanMetadata
                 )
             }
     }

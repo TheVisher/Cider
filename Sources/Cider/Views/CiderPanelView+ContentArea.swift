@@ -362,6 +362,8 @@ extension CiderPanelView {
                                     notes: notesStorage.notes,
                                     artifactRelations: ProjectWorkspaceSurfaceProvider.artifactRelations(for: notesStorage.notes)
                                 ),
+                                allNotes: notesStorage.notes,
+                                artifactRelations: ProjectWorkspaceSurfaceProvider.artifactRelations(for: notesStorage.notes),
                                 onOpenNote: { note in
                                     openNoteDetail(note)
                                 }

@@ -22,6 +22,74 @@ struct CiderCLIAgentSafetyTests {
         #expect(dict["isProjectArtifact"] as? Bool == true)
     }
 
+    @Test("note JSON exposes idea-plan frontmatter classification")
+    func noteJSONExposesIdeaPlanFrontmatterClassification() throws {
+        let note = Note(
+            title: "Parked Native AI Assistant idea plan",
+            content: """
+            ---
+            type: idea-plan
+            status: parked
+            category: product-surface
+            source: CID-461
+            dogfoodStatus: unproven
+            ---
+
+            # Parked Native AI Assistant
+            """,
+            relativePath: "Projects/Cider/Plans/Parked Native AI Assistant idea plan.md",
+            projectID: "cider",
+            artifactType: "plan"
+        )
+
+        let dict = noteToDict(note)
+        let plan = try #require(dict["planClassification"] as? [String: Any])
+
+        #expect(plan["type"] as? String == "idea-plan")
+        #expect(plan["status"] as? String == "parked")
+        #expect(plan["category"] as? String == "product-surface")
+        #expect(plan["source"] as? String == "CID-461")
+        #expect(plan["dogfoodStatus"] as? String == "unproven")
+        #expect(plan["isParked"] as? Bool == true)
+        #expect(plan["isTemplate"] as? Bool == false)
+    }
+
+    @Test("project artifact plan filters use shared frontmatter classification")
+    func projectArtifactPlanFiltersUseSharedFrontmatterClassification() throws {
+        let note = Note(
+            title: "Parked Spaces Media Recipes idea plan",
+            content: """
+            ---
+            type: idea-plan
+            status: parked
+            category: product-surface
+            source: CID-460
+            dogfoodStatus: unproven
+            ---
+
+            # Parked Spaces, Media, and Recipes
+            """,
+            relativePath: "Projects/Cider/Plans/Parked Spaces Media Recipes idea plan.md",
+            projectID: "cider",
+            artifactType: "plan"
+        )
+
+        #expect(CiderCLI.projectPlanFiltersMatch(
+            note: note,
+            status: "parked",
+            category: "product-surface",
+            dogfoodStatus: "unproven",
+            source: "CID-460"
+        ))
+        #expect(!CiderCLI.projectPlanFiltersMatch(
+            note: note,
+            status: "active",
+            category: nil,
+            dogfoodStatus: nil,
+            source: nil
+        ))
+    }
+
     @Test("regular note JSON marks non-project artifacts")
     func regularNoteJSONMarksNonProjectArtifacts() throws {
         let note = Note(title: "Inbox Note", relativePath: "Inbox/Notes/Inbox Note.md")

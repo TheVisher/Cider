@@ -3208,7 +3208,7 @@ struct CiderCLI {
               cider-cli note project-artifact create --project <project-id-or-name> --type note|plan|handoff|decision|qa --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--card-id <id>] [--decided-from-card <id>] [--decided-from-note <id>] [--source-card <id>] [--source-note <id>] [--validates-card <id>] [--validates-note <id>] [--found-bug-in-card <id>] [--found-bug-in-note <id>] [--json]
               cider-cli note project-artifact link <note-id-prefix> --card <id|display-key|board/card> [--board <board>] [--relation documents|validates|found-bug-in|decided-from] [--json]
               cider-cli note project-artifact append <note-id-prefix> (--stdin|--text-file <path>|--content <text>) [--json]
-              cider-cli note project-artifact list --project <project-id-or-name> [--type note|plan|handoff|decision|decisions|qa|audit|qa-audits|plans-handoffs] [--json]
+              cider-cli note project-artifact list --project <project-id-or-name> [--type note|plan|handoff|decision|decisions|qa|audit|qa-audits|plans-handoffs] [--status active|parked|template] [--category <name>] [--dogfood-status <status>] [--source <card>] [--json]
               cider-cli note project-artifact get <note-id-prefix> [--json]
             """)
 
@@ -3319,6 +3319,10 @@ struct CiderCLI {
             }
             let projectID = SecondBrainProjectGraphService.normalizedProjectID(project)
             let typeFilter = parseFlag("--type", from: rest) ?? parseFlag("--artifact-type", from: rest)
+            let statusFilter = parseFlag("--status", from: rest) ?? parseFlag("--plan-status", from: rest)
+            let categoryFilter = parseFlag("--category", from: rest)
+            let dogfoodStatusFilter = parseFlag("--dogfood-status", from: rest) ?? parseFlag("--dogfoodStatus", from: rest)
+            let sourceFilter = parseFlag("--source", from: rest) ?? parseFlag("--source-card", from: rest)
             let allowedTypes: Set<String>? = typeFilter.map { filter in
                 let normalized = filter.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
                 if normalized == "plans-handoffs" || normalized == "plans_handoffs" {
@@ -3332,8 +3336,14 @@ struct CiderCLI {
             }
             let notes = storage.notes.filter { note in
                 guard SecondBrainProjectGraphService.normalizedProjectID(note.projectID ?? "") == projectID else { return false }
-                guard let allowedTypes else { return true }
-                return allowedTypes.contains(note.artifactType?.localizedLowercase ?? "note")
+                if let allowedTypes, !allowedTypes.contains(note.artifactType?.localizedLowercase ?? "note") { return false }
+                return projectPlanFiltersMatch(
+                    note: note,
+                    status: statusFilter,
+                    category: categoryFilter,
+                    dogfoodStatus: dogfoodStatusFilter,
+                    source: sourceFilter
+                )
             }.sorted { lhs, rhs in
                 if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
                 return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
@@ -3386,8 +3396,39 @@ struct CiderCLI {
         "--content", "--text-file", "--card", "--card-id", "--source-agent", "--target-agent",
         "--decided-from-card", "--decided-from-note", "--source-card", "--source-note",
         "--validates-card", "--validates-note", "--found-bug-in-card", "--found-bug-in-note",
-        "--relation", "--board",
+        "--relation", "--board", "--status", "--plan-status", "--category", "--dogfood-status", "--dogfoodStatus", "--source",
     ]
+
+    static func projectPlanFiltersMatch(
+        note: Note,
+        status: String?,
+        category: String?,
+        dogfoodStatus: String?,
+        source: String?
+    ) -> Bool {
+        let filters = [status, category, dogfoodStatus, source]
+        guard filters.contains(where: { $0?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }) else {
+            return true
+        }
+        guard let metadata = note.projectPlanMetadata else { return false }
+        if let status, !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           metadata.status != status.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase {
+            return false
+        }
+        if let category, !category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           metadata.category != category.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase {
+            return false
+        }
+        if let dogfoodStatus, !dogfoodStatus.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           metadata.dogfoodStatus != dogfoodStatus.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase {
+            return false
+        }
+        if let source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           metadata.source?.localizedCaseInsensitiveCompare(source.trimmingCharacters(in: .whitespacesAndNewlines)) != .orderedSame {
+            return false
+        }
+        return true
+    }
 
     static func projectArtifactContent(from args: [String]) -> String? {
         if let raw = parseFlag("--content", from: args) {

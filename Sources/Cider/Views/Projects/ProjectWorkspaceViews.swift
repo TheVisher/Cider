@@ -752,15 +752,29 @@ struct ProjectWorkspaceMilestonesView: View {
 
 struct ProjectWorkspaceSurfaceView: View {
     let model: ProjectWorkspaceSurfaceModel
+    var allNotes: [Note]? = nil
+    var artifactRelations: [SecondBrainRelation] = []
     var onOpenNote: (Note) -> Void
 
     @State private var displayMode: ProjectWorkspaceSurfaceDisplayMode = .list
+    @State private var planScope: ProjectPlanScope = .active
+
+    private var currentModel: ProjectWorkspaceSurfaceModel {
+        guard model.surface == .plansHandoffs, let allNotes else { return model }
+        return ProjectWorkspaceSurfaceProvider.model(
+            for: model.workspace,
+            surface: model.surface,
+            notes: allNotes,
+            artifactRelations: artifactRelations,
+            planScope: planScope
+        )
+    }
 
     var body: some View {
-        if model.surface == .notes || model.surface == .plansHandoffs || model.surface == .qaAudits {
+        if currentModel.surface == .notes || currentModel.surface == .plansHandoffs || currentModel.surface == .qaAudits {
             artifactListBody
         } else {
-            ProjectWorkspaceSurfacePlaceholderView(project: model.workspace, surface: model.surface)
+            ProjectWorkspaceSurfacePlaceholderView(project: currentModel.workspace, surface: currentModel.surface)
         }
     }
 
@@ -768,11 +782,11 @@ struct ProjectWorkspaceSurfaceView: View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             header
 
-            if model.notes.isEmpty {
+            if currentModel.notes.isEmpty {
                 EmptyStateView(
-                    icon: model.surface.systemImage,
+                    icon: currentModel.surface.systemImage,
                     title: emptyTitle,
-                    subtitle: model.surface.placeholderSubtitle
+                    subtitle: currentModel.surface.placeholderSubtitle
                 )
                 .frame(maxWidth: .infinity, minHeight: 260)
             } else {
@@ -790,7 +804,7 @@ struct ProjectWorkspaceSurfaceView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: Spacing.md) {
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Label(model.surface.title, systemImage: model.surface.systemImage)
+                Label(currentModel.surface.title, systemImage: currentModel.surface.systemImage)
                     .font(CiderFont.headingSemibold)
                     .foregroundColor(CiderColors.primary)
                 Text(surfaceSubtitle)
@@ -800,9 +814,44 @@ struct ProjectWorkspaceSurfaceView: View {
 
             Spacer(minLength: 0)
 
-            displayModeControls
-                .padding(.top, 2)
+            HStack(spacing: Spacing.sm) {
+                if currentModel.surface == .plansHandoffs {
+                    planScopeControls
+                }
+                displayModeControls
+            }
+            .padding(.top, 2)
         }
+    }
+
+    private var planScopeControls: some View {
+        HStack(spacing: Spacing.xs) {
+            ForEach(ProjectPlanScope.allCases) { scope in
+                planScopeChip(scope)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Plan scope")
+    }
+
+    private func planScopeChip(_ scope: ProjectPlanScope) -> some View {
+        let isSelected = planScope == scope
+        return Button {
+            planScope = scope
+        } label: {
+            Label(scope.title, systemImage: scope.systemImage)
+                .font(CiderFont.captionMedium)
+                .foregroundColor(isSelected ? CiderColors.primary : CiderColors.tertiary)
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.hairline)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(isSelected ? CiderColors.accentSubtle : CiderColors.separatorLight)
+                )
+        }
+        .buttonStyle(.plain)
+        .help("Show \(scope.title.lowercased()) plans")
     }
 
     private var displayModeControls: some View {
@@ -832,7 +881,7 @@ struct ProjectWorkspaceSurfaceView: View {
                 )
         }
         .buttonStyle(.plain)
-        .help("Show \(model.surface.title) as \(mode.title.lowercased())")
+        .help("Show \(currentModel.surface.title) as \(mode.title.lowercased())")
     }
 
     @ViewBuilder
@@ -840,13 +889,13 @@ struct ProjectWorkspaceSurfaceView: View {
         switch displayMode {
         case .list:
             LazyVStack(spacing: Spacing.xs) {
-                ForEach(model.notes) { row in
+                ForEach(currentModel.notes) { row in
                     noteListRow(row)
                 }
             }
         case .grid:
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Spacing.md)], spacing: Spacing.md) {
-                ForEach(model.notes) { row in
+                ForEach(currentModel.notes) { row in
                     noteGridCard(row)
                 }
             }
@@ -859,7 +908,7 @@ struct ProjectWorkspaceSurfaceView: View {
             onOpenNote(row.note)
         } label: {
             HStack(spacing: Spacing.sm) {
-                Image(systemName: model.surface.systemImage)
+                Image(systemName: currentModel.surface.systemImage)
                     .foregroundColor(CiderColors.tertiary)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
@@ -893,7 +942,7 @@ struct ProjectWorkspaceSurfaceView: View {
         } label: {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 HStack(alignment: .top, spacing: Spacing.sm) {
-                    Image(systemName: model.surface.systemImage)
+                    Image(systemName: currentModel.surface.systemImage)
                         .font(CiderFont.bodySemibold)
                         .foregroundColor(CiderColors.controlAccent)
                         .frame(width: 28, height: 28)
@@ -934,6 +983,9 @@ struct ProjectWorkspaceSurfaceView: View {
 
     @ViewBuilder
     private func noteMetadata(_ row: ProjectWorkspaceNoteRow, pathLineLimit: Int, relationLineLimit: Int) -> some View {
+        if let planMetadata = row.planMetadata {
+            planMetadataChips(planMetadata)
+        }
         Text(row.path)
             .font(CiderFont.caption)
             .foregroundColor(CiderColors.tertiary)
@@ -946,21 +998,50 @@ struct ProjectWorkspaceSurfaceView: View {
         }
     }
 
+    private func planMetadataChips(_ metadata: ProjectPlanMetadata) -> some View {
+        HStack(spacing: Spacing.xs) {
+            metadataChip(metadata.type)
+            metadataChip(metadata.status)
+            if let category = metadata.category {
+                metadataChip(category)
+            }
+            if let dogfoodStatus = metadata.dogfoodStatus {
+                metadataChip(dogfoodStatus)
+            }
+            if let source = metadata.source {
+                metadataChip(source)
+            }
+        }
+        .lineLimit(1)
+    }
+
+    private func metadataChip(_ text: String) -> some View {
+        Text(text)
+            .font(CiderFont.caption)
+            .foregroundColor(CiderColors.secondary)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, 1)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(CiderColors.separatorLight)
+            )
+    }
+
     private var surfaceSubtitle: String {
-        switch model.surface {
+        switch currentModel.surface {
         case .notes:
-            return "Markdown-backed notes stored under Projects/\(model.workspace.title)/Notes"
+            return "Markdown-backed notes stored under Projects/\(currentModel.workspace.title)/Notes"
         case .plansHandoffs:
-            return "Draft feature plans stored under Projects/\(model.workspace.title)/Plans until they become milestones and cards"
+            return "Draft feature plans stored under Projects/\(currentModel.workspace.title)/Plans until they become milestones and cards"
         case .qaAudits:
-            return "Audit results and QA reports stored under Projects/\(model.workspace.title)/QA until they become cleanup milestones and cards"
+            return "Audit results and QA reports stored under Projects/\(currentModel.workspace.title)/QA until they become cleanup milestones and cards"
         default:
-            return model.surface.placeholderSubtitle
+            return currentModel.surface.placeholderSubtitle
         }
     }
 
     private var emptyTitle: String {
-        switch model.surface {
+        switch currentModel.surface {
         case .notes:
             return "No project notes yet"
         case .plansHandoffs:

@@ -73,6 +73,10 @@ struct Note: Identifiable, Hashable {
         projectID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
+    var projectPlanMetadata: ProjectPlanMetadata? {
+        ProjectPlanMetadata(note: self)
+    }
+
     var isDailyJournalNote: Bool {
         title.range(
             of: #"^Daily Journal \d{4}-\d{2}-\d{2}$"#,
@@ -267,6 +271,77 @@ struct Note: Identifiable, Hashable {
             return existingContainedURL(URL(fileURLWithPath: path), allowedRoots: allowedRoots)
         }
         return nil
+    }
+}
+
+struct ProjectPlanMetadata: Hashable {
+    let type: String
+    let status: String
+    let category: String?
+    let source: String?
+    let dogfoodStatus: String?
+    let parkedBecause: String?
+    let revisitTrigger: String?
+
+    var isIdeaPlan: Bool { type == "idea-plan" }
+    var isParked: Bool { status == "parked" }
+    var isTemplate: Bool { status == "template" }
+    var isActive: Bool { !isParked && !isTemplate }
+
+    init?(note: Note) {
+        guard note.artifactType?.localizedLowercase == "plan",
+              note.relativePath.localizedCaseInsensitiveContains("/Plans/") else {
+            return nil
+        }
+        let fields = Self.frontmatterFields(in: note.content.isEmpty ? note.resolvedContent : note.content)
+        let type = Self.normalized(fields["type"] ?? "plan")
+        let status = Self.normalized(fields["status"] ?? "active")
+        self.type = type.isEmpty ? "plan" : type
+        self.status = status.isEmpty ? "active" : status
+        self.category = Self.optionalNormalized(fields["category"])
+        self.source = Self.optionalTrimmed(fields["source"])
+        self.dogfoodStatus = Self.optionalNormalized(fields["dogfoodStatus"] ?? fields["dogfoodstatus"])
+        self.parkedBecause = Self.optionalTrimmed(fields["parkedBecause"] ?? fields["parkedbecause"])
+        self.revisitTrigger = Self.optionalTrimmed(fields["revisitTrigger"] ?? fields["revisittrigger"])
+    }
+
+    private static func frontmatterFields(in content: String) -> [String: String] {
+        let normalized = content.replacingOccurrences(of: "\r\n", with: "\n")
+        guard normalized.hasPrefix("---\n") || normalized == "---" else { return [:] }
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard lines.first == "---" else { return [:] }
+        var fields: [String: String] = [:]
+        for line in lines.dropFirst() {
+            if line == "---" { break }
+            guard let separator = line.firstIndex(of: ":") else { continue }
+            let key = String(line[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawValue = String(line[line.index(after: separator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { continue }
+            fields[key] = unquoted(rawValue)
+        }
+        return fields
+    }
+
+    private static func unquoted(_ value: String) -> String {
+        guard value.count >= 2 else { return value }
+        if (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
+            return String(value.dropFirst().dropLast())
+        }
+        return value
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+    }
+
+    private static func optionalNormalized(_ value: String?) -> String? {
+        guard let normalized = value.map(normalized), !normalized.isEmpty else { return nil }
+        return normalized
+    }
+
+    private static func optionalTrimmed(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed
     }
 }
 

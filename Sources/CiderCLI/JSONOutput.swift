@@ -60,6 +60,23 @@ func outputJSON(_ value: Any) {
     ]
     if let projectID = note.projectID { d["projectID"] = projectID }
     if let artifactType = note.artifactType { d["artifactType"] = artifactType }
+    if let plan = note.projectPlanMetadata { d["planClassification"] = projectPlanMetadataToDict(plan) }
+    return d
+}
+
+@MainActor func projectPlanMetadataToDict(_ plan: ProjectPlanMetadata) -> [String: Any] {
+    var d: [String: Any] = [
+        "type": plan.type,
+        "status": plan.status,
+        "isParked": plan.isParked,
+        "isTemplate": plan.isTemplate,
+        "isActive": plan.isActive,
+    ]
+    if let category = plan.category { d["category"] = category }
+    if let source = plan.source { d["source"] = source }
+    if let dogfoodStatus = plan.dogfoodStatus { d["dogfoodStatus"] = dogfoodStatus }
+    if let parkedBecause = plan.parkedBecause { d["parkedBecause"] = parkedBecause }
+    if let revisitTrigger = plan.revisitTrigger { d["revisitTrigger"] = revisitTrigger }
     return d
 }
 

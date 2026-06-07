@@ -496,6 +496,161 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         ])
     }
 
+    func testProjectPlansSurfaceDefaultsToActivePlansAndSuppressesParkedIdeasAndTemplates() {
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+        let activeID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let parkedID = UUID(uuidString: "22222222-3333-4444-5555-666666666666")!
+        let templateID = UUID(uuidString: "33333333-4444-5555-6666-777777777777")!
+        let notes = [
+            Note(
+                id: activeID,
+                title: "Dogfood recall plan",
+                content: "Active implementation plan body",
+                modifiedAt: Date(timeIntervalSince1970: 4_000),
+                relativePath: "Projects/Cider/Plans/Dogfood recall plan.md",
+                projectID: "cider",
+                artifactType: "plan"
+            ),
+            Note(
+                id: parkedID,
+                title: "Parked Spaces Media Recipes idea plan",
+                content: """
+                ---
+                type: idea-plan
+                status: parked
+                category: product-surface
+                source: CID-460
+                dogfoodStatus: unproven
+                ---
+
+                # Parked Spaces, Media, and Recipes
+                """,
+                modifiedAt: Date(timeIntervalSince1970: 5_000),
+                relativePath: "Projects/Cider/Plans/Parked Spaces Media Recipes idea plan.md",
+                projectID: "cider",
+                artifactType: "plan"
+            ),
+            Note(
+                id: templateID,
+                title: "Idea Plan Template",
+                content: """
+                ---
+                type: idea-plan
+                status: template
+                category: product-surface
+                dogfoodStatus: unknown
+                ---
+
+                # Idea Plan Template
+                """,
+                modifiedAt: Date(timeIntervalSince1970: 6_000),
+                relativePath: "Projects/Cider/Plans/Idea Plan Template.md",
+                projectID: "cider",
+                artifactType: "plan"
+            )
+        ]
+
+        let model = ProjectWorkspaceSurfaceProvider.model(
+            for: ciderWorkspace,
+            surface: .plansHandoffs,
+            notes: notes
+        )
+
+        XCTAssertEqual(model.notes.map(\.id), [activeID])
+        XCTAssertEqual(model.notes.first?.planMetadata?.status, "active")
+    }
+
+    func testProjectPlansSurfaceCanExplicitlyShowParkedIdeaPlansWithMetadata() {
+        let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
+        let ciderWorkspace = catalog.workspace(id: "cider")!
+        let spacesID = UUID(uuidString: "44444444-5555-6666-7777-888888888888")!
+        let nativeAIID = UUID(uuidString: "55555555-6666-7777-8888-999999999999")!
+        let activeID = UUID(uuidString: "66666666-7777-8888-9999-AAAAAAAAAAAA")!
+        let templateID = UUID(uuidString: "77777777-8888-9999-AAAA-BBBBBBBBBBBB")!
+        let notes = [
+            Note(
+                id: activeID,
+                title: "Active planning flow",
+                content: "Active implementation plan body",
+                modifiedAt: Date(timeIntervalSince1970: 8_000),
+                relativePath: "Projects/Cider/Plans/Active planning flow.md",
+                projectID: "cider",
+                artifactType: "plan"
+            ),
+            Note(
+                id: nativeAIID,
+                title: "Parked Native AI Assistant idea plan",
+                content: """
+                ---
+                type: idea-plan
+                status: parked
+                category: product-surface
+                source: CID-461
+                dogfoodStatus: unproven
+                ---
+
+                # Parked Native AI Assistant
+                """,
+                modifiedAt: Date(timeIntervalSince1970: 9_000),
+                relativePath: "Projects/Cider/Plans/Parked Native AI Assistant idea plan.md",
+                projectID: "cider",
+                artifactType: "plan"
+            ),
+            Note(
+                id: spacesID,
+                title: "Parked Spaces Media Recipes idea plan",
+                content: """
+                ---
+                type: idea-plan
+                status: parked
+                category: product-surface
+                source: CID-460
+                dogfoodStatus: unproven
+                ---
+
+                # Parked Spaces, Media, and Recipes
+                """,
+                modifiedAt: Date(timeIntervalSince1970: 10_000),
+                relativePath: "Projects/Cider/Plans/Parked Spaces Media Recipes idea plan.md",
+                projectID: "cider",
+                artifactType: "plan"
+            ),
+            Note(
+                id: templateID,
+                title: "Idea Plan Template",
+                content: """
+                ---
+                type: idea-plan
+                status: template
+                category: product-surface
+                source: CID-463
+                dogfoodStatus: unknown
+                ---
+
+                # Idea Plan Template
+                """,
+                modifiedAt: Date(timeIntervalSince1970: 11_000),
+                relativePath: "Projects/Cider/Plans/Idea Plan Template.md",
+                projectID: "cider",
+                artifactType: "plan"
+            )
+        ]
+
+        let model = ProjectWorkspaceSurfaceProvider.model(
+            for: ciderWorkspace,
+            surface: .plansHandoffs,
+            notes: notes,
+            planScope: .parkedIdeas
+        )
+
+        XCTAssertEqual(model.notes.map(\.id), [spacesID, nativeAIID])
+        XCTAssertEqual(model.notes.map { $0.planMetadata?.type }, ["idea-plan", "idea-plan"])
+        XCTAssertEqual(model.notes.map { $0.planMetadata?.status }, ["parked", "parked"])
+        XCTAssertEqual(model.notes.map { $0.planMetadata?.source }, ["CID-460", "CID-461"])
+        XCTAssertEqual(model.notes.map { $0.planMetadata?.dogfoodStatus }, ["unproven", "unproven"])
+    }
+
     func testProjectPlansHandoffsSurfaceSummarizesLinkedCardsAndAgents() {
         let catalog = ProjectWorkspaceCatalog.defaultCatalog(boards: [KanbanBoard(id: "2afee0", name: "Cider")])
         let ciderWorkspace = catalog.workspace(id: "cider")!
