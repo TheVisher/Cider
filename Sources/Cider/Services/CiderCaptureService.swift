@@ -424,6 +424,10 @@ struct CiderCaptureResult {
             commands.append("cider-cli review list --item-type \(item.type) --state needs_review --limit 10 --json")
         }
         if canonicalSideEffectPartialSuccess() != nil {
+            if indexing.status == "failed" || indexing.status == "unavailable" {
+                commands.append("cider-cli item rebuild-chunks \(item.type) \(item.id.uuidString) --json")
+                commands.append("cider-cli item rebuild-index --json")
+            }
             commands.append("cider-cli storage audit --json")
         }
         return orderedUnique(commands)
@@ -2048,8 +2052,10 @@ final class CiderCaptureService {
             return result
         }
         do {
-            _ = try SecondBrainItemContentIndexingService(database: database).rebuild(owner: owner)
-            let chunks = try indexedChunkTrace(owner: owner, database: database)
+            let chunks = try retryingTransientSQLiteLocks {
+                _ = try SecondBrainItemContentIndexingService(database: database).rebuild(owner: owner)
+                return try indexedChunkTrace(owner: owner, database: database)
+            }
             result.indexing = .init(
                 status: "indexed",
                 reason: nil,
@@ -2069,6 +2075,34 @@ final class CiderCaptureService {
             return result
         }
         return result
+    }
+
+    private func retryingTransientSQLiteLocks<T>(
+        attempts: Int = 6,
+        initialDelay: TimeInterval = 0.05,
+        _ operation: () throws -> T
+    ) throws -> T {
+        var lastError: Error?
+        for attempt in 0..<max(1, attempts) {
+            do {
+                return try operation()
+            } catch {
+                lastError = error
+                guard isTransientSQLiteLock(error), attempt + 1 < attempts else {
+                    throw error
+                }
+                Thread.sleep(forTimeInterval: initialDelay * Double(attempt + 1))
+            }
+        }
+        throw lastError ?? CiderCaptureError.storeFailed("capture indexing")
+    }
+
+    private func isTransientSQLiteLock(_ error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("database is locked")
+            || message.contains("database is busy")
+            || message.contains("sqlite_busy")
+            || message.contains("sqlite_locked")
     }
 
     func refreshItemIndexing(_ result: CiderCaptureResult) -> CiderCaptureResult {

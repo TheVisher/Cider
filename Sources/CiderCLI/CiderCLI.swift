@@ -230,9 +230,7 @@ struct CiderCLI {
                 at: dbPath.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            DatabaseSafetyService.shared.capturePreOpenSnapshotIfNeeded(databaseURL: dbPath)
-            try CiderDatabase.shared.open(at: dbPath)
-            DatabaseSafetyService.shared.performStartupSafetyPass(database: CiderDatabase.shared)
+            try openCanonicalDatabaseWithRetry(at: dbPath)
         } catch {
             let databaseOpenError = error
             Logger(subsystem: "Cider", category: "CLI")
@@ -342,6 +340,38 @@ struct CiderCLI {
         default:
             printCLIError("Unknown command: \(command). Run 'cider-cli help' for usage.")
         }
+    }
+
+    static func openCanonicalDatabaseWithRetry(
+        at dbPath: URL,
+        attempts: Int = 8,
+        initialDelay: TimeInterval = 0.05
+    ) throws {
+        var lastError: Error?
+        for attempt in 0..<max(1, attempts) {
+            do {
+                DatabaseSafetyService.shared.capturePreOpenSnapshotIfNeeded(databaseURL: dbPath)
+                try CiderDatabase.shared.open(at: dbPath)
+                DatabaseSafetyService.shared.performStartupSafetyPass(database: CiderDatabase.shared)
+                return
+            } catch {
+                lastError = error
+                guard isTransientSQLiteLock(error), attempt + 1 < attempts else {
+                    throw error
+                }
+                CiderDatabase.shared.close()
+                Thread.sleep(forTimeInterval: initialDelay * Double(attempt + 1))
+            }
+        }
+        throw lastError ?? CiderDatabaseError.open("unknown SQLite open failure")
+    }
+
+    static func isTransientSQLiteLock(_ error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("database is locked")
+            || message.contains("database is busy")
+            || message.contains("sqlite_busy")
+            || message.contains("sqlite_locked")
     }
 
     static func requiresCanonicalDatabase(command rawCommand: String, subcommand rawSubcommand: String?, args: [String]) -> Bool {

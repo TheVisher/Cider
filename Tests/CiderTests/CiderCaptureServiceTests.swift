@@ -1229,6 +1229,8 @@ struct CiderCaptureServiceTests {
             #expect((indexing["reason"] as? String)?.contains("database") == true)
             #expect(partialSuccess["status"] as? String == "canonical_side_effects_incomplete")
             #expect((partialSuccess["reason"] as? String)?.contains("provenance") == true)
+            #expect(safeNextCommands.contains("cider-cli item rebuild-chunks note \(result.item.id.uuidString) --json"))
+            #expect(safeNextCommands.contains("cider-cli item rebuild-index --json"))
             #expect(safeNextCommands.contains("cider-cli storage audit --json"))
         }
     }

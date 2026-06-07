@@ -2022,6 +2022,102 @@ struct CiderCLIAgentSafetyTests {
         })
     }
 
+    @Test("parallel capture add records every test-run item and indexes without transient lock drift")
+    func parallelCaptureAddRecordsEveryTestRunItemAndIndexesWithoutTransientLockDrift() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-concurrent-capture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let runID = "cid465-\(UUID().uuidString)"
+        let marker = "CID-465 concurrent capture fixture"
+        let specs: [(label: String, expectedType: String, args: [String], stdin: String)] = [
+            (
+                "note",
+                "note",
+                [
+                    "capture", "add",
+                    "--kind", "note",
+                    "--title", "CID465 concurrent note",
+                    "--test-run", runID,
+                    "--test-marker", marker,
+                    "--stdin",
+                    "--json",
+                ],
+                "Concurrent note body \(marker)"
+            ),
+            (
+                "todo",
+                "todo",
+                [
+                    "capture", "add",
+                    "--kind", "todo",
+                    "--title", "CID465 concurrent todo",
+                    "--test-run", runID,
+                    "--test-marker", marker,
+                    "--stdin",
+                    "--json",
+                ],
+                "Concurrent todo body \(marker)"
+            ),
+            (
+                "contact",
+                "contact",
+                [
+                    "capture", "add",
+                    "--kind", "contact",
+                    "--name", "CID465 Concurrent Contact",
+                    "--email", "cid465@example.com",
+                    "--test-run", runID,
+                    "--test-marker", marker,
+                    "--stdin",
+                    "--json",
+                ],
+                "Concurrent contact notes \(marker)"
+            ),
+            (
+                "event",
+                "event",
+                [
+                    "capture", "add",
+                    "--kind", "event",
+                    "--title", "CID465 concurrent event",
+                    "--date", "2026-06-09",
+                    "--time", "10:00 AM",
+                    "--location", "Test Room",
+                    "--test-run", runID,
+                    "--test-marker", marker,
+                    "--stdin",
+                    "--json",
+                ],
+                "Concurrent event notes \(marker)"
+            ),
+        ]
+
+        let captures = try runCLIConcurrently(specs: specs, vault: vault)
+        let payloads = try captures.map { capture -> [String: Any] in
+            #expect(capture.status == 0, "\(capture.label) stderr: \(capture.stderr)")
+            let payload = try parseJSONObject(capture.stdout)
+            #expect(payload["command"] as? String == "capture.add")
+            #expect((payload["item"] as? [String: Any])?["type"] as? String == capture.expectedType)
+            #expect((payload["indexing"] as? [String: Any])?["status"] as? String == "indexed")
+            #expect((payload["partialSuccess"] as? [String: Any])?["status"] as? String != "canonical_side_effects_incomplete")
+            let safeCommands = try #require(payload["safeNextCommands"] as? [String])
+            #expect(safeCommands.contains("cider-cli test-run cleanup \(runID) --dry-run --json"))
+            return payload
+        }
+        let capturedIDs = Set(payloads.compactMap { ($0["item"] as? [String: Any])?["id"] as? String })
+        #expect(capturedIDs.count == specs.count)
+
+        let cleanupResult = try runCLI(args: ["test-run", "cleanup", runID, "--dry-run", "--json"], vault: vault)
+        let cleanup = try parseJSONObject(cleanupResult.stdout)
+        #expect(cleanup["itemCount"] as? Int == specs.count)
+        let cleanupItems = try #require(cleanup["items"] as? [[String: Any]])
+        let cleanupIDs = Set(cleanupItems.compactMap { $0["id"] as? String })
+        #expect(cleanupIDs == capturedIDs)
+        #expect(cleanupItems.allSatisfy { $0["status"] as? String == "present" })
+    }
+
     @Test("test run cleanup previews and trashes only manifest items")
     func testRunCleanupPreviewsAndTrashesOnlyManifestItems() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -3159,6 +3255,53 @@ struct CiderCLIAgentSafetyTests {
             String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
             process.terminationStatus
         )
+    }
+
+    private func runCLIConcurrently(
+        specs: [(label: String, expectedType: String, args: [String], stdin: String)],
+        vault: URL
+    ) throws -> [(label: String, expectedType: String, stdout: String, stderr: String, status: Int32)] {
+        let cli = try cliURL()
+        var running: [(
+            label: String,
+            expectedType: String,
+            process: Process,
+            stdout: Pipe,
+            stderr: Pipe,
+            input: Pipe,
+            stdin: String
+        )] = []
+
+        for spec in specs {
+            let process = Process()
+            process.executableURL = cli
+            process.arguments = ["--vault", vault.path] + spec.args
+
+            let stdout = Pipe()
+            let stderr = Pipe()
+            let input = Pipe()
+            process.standardOutput = stdout
+            process.standardError = stderr
+            process.standardInput = input
+            try process.run()
+            running.append((spec.label, spec.expectedType, process, stdout, stderr, input, spec.stdin))
+        }
+
+        for item in running {
+            item.input.fileHandleForWriting.write(Data(item.stdin.utf8))
+            try item.input.fileHandleForWriting.close()
+        }
+
+        return running.map { item in
+            item.process.waitUntilExit()
+            return (
+                label: item.label,
+                expectedType: item.expectedType,
+                stdout: String(data: item.stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
+                stderr: String(data: item.stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
+                status: item.process.terminationStatus
+            )
+        }
     }
 
     private func cliURL() throws -> URL {

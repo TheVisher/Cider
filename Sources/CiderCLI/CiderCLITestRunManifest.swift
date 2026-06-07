@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 @testable import Cider
 
 struct CiderCLITestRunManifest: Codable {
@@ -81,6 +82,26 @@ enum CiderCLITestRunManifestStore {
         try data.write(to: url, options: [.atomic])
     }
 
+    static func withManifestLock<T>(runID: String, _ body: () throws -> T) throws -> T {
+        try validateRunID(runID)
+        let directoryURL = StoragePaths.cachedVaultDirectoryURL
+            .appendingPathComponent(relativeDirectory, isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let lockURL = directoryURL.appendingPathComponent(".\(runID).lock", isDirectory: false)
+        let fd = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard fd >= 0 else {
+            throw ManifestError.message("Could not open test-run manifest lock for \(runID).")
+        }
+        defer {
+            flock(fd, LOCK_UN)
+            close(fd)
+        }
+        guard flock(fd, LOCK_EX) == 0 else {
+            throw ManifestError.message("Could not lock test-run manifest \(runID).")
+        }
+        return try body()
+    }
+
     static func recordCapture(
         runID: String,
         marker: String?,
@@ -114,55 +135,56 @@ enum CiderCLITestRunManifestStore {
         sourceURL: String? = nil,
         sourceFile: String? = nil
     ) throws -> [String: Any] {
-        try validateRunID(runID)
-        let now = ISO8601DateFormatter().string(from: Date())
-        var manifest: CiderCLITestRunManifest
-        if try exists(runID: runID) {
-            manifest = try load(runID: runID)
-            if manifest.marker == nil {
-                manifest.marker = marker
+        try withManifestLock(runID: runID) {
+            let now = ISO8601DateFormatter().string(from: Date())
+            var manifest: CiderCLITestRunManifest
+            if try exists(runID: runID) {
+                manifest = try load(runID: runID)
+                if manifest.marker == nil {
+                    manifest.marker = marker
+                }
+            } else {
+                manifest = CiderCLITestRunManifest(
+                    runID: runID,
+                    marker: marker,
+                    createdAt: now,
+                    updatedAt: now,
+                    cleanupStatus: "not_started",
+                    items: []
+                )
             }
-        } else {
-            manifest = CiderCLITestRunManifest(
-                runID: runID,
-                marker: marker,
-                createdAt: now,
-                updatedAt: now,
-                cleanupStatus: "not_started",
-                items: []
+
+            let item = CiderCLITestRunManifest.Item(
+                type: type,
+                id: id,
+                title: title,
+                relativePath: relativePath,
+                captureEventID: captureEventID,
+                sourceKind: sourceKind,
+                sourceURL: sourceURL,
+                sourceFile: sourceFile,
+                recordedAt: now,
+                cleanupStatus: nil,
+                trashItemID: nil
             )
-        }
+            if let index = manifest.items.firstIndex(where: { $0.type == item.type && $0.id == item.id }) {
+                manifest.items[index] = item
+            } else {
+                manifest.items.append(item)
+            }
+            manifest.updatedAt = now
+            try save(manifest)
 
-        let item = CiderCLITestRunManifest.Item(
-            type: type,
-            id: id,
-            title: title,
-            relativePath: relativePath,
-            captureEventID: captureEventID,
-            sourceKind: sourceKind,
-            sourceURL: sourceURL,
-            sourceFile: sourceFile,
-            recordedAt: now,
-            cleanupStatus: nil,
-            trashItemID: nil
-        )
-        if let index = manifest.items.firstIndex(where: { $0.type == item.type && $0.id == item.id }) {
-            manifest.items[index] = item
-        } else {
-            manifest.items.append(item)
+            var dict: [String: Any] = [
+                "runID": runID,
+                "manifestPath": manifestRelativePath(runID: runID),
+                "itemCount": manifest.items.count,
+                "cleanupCommand": "cider-cli test-run cleanup \(runID) --dry-run --json",
+            ]
+            if let marker {
+                dict["marker"] = marker
+            }
+            return dict
         }
-        manifest.updatedAt = now
-        try save(manifest)
-
-        var dict: [String: Any] = [
-            "runID": runID,
-            "manifestPath": manifestRelativePath(runID: runID),
-            "itemCount": manifest.items.count,
-            "cleanupCommand": "cider-cli test-run cleanup \(runID) --dry-run --json",
-        ]
-        if let marker {
-            dict["marker"] = marker
-        }
-        return dict
     }
 }
