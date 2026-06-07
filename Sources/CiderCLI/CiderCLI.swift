@@ -389,7 +389,11 @@ struct CiderCLI {
         case "reminder", "reminders":
             return isMutationSubcommand(subcommand, in: ["complete", "done", "snooze"])
         case "storage":
-            return subcommand == "doctor-apply" || subcommand == "bookmark-drift-repair" || (subcommand == "repair-schema" && args.contains("--execute"))
+            return subcommand == "doctor-apply"
+                || subcommand == "bookmark-drift-repair"
+                || (subcommand == "duplicate-markdown-cleanup" && args.contains("--execute"))
+                || (subcommand == "duplicate-markdown-plan" && args.contains("--execute"))
+                || (subcommand == "repair-schema" && args.contains("--execute"))
         case "doctor":
             return args.contains("--fix") || args.contains("--apply") || args.contains("--execute")
         default:
@@ -419,6 +423,7 @@ struct CiderCLI {
               cider-cli storage audit [--json]
               cider-cli storage doctor-plan [--limit <n>] [--json]
               cider-cli storage doctor-apply --finding <id> --canonical <path> --duplicate <path> --approve <token> [--execute] [--json]
+              cider-cli storage duplicate-markdown-cleanup --duplicate-prefix <path> --canonical-prefix <path> [--approve <token>] [--execute] [--json]
               cider-cli storage active-duplicate-invariants [--limit <n>] [--json]
               cider-cli storage restart-duplicate-regression [--limit <n>] [--json]
               cider-cli storage bookmark-drift-audit [--limit <n>] [--json]
@@ -500,6 +505,65 @@ struct CiderCLI {
                     print("      Action: \(plan.proposedAction) (\(plan.confidence))")
                     print("      No files or folders were changed.")
                 }
+            }
+
+        case "duplicate-markdown-cleanup", "duplicate-markdown-plan":
+            guard let duplicatePrefix = parseFlag("--duplicate-prefix", from: args) ?? parseFlag("--prefix", from: args),
+                  let canonicalPrefix = parseFlag("--canonical-prefix", from: args) ?? parseFlag("--matching-canonical-prefix", from: args) else {
+                printCLIError("Usage: cider-cli storage duplicate-markdown-cleanup --duplicate-prefix <path> --canonical-prefix <path> [--approve <token>] [--execute] [--json]")
+                return
+            }
+            do {
+                let report = try CiderStorageAuditService().duplicateMarkdownCleanup(
+                    duplicatePrefix: duplicatePrefix,
+                    canonicalPrefix: canonicalPrefix,
+                    approvalToken: parseFlag("--approve", from: args),
+                    execute: args.contains("--execute")
+                )
+                if jsonOutput {
+                    outputJSON(duplicateMarkdownCleanupReportToDict(report))
+                } else {
+                    print("Duplicate Markdown cleanup")
+                    print("  Status: \(report.status)")
+                    print("  Mutating: \(report.isMutating ? "yes" : "no")")
+                    print("  Duplicate prefix: \(report.duplicatePrefix)")
+                    print("  Canonical prefix: \(report.canonicalPrefix)")
+                    print("  Planned: \(report.summary["planned"] ?? 0)")
+                    print("  Applied: \(report.summary["applied"] ?? 0)")
+                    print("  Skipped: \(report.summary["skipped"] ?? 0)")
+                    print("  Blockers: \(report.summary["blockers"] ?? 0)")
+                    if let approvalToken = report.approvalToken {
+                        print("  Required approval token: \(approvalToken)")
+                    }
+                    for candidate in report.candidates {
+                        print("    [candidate] \(candidate.duplicateRelativePath) -> \(candidate.canonicalRelativePath)")
+                        print("      SHA-256: \(candidate.sha256)")
+                        print("      Reasons: \(candidate.reasons.joined(separator: ", "))")
+                    }
+                    for candidate in report.blockedCandidates {
+                        print("    [blocked] \(candidate.duplicateRelativePath) -> \(candidate.canonicalRelativePath)")
+                        print("      Blockers: \(candidate.blockers.joined(separator: ", "))")
+                    }
+                    for applied in report.applied {
+                        if let trash = applied.trashRelativePath {
+                            print("    [applied] \(applied.duplicateRelativePath) -> \(trash)")
+                        }
+                    }
+                    if !report.blockers.isEmpty {
+                        print("  Top-level blockers:")
+                        for blocker in report.blockers {
+                            print("    \(blocker)")
+                        }
+                    }
+                    if !report.safeNextCommands.isEmpty {
+                        print("  Safe next commands:")
+                        for command in report.safeNextCommands {
+                            print("    \(command)")
+                        }
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
             }
 
         case "active-duplicate-invariants", "duplicate-invariants":
@@ -750,7 +814,7 @@ struct CiderCLI {
             }
 
         default:
-            printCLIError("Unknown storage command: \(subcommand ?? "nil"). Commands: audit, doctor-plan, doctor-apply, active-duplicate-invariants, restart-duplicate-regression, bookmark-drift-audit, bookmark-drift-repair, repair-schema")
+            printCLIError("Unknown storage command: \(subcommand ?? "nil"). Commands: audit, doctor-plan, doctor-apply, duplicate-markdown-cleanup, active-duplicate-invariants, restart-duplicate-regression, bookmark-drift-audit, bookmark-drift-repair, repair-schema")
         }
     }
 
@@ -16649,6 +16713,7 @@ struct CiderCLI {
           cider-cli storage audit [--json]
           cider-cli storage doctor-plan [--limit <n>] [--json]
           cider-cli storage doctor-apply --finding <id> --canonical <path> --duplicate <path> --approve <token> [--execute] [--json]
+          cider-cli storage duplicate-markdown-cleanup --duplicate-prefix <path> --canonical-prefix <path> [--approve <token>] [--execute] [--json]
           cider-cli storage bookmark-drift-audit [--limit <n>] [--json]
           cider-cli storage bookmark-drift-repair --item <id> --approve <token> [--execute] [--json]
           cider-cli storage repair-schema [--approve REPAIR_SCHEMA] [--execute] [--json]

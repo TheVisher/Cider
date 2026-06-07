@@ -74,6 +74,140 @@ struct CiderStorageAuditServiceTests {
         try stmt.step()
     }
 
+    private func insertNoteDetail(_ db: CiderDatabase, id: UUID, content: String) throws {
+        let stmt = try db.prepare("""
+            INSERT INTO notes (item_id, content, summary, is_pinned)
+            VALUES (?, ?, NULL, 0);
+            """)
+        stmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(content, at: 2)
+        try stmt.step()
+    }
+
+    private func insertProject(_ db: CiderDatabase, id: String = "cider", title: String = "Cider") throws {
+        let now = DatabaseHelpers.encode(Date(timeIntervalSince1970: 10))
+        let stmt = try db.prepare("""
+            INSERT INTO projects (id, title, subtitle, status, metadata, created_at, updated_at)
+            VALUES (?, ?, '', 'active', '{}', ?, ?);
+            """)
+        stmt.bind(id, at: 1)
+            .bind(title, at: 2)
+            .bind(now, at: 3)
+            .bind(now, at: 4)
+        try stmt.step()
+    }
+
+    private func insertProjectArtifactRelation(
+        _ db: CiderDatabase,
+        noteID: UUID,
+        projectID: String = "cider",
+        artifactType: String = "note"
+    ) throws {
+        let now = DatabaseHelpers.encode(Date(timeIntervalSince1970: 10))
+        let stmt = try db.prepare("""
+            INSERT INTO owner_relations (
+                id, source_owner_type, source_owner_id, target_owner_type, target_owner_id,
+                relation_type, evidence, source, actor, confidence, metadata, created_at, updated_at
+            )
+            VALUES (?, 'note', ?, 'project', ?, 'artifact_of', 'test fixture', 'test', 'agent', 1.0, ?, ?, ?);
+            """)
+        stmt.bind(DatabaseHelpers.encode(UUID()), at: 1)
+            .bind(DatabaseHelpers.encode(noteID), at: 2)
+            .bind(projectID, at: 3)
+            .bind(DatabaseHelpers.encodeJSON(["artifactType": artifactType]) ?? "{}", at: 4)
+            .bind(now, at: 5)
+            .bind(now, at: 6)
+        try stmt.step()
+    }
+
+    private func writeFile(_ relativePath: String, content: String, under root: URL) throws {
+        let url = root.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try content.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func writeIndex(paths: [String], under root: URL) throws {
+        let indexURL = root
+            .appendingPathComponent(".cider", isDirectory: true)
+            .appendingPathComponent("index.json")
+        try FileManager.default.createDirectory(
+            at: indexURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let items = paths.enumerated().map { offset, path in
+            """
+                "\(UUID().uuidString)": {
+                  "type": "note",
+                  "path": "\(path)",
+                  "title": "Indexed \(offset)",
+                  "createdAt": "1970-01-01T00:00:10Z",
+                  "updatedAt": "1970-01-01T00:00:10Z"
+                }
+            """
+        }.joined(separator: ",\n")
+        let json = """
+        {
+          "version": 1,
+          "items": {
+        \(items)
+          }
+        }
+        """
+        try json.write(to: indexURL, atomically: true, encoding: .utf8)
+    }
+
+    private func makeDuplicateMarkdownFixture(
+        indexedDuplicatePath: String? = nil,
+        sqliteDuplicatePath: String? = nil,
+        projectBacked: Bool = true
+    ) throws -> (service: CiderStorageAuditService, db: CiderDatabase, dbURL: URL, vault: URL, canonicalID: UUID) {
+        let (db, dbURL) = try makeTestDB()
+        let vault = try makeTempVault()
+        let canonicalID = UUID()
+        let canonicalPath = "Projects/Cider/Notes/Signal.md"
+        let duplicatePath = "Notes/Signal 1.md"
+        let otherDuplicatePath = "Cider 31/Notes/Signal 1.md"
+        let content = "# Signal\n\nDurable project note.\n"
+
+        try writeFile(canonicalPath, content: content, under: vault)
+        try writeFile(duplicatePath, content: content, under: vault)
+        try writeFile(otherDuplicatePath, content: content, under: vault)
+        try writeFile("Notes/Different.md", content: "# Different\n", under: vault)
+        try writeIndex(paths: [canonicalPath] + [indexedDuplicatePath].compactMap { $0 }, under: vault)
+
+        try insertProject(db)
+        try insertItem(db, id: canonicalID, type: "note", title: "Signal", relativePath: canonicalPath)
+        try insertNoteDetail(db, id: canonicalID, content: content)
+        if projectBacked {
+            try insertProjectArtifactRelation(db, noteID: canonicalID)
+        }
+        if let sqliteDuplicatePath {
+            try db.runSQL("DROP INDEX IF EXISTS idx_items_path;")
+            let duplicateID = UUID()
+            try insertItem(db, id: duplicateID, type: "note", title: "Signal Duplicate", relativePath: sqliteDuplicatePath)
+            try insertNoteDetail(db, id: duplicateID, content: content)
+        }
+
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            modelCountsProvider: { [:] },
+            doctorReportProvider: {
+                VaultDoctor.Report(
+                    startedAt: Date(timeIntervalSince1970: 10),
+                    finishedAt: Date(timeIntervalSince1970: 11),
+                    findings: []
+                )
+            },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+        return (service, db, dbURL, vault, canonicalID)
+    }
+
     private func insertItem(
         _ db: CiderDatabase,
         id: UUID,
@@ -386,6 +520,164 @@ struct CiderStorageAuditServiceTests {
         #expect(report.duplicateRelativePaths.first?.relativePath == "Inbox/Notes/CodexNote.md")
         #expect(report.duplicateRelativePaths.first?.items.map(\.id).contains(firstID.uuidString) == true)
         #expect(report.sqliteMismatches.first?.key == "note")
+    }
+
+    @Test("duplicate Markdown dry-run emits exact hash candidates with approval token")
+    func duplicateMarkdownDryRunEmitsExactHashCandidatesWithApprovalToken() throws {
+        let fixture = try makeDuplicateMarkdownFixture()
+        defer {
+            fixture.db.close()
+            cleanup(fixture.dbURL)
+            try? FileManager.default.removeItem(at: fixture.vault)
+        }
+
+        let report = try fixture.service.duplicateMarkdownCleanup(
+            duplicatePrefix: "Notes",
+            canonicalPrefix: "Projects/Cider/Notes"
+        )
+
+        #expect(report.command == "storage.duplicate-markdown-cleanup")
+        #expect(report.isMutating == false)
+        #expect(report.status == "planned")
+        #expect(report.summary["planned"] == 1)
+        #expect(report.summary["applied"] == 0)
+        #expect(report.summary["blockers"] == 0)
+        let candidate = try #require(report.candidates.first)
+        #expect(candidate.duplicateRelativePath == "Notes/Signal 1.md")
+        #expect(candidate.canonicalRelativePath == "Projects/Cider/Notes/Signal.md")
+        #expect(candidate.byteCount == 32)
+        #expect(candidate.duplicateIndexed == false)
+        #expect(candidate.duplicateSQLiteOwners.isEmpty)
+        #expect(candidate.canonicalProjectID == "cider")
+        #expect(candidate.canonicalItemID == fixture.canonicalID.uuidString)
+        #expect(candidate.reasons.contains("duplicate_hash_matches_canonical"))
+        #expect(candidate.reasons.contains("duplicate_not_in_index"))
+        #expect(candidate.reasons.contains("duplicate_has_no_sqlite_owner"))
+        #expect(candidate.reasons.contains("canonical_is_project_backed"))
+        let approvalToken = try #require(candidate.approvalToken)
+        #expect(approvalToken.hasPrefix("duplicate-markdown:"))
+        #expect(approvalToken.count == "duplicate-markdown:".count + 64)
+        #expect(report.safeNextCommands.contains {
+            $0.contains("storage duplicate-markdown-cleanup")
+                && $0.contains("--approve")
+                && $0.contains("--execute")
+        })
+
+        let dict = duplicateMarkdownCleanupReportToDict(report)
+        let candidates = try #require(dict["candidates"] as? [[String: Any]])
+        #expect(candidates.first?["duplicateRelativePath"] as? String == "Notes/Signal 1.md")
+        #expect(candidates.first?["approvalToken"] as? String == candidate.approvalToken)
+    }
+
+    @Test("duplicate Markdown execute refuses without exact approval")
+    func duplicateMarkdownExecuteRefusesWithoutExactApproval() throws {
+        let fixture = try makeDuplicateMarkdownFixture()
+        defer {
+            fixture.db.close()
+            cleanup(fixture.dbURL)
+            try? FileManager.default.removeItem(at: fixture.vault)
+        }
+
+        let report = try fixture.service.duplicateMarkdownCleanup(
+            duplicatePrefix: "Notes",
+            canonicalPrefix: "Projects/Cider/Notes",
+            approvalToken: nil,
+            execute: true
+        )
+
+        #expect(report.status == "refused")
+        #expect(report.isMutating == false)
+        #expect(report.summary["planned"] == 1)
+        #expect(report.summary["applied"] == 0)
+        #expect(report.summary["skipped"] == 1)
+        #expect(report.summary["blockers"] == 1)
+        #expect(report.blockers.contains { $0.contains("exact approval token required") })
+        #expect(FileManager.default.fileExists(atPath: fixture.vault.appendingPathComponent("Notes/Signal 1.md").path))
+    }
+
+    @Test("duplicate Markdown approved execute moves duplicate to storage doctor trash and audits")
+    func duplicateMarkdownApprovedExecuteMovesDuplicateToStorageDoctorTrashAndAudits() throws {
+        let fixture = try makeDuplicateMarkdownFixture()
+        defer {
+            fixture.db.close()
+            cleanup(fixture.dbURL)
+            try? FileManager.default.removeItem(at: fixture.vault)
+        }
+        let dryRun = try fixture.service.duplicateMarkdownCleanup(
+            duplicatePrefix: "Notes",
+            canonicalPrefix: "Projects/Cider/Notes"
+        )
+        let token = try #require(dryRun.candidates.first?.approvalToken)
+
+        let report = try fixture.service.duplicateMarkdownCleanup(
+            duplicatePrefix: "Notes",
+            canonicalPrefix: "Projects/Cider/Notes",
+            approvalToken: token,
+            execute: true
+        )
+
+        #expect(report.status == "applied")
+        #expect(report.isMutating == true)
+        #expect(report.summary["planned"] == 1)
+        #expect(report.summary["applied"] == 1)
+        #expect(report.summary["skipped"] == 0)
+        #expect(report.summary["blockers"] == 0)
+        let applied = try #require(report.applied.first)
+        let trashPath = try #require(applied.trashRelativePath)
+        #expect(trashPath.hasPrefix(".cider/storage-doctor-trash/"))
+        #expect(!FileManager.default.fileExists(atPath: fixture.vault.appendingPathComponent("Notes/Signal 1.md").path))
+        #expect(FileManager.default.fileExists(atPath: fixture.vault.appendingPathComponent(trashPath).path))
+        #expect(FileManager.default.fileExists(atPath: fixture.vault.appendingPathComponent("Projects/Cider/Notes/Signal.md").path))
+
+        let entries = MutationAuditService(database: fixture.db).loadEntries()
+        let audit = try #require(entries.first { $0.action == "storage.duplicate-markdown-cleanup.apply" })
+        #expect(audit.itemType == "note")
+        #expect(audit.itemID == fixture.canonicalID)
+        #expect(audit.beforeState["duplicateRelativePath"] == "Notes/Signal 1.md")
+        #expect(audit.afterState["trashRelativePath"] == trashPath)
+        #expect(audit.metadata["approvalToken"] == token)
+    }
+
+    @Test("duplicate Markdown cleanup blocks indexed SQLite-owned or non project canonical files")
+    func duplicateMarkdownCleanupBlocksIndexedSQLiteOwnedOrNonProjectCanonicalFiles() throws {
+        let indexed = try makeDuplicateMarkdownFixture(indexedDuplicatePath: "Notes/Signal 1.md")
+        defer {
+            indexed.db.close()
+            cleanup(indexed.dbURL)
+            try? FileManager.default.removeItem(at: indexed.vault)
+        }
+        let indexedReport = try indexed.service.duplicateMarkdownCleanup(
+            duplicatePrefix: "Notes",
+            canonicalPrefix: "Projects/Cider/Notes"
+        )
+        #expect(indexedReport.candidates.isEmpty)
+        #expect(indexedReport.blockedCandidates.first?.blockers.contains("duplicate path is present in .cider/index.json") == true)
+
+        let sqliteOwned = try makeDuplicateMarkdownFixture(sqliteDuplicatePath: "Notes/Signal 1.md")
+        defer {
+            sqliteOwned.db.close()
+            cleanup(sqliteOwned.dbURL)
+            try? FileManager.default.removeItem(at: sqliteOwned.vault)
+        }
+        let sqliteReport = try sqliteOwned.service.duplicateMarkdownCleanup(
+            duplicatePrefix: "Notes",
+            canonicalPrefix: "Projects/Cider/Notes"
+        )
+        #expect(sqliteReport.candidates.isEmpty)
+        #expect(sqliteReport.blockedCandidates.first?.blockers.contains("duplicate path has SQLite item owner rows") == true)
+
+        let nonProject = try makeDuplicateMarkdownFixture(projectBacked: false)
+        defer {
+            nonProject.db.close()
+            cleanup(nonProject.dbURL)
+            try? FileManager.default.removeItem(at: nonProject.vault)
+        }
+        let nonProjectReport = try nonProject.service.duplicateMarkdownCleanup(
+            duplicatePrefix: "Notes",
+            canonicalPrefix: "Projects/Cider/Notes"
+        )
+        #expect(nonProjectReport.candidates.isEmpty)
+        #expect(nonProjectReport.blockedCandidates.first?.blockers.contains("canonical note is not project-backed") == true)
     }
 
     @Test("active duplicate invariant check reports vault SQLite path mismatches read-only")

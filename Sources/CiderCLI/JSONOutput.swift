@@ -419,6 +419,71 @@ func storageDoctorRemediationApplyReportToDict(_ report: CiderStorageDoctorRemed
     return dict
 }
 
+func duplicateMarkdownCleanupReportToDict(_ report: CiderDuplicateMarkdownCleanupReport) -> [String: Any] {
+    var dict: [String: Any] = [
+        "command": report.command,
+        "generatedAt": ISO8601DateFormatter().string(from: report.generatedAt),
+        "status": report.status,
+        "isMutating": report.isMutating,
+        "approvalRequired": report.approvalRequired,
+        "duplicatePrefix": report.duplicatePrefix,
+        "canonicalPrefix": report.canonicalPrefix,
+        "candidates": report.candidates.map(duplicateMarkdownCleanupCandidateToDict),
+        "blockedCandidates": report.blockedCandidates.map(duplicateMarkdownCleanupCandidateToDict),
+        "applied": report.applied.map(duplicateMarkdownCleanupCandidateToDict),
+        "blockers": report.blockers,
+        "summary": report.summary,
+        "plannedCount": report.summary["planned"] ?? 0,
+        "appliedCount": report.summary["applied"] ?? 0,
+        "skippedCount": report.summary["skipped"] ?? 0,
+        "blockerCount": report.summary["blockers"] ?? 0,
+        "safeNextCommands": report.safeNextCommands,
+    ]
+    if let approvalToken = report.approvalToken {
+        dict["approvalToken"] = approvalToken
+    }
+    return dict
+}
+
+func duplicateMarkdownCleanupCandidateToDict(_ candidate: CiderDuplicateMarkdownCleanupCandidate) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": candidate.id,
+        "duplicateRelativePath": candidate.duplicateRelativePath,
+        "canonicalRelativePath": candidate.canonicalRelativePath,
+        "sha256": candidate.sha256,
+        "byteCount": candidate.byteCount,
+        "duplicateIndexed": candidate.duplicateIndexed,
+        "duplicateSQLiteOwners": candidate.duplicateSQLiteOwners.map(duplicateMarkdownSQLiteOwnerToDict),
+        "reasons": candidate.reasons,
+        "blockers": candidate.blockers,
+        "auditRecorded": candidate.auditRecorded,
+    ]
+    if let canonicalItemID = candidate.canonicalItemID {
+        dict["canonicalItemID"] = canonicalItemID
+    }
+    if let canonicalProjectID = candidate.canonicalProjectID {
+        dict["canonicalProjectID"] = canonicalProjectID
+    }
+    if let approvalToken = candidate.approvalToken {
+        dict["approvalToken"] = approvalToken
+    }
+    if let safeNextCommand = candidate.safeNextCommand {
+        dict["safeNextCommand"] = safeNextCommand
+    }
+    if let trashRelativePath = candidate.trashRelativePath {
+        dict["trashRelativePath"] = trashRelativePath
+    }
+    return dict
+}
+
+func duplicateMarkdownSQLiteOwnerToDict(_ owner: CiderDuplicateMarkdownSQLiteOwner) -> [String: Any] {
+    [
+        "id": owner.id,
+        "type": owner.type,
+        "title": owner.title,
+    ]
+}
+
 func bookmarkDriftAuditReportToDict(_ report: CiderBookmarkDriftAuditReport) -> [String: Any] {
     [
         "command": report.command,

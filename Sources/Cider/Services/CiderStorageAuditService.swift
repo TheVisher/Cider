@@ -1,3 +1,4 @@
+import CommonCrypto
 import Foundation
 
 struct CiderStorageAuditMismatch: Codable, Equatable {
@@ -123,6 +124,47 @@ struct CiderStorageDoctorRemediationApplyReport: Equatable {
     var blockers: [String]
     var trashRelativePath: String?
     var auditRecorded: Bool = false
+}
+
+struct CiderDuplicateMarkdownCleanupReport: Equatable {
+    var command: String = "storage.duplicate-markdown-cleanup"
+    var generatedAt: Date
+    var status: String
+    var isMutating: Bool
+    var approvalRequired: Bool = true
+    var duplicatePrefix: String
+    var canonicalPrefix: String
+    var approvalToken: String?
+    var candidates: [CiderDuplicateMarkdownCleanupCandidate]
+    var blockedCandidates: [CiderDuplicateMarkdownCleanupCandidate]
+    var applied: [CiderDuplicateMarkdownCleanupCandidate]
+    var blockers: [String]
+    var summary: [String: Int]
+    var safeNextCommands: [String]
+}
+
+struct CiderDuplicateMarkdownCleanupCandidate: Equatable {
+    var id: String
+    var duplicateRelativePath: String
+    var canonicalRelativePath: String
+    var sha256: String
+    var byteCount: Int
+    var duplicateIndexed: Bool
+    var duplicateSQLiteOwners: [CiderDuplicateMarkdownSQLiteOwner]
+    var canonicalItemID: String?
+    var canonicalProjectID: String?
+    var reasons: [String]
+    var blockers: [String]
+    var approvalToken: String?
+    var safeNextCommand: String?
+    var trashRelativePath: String?
+    var auditRecorded: Bool = false
+}
+
+struct CiderDuplicateMarkdownSQLiteOwner: Equatable {
+    var id: String
+    var type: String
+    var title: String
 }
 
 struct CiderBookmarkDriftAuditReport: Equatable {
@@ -461,6 +503,136 @@ final class CiderStorageAuditService {
         )
     }
 
+    func duplicateMarkdownCleanup(
+        duplicatePrefix: String,
+        canonicalPrefix: String,
+        approvalToken: String? = nil,
+        execute: Bool = false
+    ) throws -> CiderDuplicateMarkdownCleanupReport {
+        let normalizedDuplicatePrefix = normalizedPrefix(duplicatePrefix)
+        let normalizedCanonicalPrefix = normalizedPrefix(canonicalPrefix)
+        var topLevelBlockers: [String] = []
+
+        guard isSafeRelativePath(normalizedDuplicatePrefix),
+              isSafeRelativePath(normalizedCanonicalPrefix) else {
+            topLevelBlockers.append("prefixes must be vault-relative and cannot contain traversal")
+            return duplicateMarkdownCleanupReport(
+                status: "refused",
+                isMutating: false,
+                duplicatePrefix: normalizedDuplicatePrefix,
+                canonicalPrefix: normalizedCanonicalPrefix,
+                approvalToken: nil,
+                candidates: [],
+                blockedCandidates: [],
+                applied: [],
+                blockers: topLevelBlockers,
+                execute: execute
+            )
+        }
+
+        let indexedPaths = indexedVaultRelativePaths()
+        let canonicalFiles = markdownFiles(under: normalizedCanonicalPrefix)
+        let duplicateFiles = markdownFiles(under: normalizedDuplicatePrefix)
+        let canonicalByHash = Dictionary(grouping: canonicalFiles, by: \.sha256)
+
+        var candidates: [CiderDuplicateMarkdownCleanupCandidate] = []
+        var blockedCandidates: [CiderDuplicateMarkdownCleanupCandidate] = []
+
+        for duplicate in duplicateFiles {
+            guard let matchingCanonicals = canonicalByHash[duplicate.sha256],
+                  !matchingCanonicals.isEmpty else { continue }
+
+            let candidate = try duplicateMarkdownCandidate(
+                duplicate: duplicate,
+                matchingCanonicals: matchingCanonicals,
+                indexedPaths: indexedPaths
+            )
+            if candidate.blockers.isEmpty {
+                candidates.append(candidate)
+            } else {
+                blockedCandidates.append(candidate)
+            }
+        }
+
+        candidates.sort { $0.duplicateRelativePath.localizedCaseInsensitiveCompare($1.duplicateRelativePath) == .orderedAscending }
+        blockedCandidates.sort { $0.duplicateRelativePath.localizedCaseInsensitiveCompare($1.duplicateRelativePath) == .orderedAscending }
+
+        let planApprovalToken = Self.duplicateMarkdownApprovalToken(
+            duplicatePrefix: normalizedDuplicatePrefix,
+            canonicalPrefix: normalizedCanonicalPrefix,
+            candidates: candidates
+        )
+        candidates = candidates.map { candidate in
+            var copy = candidate
+            copy.approvalToken = planApprovalToken
+            copy.safeNextCommand = "cider-cli storage duplicate-markdown-cleanup --duplicate-prefix \(Self.shellQuoted(normalizedDuplicatePrefix)) --canonical-prefix \(Self.shellQuoted(normalizedCanonicalPrefix)) --approve \(Self.shellQuoted(planApprovalToken)) --execute --json"
+            return copy
+        }
+
+        guard execute else {
+            return duplicateMarkdownCleanupReport(
+                status: candidates.isEmpty ? (blockedCandidates.isEmpty ? "clean" : "blocked") : "planned",
+                isMutating: false,
+                duplicatePrefix: normalizedDuplicatePrefix,
+                canonicalPrefix: normalizedCanonicalPrefix,
+                approvalToken: planApprovalToken,
+                candidates: candidates,
+                blockedCandidates: blockedCandidates,
+                applied: [],
+                blockers: [],
+                execute: false
+            )
+        }
+
+        guard approvalToken == planApprovalToken else {
+            topLevelBlockers.append("exact approval token required: \(planApprovalToken)")
+            return duplicateMarkdownCleanupReport(
+                status: "refused",
+                isMutating: false,
+                duplicatePrefix: normalizedDuplicatePrefix,
+                canonicalPrefix: normalizedCanonicalPrefix,
+                approvalToken: planApprovalToken,
+                candidates: candidates,
+                blockedCandidates: blockedCandidates,
+                applied: [],
+                blockers: topLevelBlockers,
+                execute: true
+            )
+        }
+
+        var applied: [CiderDuplicateMarkdownCleanupCandidate] = []
+        var applyBlockers: [String] = []
+        for candidate in candidates {
+            do {
+                applied.append(try applyDuplicateMarkdownCleanupCandidate(candidate))
+            } catch {
+                applyBlockers.append("\(candidate.duplicateRelativePath): \(error.localizedDescription)")
+            }
+        }
+
+        let status: String
+        if !applyBlockers.isEmpty {
+            status = applied.isEmpty ? "failed" : "partial"
+        } else if applied.isEmpty {
+            status = "clean"
+        } else {
+            status = "applied"
+        }
+
+        return duplicateMarkdownCleanupReport(
+            status: status,
+            isMutating: !applied.isEmpty,
+            duplicatePrefix: normalizedDuplicatePrefix,
+            canonicalPrefix: normalizedCanonicalPrefix,
+            approvalToken: planApprovalToken,
+            candidates: candidates,
+            blockedCandidates: blockedCandidates,
+            applied: applied,
+            blockers: applyBlockers,
+            execute: true
+        )
+    }
+
     func doctorRemediationPlan(limit: Int = defaultDoctorFindingSampleLimit) -> CiderStorageDoctorRemediationPlanReport {
         let normalizedLimit = max(0, limit)
         let doctorReport = doctorReportProvider()
@@ -757,6 +929,363 @@ final class CiderStorageAuditService {
         proposedRelativePath: String
     ) -> String {
         "bookmark-drift:\(itemID):\(currentRelativePath)=>\(proposedRelativePath)"
+    }
+
+    static func duplicateMarkdownApprovalToken(
+        duplicatePrefix: String,
+        canonicalPrefix: String,
+        candidates: [CiderDuplicateMarkdownCleanupCandidate]
+    ) -> String {
+        let fingerprint = candidates
+            .map { "\($0.duplicateRelativePath)=>\($0.canonicalRelativePath)#\($0.sha256)" }
+            .joined(separator: ",")
+        let payload = "\(duplicatePrefix)=>\(canonicalPrefix):\(fingerprint)"
+        return "duplicate-markdown:\(sha256Hex(Data(payload.utf8)))"
+    }
+
+    private struct DuplicateMarkdownFile {
+        var relativePath: String
+        var sha256: String
+        var byteCount: Int
+    }
+
+    private func duplicateMarkdownCleanupReport(
+        status: String,
+        isMutating: Bool,
+        duplicatePrefix: String,
+        canonicalPrefix: String,
+        approvalToken: String?,
+        candidates: [CiderDuplicateMarkdownCleanupCandidate],
+        blockedCandidates: [CiderDuplicateMarkdownCleanupCandidate],
+        applied: [CiderDuplicateMarkdownCleanupCandidate],
+        blockers: [String],
+        execute: Bool
+    ) -> CiderDuplicateMarkdownCleanupReport {
+        let skipped = execute ? max(0, candidates.count - applied.count) : 0
+        let blockerCount = blockers.count + blockedCandidates.count
+        let safeNextCommands: [String]
+        if let approvalToken, !candidates.isEmpty {
+            safeNextCommands = [
+                "cider-cli storage duplicate-markdown-cleanup --duplicate-prefix \(Self.shellQuoted(duplicatePrefix)) --canonical-prefix \(Self.shellQuoted(canonicalPrefix)) --approve \(Self.shellQuoted(approvalToken)) --execute --json",
+                "cider-cli storage audit --json",
+                "cider-cli storage active-duplicate-invariants --limit 200 --json",
+                "cider-cli item rebuild-index --json",
+            ]
+        } else {
+            safeNextCommands = [
+                "cider-cli storage audit --json",
+                "cider-cli storage active-duplicate-invariants --limit 200 --json",
+            ]
+        }
+
+        return CiderDuplicateMarkdownCleanupReport(
+            generatedAt: nowProvider(),
+            status: status,
+            isMutating: isMutating,
+            duplicatePrefix: duplicatePrefix,
+            canonicalPrefix: canonicalPrefix,
+            approvalToken: approvalToken,
+            candidates: candidates,
+            blockedCandidates: blockedCandidates,
+            applied: applied,
+            blockers: blockers,
+            summary: [
+                "planned": candidates.count,
+                "applied": applied.count,
+                "skipped": skipped,
+                "blockers": blockerCount,
+            ],
+            safeNextCommands: safeNextCommands
+        )
+    }
+
+    private func duplicateMarkdownCandidate(
+        duplicate: DuplicateMarkdownFile,
+        matchingCanonicals: [DuplicateMarkdownFile],
+        indexedPaths: Set<String>
+    ) throws -> CiderDuplicateMarkdownCleanupCandidate {
+        var reasons = ["duplicate_hash_matches_canonical"]
+        var blockers: [String] = []
+
+        let duplicateIndexed = indexedPaths.contains(duplicate.relativePath)
+        if duplicateIndexed {
+            blockers.append("duplicate path is present in .cider/index.json")
+        } else {
+            reasons.append("duplicate_not_in_index")
+        }
+
+        let duplicateOwners = try sqliteOwners(relativePath: duplicate.relativePath)
+        if duplicateOwners.isEmpty {
+            reasons.append("duplicate_has_no_sqlite_owner")
+        } else {
+            blockers.append("duplicate path has SQLite item owner rows")
+        }
+
+        let canonicalMetadata = try canonicalProjectBackedNote(
+            matchingCanonicals: matchingCanonicals
+        )
+        if canonicalMetadata.blockers.isEmpty {
+            reasons.append("canonical_is_project_backed")
+        } else {
+            blockers.append(contentsOf: canonicalMetadata.blockers)
+        }
+
+        let canonicalPath = canonicalMetadata.relativePath ?? matchingCanonicals.first?.relativePath ?? ""
+        return CiderDuplicateMarkdownCleanupCandidate(
+            id: "duplicate-markdown:\(safeTrashComponent(duplicate.relativePath))",
+            duplicateRelativePath: duplicate.relativePath,
+            canonicalRelativePath: canonicalPath,
+            sha256: duplicate.sha256,
+            byteCount: duplicate.byteCount,
+            duplicateIndexed: duplicateIndexed,
+            duplicateSQLiteOwners: duplicateOwners,
+            canonicalItemID: canonicalMetadata.itemID,
+            canonicalProjectID: canonicalMetadata.projectID,
+            reasons: reasons,
+            blockers: blockers,
+            approvalToken: nil,
+            safeNextCommand: nil,
+            trashRelativePath: nil
+        )
+    }
+
+    private func applyDuplicateMarkdownCleanupCandidate(
+        _ candidate: CiderDuplicateMarkdownCleanupCandidate
+    ) throws -> CiderDuplicateMarkdownCleanupCandidate {
+        guard candidate.blockers.isEmpty else {
+            throw NSError(
+                domain: "CiderStorageAuditService",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: candidate.blockers.joined(separator: "; ")]
+            )
+        }
+        guard let canonicalItemID = candidate.canonicalItemID,
+              let canonicalUUID = UUID(uuidString: canonicalItemID) else {
+            throw NSError(
+                domain: "CiderStorageAuditService",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "canonical project note item is missing"]
+            )
+        }
+        guard isSafeRelativePath(candidate.duplicateRelativePath),
+              isSafeRelativePath(candidate.canonicalRelativePath) else {
+            throw NSError(
+                domain: "CiderStorageAuditService",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "paths must be vault-relative and cannot contain traversal"]
+            )
+        }
+
+        let duplicateURL = vaultRoot.appendingPathComponent(candidate.duplicateRelativePath)
+        let canonicalURL = vaultRoot.appendingPathComponent(candidate.canonicalRelativePath)
+        var duplicateIsDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: duplicateURL.path, isDirectory: &duplicateIsDirectory),
+              !duplicateIsDirectory.boolValue else {
+            throw NSError(
+                domain: "CiderStorageAuditService",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "duplicate Markdown file does not exist on disk"]
+            )
+        }
+        guard FileManager.default.fileExists(atPath: canonicalURL.path) else {
+            throw NSError(
+                domain: "CiderStorageAuditService",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "canonical Markdown file does not exist on disk"]
+            )
+        }
+
+        let trashRelativePath = uniqueStorageDoctorTrashRelativePath(
+            duplicateRelativePath: candidate.duplicateRelativePath
+        )
+        let trashURL = vaultRoot.appendingPathComponent(trashRelativePath)
+        try FileManager.default.createDirectory(
+            at: trashURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.moveItem(at: duplicateURL, to: trashURL)
+
+        var applied = candidate
+        applied.trashRelativePath = trashRelativePath
+        if let approvalToken = candidate.approvalToken {
+            let auditEntry = MutationAuditService(database: database).record(
+                action: "storage.duplicate-markdown-cleanup.apply",
+                itemType: "note",
+                itemID: canonicalUUID,
+                before: [
+                    "duplicateRelativePath": candidate.duplicateRelativePath,
+                    "canonicalRelativePath": candidate.canonicalRelativePath,
+                    "sha256": candidate.sha256,
+                ],
+                after: [
+                    "trashRelativePath": trashRelativePath,
+                    "canonicalRelativePath": candidate.canonicalRelativePath,
+                ],
+                metadata: [
+                    "approvalToken": approvalToken,
+                    "byteCount": String(candidate.byteCount),
+                    "projectID": candidate.canonicalProjectID ?? "",
+                ],
+                source: .cleanup
+            )
+            applied.auditRecorded = auditEntry != nil
+        }
+        return applied
+    }
+
+    private func markdownFiles(under prefix: String) -> [DuplicateMarkdownFile] {
+        let root = vaultRoot.appendingPathComponent(prefix, isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+                options: [.skipsPackageDescendants]
+              ) else { return [] }
+
+        var files: [DuplicateMarkdownFile] = []
+        for case let url as URL in enumerator {
+            guard url.pathExtension.localizedCaseInsensitiveCompare("md") == .orderedSame,
+                  let isRegular = try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile,
+                  isRegular == true,
+                  let data = try? Data(contentsOf: url) else { continue }
+            files.append(DuplicateMarkdownFile(
+                relativePath: relativePath(for: url, under: vaultRoot),
+                sha256: Self.sha256Hex(data),
+                byteCount: data.count
+            ))
+        }
+        return files.sorted { $0.relativePath.localizedCaseInsensitiveCompare($1.relativePath) == .orderedAscending }
+    }
+
+    private func indexedVaultRelativePaths() -> Set<String> {
+        let indexURL = vaultRoot
+            .appendingPathComponent(".cider", isDirectory: true)
+            .appendingPathComponent("index.json")
+        guard let data = try? Data(contentsOf: indexURL),
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = raw["items"] as? [String: Any] else { return [] }
+        var paths = Set<String>()
+        for value in items.values {
+            guard let entry = value as? [String: Any],
+                  let path = entry["path"] as? String,
+                  !path.isEmpty else { continue }
+            paths.insert(path)
+        }
+        return paths
+    }
+
+    private struct CanonicalProjectMetadata {
+        var relativePath: String?
+        var itemID: String?
+        var projectID: String?
+        var blockers: [String]
+    }
+
+    private func canonicalProjectBackedNote(
+        matchingCanonicals: [DuplicateMarkdownFile]
+    ) throws -> CanonicalProjectMetadata {
+        var valid: [(file: DuplicateMarkdownFile, itemID: String, projectID: String)] = []
+        var sawCanonicalItem = false
+
+        for file in matchingCanonicals {
+            let rows = try sqliteOwners(relativePath: file.relativePath)
+            let noteRows = rows.filter { $0.type == "note" }
+            guard noteRows.count == 1 else { continue }
+            sawCanonicalItem = true
+            let itemID = noteRows[0].id
+            if let projectID = try projectIDForArtifactNote(itemID: itemID) {
+                valid.append((file, itemID, projectID))
+            }
+        }
+
+        if valid.count == 1 {
+            return CanonicalProjectMetadata(
+                relativePath: valid[0].file.relativePath,
+                itemID: valid[0].itemID,
+                projectID: valid[0].projectID,
+                blockers: []
+            )
+        }
+        if valid.count > 1 {
+            return CanonicalProjectMetadata(
+                relativePath: valid[0].file.relativePath,
+                itemID: valid[0].itemID,
+                projectID: valid[0].projectID,
+                blockers: ["multiple project-backed canonical note rows match the duplicate hash"]
+            )
+        }
+        return CanonicalProjectMetadata(
+            relativePath: matchingCanonicals.first?.relativePath,
+            itemID: nil,
+            projectID: nil,
+            blockers: [sawCanonicalItem ? "canonical note is not project-backed" : "canonical note item row is missing"]
+        )
+    }
+
+    private func sqliteOwners(relativePath: String) throws -> [CiderDuplicateMarkdownSQLiteOwner] {
+        guard try tableExists("items") else { return [] }
+        let stmt = try database.prepare("""
+            SELECT id, type, title
+            FROM items
+            WHERE relative_path = ?
+            ORDER BY updated_at DESC, title COLLATE NOCASE ASC;
+            """)
+        stmt.bind(relativePath, at: 1)
+        var owners: [CiderDuplicateMarkdownSQLiteOwner] = []
+        while try stmt.step() {
+            owners.append(CiderDuplicateMarkdownSQLiteOwner(
+                id: stmt.string(at: 0),
+                type: stmt.string(at: 1),
+                title: stmt.string(at: 2)
+            ))
+        }
+        return owners
+    }
+
+    private func projectIDForArtifactNote(itemID: String) throws -> String? {
+        guard try tableExists("owner_relations"),
+              try tableExists("projects") else { return nil }
+        let stmt = try database.prepare("""
+            SELECT p.id
+            FROM owner_relations r
+            JOIN projects p ON p.id = r.target_owner_id
+            WHERE r.source_owner_type = 'note'
+              AND r.source_owner_id = ?
+              AND r.target_owner_type = 'project'
+              AND r.relation_type = 'artifact_of'
+            ORDER BY r.updated_at DESC
+            LIMIT 1;
+            """)
+        stmt.bind(itemID, at: 1)
+        return try stmt.step() ? stmt.string(at: 0) : nil
+    }
+
+    private func uniqueStorageDoctorTrashRelativePath(duplicateRelativePath: String) -> String {
+        let runComponent = "duplicate-markdown-\(Int(nowProvider().timeIntervalSince1970))"
+        let base = ".cider/storage-doctor-trash/\(runComponent)/\(duplicateRelativePath)"
+        var candidate = base
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: vaultRoot.appendingPathComponent(candidate).path) {
+            let parent = (base as NSString).deletingLastPathComponent
+            let filename = (base as NSString).lastPathComponent
+            candidate = "\(parent)/\(suffix)-\(filename)"
+            suffix += 1
+        }
+        return candidate
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        _ = data.withUnsafeBytes { CC_SHA256($0.baseAddress, CC_LONG(data.count), &digest) }
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func normalizedPrefix(_ prefix: String) -> String {
+        prefix
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     private func sqliteCountsByEntity() throws -> [String: Int] {
