@@ -157,13 +157,15 @@ enum WorkspaceDomainSidebarModel {
             .mainDashboard,
             .browse,
             .review,
-            .spaces,
             .projects,
             .tasksEvents,
             .people,
             .aiAssistant
         ]
 
+        if selectedDomain == .spaces {
+            return Array(domains.prefix(3)) + [.spaces] + Array(domains.dropFirst(3))
+        }
         return domains
     }
 

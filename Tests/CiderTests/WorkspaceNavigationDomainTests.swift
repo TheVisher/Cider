@@ -57,18 +57,18 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
             .mainDashboard,
             .browse,
             .review,
-            .spaces,
             .projects,
             .tasksEvents,
             .people,
             .aiAssistant
         ])
+        XCTAssertFalse(domains.contains(.spaces))
         XCTAssertFalse(domains.contains(.bookmarks))
         XCTAssertFalse(domains.contains(.notes))
         XCTAssertFalse(domains.contains(.files))
     }
 
-    func testPinnedMediaSpaceLivesUnderSpacesWithoutAddingMediaAsTopLevelDomain() {
+    func testParkedSpacesStayOutOfPrimarySidebarUntilSpacesRouteIsOpen() {
         let mediaSpace = CiderSpace(
             id: "media-space",
             name: "Media",
@@ -92,12 +92,28 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
             .mainDashboard,
             .browse,
             .review,
-            .spaces,
             .projects,
             .tasksEvents,
             .people,
             .aiAssistant
         ])
+
+        XCTAssertEqual(
+            WorkspaceDomainSidebarModel.primaryDomains(
+                selectedDomain: .spaces,
+                pinnedSpaces: [mediaSpace]
+            ),
+            [
+                .mainDashboard,
+                .browse,
+                .review,
+                .spaces,
+                .projects,
+                .tasksEvents,
+                .people,
+                .aiAssistant
+            ]
+        )
     }
 
     func testLibraryRoutesExposeContentTypesAndFoldersForFastFiltering() {
