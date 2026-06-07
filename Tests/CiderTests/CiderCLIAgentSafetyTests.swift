@@ -1955,6 +1955,73 @@ struct CiderCLIAgentSafetyTests {
         #expect(items.first?["captureEventID"] as? String != nil)
     }
 
+    @Test("capture add titled stdin note stays consistent across recall and cleanup")
+    func captureAddTitledStdinNoteStaysConsistentAcrossRecallAndCleanup() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-titled-note-capture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let title = "Memory trust audit blue notebook fixture"
+        let body = "The spare blue notebook is on the lower shelf near the memory trust audit fixture marker 30956f."
+        let runID = "cid468-\(UUID().uuidString)"
+        let marker = "CID-468 memory trust note fixture"
+
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "note",
+                "--title", title,
+                "--test-run", runID,
+                "--test-marker", marker,
+                "--stdin",
+                "--json",
+            ],
+            vault: vault,
+            stdin: body
+        )
+        let capture = try parseJSONObject(captureResult.stdout)
+        let capturedItem = try #require(capture["item"] as? [String: Any])
+        let noteID = try #require(capturedItem["id"] as? String)
+        #expect(capturedItem["title"] as? String == title)
+        #expect((capture["source"] as? [String: Any])?["text"] as? String == body)
+        #expect((capture["indexing"] as? [String: Any])?["status"] as? String == "indexed")
+        #expect((capture["testRun"] as? [String: Any])?["cleanupCommand"] as? String == "cider-cli test-run cleanup \(runID) --dry-run --json")
+
+        let itemGetResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
+        let itemGet = try parseJSONObject(itemGetResult.stdout)
+        let itemGetItem = try #require(itemGet["item"] as? [String: Any])
+        let chunks = try #require(itemGet["chunks"] as? [[String: Any]])
+        #expect(itemGetItem["title"] as? String == title)
+        #expect(chunks.contains { ($0["body"] as? String)?.contains(body) == true })
+
+        let searchResult = try runCLI(args: ["item", "search", "spare blue notebook", "--limit", "3", "--json"], vault: vault)
+        let search = try parseJSONArray(searchResult.stdout)
+        #expect(search.prefix(3).contains {
+            (($0["item"] as? [String: Any])?["id"] as? String) == noteID
+                && (($0["item"] as? [String: Any])?["title"] as? String) == title
+                && ($0["title"] as? String) == title
+        })
+
+        let cleanupResult = try runCLI(args: ["test-run", "cleanup", runID, "--dry-run", "--json"], vault: vault)
+        let cleanup = try parseJSONObject(cleanupResult.stdout)
+        let cleanupItems = try #require(cleanup["items"] as? [[String: Any]])
+        #expect(cleanup["marker"] as? String == marker)
+        #expect(cleanupItems.contains {
+            ($0["id"] as? String) == noteID
+                && ($0["title"] as? String) == title
+                && ($0["status"] as? String) == "present"
+        })
+
+        let titleSearchResult = try runCLI(args: ["item", "search", title, "--limit", "3", "--json"], vault: vault)
+        let titleSearch = try parseJSONArray(titleSearchResult.stdout)
+        #expect(titleSearch.prefix(3).contains {
+            (($0["item"] as? [String: Any])?["id"] as? String) == noteID
+                && (($0["item"] as? [String: Any])?["title"] as? String) == title
+                && ($0["title"] as? String) == title
+        })
+    }
+
     @Test("test run cleanup previews and trashes only manifest items")
     func testRunCleanupPreviewsAndTrashesOnlyManifestItems() throws {
         let vault = FileManager.default.temporaryDirectory
