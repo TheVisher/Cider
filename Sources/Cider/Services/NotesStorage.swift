@@ -2803,12 +2803,16 @@ final class NotesStorage: ObservableObject {
     /// Persist a single note to the given database inside its own transaction.
     func persistNoteToDatabase(_ db: CiderDatabase, note: Note) {
         do {
-            try db.withTransaction {
-                try persistNoteToDatabaseInner(db, note: note)
-            }
+            try persistNoteCanonicalRow(db, note: note)
             try indexNoteContent(db, noteID: note.id)
         } catch {
             logger.error("Failed to persist note \(note.id) to database: \(error.localizedDescription)")
+        }
+    }
+
+    func persistNoteCanonicalRow(_ db: CiderDatabase, note: Note) throws {
+        try db.withTransaction {
+            try persistNoteToDatabaseInner(db, note: note)
         }
     }
 

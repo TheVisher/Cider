@@ -1186,6 +1186,7 @@ final class CiderCaptureService {
         guard let stored = notesStorage.notes.first(where: { $0.id == note.id }) else {
             throw CiderCaptureError.storeFailed(content)
         }
+        try ensureCapturedNoteCanonicalRow(stored)
         let partialSuccess = assignmentPartialSuccess(
             itemType: "note",
             requestedFolderID: folderID,
@@ -2078,8 +2079,8 @@ final class CiderCaptureService {
     }
 
     private func retryingTransientSQLiteLocks<T>(
-        attempts: Int = 6,
-        initialDelay: TimeInterval = 0.05,
+        attempts: Int = 12,
+        initialDelay: TimeInterval = 0.08,
         _ operation: () throws -> T
     ) throws -> T {
         var lastError: Error?
@@ -2103,6 +2104,15 @@ final class CiderCaptureService {
             || message.contains("database is busy")
             || message.contains("sqlite_busy")
             || message.contains("sqlite_locked")
+    }
+
+    private func ensureCapturedNoteCanonicalRow(_ note: Note) throws {
+        guard let database, database.isOpen else {
+            return
+        }
+        try retryingTransientSQLiteLocks {
+            try notesStorage.persistNoteCanonicalRow(database, note: note)
+        }
     }
 
     func refreshItemIndexing(_ result: CiderCaptureResult) -> CiderCaptureResult {

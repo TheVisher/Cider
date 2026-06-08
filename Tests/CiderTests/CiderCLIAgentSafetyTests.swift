@@ -1531,6 +1531,7 @@ struct CiderCLIAgentSafetyTests {
             "STORAGE",
             "MIGRATE",
             "DOCTOR",
+            "USAGE",
             "BOARD WORKFLOW",
             "DATABASE",
             "GLOBAL FLAGS",
