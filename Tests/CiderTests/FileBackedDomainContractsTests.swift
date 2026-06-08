@@ -145,6 +145,31 @@ struct FileBackedDomainContractsTests {
         }
     }
 
+    @Test("agent docs use supported item search scopes")
+    func agentDocsUseSupportedItemSearchScopes() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let cliDoc = repoRoot.appendingPathComponent("Docs/CLI.md")
+        let agentDoc = repoRoot.appendingPathComponent("Docs/AGENT.md")
+        let cliSource = try String(contentsOf: cliDoc, encoding: .utf8)
+        let agentSource = try String(contentsOf: agentDoc, encoding: .utf8)
+
+        for snippet in [
+            "Valid `item search --scope` values are `all`, `personalMemory`, `projectKanban`, `qaArtifacts`, and `files`.",
+            "Use one scope value per search; do not combine scope names such as `personalMemory/all`.",
+            "cider-cli item search \"event\" --scope personalMemory --json",
+        ] {
+            #expect(cliSource.contains(snippet), "Docs/CLI.md missing item search scope snippet: \(snippet)")
+        }
+
+        for snippet in [
+            "Use one supported `item search --scope` value at a time",
+            "`personalMemory` for life memory/date/event/contact recall",
+            "`all` for broad recall",
+        ] {
+            #expect(agentSource.contains(snippet), "Docs/AGENT.md missing item search scope snippet: \(snippet)")
+        }
+    }
+
     @Test("root agent instructions declare canonical bookmark capture workflow")
     func rootAgentInstructionsDeclareCanonicalBookmarkCaptureWorkflow() throws {
         let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)

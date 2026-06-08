@@ -4706,6 +4706,8 @@ struct CiderCLI {
             print("""
             Item graph commands:
               cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--space <space-id|name>] [--limit <n>] [--json]
+                Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files.
+                Use one scope value at a time; do not combine scope names.
               cider-cli item search-debug <query> [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
@@ -4742,9 +4744,13 @@ struct CiderCLI {
             """)
 
         case "search":
+            if args.contains("--help") || args.contains("-h") {
+                print(itemSearchHelpText)
+                return
+            }
             let query = leadingPositionalArgs(from: args).joined(separator: " ")
             guard !query.isEmpty else {
-                printCLIError("Usage: cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--limit <n>] [--json]")
+                printCLIError(itemSearchUsageLine)
                 return
             }
             let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 20
@@ -10052,9 +10058,39 @@ struct CiderCLI {
         if let scope = CiderItemSearchScope(rawValue: rawScope) {
             return scope
         }
-        let supported = CiderItemSearchScope.allCases.map(\.rawValue).joined(separator: ", ")
-        printCLIError("Unsupported item search scope '\(rawScope)'. Supported scopes: \(supported)")
+        printCLIError("Unsupported item search scope '\(rawScope)'. \(itemSearchScopeGuidance) Use --scope personalMemory or --scope all for the post-merge event-search smoke.")
         return nil
+    }
+
+    static var itemSearchScopeValues: String {
+        CiderItemSearchScope.allCases.map(\.rawValue).joined(separator: ", ")
+    }
+
+    static var itemSearchUsageLine: String {
+        "Usage: cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--space <space-id|name>] [--limit <n>] [--json]"
+    }
+
+    static var itemSearchScopeGuidance: String {
+        "Valid --scope values: \(itemSearchScopeValues). Use one scope value at a time; do not combine scope names."
+    }
+
+    static var itemSearchHelpText: String {
+        """
+        \(itemSearchUsageLine)
+
+        \(itemSearchScopeGuidance)
+
+        Scope meanings:
+          all             Search all projected item/chunk content.
+          personalMemory  Search life memory, date/event/contact recall, notes, bookmarks, todos, and files; excludes project Kanban and QA artifacts.
+          projectKanban   Search projected Kanban board/card work.
+          qaArtifacts     Search project QA/audit artifacts.
+          files           Search vault file content.
+
+        Examples:
+          cider-cli item search "event" --scope personalMemory --json
+          cider-cli item search "event" --scope all --json
+        """
     }
 
     static func firstPositionalArgument(from args: [String], valueFlags: Set<String> = []) -> String? {
@@ -16803,6 +16839,7 @@ struct CiderCLI {
 
         ITEM
           cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--space <space-id|name>] [--limit <n>] [--json]
+            Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files. Use one scope value at a time.
           cider-cli item search-debug <query> [--limit <n>] [--json]
           cider-cli item get <type> <id-or-ref> [--json]
           cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]

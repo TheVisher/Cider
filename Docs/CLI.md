@@ -112,6 +112,7 @@ Agents should prefer `cider-cli item ...` and `cider-cli space ...` for second-b
 Core commands:
 
 - `item search <query> --json`: FTS-backed search over projected chunks. Explicit recall facets such as `type:file tag:ADHD` intersect broad item type/source intent with focused item tags.
+- Valid `item search --scope` values are `all`, `personalMemory`, `projectKanban`, `qaArtifacts`, and `files`. Use one scope value per search; do not combine scope names such as `personalMemory/all`. For the post-merge event-search smoke, use `cider-cli item search "event" --scope personalMemory --json` for life memory/date/event recall or `cider-cli item search "event" --scope all --json` for broad recall.
 - `item search-debug <query> --json`: read-only recall diagnostics for agents. Returns exact item/chunk matches, matched chunk context, routing/provenance where available, tag facet filter stages, missing or stale index warnings, semantic/vector availability status, machine-readable warnings/errors, and safe follow-up commands. It does not repair or mutate indexes.
 - `item get <type> <id-or-ref> --json`: unified item context for library item refs such as bookmark, note, todo, dateCard/event, contact, and vaultFile, including `captureProvenance` when a capture event produced the item.
 - `item owner-get <owner-type> <owner-id-or-ref> --json`: legacy owner-section inspection for projected owners such as Kanban cards; returns structured sections, routing decisions, agent actions, and owner resolution metadata.

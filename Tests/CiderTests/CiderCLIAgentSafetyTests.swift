@@ -1242,6 +1242,31 @@ struct CiderCLIAgentSafetyTests {
         #expect(topHelp.stdout.contains("--path <target-folder-path>"))
     }
 
+    @Test("item search help and scope validation are agent safe")
+    func itemSearchHelpAndScopeValidationAreAgentSafe() throws {
+        let help = try runCLI(args: ["item", "search", "--help"])
+
+        #expect(help.status == 0)
+        #expect(help.stdout.contains("Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files"))
+        #expect(help.stdout.contains("Use one scope value at a time; do not combine scope names"))
+        #expect(help.stdout.contains("cider-cli item search \"event\" --scope personalMemory --json"))
+        #expect(!help.stdout.contains("personalMemory/all"))
+
+        let invalid = try runCLI(args: [
+            "item", "search", "event",
+            "--scope", "personalMemory/all",
+            "--json",
+        ])
+        let payload = try parseJSONObject(invalid.stdout)
+        let error = try #require(payload["error"] as? String)
+
+        #expect(invalid.status != 0)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(error.contains("Unsupported item search scope 'personalMemory/all'"))
+        #expect(error.contains("Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files"))
+        #expect(error.contains("Use --scope personalMemory or --scope all"))
+    }
+
     @Test("capture add event and contact reject missing required fields")
     func captureAddEventAndContactRejectMissingRequiredFields() throws {
         let eventResult = try runCLI(args: [
