@@ -814,6 +814,7 @@ final class CiderItemContextService {
                 )
                 result.rankFactors = recallRankFactors(
                     result: result,
+                    originalQuery: originalQuery,
                     matchedQuery: stage.query,
                     stage: stage,
                     stageIndex: stageIndex,
@@ -867,6 +868,7 @@ final class CiderItemContextService {
                 )
                 result.rankFactors = recallRankFactors(
                     result: result,
+                    originalQuery: originalQuery,
                     matchedQuery: stage.query,
                     stage: stage,
                     stageIndex: stageIndex,
@@ -880,7 +882,13 @@ final class CiderItemContextService {
         let hasExpandedRecallIntent = queryPlan.count > 1
         let hasSavedItemMatch = bestByOwner.values.contains { $0.item != nil }
         let candidates = bestByOwner.values.filter { result in
-            !(hasExpandedRecallIntent && hasSavedItemMatch && result.owner.ownerType == "kanban_card" && result.item == nil)
+            !shouldSuppressOwnerOnlyKanbanResult(
+                result,
+                hasExpandedRecallIntent: hasExpandedRecallIntent,
+                hasSavedItemMatch: hasSavedItemMatch,
+                query: originalQuery,
+                scope: scope
+            )
                 && searchResult(result, isIncludedIn: scope)
         }
 
@@ -914,6 +922,24 @@ final class CiderItemContextService {
         case .files:
             return result.item?.type == .vaultFile || result.owner.ownerType == "vaultFile"
         }
+    }
+
+    private func shouldSuppressOwnerOnlyKanbanResult(
+        _ result: CiderItemSearchResult,
+        hasExpandedRecallIntent: Bool,
+        hasSavedItemMatch: Bool,
+        query: String,
+        scope: CiderItemSearchScope
+    ) -> Bool {
+        guard hasExpandedRecallIntent,
+              hasSavedItemMatch,
+              result.owner.ownerType == "kanban_card",
+              result.item == nil else {
+            return false
+        }
+        if scope == .projectKanban { return false }
+        if scope == .all, shouldBoostProjectKanbanCard(for: query) { return false }
+        return true
     }
 
     private func isProjectOrQAArtifact(_ result: CiderItemSearchResult) -> Bool {
@@ -1043,7 +1069,16 @@ final class CiderItemContextService {
     ) -> Double {
         var rank: Double = result.item == nil ? 100 : 900
         if result.kind == .item { rank += 120 }
-        if result.owner.ownerType == "kanban_card" { rank -= 650 }
+        if result.owner.ownerType == "kanban_card" {
+            switch scope {
+            case .projectKanban:
+                rank += 1_250
+            case .all:
+                rank += shouldBoostProjectKanbanCard(for: originalQuery) ? 720 : -650
+            default:
+                rank -= 650
+            }
+        }
         if let item = result.item {
             rank += typeIntentBoost(item: item, query: originalQuery)
             if item.title.localizedCaseInsensitiveContains(matchedQuery) { rank += 40 }
@@ -1061,6 +1096,7 @@ final class CiderItemContextService {
 
     private func recallRankFactors(
         result: CiderItemSearchResult,
+        originalQuery: String,
         matchedQuery: String,
         stage: RecallQueryStage,
         stageIndex: Int,
@@ -1070,7 +1106,16 @@ final class CiderItemContextService {
         var factors: [String] = []
         factors.append(result.item == nil ? "owner_only_chunk" : "saved_library_item")
         factors.append(result.kind == .item ? "title_or_path_match" : "chunk_match")
-        if result.owner.ownerType == "kanban_card" { factors.append("kanban_demoted_for_saved_item_recall") }
+        if result.owner.ownerType == "kanban_card" {
+            switch scope {
+            case .projectKanban:
+                factors.append("kanban_card_project_scope_boost")
+            case .all where shouldBoostProjectKanbanCard(for: originalQuery):
+                factors.append("kanban_card_explicit_project_intent")
+            default:
+                factors.append("kanban_demoted_for_saved_item_recall")
+            }
+        }
         factors.append("stage:\(stage.name)")
         factors.append("matched_query:\(matchedQuery)")
         if stageIndex > 0 { factors.append("human_query_expansion:\(matchedQuery)") }
@@ -1078,7 +1123,7 @@ final class CiderItemContextService {
             factors += typeIntentFactors(item: item, query: matchedQuery)
         }
         if scope == .all,
-           shouldDemoteArtifacts(forLifeMemoryQuery: matchedQuery),
+           shouldDemoteArtifacts(forLifeMemoryQuery: originalQuery),
            isProjectOrQAArtifact(result) {
             factors.append("artifact_demoted_for_life_memory_type_intent")
         }
@@ -1276,6 +1321,15 @@ final class CiderItemContextService {
             "qa", "audit", "screenshot", "evidence", "artifact", "project", "kanban", "plan", "acceptance"
         ]
         return !explicitArtifactSignals.contains(where: lower.contains)
+    }
+
+    private func shouldBoostProjectKanbanCard(for query: String) -> Bool {
+        let lower = query.lowercased()
+        if lower.range(of: #"\bcid-\d+\b"#, options: .regularExpression) != nil { return true }
+        let explicitProjectSignals = [
+            "project", "kanban", "card", "cid", "artifact", "scope", "scopes", "acceptance", "implementation"
+        ]
+        return explicitProjectSignals.contains(where: lower.contains)
     }
 
     private func isDailyJournal(_ item: CiderItemSummary) -> Bool {

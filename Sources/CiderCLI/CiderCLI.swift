@@ -15526,6 +15526,13 @@ struct CiderCLI {
         ]
         if let item = result.item {
             dict["item"] = itemSummaryToDict(item)
+        } else if result.owner.ownerType == "kanban_card",
+                  let detail = try? resolveKanbanCardDetail(ref: result.owner.ownerID) {
+            dict["kanbanCard"] = kanbanCardItemToDict(
+                board: detail.board,
+                column: detail.column,
+                card: detail.card
+            )
         }
         if let stage = result.stage {
             dict["stage"] = stage

@@ -595,6 +595,82 @@ struct CiderItemContextServiceTests {
         #expect(qaResults.allSatisfy { $0.item?.relativePath?.contains("/QA/") == true })
     }
 
+    @Test("project Kanban search recalls projected card display key title body and evidence")
+    func projectKanbanSearchRecallsProjectedCardDisplayKeyTitleBodyAndEvidence() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let projector = SecondBrainKanbanProjectionService(store: store)
+        let rebuildStorm = KanbanCard(
+            id: "storm-card",
+            title: "Bug: Library rebuild storm ghosts previous views and pegs CPU",
+            notes: """
+            ## Problem
+            Previous Library views ghost behind the active note route during a rebuild storm.
+
+            ## Test Evidence
+            CID-447 verification captured CPU and RSS settling after the fix.
+            """,
+            displayKey: "CID-447"
+        )
+        let artifactScopes = KanbanCard(
+            id: "artifact-scopes",
+            title: "Add artifact-aware search scopes for life-memory recall",
+            notes: """
+            ## Problem
+            Broad life memory recall should not be dominated by QA artifact evidence.
+            """,
+            displayKey: "CID-384"
+        )
+        let entityBlocks = KanbanCard(
+            id: "entity-blocks",
+            title: "Entity-linked memory blocks for people/contact profiles",
+            notes: """
+            ## Problem
+            ADHD visual recall needs compact contact profile memory blocks instead of long walls of text.
+            """,
+            displayKey: "CID-385"
+        )
+        try projector.refreshCard(boardID: "2afee0", card: rebuildStorm)
+        try projector.refreshCard(boardID: "2afee0", card: artifactScopes)
+        try projector.refreshCard(boardID: "2afee0", card: entityBlocks)
+
+        let qaNote = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(
+            qaNote,
+            title: "CID-447 ghost QA evidence",
+            relativePath: "Projects/Cider/QA/CID-447 ghost evidence.md",
+            into: db
+        )
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: qaNote.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: qaNote.entityID.uuidString, source: "qa", title: "CID-447 ghost evidence", body: "CID-447 ghost rebuild storm QA screenshot evidence", chunkIndex: 0),
+            SecondBrainChunkDraft(sectionID: nil, itemID: qaNote.entityID.uuidString, source: "qa", title: "Artifact recall evidence", body: "artifact aware search scopes life memory recall QA evidence", chunkIndex: 1),
+            SecondBrainChunkDraft(sectionID: nil, itemID: qaNote.entityID.uuidString, source: "qa", title: "Entity visual evidence", body: "entity memory blocks contact profiles ADHD visual QA evidence", chunkIndex: 2),
+        ])
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+
+        let cidResults = try service.search("CID-447 ghost rebuild storm", limit: 5, scope: .projectKanban)
+        let artifactResults = try service.search("artifact aware search scopes life memory recall", limit: 5, scope: .projectKanban)
+        let entityResults = try service.search("entity memory blocks contact profiles ADHD visual", limit: 5, scope: .projectKanban)
+        let personalResults = try service.search("CID-447 ghost rebuild storm", limit: 5, scope: .personalMemory)
+
+        #expect(cidResults.prefix(3).contains {
+            $0.owner == SecondBrainKanbanProjectionService.owner(boardID: "2afee0", cardID: "storm-card")
+                && $0.title.localizedCaseInsensitiveContains("Library rebuild storm")
+        })
+        #expect(artifactResults.prefix(3).contains {
+            $0.owner == SecondBrainKanbanProjectionService.owner(boardID: "2afee0", cardID: "artifact-scopes")
+                && $0.title == "Add artifact-aware search scopes for life-memory recall"
+        })
+        #expect(entityResults.prefix(3).contains {
+            $0.owner == SecondBrainKanbanProjectionService.owner(boardID: "2afee0", cardID: "entity-blocks")
+                && $0.title == "Entity-linked memory blocks for people/contact profiles"
+        })
+        #expect(personalResults.allSatisfy { $0.owner.ownerType != "kanban_card" })
+    }
+
     @Test("natural file intent keeps personal memory search free of QA evidence artifacts")
     func naturalFileIntentKeepsPersonalMemorySearchFreeOfQAEvidenceArtifacts() throws {
         let (db, url) = try makeTestDB()

@@ -12,6 +12,11 @@ final class SecondBrainKanbanProjectionService {
         let owner = Self.owner(boardID: boardID, cardID: card.id)
         let parsedSections = normalizedSections(for: card)
         let existingByKey = Dictionary(uniqueKeysWithValues: try store.sections(for: owner).map { ($0.sectionKey, $0) })
+        let displayKey = card.displayKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cardIdentity = [displayKey, card.title]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
 
         var sections: [SecondBrainSection] = []
         var chunkDrafts: [SecondBrainChunkDraft] = []
@@ -35,19 +40,21 @@ final class SecondBrainKanbanProjectionService {
             )
             sections.append(section)
 
-            let chunkBody = [card.title, parsed.body]
+            let chunkBody = [cardIdentity, parsed.title, parsed.body]
                 .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
                 .joined(separator: "\n\n")
             chunkDrafts.append(
                 SecondBrainChunkDraft(
                     sectionID: section.id,
                     source: "kanban_notes",
-                    title: parsed.title,
+                    title: card.title,
                     body: chunkBody,
                     chunkIndex: index,
                     metadata: [
                         "board_id": boardID,
                         "card_id": card.id,
+                        "card_title": card.title,
+                        "display_key": displayKey ?? "",
                         "section_key": parsed.key,
                     ]
                 )
