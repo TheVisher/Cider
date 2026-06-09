@@ -2870,6 +2870,15 @@ struct CiderCLIAgentSafetyTests {
         #expect(apply["readOnly"] as? Bool == false)
         #expect(apply["changed"] as? Bool == true)
         #expect((apply["mutationReason"] as? String)?.contains("MediaItem YAML") == true)
+        let actionRecords = try #require(apply["actionRecords"] as? [[String: Any]])
+        let firstRecord = try #require(actionRecords.first)
+        let owner = try #require(firstRecord["owner"] as? [String: Any])
+        #expect(owner["ownerType"] as? String == "media_item")
+        #expect(owner["ownerID"] as? String == "steam-1145350")
+        #expect(owner["ref"] as? String == "media_item:steam-1145350")
+        let safeCommands = try #require(firstRecord["safeCommands"] as? [String])
+        #expect(safeCommands.contains("cider-cli item owner-get media_item steam-1145350 --json"))
+        #expect(safeCommands.contains("cider-cli item search \"steam-1145350\" --json"))
     }
 
     @Test("media identify dry-run is reachable as strict process json")

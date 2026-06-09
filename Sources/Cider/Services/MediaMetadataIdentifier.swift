@@ -441,6 +441,7 @@ struct MediaBackfillService {
         let action = isCreate ? "media.backfill.create" : "media.backfill.update"
         let summary = "\(isCreate ? "Created" : "Updated") media item \(item.title) from media identify --apply."
         let owner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: item.id)
+        try projectMediaItem(item, owner: owner, store: secondBrainStore)
         try secondBrainStore.recordAgentAction(
             SecondBrainAgentAction(
                 owner: owner,
@@ -467,5 +468,130 @@ struct MediaBackfillService {
             status: "succeeded",
             summary: summary
         )
+    }
+
+    private func projectMediaItem(
+        _ item: MediaItem,
+        owner: SecondBrainOwnerRef,
+        store: SecondBrainStore
+    ) throws {
+        let summaryID = "media_item:\(item.id):media_summary"
+        let sourcesID = "media_item:\(item.id):media_sources"
+        let summaryBody = mediaSummaryBody(for: item)
+        let sourcesBody = mediaSourcesBody(for: item)
+        let sections = [
+            SecondBrainSection(
+                id: summaryID,
+                owner: owner,
+                itemID: nil,
+                sectionKey: "media_summary",
+                title: "Media Summary",
+                body: summaryBody,
+                source: "media.identify.apply",
+                confidence: item.confidence,
+                metadata: mediaProjectionMetadata(for: item),
+                sortOrder: 0,
+                createdAt: item.createdAt,
+                updatedAt: item.updatedAt
+            ),
+            SecondBrainSection(
+                id: sourcesID,
+                owner: owner,
+                itemID: nil,
+                sectionKey: "media_sources",
+                title: "Media Sources",
+                body: sourcesBody,
+                source: "media.identify.apply",
+                confidence: item.confidence,
+                metadata: mediaProjectionMetadata(for: item),
+                sortOrder: 1,
+                createdAt: item.createdAt,
+                updatedAt: item.updatedAt
+            ),
+        ]
+        let chunks = [
+            SecondBrainChunkDraft(
+                sectionID: summaryID,
+                itemID: nil,
+                source: "media.identify.apply",
+                title: item.title,
+                body: [summaryBody, sourcesBody].joined(separator: "\n\n"),
+                chunkIndex: 0,
+                metadata: mediaProjectionMetadata(for: item)
+            )
+        ]
+        try store.replaceProjection(
+            owner: owner,
+            sections: sections,
+            keeping: Set(sections.map(\.sectionKey)),
+            chunks: chunks
+        )
+
+        for bookmarkID in item.sourceBookmarkIDs {
+            try store.recordRelation(SecondBrainRelation(
+                sourceOwner: owner,
+                targetOwner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmarkID.uuidString),
+                relationType: "sourced_from",
+                evidence: "\(item.title) was identified from source bookmark \(bookmarkID.uuidString).",
+                source: "media.identify.apply",
+                actor: "agent",
+                confidence: item.confidence,
+                metadata: ["mediaItemTitle": item.title]
+            ))
+        }
+    }
+
+    private func mediaSummaryBody(for item: MediaItem) -> String {
+        var lines = [
+            "Title: \(item.title)",
+            "Type: \(item.type.rawValue)",
+            "Status: \(item.status.rawValue)",
+            "Confidence: \(String(format: "%.2f", item.confidence))",
+        ]
+        if let year = item.year {
+            lines.append("Year: \(year)")
+        }
+        if let releaseDate = item.releaseDate {
+            lines.append("Release Date: \(releaseDate)")
+        }
+        let externalIDs = item.externalIDs
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+            .map { "\($0.key): \($0.value)" }
+        if !externalIDs.isEmpty {
+            lines.append("External IDs: \(externalIDs.joined(separator: ", "))")
+        }
+        if !item.genres.isEmpty {
+            lines.append("Genres: \(item.genres.joined(separator: ", "))")
+        }
+        if !item.categories.isEmpty {
+            lines.append("Categories: \(item.categories.joined(separator: ", "))")
+        }
+        if let reason = item.identificationReason, !reason.isEmpty {
+            lines.append("Identification Reason: \(reason)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func mediaSourcesBody(for item: MediaItem) -> String {
+        var lines: [String] = []
+        if !item.sourceBookmarkIDs.isEmpty {
+            lines.append("Source Bookmark IDs: \(item.sourceBookmarkIDs.map(\.uuidString).joined(separator: ", "))")
+        }
+        if !item.sourceRelativePaths.isEmpty {
+            lines.append("Source Paths: \(item.sourceRelativePaths.joined(separator: ", "))")
+        }
+        if !item.sourceURLs.isEmpty {
+            lines.append("Source URLs: \(item.sourceURLs.joined(separator: ", "))")
+        }
+        return lines.isEmpty ? "No source bookmarks or URLs recorded." : lines.joined(separator: "\n")
+    }
+
+    private func mediaProjectionMetadata(for item: MediaItem) -> [String: String] {
+        [
+            "authority": "media_item_yaml_bridge",
+            "mediaItemID": item.id,
+            "storage": "yaml",
+            "secondBrainTruth": "projection",
+        ]
     }
 }

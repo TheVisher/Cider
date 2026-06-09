@@ -135,11 +135,17 @@ extension CiderCLI {
     }
 
     private static func mediaBackfillActionRecordToDict(_ record: MediaBackfillActionRecord) -> [String: Any] {
-        [
+        let owner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: record.mediaItemID)
+        return [
             "mediaItemID": record.mediaItemID,
+            "owner": ownerToDict(owner),
             "action": record.action,
             "status": record.status,
             "summary": record.summary,
+            "safeCommands": [
+                "cider-cli item owner-get media_item \(record.mediaItemID) --json",
+                "cider-cli item search \"\(record.mediaItemID)\" --json",
+            ],
         ]
     }
 

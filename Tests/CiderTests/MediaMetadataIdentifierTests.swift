@@ -215,6 +215,58 @@ final class MediaMetadataIdentifierTests: XCTestCase {
         XCTAssertEqual(actions.map(\.status), ["succeeded"])
     }
 
+    @MainActor
+    func testApplyProjectsMediaItemIntoSecondBrainSectionsAndSearchChunks() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-media-backfill-projection-\(UUID().uuidString)", isDirectory: true)
+        let dbURL = tempRoot.appendingPathComponent(".cider/cider.db")
+        defer {
+            try? FileManager.default.removeItem(at: tempRoot)
+            cleanupDatabase(at: dbURL)
+        }
+
+        try FileManager.default.createDirectory(
+            at: dbURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let db = CiderDatabase()
+        try db.open(at: dbURL)
+        defer { db.close() }
+
+        let bookmarkID = UUID(uuidString: "00000000-0000-0000-0000-000000000123")!
+        let bookmarks = [
+            Bookmark(
+                id: bookmarkID,
+                title: "Hades II",
+                urlString: "https://store.steampowered.com/app/1145350/Hades_II/",
+                relativePath: "Inbox/Bookmarks/Hades II.webloc"
+            )
+        ]
+        let storage = MediaItemStorage(vaultRoot: tempRoot)
+        let store = SecondBrainStore(database: db)
+        let service = MediaBackfillService(storage: storage, secondBrainStore: store)
+        let owner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: "steam-1145350")
+
+        _ = try service.identify(bookmarks: bookmarks, mode: .apply)
+
+        let sections = try store.sections(for: owner)
+        XCTAssertEqual(sections.map(\.sectionKey), ["media_summary", "media_sources"])
+        let summary = try XCTUnwrap(sections.first { $0.sectionKey == "media_summary" })
+        let sources = try XCTUnwrap(sections.first { $0.sectionKey == "media_sources" })
+        XCTAssertTrue(summary.body.contains("Hades II"))
+        XCTAssertTrue(summary.body.contains("steamAppID: 1145350"))
+        XCTAssertTrue(sources.body.contains("https://store.steampowered.com/app/1145350/Hades_II/"))
+
+        let searchMatches = try store.searchChunks(query: "Hades steamAppID", limit: 5)
+        XCTAssertEqual(searchMatches.first?.owner, owner)
+
+        let relations = try store.outgoingRelations(for: owner)
+        XCTAssertTrue(relations.contains {
+            $0.relationType == "sourced_from"
+                && $0.targetOwner == SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmarkID.uuidString)
+        })
+    }
+
     func testPlannerSurfacesLowConfidenceMediaReviewItems() {
         let bookmarks = [
             Bookmark(title: "A long video essay", urlString: "https://www.youtube.com/watch?v=abc123")

@@ -146,9 +146,9 @@ Durable sync invariants:
 
 ## Media Bridge
 
-MediaItem metadata remains YAML-backed during the bridge phase. `media identify --apply` writes MediaItem YAML and records `media_item` action provenance through `agent_actions` when the second-brain store is available, but it does not yet project MediaItem content into `item_sections`/`content_chunks` or create full SQLite-native media owner relations.
+MediaItem metadata remains YAML-backed during the bridge phase. `media identify --apply` writes MediaItem YAML and records `media_item` action provenance through `agent_actions` when the second-brain store is available. `media identify --apply` also projects bounded `media_item` owner sections and searchable chunks, plus source-bookmark owner relations, so agents can inspect the YAML bridge without treating Media as fully SQLite-native.
 
-Agents should inspect media through the media CLI, Media Space dashboard, and the YAML-backed storage contract rather than assuming full item graph parity.
+Agents should inspect media through the media CLI, `item owner-get media_item <id> --json`, item search, Media Space dashboard, and the YAML-backed storage contract rather than assuming full item graph parity.
 
 ## Native Spaces Cutover
 

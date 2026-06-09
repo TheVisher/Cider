@@ -263,6 +263,7 @@ struct FileBackedDomainContractsTests {
             "It does not sync second-brain graph tables",
             "MediaItem metadata remains YAML-backed",
             "`media identify --apply` writes MediaItem YAML and records `media_item` action provenance",
+            "`media identify --apply` also projects bounded `media_item` owner sections and searchable chunks",
         ] {
             #expect(storageSource.contains(snippet), "Docs/STORAGE.md missing sync/media bridge snippet: \(snippet)")
         }
@@ -270,6 +271,7 @@ struct FileBackedDomainContractsTests {
         for snippet in [
             "`media identify --dry-run --json` reports `readOnly: true` and `changed: false`",
             "`media identify --apply --json` reports `readOnly: false`",
+            "`actionRecords[].safeCommands` points agents at `item owner-get media_item <id> --json`",
             "`reviewLane.safeActions` must include only read-only commands",
         ] {
             #expect(cliSource.contains(snippet), "Docs/CLI.md missing media CLI bridge snippet: \(snippet)")

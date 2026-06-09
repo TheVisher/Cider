@@ -137,7 +137,7 @@ Core commands:
 - `space explain <name-or-id> --json`: returns purpose, routing hints, default views, and agent instructions for a Space.
 - `space list --json` and `space explain <name-or-id> --json` expose an `authority` object so agents can distinguish Space metadata, semantic membership, and storage fallback. `authority.pathContainmentIsSemantic: false` means root paths are not proof of membership.
 - `media identify --dry-run --json`: read-only media identification preview. JSON reports `command: media.identify`, `readOnly: true`, `changed: false`, candidate counts, review items, and safe review actions.
-- `media identify --apply --json`: mutating media identification apply path. JSON reports `command: media.identify`, `readOnly: false`, `changed`, `mutationReason`, write counts, and `actionRecords` for recorded media provenance.
+- `media identify --apply --json`: mutating media identification apply path. JSON reports `command: media.identify`, `readOnly: false`, `changed`, `mutationReason`, write counts, and `actionRecords` for recorded media provenance. `actionRecords[].safeCommands` points agents at `item owner-get media_item <id> --json` and item search for the projected media owner.
 
 Graph-heavy commands should expose counts and safe follow-up commands. Prefer bounded summaries or explicit full-detail flags when relation-heavy responses, such as project card lists, would otherwise flood agent context.
 
@@ -147,7 +147,7 @@ The second-brain command surface should support the product loop: capture -> enr
 
 Review queue JSON includes `reasonCodes` for trust-boundary states such as `routing_low_confidence`, `enrichment_failed`, `inbox_unrouted`, and duplicate-specific codes so agents do not need to parse prose reasons.
 
-Media identification is a bridge command over file-backed MediaItem metadata. `media identify --dry-run --json` reports `readOnly: true` and `changed: false`; `media identify --apply --json` reports `readOnly: false` and must include a mutation reason when applying proposed YAML writes. `reviewLane.safeActions` must include only read-only commands; mutating follow-ups belong in `reviewLane.actions` with `readOnly: false` and `requiresApproval: true`.
+Media identification is a bridge command over file-backed MediaItem metadata. `media identify --dry-run --json` reports `readOnly: true` and `changed: false`; `media identify --apply --json` reports `readOnly: false` and must include a mutation reason when applying proposed YAML writes. Apply also refreshes bounded `media_item` owner sections/chunks so agents can inspect the bridge through `item owner-get media_item <id> --json` and discover it through `item search`. `reviewLane.safeActions` must include only read-only commands; mutating follow-ups belong in `reviewLane.actions` with `readOnly: false` and `requiresApproval: true`.
 
 Database admin commands with `--json` use explicit envelopes. `db integrity`, `db backups`, and `db audit` report `readOnly: true` and `changed: false`; `db backup` reports the created backup and verification details with `readOnly: false`. `db restore <selector> --dry-run --json` is the agent-safe inspection path and reports the selected backup, required `--yes` confirmation, active-app blockers, planned pre-restore snapshot, rollback guidance, and safe follow-up commands. Confirmed restore can still refuse with structured JSON when Cider.app is running.
 

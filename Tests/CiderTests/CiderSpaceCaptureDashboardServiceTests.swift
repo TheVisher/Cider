@@ -307,4 +307,61 @@ struct CiderSpaceCaptureDashboardServiceTests {
         #expect(dashboard.recentRouted.first?.target.spaceID == space.id)
         #expect(dashboard.recentRouted.first?.itemRelativePath == "Inbox/Bookmarks/Steam Deck Notes.webloc")
     }
+
+    @Test("space dashboard does not let path containment override explicit membership")
+    func dashboardDoesNotLetPathContainmentOverrideExplicitMembership() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let research = makeSpace()
+        let media = CiderSpace(
+            id: "space-media",
+            name: "Media",
+            systemImage: "play.rectangle",
+            purpose: "Media backlog.",
+            preset: .media,
+            aiInstructions: "Route media here.",
+            routingHints: ["Prefer native membership."],
+            defaultViews: [.overview],
+            rootRelativePath: "Spaces/Media",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let folderID = try insertFolder(db, path: research.rootRelativePath)
+        let itemID = try insertBookmark(
+            db,
+            title: "Hades II in wrong folder",
+            url: "https://store.steampowered.com/app/1145350/Hades_II/",
+            folderID: folderID,
+            relativePath: "Spaces/Research/Hades II.webloc",
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        _ = try CiderRoutingDecisionService(database: db).recordDecision(
+            itemID: itemID,
+            itemType: "bookmark",
+            target: .init(kind: "folder", name: "Research", relativePath: research.rootRelativePath, folderID: folderID),
+            confidence: 1,
+            reason: "Legacy path route, later superseded by native Space membership.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "accepted",
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+        _ = try CiderSpaceMembershipStore(database: db).assign(
+            item: LibraryEntityRef(type: .bookmark, entityID: itemID),
+            toSpaceID: media.id,
+            spaceName: media.name,
+            reason: "This belongs to Media even while the file is still under Research.",
+            confidence: 0.95,
+            source: "test",
+            actor: "agent"
+        )
+
+        let researchDashboard = try CiderSpaceCaptureDashboardService(database: db).dashboard(for: research)
+        let mediaDashboard = try CiderSpaceCaptureDashboardService(database: db).dashboard(for: media)
+
+        #expect(researchDashboard.recentRouted.isEmpty)
+        #expect(mediaDashboard.recentRouted.map(\.itemID) == [itemID])
+        let mediaItem = try #require(mediaDashboard.recentRouted.first)
+        #expect(mediaItem.toDictionary()["membershipAuthority"] as? String == "space_memberships")
+    }
 }

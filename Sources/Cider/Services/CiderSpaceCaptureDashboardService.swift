@@ -44,6 +44,7 @@ struct CiderSpaceCaptureDashboardItem: Identifiable, Equatable {
     var reviewState: String
     var routedAt: Date
     var safeActions: [String]
+    var membershipAuthority: String?
 
     var routingExplanationCommand: String {
         "cider-cli routing explain \(itemID.uuidString.prefix(8)) --json"
@@ -83,6 +84,9 @@ struct CiderSpaceCaptureDashboardItem: Identifiable, Equatable {
         if let itemRelativePath {
             dictionary["itemRelativePath"] = itemRelativePath
         }
+        if let membershipAuthority {
+            dictionary["membershipAuthority"] = membershipAuthority
+        }
         return dictionary
     }
 }
@@ -107,8 +111,15 @@ final class CiderSpaceCaptureDashboardService {
     ) throws -> CiderSpaceCaptureDashboard {
         guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
 
-        let rows = try latestRows(in: db)
-            .filter { belongsToSpace($0, space: space) }
+        var rows: [DashboardRow] = []
+        for row in try latestRows(in: db) {
+            guard let authority = try membershipAuthority(for: row, space: space, in: db) else {
+                continue
+            }
+            var scopedRow = row
+            scopedRow.membershipAuthority = authority
+            rows.append(scopedRow)
+        }
 
         let recent = rows
             .filter { isAcceptedState($0.reviewState) }
@@ -145,6 +156,7 @@ final class CiderSpaceCaptureDashboardService {
         var title: String
         var itemRelativePath: String?
         var sourceURL: String?
+        var membershipAuthority: String?
     }
 
     private func latestRows(in db: CiderDatabase) throws -> [DashboardRow] {
@@ -191,10 +203,66 @@ final class CiderSpaceCaptureDashboardService {
         return rows
     }
 
-    private func belongsToSpace(_ row: DashboardRow, space: CiderSpace) -> Bool {
-        row.target.spaceID == space.id
-            || path(row.target.relativePath, isIn: space.rootRelativePath)
-            || row.itemRelativePath.map { path($0, isIn: space.rootRelativePath) } == true
+    private func membershipAuthority(
+        for row: DashboardRow,
+        space: CiderSpace,
+        in db: CiderDatabase
+    ) throws -> String? {
+        let membershipSpaceIDs = try explicitMembershipSpaceIDs(for: row, in: db)
+        if !membershipSpaceIDs.isEmpty {
+            return membershipSpaceIDs.contains(space.id) ? "space_memberships" : nil
+        }
+
+        let relationSpaceIDs = try ownerRelationSpaceIDs(for: row, in: db)
+        if !relationSpaceIDs.isEmpty {
+            return relationSpaceIDs.contains(space.id) ? "owner_relations" : nil
+        }
+
+        if row.target.spaceID == space.id {
+            return "routing_target_space"
+        }
+        if path(row.target.relativePath, isIn: space.rootRelativePath) {
+            return "target_path_fallback"
+        }
+        if row.itemRelativePath.map({ path($0, isIn: space.rootRelativePath) }) == true {
+            return "item_path_fallback"
+        }
+        return nil
+    }
+
+    private func explicitMembershipSpaceIDs(for row: DashboardRow, in db: CiderDatabase) throws -> Set<String> {
+        let stmt = try db.prepare("""
+            SELECT space_id
+            FROM space_memberships
+            WHERE item_id = ? AND item_type = ?;
+            """)
+        stmt.bind(row.itemID.uuidString, at: 1)
+            .bind(row.itemType, at: 2)
+
+        var spaceIDs = Set<String>()
+        while try stmt.step() {
+            spaceIDs.insert(stmt.string(at: 0))
+        }
+        return spaceIDs
+    }
+
+    private func ownerRelationSpaceIDs(for row: DashboardRow, in db: CiderDatabase) throws -> Set<String> {
+        let stmt = try db.prepare("""
+            SELECT target_owner_id
+            FROM owner_relations
+            WHERE source_owner_type = ?
+              AND source_owner_id = ?
+              AND target_owner_type = 'space'
+              AND relation_type = 'belongs_to_space';
+            """)
+        stmt.bind(row.itemType, at: 1)
+            .bind(row.itemID.uuidString, at: 2)
+
+        var spaceIDs = Set<String>()
+        while try stmt.step() {
+            spaceIDs.insert(stmt.string(at: 0))
+        }
+        return spaceIDs
     }
 
     private func path(_ path: String, isIn root: String) -> Bool {
@@ -231,7 +299,8 @@ final class CiderSpaceCaptureDashboardService {
             reason: row.reason,
             reviewState: row.reviewState,
             routedAt: row.routedAt,
-            safeActions: safeActions(for: row.reviewState, itemType: row.itemType)
+            safeActions: safeActions(for: row.reviewState, itemType: row.itemType),
+            membershipAuthority: row.membershipAuthority
         )
     }
 
