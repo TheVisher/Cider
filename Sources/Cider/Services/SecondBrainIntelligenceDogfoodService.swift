@@ -51,6 +51,11 @@ final class SecondBrainIntelligenceDogfoodService {
                 threshold: threshold,
                 limit: boundedCandidateLimit
             )
+            let entityRelations = try similarityService.rebuildEntityRelationCandidates(
+                for: chunkedOwner.owner,
+                targetTypes: ["contact"],
+                limit: boundedCandidateLimit
+            )
             let candidates = try similarityService.candidates(for: chunkedOwner.owner)
 
             ownerResults.append(SecondBrainIntelligenceDogfoodOwnerResult(
@@ -59,7 +64,7 @@ final class SecondBrainIntelligenceDogfoodService {
                 enrichmentOutputCount: enrichment.outputCount,
                 enrichmentKindCounts: enrichment.kindCounts,
                 enrichmentReviewStates: Dictionary(grouping: outputs, by: \.reviewState).mapValues(\.count),
-                similarityCandidateCount: similarity.candidateCount,
+                similarityCandidateCount: similarity.candidateCount + entityRelations.candidateCount,
                 similarityReviewStates: Dictionary(grouping: candidates, by: \.reviewState).mapValues(\.count)
             ))
         }

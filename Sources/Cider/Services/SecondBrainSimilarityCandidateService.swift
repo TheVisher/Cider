@@ -115,6 +115,52 @@ final class SecondBrainSimilarityCandidateService {
         return SecondBrainSimilarityRebuildResult(owner: owner, candidateCount: limited.count, signal: "chunk_overlap")
     }
 
+    func rebuildEntityRelationCandidates(
+        for owner: SecondBrainOwnerRef,
+        targetTypes: [String] = ["contact"],
+        limit: Int = 10
+    ) throws -> SecondBrainSimilarityRebuildResult {
+        let supportedTargetTypes = Set(targetTypes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        guard !supportedTargetTypes.isEmpty else {
+            try replaceSuggestedEntityRelationCandidates(for: owner, with: [])
+            return SecondBrainSimilarityRebuildResult(owner: owner, candidateCount: 0, signal: "entity_enrichment")
+        }
+
+        let outputs = try entityOutputs(for: owner)
+        let contacts = supportedTargetTypes.contains("contact") ? try contactTargets() : []
+        var candidates: [SecondBrainSimilarityCandidate] = []
+        var seenTargets = Set<String>()
+
+        for output in outputs {
+            guard output.reviewState == "suggested" || output.reviewState == "needs_review" else { continue }
+            guard let contact = contacts.first(where: { $0.normalizedName == output.normalizedValue }) else { continue }
+            let target = SecondBrainOwnerRef(ownerType: "contact", ownerID: contact.id)
+            guard owner != target else { continue }
+            guard seenTargets.insert(target.canonicalRef).inserted else { continue }
+            candidates.append(SecondBrainSimilarityCandidate(
+                sourceOwner: owner,
+                targetOwner: target,
+                candidateType: "mentions",
+                signal: "entity_enrichment",
+                score: output.confidence.map { max($0, 0.8) } ?? 0.8,
+                reason: "Detected entity enrichment matches an existing contact title.",
+                evidence: output.evidence,
+                source: "enrichment_output",
+                reviewState: "suggested",
+                metadata: [
+                    "enrichment_output_id": output.id,
+                    "matched_entity": output.value,
+                    "target_title": contact.title,
+                    "target_type": "contact",
+                ]
+            ))
+        }
+
+        let limited = Array(candidates.prefix(max(0, limit)))
+        try replaceSuggestedEntityRelationCandidates(for: owner, with: limited)
+        return SecondBrainSimilarityRebuildResult(owner: owner, candidateCount: limited.count, signal: "entity_enrichment")
+    }
+
     func accept(candidateID: String, relationType: String? = nil, actor: String = "agent") throws -> SecondBrainSimilarityCandidate {
         let current = try candidate(id: candidateID)
         let acceptedType = relationType ?? current.candidateType
@@ -166,6 +212,61 @@ final class SecondBrainSimilarityCandidateService {
                 WHERE source_owner_type = ?
                   AND source_owner_id = ?
                   AND source = 'chunk_overlap'
+                  AND review_state != 'accepted';
+                """)
+            delete.bind(owner.ownerType, at: 1)
+                .bind(owner.ownerID, at: 2)
+            try delete.step()
+
+            for candidate in candidates {
+                try record(candidate)
+            }
+        }
+    }
+
+    private struct EntityRelationTarget {
+        var id: String
+        var title: String
+        var normalizedName: String
+    }
+
+    private func entityOutputs(for owner: SecondBrainOwnerRef) throws -> [SecondBrainEnrichmentOutput] {
+        try SecondBrainEnrichmentOutputService(database: database)
+            .outputs(for: owner)
+            .filter { $0.kind == "entity" }
+    }
+
+    private func contactTargets() throws -> [EntityRelationTarget] {
+        let stmt = try database.prepare("""
+            SELECT i.id, i.title
+            FROM items i
+            JOIN contacts c ON c.item_id = i.id
+            WHERE i.type = 'contact'
+            ORDER BY i.title COLLATE NOCASE ASC;
+            """)
+        var targets: [EntityRelationTarget] = []
+        while try stmt.step() {
+            let title = stmt.string(at: 1)
+            targets.append(EntityRelationTarget(
+                id: stmt.string(at: 0),
+                title: title,
+                normalizedName: normalizedEntityName(title)
+            ))
+        }
+        return targets
+    }
+
+    private func replaceSuggestedEntityRelationCandidates(
+        for owner: SecondBrainOwnerRef,
+        with candidates: [SecondBrainSimilarityCandidate]
+    ) throws {
+        try database.withTransaction {
+            let delete = try database.prepare("""
+                DELETE FROM similarity_candidates
+                WHERE source_owner_type = ?
+                  AND source_owner_id = ?
+                  AND source = 'enrichment_output'
+                  AND signal = 'entity_enrichment'
                   AND review_state != 'accepted';
                 """)
             delete.bind(owner.ownerType, at: 1)
@@ -293,6 +394,13 @@ final class SecondBrainSimilarityCandidateService {
         return regex.matches(in: text, range: NSRange(location: 0, length: nsText.length)).map {
             nsText.substring(with: $0.range)
         }
+    }
+
+    private func normalizedEntityName(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 
     private func candidate(from stmt: SQLStatement) -> SecondBrainSimilarityCandidate {

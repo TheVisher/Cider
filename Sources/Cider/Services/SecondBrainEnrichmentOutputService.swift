@@ -214,7 +214,7 @@ final class SecondBrainEnrichmentOutputService {
     }
 
     private var entityLeadStopwords: Set<String> {
-        ["Content", "Details", "Meet", "Notes", "Read", "See", "Summary", "Title", "URL"]
+        ["Content", "Details", "Meet", "Met", "Notes", "Read", "See", "Summary", "Title", "URL"]
     }
 
     private struct RegexMatch {

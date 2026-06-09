@@ -198,6 +198,7 @@ struct CiderCLIAgentSafetyTests {
             routingDecisions: [],
             agentActions: [],
             enrichmentOutputs: [],
+            relationCandidates: [],
             captureProvenance: []
         )
 
@@ -1757,6 +1758,63 @@ struct CiderCLIAgentSafetyTests {
                 && component["state"] as? String == "healthy"
                 && (component["count"] as? Int ?? 0) > 0
         })
+    }
+
+    @Test("item dogfood intelligence exposes entity relation candidates through similarity JSON")
+    func itemDogfoodIntelligenceExposesEntityRelationCandidatesThroughSimilarityJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-entity-relation-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "contact",
+                "--name", "Avery Stone",
+                "--content", "Avery Stone",
+                "--json"
+            ],
+            vault: vault
+        )
+        let noteID = try createNote(
+            title: "Cafe follow-up",
+            content: "Met Avery Stone at Sightglass and promised to send the launch graph notes.",
+            vault: vault
+        )
+
+        let seedResult = try runCLI(args: ["item", "dogfood-intelligence", "--limit", "5", "--json"], vault: vault)
+        let seed = try parseJSONObject(seedResult.stdout)
+        #expect(seed["command"] as? String == "item.dogfood-intelligence")
+        #expect((seed["similarityCandidateCount"] as? Int ?? 0) > 0)
+
+        let similarityResult = try runCLI(args: ["item", "similarity", "note", noteID, "--json"], vault: vault)
+        let similarity = try parseJSONObject(similarityResult.stdout)
+        #expect(similarity["command"] as? String == "item.similarity")
+        let candidates = try #require(similarity["candidates"] as? [[String: Any]])
+        let candidate = try #require(candidates.first { $0["signal"] as? String == "entity_enrichment" })
+        let targetOwner = try #require(candidate["targetOwner"] as? [String: Any])
+        let metadata = try #require(candidate["metadata"] as? [String: Any])
+
+        #expect(candidate["candidateType"] as? String == "mentions")
+        #expect(candidate["source"] as? String == "enrichment_output")
+        #expect(candidate["reviewState"] as? String == "suggested")
+        #expect((candidate["evidence"] as? String)?.contains("Avery Stone") == true)
+        #expect(targetOwner["ownerType"] as? String == "contact")
+        #expect(metadata["matched_entity"] as? String == "Avery Stone")
+        #expect(metadata["target_type"] as? String == "contact")
+
+        let contextResult = try runCLI(args: ["item", "context", "note", noteID, "--json"], vault: vault)
+        let context = try parseJSONObject(contextResult.stdout)
+        let contextCandidates = try #require(context["relationCandidates"] as? [[String: Any]])
+        #expect(contextCandidates.contains { relationCandidate in
+            relationCandidate["signal"] as? String == "entity_enrichment"
+                && relationCandidate["candidateType"] as? String == "mentions"
+                && relationCandidate["reviewState"] as? String == "suggested"
+        })
+        let blockingIssues = try #require(context["blockingIssues"] as? [String])
+        #expect(context["needsReview"] as? Bool == true)
+        #expect(blockingIssues.contains("relation_candidates_need_review"))
     }
 
     @Test("read-only folder filters do not adopt untracked disk folders")

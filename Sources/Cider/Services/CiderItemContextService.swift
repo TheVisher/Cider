@@ -56,6 +56,7 @@ struct CiderItemContextBundle: Equatable {
     var routingDecisions: [SecondBrainRoutingDecision]
     var agentActions: [SecondBrainAgentAction]
     var enrichmentOutputs: [SecondBrainEnrichmentOutput]
+    var relationCandidates: [SecondBrainSimilarityCandidate]
     var captureProvenance: [CiderItemCaptureProvenance]
 }
 
@@ -105,6 +106,7 @@ struct CiderItemAgentContextPacket: Equatable {
     var contentBlocks: [CiderItemAgentContextBlock]
     var related: [ItemLinkSummary]
     var ownerRelations: [SecondBrainRelation]
+    var relationCandidates: [SecondBrainSimilarityCandidate]
     var backlinks: [SecondBrainRelation]
     var captureProvenance: [CiderItemCaptureProvenance]
     var review: CiderItemAgentReviewState?
@@ -306,6 +308,7 @@ final class CiderItemContextService {
             routingDecisions: try secondBrainStore.routingDecisions(for: owner),
             agentActions: try secondBrainStore.agentActions(for: owner),
             enrichmentOutputs: try SecondBrainEnrichmentOutputService(database: database).outputs(for: owner),
+            relationCandidates: try SecondBrainSimilarityCandidateService(database: database, store: secondBrainStore).candidates(for: owner),
             captureProvenance: try captureProvenance(from: backlinks)
         )
     }
@@ -325,6 +328,7 @@ final class CiderItemContextService {
             contentBlocks: contentBlocks(for: bundle, limits: normalizedLimits),
             related: Array(bundle.related.prefix(normalizedLimits.maxRelated)),
             ownerRelations: Array(bundle.ownerRelations.prefix(normalizedLimits.maxRelated)),
+            relationCandidates: Array(bundle.relationCandidates.prefix(normalizedLimits.maxRelated)),
             backlinks: Array(bundle.backlinks.prefix(normalizedLimits.maxRelated)),
             captureProvenance: Array(bundle.captureProvenance.prefix(normalizedLimits.maxHistory)),
             review: reviewState(for: bundle),
@@ -1675,6 +1679,9 @@ final class CiderItemContextService {
         }
         if !bundle.ownerRelations.isEmpty {
             values.append("owner_relations:\(bundle.ownerRelations.count)")
+        }
+        if !bundle.relationCandidates.isEmpty {
+            values.append("relation_candidates:\(bundle.relationCandidates.count)")
         }
         if !bundle.backlinks.isEmpty {
             values.append("backlinks:\(bundle.backlinks.count)")

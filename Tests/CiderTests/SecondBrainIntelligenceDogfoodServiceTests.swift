@@ -30,14 +30,17 @@ struct SecondBrainIntelligenceDogfoodServiceTests {
 
         let launch = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
         let roadmap = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let contactID = UUID()
+        let contact = SecondBrainOwnerRef(ownerType: "contact", ownerID: contactID.uuidString)
         try insertNoteItem(owner: launch, title: "Launch graph", into: db)
         try insertNoteItem(owner: roadmap, title: "Launch roadmap", into: db)
+        try insertContactItem(id: contactID, displayName: "Avery Stone", into: db)
 
         let store = SecondBrainStore(database: db)
         try store.replaceChunks(owner: launch, chunks: [
             chunk(
                 owner: launch,
-                body: "Cider graph launch roadmap agent context Apple Park https://example.com/launch #ProductLaunch"
+                body: "Met Avery Stone about the Cider graph launch roadmap agent context Apple Park https://example.com/launch #ProductLaunch"
             )
         ])
         try store.replaceChunks(owner: roadmap, chunks: [
@@ -57,7 +60,15 @@ struct SecondBrainIntelligenceDogfoodServiceTests {
         #expect(result.owners.allSatisfy { $0.enrichmentReviewStates["suggested", default: 0] == $0.enrichmentOutputCount })
         #expect(result.owners.contains { $0.similarityReviewStates["suggested", default: 0] > 0 })
         #expect(try SecondBrainEnrichmentOutputService(database: db).outputs(for: launch).contains { $0.reviewState == "suggested" })
-        #expect(try SecondBrainSimilarityCandidateService(database: db, store: store).candidates(for: launch).contains { $0.reviewState == "suggested" })
+        let candidates = try SecondBrainSimilarityCandidateService(database: db, store: store).candidates(for: launch)
+        #expect(candidates.contains { $0.reviewState == "suggested" })
+        #expect(candidates.contains {
+            $0.signal == "entity_enrichment"
+                && $0.targetOwner == contact
+                && $0.candidateType == "mentions"
+                && $0.source == "enrichment_output"
+                && $0.evidence.contains("Avery Stone")
+        })
         #expect(try store.outgoingRelations(for: launch).isEmpty)
     }
 
@@ -88,5 +99,26 @@ struct SecondBrainIntelligenceDogfoodServiceTests {
         let noteStmt = try db.prepare("INSERT INTO notes (item_id, content, summary, is_pinned) VALUES (?, '', NULL, 0);")
         noteStmt.bind(owner.ownerID, at: 1)
         try noteStmt.step()
+    }
+
+    private func insertContactItem(id: UUID, displayName: String, into db: CiderDatabase) throws {
+        let now = DatabaseHelpers.encode(Date())
+        let itemStmt = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'contact', ?, ?, ?, NULL, ?);
+            """)
+        itemStmt.bind(id.uuidString, at: 1)
+            .bind(displayName, at: 2)
+            .bind(now, at: 3)
+            .bind(now, at: 4)
+            .bind("Inbox/Contacts/\(displayName).vcf", at: 5)
+        try itemStmt.step()
+
+        let contactStmt = try db.prepare("""
+            INSERT INTO contacts (item_id, relationship_label, notes, email, phone, address, has_avatar, custom_fields)
+            VALUES (?, '', '', '', '', '', 0, '[]');
+            """)
+        contactStmt.bind(id.uuidString, at: 1)
+        try contactStmt.step()
     }
 }

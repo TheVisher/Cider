@@ -14707,6 +14707,7 @@ struct CiderCLI {
             "chunks": bundle.chunks.map(itemChunkToDict),
             "related": bundle.related.map(itemLinkSummaryToDict),
             "ownerRelations": bundle.ownerRelations.map(ownerRelationToDict),
+            "relationCandidates": bundle.relationCandidates.map(similarityCandidateToDict),
             "backlinks": bundle.backlinks.map(ownerRelationToDict),
             "routingDecisions": bundle.routingDecisions.map(routingDecisionToDict),
             "agentActions": bundle.agentActions.map(agentActionToDict),
@@ -15477,6 +15478,7 @@ struct CiderCLI {
             "contentBlocks": packet.contentBlocks.map(itemAgentContextBlockToDict),
             "related": packet.related.map(itemLinkSummaryToDict),
             "ownerRelations": packet.ownerRelations.map(ownerRelationToDict),
+            "relationCandidates": packet.relationCandidates.map(similarityCandidateToDict),
             "backlinks": packet.backlinks.map(ownerRelationToDict),
             "captureProvenance": packet.captureProvenance.map(captureProvenanceToDict),
             "surfacing": surfacingExplanationToDict(packet.surfacing),
@@ -15499,11 +15501,17 @@ struct CiderCLI {
 
     static func itemAgentDecisionDictionary(for packet: CiderItemAgentContextPacket) -> [String: Any] {
         let reviewStatus = packet.review?.status ?? packet.surfacing.reviewState
-        let needsReview = reviewStatus == "needs_review"
-        let needsRouting = needsReview || packet.review?.targetPath != nil
+        let hasSuggestedRelationCandidates = packet.relationCandidates.contains {
+            $0.reviewState == "suggested" || $0.reviewState == "needs_review"
+        }
+        let needsReview = reviewStatus == "needs_review" || hasSuggestedRelationCandidates
+        let needsRouting = reviewStatus == "needs_review" || packet.review?.targetPath != nil
         var blockingIssues: [String] = []
-        if needsReview {
+        if reviewStatus == "needs_review" {
             blockingIssues.append("routing_needs_review")
+        }
+        if hasSuggestedRelationCandidates {
+            blockingIssues.append("relation_candidates_need_review")
         }
         return CiderAgentDecisionContract.dictionary(
             saved: true,
@@ -15512,7 +15520,7 @@ struct CiderCLI {
             needsRouting: needsRouting,
             confidence: packet.review?.confidence,
             blockingIssues: blockingIssues,
-            recommendedNextAction: needsReview ? "review_route" : packet.surfacing.suggestedAction,
+            recommendedNextAction: reviewStatus == "needs_review" ? "review_route" : (hasSuggestedRelationCandidates ? "review_relation_candidates" : packet.surfacing.suggestedAction),
             safeNextCommands: packet.safeCommands
         )
     }
