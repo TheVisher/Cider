@@ -4,6 +4,8 @@ Status: canonical core doc.
 
 Cider is a local-first Mac second brain and life command center. It is the user's calm native memory cockpit: fast capture, clear review, helpful resurfacing, and one trusted Main Brain over local personal context.
 
+The destination is defined in `Docs/NORTH_STAR.md`; this document summarizes the current product line, principles, surfaces, focus, and non-goals.
+
 The product is no longer the old general vault/bookmark app with extra features bolted on. Bookmarks, notes, files, todos, dates, contacts, screenshots, Kanban cards, and Spaces are parts of one second-brain system.
 
 The core loop is:
@@ -71,6 +73,6 @@ Cider still keeps important older capabilities, but they should now serve the se
 
 ## Roadmap Ownership
 
-The active roadmap lives in Kanban, especially the Second-Brain Roadmap v1 board. This doc is the durable product narrative; it should not become a duplicate roadmap, QA report, or implementation log.
+The active roadmap lives in Kanban, especially the Cider board (`2afee0`). This doc is the durable product narrative; it should not become a duplicate roadmap, QA report, or implementation log.
 
 The pre-second-brain product line is preserved in git on `legacy/pre-second-brain-cider` for reference. It is not the default direction for new work.

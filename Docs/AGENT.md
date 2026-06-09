@@ -6,11 +6,11 @@ This doc tells agents how to work on Cider without growing a second project-mana
 
 ## Current Product Line
 
-`main` is the second-brain Cider line. Treat Cider as a local-first Mac second brain and life command center, with the product direction summarized in `Docs/PRODUCT.md`.
+`main` is the second-brain Cider line. Treat Cider as a local-first Mac second brain and life command center, with the destination summarized in `Docs/NORTH_STAR.md` and current product direction summarized in `Docs/PRODUCT.md`.
 
 The pre-second-brain app is preserved on `legacy/pre-second-brain-cider` for reference only. Do not use legacy docs or old branch behavior as active instruction unless the durable fact has been promoted into the current core docs or a current Kanban card.
 
-The active roadmap source is the Second-Brain Roadmap v1 board, `~/CiderVault/.cider/boards/3d45ca.yaml`.
+The active roadmap source is the Cider board, `~/CiderVault/.cider/boards/2afee0.yaml`. Older references to the Second-Brain Roadmap v1 board are historical unless that board exists in the current vault.
 
 ## The Model
 

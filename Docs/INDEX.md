@@ -10,6 +10,7 @@ Cider uses Kanban for roadmap, specs, QA evidence, active work, bugs, implementa
 
 ## Core Docs
 
+- `Docs/NORTH_STAR.md` - guiding second-brain/life-assistant direction for broad work, audits, and future-agent prompts.
 - `Docs/PRODUCT.md` - product direction, principles, and current focus.
 - `Docs/FEATURES.md` - compact inventory of app features and what each one does.
 - `Docs/ARCHITECTURE.md` - app structure, major services, and boundaries.
