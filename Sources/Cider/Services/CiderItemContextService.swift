@@ -349,6 +349,35 @@ final class CiderItemContextService {
         }
     }
 
+    func recentItems(since threshold: Date, limit: Int = 20) throws -> [CiderItemSummary] {
+        let activeTypes = LibraryEntityType.activeCases.map(ItemLinkService.databaseItemType(for:))
+        guard !activeTypes.isEmpty else { return [] }
+
+        let placeholders = activeTypes.map { _ in "?" }.joined(separator: ", ")
+        let stmt = try database.prepare("""
+            SELECT id, type, title, created_at, updated_at, folder_id, relative_path
+            FROM items
+            WHERE type IN (\(placeholders))
+              AND (created_at >= ? OR updated_at >= ?)
+            ORDER BY updated_at DESC, created_at DESC, title COLLATE NOCASE ASC
+            LIMIT ?;
+            """)
+        for (index, type) in activeTypes.enumerated() {
+            stmt.bind(type, at: Int32(index + 1))
+        }
+        let thresholdValue = DatabaseHelpers.encode(threshold)
+        let offset = Int32(activeTypes.count)
+        stmt.bind(thresholdValue, at: offset + 1)
+            .bind(thresholdValue, at: offset + 2)
+            .bind(max(1, limit), at: offset + 3)
+
+        var items: [CiderItemSummary] = []
+        while try stmt.step() {
+            items.append(try itemSummary(from: stmt))
+        }
+        return items
+    }
+
     func search(
         _ query: String,
         limit: Int = 20,

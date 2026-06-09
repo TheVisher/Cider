@@ -210,47 +210,7 @@ struct GetRecentItemsTool: Tool {
     }
 
     nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
-        let threshold = Date().addingTimeInterval(-Double(arguments.days) * 86400)
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-
-        var results: [String] = []
-
-        let recentBookmarks = VaultBookmarkService.shared.bookmarks
-            .filter { $0.createdAt >= threshold }
-            .sorted { $0.createdAt > $1.createdAt }
-        for b in recentBookmarks.prefix(10) {
-            results.append("Bookmark: \"\(b.title)\" — \(formatter.string(from: b.createdAt))")
-        }
-        if recentBookmarks.count > 10 { results.append("...and \(recentBookmarks.count - 10) more bookmarks") }
-
-        let recentNotes = NotesStorage.shared.notes
-            .filter { $0.modifiedAt >= threshold }
-            .sorted { $0.modifiedAt > $1.modifiedAt }
-        for n in recentNotes.prefix(10) {
-            results.append("Note: \"\(n.title)\" — \(formatter.string(from: n.modifiedAt))")
-        }
-        if recentNotes.count > 10 { results.append("...and \(recentNotes.count - 10) more notes") }
-
-        let recentEvents = DateCardStorage.shared.dateCards
-            .filter { $0.createdAt >= threshold }
-            .sorted { $0.createdAt > $1.createdAt }
-        for e in recentEvents.prefix(5) {
-            results.append("Event: \"\(e.title)\" — \(formatter.string(from: e.startAt))")
-        }
-
-        let recentTodos = TodoCardStorage.shared.todoCards
-            .filter { $0.createdAt >= threshold }
-            .sorted { $0.createdAt > $1.createdAt }
-        for t in recentTodos.prefix(5) {
-            let status = t.isCompleted ? "✓" : "○"
-            results.append("Todo: \(status) \"\(t.title)\"")
-        }
-
-        if results.isEmpty {
-            return ("No items created or modified in the last \(arguments.days) day(s).")
-        }
-        return ("Items from the last \(arguments.days) day(s):\n" + results.joined(separator: "\n"))
+        CiderAgentRecentItemsFormatter.recentItemsResponseOrMessage(days: arguments.days)
     } }
 }
 

@@ -281,6 +281,51 @@ struct CiderItemContextServiceTests {
         })
     }
 
+    @Test("recent item read model returns bounded updated items with stable identity")
+    func recentItemReadModelReturnsBoundedUpdatedItemsWithStableIdentity() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let recentNote = LibraryEntityRef(type: .note, entityID: UUID())
+        let recentBookmark = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let olderTodo = LibraryEntityRef(type: .todo, entityID: UUID())
+        try insertItem(
+            recentNote,
+            title: "Main Brain recent note",
+            relativePath: "Inbox/Notes/Main Brain recent note.md",
+            into: db,
+            createdAt: now.addingTimeInterval(-120),
+            updatedAt: now.addingTimeInterval(-30)
+        )
+        try insertItem(
+            recentBookmark,
+            title: "Shared context bookmark",
+            relativePath: "Inbox/Bookmarks/Shared context bookmark.url",
+            into: db,
+            createdAt: now.addingTimeInterval(-180),
+            updatedAt: now.addingTimeInterval(-60)
+        )
+        try insertItem(
+            olderTodo,
+            title: "Older isolated store task",
+            relativePath: "Inbox/Todos/Older isolated store task.md",
+            into: db,
+            createdAt: now.addingTimeInterval(-90_000),
+            updatedAt: now.addingTimeInterval(-90_000)
+        )
+
+        let service = CiderItemContextService(database: db, nowProvider: { now })
+        let recent = try service.recentItems(since: now.addingTimeInterval(-3600), limit: 10)
+
+        #expect(recent.map(\.id) == [recentNote.entityID, recentBookmark.entityID])
+        #expect(recent.map(\.type) == [.note, .bookmark])
+        #expect(recent.map(\.relativePath) == [
+            "Inbox/Notes/Main Brain recent note.md",
+            "Inbox/Bookmarks/Shared context bookmark.url",
+        ])
+    }
+
     @Test("search diagnostics explain FTS chunk hits with item routing and safe commands")
     func searchDiagnosticsExplainChunkHitsWithItemContext() throws {
         let (db, url) = try makeTestDB()

@@ -87,6 +87,51 @@ enum CiderAgentItemSearchFormatter {
     }
 }
 
+@MainActor
+enum CiderAgentRecentItemsFormatter {
+    static func recentItemsResponse(
+        days: Int,
+        service: CiderItemContextService = CiderItemContextService(),
+        now: Date = Date(),
+        limit: Int = 20
+    ) throws -> String {
+        let boundedDays = max(1, days)
+        let threshold = now.addingTimeInterval(-Double(boundedDays) * 86_400)
+        let items = try service.recentItems(since: threshold, limit: limit)
+
+        guard !items.isEmpty else {
+            return "No items created or modified in the last \(boundedDays) day(s)."
+        }
+
+        let lines = items.prefix(max(1, limit)).map(format)
+        return "Items from the last \(boundedDays) day(s) through shared item context:\n" + lines.joined(separator: "\n")
+    }
+
+    static func recentItemsResponseOrMessage(
+        days: Int,
+        service: CiderItemContextService = CiderItemContextService(),
+        now: Date = Date(),
+        limit: Int = 20
+    ) -> String {
+        do {
+            return try recentItemsResponse(days: days, service: service, now: now, limit: limit)
+        } catch {
+            return "Recent item lookup failed: \(error.localizedDescription)"
+        }
+    }
+
+    private static func format(_ item: CiderItemSummary) -> String {
+        var parts = [
+            "- \(item.type.rawValue) \(item.id.uuidString): \"\(item.title)\"",
+        ]
+        if let path = item.relativePath, !path.isEmpty {
+            parts.append("Path: \(path)")
+        }
+        parts.append("Command: cider-cli item context \(item.type.rawValue) \(item.id.uuidString) --json")
+        return parts.joined(separator: " | ")
+    }
+}
+
 private extension LibraryEntityType {
     var agentSearchDisplayNamePlural: String {
         switch self {

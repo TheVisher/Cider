@@ -106,4 +106,43 @@ struct AgentRecallUnifiedSearchTests {
         #expect(noteOnly.contains("note \(note.entityID.uuidString)"))
         #expect(!noteOnly.contains("bookmark \(bookmark.entityID.uuidString)"))
     }
+
+    @Test("assistant recent items formats shared item context refs and commands")
+    func assistantRecentItemsFormatsSharedItemContextRefsAndCommands() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        let bookmark = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        try insertItem(
+            note,
+            title: "Recent Main Brain note",
+            relativePath: "Inbox/Notes/Recent Main Brain note.md",
+            into: db
+        )
+        try insertItem(
+            bookmark,
+            title: "Recent shared context bookmark",
+            relativePath: "Inbox/Bookmarks/Recent shared context bookmark.url",
+            into: db
+        )
+
+        let service = CiderItemContextService(database: db, nowProvider: { now })
+
+        let response = try CiderAgentRecentItemsFormatter.recentItemsResponse(
+            days: 7,
+            service: service,
+            now: now,
+            limit: 10
+        )
+
+        #expect(response.contains("Items from the last 7 day(s) through shared item context:"))
+        #expect(response.contains("note \(note.entityID.uuidString): \"Recent Main Brain note\""))
+        #expect(response.contains("bookmark \(bookmark.entityID.uuidString): \"Recent shared context bookmark\""))
+        #expect(response.contains("Path: Inbox/Notes/Recent Main Brain note.md"))
+        #expect(response.contains("Path: Inbox/Bookmarks/Recent shared context bookmark.url"))
+        #expect(response.contains("Command: cider-cli item context note \(note.entityID.uuidString) --json"))
+        #expect(response.contains("Command: cider-cli item context bookmark \(bookmark.entityID.uuidString) --json"))
+    }
 }
