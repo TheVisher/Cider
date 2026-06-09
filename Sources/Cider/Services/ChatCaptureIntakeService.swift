@@ -5,6 +5,7 @@ struct ChatCaptureChannel: RawRepresentable, Codable, Equatable, Sendable {
 
     static let telegram = ChatCaptureChannel(rawValue: "telegram")!
     static let discord = ChatCaptureChannel(rawValue: "discord")!
+    static let iMessage = ChatCaptureChannel(rawValue: "imessage")!
 
     init?(rawValue: String) {
         let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)

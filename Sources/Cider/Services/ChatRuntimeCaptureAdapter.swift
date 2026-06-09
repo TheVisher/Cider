@@ -19,6 +19,15 @@ enum ChatRuntimeCaptureAdapter {
         return try intakeService.capture(input)
     }
 
+    @MainActor
+    static func captureIfNeeded(
+        fromPhoton update: PhotonIMessageEnvelope,
+        intakeService: ChatCaptureIntakeService = ChatCaptureIntakeService()
+    ) throws -> ChatCaptureIntakeResult? {
+        guard let input = input(fromPhoton: update) else { return nil }
+        return try intakeService.capture(input)
+    }
+
     static func input(fromTelegram update: TelegramUpdateEnvelope) -> ChatCaptureInput? {
         let text = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = telegramAttachments(from: text)
@@ -78,6 +87,47 @@ enum ChatRuntimeCaptureAdapter {
             channelID: update.channelID,
             threadID: update.threadID ?? update.channelID,
             messageID: "discord:\(update.messageID)",
+            senderID: update.senderID,
+            senderName: update.senderDisplayName,
+            text: captureText,
+            attachments: attachments,
+            intent: .capture,
+            metadata: metadata
+        )
+    }
+
+    static func input(fromPhoton update: PhotonIMessageEnvelope) -> ChatCaptureInput? {
+        let text = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachments = update.attachments.map { attachment in
+            ChatAttachment(
+                id: attachment.id,
+                filename: attachment.filename,
+                mimeType: attachment.mimeType,
+                localPath: attachment.localPath,
+                remoteURL: attachment.remoteURL
+            )
+        }
+        guard let captureText = explicitCaptureText(from: text, hasAttachments: !attachments.isEmpty) else {
+            return nil
+        }
+
+        var metadata = [
+            "runtime": "photon",
+            "transport": "imessage",
+            "source_message_id": update.messageID,
+        ]
+        if let failureReason = update.attachments
+            .compactMap(\.downloadFailedReason)
+            .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .first(where: { !$0.isEmpty }) {
+            metadata["attachment_failure_reason"] = failureReason
+        }
+
+        return ChatCaptureInput(
+            channel: .iMessage,
+            channelID: update.conversationID,
+            threadID: update.threadID ?? update.conversationID,
+            messageID: "imessage:\(update.messageID)",
             senderID: update.senderID,
             senderName: update.senderDisplayName,
             text: captureText,

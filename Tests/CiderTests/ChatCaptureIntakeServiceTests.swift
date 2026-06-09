@@ -315,6 +315,141 @@ struct ChatCaptureIntakeServiceTests {
         }
     }
 
+    @Test("photon imessage runtime update maps explicit save intent into canonical chat capture input")
+    func photonIMessageRuntimeUpdateMapsExplicitSaveIntentIntoCanonicalChatCaptureInput() throws {
+        let update = PhotonIMessageEnvelope(
+            messageID: "imsg-msg-100",
+            conversationID: "imsg-chat-100",
+            threadID: "imsg-thread-100",
+            senderID: "+15555550100",
+            senderDisplayName: "Erik",
+            text: "save this https://example.com/photon-capture"
+        )
+
+        let input = ChatRuntimeCaptureAdapter.input(fromPhoton: update)
+
+        #expect(input?.channel == .iMessage)
+        #expect(input?.channelID == "imsg-chat-100")
+        #expect(input?.threadID == "imsg-thread-100")
+        #expect(input?.messageID == "imessage:imsg-msg-100")
+        #expect(input?.senderID == "+15555550100")
+        #expect(input?.senderName == "Erik")
+        #expect(input?.intent == .capture)
+        #expect(input?.text == "https://example.com/photon-capture")
+        #expect(input?.metadata["source_message_id"] == "imsg-msg-100")
+        #expect(input?.metadata["runtime"] == "photon")
+        #expect(input?.metadata["transport"] == "imessage")
+    }
+
+    @Test("photon imessage runtime save intent captures through canonical intake")
+    func photonIMessageRuntimeSaveIntentCapturesThroughCanonicalIntake() throws {
+        try withIsolatedVault { db, notes, _ in
+            let service = ChatCaptureIntakeService(
+                captureService: CiderCaptureService(notesStorage: notes, database: db)
+            )
+            let update = PhotonIMessageEnvelope(
+                messageID: "imsg-msg-101",
+                conversationID: "imsg-chat-101",
+                threadID: nil,
+                senderID: "erik@example.com",
+                senderDisplayName: "Erik",
+                text: "save this https://example.com/photon-canonical"
+            )
+
+            let result = try ChatRuntimeCaptureAdapter.captureIfNeeded(
+                fromPhoton: update,
+                intakeService: service
+            )
+
+            let capture = try #require(result?.captureResult)
+            #expect(result?.status == .captured)
+            #expect(capture.sourceContext?.channel == "imessage")
+            #expect(capture.sourceContext?.messageID == "imessage:imsg-msg-101")
+            #expect(capture.sourceContext?.metadata["runtime"] == "photon")
+
+            let eventID = try #require(capture.captureEventID)
+            let stmt = try db.prepare("""
+                SELECT surface, channel, channel_id, thread_id, message_id, sender_id, metadata
+                FROM capture_events
+                WHERE id = ?;
+                """)
+            stmt.bind(eventID.uuidString, at: 1)
+            #expect(try stmt.step())
+            #expect(stmt.string(at: 0) == "chat")
+            #expect(stmt.string(at: 1) == "imessage")
+            #expect(stmt.string(at: 2) == "imsg-chat-101")
+            #expect(stmt.string(at: 3) == "imsg-chat-101")
+            #expect(stmt.string(at: 4) == "imessage:imsg-msg-101")
+            #expect(stmt.string(at: 5) == "erik@example.com")
+            #expect(stmt.string(at: 6).contains("photon"))
+        }
+    }
+
+    @Test("photon imessage remote attachment save intent records unsupported attachment review")
+    func photonIMessageRemoteAttachmentSaveIntentRecordsUnsupportedAttachmentReview() throws {
+        try withIsolatedVault { db, notes, files in
+            let service = ChatCaptureIntakeService(
+                captureService: CiderCaptureService(
+                    notesStorage: notes,
+                    vaultFileStorage: files,
+                    database: db
+                ),
+                database: db
+            )
+            let update = PhotonIMessageEnvelope(
+                messageID: "imsg-msg-102",
+                conversationID: "imsg-chat-102",
+                threadID: nil,
+                senderID: "+15555550102",
+                senderDisplayName: "Erik",
+                text: "save this",
+                attachments: [
+                    PhotonAttachmentEnvelope(
+                        id: "photon-attachment-102",
+                        filename: "scan.heic",
+                        mimeType: "image/heic",
+                        localPath: nil,
+                        remoteURL: "photon://attachments/scan.heic",
+                        downloadFailedReason: "photon_attachment_unavailable"
+                    )
+                ]
+            )
+
+            let input = try #require(ChatRuntimeCaptureAdapter.input(fromPhoton: update))
+            #expect(input.metadata["attachment_failure_reason"] == "photon_attachment_unavailable")
+            let result = try ChatRuntimeCaptureAdapter.captureIfNeeded(
+                fromPhoton: update,
+                intakeService: service
+            )
+
+            #expect(result?.status == .needsReview)
+            let eventID = try #require(result?.captureEventID)
+            #expect(result?.safeNextCommands.contains("cider-cli item backlinks capture_event \(eventID.uuidString) --json") == true)
+            #expect(try captureAttachmentSourceIDs(db, eventID: eventID) == ["photon-attachment-102"])
+            #expect(try captureAttachmentRemoteURLs(db, eventID: eventID) == ["photon://attachments/scan.heic"])
+            #expect(try unsupportedAttachmentReviewOutputCount(db, eventID: eventID) == 1)
+
+            let stmt = try db.prepare("""
+                SELECT source_kind, surface, channel, channel_id, thread_id, message_id, sender_id,
+                       sender_name, attachment_count, metadata
+                FROM capture_events
+                WHERE id = ?;
+                """)
+            stmt.bind(eventID.uuidString, at: 1)
+            #expect(try stmt.step())
+            #expect(stmt.string(at: 0) == "chat_unsupported_attachment")
+            #expect(stmt.string(at: 1) == "chat")
+            #expect(stmt.string(at: 2) == "imessage")
+            #expect(stmt.string(at: 3) == "imsg-chat-102")
+            #expect(stmt.string(at: 4) == "imsg-chat-102")
+            #expect(stmt.string(at: 5) == "imessage:imsg-msg-102")
+            #expect(stmt.string(at: 6) == "+15555550102")
+            #expect(stmt.string(at: 7) == "Erik")
+            #expect(stmt.int(at: 8) == 1)
+            #expect(stmt.string(at: 9).contains("photon_attachment_unavailable"))
+        }
+    }
+
     @Test("telegram chat capture creates canonical capture event provenance")
     func telegramChatCaptureCreatesCanonicalCaptureEventProvenance() throws {
         try withIsolatedVault { db, notes, _ in
