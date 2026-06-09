@@ -1398,31 +1398,33 @@ struct CiderCLIAgentSafetyTests {
 
     @Test("hidden legacy type specific commands return structured replacement guidance")
     func hiddenLegacyTypeSpecificCommandsReturnStructuredReplacementGuidance() throws {
-        let cases: [(args: [String], command: String, replacement: String)] = [
-            (["bookmark", "list", "--json"], "bookmark list", "cider-cli item search <query> --json"),
-            (["bookmark", "enrich", "abc", "--json"], "bookmark enrich", "cider-cli review enrich <item-id> --json"),
-            (["note", "list", "--json"], "note list", "cider-cli item search <query> --json"),
-            (["todo", "list", "--json"], "todo list", "cider-cli item search <query> --json"),
-            (["event", "list", "--json"], "event list", "cider-cli item search <query> --json"),
-            (["contact", "list", "--json"], "contact list", "cider-cli item search <query> --json"),
-            (["file", "list", "--json"], "file list", "cider-cli item search <query> --json"),
-            (["folder", "list", "--json"], "folder list", "cider-cli item search <query> --json"),
-            (["folder", "create", "Projects", "--json"], "folder create", "cider-cli item search <query> --json"),
-            (["label", "list", "--json"], "label list", "cider-cli item search <query> --json"),
-            (["tag", "list", "--json"], "tag list", "cider-cli item search <query> --json"),
-            (["dashboard", "topic", "list", "--json"], "dashboard topic", "cider-cli item graph-health --json"),
-            (["link", "add", "note", "a", "note", "b", "--json"], "link add", "cider-cli item link"),
-            (["view", "list", "--json"], "view list", "cider-cli item project-context <project-id-or-name> --json"),
-            (["saved-view", "list", "--json"], "saved-view list", "cider-cli item project-context <project-id-or-name> --json"),
-            (["trash", "list", "--json"], "trash list", "cider-cli storage audit --json"),
-            (["clipboard", "import", "--json"], "clipboard import", "cider-cli capture add --kind note --stdin --json"),
-            (["recall", "list", "--json"], "recall list", "cider-cli item search <query> --json"),
-            (["duplicate-check", "run", "--json"], "duplicate-check run", "cider-cli item search <url-or-query> --json"),
-            (["media", "scan", "--json"], "media scan", "cider-cli item search <query> --json"),
-            (["bookmark", "move", "abc", "--json"], "bookmark move", "cider-cli item move bookmark <id> --folder <name|path> --json"),
-            (["note", "move", "abc", "--json"], "note move", "cider-cli item move note <id> --folder <name|path> --json"),
-            (["todo", "move", "abc", "--json"], "todo move", "cider-cli item move todo <id> --folder <name|path> --json"),
-            (["file", "move", "abc", "--json"], "file move", "cider-cli item move file <id> --folder <name|path> --json"),
+        let genericReason = "Use the Second Brain v1 agent API."
+        let dashboardReason = "Dashboard topics and cards are UI preference state, not second-brain truth. HomeOverviewDataProvider remains the graph-backed read model for what matters now."
+        let cases: [(args: [String], command: String, replacement: String, reason: String)] = [
+            (["bookmark", "list", "--json"], "bookmark list", "cider-cli item search <query> --json", genericReason),
+            (["bookmark", "enrich", "abc", "--json"], "bookmark enrich", "cider-cli review enrich <item-id> --json", genericReason),
+            (["note", "list", "--json"], "note list", "cider-cli item search <query> --json", genericReason),
+            (["todo", "list", "--json"], "todo list", "cider-cli item search <query> --json", genericReason),
+            (["event", "list", "--json"], "event list", "cider-cli item search <query> --json", genericReason),
+            (["contact", "list", "--json"], "contact list", "cider-cli item search <query> --json", genericReason),
+            (["file", "list", "--json"], "file list", "cider-cli item search <query> --json", genericReason),
+            (["folder", "list", "--json"], "folder list", "cider-cli item search <query> --json", genericReason),
+            (["folder", "create", "Projects", "--json"], "folder create", "cider-cli item search <query> --json", genericReason),
+            (["label", "list", "--json"], "label list", "cider-cli item search <query> --json", genericReason),
+            (["tag", "list", "--json"], "tag list", "cider-cli item search <query> --json", genericReason),
+            (["dashboard", "topic", "list", "--json"], "dashboard topic", "cider-cli item graph-health --json", dashboardReason),
+            (["link", "add", "note", "a", "note", "b", "--json"], "link add", "cider-cli item link", genericReason),
+            (["view", "list", "--json"], "view list", "cider-cli item project-context <project-id-or-name> --json", genericReason),
+            (["saved-view", "list", "--json"], "saved-view list", "cider-cli item project-context <project-id-or-name> --json", genericReason),
+            (["trash", "list", "--json"], "trash list", "cider-cli storage audit --json", genericReason),
+            (["clipboard", "import", "--json"], "clipboard import", "cider-cli capture add --kind note --stdin --json", genericReason),
+            (["recall", "list", "--json"], "recall list", "cider-cli item search <query> --json", genericReason),
+            (["duplicate-check", "run", "--json"], "duplicate-check run", "cider-cli item search <url-or-query> --json", genericReason),
+            (["media", "scan", "--json"], "media scan", "cider-cli item search <query> --json", genericReason),
+            (["bookmark", "move", "abc", "--json"], "bookmark move", "cider-cli item move bookmark <id> --folder <name|path> --json", genericReason),
+            (["note", "move", "abc", "--json"], "note move", "cider-cli item move note <id> --folder <name|path> --json", genericReason),
+            (["todo", "move", "abc", "--json"], "todo move", "cider-cli item move todo <id> --folder <name|path> --json", genericReason),
+            (["file", "move", "abc", "--json"], "file move", "cider-cli item move file <id> --folder <name|path> --json", genericReason),
         ]
 
         for testCase in cases {
@@ -1433,8 +1435,20 @@ struct CiderCLIAgentSafetyTests {
             #expect(dict["legacyRemoved"] as? Bool == true)
             #expect(dict["command"] as? String == testCase.command)
             #expect(dict["replacement"] as? String == testCase.replacement)
-            #expect(dict["reason"] as? String == "Use the Second Brain v1 agent API.")
+            #expect(dict["reason"] as? String == testCase.reason)
         }
+    }
+
+    @Test("dashboard topic legacy CLI explains ui preference contract")
+    func dashboardTopicLegacyCLIExplainsUIPreferenceContract() throws {
+        let result = try runCLI(args: ["dashboard", "topic", "list", "--json"])
+        let dict = try parseJSONObject(result.stdout)
+
+        #expect(result.status != 0)
+        #expect(dict["legacyRemoved"] as? Bool == true)
+        #expect(dict["replacement"] as? String == "cider-cli item graph-health --json")
+        #expect((dict["reason"] as? String)?.contains("Dashboard topics and cards are UI preference state") == true)
+        #expect((dict["reason"] as? String)?.contains("HomeOverviewDataProvider") == true)
     }
 
     @Test("type specific legacy handlers repeat the removed command guard")

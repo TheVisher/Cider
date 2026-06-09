@@ -1046,12 +1046,17 @@ private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
 }
 
 @MainActor func dashboardTopicToDict(_ topic: DashboardTopic) -> [String: Any] {
+    let contract = topic.secondBrainContract
     var dict: [String: Any] = [
         "id": topic.ciderSyncId,
         "title": topic.title,
         "position": topic.position,
         "createdAt": topic.createdAt,
         "updatedAt": topic.updatedAt,
+        "authority": contract.authority.rawValue,
+        "secondBrainTruth": contract.isSecondBrainTruth,
+        "homePrimaryReadModel": contract.homePrimaryReadModel,
+        "safeGraphCommands": contract.safeGraphCommands,
     ]
     if let icon = topic.icon { dict["icon"] = icon }
     if let colorToken = topic.colorToken { dict["colorToken"] = colorToken }
@@ -1063,6 +1068,7 @@ private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
 }
 
 @MainActor func dashboardCardToDict(_ card: DashboardCard) -> [String: Any] {
+    let contract = card.secondBrainContract
     var dict: [String: Any] = [
         "id": card.ciderSyncId,
         "topicSyncIds": card.topicSyncIds,
@@ -1073,6 +1079,10 @@ private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
         "priority": card.priority.rawValue,
         "createdAt": card.createdAt,
         "updatedAt": card.updatedAt,
+        "authority": contract.authority.rawValue,
+        "secondBrainTruth": contract.isSecondBrainTruth,
+        "homePrimaryReadModel": contract.homePrimaryReadModel,
+        "safeGraphCommands": contract.safeGraphCommands,
     ]
     if let subtitle = card.subtitle { dict["subtitle"] = subtitle }
     if let whyItMatters = card.whyItMatters { dict["whyItMatters"] = whyItMatters }

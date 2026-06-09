@@ -111,7 +111,11 @@ struct CiderCLI {
         case "link":
             return LegacyRemovedCommand(command: label, replacement: "cider-cli item link")
         case "dashboard", "dash":
-            return LegacyRemovedCommand(command: label, replacement: "cider-cli item graph-health --json")
+            return LegacyRemovedCommand(
+                command: label,
+                replacement: "cider-cli item graph-health --json",
+                reason: "Dashboard topics and cards are UI preference state, not second-brain truth. HomeOverviewDataProvider remains the graph-backed read model for what matters now."
+            )
         case "view", "saved-view":
             return LegacyRemovedCommand(command: label, replacement: "cider-cli item project-context <project-id-or-name> --json")
         case "trash":

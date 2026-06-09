@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Cider
+@testable import CiderCLI
 
 @Suite("Dashboard model tests")
 struct DashboardModelTests {
@@ -120,5 +121,43 @@ struct DashboardModelTests {
         #expect(snapshot.cards.first?.priority == .unknown("critical"))
         #expect(snapshot.runs.first?.source == .unknown("webhook"))
         #expect(snapshot.runs.first?.status == .unknown("paused"))
+    }
+
+    @Test("dashboard topics and cards declare ui preference second brain contract")
+    @MainActor
+    func dashboardTopicsAndCardsDeclareUIPreferenceSecondBrainContract() throws {
+        let topic = DashboardTopic(
+            title: "Cider Projects",
+            position: 1,
+            createdAt: 1_777_708_800_000,
+            updatedAt: 1_777_708_800_001
+        )
+        let card = DashboardCard(
+            topicSyncIds: [topic.ciderSyncId],
+            title: "Dashboard preference",
+            summary: "Local dashboard preference state.",
+            relatedItemSyncId: "note-123",
+            relatedItemType: "note",
+            createdAt: 1_777_708_800_002,
+            updatedAt: 1_777_708_800_003
+        )
+
+        #expect(DashboardStorage.secondBrainContract.authority == .uiPreferenceState)
+        #expect(DashboardStorage.secondBrainContract.isSecondBrainTruth == false)
+        #expect(DashboardStorage.secondBrainContract.homePrimaryReadModel == "HomeOverviewDataProvider")
+        #expect(DashboardStorage.secondBrainContract.safeGraphCommands == ["cider-cli item graph-health --json"])
+        #expect(topic.secondBrainContract.authority == .uiPreferenceState)
+        #expect(card.secondBrainContract.authority == .uiPreferenceState)
+        #expect(card.secondBrainOwnerRef == nil)
+
+        let topicDict = dashboardTopicToDict(topic)
+        let cardDict = dashboardCardToDict(card)
+        #expect(topicDict["secondBrainTruth"] as? Bool == false)
+        #expect(topicDict["authority"] as? String == "ui_preference_state")
+        #expect(cardDict["secondBrainTruth"] as? Bool == false)
+        #expect(cardDict["authority"] as? String == "ui_preference_state")
+        #expect(cardDict["relatedItemSyncId"] as? String == "note-123")
+        #expect(cardDict["secondBrainOwnerRef"] == nil)
+        #expect(cardDict["safeGraphCommands"] as? [String] == ["cider-cli item graph-health --json"])
     }
 }

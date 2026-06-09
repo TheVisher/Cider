@@ -5,6 +5,7 @@ import os
 @MainActor
 final class DashboardStorage: ObservableObject {
     static let shared = DashboardStorage()
+    static let secondBrainContract = DashboardSecondBrainContract.uiPreferenceState
 
     @Published private(set) var topics: [DashboardTopic] = []
     @Published private(set) var cards: [DashboardCard] = []

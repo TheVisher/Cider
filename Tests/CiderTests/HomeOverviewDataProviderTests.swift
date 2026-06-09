@@ -2,6 +2,20 @@ import XCTest
 @testable import Cider
 
 final class HomeOverviewDataProviderTests: XCTestCase {
+    func testHomeOverviewReadModelDoesNotConsumeDashboardTopicStorage() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let homeSources = try [
+            "Sources/Cider/Views/Home/HomeOverviewDataProvider.swift",
+            "Sources/Cider/Views/Home/HomeOverviewModels.swift",
+        ]
+        .map { try String(contentsOf: repoRoot.appendingPathComponent($0), encoding: .utf8) }
+        .joined(separator: "\n")
+
+        XCTAssertFalse(homeSources.contains("DashboardStorage"))
+        XCTAssertFalse(homeSources.contains("DashboardTopic"))
+        XCTAssertFalse(homeSources.contains("DashboardCard"))
+    }
+
     func testTelemetryCountsUseMixedLibraryItems() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let bookmark = Bookmark(
