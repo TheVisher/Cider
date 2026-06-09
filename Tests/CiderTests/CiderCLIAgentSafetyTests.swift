@@ -1689,6 +1689,76 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["owners"] as? [[String: Any]])?.isEmpty == true)
     }
 
+    @Test("item dogfood intelligence seeds reviewable stores and exposes safe follow-up commands")
+    func itemDogfoodIntelligenceSeedsReviewableStoresAndExposesSafeFollowUpCommands() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-dogfood-intelligence-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(
+            args: [
+                "note", "create", "Launch graph",
+                "--content", "Cider graph launch roadmap agent context Apple Park https://example.com/launch #ProductLaunch",
+                "--json"
+            ],
+            vault: vault
+        )
+        _ = try runCLI(
+            args: [
+                "note", "create", "Launch roadmap",
+                "--content", "Apple Park product launch roadmap for Cider agent context https://example.com/roadmap #ProductLaunch",
+                "--json"
+            ],
+            vault: vault
+        )
+
+        let seedResult = try runCLI(args: ["item", "dogfood-intelligence", "--limit", "2", "--json"], vault: vault)
+        let seed = try parseJSONObject(seedResult.stdout)
+        #expect(seed["command"] as? String == "item.dogfood-intelligence")
+        #expect(seed["reviewRequired"] as? Bool == true)
+        #expect((seed["enrichmentOutputCount"] as? Int ?? 0) > 0)
+        #expect((seed["similarityCandidateCount"] as? Int ?? 0) > 0)
+
+        let owners = try #require(seed["owners"] as? [[String: Any]])
+        #expect(owners.allSatisfy { owner in
+            let outputCount = owner["enrichmentOutputCount"] as? Int ?? 0
+            let states = owner["enrichmentReviewStates"] as? [String: Int] ?? [:]
+            return states["suggested", default: 0] == outputCount
+        })
+        #expect(owners.contains { owner in
+            let states = owner["similarityReviewStates"] as? [String: Int] ?? [:]
+            return states["suggested", default: 0] > 0
+        })
+
+        let safeNextCommands = try #require(seed["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli capture review-queue --limit 20 --json"))
+        #expect(safeNextCommands.contains("cider-cli item graph-health --json"))
+        #expect(safeNextCommands.contains { $0.hasPrefix("cider-cli item context ") && $0.hasSuffix(" --json") })
+
+        let safeNextActions = try #require(seed["safeNextActions"] as? [[String: Any]])
+        #expect(safeNextActions.contains { action in
+            action["command"] as? String == "cider-cli capture review-queue --limit 20 --json"
+                && action["readOnly"] as? Bool == true
+                && action["requiresApproval"] as? Bool == false
+                && action["reason"] as? String == "review_seeded_intelligence"
+        })
+
+        let healthResult = try runCLI(args: ["item", "graph-health", "--json"], vault: vault)
+        let health = try parseJSONObject(healthResult.stdout)
+        let components = try #require(health["components"] as? [[String: Any]])
+        #expect(components.contains { component in
+            component["id"] as? String == "enrichment_outputs"
+                && component["state"] as? String == "healthy"
+                && (component["count"] as? Int ?? 0) > 0
+        })
+        #expect(components.contains { component in
+            component["id"] as? String == "similarity_candidates"
+                && component["state"] as? String == "healthy"
+                && (component["count"] as? Int ?? 0) > 0
+        })
+    }
+
     @Test("read-only folder filters do not adopt untracked disk folders")
     func readOnlyFolderFiltersDoNotAdoptUntrackedDiskFolders() throws {
         let vault = FileManager.default.temporaryDirectory

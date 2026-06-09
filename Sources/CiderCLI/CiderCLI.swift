@@ -15353,7 +15353,8 @@ struct CiderCLI {
     }
 
     static func intelligenceDogfoodResultToDict(_ result: SecondBrainIntelligenceDogfoodResult) -> [String: Any] {
-        [
+        let safeNextCommands = intelligenceDogfoodSafeNextCommands(for: result)
+        var payload: [String: Any] = [
             "ok": true,
             "command": "item.dogfood-intelligence",
             "changed": result.enrichmentOutputCount > 0 || result.similarityCandidateCount > 0,
@@ -15365,6 +15366,41 @@ struct CiderCLI {
             "enrichmentOutputCount": result.enrichmentOutputCount,
             "similarityCandidateCount": result.similarityCandidateCount,
             "owners": result.owners.map(intelligenceDogfoodOwnerResultToDict),
+        ]
+        payload["safeNextCommands"] = safeNextCommands
+        payload["safeNextActions"] = safeNextCommands.map(intelligenceDogfoodSafeNextAction)
+        return payload
+    }
+
+    static func intelligenceDogfoodSafeNextCommands(for result: SecondBrainIntelligenceDogfoodResult) -> [String] {
+        var commands: [String] = [
+            "cider-cli item graph-health --json",
+        ]
+        if result.reviewRequired {
+            commands.insert("cider-cli capture review-queue --limit 20 --json", at: 0)
+        }
+        for owner in result.owners.prefix(5) {
+            commands.append("cider-cli item context \(owner.owner.ownerType) \(owner.owner.ownerID) --json")
+        }
+        return Array(NSOrderedSet(array: commands).compactMap { $0 as? String })
+    }
+
+    static func intelligenceDogfoodSafeNextAction(for command: String) -> [String: Any] {
+        let reason: String
+        if command.contains(" capture review-queue ") {
+            reason = "review_seeded_intelligence"
+        } else if command.contains(" graph-health ") {
+            reason = "verify_graph_intelligence_counts"
+        } else if command.contains(" item context ") {
+            reason = "inspect_seeded_owner_context"
+        } else {
+            reason = "inspect_seeded_intelligence"
+        }
+        return [
+            "command": command,
+            "readOnly": true,
+            "requiresApproval": false,
+            "reason": reason,
         ]
     }
 
