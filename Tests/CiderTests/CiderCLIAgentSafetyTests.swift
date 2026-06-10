@@ -184,7 +184,14 @@ struct CiderCLIAgentSafetyTests {
             source: "test",
             actor: "agent",
             confidence: 1,
-            metadata: ["artifactType": "note"]
+            metadata: [
+                "artifactType": "note",
+                "candidate_id": "candidate-123",
+                "candidate_ref": "graph_candidate:candidate-123",
+                "mention_text": "Cider Project Note",
+                "source_kind": "journal",
+                "source_quote": "Project note belongs to Cider.",
+            ]
         )
         let bundle = CiderItemContextBundle(
             item: item,
@@ -208,6 +215,23 @@ struct CiderCLIAgentSafetyTests {
         #expect(itemDict["isProjectArtifact"] as? Bool == true)
         #expect(itemDict["projectID"] as? String == "cider")
         #expect(itemDict["artifactType"] as? String == "note")
+
+        let sourceEvidence = try #require(dict["sourceEvidence"] as? [String: Any])
+        #expect(sourceEvidence["count"] as? Int == 1)
+        #expect(sourceEvidence["acceptedRelationCount"] as? Int == 1)
+        let facts = try #require(sourceEvidence["facts"] as? [[String: Any]])
+        let fact = try #require(facts.first)
+        #expect(fact["direction"] as? String == "outgoing")
+        #expect(fact["currentOwnerRole"] as? String == "source")
+        #expect(fact["relationType"] as? String == "artifact_of")
+        #expect(fact["sourceQuote"] as? String == "Project note belongs to Cider.")
+        #expect(fact["candidateRef"] as? String == "graph_candidate:candidate-123")
+        #expect(fact["mentionText"] as? String == "Cider Project Note")
+        #expect(fact["sourceKind"] as? String == "journal")
+        let safeNextCommands = try #require(fact["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item graph-candidate candidate-123 --json"))
+        #expect(safeNextCommands.contains("cider-cli item context note \(noteID.uuidString) --json"))
+        #expect(safeNextCommands.contains("cider-cli item project-context cider --json"))
     }
 
     @Test("reminder validation errors honor json output")
@@ -2067,6 +2091,16 @@ struct CiderCLIAgentSafetyTests {
         let ownerRelations = try #require(context["ownerRelations"] as? [[String: Any]])
         #expect(ownerRelations.count == 1)
         #expect(ownerRelations.first?["relationType"] as? String == "watched")
+        let sourceEvidence = try #require(context["sourceEvidence"] as? [String: Any])
+        #expect((sourceEvidence["count"] as? Int ?? 0) >= 1)
+        let facts = try #require(sourceEvidence["facts"] as? [[String: Any]])
+        let fact = try #require(facts.first { $0["candidateRef"] as? String == "graph_candidate:\(acceptOutput.id)" })
+        #expect(fact["relationType"] as? String == "watched")
+        #expect(fact["sourceQuote"] as? String == "Watched The Way Way Back.")
+        #expect(fact["candidateRef"] as? String == "graph_candidate:\(acceptOutput.id)")
+        #expect(fact["mentionText"] as? String == "The Way Way Back")
+        let factCommands = try #require(fact["safeNextCommands"] as? [String])
+        #expect(factCommands.contains("cider-cli item graph-candidate \(acceptOutput.id) --json"))
         let agentActions = try #require(context["agentActions"] as? [[String: Any]])
         #expect(agentActions.contains { $0["actionType"] as? String == "graph_candidate.accept" })
         #expect(agentActions.contains { $0["actionType"] as? String == "graph_candidate.reject" })

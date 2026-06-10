@@ -6938,12 +6938,19 @@ struct CiderCLI {
             dict["related"] = bundle.related.map(itemLinkSummaryToDict)
             dict["ownerRelations"] = bundle.ownerRelations.map(ownerRelationToDict)
             dict["backlinks"] = bundle.backlinks.map(ownerRelationToDict)
+            dict["sourceEvidence"] = sourceEvidenceToDict(
+                owner: bundle.owner,
+                ownerRelations: bundle.ownerRelations,
+                backlinks: bundle.backlinks,
+                relationCandidates: bundle.relationCandidates
+            )
             dict["routingDecisions"] = bundle.routingDecisions.map(routingDecisionToDict)
             dict["captureProvenance"] = bundle.captureProvenance.map(captureProvenanceToDict)
         } else {
             dict["related"] = []
             dict["ownerRelations"] = []
             dict["backlinks"] = []
+            dict["sourceEvidence"] = sourceEvidenceToDict(owner: SecondBrainOwnerRef(ownerType: ref.type.rawValue, ownerID: ref.entityID.uuidString))
             dict["routingDecisions"] = []
             dict["captureProvenance"] = []
         }
@@ -14202,6 +14209,100 @@ struct CiderCLI {
         return dict
     }
 
+    static func sourceEvidenceToDict(
+        owner: SecondBrainOwnerRef,
+        ownerRelations: [SecondBrainRelation] = [],
+        backlinks: [SecondBrainRelation] = [],
+        relationCandidates: [SecondBrainSimilarityCandidate] = []
+    ) -> [String: Any] {
+        let outgoingFacts = ownerRelations.map {
+            sourceEvidenceFactToDict($0, owner: owner, direction: "outgoing")
+        }
+        let backlinkFacts = backlinks.map {
+            sourceEvidenceFactToDict($0, owner: owner, direction: "backlink")
+        }
+        let facts = outgoingFacts + backlinkFacts
+        return [
+            "owner": ownerToDict(owner),
+            "count": facts.count,
+            "acceptedRelationCount": facts.count,
+            "reviewCandidateCount": relationCandidates.filter { candidate in
+                ["suggested", "needs_review"].contains(candidate.reviewState)
+            }.count,
+            "facts": facts,
+            "outgoingFacts": outgoingFacts,
+            "backlinkFacts": backlinkFacts,
+        ] as [String: Any]
+    }
+
+    static func sourceEvidenceFactToDict(
+        _ relation: SecondBrainRelation,
+        owner: SecondBrainOwnerRef,
+        direction: String
+    ) -> [String: Any] {
+        let metadata = relation.metadata
+        let currentOwnerRole: String
+        if relation.sourceOwner == owner {
+            currentOwnerRole = "source"
+        } else if relation.targetOwner == owner {
+            currentOwnerRole = "target"
+        } else {
+            currentOwnerRole = "related"
+        }
+
+        var dict: [String: Any] = [
+            "id": relation.id,
+            "direction": direction,
+            "currentOwnerRole": currentOwnerRole,
+            "relationType": relation.relationType,
+            "sourceOwner": ownerToDict(relation.sourceOwner),
+            "targetOwner": ownerToDict(relation.targetOwner),
+            "sourceOwnerRef": relation.sourceOwner.canonicalRef,
+            "targetOwnerRef": relation.targetOwner.canonicalRef,
+            "evidence": relation.evidence,
+            "sourceQuote": metadata["source_quote"] ?? relation.evidence,
+            "source": relation.source,
+            "actor": relation.actor,
+            "metadata": metadata,
+            "safeNextCommands": sourceEvidenceSafeCommands(for: relation),
+            "createdAt": ISO8601DateFormatter().string(from: relation.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: relation.updatedAt),
+        ]
+        if let confidence = relation.confidence {
+            dict["confidence"] = confidence
+        }
+        if let candidateRef = metadata["candidate_ref"] {
+            dict["candidateRef"] = candidateRef
+        }
+        if let candidateID = metadata["candidate_id"] {
+            dict["candidateID"] = candidateID
+        }
+        if let mentionText = metadata["mention_text"] {
+            dict["mentionText"] = mentionText
+        }
+        if let sourceKind = metadata["source_kind"] {
+            dict["sourceKind"] = sourceKind
+        }
+        if let sourceOwnerRef = metadata["source_owner_ref"] {
+            dict["evidenceSourceOwnerRef"] = sourceOwnerRef
+        }
+        return dict
+    }
+
+    static func sourceEvidenceSafeCommands(for relation: SecondBrainRelation) -> [String] {
+        var commands: [String] = []
+        if let candidateID = relation.metadata["candidate_id"] {
+            commands.append("cider-cli item graph-candidate \(candidateID) --json")
+        } else if let candidateRef = relation.metadata["candidate_ref"]?.split(separator: ":").last {
+            commands.append("cider-cli item graph-candidate \(candidateRef) --json")
+        }
+        commands.append(contextCommand(for: relation.sourceOwner))
+        commands.append(contextCommand(for: relation.targetOwner))
+        commands.append("cider-cli item backlinks \(relation.targetOwner.ownerType) \(relation.targetOwner.ownerID) --json")
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
     static func printOwnerRelations(
         _ relations: [SecondBrainRelation],
         command: String,
@@ -14919,6 +15020,12 @@ struct CiderCLI {
             "ownerRelations": bundle.ownerRelations.map(ownerRelationToDict),
             "relationCandidates": bundle.relationCandidates.map(similarityCandidateToDict),
             "backlinks": bundle.backlinks.map(ownerRelationToDict),
+            "sourceEvidence": sourceEvidenceToDict(
+                owner: bundle.owner,
+                ownerRelations: bundle.ownerRelations,
+                backlinks: bundle.backlinks,
+                relationCandidates: bundle.relationCandidates
+            ),
             "routingDecisions": bundle.routingDecisions.map(routingDecisionToDict),
             "agentActions": bundle.agentActions.map(agentActionToDict),
             "enrichmentOutputs": bundle.enrichmentOutputs.map(enrichmentOutputToDict),
@@ -16326,6 +16433,12 @@ struct CiderCLI {
             "ownerRelations": packet.ownerRelations.map(ownerRelationToDict),
             "relationCandidates": packet.relationCandidates.map(similarityCandidateToDict),
             "backlinks": packet.backlinks.map(ownerRelationToDict),
+            "sourceEvidence": sourceEvidenceToDict(
+                owner: packet.owner,
+                ownerRelations: packet.ownerRelations,
+                backlinks: packet.backlinks,
+                relationCandidates: packet.relationCandidates
+            ),
             "captureProvenance": packet.captureProvenance.map(captureProvenanceToDict),
             "surfacing": surfacingExplanationToDict(packet.surfacing),
             "recentHistory": packet.recentHistory.map(itemAgentContextHistoryToDict),
