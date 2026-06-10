@@ -227,6 +227,7 @@ struct CiderCaptureResult {
         ownerID: nil,
         captureEventID: nil
     )
+    var graphCandidates: [SecondBrainEnrichmentOutput] = []
     var captureQuality: [String: Any]? = nil
     var stagedIntents: [StagedIntent] = []
 
@@ -332,6 +333,15 @@ struct CiderCaptureResult {
         if let sourceContext {
             dict["sourceContext"] = sourceContext.toDictionary()
         }
+        if !graphCandidates.isEmpty {
+            dict["graphCandidates"] = [
+                "status": "suggested",
+                "count": graphCandidates.count,
+                "candidates": graphCandidates.map(Self.graphCandidateDictionary),
+                "reviewState": "reviewable",
+                "trustBoundary": "No graph candidate is accepted truth until explicitly accepted.",
+            ]
+        }
         return dict
     }
 
@@ -410,6 +420,10 @@ struct CiderCaptureResult {
 
     private func safeNextCommands() -> [String] {
         var commands = ["cider-cli item get \(item.type) \(item.id.uuidString) --json"]
+        if !graphCandidates.isEmpty {
+            commands.append("cider-cli item graph-candidates \(item.type) \(item.id.uuidString) --json")
+            commands.append("cider-cli capture review-queue --json")
+        }
         if let existingItemID = duplicate.existingItemID {
             commands.append("cider-cli item get \(item.type) \(existingItemID.uuidString) --json")
         }
@@ -431,6 +445,40 @@ struct CiderCaptureResult {
             commands.append("cider-cli storage audit --json")
         }
         return orderedUnique(commands)
+    }
+
+    private static func graphCandidateDictionary(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": output.id,
+            "kind": output.kind,
+            "value": output.value,
+            "label": output.label,
+            "evidence": output.evidence,
+            "source": output.source,
+            "reviewState": output.reviewState,
+            "owner": [
+                "ownerType": output.owner.ownerType,
+                "ownerID": output.owner.ownerID,
+                "ref": output.owner.canonicalRef,
+            ],
+            "metadata": output.metadata,
+        ]
+        if let confidence = output.confidence {
+            dict["confidence"] = confidence
+        }
+        if let typeGuesses = DatabaseHelpers.decodeJSON([String].self, from: output.metadata["type_guesses"]) {
+            dict["typeGuesses"] = typeGuesses
+        }
+        if let relationGuesses = DatabaseHelpers.decodeJSON([String].self, from: output.metadata["relation_guesses"]) {
+            dict["relationGuesses"] = relationGuesses
+        }
+        if let sourceQuote = output.metadata["source_quote"] {
+            dict["sourceQuote"] = sourceQuote
+        }
+        if let reviewPrompt = output.metadata["review_prompt"] {
+            dict["reviewPrompt"] = reviewPrompt
+        }
+        return dict
     }
 
     private func orderedUnique(_ commands: [String]) -> [String] {
@@ -1155,7 +1203,7 @@ final class CiderCaptureService {
             nextSafeAction: isDuplicate ? "inspect_existing_item" : "enrich"
         )
         result.stagedIntents = CiderCaptureIntentStagingService.stagedIntents(for: bookmark)
-        return indexCapturedItem(attachCaptureEvent(to: result, sourceContext: sourceContext))
+        return indexCapturedItem(extractGraphCandidates(attachCaptureEvent(to: result, sourceContext: sourceContext)))
     }
 
     private func addNote(
@@ -1897,7 +1945,7 @@ final class CiderCaptureService {
         )
         result.captureQuality = captureQuality
         result.stagedIntents = stagedIntents
-        return indexCapturedItem(attachCaptureEvent(to: result, sourceContext: sourceContext))
+        return indexCapturedItem(extractGraphCandidates(attachCaptureEvent(to: result, sourceContext: sourceContext)))
     }
 
     private func existingOpenTodoDuplicate(title: String, dueDate: Date?) -> TodoCard? {
@@ -2031,6 +2079,31 @@ final class CiderCaptureService {
                 ownerID: nil,
                 captureEventID: nil
             )
+            return result
+        }
+        return result
+    }
+
+    private func extractGraphCandidates(_ result: CiderCaptureResult) -> CiderCaptureResult {
+        var result = result
+        let owner = SecondBrainOwnerRef(
+            ownerType: ownerType(forCaptureItemType: result.item.type),
+            ownerID: result.item.id.uuidString
+        )
+        guard let database, database.isOpen else {
+            return result
+        }
+        do {
+            let extraction = try SecondBrainGraphCandidateService(database: database).extract(
+                owner: owner,
+                sourceText: result.source.text,
+                sourceURL: result.source.url,
+                sourceKind: result.source.kind,
+                title: result.item.title,
+                date: nil
+            )
+            result.graphCandidates = extraction.candidates
+        } catch {
             return result
         }
         return result

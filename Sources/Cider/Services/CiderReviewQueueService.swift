@@ -16,6 +16,48 @@ struct CiderReviewQueueResult: Equatable {
     }
 }
 
+private extension SecondBrainEnrichmentOutput {
+    func toReviewDictionary() -> [String: Any] {
+        var dictionary: [String: Any] = [
+            "id": id,
+            "owner": [
+                "ownerType": owner.ownerType,
+                "ownerID": owner.ownerID,
+                "ref": owner.canonicalRef,
+            ],
+            "kind": kind,
+            "value": value,
+            "normalizedValue": normalizedValue,
+            "label": label,
+            "evidence": evidence,
+            "source": source,
+            "reviewState": reviewState,
+            "metadata": metadata,
+            "createdAt": ISO8601DateFormatter().string(from: createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: updatedAt),
+        ]
+        if let confidence {
+            dictionary["confidence"] = confidence
+        }
+        if let typeGuesses = DatabaseHelpers.decodeJSON([String].self, from: metadata["type_guesses"]) {
+            dictionary["typeGuesses"] = typeGuesses
+        }
+        if let relationGuesses = DatabaseHelpers.decodeJSON([String].self, from: metadata["relation_guesses"]) {
+            dictionary["relationGuesses"] = relationGuesses
+        }
+        if let safeActions = DatabaseHelpers.decodeJSON([String].self, from: metadata["safe_actions"]) {
+            dictionary["safeActions"] = safeActions
+        }
+        if let reviewChoices = DatabaseHelpers.decodeJSON([String].self, from: metadata["review_choices"]) {
+            dictionary["reviewChoices"] = reviewChoices
+        }
+        if let possibleExternalMatches = DatabaseHelpers.decodeJSON([String].self, from: metadata["possible_external_matches"]) {
+            dictionary["possibleExternalMatches"] = possibleExternalMatches
+        }
+        return dictionary
+    }
+}
+
 struct CiderCaptureReviewWorklistResult: Equatable {
     var command: String = "capture.review-queue"
     var generatedAt: Date
@@ -509,6 +551,8 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var confidence: Double?
     var routingDecisionID: UUID?
     var target: CiderRoutingDecisionTarget?
+    var graphCandidateID: String?
+    var graphCandidate: SecondBrainEnrichmentOutput?
     var createdAt: Date
     var safeActions: [String]
 
@@ -539,6 +583,12 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         }
         if let target {
             dictionary["target"] = target.toDictionary()
+        }
+        if let graphCandidateID {
+            dictionary["graphCandidateID"] = graphCandidateID
+        }
+        if let graphCandidate {
+            dictionary["graphCandidate"] = graphCandidate.toReviewDictionary()
         }
         return dictionary
     }
@@ -828,6 +878,7 @@ final class CiderReviewQueueService {
         }
 
         reviewItems.append(contentsOf: duplicateReviewItems(now: now))
+        reviewItems.append(contentsOf: graphCandidateReviewItems(includeDeferred: includeDeferred))
 
         let filtered = reviewItems.filter { item in
             if let kind, item.kind != kind { return false }
@@ -1683,6 +1734,8 @@ final class CiderReviewQueueService {
             confidence: decision.confidence,
             routingDecisionID: decision.id,
             target: decision.target,
+            graphCandidateID: nil,
+            graphCandidate: nil,
             createdAt: decision.createdAt,
             safeActions: decision.reviewState == "deferred"
                 ? routingSafeActions(for: item.type, includeDefer: false)
@@ -1731,6 +1784,8 @@ final class CiderReviewQueueService {
             confidence: nil,
             routingDecisionID: nil,
             target: nil,
+            graphCandidateID: nil,
+            graphCandidate: nil,
             createdAt: now,
             safeActions: ["enrich", "correct", "defer"]
         )
@@ -1904,6 +1959,8 @@ final class CiderReviewQueueService {
             confidence: nil,
             routingDecisionID: nil,
             target: nil,
+            graphCandidateID: nil,
+            graphCandidate: nil,
             createdAt: now,
             safeActions: ["correct", "defer"]
         )
@@ -1930,9 +1987,80 @@ final class CiderReviewQueueService {
                 confidence: duplicateConfidenceScore(finding.confidence),
                 routingDecisionID: nil,
                 target: nil,
+                graphCandidateID: nil,
+                graphCandidate: nil,
                 createdAt: now,
                 safeActions: ["inspect_duplicates", "manual_review"]
             )
+        }
+    }
+
+    private func graphCandidateReviewItems(includeDeferred: Bool) -> [CiderReviewQueueItem] {
+        let service = SecondBrainGraphCandidateService(database: resolvedDatabase ?? .shared)
+        let outputs = (try? service.candidates(includeReviewed: false, limit: nil)) ?? []
+        return outputs.compactMap { candidate in
+            guard candidate.reviewState != "deferred" || includeDeferred,
+                  let itemID = UUID(uuidString: candidate.owner.ownerID) else {
+                return nil
+            }
+            let safeActions = graphCandidateSafeActions(candidate)
+            return CiderReviewQueueItem(
+                id: "review-graph-candidate-\(candidate.id)",
+                kind: "graph_candidate",
+                source: candidate.source,
+                itemID: itemID,
+                itemType: candidate.owner.ownerType,
+                title: candidate.label.isEmpty ? candidate.value : candidate.label,
+                relativePath: nil,
+                reason: candidate.metadata["confidence_reason"] ?? candidate.evidence,
+                reasonCodes: graphCandidateReasonCodes(candidate),
+                suggestedAction: candidate.metadata["review_prompt"] ?? "Review graph candidate",
+                reviewState: candidate.reviewState,
+                confidence: candidate.confidence,
+                routingDecisionID: nil,
+                target: nil,
+                graphCandidateID: candidate.id,
+                graphCandidate: candidate,
+                createdAt: candidate.createdAt,
+                safeActions: safeActions
+            )
+        }
+    }
+
+    private func graphCandidateReasonCodes(_ candidate: SecondBrainEnrichmentOutput) -> [String] {
+        var codes = ["graph_candidate_review"]
+        if candidate.reviewState == "needs_review" {
+            codes.append("graph_candidate_needs_triage")
+        }
+        if let scope = candidate.metadata["candidate_scope"] {
+            codes.append("graph_candidate_\(reasonCodeSuffix(for: scope))")
+        }
+        if let guesses = DatabaseHelpers.decodeJSON([String].self, from: candidate.metadata["type_guesses"]),
+           guesses.contains(where: { ["place", "restaurant", "object", "topic"].contains($0) }) {
+            codes.append("graph_candidate_ambiguous_type")
+        }
+        return codes
+    }
+
+    private func graphCandidateSafeActions(_ candidate: SecondBrainEnrichmentOutput) -> [String] {
+        let raw = DatabaseHelpers.decodeJSON([String].self, from: candidate.metadata["safe_actions"]) ?? [
+            "accept",
+            "reject",
+            "delegate_enrichment",
+        ]
+        return raw.map { action in
+            switch action {
+            case "accept":
+                return "accept_graph_candidate"
+            case "reject":
+                return "reject_graph_candidate"
+            case "correct":
+                return "correct_graph_candidate"
+            case "delegate_enrichment":
+                return "delegate_graph_candidate"
+            default:
+                return action
+            }
         }
     }
 
@@ -1968,6 +2096,17 @@ final class CiderReviewQueueService {
                 routingState?["routingDecisionID"] = routingDecisionID.uuidString
             }
         }
+        var provenance = [
+            "source": item.source,
+            "kind": item.kind,
+        ]
+        if let graphCandidateID = item.graphCandidateID {
+            provenance["graphCandidateID"] = graphCandidateID
+        }
+        let safeNextCommands = orderedUnique(
+            itemSafeInspectionCommands(type: item.itemType, id: item.itemID, title: item.title)
+                + graphCandidateInspectionCommands(item)
+        )
         return CiderCaptureReviewWorklistItem(
             id: "capture-worklist-\(item.id)",
             kind: item.kind,
@@ -1983,17 +2122,24 @@ final class CiderReviewQueueService {
             severity: severity,
             priority: priority,
             reviewState: item.reviewState,
-            provenance: [
-                "source": item.source,
-                "kind": item.kind,
-            ],
+            provenance: provenance,
             routingState: routingState,
             indexingStatus: nil,
             enrichmentStatus: item.kind == "enrichment" ? item.reviewState : nil,
             attachmentSummary: nil,
             createdAt: item.createdAt,
-            safeNextCommands: itemSafeInspectionCommands(type: item.itemType, id: item.itemID, title: item.title)
+            safeNextCommands: safeNextCommands
         )
+    }
+
+    private func graphCandidateInspectionCommands(_ item: CiderReviewQueueItem) -> [String] {
+        guard let candidateID = item.graphCandidateID else { return [] }
+        return [
+            "cider-cli item graph-candidates \(item.itemType) \(item.itemID.uuidString) --json",
+            "cider-cli item accept-graph-candidate \(candidateID) --json",
+            "cider-cli item reject-graph-candidate \(candidateID) --json",
+            "cider-cli item delegate-graph-candidate \(candidateID) --json",
+        ]
     }
 
     private func unsupportedAttachmentWorklistItems(in db: CiderDatabase, now: Date) throws -> [CiderCaptureReviewWorklistItem] {
