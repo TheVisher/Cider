@@ -568,6 +568,102 @@ struct SecondBrainFoundationTests {
         })
     }
 
+    @Test("bookmark URL graph extractor classifies common object sources")
+    func bookmarkURLGraphExtractorClassifiesCommonObjectSources() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let extractor = SecondBrainBookmarkGraphCandidateExtractor()
+        let samples: [(url: String, title: String, objectType: String, relation: String, mention: String)] = [
+            ("https://www.imdb.com/title/tt1727388/", "The Way Way Back - IMDb", "movie", "represents", "The Way Way Back"),
+            ("https://github.com/openai/codex", "openai/codex", "project", "source_for", "openai/codex"),
+            ("https://www.allrecipes.com/recipe/123/pancakes/", "Pancakes Recipe", "recipe", "represents", "Pancakes Recipe"),
+            ("https://www.amazon.com/dp/B000000000", "Tiny Keyboard", "product", "represents", "Tiny Keyboard"),
+            ("https://www.yelp.com/biz/cactus-seattle", "Cactus", "restaurant", "represents", "Cactus"),
+            ("https://youtu.be/dQw4w9WgXcQ", "A Video - YouTube", "video", "represents", "A Video"),
+        ]
+
+        for sample in samples {
+            let result = extractor.extract(sourceOwner: owner, urlString: sample.url, title: sample.title)
+            let output = try #require(result.outputs.first, "Expected graph candidate for \(sample.url)")
+            let candidate = try SecondBrainGraphCandidateContract.validate(output)
+            #expect(candidate.sourceOwner == owner)
+            #expect(candidate.sourceKind == "bookmark")
+            #expect(candidate.kind == .objectRelation)
+            #expect(candidate.mentionText == sample.mention)
+            #expect(candidate.objectTypeGuesses.map(\.rawValue).contains(sample.objectType))
+            #expect(candidate.relationGuesses.map(\.rawValue).contains(sample.relation))
+            #expect(candidate.safeActions.contains(.delegateEnrichment))
+            #expect(output.metadata["url"] == sample.url)
+            #expect(output.metadata["resolution_state"] == "unresolved")
+        }
+    }
+
+    @Test("capture add bookmark creates source backed graph candidates")
+    func captureAddBookmarkCreatesSourceBackedGraphCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-bookmark-graph-candidates-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let capturePayload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "bookmark",
+            "--url", "https://www.imdb.com/title/tt1727388/",
+            "--title", "The Way Way Back - IMDb",
+            "--no-wait",
+            "--json",
+        ], vaultURL: vault))
+        let item = try #require(capturePayload["item"] as? [String: Any])
+        let bookmarkID = try #require(item["id"] as? String)
+        let source = try #require(capturePayload["source"] as? [String: Any])
+        #expect(source["kind"] as? String == "url")
+        #expect(source["url"] as? String == "https://www.imdb.com/title/tt1727388/")
+
+        let graphCandidates = try #require(capturePayload["graphCandidates"] as? [String: Any])
+        #expect(graphCandidates["status"] as? String == "suggested")
+        #expect(graphCandidates["count"] as? Int == 1)
+        let candidateRefs = try #require(graphCandidates["candidateRefs"] as? [String])
+        #expect(candidateRefs.count == 1)
+        #expect(candidateRefs.first?.hasPrefix("graph_candidate:") == true)
+
+        let safeNextCommands = try #require(capturePayload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item graph-candidates bookmark \(bookmarkID) --json"))
+        #expect(safeNextCommands.contains("cider-cli capture review-queue --kind graph_candidate --json"))
+
+        let enrichment = try #require(capturePayload["enrichment"] as? [String: Any])
+        #expect(enrichment["graphCandidateCount"] as? Int == 1)
+
+        let listPayload = try jsonObject(from: runCLI([
+            "item", "graph-candidates", "bookmark", bookmarkID, "--json",
+        ], vaultURL: vault))
+        #expect(listPayload["ok"] as? Bool == true)
+        #expect(listPayload["readOnly"] as? Bool == true)
+        let candidates = try #require(listPayload["candidates"] as? [[String: Any]])
+        let candidate = try #require(candidates.first)
+        #expect(candidate["mentionText"] as? String == "The Way Way Back")
+        #expect(candidate["sourceKind"] as? String == "bookmark")
+        #expect(candidate["reviewState"] as? String == "suggested")
+        #expect(candidate["reviewable"] as? Bool == true)
+        #expect((candidate["objectTypeGuesses"] as? [String])?.contains("movie") == true)
+        #expect((candidate["relationGuesses"] as? [String])?.contains("represents") == true)
+        #expect((candidate["relationGuesses"] as? [String])?.contains("source_for") == true)
+        let reviewActionCommands = try #require(candidate["reviewActionCommands"] as? [[String: Any]])
+        #expect(reviewActionCommands.contains { action in
+            action["action"] as? String == "accept"
+                && (action["command"] as? String)?.contains("accept-graph-candidate") == true
+                && action["status"] as? String == "available"
+        })
+
+        let reviewQueue = try jsonObject(from: runCLI([
+            "capture", "review-queue", "--kind", "graph_candidate", "--json",
+        ], vaultURL: vault))
+        let reviewItems = try #require(reviewQueue["items"] as? [[String: Any]])
+        #expect(reviewItems.contains { item in
+            item["kind"] as? String == "graph_candidate"
+                && item["candidateID"] as? String == candidate["id"] as? String
+                && item["itemID"] as? String == bookmarkID
+        })
+    }
+
     @Test("capture add journal defaults date to today and rejects empty content as JSON")
     func captureAddJournalDefaultsDateToTodayAndRejectsEmptyContentAsJSON() throws {
         let vault = FileManager.default.temporaryDirectory

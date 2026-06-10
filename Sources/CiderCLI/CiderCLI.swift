@@ -1458,6 +1458,24 @@ struct CiderCLI {
                     ?? bookmarkService.bookmarks.first(where: { $0.id == result.item.id })
                 if jsonOutput {
                     var dict = result.toDictionary(finalBookmark: finalBookmark)
+                    if result.item.type == "bookmark" {
+                        let graphCandidates = recordBookmarkGraphCandidates(
+                            result,
+                            finalBookmark: finalBookmark
+                        )
+                        dict["graphCandidates"] = graphCandidates
+                        if var enrichment = dict["enrichment"] as? [String: Any] {
+                            enrichment["graphCandidateCount"] = graphCandidates["count"] as? Int ?? 0
+                            dict["enrichment"] = enrichment
+                        }
+                        if (graphCandidates["count"] as? Int ?? 0) > 0 {
+                            var commands = (dict["safeNextCommands"] as? [String]) ?? []
+                            for command in (graphCandidates["safeNextCommands"] as? [String]) ?? [] where !commands.contains(command) {
+                                commands.append(command)
+                            }
+                            dict["safeNextCommands"] = commands
+                        }
+                    }
                     if let testRunID {
                         let testRun = try CiderCLITestRunManifestStore.recordCapture(
                             runID: testRunID,
@@ -3279,6 +3297,83 @@ struct CiderCLI {
                 "candidates": candidates,
                 "safeNextCommands": [
                     "cider-cli item graph-candidates note \(result.note.id.uuidString) --json",
+                    "cider-cli capture review-queue --kind graph_candidate --json",
+                ],
+            ] as [String: Any]
+        } catch {
+            return [
+                "status": "failed",
+                "count": 0,
+                "reason": "Graph candidate extraction failed: \(error.localizedDescription)",
+            ] as [String: Any]
+        }
+    }
+
+    static func recordBookmarkGraphCandidates(
+        _ result: CiderCaptureResult,
+        finalBookmark: Bookmark?
+    ) -> [String: Any] {
+        guard CiderDatabase.shared.isOpen else {
+            return [
+                "status": "unavailable",
+                "count": 0,
+                "reason": "Graph candidate extraction could not run because no writable database is available.",
+            ] as [String: Any]
+        }
+        guard result.item.type == "bookmark",
+              let urlString = result.source.url else {
+            return [
+                "status": "not_applicable",
+                "count": 0,
+            ] as [String: Any]
+        }
+
+        let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: result.item.id.uuidString)
+        let title = finalBookmark?.title ?? result.item.title
+        let extraction = SecondBrainBookmarkGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            urlString: urlString,
+            title: title
+        )
+        guard !extraction.outputs.isEmpty else {
+            return [
+                "status": "none",
+                "count": 0,
+                "candidateIDs": [],
+                "candidateRefs": [],
+            ] as [String: Any]
+        }
+
+        do {
+            let service = SecondBrainEnrichmentOutputService(database: .shared)
+            for output in extraction.outputs {
+                try service.record(output)
+            }
+            let candidates = extraction.outputs.map { output -> [String: Any] in
+                [
+                    "id": output.id,
+                    "ref": "graph_candidate:\(output.id)",
+                    "mentionText": output.value,
+                    "reviewState": output.reviewState,
+                    "sourceQuote": output.evidence,
+                    "confidence": output.confidence as Any,
+                    "objectTypeGuesses": DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses]),
+                    "relationGuesses": DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses]),
+                    "safeNextCommands": [
+                        "cider-cli item graph-candidate \(output.id) --json",
+                        "cider-cli item context bookmark \(result.item.id.uuidString) --json",
+                    ],
+                ] as [String: Any]
+            }
+            return [
+                "status": "suggested",
+                "count": extraction.outputs.count,
+                "candidateIDs": extraction.ids,
+                "candidateRefs": extraction.ids.map { "graph_candidate:\($0)" },
+                "reviewState": "suggested",
+                "candidates": candidates,
+                "safeNextCommands": [
+                    "cider-cli item graph-candidates bookmark \(result.item.id.uuidString) --json",
                     "cider-cli capture review-queue --kind graph_candidate --json",
                 ],
             ] as [String: Any]
