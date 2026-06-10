@@ -4914,7 +4914,7 @@ struct CiderCLI {
               cider-cli item graph-candidate <candidate-id> [--json]
               cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
               cider-cli item reject-graph-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
-              cider-cli item delegate-graph-candidate <candidate-id> [--instructions <text>] [--actor <name>] [--json]
+              cider-cli item delegate-graph-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
               cider-cli item related <type> <id-or-ref> [--json]
               cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
               cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
@@ -15362,16 +15362,23 @@ struct CiderCLI {
 
         let actor = parseFlag("--actor", from: args) ?? "user"
         let source = parseFlag("--source", from: args) ?? "graph_candidate.delegate"
-        let instructions = parseFlag("--instructions", from: args)
-            ?? parseFlag("--task", from: args)
-            ?? defaultGraphCandidateDelegationInstructions(candidate)
+        let requestedTaskKind = parseFlag("--task-kind", from: args) ?? parseFlag("--task", from: args)
+        let task = graphCandidateDelegationTask(
+            for: candidate,
+            output: output,
+            requestedKind: requestedTaskKind,
+            customInstructions: parseFlag("--instructions", from: args)
+        )
+        let instructions = task.instructions
 
         var delegated = output
         delegated.reviewState = SecondBrainGraphCandidateContract.ReviewState.deferred.rawValue
         delegated.metadata["reviewed_at"] = ISO8601DateFormatter().string(from: Date())
         delegated.metadata["reviewed_by"] = actor
         delegated.metadata["delegation_status"] = "requested"
+        delegated.metadata["delegation_task_kind"] = task.kind
         delegated.metadata["delegation_instructions"] = instructions
+        delegated.metadata["delegation_result_policy"] = task.resultPolicy
         delegated.updatedAt = Date()
         _ = try SecondBrainGraphCandidateContract.validate(delegated)
 
@@ -15386,13 +15393,17 @@ struct CiderCLI {
             argumentsJSON: DatabaseHelpers.encodeJSON([
                 "candidateID": output.id,
                 "actor": actor,
+                "taskKind": task.kind,
                 "instructions": instructions,
                 "mentionText": candidate.mentionText,
+                "objectTypeGuesses": DatabaseHelpers.encode(candidate.objectTypeGuesses.map(\.rawValue)),
+                "relationGuesses": DatabaseHelpers.encode(candidate.relationGuesses.map(\.rawValue)),
                 "sourceQuote": candidate.sourceQuote,
+                "allowedSources": DatabaseHelpers.encode(task.allowedSources),
             ]),
             resultJSON: DatabaseHelpers.encodeJSON([
                 "reviewState": delegated.reviewState,
-                "resultPolicy": "return_reviewable_evidence_not_truth",
+                "resultPolicy": task.resultPolicy,
             ])
         )
 
@@ -15415,8 +15426,11 @@ struct CiderCLI {
             "agentAction": agentActionToDict(action),
             "delegation": [
                 "status": "requested",
+                "task": graphCandidateDelegationTaskToDict(task, candidateID: output.id),
+                "taskKind": task.kind,
                 "instructions": instructions,
-                "resultPolicy": "return_reviewable_evidence_not_truth",
+                "allowedSources": task.allowedSources,
+                "resultPolicy": task.resultPolicy,
             ],
             "safeNextCommands": safeCommands,
             "safeCommands": safeCommands,
@@ -15520,6 +15534,156 @@ struct CiderCLI {
         metadata["relation_guesses"] = DatabaseHelpers.encode(candidate.relationGuesses.map(\.rawValue))
         metadata["action_guesses"] = DatabaseHelpers.encode(candidate.actionGuesses)
         return metadata
+    }
+
+    struct GraphCandidateDelegationTask {
+        var kind: String
+        var label: String
+        var instructions: String
+        var allowedSources: [String]
+        var resultPolicy: String = "return_reviewable_evidence_not_truth"
+    }
+
+    static func graphCandidateDelegationTask(
+        for candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput,
+        requestedKind: String?,
+        customInstructions: String?
+    ) -> GraphCandidateDelegationTask {
+        let templates = graphCandidateDelegationTasks(for: candidate, output: output)
+        let normalizedRequestedKind: String?
+        if let requestedKind {
+            let trimmed = requestedKind.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalizedRequestedKind = trimmed.isEmpty ? nil : trimmed
+        } else {
+            normalizedRequestedKind = nil
+        }
+        if let customInstructions = customInstructions?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !customInstructions.isEmpty {
+            return GraphCandidateDelegationTask(
+                kind: normalizedRequestedKind ?? "custom_enrichment",
+                label: "Custom enrichment",
+                instructions: customInstructions,
+                allowedSources: graphCandidateDelegationAllowedSources(candidate: candidate, output: output)
+            )
+        }
+
+        if let requestedKind = normalizedRequestedKind {
+            if let task = templates.first(where: { $0.kind.caseInsensitiveCompare(requestedKind) == .orderedSame }) {
+                return task
+            }
+            return GraphCandidateDelegationTask(
+                kind: "custom_enrichment",
+                label: "Custom enrichment",
+                instructions: requestedKind,
+                allowedSources: graphCandidateDelegationAllowedSources(candidate: candidate, output: output)
+            )
+        }
+
+        return templates.first ?? GraphCandidateDelegationTask(
+            kind: "find_object_evidence",
+            label: "Find object evidence",
+            instructions: defaultGraphCandidateDelegationInstructions(candidate),
+            allowedSources: graphCandidateDelegationAllowedSources(candidate: candidate, output: output)
+        )
+    }
+
+    static func graphCandidateDelegationTasks(
+        for candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput
+    ) -> [GraphCandidateDelegationTask] {
+        let types = Set(candidate.objectTypeGuesses.map(\.rawValue))
+        let allowedSources = graphCandidateDelegationAllowedSources(candidate: candidate, output: output)
+        let mention = candidate.mentionText
+        let quote = candidate.sourceQuote
+        var tasks: [GraphCandidateDelegationTask] = []
+
+        if !types.isDisjoint(with: ["movie", "show", "media", "video"]) {
+            tasks.append(GraphCandidateDelegationTask(
+                kind: "find_media_match",
+                label: "Find media match",
+                instructions: "Find likely media matches for '\(mention)' using the source quote. Prefer IMDb, TMDb, Letterboxd, or YouTube identifiers when relevant. Return candidate matches with URLs, IDs, confidence, and evidence only; do not create accepted facts.",
+                allowedSources: allowedSources + ["IMDb", "TMDb", "Letterboxd", "YouTube"]
+            ))
+        }
+
+        if !types.isDisjoint(with: ["restaurant", "place", "trip"]) {
+            tasks.append(GraphCandidateDelegationTask(
+                kind: "find_place_match",
+                label: "Find place match",
+                instructions: "Find likely place or restaurant matches for '\(mention)' using the source quote. Return official site, map/listing URLs, location hints, confidence, and evidence only; do not create accepted facts.",
+                allowedSources: allowedSources + ["official site", "maps", "Yelp", "OpenTable", "Tripadvisor"]
+            ))
+        }
+
+        if !types.isDisjoint(with: ["recipe", "food", "drink"]) {
+            tasks.append(GraphCandidateDelegationTask(
+                kind: "find_recipe_or_menu_evidence",
+                label: "Find recipe or menu evidence",
+                instructions: "Find likely recipe, menu, food, or drink evidence for '\(mention)' using the source quote. Return candidate sources, confidence, and evidence only; do not create accepted facts.",
+                allowedSources: allowedSources + ["recipe sites", "restaurant menus", "source bookmark"]
+            ))
+        }
+
+        if types.contains("product") {
+            tasks.append(GraphCandidateDelegationTask(
+                kind: "find_product_match",
+                label: "Find product match",
+                instructions: "Find likely product matches for '\(mention)' using the source quote. Return product URLs, maker/store hints, confidence, and evidence only; do not create accepted facts.",
+                allowedSources: allowedSources + ["official product pages", "store pages", "source bookmark"]
+            ))
+        }
+
+        if types.contains("project") {
+            tasks.append(GraphCandidateDelegationTask(
+                kind: "inspect_project_source",
+                label: "Inspect project source",
+                instructions: "Inspect likely project sources for '\(mention)' using the source quote. Return repository/site URLs, owner/name hints, confidence, and evidence only; do not create accepted facts.",
+                allowedSources: allowedSources + ["GitHub", "project site", "source bookmark"]
+            ))
+        }
+
+        tasks.append(GraphCandidateDelegationTask(
+            kind: "find_object_evidence",
+            label: "Find object evidence",
+            instructions: defaultGraphCandidateDelegationInstructions(candidate) + " Source quote: \(quote)",
+            allowedSources: allowedSources
+        ))
+        return tasks
+    }
+
+    static func graphCandidateDelegationAllowedSources(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput
+    ) -> [String] {
+        var sources = [
+            "source owner \(output.owner.canonicalRef)",
+            "source quote",
+        ]
+        if let sourceKind = candidate.sourceKind {
+            sources.append("source kind \(sourceKind)")
+        }
+        if let url = output.metadata["url"] {
+            sources.append("captured URL \(url)")
+        }
+        var seen = Set<String>()
+        return sources.filter { seen.insert($0).inserted }
+    }
+
+    static func graphCandidateDelegationTaskToDict(
+        _ task: GraphCandidateDelegationTask,
+        candidateID: String
+    ) -> [String: Any] {
+        [
+            "kind": task.kind,
+            "label": task.label,
+            "instructions": task.instructions,
+            "allowedSources": task.allowedSources,
+            "resultPolicy": task.resultPolicy,
+            "command": "cider-cli item delegate-graph-candidate \(candidateID) --task-kind \(task.kind) --json",
+            "readOnly": false,
+            "status": "available",
+        ] as [String: Any]
     }
 
     static func defaultGraphCandidateDelegationInstructions(
@@ -15674,6 +15838,8 @@ struct CiderCLI {
             dict["relationGuesses"] = candidate.relationGuesses.map(\.rawValue)
             dict["actionGuesses"] = candidate.actionGuesses
             dict["safeActions"] = candidate.safeActions.map(\.rawValue)
+            dict["delegatedEnrichmentActions"] = graphCandidateDelegationTasks(for: candidate, output: output)
+                .map { graphCandidateDelegationTaskToDict($0, candidateID: output.id) }
             if let sourceKind = candidate.sourceKind { dict["sourceKind"] = sourceKind }
             if let confidenceReason = candidate.confidenceReason { dict["confidenceReason"] = confidenceReason }
             if let subjectText = candidate.subjectText { dict["subjectText"] = subjectText }

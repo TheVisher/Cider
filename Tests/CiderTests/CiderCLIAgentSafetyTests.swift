@@ -1914,6 +1914,12 @@ struct CiderCLIAgentSafetyTests {
         #expect(candidate["relationGuesses"] as? [String] == ["likes_drink"])
         #expect(candidate["actionGuesses"] as? [String] == ["liked"])
         #expect(candidate["safeActions"] as? [String] == ["inspect_source", "accept", "correct", "reject", "delegate_enrichment"])
+        let delegatedEnrichmentActions = try #require(candidate["delegatedEnrichmentActions"] as? [[String: Any]])
+        #expect(delegatedEnrichmentActions.contains { action in
+            action["kind"] as? String == "find_recipe_or_menu_evidence"
+                && action["resultPolicy"] as? String == "return_reviewable_evidence_not_truth"
+                && (action["command"] as? String)?.contains("delegate-graph-candidate \(output.id) --task-kind find_recipe_or_menu_evidence") == true
+        })
         #expect(candidate["subjectText"] as? String == "Jami")
         #expect(candidate["confidenceReason"] as? String == "Sentence explicitly says Jami loved the drink.")
 
@@ -2075,7 +2081,7 @@ struct CiderCLIAgentSafetyTests {
 
         let delegateResult = try runCLI(args: [
             "item", "delegate-graph-candidate", delegateOutput.id,
-            "--instructions", "Find the likely restaurant listing; return evidence only.",
+            "--task-kind", "find_place_match",
             "--actor", "codex-test",
             "--json",
         ], vault: vault)
@@ -2084,7 +2090,12 @@ struct CiderCLIAgentSafetyTests {
         #expect(delegate["command"] as? String == "item.delegate-graph-candidate")
         #expect(delegate["reviewState"] as? String == "deferred")
         let delegation = try #require(delegate["delegation"] as? [String: Any])
+        #expect(delegation["taskKind"] as? String == "find_place_match")
+        #expect((delegation["instructions"] as? String)?.contains("place or restaurant matches") == true)
         #expect(delegation["resultPolicy"] as? String == "return_reviewable_evidence_not_truth")
+        let delegatedTask = try #require(delegation["task"] as? [String: Any])
+        #expect(delegatedTask["kind"] as? String == "find_place_match")
+        #expect(delegatedTask["status"] as? String == "available")
 
         let contextResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
         let context = try parseJSONObject(contextResult.stdout)
