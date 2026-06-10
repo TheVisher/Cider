@@ -1818,7 +1818,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(metadata["matched_entity"] as? String == "Avery Stone")
         #expect(metadata["target_type"] as? String == "contact")
 
-        let contextResult = try runCLI(args: ["item", "context", "note", noteID, "--json"], vault: vault)
+        let contextResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
         let context = try parseJSONObject(contextResult.stdout)
         let contextCandidates = try #require(context["relationCandidates"] as? [[String: Any]])
         #expect(contextCandidates.contains { relationCandidate in
@@ -1903,7 +1903,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(reviewActionCommands.contains { action in
             action["action"] as? String == "accept"
                 && action["readOnly"] as? Bool == false
-                && action["status"] as? String == "planned_cid_489"
+                && action["status"] as? String == "available"
         })
 
         let reviewQueueResult = try runCLI(args: ["capture", "review-queue", "--json"], vault: vault)
@@ -1953,6 +1953,128 @@ struct CiderCLIAgentSafetyTests {
         let inspectSafeCommands = try #require(inspect["safeNextCommands"] as? [String])
         #expect(!inspectSafeCommands.contains("cider-cli item graph-candidate \(output.id) --json"))
         #expect(inspectSafeCommands.contains("cider-cli item context note \(noteID) --json"))
+    }
+
+    @Test("item graph candidate mutations accept reject and delegate explicitly")
+    func itemGraphCandidateMutationsAcceptRejectAndDelegateExplicitly() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-graph-candidate-mutations-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Graph Candidate Mutation Source",
+            content: "Watched The Way Way Back. Jami loved that pineapple coconut drink. We stopped at Cactus.",
+            vault: vault
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let acceptOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "The Way Way Back",
+            sourceQuote: "Watched The Way Way Back.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched],
+            actionGuesses: ["watched"],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.78,
+            source: "graph_candidate.test"
+        )
+        let rejectOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "pineapple coconut drink",
+            sourceQuote: "Jami loved that pineapple coconut drink.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            relationGuesses: [.likesDrink],
+            actionGuesses: ["liked"],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.72,
+            subjectText: "Jami",
+            source: "graph_candidate.test"
+        )
+        let delegateOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Cactus",
+            sourceQuote: "We stopped at Cactus.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.restaurant, .place],
+            relationGuesses: [.visited],
+            actionGuesses: ["visited"],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.74,
+            source: "graph_candidate.test"
+        )
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let service = SecondBrainEnrichmentOutputService(database: db)
+        try service.record(acceptOutput)
+        try service.record(rejectOutput)
+        try service.record(delegateOutput)
+        db.close()
+
+        let acceptResult = try runCLI(args: [
+            "item", "accept-graph-candidate", acceptOutput.id,
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let accept = try parseJSONObject(acceptResult.stdout)
+        #expect(acceptResult.status == 0)
+        #expect(accept["ok"] as? Bool == true)
+        #expect(accept["command"] as? String == "item.accept-graph-candidate")
+        #expect(accept["readOnly"] as? Bool == false)
+        #expect(accept["changed"] as? Bool == true)
+        #expect(accept["reviewState"] as? String == "accepted")
+        let relation = try #require(accept["relation"] as? [String: Any])
+        #expect(relation["sourceOwner"] as? [String: Any] != nil)
+        #expect(relation["relationType"] as? String == "watched")
+        let targetOwner = try #require(accept["targetOwner"] as? [String: Any])
+        #expect(targetOwner["ownerType"] as? String == "graph_object")
+        #expect(targetOwner["ownerID"] as? String == "movie-the-way-way-back")
+
+        let rejectResult = try runCLI(args: [
+            "item", "reject-graph-candidate", rejectOutput.id,
+            "--reason", "Not useful",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let reject = try parseJSONObject(rejectResult.stdout)
+        #expect(rejectResult.status == 0)
+        #expect(reject["command"] as? String == "item.reject-graph-candidate")
+        #expect(reject["reviewState"] as? String == "rejected")
+        #expect(reject["relation"] == nil)
+
+        let delegateResult = try runCLI(args: [
+            "item", "delegate-graph-candidate", delegateOutput.id,
+            "--instructions", "Find the likely restaurant listing; return evidence only.",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let delegate = try parseJSONObject(delegateResult.stdout)
+        #expect(delegateResult.status == 0)
+        #expect(delegate["command"] as? String == "item.delegate-graph-candidate")
+        #expect(delegate["reviewState"] as? String == "deferred")
+        let delegation = try #require(delegate["delegation"] as? [String: Any])
+        #expect(delegation["resultPolicy"] as? String == "return_reviewable_evidence_not_truth")
+
+        let contextResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
+        let context = try parseJSONObject(contextResult.stdout)
+        let ownerRelations = try #require(context["ownerRelations"] as? [[String: Any]])
+        #expect(ownerRelations.count == 1)
+        #expect(ownerRelations.first?["relationType"] as? String == "watched")
+        let agentActions = try #require(context["agentActions"] as? [[String: Any]])
+        #expect(agentActions.contains { $0["actionType"] as? String == "graph_candidate.accept" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "graph_candidate.reject" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "graph_candidate.delegate_enrichment" })
+
+        let defaultList = try parseJSONObject(try runCLI(args: ["item", "graph-candidates", "note", noteID, "--json"], vault: vault).stdout)
+        #expect(defaultList["count"] as? Int == 1)
+        let reviewedList = try parseJSONObject(try runCLI(args: ["item", "graph-candidates", "note", noteID, "--include-reviewed", "--json"], vault: vault).stdout)
+        #expect(reviewedList["count"] as? Int == 3)
     }
 
     @Test("read-only folder filters do not adopt untracked disk folders")

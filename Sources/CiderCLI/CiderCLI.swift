@@ -416,7 +416,7 @@ struct CiderCLI {
         case "review":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
         case "item":
-            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "sync-project", "project-sync"])
+            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "accept-graph-candidate", "reject-graph-candidate", "delegate-graph-candidate", "sync-project", "project-sync"])
         case "test-run", "testrun":
             return isMutationSubcommand(subcommand, in: ["cleanup"])
         case "label", "tag":
@@ -4813,6 +4813,9 @@ struct CiderCLI {
               cider-cli item graph-health [--json]
               cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
               cider-cli item graph-candidate <candidate-id> [--json]
+              cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
+              cider-cli item reject-graph-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
+              cider-cli item delegate-graph-candidate <candidate-id> [--instructions <text>] [--actor <name>] [--json]
               cider-cli item related <type> <id-or-ref> [--json]
               cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
               cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
@@ -5163,6 +5166,15 @@ struct CiderCLI {
 
         case "graph-candidates", "graph-candidate", "graph-candidate-inspect":
             handleGraphCandidateReadCommand(subcommand: subcommand ?? "graph-candidates", args: args)
+
+        case "accept-graph-candidate", "graph-candidate-accept":
+            handleGraphCandidateMutationCommand(action: "accept", args: args, store: store)
+
+        case "reject-graph-candidate", "graph-candidate-reject":
+            handleGraphCandidateMutationCommand(action: "reject", args: args, store: store)
+
+        case "delegate-graph-candidate", "graph-candidate-delegate":
+            handleGraphCandidateMutationCommand(action: "delegate", args: args, store: store)
 
         case "why-surfaced", "why":
             let positional = leadingPositionalArgs(from: args)
@@ -14947,6 +14959,387 @@ struct CiderCLI {
         }
     }
 
+    static func handleGraphCandidateMutationCommand(
+        action: String,
+        args: [String],
+        store: SecondBrainStore
+    ) {
+        let positional = leadingPositionalArgs(from: args)
+        guard let candidateID = parseFlag("--id", from: args)
+            ?? parseFlag("--candidate", from: args)
+            ?? positional.first else {
+            printCLIError("Usage: cider-cli item \(action)-graph-candidate <candidate-id> [--json]")
+            return
+        }
+
+        do {
+            let payload: [String: Any]
+            switch action {
+            case "accept":
+                payload = try acceptGraphCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "reject":
+                payload = try rejectGraphCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "delegate":
+                payload = try delegateGraphCandidatePayload(candidateID: candidateID, args: args, store: store)
+            default:
+                printCLIError("Unsupported graph candidate action '\(action)'.")
+                return
+            }
+
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("\(payload["action"] ?? action) graph candidate: \(candidateID)")
+                print("  State: \(payload["reviewState"] ?? "")")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func acceptGraphCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try graphCandidateOutput(candidateID, service: service)
+        let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        try requireReviewableGraphCandidate(candidate)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "graph_candidate.accept"
+        let relationType = parseFlag("--relation", from: args)
+            ?? candidate.relationGuesses.first?.rawValue
+            ?? SecondBrainGraphCandidateContract.RelationType.mentions.rawValue
+        let targetOwner = try graphCandidateAcceptedTargetOwner(candidate: candidate, args: args)
+        let relationSourceOwner = candidate.subjectOwner ?? output.owner
+
+        var accepted = output
+        accepted.reviewState = SecondBrainGraphCandidateContract.ReviewState.accepted.rawValue
+        accepted.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerType] = targetOwner.ownerType
+        accepted.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerID] = targetOwner.ownerID
+        accepted.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedRelationType] = relationType
+        accepted.metadata["reviewed_at"] = ISO8601DateFormatter().string(from: Date())
+        accepted.metadata["reviewed_by"] = actor
+        accepted.metadata["accepted_source_owner_ref"] = output.owner.canonicalRef
+        accepted.metadata["accepted_relation_source_owner_ref"] = relationSourceOwner.canonicalRef
+        accepted.updatedAt = Date()
+        _ = try SecondBrainGraphCandidateContract.validate(accepted)
+
+        let relation = SecondBrainRelation(
+            sourceOwner: relationSourceOwner,
+            targetOwner: targetOwner,
+            relationType: relationType,
+            evidence: candidate.sourceQuote,
+            source: source,
+            actor: actor,
+            confidence: output.confidence,
+            metadata: graphCandidateRelationMetadata(output: output, candidate: candidate, targetOwner: targetOwner)
+        )
+        let action = SecondBrainAgentAction(
+            owner: output.owner,
+            itemID: output.owner.ownerType == "note" ? output.owner.ownerID : nil,
+            toolName: "item.accept-graph-candidate",
+            actionType: "graph_candidate.accept",
+            source: source,
+            status: "succeeded",
+            summary: "Accepted graph candidate \(candidate.mentionText) as \(relationType) -> \(targetOwner.canonicalRef).",
+            argumentsJSON: DatabaseHelpers.encodeJSON([
+                "candidateID": output.id,
+                "actor": actor,
+                "targetOwner": targetOwner.canonicalRef,
+                "relationType": relationType,
+            ]),
+            resultJSON: DatabaseHelpers.encodeJSON([
+                "reviewState": accepted.reviewState,
+                "relationID": relation.id,
+            ])
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try store.recordRelation(relation)
+            try service.record(accepted)
+            try store.recordAgentAction(action)
+        }
+
+        let safeCommands = graphCandidatePostMutationSafeCommands(output: accepted, targetOwner: targetOwner)
+        return [
+            "ok": true,
+            "command": "item.accept-graph-candidate",
+            "action": "accept",
+            "readOnly": false,
+            "changed": true,
+            "candidateID": output.id,
+            "candidateRef": "graph_candidate:\(output.id)",
+            "reviewState": accepted.reviewState,
+            "candidate": graphCandidateToDict(accepted),
+            "relation": ownerRelationToDict(relation),
+            "agentAction": agentActionToDict(action),
+            "targetOwner": ownerToDict(targetOwner),
+            "safeNextCommands": safeCommands,
+            "safeCommands": safeCommands,
+        ]
+    }
+
+    static func rejectGraphCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try graphCandidateOutput(candidateID, service: service)
+        let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        try requireReviewableGraphCandidate(candidate)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "graph_candidate.reject"
+        let reason = parseFlag("--reason", from: args) ?? "Rejected from graph candidate review."
+
+        var rejected = output
+        rejected.reviewState = SecondBrainGraphCandidateContract.ReviewState.rejected.rawValue
+        rejected.metadata["reviewed_at"] = ISO8601DateFormatter().string(from: Date())
+        rejected.metadata["reviewed_by"] = actor
+        rejected.metadata["rejection_reason"] = reason
+        rejected.updatedAt = Date()
+        _ = try SecondBrainGraphCandidateContract.validate(rejected)
+
+        let action = SecondBrainAgentAction(
+            owner: output.owner,
+            itemID: output.owner.ownerType == "note" ? output.owner.ownerID : nil,
+            toolName: "item.reject-graph-candidate",
+            actionType: "graph_candidate.reject",
+            source: source,
+            status: "succeeded",
+            summary: "Rejected graph candidate \(candidate.mentionText).",
+            argumentsJSON: DatabaseHelpers.encodeJSON([
+                "candidateID": output.id,
+                "actor": actor,
+                "reason": reason,
+            ]),
+            resultJSON: DatabaseHelpers.encodeJSON([
+                "reviewState": rejected.reviewState,
+            ])
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(rejected)
+            try store.recordAgentAction(action)
+        }
+
+        let safeCommands = graphCandidatePostMutationSafeCommands(output: rejected)
+        return [
+            "ok": true,
+            "command": "item.reject-graph-candidate",
+            "action": "reject",
+            "readOnly": false,
+            "changed": true,
+            "candidateID": output.id,
+            "candidateRef": "graph_candidate:\(output.id)",
+            "reviewState": rejected.reviewState,
+            "candidate": graphCandidateToDict(rejected),
+            "agentAction": agentActionToDict(action),
+            "safeNextCommands": safeCommands,
+            "safeCommands": safeCommands,
+        ]
+    }
+
+    static func delegateGraphCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try graphCandidateOutput(candidateID, service: service)
+        let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        try requireReviewableGraphCandidate(candidate)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "graph_candidate.delegate"
+        let instructions = parseFlag("--instructions", from: args)
+            ?? parseFlag("--task", from: args)
+            ?? defaultGraphCandidateDelegationInstructions(candidate)
+
+        var delegated = output
+        delegated.reviewState = SecondBrainGraphCandidateContract.ReviewState.deferred.rawValue
+        delegated.metadata["reviewed_at"] = ISO8601DateFormatter().string(from: Date())
+        delegated.metadata["reviewed_by"] = actor
+        delegated.metadata["delegation_status"] = "requested"
+        delegated.metadata["delegation_instructions"] = instructions
+        delegated.updatedAt = Date()
+        _ = try SecondBrainGraphCandidateContract.validate(delegated)
+
+        let action = SecondBrainAgentAction(
+            owner: output.owner,
+            itemID: output.owner.ownerType == "note" ? output.owner.ownerID : nil,
+            toolName: "item.delegate-graph-candidate",
+            actionType: "graph_candidate.delegate_enrichment",
+            source: source,
+            status: "requested",
+            summary: "Requested bounded enrichment for graph candidate \(candidate.mentionText).",
+            argumentsJSON: DatabaseHelpers.encodeJSON([
+                "candidateID": output.id,
+                "actor": actor,
+                "instructions": instructions,
+                "mentionText": candidate.mentionText,
+                "sourceQuote": candidate.sourceQuote,
+            ]),
+            resultJSON: DatabaseHelpers.encodeJSON([
+                "reviewState": delegated.reviewState,
+                "resultPolicy": "return_reviewable_evidence_not_truth",
+            ])
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(delegated)
+            try store.recordAgentAction(action)
+        }
+
+        let safeCommands = graphCandidatePostMutationSafeCommands(output: delegated)
+        return [
+            "ok": true,
+            "command": "item.delegate-graph-candidate",
+            "action": "delegate",
+            "readOnly": false,
+            "changed": true,
+            "candidateID": output.id,
+            "candidateRef": "graph_candidate:\(output.id)",
+            "reviewState": delegated.reviewState,
+            "candidate": graphCandidateToDict(delegated),
+            "agentAction": agentActionToDict(action),
+            "delegation": [
+                "status": "requested",
+                "instructions": instructions,
+                "resultPolicy": "return_reviewable_evidence_not_truth",
+            ],
+            "safeNextCommands": safeCommands,
+            "safeCommands": safeCommands,
+        ]
+    }
+
+    static func graphCandidateOutput(
+        _ candidateID: String,
+        service: SecondBrainEnrichmentOutputService
+    ) throws -> SecondBrainEnrichmentOutput {
+        let normalizedID = candidateID
+            .replacingOccurrences(of: "graph_candidate:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let output = try service.output(id: normalizedID),
+              output.kind == SecondBrainGraphCandidateContract.outputKind else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Graph candidate '\(candidateID)' was not found."]
+            )
+        }
+        return output
+    }
+
+    static func requireReviewableGraphCandidate(_ candidate: SecondBrainGraphCandidateContract.Candidate) throws {
+        guard candidate.reviewState.isReviewable else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Graph candidate '\(candidate.id)' is \(candidate.reviewState.rawValue) and cannot be mutated by this review command."]
+            )
+        }
+    }
+
+    static func graphCandidateAcceptedTargetOwner(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        args: [String]
+    ) throws -> SecondBrainOwnerRef {
+        if let rawOwner = parseFlag("--target-owner", from: args) {
+            return try ownerRefFromCanonical(rawOwner)
+        }
+        if let type = parseFlag("--target-owner-type", from: args),
+           let id = parseFlag("--target-owner-id", from: args) {
+            return normalizedOwner(type: type, ref: id)
+        }
+        let objectType = candidate.objectTypeGuesses.first?.rawValue ?? "object"
+        return SecondBrainOwnerRef(
+            ownerType: "graph_object",
+            ownerID: "\(objectType)-\(slugForGraphObject(candidate.mentionText))"
+        )
+    }
+
+    static func ownerRefFromCanonical(_ raw: String) throws -> SecondBrainOwnerRef {
+        let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2,
+              !parts[0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !parts[1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "--target-owner must be '<owner-type>:<owner-id>'."]
+            )
+        }
+        return normalizedOwner(type: parts[0], ref: parts[1])
+    }
+
+    static func slugForGraphObject(_ value: String) -> String {
+        let slug = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        return slug.isEmpty ? "object" : String(slug.prefix(80))
+    }
+
+    static func graphCandidateRelationMetadata(
+        output: SecondBrainEnrichmentOutput,
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        targetOwner: SecondBrainOwnerRef
+    ) -> [String: String] {
+        var metadata: [String: String] = [
+            "candidate_id": output.id,
+            "candidate_ref": "graph_candidate:\(output.id)",
+            "candidate_kind": candidate.kind.rawValue,
+            "mention_text": candidate.mentionText,
+            "source_quote": candidate.sourceQuote,
+            "source_owner_ref": output.owner.canonicalRef,
+            "target_owner_ref": targetOwner.canonicalRef,
+        ]
+        if let sourceKind = candidate.sourceKind {
+            metadata["source_kind"] = sourceKind
+        }
+        if let subjectText = candidate.subjectText {
+            metadata["subject_text"] = subjectText
+        }
+        if let confidenceReason = candidate.confidenceReason {
+            metadata["confidence_reason"] = confidenceReason
+        }
+        metadata["object_type_guesses"] = DatabaseHelpers.encode(candidate.objectTypeGuesses.map(\.rawValue))
+        metadata["relation_guesses"] = DatabaseHelpers.encode(candidate.relationGuesses.map(\.rawValue))
+        metadata["action_guesses"] = DatabaseHelpers.encode(candidate.actionGuesses)
+        return metadata
+    }
+
+    static func defaultGraphCandidateDelegationInstructions(
+        _ candidate: SecondBrainGraphCandidateContract.Candidate
+    ) -> String {
+        let typeHint = candidate.objectTypeGuesses.map(\.rawValue).joined(separator: ", ")
+        let relationHint = candidate.relationGuesses.map(\.rawValue).joined(separator: ", ")
+        return "Find bounded supporting evidence or likely matches for '\(candidate.mentionText)'"
+            + (typeHint.isEmpty ? "" : " as \(typeHint)")
+            + (relationHint.isEmpty ? "" : " with relation \(relationHint)")
+            + ". Return candidates/evidence for review; do not create accepted facts."
+    }
+
+    static func graphCandidatePostMutationSafeCommands(
+        output: SecondBrainEnrichmentOutput,
+        targetOwner: SecondBrainOwnerRef? = nil
+    ) -> [String] {
+        var commands = graphCandidateSafeCommands(for: output, includeSelfInspect: true)
+        commands.append("cider-cli item graph-candidates \(output.owner.ownerType) \(output.owner.ownerID) --include-reviewed --json")
+        if let targetOwner {
+            commands.append("cider-cli item related-owners \(targetOwner.ownerType) \(targetOwner.ownerID) --json")
+        }
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
     static func boundedGraphCandidateLimit(from args: [String]) -> Int {
         let rawLimit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
         return min(max(rawLimit, 0), 100)
@@ -15125,19 +15518,19 @@ struct CiderCLI {
                 "action": "accept",
                 "command": "cider-cli item accept-graph-candidate \(output.id) --json",
                 "readOnly": false,
-                "status": "planned_cid_489",
+                "status": "available",
             ],
             [
                 "action": "reject",
                 "command": "cider-cli item reject-graph-candidate \(output.id) --json",
                 "readOnly": false,
-                "status": "planned_cid_489",
+                "status": "available",
             ],
             [
                 "action": "delegate",
                 "command": "cider-cli item delegate-graph-candidate \(output.id) --json",
                 "readOnly": false,
-                "status": "planned_cid_489",
+                "status": "available",
             ],
         ]
     }
