@@ -61,7 +61,11 @@ final class SecondBrainMemoryCandidateService {
         value rawValue: String,
         evidence rawEvidence: String,
         source rawSource: String?,
-        confidence: Double?
+        confidence: Double?,
+        linkedOwners: [SecondBrainOwnerRef] = [],
+        observedDate: String? = nil,
+        memoryKey: String? = nil,
+        memoryStatus: String? = nil
     ) throws -> SecondBrainMemoryCandidateResult {
         let owner = try resolveOwner(type: ownerType, ref: ownerRef)
         return try suggest(
@@ -72,7 +76,11 @@ final class SecondBrainMemoryCandidateService {
             value: rawValue,
             evidence: rawEvidence,
             source: rawSource,
-            confidence: confidence
+            confidence: confidence,
+            linkedOwners: linkedOwners,
+            observedDate: observedDate,
+            memoryKey: memoryKey,
+            memoryStatus: memoryStatus
         )
     }
 
@@ -85,7 +93,11 @@ final class SecondBrainMemoryCandidateService {
         value rawValue: String,
         evidence rawEvidence: String,
         source rawSource: String?,
-        confidence: Double?
+        confidence: Double?,
+        linkedOwners: [SecondBrainOwnerRef] = [],
+        observedDate: String? = nil,
+        memoryKey: String? = nil,
+        memoryStatus: String? = nil
     ) throws -> SecondBrainMemoryCandidateResult {
         guard try ownerExists(owner) else {
             throw MemoryCandidateError.unresolvedOwner(requestedOwnerType, requestedOwnerRef)
@@ -107,6 +119,15 @@ final class SecondBrainMemoryCandidateService {
         }
 
         let source = normalizedSource(rawSource)
+        let metadata = memoryMetadata(
+            kind: kind,
+            requestedOwnerType: requestedOwnerType,
+            requestedOwnerRef: requestedOwnerRef,
+            linkedOwners: linkedOwners,
+            observedDate: observedDate,
+            memoryKey: memoryKey,
+            memoryStatus: memoryStatus
+        )
         let candidate = SecondBrainEnrichmentOutput(
             owner: owner,
             chunkID: nil,
@@ -118,13 +139,7 @@ final class SecondBrainMemoryCandidateService {
             source: source,
             confidence: confidence,
             reviewState: "suggested",
-            metadata: [
-                "memory_kind": kind,
-                "candidate_kind": kind,
-                "requires_review": "true",
-                "requested_owner_type": requestedOwnerType,
-                "requested_owner_ref": requestedOwnerRef,
-            ]
+            metadata: metadata
         )
 
         let arguments: [String: String] = [
@@ -135,6 +150,10 @@ final class SecondBrainMemoryCandidateService {
             "evidence": evidence,
             "source": source,
             "confidence": confidence.map { String($0) } ?? "",
+            "linkedOwners": DatabaseHelpers.encode(linkedOwners.map(\.canonicalRef)),
+            "observedDate": observedDate ?? "",
+            "memoryKey": memoryKey ?? "",
+            "memoryStatus": memoryStatus ?? "",
         ]
         let resultJSON = DatabaseHelpers.encodeJSON([
             "candidateID": candidate.id,
@@ -160,6 +179,38 @@ final class SecondBrainMemoryCandidateService {
         }
 
         return SecondBrainMemoryCandidateResult(owner: owner, candidate: candidate, agentAction: action)
+    }
+
+    private func memoryMetadata(
+        kind: String,
+        requestedOwnerType: String,
+        requestedOwnerRef: String,
+        linkedOwners: [SecondBrainOwnerRef],
+        observedDate: String?,
+        memoryKey: String?,
+        memoryStatus: String?
+    ) -> [String: String] {
+        var metadata: [String: String] = [
+            "memory_kind": kind,
+            "candidate_kind": kind,
+            "requires_review": "true",
+            "requested_owner_type": requestedOwnerType,
+            "requested_owner_ref": requestedOwnerRef,
+        ]
+        let linkedOwnerRefs = linkedOwners.map(\.canonicalRef)
+        if !linkedOwnerRefs.isEmpty {
+            metadata["linked_owner_refs"] = DatabaseHelpers.encode(linkedOwnerRefs)
+        }
+        if let observedDate = normalizedOptional(observedDate) {
+            metadata["observed_date"] = observedDate
+        }
+        if let memoryKey = normalizedOptional(memoryKey) {
+            metadata["memory_key"] = memoryKey
+        }
+        if let memoryStatus = normalizedOptional(memoryStatus)?.replacingOccurrences(of: "-", with: "_").lowercased() {
+            metadata["memory_status"] = memoryStatus
+        }
+        return metadata
     }
 
     private func resolveOwner(type rawType: String, ref rawRef: String) throws -> SecondBrainOwnerRef {
@@ -285,5 +336,10 @@ final class SecondBrainMemoryCandidateService {
     private func normalizedSource(_ value: String?) -> String {
         let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "agent.memory_suggest" : trimmed
+    }
+
+    private func normalizedOptional(_ value: String?) -> String? {
+        let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

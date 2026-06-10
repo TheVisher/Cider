@@ -108,6 +108,7 @@ struct CiderItemAgentContextPacket: Equatable {
     var ownerRelations: [SecondBrainRelation]
     var relationCandidates: [SecondBrainSimilarityCandidate]
     var backlinks: [SecondBrainRelation]
+    var memoryCandidates: [SecondBrainEnrichmentOutput]
     var captureProvenance: [CiderItemCaptureProvenance]
     var review: CiderItemAgentReviewState?
     var surfacing: CiderSurfacingExplanation
@@ -330,6 +331,11 @@ final class CiderItemContextService {
             ownerRelations: Array(bundle.ownerRelations.prefix(normalizedLimits.maxRelated)),
             relationCandidates: Array(bundle.relationCandidates.prefix(normalizedLimits.maxRelated)),
             backlinks: Array(bundle.backlinks.prefix(normalizedLimits.maxRelated)),
+            memoryCandidates: Array(
+                bundle.enrichmentOutputs
+                    .filter { $0.kind == "memory_candidate" }
+                    .prefix(normalizedLimits.maxRelated)
+            ),
             captureProvenance: Array(bundle.captureProvenance.prefix(normalizedLimits.maxHistory)),
             review: reviewState(for: bundle),
             surfacing: surfacingExplanation(for: bundle),

@@ -75,12 +75,27 @@ struct SecondBrainMemoryCandidateServiceTests {
             value: "Use Cider Kanban cards for implementation handoffs.",
             evidence: "AGENTS.md says Kanban is the active work surface.",
             source: "test",
-            confidence: 0.7
+            confidence: 0.7,
+            linkedOwners: [
+                SecondBrainOwnerRef(ownerType: "contact", ownerID: "alex"),
+                SecondBrainOwnerRef(ownerType: "project", ownerID: "cider"),
+            ],
+            observedDate: "2026-06-10",
+            memoryKey: "kanban-handoff-preference",
+            memoryStatus: "current"
         )
 
         let ref = LibraryEntityRef(type: .note, entityID: UUID(uuidString: owner.ownerID)!)
         let context = try CiderItemContextService(database: db).context(for: ref)
         #expect(context.enrichmentOutputs.contains { $0.id == result.candidate.id })
+
+        #expect(result.candidate.metadata["linked_owner_refs"] == "[\"contact:alex\",\"project:cider\"]")
+        #expect(result.candidate.metadata["observed_date"] == "2026-06-10")
+        #expect(result.candidate.metadata["memory_key"] == "kanban-handoff-preference")
+        #expect(result.candidate.metadata["memory_status"] == "current")
+
+        let agentContext = try CiderItemContextService(database: db).agentContext(for: ref)
+        #expect(agentContext.memoryCandidates.map(\.id).contains(result.candidate.id))
     }
 
     @Test("suggestion supports projected Kanban card owner")

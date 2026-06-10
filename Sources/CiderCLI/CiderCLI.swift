@@ -4922,7 +4922,7 @@ struct CiderCLI {
               cider-cli item rebuild-references <note|card|board> <id-or-ref> [--json]
               cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]
               cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
-              cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind preference|pattern|project_context|relationship_context|agent_lesson --value <text> --evidence <text> [--source <source>] [--confidence <0-1>] [--json]
+              cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind preference|pattern|project_context|relationship_context|agent_lesson --value <text> --evidence <text> [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status current|historical|superseded] [--source <source>] [--confidence <0-1>] [--json]
               cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
               cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
               cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
@@ -5464,7 +5464,7 @@ struct CiderCLI {
         case "memory-suggest", "suggest-memory":
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
-                printCLIError("Usage: cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind <kind> --value <text> --evidence <text> [--source <source>] [--confidence <0-1>] [--json]")
+                printCLIError("Usage: cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind <kind> --value <text> --evidence <text> [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status <status>] [--source <source>] [--confidence <0-1>] [--json]")
                 return
             }
             guard let kind = parseFlag("--kind", from: args) else {
@@ -5490,6 +5490,7 @@ struct CiderCLI {
                 confidence = nil
             }
             do {
+                let linkedOwners = try parseLinkedOwnerRefs(from: args)
                 let service = SecondBrainMemoryCandidateService(database: .shared, store: store)
                 let result: SecondBrainMemoryCandidateResult
                 if positional[0].trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "project" {
@@ -5500,7 +5501,11 @@ struct CiderCLI {
                         value: value,
                         evidence: evidence,
                         source: parseFlag("--source", from: args),
-                        confidence: confidence
+                        confidence: confidence,
+                        linkedOwners: linkedOwners,
+                        observedDate: parseFlag("--observed-date", from: args),
+                        memoryKey: parseFlag("--memory-key", from: args),
+                        memoryStatus: parseFlag("--memory-status", from: args) ?? parseFlag("--status", from: args)
                     )
                 } else {
                     result = try service.suggest(
@@ -5511,7 +5516,11 @@ struct CiderCLI {
                         value: value,
                         evidence: evidence,
                         source: parseFlag("--source", from: args),
-                        confidence: confidence
+                        confidence: confidence,
+                        linkedOwners: linkedOwners,
+                        observedDate: parseFlag("--observed-date", from: args),
+                        memoryKey: parseFlag("--memory-key", from: args),
+                        memoryStatus: parseFlag("--memory-status", from: args) ?? parseFlag("--status", from: args)
                     )
                 }
                 let payload = memoryCandidateResultToDict(
@@ -15026,6 +15035,9 @@ struct CiderCLI {
                 backlinks: bundle.backlinks,
                 relationCandidates: bundle.relationCandidates
             ),
+            "memoryCandidates": bundle.enrichmentOutputs
+                .filter { $0.kind == "memory_candidate" }
+                .map(memoryCandidateToDict),
             "routingDecisions": bundle.routingDecisions.map(routingDecisionToDict),
             "agentActions": bundle.agentActions.map(agentActionToDict),
             "enrichmentOutputs": bundle.enrichmentOutputs.map(enrichmentOutputToDict),
@@ -15093,11 +15105,35 @@ struct CiderCLI {
                 "ref": sourceRef,
             ],
             "owner": ownerToDict(result.owner),
-            "candidate": enrichmentOutputToDict(result.candidate),
+            "candidate": memoryCandidateToDict(result.candidate),
             "agentAction": agentActionToDict(result.agentAction),
             "safeNextCommands": safeCommands,
             "safeCommands": safeCommands,
         ]
+    }
+
+    static func memoryCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        var dict = enrichmentOutputToDict(output)
+        let linkedOwnerRefs = DatabaseHelpers.decodeStringArray(output.metadata["linked_owner_refs"])
+        dict["ref"] = "memory_candidate:\(output.id)"
+        dict["memoryKind"] = output.metadata["memory_kind"] ?? output.metadata["candidate_kind"]
+        dict["requiresReview"] = output.metadata["requires_review"] == "true"
+        dict["reviewable"] = ["suggested", "needs_review", "deferred"].contains(output.reviewState)
+        dict["sourceQuote"] = output.evidence
+        dict["linkedOwnerRefs"] = linkedOwnerRefs
+        dict["linkedOwners"] = linkedOwnerRefs.compactMap { try? ownerRefFromCanonical($0) }.map(ownerToDict)
+        dict["safeNextCommands"] = memoryCandidateSafeCommands(owner: output.owner)
+        if let observedDate = output.metadata["observed_date"] { dict["observedDate"] = observedDate }
+        if let memoryKey = output.metadata["memory_key"] { dict["memoryKey"] = memoryKey }
+        if let memoryStatus = output.metadata["memory_status"] { dict["memoryStatus"] = memoryStatus }
+        if let requestedType = output.metadata["requested_owner_type"],
+           let requestedRef = output.metadata["requested_owner_ref"] {
+            dict["requestedOwner"] = [
+                "type": requestedType,
+                "ref": requestedRef,
+            ]
+        }
+        return dict
     }
 
     static func memoryCandidateSafeCommands(owner: SecondBrainOwnerRef) -> [String] {
@@ -15491,10 +15527,24 @@ struct CiderCLI {
             throw NSError(
                 domain: "CiderCLI",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "--target-owner must be '<owner-type>:<owner-id>'."]
+                userInfo: [NSLocalizedDescriptionKey: "Owner references must be '<owner-type>:<owner-id>'."]
             )
         }
         return normalizedOwner(type: parts[0], ref: parts[1])
+    }
+
+    static func parseLinkedOwnerRefs(from args: [String]) throws -> [SecondBrainOwnerRef] {
+        try parseFlagAll("--linked-owner", from: args).map { raw in
+            do {
+                return try ownerRefFromCanonical(raw)
+            } catch {
+                throw NSError(
+                    domain: "CiderCLI",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "--linked-owner must be '<owner-type>:<owner-id>'; got '\(raw)'."]
+                )
+            }
+        }
     }
 
     static func slugForGraphObject(_ value: String) -> String {
@@ -16605,6 +16655,7 @@ struct CiderCLI {
                 backlinks: packet.backlinks,
                 relationCandidates: packet.relationCandidates
             ),
+            "memoryCandidates": packet.memoryCandidates.map(memoryCandidateToDict),
             "captureProvenance": packet.captureProvenance.map(captureProvenanceToDict),
             "surfacing": surfacingExplanationToDict(packet.surfacing),
             "recentHistory": packet.recentHistory.map(itemAgentContextHistoryToDict),
@@ -16629,7 +16680,10 @@ struct CiderCLI {
         let hasSuggestedRelationCandidates = packet.relationCandidates.contains {
             $0.reviewState == "suggested" || $0.reviewState == "needs_review"
         }
-        let needsReview = reviewStatus == "needs_review" || hasSuggestedRelationCandidates
+        let hasSuggestedMemoryCandidates = packet.memoryCandidates.contains {
+            $0.reviewState == "suggested" || $0.reviewState == "needs_review"
+        }
+        let needsReview = reviewStatus == "needs_review" || hasSuggestedRelationCandidates || hasSuggestedMemoryCandidates
         let needsRouting = reviewStatus == "needs_review" || packet.review?.targetPath != nil
         var blockingIssues: [String] = []
         if reviewStatus == "needs_review" {
@@ -16638,6 +16692,9 @@ struct CiderCLI {
         if hasSuggestedRelationCandidates {
             blockingIssues.append("relation_candidates_need_review")
         }
+        if hasSuggestedMemoryCandidates {
+            blockingIssues.append("memory_candidates_need_review")
+        }
         return CiderAgentDecisionContract.dictionary(
             saved: true,
             needsReview: needsReview,
@@ -16645,7 +16702,7 @@ struct CiderCLI {
             needsRouting: needsRouting,
             confidence: packet.review?.confidence,
             blockingIssues: blockingIssues,
-            recommendedNextAction: reviewStatus == "needs_review" ? "review_route" : (hasSuggestedRelationCandidates ? "review_relation_candidates" : packet.surfacing.suggestedAction),
+            recommendedNextAction: reviewStatus == "needs_review" ? "review_route" : (hasSuggestedRelationCandidates ? "review_relation_candidates" : (hasSuggestedMemoryCandidates ? "review_memory_candidates" : packet.surfacing.suggestedAction)),
             safeNextCommands: packet.safeCommands
         )
     }

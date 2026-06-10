@@ -3115,6 +3115,56 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeCommands.contains("cider-cli capture review-queue --json"))
     }
 
+    @Test("memory suggest stores linked owner metadata and appears in item context JSON")
+    func memorySuggestStoresLinkedOwnerMetadataAndAppearsInItemContextJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-memory-suggest-linked-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let createResult = try runCLI(
+            args: ["note", "create", "Alex context", "--content", "Alex prefers late coffee catch-ups.", "--json"],
+            vault: vault
+        )
+        let created = try parseJSONObject(createResult.stdout)
+        let noteID = try #require(created["id"] as? String)
+
+        let result = try runCLI(args: [
+            "item", "memory-suggest", "note", noteID,
+            "--kind", "relationship_context",
+            "--value", "Alex prefers late coffee catch-ups.",
+            "--evidence", "Journal note says Alex prefers late coffee catch-ups.",
+            "--linked-owner", "contact:alex",
+            "--linked-owner", "project:cider",
+            "--observed-date", "2026-06-10",
+            "--memory-key", "alex-coffee-catchups",
+            "--memory-status", "current",
+            "--source", "codex",
+            "--confidence", "0.83",
+            "--json",
+        ], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.memory-suggest")
+        let candidate = try #require(payload["candidate"] as? [String: Any])
+        #expect(candidate["memoryKind"] as? String == "relationship_context")
+        #expect(candidate["observedDate"] as? String == "2026-06-10")
+        #expect(candidate["memoryKey"] as? String == "alex-coffee-catchups")
+        #expect(candidate["memoryStatus"] as? String == "current")
+        #expect(candidate["linkedOwnerRefs"] as? [String] == ["contact:alex", "project:cider"])
+
+        let contextResult = try runCLI(args: ["item", "context", "note", noteID, "--json"], vault: vault)
+        let context = try parseJSONObject(contextResult.stdout)
+        let memoryCandidates = try #require(context["memoryCandidates"] as? [[String: Any]])
+        let contextCandidate = try #require(memoryCandidates.first)
+        #expect(contextCandidate["id"] as? String == candidate["id"] as? String)
+        #expect(contextCandidate["linkedOwnerRefs"] as? [String] == ["contact:alex", "project:cider"])
+        #expect(context["needsReview"] as? Bool == true)
+        let blockingIssues = try #require(context["blockingIssues"] as? [String])
+        #expect(blockingIssues.contains("memory_candidates_need_review"))
+    }
+
     @Test("media identify json separates read-only review from mutating apply")
     func mediaIdentifyJSONSeparatesReadOnlyReviewFromMutatingApply() throws {
         let dryRunReport = MediaBackfillReport(
