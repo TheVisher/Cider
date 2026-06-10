@@ -3182,6 +3182,147 @@ struct CiderCLIAgentSafetyTests {
         #expect(!reviewSafeNext.contains { $0.contains("accept") || $0.contains("promote") })
     }
 
+    @Test("memory candidate review actions are explicit and audited")
+    func memoryCandidateReviewActionsAreExplicitAndAudited() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-memory-actions-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let createResult = try runCLI(
+            args: ["note", "create", "Memory action context", "--content", "Alex likes coffee. Jami likes pineapple drinks.", "--json"],
+            vault: vault
+        )
+        let created = try parseJSONObject(createResult.stdout)
+        let noteID = try #require(created["id"] as? String)
+
+        func suggest(_ value: String) throws -> String {
+            let result = try runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "relationship_context",
+                "--value", value,
+                "--evidence", "Source says: \(value)",
+                "--linked-owner", "contact:alex",
+                "--source", "codex-test",
+                "--confidence", "0.8",
+                "--json",
+            ], vault: vault)
+            let payload = try parseJSONObject(result.stdout)
+            let candidate = try #require(payload["candidate"] as? [String: Any])
+            return try #require(candidate["id"] as? String)
+        }
+
+        let acceptID = try suggest("Alex likes coffee.")
+        let rejectID = try suggest("Alex dislikes all warm drinks.")
+        let deferID = try suggest("Alex may like evening tea.")
+        let correctID = try suggest("Jami likes pineapple drinks.")
+        let delegateID = try suggest("Alex mentioned a favorite cafe.")
+
+        let acceptResult = try runCLI(args: [
+            "item", "accept-memory-candidate", acceptID,
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let accept = try parseJSONObject(acceptResult.stdout)
+        #expect(acceptResult.status == 0)
+        #expect(accept["command"] as? String == "item.accept-memory-candidate")
+        #expect(accept["readOnly"] as? Bool == false)
+        #expect(accept["changed"] as? Bool == true)
+        #expect(accept["reviewState"] as? String == "accepted")
+        let acceptedCandidate = try #require(accept["candidate"] as? [String: Any])
+        let acceptedMetadata = try #require(acceptedCandidate["metadata"] as? [String: String])
+        #expect(acceptedMetadata["reviewed_by"] == "codex-test")
+        #expect(acceptedMetadata["accepted_value"] == "Alex likes coffee.")
+
+        let rejectResult = try runCLI(args: [
+            "item", "reject-memory-candidate", rejectID,
+            "--reason", "Contradicted by source.",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let reject = try parseJSONObject(rejectResult.stdout)
+        #expect(rejectResult.status == 0)
+        #expect(reject["command"] as? String == "item.reject-memory-candidate")
+        #expect(reject["reviewState"] as? String == "rejected")
+        let rejectedCandidate = try #require(reject["candidate"] as? [String: Any])
+        let rejectedMetadata = try #require(rejectedCandidate["metadata"] as? [String: String])
+        #expect(rejectedMetadata["rejection_reason"] == "Contradicted by source.")
+
+        let deferResult = try runCLI(args: [
+            "item", "defer-memory-candidate", deferID,
+            "--reason", "Needs user confirmation.",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let deferPayload = try parseJSONObject(deferResult.stdout)
+        #expect(deferResult.status == 0)
+        #expect(deferPayload["command"] as? String == "item.defer-memory-candidate")
+        #expect(deferPayload["reviewState"] as? String == "deferred")
+        let deferredCandidate = try #require(deferPayload["candidate"] as? [String: Any])
+        let deferredMetadata = try #require(deferredCandidate["metadata"] as? [String: String])
+        #expect(deferredMetadata["deferral_reason"] == "Needs user confirmation.")
+
+        let correctResult = try runCLI(args: [
+            "item", "correct-memory-candidate", correctID,
+            "--value", "Jami likes pineapple coconut drinks.",
+            "--evidence", "Corrected source says Jami likes pineapple coconut drinks.",
+            "--linked-owner", "contact:jami",
+            "--memory-key", "jami-pineapple-coconut-drinks",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let correct = try parseJSONObject(correctResult.stdout)
+        #expect(correctResult.status == 0)
+        #expect(correct["command"] as? String == "item.correct-memory-candidate")
+        #expect(correct["reviewState"] as? String == "needs_review")
+        #expect(correct["changedFields"] as? [String] == ["value", "evidence", "linked_owner_refs", "memory_key"])
+        let correctedCandidate = try #require(correct["candidate"] as? [String: Any])
+        #expect(correctedCandidate["value"] as? String == "Jami likes pineapple coconut drinks.")
+        #expect(correctedCandidate["linkedOwnerRefs"] as? [String] == ["contact:jami"])
+
+        let delegateResult = try runCLI(args: [
+            "item", "delegate-memory-candidate", delegateID,
+            "--task-kind", "confirm_person_preference",
+            "--instructions", "Ask for source-backed confirmation only.",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let delegate = try parseJSONObject(delegateResult.stdout)
+        #expect(delegateResult.status == 0)
+        #expect(delegate["command"] as? String == "item.delegate-memory-candidate")
+        #expect(delegate["reviewState"] as? String == "deferred")
+        let delegation = try #require(delegate["delegation"] as? [String: Any])
+        #expect(delegation["taskKind"] as? String == "confirm_person_preference")
+        #expect(delegation["resultPolicy"] as? String == "return_reviewable_evidence_not_truth")
+
+        let rejectedAgain = try runCLI(args: [
+            "item", "reject-memory-candidate", acceptID,
+            "--reason", "Too late",
+            "--json",
+        ], vault: vault)
+        #expect(rejectedAgain.status != 0)
+        let rejectedAgainPayload = try parseJSONObject(rejectedAgain.stdout)
+        #expect((rejectedAgainPayload["error"] as? String)?.contains("accepted") == true)
+
+        let queueResult = try runCLI(args: ["capture", "review-queue", "--kind", "memory_candidate", "--json"], vault: vault)
+        let queue = try parseJSONObject(queueResult.stdout)
+        let queueItems = try #require(queue["items"] as? [[String: Any]])
+        #expect(!queueItems.contains { $0["candidateID"] as? String == acceptID })
+        #expect(!queueItems.contains { $0["candidateID"] as? String == rejectID })
+        #expect(!queueItems.contains { $0["candidateID"] as? String == deferID })
+        #expect(!queueItems.contains { $0["candidateID"] as? String == delegateID })
+        #expect(queueItems.contains { $0["candidateID"] as? String == correctID && $0["reviewState"] as? String == "needs_review" })
+
+        let getResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
+        let get = try parseJSONObject(getResult.stdout)
+        let agentActions = try #require(get["agentActions"] as? [[String: Any]])
+        #expect(agentActions.contains { $0["actionType"] as? String == "memory_candidate.accept" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "memory_candidate.reject" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "memory_candidate.defer" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "memory_candidate.correct" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "memory_candidate.delegate_enrichment" })
+    }
+
     @Test("media identify json separates read-only review from mutating apply")
     func mediaIdentifyJSONSeparatesReadOnlyReviewFromMutatingApply() throws {
         let dryRunReport = MediaBackfillReport(

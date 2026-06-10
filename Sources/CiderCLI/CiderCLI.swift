@@ -416,7 +416,7 @@ struct CiderCLI {
         case "review":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
         case "item":
-            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "accept-graph-candidate", "reject-graph-candidate", "delegate-graph-candidate", "sync-project", "project-sync"])
+            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "accept-graph-candidate", "reject-graph-candidate", "delegate-graph-candidate", "accept-memory-candidate", "reject-memory-candidate", "defer-memory-candidate", "correct-memory-candidate", "delegate-memory-candidate", "sync-project", "project-sync"])
         case "test-run", "testrun":
             return isMutationSubcommand(subcommand, in: ["cleanup"])
         case "label", "tag":
@@ -4915,6 +4915,11 @@ struct CiderCLI {
               cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
               cider-cli item reject-graph-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
               cider-cli item delegate-graph-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
+              cider-cli item accept-memory-candidate <candidate-id> [--actor <name>] [--json]
+              cider-cli item reject-memory-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
+              cider-cli item defer-memory-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
+              cider-cli item correct-memory-candidate <candidate-id> [--value <text>] [--evidence <text>] [--kind <kind>] [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status <status>] [--actor <name>] [--json]
+              cider-cli item delegate-memory-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
               cider-cli item related <type> <id-or-ref> [--json]
               cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
               cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
@@ -5274,6 +5279,21 @@ struct CiderCLI {
 
         case "delegate-graph-candidate", "graph-candidate-delegate":
             handleGraphCandidateMutationCommand(action: "delegate", args: args, store: store)
+
+        case "accept-memory-candidate", "memory-candidate-accept":
+            handleMemoryCandidateMutationCommand(action: "accept", args: args, store: store)
+
+        case "reject-memory-candidate", "memory-candidate-reject":
+            handleMemoryCandidateMutationCommand(action: "reject", args: args, store: store)
+
+        case "defer-memory-candidate", "memory-candidate-defer":
+            handleMemoryCandidateMutationCommand(action: "defer", args: args, store: store)
+
+        case "correct-memory-candidate", "memory-candidate-correct":
+            handleMemoryCandidateMutationCommand(action: "correct", args: args, store: store)
+
+        case "delegate-memory-candidate", "memory-candidate-delegate":
+            handleMemoryCandidateMutationCommand(action: "delegate", args: args, store: store)
 
         case "why-surfaced", "why":
             let positional = leadingPositionalArgs(from: args)
@@ -15123,6 +15143,7 @@ struct CiderCLI {
         dict["linkedOwnerRefs"] = linkedOwnerRefs
         dict["linkedOwners"] = linkedOwnerRefs.compactMap { try? ownerRefFromCanonical($0) }.map(ownerToDict)
         dict["safeNextCommands"] = memoryCandidateSafeCommands(owner: output.owner)
+        dict["reviewActionCommands"] = memoryCandidateReviewActionCommands(for: output)
         if let observedDate = output.metadata["observed_date"] { dict["observedDate"] = observedDate }
         if let memoryKey = output.metadata["memory_key"] { dict["memoryKey"] = memoryKey }
         if let memoryStatus = output.metadata["memory_status"] { dict["memoryStatus"] = memoryStatus }
@@ -15152,6 +15173,530 @@ struct CiderCLI {
         commands.append("cider-cli item owner-get \(owner.ownerType) \(owner.ownerID) --json")
         var seen = Set<String>()
         return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func handleMemoryCandidateMutationCommand(
+        action: String,
+        args: [String],
+        store: SecondBrainStore
+    ) {
+        let positional = leadingPositionalArgs(from: args)
+        guard let candidateID = parseFlag("--id", from: args)
+            ?? parseFlag("--candidate", from: args)
+            ?? positional.first else {
+            printCLIError("Usage: cider-cli item \(action)-memory-candidate <candidate-id> [--json]")
+            return
+        }
+
+        do {
+            let payload: [String: Any]
+            switch action {
+            case "accept":
+                payload = try acceptMemoryCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "reject":
+                payload = try rejectMemoryCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "defer":
+                payload = try deferMemoryCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "correct":
+                payload = try correctMemoryCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "delegate":
+                payload = try delegateMemoryCandidatePayload(candidateID: candidateID, args: args, store: store)
+            default:
+                printCLIError("Unsupported memory candidate action '\(action)'.")
+                return
+            }
+
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("\(payload["action"] ?? action) memory candidate: \(candidateID)")
+                print("  State: \(payload["reviewState"] ?? "")")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func acceptMemoryCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try memoryCandidateOutput(candidateID, service: service)
+        try requireReviewableMemoryCandidate(output)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "memory_candidate.accept"
+        var accepted = reviewedMemoryCandidate(output, reviewState: "accepted", actor: actor)
+        accepted.metadata["accepted_value"] = accepted.value
+        accepted.metadata["accepted_memory_kind"] = accepted.metadata["memory_kind"] ?? accepted.metadata["candidate_kind"] ?? ""
+
+        let action = memoryCandidateAgentAction(
+            output: output,
+            toolName: "item.accept-memory-candidate",
+            actionType: "memory_candidate.accept",
+            source: source,
+            status: "succeeded",
+            summary: "Accepted memory candidate \(output.value).",
+            arguments: [
+                "candidateID": output.id,
+                "actor": actor,
+            ],
+            result: [
+                "reviewState": accepted.reviewState,
+            ]
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(accepted)
+            try store.recordAgentAction(action)
+        }
+
+        return memoryCandidateMutationResult(
+            command: "item.accept-memory-candidate",
+            action: "accept",
+            candidate: accepted,
+            agentAction: action
+        )
+    }
+
+    static func rejectMemoryCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try memoryCandidateOutput(candidateID, service: service)
+        try requireReviewableMemoryCandidate(output)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "memory_candidate.reject"
+        let reason = parseFlag("--reason", from: args) ?? "Rejected from memory candidate review."
+        var rejected = reviewedMemoryCandidate(output, reviewState: "rejected", actor: actor)
+        rejected.metadata["rejection_reason"] = reason
+
+        let action = memoryCandidateAgentAction(
+            output: output,
+            toolName: "item.reject-memory-candidate",
+            actionType: "memory_candidate.reject",
+            source: source,
+            status: "succeeded",
+            summary: "Rejected memory candidate \(output.value).",
+            arguments: [
+                "candidateID": output.id,
+                "actor": actor,
+                "reason": reason,
+            ],
+            result: [
+                "reviewState": rejected.reviewState,
+            ]
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(rejected)
+            try store.recordAgentAction(action)
+        }
+
+        return memoryCandidateMutationResult(
+            command: "item.reject-memory-candidate",
+            action: "reject",
+            candidate: rejected,
+            agentAction: action
+        )
+    }
+
+    static func deferMemoryCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try memoryCandidateOutput(candidateID, service: service)
+        try requireReviewableMemoryCandidate(output)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "memory_candidate.defer"
+        let reason = parseFlag("--reason", from: args) ?? "Deferred from memory candidate review."
+        var deferred = reviewedMemoryCandidate(output, reviewState: "deferred", actor: actor)
+        deferred.metadata["deferral_reason"] = reason
+
+        let action = memoryCandidateAgentAction(
+            output: output,
+            toolName: "item.defer-memory-candidate",
+            actionType: "memory_candidate.defer",
+            source: source,
+            status: "deferred",
+            summary: "Deferred memory candidate \(output.value).",
+            arguments: [
+                "candidateID": output.id,
+                "actor": actor,
+                "reason": reason,
+            ],
+            result: [
+                "reviewState": deferred.reviewState,
+            ]
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(deferred)
+            try store.recordAgentAction(action)
+        }
+
+        return memoryCandidateMutationResult(
+            command: "item.defer-memory-candidate",
+            action: "defer",
+            candidate: deferred,
+            agentAction: action
+        )
+    }
+
+    static func correctMemoryCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try memoryCandidateOutput(candidateID, service: service)
+        try requireReviewableMemoryCandidate(output)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "memory_candidate.correct"
+        let reason = parseFlag("--reason", from: args) ?? "Corrected during memory candidate review."
+        var corrected = output
+        var changedFields: [String] = []
+
+        if let value = parseFlag("--value", from: args) {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw memoryCandidateError("--value cannot be empty.")
+            }
+            corrected.value = trimmed
+            corrected.normalizedValue = normalizedMemoryCandidateValue(trimmed)
+            changedFields.append("value")
+        }
+        if let evidence = parseFlag("--evidence", from: args) {
+            let trimmed = evidence.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw memoryCandidateError("--evidence cannot be empty.")
+            }
+            corrected.evidence = trimmed
+            changedFields.append("evidence")
+        }
+        if let rawKind = parseFlag("--kind", from: args) {
+            let kind = normalizedMemoryCandidateKind(rawKind)
+            guard SecondBrainMemoryCandidateService.allowedKinds.contains(kind) else {
+                throw memoryCandidateError("Unsupported memory candidate kind '\(rawKind)'.")
+            }
+            corrected.metadata["memory_kind"] = kind
+            corrected.metadata["candidate_kind"] = kind
+            corrected.label = "Memory candidate: \(kind.replacingOccurrences(of: "_", with: " "))"
+            changedFields.append("kind")
+        }
+        let linkedOwnerFlags = parseFlagAll("--linked-owner", from: args)
+        if !linkedOwnerFlags.isEmpty {
+            let linkedOwners = try parseLinkedOwnerRefs(from: args)
+            corrected.metadata["linked_owner_refs"] = DatabaseHelpers.encode(linkedOwners.map(\.canonicalRef))
+            changedFields.append("linked_owner_refs")
+        }
+        if let observedDate = parseFlag("--observed-date", from: args) {
+            corrected.metadata["observed_date"] = observedDate.trimmingCharacters(in: .whitespacesAndNewlines)
+            changedFields.append("observed_date")
+        }
+        if let memoryKey = parseFlag("--memory-key", from: args) {
+            corrected.metadata["memory_key"] = memoryKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            changedFields.append("memory_key")
+        }
+        if let memoryStatus = parseFlag("--memory-status", from: args) ?? parseFlag("--status", from: args) {
+            corrected.metadata["memory_status"] = normalizedMemoryCandidateKind(memoryStatus)
+            changedFields.append("memory_status")
+        }
+        if let rawConfidence = parseFlag("--confidence", from: args) {
+            guard let confidence = Double(rawConfidence), confidence >= 0, confidence <= 1 else {
+                throw memoryCandidateError("Invalid --confidence '\(rawConfidence)'. Use a number from 0 to 1.")
+            }
+            corrected.confidence = confidence
+            changedFields.append("confidence")
+        }
+        guard !changedFields.isEmpty else {
+            throw memoryCandidateError("correct-memory-candidate requires at least one correction flag.")
+        }
+
+        corrected.reviewState = "needs_review"
+        corrected.metadata["corrected_at"] = ISO8601DateFormatter().string(from: Date())
+        corrected.metadata["corrected_by"] = actor
+        corrected.metadata["correction_reason"] = reason
+        corrected.metadata["corrected_fields"] = DatabaseHelpers.encode(changedFields)
+        corrected.updatedAt = Date()
+
+        let action = memoryCandidateAgentAction(
+            output: output,
+            toolName: "item.correct-memory-candidate",
+            actionType: "memory_candidate.correct",
+            source: source,
+            status: "corrected",
+            summary: "Corrected memory candidate \(output.value).",
+            arguments: [
+                "candidateID": output.id,
+                "actor": actor,
+                "reason": reason,
+                "changedFields": DatabaseHelpers.encode(changedFields),
+            ],
+            result: [
+                "reviewState": corrected.reviewState,
+                "candidateID": corrected.id,
+            ]
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try replaceEnrichmentOutput(corrected, service: service)
+            try store.recordAgentAction(action)
+        }
+
+        var result = memoryCandidateMutationResult(
+            command: "item.correct-memory-candidate",
+            action: "correct",
+            candidate: corrected,
+            agentAction: action
+        )
+        result["changedFields"] = changedFields
+        return result
+    }
+
+    static func delegateMemoryCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try memoryCandidateOutput(candidateID, service: service)
+        try requireReviewableMemoryCandidate(output)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "memory_candidate.delegate"
+        let taskKind = parseFlag("--task-kind", from: args)
+            ?? parseFlag("--task", from: args)
+            ?? "clarify_memory_evidence"
+        let instructions = parseFlag("--instructions", from: args)
+            ?? defaultMemoryCandidateDelegationInstructions(output)
+        let allowedSources = ["source_item", "linked_owner_context", "user_confirmation"]
+        let resultPolicy = "return_reviewable_evidence_not_truth"
+
+        var delegated = reviewedMemoryCandidate(output, reviewState: "deferred", actor: actor)
+        delegated.metadata["delegation_status"] = "requested"
+        delegated.metadata["delegation_task_kind"] = taskKind
+        delegated.metadata["delegation_instructions"] = instructions
+        delegated.metadata["delegation_allowed_sources"] = DatabaseHelpers.encode(allowedSources)
+        delegated.metadata["delegation_result_policy"] = resultPolicy
+
+        let action = memoryCandidateAgentAction(
+            output: output,
+            toolName: "item.delegate-memory-candidate",
+            actionType: "memory_candidate.delegate_enrichment",
+            source: source,
+            status: "requested",
+            summary: "Requested bounded enrichment for memory candidate \(output.value).",
+            arguments: [
+                "candidateID": output.id,
+                "actor": actor,
+                "taskKind": taskKind,
+                "instructions": instructions,
+                "allowedSources": DatabaseHelpers.encode(allowedSources),
+            ],
+            result: [
+                "reviewState": delegated.reviewState,
+                "resultPolicy": resultPolicy,
+            ]
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(delegated)
+            try store.recordAgentAction(action)
+        }
+
+        var result = memoryCandidateMutationResult(
+            command: "item.delegate-memory-candidate",
+            action: "delegate",
+            candidate: delegated,
+            agentAction: action
+        )
+        result["delegation"] = [
+            "status": "requested",
+            "taskKind": taskKind,
+            "instructions": instructions,
+            "allowedSources": allowedSources,
+            "resultPolicy": resultPolicy,
+        ]
+        return result
+    }
+
+    static func memoryCandidateMutationResult(
+        command: String,
+        action: String,
+        candidate: SecondBrainEnrichmentOutput,
+        agentAction: SecondBrainAgentAction
+    ) -> [String: Any] {
+        let safeCommands = memoryCandidatePostMutationSafeCommands(output: candidate)
+        return [
+            "ok": true,
+            "command": command,
+            "action": action,
+            "readOnly": false,
+            "changed": true,
+            "candidateID": candidate.id,
+            "candidateRef": "memory_candidate:\(candidate.id)",
+            "reviewState": candidate.reviewState,
+            "candidate": memoryCandidateToDict(candidate),
+            "agentAction": agentActionToDict(agentAction),
+            "safeNextCommands": safeCommands,
+            "safeCommands": safeCommands,
+        ]
+    }
+
+    static func memoryCandidateOutput(
+        _ candidateID: String,
+        service: SecondBrainEnrichmentOutputService
+    ) throws -> SecondBrainEnrichmentOutput {
+        let normalizedID = candidateID
+            .replacingOccurrences(of: "memory_candidate:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let output = try service.output(id: normalizedID),
+              output.kind == "memory_candidate" else {
+            throw memoryCandidateError("Memory candidate '\(candidateID)' was not found.")
+        }
+        return output
+    }
+
+    static func requireReviewableMemoryCandidate(_ output: SecondBrainEnrichmentOutput) throws {
+        guard ["suggested", "needs_review", "deferred"].contains(output.reviewState) else {
+            throw memoryCandidateError("Memory candidate '\(output.id)' is \(output.reviewState) and cannot be mutated by this review command.")
+        }
+    }
+
+    static func reviewedMemoryCandidate(
+        _ output: SecondBrainEnrichmentOutput,
+        reviewState: String,
+        actor: String
+    ) -> SecondBrainEnrichmentOutput {
+        var reviewed = output
+        reviewed.reviewState = reviewState
+        reviewed.metadata["reviewed_at"] = ISO8601DateFormatter().string(from: Date())
+        reviewed.metadata["reviewed_by"] = actor
+        reviewed.updatedAt = Date()
+        return reviewed
+    }
+
+    static func memoryCandidateAgentAction(
+        output: SecondBrainEnrichmentOutput,
+        toolName: String,
+        actionType: String,
+        source: String,
+        status: String,
+        summary: String,
+        arguments: [String: String],
+        result: [String: String]
+    ) -> SecondBrainAgentAction {
+        SecondBrainAgentAction(
+            owner: output.owner,
+            itemID: memoryCandidateItemID(for: output.owner),
+            toolName: toolName,
+            actionType: actionType,
+            source: source,
+            status: status,
+            summary: summary,
+            argumentsJSON: DatabaseHelpers.encodeJSON(arguments),
+            resultJSON: DatabaseHelpers.encodeJSON(result)
+        )
+    }
+
+    static func memoryCandidateItemID(for owner: SecondBrainOwnerRef) -> String? {
+        switch owner.ownerType {
+        case "bookmark", "note", "dateCard", "contact", "todo", "vaultFile":
+            return UUID(uuidString: owner.ownerID) == nil ? nil : owner.ownerID
+        default:
+            return nil
+        }
+    }
+
+    static func replaceEnrichmentOutput(
+        _ output: SecondBrainEnrichmentOutput,
+        service: SecondBrainEnrichmentOutputService
+    ) throws {
+        let stmt = try CiderDatabase.shared.prepare("DELETE FROM enrichment_outputs WHERE id = ?;")
+        stmt.bind(output.id, at: 1)
+        try stmt.step()
+        try service.record(output)
+    }
+
+    static func defaultMemoryCandidateDelegationInstructions(_ output: SecondBrainEnrichmentOutput) -> String {
+        let memoryKind = output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? "memory"
+        return "Inspect the source item and linked owner context for this \(memoryKind) candidate. Return only source-backed evidence or a recommendation to reject; do not promote permanent memory."
+    }
+
+    static func memoryCandidatePostMutationSafeCommands(output: SecondBrainEnrichmentOutput) -> [String] {
+        var commands = memoryCandidateSafeCommands(owner: output.owner)
+        commands.insert("cider-cli capture review-queue --kind memory_candidate --json", at: 0)
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func memoryCandidateReviewActionCommands(for output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
+        let reviewable = ["suggested", "needs_review", "deferred"].contains(output.reviewState)
+        let status = reviewable ? "available" : "unavailable"
+        return [
+            [
+                "action": "accept",
+                "command": "cider-cli item accept-memory-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": status,
+            ],
+            [
+                "action": "reject",
+                "command": "cider-cli item reject-memory-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": status,
+            ],
+            [
+                "action": "defer",
+                "command": "cider-cli item defer-memory-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": status,
+            ],
+            [
+                "action": "correct",
+                "command": "cider-cli item correct-memory-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": status,
+            ],
+            [
+                "action": "delegate",
+                "command": "cider-cli item delegate-memory-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": status,
+            ],
+        ]
+    }
+
+    static func normalizedMemoryCandidateKind(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "-", with: "_")
+            .lowercased()
+    }
+
+    static func normalizedMemoryCandidateValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    static func memoryCandidateError(_ message: String) -> NSError {
+        NSError(
+            domain: "CiderCLI",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
     }
 
     static func handleGraphCandidateReadCommand(subcommand: String, args: [String]) {
