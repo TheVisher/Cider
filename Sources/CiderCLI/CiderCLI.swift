@@ -2931,7 +2931,14 @@ struct CiderCLI {
         )
         let sourceContext = captureSourceContext(from: args, originalText: result.rawContent)
         let provenance = recordJournalCaptureProvenance(result, sourceContext: sourceContext)
-        return journalCapturePayload(result, args: args, sourceContext: sourceContext, provenance: provenance)
+        let graphCandidates = recordJournalGraphCandidates(result)
+        return journalCapturePayload(
+            result,
+            args: args,
+            sourceContext: sourceContext,
+            provenance: provenance,
+            graphCandidates: graphCandidates
+        )
     }
 
     static func appendDailyNoteEntry(
@@ -3129,7 +3136,11 @@ struct CiderCLI {
         _ result: DailyNoteAppendResult,
         args: [String],
         sourceContext: CaptureSourceContext?,
-        provenance: [String: Any]
+        provenance: [String: Any],
+        graphCandidates: [String: Any] = [
+            "status": "not_run",
+            "count": 0,
+        ]
     ) -> [String: Any] {
         let item: [String: Any] = [
             "id": result.note.id.uuidString,
@@ -3168,7 +3179,9 @@ struct CiderCLI {
                 "status": "not_applicable",
                 "isEnriching": false,
                 "titleState": "daily_journal",
+                "graphCandidateCount": graphCandidates["count"] as? Int ?? 0,
             ],
+            "graphCandidates": graphCandidates,
             "duplicate": [
                 "status": "not_checked",
             ],
@@ -3191,10 +3204,87 @@ struct CiderCLI {
                 "cider-cli item context note \(result.note.id.uuidString) --json",
             ],
         ] as [String: Any]
+        if (graphCandidates["count"] as? Int ?? 0) > 0 {
+            var commands = (payload["safeNextCommands"] as? [String]) ?? []
+            let graphListCommand = "cider-cli item graph-candidates note \(result.note.id.uuidString) --json"
+            let reviewQueueCommand = "cider-cli capture review-queue --kind graph_candidate --json"
+            if !commands.contains(graphListCommand) {
+                commands.append(graphListCommand)
+            }
+            if !commands.contains(reviewQueueCommand) {
+                commands.append(reviewQueueCommand)
+            }
+            payload["safeNextCommands"] = commands
+        }
         if let sourceContext {
             payload["sourceContext"] = sourceContext.toDictionary()
         }
         return payload
+    }
+
+    static func recordJournalGraphCandidates(_ result: DailyNoteAppendResult) -> [String: Any] {
+        guard CiderDatabase.shared.isOpen else {
+            return [
+                "status": "unavailable",
+                "count": 0,
+                "reason": "Graph candidate extraction could not run because no writable database is available.",
+            ] as [String: Any]
+        }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: result.note.id.uuidString)
+        let extraction = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: result.rawContent,
+            date: result.date,
+            time: result.time
+        )
+        guard !extraction.outputs.isEmpty else {
+            return [
+                "status": "none",
+                "count": 0,
+                "candidateIDs": [],
+                "candidateRefs": [],
+            ] as [String: Any]
+        }
+
+        do {
+            let service = SecondBrainEnrichmentOutputService(database: .shared)
+            for output in extraction.outputs {
+                try service.record(output)
+            }
+            let candidates = extraction.outputs.map { output -> [String: Any] in
+                [
+                    "id": output.id,
+                    "ref": "graph_candidate:\(output.id)",
+                    "mentionText": output.value,
+                    "reviewState": output.reviewState,
+                    "sourceQuote": output.evidence,
+                    "confidence": output.confidence as Any,
+                    "safeNextCommands": [
+                        "cider-cli item graph-candidate \(output.id) --json",
+                        "cider-cli item context note \(result.note.id.uuidString) --json",
+                    ],
+                ] as [String: Any]
+            }
+            return [
+                "status": "suggested",
+                "count": extraction.outputs.count,
+                "candidateIDs": extraction.ids,
+                "candidateRefs": extraction.ids.map { "graph_candidate:\($0)" },
+                "reviewState": "suggested",
+                "candidates": candidates,
+                "safeNextCommands": [
+                    "cider-cli item graph-candidates note \(result.note.id.uuidString) --json",
+                    "cider-cli capture review-queue --kind graph_candidate --json",
+                ],
+            ] as [String: Any]
+        } catch {
+            return [
+                "status": "failed",
+                "count": 0,
+                "reason": "Graph candidate extraction failed: \(error.localizedDescription)",
+            ] as [String: Any]
+        }
     }
 
     struct DailyNoteKindSpec {

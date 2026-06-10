@@ -495,6 +495,79 @@ struct SecondBrainFoundationTests {
         })
     }
 
+    @Test("capture add journal creates source backed graph candidates")
+    func captureAddJournalCreatesSourceBackedGraphCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-journal-graph-candidates-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalText = """
+        Watched The Way Way Back last night. Jami loved that pineapple coconut drink. Baine liked the tacos. We stopped at Cactus.
+        """
+        let capturePayload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "journal",
+            "--date", "2026-06-10",
+            "--time", "19:30",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: journalText))
+        #expect(capturePayload["ok"] as? Bool == true)
+        let item = try #require(capturePayload["item"] as? [String: Any])
+        let noteID = try #require(item["id"] as? String)
+        let graphCandidates = try #require(capturePayload["graphCandidates"] as? [String: Any])
+        #expect(graphCandidates["status"] as? String == "suggested")
+        #expect((graphCandidates["count"] as? Int ?? 0) >= 4)
+        let candidateRefs = try #require(graphCandidates["candidateRefs"] as? [String])
+        #expect(candidateRefs.allSatisfy { $0.hasPrefix("graph_candidate:") })
+        let safeNextCommands = try #require(capturePayload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item graph-candidates note \(noteID) --json"))
+        #expect(safeNextCommands.contains("cider-cli capture review-queue --kind graph_candidate --json"))
+
+        let listPayload = try jsonObject(from: runCLI([
+            "item", "graph-candidates", "note", noteID, "--json",
+        ], vaultURL: vault))
+        #expect(listPayload["ok"] as? Bool == true)
+        #expect(listPayload["readOnly"] as? Bool == true)
+        let candidates = try #require(listPayload["candidates"] as? [[String: Any]])
+        #expect(candidates.contains { candidate in
+            candidate["mentionText"] as? String == "The Way Way Back"
+                && (candidate["relationGuesses"] as? [String])?.contains("watched") == true
+                && (candidate["objectTypeGuesses"] as? [String])?.contains("movie") == true
+        })
+        #expect(candidates.contains { candidate in
+            candidate["mentionText"] as? String == "pineapple coconut drink"
+                && candidate["subjectText"] as? String == "Jami"
+                && (candidate["relationGuesses"] as? [String])?.contains("likes_drink") == true
+        })
+        #expect(candidates.contains { candidate in
+            candidate["mentionText"] as? String == "tacos"
+                && candidate["subjectText"] as? String == "Baine"
+                && (candidate["relationGuesses"] as? [String])?.contains("likes_food") == true
+        })
+        #expect(candidates.contains { candidate in
+            candidate["mentionText"] as? String == "Cactus"
+                && (candidate["relationGuesses"] as? [String])?.contains("visited") == true
+                && (candidate["objectTypeGuesses"] as? [String])?.contains("restaurant") == true
+        })
+        #expect(candidates.allSatisfy { candidate in
+            candidate["reviewState"] as? String == "suggested"
+                && candidate["sourceKind"] as? String == "journal"
+                && candidate["reviewable"] as? Bool == true
+        })
+
+        let reviewQueue = try jsonObject(from: runCLI([
+            "capture", "review-queue", "--kind", "graph_candidate", "--json",
+        ], vaultURL: vault))
+        #expect(reviewQueue["readOnly"] as? Bool == true)
+        let reviewItems = try #require(reviewQueue["items"] as? [[String: Any]])
+        #expect(reviewItems.contains { item in
+            item["kind"] as? String == "graph_candidate"
+                && item["candidateRef"] as? String == candidateRefs.first
+        })
+    }
+
     @Test("capture add journal defaults date to today and rejects empty content as JSON")
     func captureAddJournalDefaultsDateToTodayAndRejectsEmptyContentAsJSON() throws {
         let vault = FileManager.default.temporaryDirectory
