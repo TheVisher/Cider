@@ -1906,6 +1906,23 @@ struct CiderCLIAgentSafetyTests {
                 && action["status"] as? String == "planned_cid_489"
         })
 
+        let reviewQueueResult = try runCLI(args: ["capture", "review-queue", "--json"], vault: vault)
+        let reviewQueue = try parseJSONObject(reviewQueueResult.stdout)
+        #expect(reviewQueueResult.status == 0)
+        #expect(reviewQueue["command"] as? String == "capture.review-queue")
+        #expect(reviewQueue["readOnly"] as? Bool == true)
+        #expect(reviewQueue["changed"] as? Bool == false)
+        let reviewItems = try #require(reviewQueue["items"] as? [[String: Any]])
+        let reviewItem = try #require(reviewItems.first { $0["candidateID"] as? String == output.id })
+        #expect(reviewItem["kind"] as? String == "graph_candidate")
+        #expect(reviewItem["reviewState"] as? String == "suggested")
+        #expect(reviewItem["sourceQuote"] as? String == "I gave Jami that pineapple coconut drink and she loved it.")
+        #expect(reviewItem["possibleTypes"] as? [String] == ["drink"])
+        #expect(reviewItem["recommendedNextAction"] as? String == "review_graph_candidate")
+        let reviewSafeNext = try #require(reviewItem["safeNextCommands"] as? [String])
+        #expect(reviewSafeNext.contains("cider-cli item graph-candidate \(output.id) --json"))
+        #expect(!reviewSafeNext.contains { $0.contains("accept-graph-candidate") })
+
         let ownerListResult = try runCLI(args: ["item", "graph-candidates", "note", noteID, "--json"], vault: vault)
         let ownerList = try parseJSONObject(ownerListResult.stdout)
         #expect(ownerListResult.status == 0)

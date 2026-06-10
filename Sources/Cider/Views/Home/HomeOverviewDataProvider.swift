@@ -859,6 +859,7 @@ enum HomeOverviewDataProvider {
 
     private static func reviewKindLabel(_ kind: String) -> String {
         let normalized = kind.lowercased()
+        if normalized.contains("graph_candidate") { return "Graph Candidate" }
         if normalized.contains("routing") { return "Routing" }
         if normalized.contains("enrichment") { return "Enrichment" }
         if normalized.contains("duplicate") { return "Duplicate" }
@@ -887,6 +888,9 @@ enum HomeOverviewDataProvider {
     private static func reviewTargetLabel(for item: CiderReviewQueueItem) -> String? {
         if let target = item.target {
             return target.relativePath.isEmpty ? target.name : target.relativePath
+        }
+        if !item.possibleTypes.isEmpty {
+            return item.possibleTypes.joined(separator: ", ")
         }
         return item.relativePath
     }

@@ -344,6 +344,83 @@ struct CiderReviewQueueServiceTests {
         #expect(items.first { $0.itemID == inboxID }?.kind == "inbox_backlog")
     }
 
+    @Test("review queue surfaces graph candidates as source-backed triage items")
+    func reviewQueueSurfacesGraphCandidatesAsSourceBackedTriageItems() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Movie journal",
+            relativePath: "Journal/Movie journal.md"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "The Way Way Back",
+            sourceQuote: "Watched The Way Way Back tonight and loved the water park scene.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched],
+            actionGuesses: ["watched"],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.78,
+            confidenceReason: "The sentence explicitly says this was watched.",
+            source: "graph_candidate.test"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+
+        let queue = CiderReviewQueueService(database: db)
+        let result = try queue.list(kind: "graph_candidate")
+
+        #expect(result.command == "review.list")
+        #expect(result.items.count == 1)
+        let item = try #require(result.items.first)
+        #expect(item.kind == "graph_candidate")
+        #expect(item.source == "graph_candidate")
+        #expect(item.itemID == noteID)
+        #expect(item.itemType == "note")
+        #expect(item.title == "The Way Way Back")
+        #expect(item.reviewState == "suggested")
+        #expect(item.confidence == 0.78)
+        #expect(item.candidateID == output.id)
+        #expect(item.candidateRef == "graph_candidate:\(output.id)")
+        #expect(item.sourceQuote == "Watched The Way Way Back tonight and loved the water park scene.")
+        #expect(item.possibleTypes == ["movie", "media"])
+        #expect(item.possibleRelations == ["watched"])
+        #expect(item.candidateActions == ["watched"])
+        #expect(item.safeActions == ["inspect_source", "link_existing", "create_object", "correct", "reject", "delegate_enrichment"])
+        #expect(item.safeNextCommands.contains("cider-cli item graph-candidate \(output.id) --json"))
+        #expect(item.safeNextCommands.contains("cider-cli item context note \(noteID.uuidString) --json"))
+
+        let dictionary = item.toDictionary()
+        #expect(dictionary["candidateID"] as? String == output.id)
+        #expect(dictionary["sourceQuote"] as? String == output.evidence)
+        #expect(dictionary["possibleTypes"] as? [String] == ["movie", "media"])
+        #expect(dictionary["safeNextCommands"] as? [String] == item.safeNextCommands)
+
+        let summary = try queue.summary()
+        #expect(summary.countsByKind["graph_candidate"] == 1)
+        #expect(summary.countsBySafeAction["inspect_source"] == 1)
+        #expect(summary.groups.first?.id == "graph_candidate:suggested:inspect_source:note")
+
+        let worklist = try queue.captureReviewWorklist(limit: 10)
+        let worklistItem = try #require(worklist.items.first { $0.candidateID == output.id })
+        #expect(worklistItem.kind == "graph_candidate")
+        #expect(worklistItem.ownerType == "note")
+        #expect(worklistItem.ownerID == noteID.uuidString)
+        #expect(worklistItem.sourceQuote == output.evidence)
+        #expect(worklistItem.possibleTypes == ["movie", "media"])
+        #expect(worklistItem.confidence == 0.78)
+        #expect(worklistItem.safeNextCommands.contains("cider-cli item graph-candidate \(output.id) --json"))
+        let worklistDictionary = worklistItem.toDictionary()
+        #expect(worklistDictionary["needsReview"] as? Bool == true)
+        #expect(worklistDictionary["recommendedNextAction"] as? String == "review_graph_candidate")
+        #expect(worklistDictionary["candidateRef"] as? String == "graph_candidate:\(output.id)")
+        #expect(worklistDictionary["confidence"] as? Double == 0.78)
+    }
+
     @Test("review queue filters by kind and required safe action")
     func reviewQueueFiltersByKindAndRequiredSafeAction() throws {
         let (db, url) = try makeTempDB()

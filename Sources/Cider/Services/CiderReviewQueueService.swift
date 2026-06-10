@@ -67,6 +67,13 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var attachmentSummary: [String: String]?
     var createdAt: Date
     var safeNextCommands: [String]
+    var confidence: Double? = nil
+    var candidateID: String? = nil
+    var candidateRef: String? = nil
+    var sourceQuote: String? = nil
+    var possibleTypes: [String] = []
+    var possibleRelations: [String] = []
+    var candidateActions: [String] = []
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -108,6 +115,27 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
         if let attachmentSummary {
             dictionary["attachmentSummary"] = attachmentSummary
         }
+        if let confidence {
+            dictionary["confidence"] = confidence
+        }
+        if let candidateID {
+            dictionary["candidateID"] = candidateID
+        }
+        if let candidateRef {
+            dictionary["candidateRef"] = candidateRef
+        }
+        if let sourceQuote {
+            dictionary["sourceQuote"] = sourceQuote
+        }
+        if !possibleTypes.isEmpty {
+            dictionary["possibleTypes"] = possibleTypes
+        }
+        if !possibleRelations.isEmpty {
+            dictionary["possibleRelations"] = possibleRelations
+        }
+        if !candidateActions.isEmpty {
+            dictionary["candidateActions"] = candidateActions
+        }
         CiderAgentDecisionContract.merge(agentDecisionDictionary(), into: &dictionary)
         return dictionary
     }
@@ -121,15 +149,17 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     }
 
     private func agentDecisionDictionary() -> [String: Any] {
-        let needsReview = reviewState == "needs_review"
+        let needsReview = reviewState == "needs_review" || reviewState == "suggested"
         let needsRouting = kind == "low_confidence_routing"
             || reasonCodes.contains(where: { $0.hasPrefix("routing_") || $0 == "inbox_unrouted" })
             || routingState != nil
         let needsEnrichment = kind == "enrichment"
             || reasonCodes.contains(where: { $0.hasPrefix("enrichment_") })
             || enrichmentStatus == "needs_review"
-        let confidence = routingState?["confidence"].flatMap(Double.init)
-        let recommendedAction = needsReview ? "review_route" : "inspect_item"
+        let confidence = confidence ?? routingState?["confidence"].flatMap(Double.init)
+        let recommendedAction = kind == "graph_candidate"
+            ? "review_graph_candidate"
+            : (needsReview ? "review_route" : "inspect_item")
         return CiderAgentDecisionContract.dictionary(
             saved: true,
             needsReview: needsReview,
@@ -511,6 +541,13 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var target: CiderRoutingDecisionTarget?
     var createdAt: Date
     var safeActions: [String]
+    var candidateID: String? = nil
+    var candidateRef: String? = nil
+    var sourceQuote: String? = nil
+    var possibleTypes: [String] = []
+    var possibleRelations: [String] = []
+    var candidateActions: [String] = []
+    var safeNextCommands: [String] = []
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -539,6 +576,27 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         }
         if let target {
             dictionary["target"] = target.toDictionary()
+        }
+        if let candidateID {
+            dictionary["candidateID"] = candidateID
+        }
+        if let candidateRef {
+            dictionary["candidateRef"] = candidateRef
+        }
+        if let sourceQuote {
+            dictionary["sourceQuote"] = sourceQuote
+        }
+        if !possibleTypes.isEmpty {
+            dictionary["possibleTypes"] = possibleTypes
+        }
+        if !possibleRelations.isEmpty {
+            dictionary["possibleRelations"] = possibleRelations
+        }
+        if !candidateActions.isEmpty {
+            dictionary["candidateActions"] = candidateActions
+        }
+        if !safeNextCommands.isEmpty {
+            dictionary["safeNextCommands"] = safeNextCommands
         }
         return dictionary
     }
@@ -828,6 +886,11 @@ final class CiderReviewQueueService {
         }
 
         reviewItems.append(contentsOf: duplicateReviewItems(now: now))
+        reviewItems.append(contentsOf: try graphCandidateReviewItems(
+            in: db,
+            itemsByID: itemsByID,
+            includeDeferred: includeDeferred
+        ))
 
         let filtered = reviewItems.filter { item in
             if let kind, item.kind != kind { return false }
@@ -1736,6 +1799,76 @@ final class CiderReviewQueueService {
         )
     }
 
+    private func graphCandidateReviewItems(
+        in db: CiderDatabase,
+        itemsByID: [UUID: CiderRoutingItemSummary],
+        includeDeferred: Bool
+    ) throws -> [CiderReviewQueueItem] {
+        let states: Set<String> = includeDeferred
+            ? ["suggested", "needs_review", "deferred"]
+            : ["suggested", "needs_review"]
+        let outputs = try SecondBrainEnrichmentOutputService(database: db).outputs(
+            kind: SecondBrainGraphCandidateContract.outputKind,
+            reviewStates: states
+        )
+
+        return outputs.compactMap { output in
+            guard let sourceItemID = UUID(uuidString: output.owner.ownerID),
+                  let item = itemsByID[sourceItemID],
+                  let candidate = try? SecondBrainGraphCandidateContract.validate(output) else {
+                return nil
+            }
+            let possibleTypes = candidate.objectTypeGuesses.map(\.rawValue)
+            let possibleRelations = candidate.relationGuesses.map(\.rawValue)
+            let candidateActions = candidate.safeActions.map(\.rawValue)
+            let typeLabel = possibleTypes.isEmpty ? "object" : possibleTypes.joined(separator: ", ")
+            let relationLabel = possibleRelations.isEmpty ? nil : possibleRelations.joined(separator: ", ")
+            let reason = relationLabel.map {
+                "Review extracted \(typeLabel) candidate from source quote; possible relation: \($0)."
+            } ?? "Review extracted \(typeLabel) candidate from source quote."
+
+            return CiderReviewQueueItem(
+                id: "review-graph-candidate-\(output.id)",
+                kind: "graph_candidate",
+                source: "graph_candidate",
+                itemID: sourceItemID,
+                itemType: item.type,
+                title: candidate.mentionText,
+                relativePath: item.relativePath,
+                reason: reason,
+                reasonCodes: ["graph_candidate_review"],
+                suggestedAction: "Review graph candidate",
+                reviewState: output.reviewState,
+                confidence: candidate.confidence,
+                routingDecisionID: nil,
+                target: nil,
+                createdAt: output.createdAt,
+                safeActions: candidateActions.isEmpty
+                    ? ["inspect_source", "correct", "reject", "delegate_enrichment"]
+                    : candidateActions,
+                candidateID: output.id,
+                candidateRef: "graph_candidate:\(output.id)",
+                sourceQuote: candidate.sourceQuote,
+                possibleTypes: possibleTypes,
+                possibleRelations: possibleRelations,
+                candidateActions: candidate.actionGuesses,
+                safeNextCommands: graphCandidateSafeNextCommands(output: output, sourceItem: item)
+            )
+        }
+    }
+
+    private func graphCandidateSafeNextCommands(
+        output: SecondBrainEnrichmentOutput,
+        sourceItem: CiderRoutingItemSummary
+    ) -> [String] {
+        orderedUnique([
+            "cider-cli item graph-candidate \(output.id) --json",
+            "cider-cli item graph-candidates \(output.owner.ownerType) \(output.owner.ownerID) --json",
+            "cider-cli item context \(sourceItem.type) \(sourceItem.id.uuidString) --json",
+            "cider-cli capture review-queue --json",
+        ])
+    }
+
     private func enrichmentReasonCodes(status: String?, lastEnrichedAt: Date?) -> [String] {
         if status == "failed" || status == "error" {
             return ["enrichment_failed"]
@@ -1992,7 +2125,16 @@ final class CiderReviewQueueService {
             enrichmentStatus: item.kind == "enrichment" ? item.reviewState : nil,
             attachmentSummary: nil,
             createdAt: item.createdAt,
-            safeNextCommands: itemSafeInspectionCommands(type: item.itemType, id: item.itemID, title: item.title)
+            safeNextCommands: item.safeNextCommands.isEmpty
+                ? itemSafeInspectionCommands(type: item.itemType, id: item.itemID, title: item.title)
+                : item.safeNextCommands,
+            confidence: item.confidence,
+            candidateID: item.candidateID,
+            candidateRef: item.candidateRef,
+            sourceQuote: item.sourceQuote,
+            possibleTypes: item.possibleTypes,
+            possibleRelations: item.possibleRelations,
+            candidateActions: item.candidateActions
         )
     }
 
@@ -2221,16 +2363,18 @@ final class CiderReviewQueueService {
         switch item.kind {
         case "low_confidence_routing":
             return 0
-        case "enrichment":
+        case "graph_candidate":
             return 1
-        case "duplicate_candidate":
+        case "enrichment":
             return 2
-        case "inbox_backlog":
+        case "duplicate_candidate":
             return 3
-        case "deferred_routing":
+        case "inbox_backlog":
             return 4
-        default:
+        case "deferred_routing":
             return 5
+        default:
+            return 6
         }
     }
 
@@ -2320,6 +2464,8 @@ final class CiderReviewQueueService {
         switch item.kind {
         case "low_confidence_routing", "deferred_routing":
             return "routing_requires_explicit_approval"
+        case "graph_candidate":
+            return "graph_candidate_requires_review"
         case "inbox_backlog":
             return "manual_routing_required"
         case "duplicate_candidate":
@@ -2333,7 +2479,7 @@ final class CiderReviewQueueService {
     }
 
     private func primarySafeAction(for item: CiderReviewQueueItem) -> String {
-        for action in ["enrich", "approve", "correct", "defer"] where item.safeActions.contains(action) {
+        for action in ["enrich", "approve", "inspect_source", "correct", "defer"] where item.safeActions.contains(action) {
             return action
         }
         return item.safeActions.first ?? "none"
@@ -2343,16 +2489,18 @@ final class CiderReviewQueueService {
         switch group.kind {
         case "low_confidence_routing":
             return 0
+        case "graph_candidate":
+            return 1
         case "enrichment":
-            return group.reviewState == "needs_review" ? 1 : 2
+            return group.reviewState == "needs_review" ? 2 : 3
         case "duplicate_candidate":
-            return 3
-        case "inbox_backlog":
             return 4
-        case "deferred_routing":
+        case "inbox_backlog":
             return 5
-        default:
+        case "deferred_routing":
             return 6
+        default:
+            return 7
         }
     }
 
