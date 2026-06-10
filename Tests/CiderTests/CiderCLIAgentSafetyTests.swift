@@ -1906,13 +1906,14 @@ struct CiderCLIAgentSafetyTests {
                 && action["status"] as? String == "available"
         })
 
-        let reviewQueueResult = try runCLI(args: ["capture", "review-queue", "--json"], vault: vault)
+        let reviewQueueResult = try runCLI(args: ["capture", "review-queue", "--kind", "graph_candidate", "--json"], vault: vault)
         let reviewQueue = try parseJSONObject(reviewQueueResult.stdout)
         #expect(reviewQueueResult.status == 0)
         #expect(reviewQueue["command"] as? String == "capture.review-queue")
         #expect(reviewQueue["readOnly"] as? Bool == true)
         #expect(reviewQueue["changed"] as? Bool == false)
         let reviewItems = try #require(reviewQueue["items"] as? [[String: Any]])
+        #expect(reviewItems.allSatisfy { $0["kind"] as? String == "graph_candidate" })
         let reviewItem = try #require(reviewItems.first { $0["candidateID"] as? String == output.id })
         #expect(reviewItem["kind"] as? String == "graph_candidate")
         #expect(reviewItem["reviewState"] as? String == "suggested")

@@ -1551,7 +1551,11 @@ struct CiderCLI {
             do {
                 let result = try CiderReviewQueueService().captureReviewWorklist(
                     limit: parseFlag("--limit", from: args).flatMap(Int.init) ?? 50,
-                    includeDeferred: args.contains("--include-deferred")
+                    includeDeferred: args.contains("--include-deferred"),
+                    kind: parseFlag("--kind", from: args),
+                    itemType: parseFlag("--item-type", from: args),
+                    reviewState: parseFlag("--state", from: args),
+                    requiredSafeAction: parseFlag("--safe-action", from: args)
                 )
                 if jsonOutput {
                     outputJSON(result.toDictionary())

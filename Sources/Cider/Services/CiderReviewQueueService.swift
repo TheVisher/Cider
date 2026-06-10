@@ -945,14 +945,30 @@ final class CiderReviewQueueService {
     func captureReviewWorklist(
         limit: Int = 50,
         includeDeferred: Bool = false,
+        kind: String? = nil,
+        itemType: String? = nil,
+        reviewState: String? = nil,
+        requiredSafeAction: String? = nil,
         now: Date = Date()
     ) throws -> CiderCaptureReviewWorklistResult {
         guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
         let cappedLimit = max(0, limit)
-        let reviewItems = try list(limit: Int.max, includeDeferred: includeDeferred, now: now).items
+        let reviewItems = try list(
+            limit: Int.max,
+            includeDeferred: includeDeferred,
+            kind: kind,
+            itemType: itemType,
+            reviewState: reviewState,
+            requiredSafeAction: requiredSafeAction,
+            now: now
+        ).items
             .map(captureWorklistItem(from:))
-        let captureItems = try unsupportedAttachmentWorklistItems(in: db, now: now)
-        let indexingItems = try indexingWorklistItems(in: db, now: now)
+        let includeCaptureDiagnostics = kind == nil
+            && itemType == nil
+            && reviewState == nil
+            && requiredSafeAction == nil
+        let captureItems = includeCaptureDiagnostics ? try unsupportedAttachmentWorklistItems(in: db, now: now) : []
+        let indexingItems = includeCaptureDiagnostics ? try indexingWorklistItems(in: db, now: now) : []
         let allItems = (reviewItems + captureItems + indexingItems).sorted { lhs, rhs in
             if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
             if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
