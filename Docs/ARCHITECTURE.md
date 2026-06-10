@@ -42,6 +42,8 @@ The second-brain foundation lives in SQLite services, not in Markdown convention
 
 Spaces are product surfaces over shared state. They may have domain-specific dashboards and routing hints, but they should not become independent data silos or parallel memory systems.
 
+Graph-native second-brain work should use the shared `graph_candidate` contract before creating feature-specific models. Extractors write reviewable `enrichment_outputs(kind: graph_candidate)` rows with source quotes and typed guesses. Review, CLI, and UI surfaces inspect those candidates. Only explicit accept paths create accepted object owners or `owner_relations`; reject/defer/correct paths should change review state or metadata without creating graph truth.
+
 ## Agent Boundary
 
 Cider owns the native UI, local memory state, vault artifacts, stable logical chat identity, commands, mirrored display history, and user-facing approval surfaces. Hermes or another runtime owns long-running agent execution, tool semantics, runtime session truth, and external session continuity.
