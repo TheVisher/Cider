@@ -4721,6 +4721,8 @@ struct CiderCLI {
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
               cider-cli item capability-map [--json]
               cider-cli item graph-health [--json]
+              cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
+              cider-cli item graph-candidate <candidate-id> [--json]
               cider-cli item related <type> <id-or-ref> [--json]
               cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
               cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
@@ -5068,6 +5070,9 @@ struct CiderCLI {
             } catch {
                 printCLIError(error.localizedDescription)
             }
+
+        case "graph-candidates", "graph-candidate", "graph-candidate-inspect":
+            handleGraphCandidateReadCommand(subcommand: subcommand ?? "graph-candidates", args: args)
 
         case "why-surfaced", "why":
             let positional = leadingPositionalArgs(from: args)
@@ -14803,6 +14808,261 @@ struct CiderCLI {
         commands.append("cider-cli item owner-get \(owner.ownerType) \(owner.ownerID) --json")
         var seen = Set<String>()
         return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func handleGraphCandidateReadCommand(subcommand: String, args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let explicitID = parseFlag("--id", from: args) ?? parseFlag("--candidate", from: args)
+        let wantsSingle = subcommand != "graph-candidates" || explicitID != nil || positional.count == 1
+
+        do {
+            if wantsSingle {
+                guard let candidateID = explicitID ?? positional.first else {
+                    printCLIError("Usage: cider-cli item graph-candidate <candidate-id> [--json]")
+                    return
+                }
+                guard let output = try service.output(id: candidateID),
+                      output.kind == SecondBrainGraphCandidateContract.outputKind else {
+                    printGraphCandidateNotFound(candidateID)
+                    return
+                }
+                printGraphCandidateInspect(output)
+                return
+            }
+
+            let owner: SecondBrainOwnerRef?
+            if positional.isEmpty {
+                owner = nil
+            } else if positional.count >= 2 {
+                owner = normalizedOwner(type: positional[0], ref: positional[1])
+            } else {
+                owner = nil
+            }
+
+            let includeReviewed = args.contains("--include-reviewed")
+            let limit = boundedGraphCandidateLimit(from: args)
+            let states: Set<String>? = includeReviewed ? nil : ["suggested", "needs_review", "deferred"]
+            var outputs = try service.outputs(
+                kind: SecondBrainGraphCandidateContract.outputKind,
+                reviewStates: states,
+                limit: owner == nil ? limit : nil
+            )
+            if let owner {
+                outputs = Array(outputs.filter { $0.owner == owner }.prefix(limit))
+            }
+            printGraphCandidateList(outputs, owner: owner, includeReviewed: includeReviewed, limit: limit)
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func boundedGraphCandidateLimit(from args: [String]) -> Int {
+        let rawLimit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+        return min(max(rawLimit, 0), 100)
+    }
+
+    static func printGraphCandidateNotFound(_ candidateID: String) {
+        processExitCode = 1
+        let payload: [String: Any] = [
+            "ok": false,
+            "command": "item.graph-candidate",
+            "readOnly": true,
+            "changed": false,
+            "exists": false,
+            "candidateID": candidateID,
+            "error": "Graph candidate '\(candidateID)' was not found.",
+            "safeNextCommands": [
+                "cider-cli item graph-candidates --json",
+            ],
+        ]
+        if jsonOutput {
+            outputJSON(payload)
+        } else {
+            print("Graph candidate not found: \(candidateID)")
+        }
+    }
+
+    static func printGraphCandidateInspect(_ output: SecondBrainEnrichmentOutput) {
+        let safeCommands = graphCandidateSafeCommands(for: output, includeSelfInspect: false)
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "command": "item.graph-candidate",
+                "readOnly": true,
+                "changed": false,
+                "exists": true,
+                "candidate": graphCandidateToDict(output),
+                "safeNextCommands": safeCommands,
+                "safeCommands": safeCommands,
+            ])
+            return
+        }
+
+        let candidate = try? SecondBrainGraphCandidateContract.validate(output)
+        print("Graph candidate: \(output.id)")
+        print("  Owner: \(output.owner.canonicalRef)")
+        print("  State: \(output.reviewState)")
+        print("  Mention: \(candidate?.mentionText ?? output.value)")
+        print("  Quote: \(candidate?.sourceQuote ?? output.evidence)")
+        if !safeCommands.isEmpty {
+            print("  Safe commands:")
+            safeCommands.forEach { print("    \($0)") }
+        }
+    }
+
+    static func printGraphCandidateList(
+        _ outputs: [SecondBrainEnrichmentOutput],
+        owner: SecondBrainOwnerRef?,
+        includeReviewed: Bool,
+        limit: Int
+    ) {
+        let safeCommands = graphCandidateListSafeCommands(owner: owner)
+        if jsonOutput {
+            var payload: [String: Any] = [
+                "ok": true,
+                "command": "item.graph-candidates",
+                "readOnly": true,
+                "changed": false,
+                "count": outputs.count,
+                "limit": limit,
+                "includeReviewed": includeReviewed,
+                "candidates": outputs.map(graphCandidateToDict),
+                "safeNextCommands": safeCommands,
+                "safeCommands": safeCommands,
+            ]
+            if let owner {
+                payload["owner"] = ownerToDict(owner)
+            }
+            outputJSON(payload)
+            return
+        }
+
+        if outputs.isEmpty {
+            if let owner {
+                print("No graph candidates for \(owner.canonicalRef).")
+            } else {
+                print("No graph candidates.")
+            }
+            return
+        }
+        print("Graph candidates (\(outputs.count)):")
+        for output in outputs {
+            let candidate = try? SecondBrainGraphCandidateContract.validate(output)
+            print("  [\(output.id)] \(output.reviewState) \(candidate?.mentionText ?? output.value) - \(output.owner.canonicalRef)")
+        }
+    }
+
+    static func graphCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": output.id,
+            "ref": "graph_candidate:\(output.id)",
+            "owner": ownerToDict(output.owner),
+            "sourceOwner": ownerToDict(output.owner),
+            "kind": output.kind,
+            "mentionText": output.value,
+            "sourceQuote": output.evidence,
+            "label": output.label,
+            "source": output.source,
+            "reviewState": output.reviewState,
+            "metadata": output.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: output.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: output.updatedAt),
+            "safeNextCommands": graphCandidateSafeCommands(for: output),
+            "reviewActionCommands": graphCandidateReviewActionCommands(for: output),
+        ]
+        if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
+        if let confidence = output.confidence { dict["confidence"] = confidence }
+
+        do {
+            let candidate = try SecondBrainGraphCandidateContract.validate(output)
+            dict["contractValid"] = true
+            dict["candidateKind"] = candidate.kind.rawValue
+            dict["mentionText"] = candidate.mentionText
+            dict["sourceQuote"] = candidate.sourceQuote
+            dict["reviewable"] = candidate.reviewState.isReviewable
+            dict["objectTypeGuesses"] = candidate.objectTypeGuesses.map(\.rawValue)
+            dict["relationGuesses"] = candidate.relationGuesses.map(\.rawValue)
+            dict["actionGuesses"] = candidate.actionGuesses
+            dict["safeActions"] = candidate.safeActions.map(\.rawValue)
+            if let sourceKind = candidate.sourceKind { dict["sourceKind"] = sourceKind }
+            if let confidenceReason = candidate.confidenceReason { dict["confidenceReason"] = confidenceReason }
+            if let subjectText = candidate.subjectText { dict["subjectText"] = subjectText }
+            if let subjectOwner = candidate.subjectOwner { dict["subjectOwner"] = ownerToDict(subjectOwner) }
+            if let acceptedTargetOwner = candidate.acceptedTargetOwner { dict["acceptedTargetOwner"] = ownerToDict(acceptedTargetOwner) }
+            if let acceptedRelationType = candidate.acceptedRelationType { dict["acceptedRelationType"] = acceptedRelationType.rawValue }
+        } catch {
+            dict["contractValid"] = false
+            dict["contractError"] = error.localizedDescription
+            dict["reviewable"] = ["suggested", "needs_review", "deferred"].contains(output.reviewState)
+            dict["objectTypeGuesses"] = DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses])
+            dict["relationGuesses"] = DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses])
+            dict["actionGuesses"] = DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.actionGuesses])
+            dict["safeActions"] = DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.safeActions])
+        }
+
+        return dict
+    }
+
+    static func graphCandidateSafeCommands(
+        for output: SecondBrainEnrichmentOutput,
+        includeSelfInspect: Bool = true
+    ) -> [String] {
+        var commands: [String] = []
+        if includeSelfInspect {
+            commands.append("cider-cli item graph-candidate \(output.id) --json")
+        }
+        commands.append(contextCommand(for: output.owner))
+        commands.append("cider-cli item graph-candidates \(output.owner.ownerType) \(output.owner.ownerID) --json")
+        commands.append("cider-cli capture review-queue --json")
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func graphCandidateListSafeCommands(owner: SecondBrainOwnerRef?) -> [String] {
+        var commands = ["cider-cli item graph-candidates --json"]
+        if let owner {
+            commands.insert(contextCommand(for: owner), at: 0)
+        }
+        commands.append("cider-cli capture review-queue --json")
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func graphCandidateReviewActionCommands(for output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
+        [
+            [
+                "action": "accept",
+                "command": "cider-cli item accept-graph-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": "planned_cid_489",
+            ],
+            [
+                "action": "reject",
+                "command": "cider-cli item reject-graph-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": "planned_cid_489",
+            ],
+            [
+                "action": "delegate",
+                "command": "cider-cli item delegate-graph-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": "planned_cid_489",
+            ],
+        ]
+    }
+
+    static func contextCommand(for owner: SecondBrainOwnerRef) -> String {
+        switch owner.ownerType {
+        case "bookmark", "note", "dateCard", "contact", "todo", "vaultFile":
+            return "cider-cli item context \(owner.ownerType) \(owner.ownerID) --json"
+        case "kanban_card":
+            return "cider-cli item context card \(owner.ownerID) --json"
+        case "project":
+            return "cider-cli item project-context \(owner.ownerID) --json"
+        default:
+            return "cider-cli item owner-get \(owner.ownerType) \(owner.ownerID) --json"
+        }
     }
 
     static func handleItemDelete(

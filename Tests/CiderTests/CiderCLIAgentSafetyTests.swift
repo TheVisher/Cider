@@ -1831,6 +1831,113 @@ struct CiderCLIAgentSafetyTests {
         #expect(blockingIssues.contains("relation_candidates_need_review"))
     }
 
+    @Test("item graph candidates exposes read-only list and inspect JSON")
+    func itemGraphCandidatesExposesReadOnlyListAndInspectJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-graph-candidates-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Graph Candidate Source",
+            content: "I gave Jami that pineapple coconut drink and she loved it.",
+            vault: vault
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "pineapple coconut drink",
+            sourceQuote: "I gave Jami that pineapple coconut drink and she loved it.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            relationGuesses: [.likesDrink],
+            actionGuesses: ["liked"],
+            safeActions: [.inspectSource, .accept, .correct, .reject, .delegateEnrichment],
+            confidence: 0.88,
+            confidenceReason: "Sentence explicitly says Jami loved the drink.",
+            subjectText: "Jami",
+            source: "graph_candidate.test"
+        )
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+        db.close()
+
+        let listResult = try runCLI(args: ["item", "graph-candidates", "--json"], vault: vault)
+        let list = try parseJSONObject(listResult.stdout)
+        #expect(listResult.status == 0)
+        #expect(list["ok"] as? Bool == true)
+        #expect(list["command"] as? String == "item.graph-candidates")
+        #expect(list["readOnly"] as? Bool == true)
+        #expect(list["changed"] as? Bool == false)
+        #expect(list["count"] as? Int == 1)
+        #expect(list["limit"] as? Int == 20)
+
+        let candidates = try #require(list["candidates"] as? [[String: Any]])
+        let candidate = try #require(candidates.first)
+        #expect(candidate["id"] as? String == output.id)
+        #expect(candidate["ref"] as? String == "graph_candidate:\(output.id)")
+        #expect(candidate["contractValid"] as? Bool == true)
+        #expect(candidate["candidateKind"] as? String == "object_relation")
+        #expect(candidate["mentionText"] as? String == "pineapple coconut drink")
+        #expect(candidate["sourceQuote"] as? String == "I gave Jami that pineapple coconut drink and she loved it.")
+        #expect(candidate["sourceKind"] as? String == "journal")
+        #expect(candidate["reviewState"] as? String == "suggested")
+        #expect(candidate["reviewable"] as? Bool == true)
+        #expect(candidate["objectTypeGuesses"] as? [String] == ["drink"])
+        #expect(candidate["relationGuesses"] as? [String] == ["likes_drink"])
+        #expect(candidate["actionGuesses"] as? [String] == ["liked"])
+        #expect(candidate["safeActions"] as? [String] == ["inspect_source", "accept", "correct", "reject", "delegate_enrichment"])
+        #expect(candidate["subjectText"] as? String == "Jami")
+        #expect(candidate["confidenceReason"] as? String == "Sentence explicitly says Jami loved the drink.")
+
+        let safeNextCommands = try #require(candidate["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item graph-candidate \(output.id) --json"))
+        #expect(safeNextCommands.contains("cider-cli item context note \(noteID) --json"))
+        #expect(safeNextCommands.contains("cider-cli item graph-candidates note \(noteID) --json"))
+        #expect(!safeNextCommands.contains { $0.contains("accept-graph-candidate") })
+
+        let reviewActionCommands = try #require(candidate["reviewActionCommands"] as? [[String: Any]])
+        #expect(reviewActionCommands.contains { action in
+            action["action"] as? String == "accept"
+                && action["readOnly"] as? Bool == false
+                && action["status"] as? String == "planned_cid_489"
+        })
+
+        let ownerListResult = try runCLI(args: ["item", "graph-candidates", "note", noteID, "--json"], vault: vault)
+        let ownerList = try parseJSONObject(ownerListResult.stdout)
+        #expect(ownerListResult.status == 0)
+        #expect(ownerList["readOnly"] as? Bool == true)
+        #expect(ownerList["changed"] as? Bool == false)
+        #expect(ownerList["count"] as? Int == 1)
+        let ownerPayload = try #require(ownerList["owner"] as? [String: Any])
+        #expect(ownerPayload["ownerType"] as? String == "note")
+        #expect(ownerPayload["ownerID"] as? String == noteID)
+
+        let cappedListResult = try runCLI(args: ["item", "graph-candidates", "--limit", "0", "--json"], vault: vault)
+        let cappedList = try parseJSONObject(cappedListResult.stdout)
+        #expect(cappedListResult.status == 0)
+        #expect(cappedList["count"] as? Int == 0)
+        #expect(cappedList["limit"] as? Int == 0)
+        let cappedCandidates = try #require(cappedList["candidates"] as? [[String: Any]])
+        #expect(cappedCandidates.isEmpty)
+
+        let inspectResult = try runCLI(args: ["item", "graph-candidate", output.id, "--json"], vault: vault)
+        let inspect = try parseJSONObject(inspectResult.stdout)
+        #expect(inspectResult.status == 0)
+        #expect(inspect["ok"] as? Bool == true)
+        #expect(inspect["command"] as? String == "item.graph-candidate")
+        #expect(inspect["readOnly"] as? Bool == true)
+        #expect(inspect["changed"] as? Bool == false)
+        let inspected = try #require(inspect["candidate"] as? [String: Any])
+        #expect(inspected["id"] as? String == output.id)
+        let inspectSafeCommands = try #require(inspect["safeNextCommands"] as? [String])
+        #expect(!inspectSafeCommands.contains("cider-cli item graph-candidate \(output.id) --json"))
+        #expect(inspectSafeCommands.contains("cider-cli item context note \(noteID) --json"))
+    }
+
     @Test("read-only folder filters do not adopt untracked disk folders")
     func readOnlyFolderFiltersDoNotAdoptUntrackedDiskFolders() throws {
         let vault = FileManager.default.temporaryDirectory
