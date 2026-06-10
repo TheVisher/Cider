@@ -3163,6 +3163,23 @@ struct CiderCLIAgentSafetyTests {
         #expect(context["needsReview"] as? Bool == true)
         let blockingIssues = try #require(context["blockingIssues"] as? [String])
         #expect(blockingIssues.contains("memory_candidates_need_review"))
+
+        let reviewQueueResult = try runCLI(args: ["capture", "review-queue", "--kind", "memory_candidate", "--json"], vault: vault)
+        let reviewQueue = try parseJSONObject(reviewQueueResult.stdout)
+        #expect(reviewQueueResult.status == 0)
+        #expect(reviewQueue["command"] as? String == "capture.review-queue")
+        #expect(reviewQueue["readOnly"] as? Bool == true)
+        #expect(reviewQueue["changed"] as? Bool == false)
+        let reviewItems = try #require(reviewQueue["items"] as? [[String: Any]])
+        #expect(reviewItems.allSatisfy { $0["kind"] as? String == "memory_candidate" })
+        let reviewItem = try #require(reviewItems.first { $0["candidateID"] as? String == candidate["id"] as? String })
+        #expect(reviewItem["sourceQuote"] as? String == "Journal note says Alex prefers late coffee catch-ups.")
+        #expect(reviewItem["memoryKind"] as? String == "relationship_context")
+        #expect(reviewItem["linkedOwnerRefs"] as? [String] == ["contact:alex", "project:cider"])
+        #expect(reviewItem["recommendedNextAction"] as? String == "review_memory_candidate")
+        let reviewSafeNext = try #require(reviewItem["safeNextCommands"] as? [String])
+        #expect(reviewSafeNext.contains("cider-cli item context note \(noteID) --json"))
+        #expect(!reviewSafeNext.contains { $0.contains("accept") || $0.contains("promote") })
     }
 
     @Test("media identify json separates read-only review from mutating apply")

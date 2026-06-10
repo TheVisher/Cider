@@ -74,6 +74,11 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var possibleTypes: [String] = []
     var possibleRelations: [String] = []
     var candidateActions: [String] = []
+    var memoryKind: String? = nil
+    var linkedOwnerRefs: [String] = []
+    var observedDate: String? = nil
+    var memoryKey: String? = nil
+    var memoryStatus: String? = nil
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -136,6 +141,21 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
         if !candidateActions.isEmpty {
             dictionary["candidateActions"] = candidateActions
         }
+        if let memoryKind {
+            dictionary["memoryKind"] = memoryKind
+        }
+        if !linkedOwnerRefs.isEmpty {
+            dictionary["linkedOwnerRefs"] = linkedOwnerRefs
+        }
+        if let observedDate {
+            dictionary["observedDate"] = observedDate
+        }
+        if let memoryKey {
+            dictionary["memoryKey"] = memoryKey
+        }
+        if let memoryStatus {
+            dictionary["memoryStatus"] = memoryStatus
+        }
         CiderAgentDecisionContract.merge(agentDecisionDictionary(), into: &dictionary)
         return dictionary
     }
@@ -157,9 +177,15 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
             || reasonCodes.contains(where: { $0.hasPrefix("enrichment_") })
             || enrichmentStatus == "needs_review"
         let confidence = confidence ?? routingState?["confidence"].flatMap(Double.init)
-        let recommendedAction = kind == "graph_candidate"
-            ? "review_graph_candidate"
-            : (needsReview ? "review_route" : "inspect_item")
+        let recommendedAction: String
+        switch kind {
+        case "graph_candidate":
+            recommendedAction = "review_graph_candidate"
+        case "memory_candidate":
+            recommendedAction = "review_memory_candidate"
+        default:
+            recommendedAction = needsReview ? "review_route" : "inspect_item"
+        }
         return CiderAgentDecisionContract.dictionary(
             saved: true,
             needsReview: needsReview,
@@ -547,6 +573,11 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var possibleTypes: [String] = []
     var possibleRelations: [String] = []
     var candidateActions: [String] = []
+    var memoryKind: String? = nil
+    var linkedOwnerRefs: [String] = []
+    var observedDate: String? = nil
+    var memoryKey: String? = nil
+    var memoryStatus: String? = nil
     var safeNextCommands: [String] = []
 
     func toDictionary() -> [String: Any] {
@@ -594,6 +625,21 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         }
         if !candidateActions.isEmpty {
             dictionary["candidateActions"] = candidateActions
+        }
+        if let memoryKind {
+            dictionary["memoryKind"] = memoryKind
+        }
+        if !linkedOwnerRefs.isEmpty {
+            dictionary["linkedOwnerRefs"] = linkedOwnerRefs
+        }
+        if let observedDate {
+            dictionary["observedDate"] = observedDate
+        }
+        if let memoryKey {
+            dictionary["memoryKey"] = memoryKey
+        }
+        if let memoryStatus {
+            dictionary["memoryStatus"] = memoryStatus
         }
         if !safeNextCommands.isEmpty {
             dictionary["safeNextCommands"] = safeNextCommands
@@ -887,6 +933,11 @@ final class CiderReviewQueueService {
 
         reviewItems.append(contentsOf: duplicateReviewItems(now: now))
         reviewItems.append(contentsOf: try graphCandidateReviewItems(
+            in: db,
+            itemsByID: itemsByID,
+            includeDeferred: includeDeferred
+        ))
+        reviewItems.append(contentsOf: try memoryCandidateReviewItems(
             in: db,
             itemsByID: itemsByID,
             includeDeferred: includeDeferred
@@ -1885,6 +1936,70 @@ final class CiderReviewQueueService {
         ])
     }
 
+    private func memoryCandidateReviewItems(
+        in db: CiderDatabase,
+        itemsByID: [UUID: CiderRoutingItemSummary],
+        includeDeferred: Bool
+    ) throws -> [CiderReviewQueueItem] {
+        let states: Set<String> = includeDeferred
+            ? ["suggested", "needs_review", "deferred"]
+            : ["suggested", "needs_review"]
+        let outputs = try SecondBrainEnrichmentOutputService(database: db).outputs(
+            kind: "memory_candidate",
+            reviewStates: states
+        )
+
+        return outputs.compactMap { output in
+            guard let sourceItemID = UUID(uuidString: output.owner.ownerID),
+                  let item = itemsByID[sourceItemID] else {
+                return nil
+            }
+            let memoryKind = output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? "memory"
+            let linkedOwnerRefs = DatabaseHelpers.decodeStringArray(output.metadata["linked_owner_refs"])
+            let reason = "Review source-backed \(memoryKind.replacingOccurrences(of: "_", with: " ")) memory candidate before promotion."
+
+            return CiderReviewQueueItem(
+                id: "review-memory-candidate-\(output.id)",
+                kind: "memory_candidate",
+                source: "memory_candidate",
+                itemID: sourceItemID,
+                itemType: item.type,
+                title: output.value,
+                relativePath: item.relativePath,
+                reason: reason,
+                reasonCodes: ["memory_candidate_review"],
+                suggestedAction: "Review memory candidate",
+                reviewState: output.reviewState,
+                confidence: output.confidence,
+                routingDecisionID: nil,
+                target: nil,
+                createdAt: output.createdAt,
+                safeActions: ["inspect_source", "manual_review"],
+                candidateID: output.id,
+                candidateRef: "memory_candidate:\(output.id)",
+                sourceQuote: output.evidence,
+                memoryKind: memoryKind,
+                linkedOwnerRefs: linkedOwnerRefs,
+                observedDate: output.metadata["observed_date"],
+                memoryKey: output.metadata["memory_key"],
+                memoryStatus: output.metadata["memory_status"],
+                safeNextCommands: memoryCandidateSafeNextCommands(output: output, sourceItem: item)
+            )
+        }
+    }
+
+    private func memoryCandidateSafeNextCommands(
+        output: SecondBrainEnrichmentOutput,
+        sourceItem: CiderRoutingItemSummary
+    ) -> [String] {
+        orderedUnique([
+            "cider-cli item context \(sourceItem.type) \(sourceItem.id.uuidString) --json",
+            "cider-cli item get \(sourceItem.type) \(sourceItem.id.uuidString) --json",
+            "cider-cli capture review-queue --kind memory_candidate --json",
+            "cider-cli capture review-queue --json",
+        ])
+    }
+
     private func enrichmentReasonCodes(status: String?, lastEnrichedAt: Date?) -> [String] {
         if status == "failed" || status == "error" {
             return ["enrichment_failed"]
@@ -2150,7 +2265,12 @@ final class CiderReviewQueueService {
             sourceQuote: item.sourceQuote,
             possibleTypes: item.possibleTypes,
             possibleRelations: item.possibleRelations,
-            candidateActions: item.candidateActions
+            candidateActions: item.candidateActions,
+            memoryKind: item.memoryKind,
+            linkedOwnerRefs: item.linkedOwnerRefs,
+            observedDate: item.observedDate,
+            memoryKey: item.memoryKey,
+            memoryStatus: item.memoryStatus
         )
     }
 
@@ -2381,16 +2501,18 @@ final class CiderReviewQueueService {
             return 0
         case "graph_candidate":
             return 1
-        case "enrichment":
+        case "memory_candidate":
             return 2
-        case "duplicate_candidate":
+        case "enrichment":
             return 3
-        case "inbox_backlog":
+        case "duplicate_candidate":
             return 4
-        case "deferred_routing":
+        case "inbox_backlog":
             return 5
-        default:
+        case "deferred_routing":
             return 6
+        default:
+            return 7
         }
     }
 
@@ -2482,6 +2604,8 @@ final class CiderReviewQueueService {
             return "routing_requires_explicit_approval"
         case "graph_candidate":
             return "graph_candidate_requires_review"
+        case "memory_candidate":
+            return "memory_candidate_requires_review"
         case "inbox_backlog":
             return "manual_routing_required"
         case "duplicate_candidate":
@@ -2507,16 +2631,18 @@ final class CiderReviewQueueService {
             return 0
         case "graph_candidate":
             return 1
+        case "memory_candidate":
+            return 2
         case "enrichment":
-            return group.reviewState == "needs_review" ? 2 : 3
+            return group.reviewState == "needs_review" ? 3 : 4
         case "duplicate_candidate":
-            return 4
-        case "inbox_backlog":
             return 5
-        case "deferred_routing":
+        case "inbox_backlog":
             return 6
-        default:
+        case "deferred_routing":
             return 7
+        default:
+            return 8
         }
     }
 

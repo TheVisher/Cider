@@ -421,6 +421,86 @@ struct CiderReviewQueueServiceTests {
         #expect(worklistDictionary["confidence"] as? Double == 0.78)
     }
 
+    @Test("review queue surfaces memory candidates as source-backed triage items")
+    func reviewQueueSurfacesMemoryCandidatesAsSourceBackedTriageItems() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Alex context",
+            relativePath: "Daily/2026-06-10.md"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let result = try SecondBrainMemoryCandidateService(database: db).suggest(
+            owner: owner,
+            requestedOwnerType: "note",
+            requestedOwnerRef: noteID.uuidString,
+            kind: "relationship_context",
+            value: "Alex prefers late coffee catch-ups.",
+            evidence: "Journal note says Alex prefers late coffee catch-ups.",
+            source: "test",
+            confidence: 0.83,
+            linkedOwners: [
+                SecondBrainOwnerRef(ownerType: "contact", ownerID: "alex"),
+                SecondBrainOwnerRef(ownerType: "project", ownerID: "cider"),
+            ],
+            observedDate: "2026-06-10",
+            memoryKey: "alex-coffee-catchups",
+            memoryStatus: "current"
+        )
+
+        let queue = CiderReviewQueueService(database: db)
+        let resultList = try queue.list(kind: "memory_candidate")
+
+        #expect(resultList.command == "review.list")
+        #expect(resultList.items.count == 1)
+        let item = try #require(resultList.items.first)
+        #expect(item.kind == "memory_candidate")
+        #expect(item.source == "memory_candidate")
+        #expect(item.itemID == noteID)
+        #expect(item.itemType == "note")
+        #expect(item.title == "Alex prefers late coffee catch-ups.")
+        #expect(item.reviewState == "suggested")
+        #expect(item.confidence == 0.83)
+        #expect(item.candidateID == result.candidate.id)
+        #expect(item.candidateRef == "memory_candidate:\(result.candidate.id)")
+        #expect(item.sourceQuote == "Journal note says Alex prefers late coffee catch-ups.")
+        #expect(item.memoryKind == "relationship_context")
+        #expect(item.linkedOwnerRefs == ["contact:alex", "project:cider"])
+        #expect(item.observedDate == "2026-06-10")
+        #expect(item.memoryKey == "alex-coffee-catchups")
+        #expect(item.memoryStatus == "current")
+        #expect(item.safeActions == ["inspect_source", "manual_review"])
+        #expect(item.safeNextCommands.contains("cider-cli item context note \(noteID.uuidString) --json"))
+        #expect(!item.safeNextCommands.contains { $0.contains("accept") || $0.contains("promote") })
+
+        let dictionary = item.toDictionary()
+        #expect(dictionary["candidateRef"] as? String == "memory_candidate:\(result.candidate.id)")
+        #expect(dictionary["memoryKind"] as? String == "relationship_context")
+        #expect(dictionary["linkedOwnerRefs"] as? [String] == ["contact:alex", "project:cider"])
+        #expect(dictionary["sourceQuote"] as? String == result.candidate.evidence)
+
+        let summary = try queue.summary()
+        #expect(summary.countsByKind["memory_candidate"] == 1)
+        #expect(summary.countsBySafeAction["inspect_source"] == 1)
+        #expect(summary.groups.first?.id == "memory_candidate:suggested:inspect_source:note")
+
+        let worklist = try queue.captureReviewWorklist(limit: 10, kind: "memory_candidate")
+        let worklistItem = try #require(worklist.items.first { $0.candidateID == result.candidate.id })
+        #expect(worklistItem.kind == "memory_candidate")
+        #expect(worklistItem.ownerType == "note")
+        #expect(worklistItem.ownerID == noteID.uuidString)
+        #expect(worklistItem.sourceQuote == result.candidate.evidence)
+        #expect(worklistItem.memoryKind == "relationship_context")
+        #expect(worklistItem.linkedOwnerRefs == ["contact:alex", "project:cider"])
+        let worklistDictionary = worklistItem.toDictionary()
+        #expect(worklistDictionary["needsReview"] as? Bool == true)
+        #expect(worklistDictionary["recommendedNextAction"] as? String == "review_memory_candidate")
+        #expect(worklistDictionary["candidateRef"] as? String == "memory_candidate:\(result.candidate.id)")
+        #expect(worklistDictionary["linkedOwnerRefs"] as? [String] == ["contact:alex", "project:cider"])
+    }
+
     @Test("review queue filters by kind and required safe action")
     func reviewQueueFiltersByKindAndRequiredSafeAction() throws {
         let (db, url) = try makeTempDB()
