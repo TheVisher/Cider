@@ -170,6 +170,58 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
     let canDefer: Bool
     let safeActions: [String]
     let dateSuggestionApproval: HomeReviewCockpitDateSuggestionApproval?
+    let candidateRef: String?
+    let sourceQuote: String?
+    let memoryKind: String?
+    let linkedOwnerRefs: [String]
+
+    init(
+        id: String,
+        sourceReviewID: String,
+        itemID: UUID,
+        itemType: String,
+        item: LibraryItemV2?,
+        title: String,
+        kindLabel: String,
+        reason: String,
+        suggestedAction: String,
+        reviewStateLabel: String,
+        confidenceLabel: String?,
+        targetLabel: String?,
+        sourceLabel: String,
+        canApprove: Bool,
+        canCorrect: Bool,
+        canDefer: Bool,
+        safeActions: [String],
+        dateSuggestionApproval: HomeReviewCockpitDateSuggestionApproval?,
+        candidateRef: String? = nil,
+        sourceQuote: String? = nil,
+        memoryKind: String? = nil,
+        linkedOwnerRefs: [String] = []
+    ) {
+        self.id = id
+        self.sourceReviewID = sourceReviewID
+        self.itemID = itemID
+        self.itemType = itemType
+        self.item = item
+        self.title = title
+        self.kindLabel = kindLabel
+        self.reason = reason
+        self.suggestedAction = suggestedAction
+        self.reviewStateLabel = reviewStateLabel
+        self.confidenceLabel = confidenceLabel
+        self.targetLabel = targetLabel
+        self.sourceLabel = sourceLabel
+        self.canApprove = canApprove
+        self.canCorrect = canCorrect
+        self.canDefer = canDefer
+        self.safeActions = safeActions
+        self.dateSuggestionApproval = dateSuggestionApproval
+        self.candidateRef = candidateRef
+        self.sourceQuote = sourceQuote
+        self.memoryKind = memoryKind
+        self.linkedOwnerRefs = linkedOwnerRefs
+    }
 }
 
 struct HomeReviewCockpitBadge: Equatable, Identifiable {

@@ -663,6 +663,59 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.reviewCockpitSummary.totalCount, 2)
     }
 
+    func testReviewCockpitLabelsMemoryCandidatesWithSourceEvidence() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let noteID = UUID()
+        let note = Note(
+            id: noteID,
+            title: "Daily context",
+            createdAt: now,
+            modifiedAt: now,
+            relativePath: "Daily/2026-06-10.md"
+        )
+        let reviewItem = CiderReviewQueueItem(
+            id: "review-memory-candidate-\(UUID().uuidString)",
+            kind: "memory_candidate",
+            source: "memory_candidate",
+            itemID: noteID,
+            itemType: "note",
+            title: "Jami likes pineapple coconut drinks.",
+            relativePath: "Daily/2026-06-10.md",
+            reason: "Review source-backed relationship context memory candidate before promotion.",
+            suggestedAction: "Review memory candidate",
+            reviewState: "needs_review",
+            confidence: 0.83,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now,
+            safeActions: ["inspect_source", "manual_review"],
+            candidateID: "candidate-123",
+            candidateRef: "memory_candidate:candidate-123",
+            sourceQuote: "Corrected source says Jami likes pineapple coconut drinks.",
+            memoryKind: "relationship_context",
+            linkedOwnerRefs: ["contact:jami"]
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.note(note)],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: [reviewItem],
+            surfacingDays: 7,
+            now: now
+        )
+
+        let cockpitItem = try! XCTUnwrap(snapshot.reviewCockpitItems.first)
+        XCTAssertEqual(cockpitItem.kindLabel, "Memory Candidate")
+        XCTAssertEqual(cockpitItem.sourceLabel, "Memory Candidate")
+        XCTAssertEqual(cockpitItem.targetLabel, "Relationship Context • contact:jami")
+        XCTAssertEqual(cockpitItem.candidateRef, "memory_candidate:candidate-123")
+        XCTAssertEqual(cockpitItem.sourceQuote, "Corrected source says Jami likes pineapple coconut drinks.")
+        XCTAssertEqual(cockpitItem.memoryKind, "relationship_context")
+        XCTAssertEqual(cockpitItem.linkedOwnerRefs, ["contact:jami"])
+        XCTAssertEqual(cockpitItem.confidenceLabel, "83% confidence")
+    }
+
     func testReviewCockpitToleratesDuplicateLibraryItemUUIDs() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let bookmarkID = UUID()

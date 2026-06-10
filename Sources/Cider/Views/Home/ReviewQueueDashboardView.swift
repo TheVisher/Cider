@@ -45,7 +45,7 @@ struct ReviewQueueDashboardView: View {
                     .foregroundColor(CiderColors.secondary)
             }
 
-            Text("Routing, enrichment, duplicate, inbox, and date-suggestion decisions that need explicit review.")
+            Text("Routing, enrichment, duplicate, inbox, date-suggestion, and source-backed memory/graph candidates that need explicit review.")
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
 
@@ -208,6 +208,12 @@ struct ReviewQueueDashboardView: View {
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
                         .lineLimit(1)
+                    if let sourceQuote = reviewItem.sourceQuote, !sourceQuote.isEmpty {
+                        Text(sourceQuote)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(2)
+                    }
                     Text("\(reviewItem.suggestedAction) • \(reviewItem.sourceLabel) • \(reviewItem.targetLabel ?? reviewItem.reviewStateLabel)")
                         .font(CiderFont.captionSemibold)
                         .foregroundColor(CiderColors.secondary)

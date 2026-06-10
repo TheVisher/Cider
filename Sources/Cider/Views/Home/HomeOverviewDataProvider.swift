@@ -542,7 +542,11 @@ enum HomeOverviewDataProvider {
                 canCorrect: linkedItem != nil && safeActions.contains("correct"),
                 canDefer: hasRoutingDecision && safeActions.contains("defer"),
                 safeActions: reviewItem.safeActions,
-                dateSuggestionApproval: nil
+                dateSuggestionApproval: nil,
+                candidateRef: reviewItem.candidateRef,
+                sourceQuote: reviewItem.sourceQuote,
+                memoryKind: reviewItem.memoryKind,
+                linkedOwnerRefs: reviewItem.linkedOwnerRefs
             )
         }
 
@@ -860,6 +864,7 @@ enum HomeOverviewDataProvider {
     private static func reviewKindLabel(_ kind: String) -> String {
         let normalized = kind.lowercased()
         if normalized.contains("graph_candidate") { return "Graph Candidate" }
+        if normalized.contains("memory_candidate") { return "Memory Candidate" }
         if normalized.contains("routing") { return "Routing" }
         if normalized.contains("enrichment") { return "Enrichment" }
         if normalized.contains("duplicate") { return "Duplicate" }
@@ -891,6 +896,17 @@ enum HomeOverviewDataProvider {
         }
         if !item.possibleTypes.isEmpty {
             return item.possibleTypes.joined(separator: ", ")
+        }
+        if item.kind == "memory_candidate" {
+            let memoryKind = item.memoryKind?
+                .split(separator: "_")
+                .map { word in word.prefix(1).uppercased() + word.dropFirst() }
+                .joined(separator: " ")
+            let owners = item.linkedOwnerRefs.isEmpty ? nil : item.linkedOwnerRefs.joined(separator: ", ")
+            if let memoryKind, let owners {
+                return "\(memoryKind) • \(owners)"
+            }
+            return memoryKind ?? owners
         }
         return item.relativePath
     }
