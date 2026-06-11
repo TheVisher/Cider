@@ -1974,7 +1974,7 @@ final class CiderReviewQueueService {
                 routingDecisionID: nil,
                 target: nil,
                 createdAt: output.createdAt,
-                safeActions: ["inspect_source", "manual_review"],
+                safeActions: ["inspect_source", "accept", "reject", "defer", "correct"],
                 candidateID: output.id,
                 candidateRef: "memory_candidate:\(output.id)",
                 sourceQuote: output.evidence,

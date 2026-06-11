@@ -523,6 +523,12 @@ enum HomeOverviewDataProvider {
             let linkedItem = itemsByUUID[reviewItem.itemID]
             let safeActions = Set(reviewItem.safeActions.map { $0.lowercased() })
             let hasRoutingDecision = reviewItem.routingDecisionID != nil
+            let reviewActions = reviewActions(
+                for: reviewItem,
+                linkedItem: linkedItem,
+                safeActions: safeActions,
+                hasRoutingDecision: hasRoutingDecision
+            )
 
             return HomeReviewCockpitItem(
                 id: "review-cockpit-\(reviewItem.id)",
@@ -538,11 +544,13 @@ enum HomeOverviewDataProvider {
                 confidenceLabel: reviewItem.confidence.map(confidenceLabel),
                 targetLabel: reviewTargetLabel(for: reviewItem),
                 sourceLabel: reviewSourceLabel(reviewItem.source),
-                canApprove: hasRoutingDecision && safeActions.contains("approve"),
-                canCorrect: linkedItem != nil && safeActions.contains("correct"),
-                canDefer: hasRoutingDecision && safeActions.contains("defer"),
+                canApprove: reviewActions.contains(.accept),
+                canCorrect: reviewActions.contains(.openSource),
+                canDefer: reviewActions.contains(.deferReview),
                 safeActions: reviewItem.safeActions,
                 dateSuggestionApproval: nil,
+                reviewActions: reviewActions,
+                candidateID: reviewItem.candidateID,
                 candidateRef: reviewItem.candidateRef,
                 sourceQuote: reviewItem.sourceQuote,
                 memoryKind: reviewItem.memoryKind,
@@ -798,7 +806,8 @@ enum HomeOverviewDataProvider {
                 suggestionIndex: suggestionIndex,
                 suggestionKey: suggestion.suggestionKey,
                 destination: destination
-            )
+            ),
+            reviewActions: [.openSource, .accept]
         )
     }
 
@@ -909,6 +918,53 @@ enum HomeOverviewDataProvider {
             return memoryKind ?? owners
         }
         return item.relativePath
+    }
+
+    private static func reviewActions(
+        for item: CiderReviewQueueItem,
+        linkedItem: LibraryItemV2?,
+        safeActions: Set<String>,
+        hasRoutingDecision: Bool
+    ) -> [HomeReviewCockpitAction] {
+        var actions: [HomeReviewCockpitAction] = []
+        let normalizedKind = item.kind.lowercased()
+        let reviewable = !["accepted", "rejected"].contains(item.reviewState.lowercased())
+        let hasCandidateID = item.candidateID != nil || item.candidateRef != nil
+
+        if linkedItem != nil,
+           safeActions.contains("correct")
+            || ["memory_candidate", "graph_candidate"].contains(normalizedKind) {
+            actions.append(.openSource)
+        }
+
+        switch normalizedKind {
+        case "memory_candidate":
+            guard reviewable, hasCandidateID else { break }
+            actions.append(.accept)
+            actions.append(.reject)
+            actions.append(.deferReview)
+
+        case "graph_candidate":
+            guard reviewable, hasCandidateID else { break }
+            if safeActions.contains("accept") {
+                actions.append(.accept)
+            }
+            actions.append(.reject)
+            if safeActions.contains("defer") {
+                actions.append(.deferReview)
+            }
+
+        default:
+            if hasRoutingDecision && safeActions.contains("approve") {
+                actions.append(.accept)
+            }
+            if hasRoutingDecision && safeActions.contains("defer") {
+                actions.append(.deferReview)
+            }
+        }
+
+        var seen = Set<HomeReviewCockpitAction>()
+        return actions.filter { seen.insert($0).inserted }
     }
 
     private static func triageItems(from items: [LibraryItemV2]) -> [HomeTriageItem] {

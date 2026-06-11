@@ -4,8 +4,7 @@ struct ReviewQueueDashboardView: View {
     let items: [HomeReviewCockpitItem]
     let summary: HomeReviewCockpitSummary
     let onOpenItem: (LibraryItemV2) -> Void
-    let onApproveReview: (HomeReviewCockpitItem) -> Bool
-    let onDeferReview: (HomeReviewCockpitItem) -> Bool
+    let onPerformReviewAction: (HomeReviewCockpitItem, HomeReviewCockpitAction) -> Bool
     let onEnrichReviewBatch: () -> Bool
 
     @State private var resolvedReviewIDs: Set<String> = []
@@ -225,48 +224,63 @@ struct ReviewQueueDashboardView: View {
             .disabled(reviewItem.item == nil)
 
             HStack(spacing: Spacing.xxs) {
-                if reviewItem.canCorrect, let item = reviewItem.item {
-                    Button {
-                        onOpenItem(item)
-                    } label: {
-                        Image(systemName: "arrow.up.right.square")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Open item")
-                    .accessibilityLabel("Open item")
-                }
-
-                if reviewItem.canApprove {
-                    Button {
-                        if onApproveReview(reviewItem) {
-                            resolvedReviewIDs.insert(reviewItem.id)
-                        }
-                    } label: {
-                        Image(systemName: "checkmark.circle")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Approve review")
-                    .accessibilityLabel("Approve review")
-                }
-
-                if reviewItem.canDefer {
-                    Button {
-                        if onDeferReview(reviewItem) {
-                            resolvedReviewIDs.insert(reviewItem.id)
-                        }
-                    } label: {
-                        Image(systemName: "clock")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Defer review")
-                    .accessibilityLabel("Defer review")
+                ForEach(reviewItem.reviewActions) { action in
+                    reviewActionButton(action, for: reviewItem)
                 }
             }
             .font(CiderFont.captionSemibold)
             .foregroundColor(CiderColors.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func reviewActionButton(
+        _ action: HomeReviewCockpitAction,
+        for reviewItem: HomeReviewCockpitItem
+    ) -> some View {
+        switch action {
+        case .openSource:
+            if let item = reviewItem.item {
+                Button {
+                    onOpenItem(item)
+                } label: {
+                    Image(systemName: action.systemImage)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .help(reviewActionHelp(action, for: reviewItem))
+                .accessibilityLabel(reviewActionHelp(action, for: reviewItem))
+            }
+        case .accept, .reject, .deferReview:
+            Button {
+                if onPerformReviewAction(reviewItem, action) {
+                    resolvedReviewIDs.insert(reviewItem.id)
+                }
+            } label: {
+                Image(systemName: action.systemImage)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .help(reviewActionHelp(action, for: reviewItem))
+            .accessibilityLabel(reviewActionHelp(action, for: reviewItem))
+        }
+    }
+
+    private func reviewActionHelp(
+        _ action: HomeReviewCockpitAction,
+        for item: HomeReviewCockpitItem
+    ) -> String {
+        switch action {
+        case .accept:
+            if item.kindLabel == "Memory Candidate" { return "Accept memory" }
+            if item.kindLabel == "Graph Candidate" { return "Accept graph candidate" }
+            return item.dateSuggestionApproval == nil ? "Approve review" : "Approve suggestion"
+        case .reject:
+            return "Reject suggestion"
+        case .deferReview:
+            return "Defer for later"
+        case .openSource:
+            return "Open source item"
         }
     }
 }

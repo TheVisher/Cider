@@ -5,8 +5,7 @@ struct HomeOverviewDashboardView: View {
     let onOpenItem: (LibraryItemV2) -> Void
     let onOpenTarget: (HomeOverviewActionTarget) -> Void
     let onOpenKanbanCard: (String, String) -> Void
-    let onApproveReview: (HomeReviewCockpitItem) -> Bool
-    let onDeferReview: (HomeReviewCockpitItem) -> Bool
+    let onPerformReviewAction: (HomeReviewCockpitItem, HomeReviewCockpitAction) -> Bool
     let onEnrichReviewBatch: () -> Bool
     let onOpenSettings: () -> Void
     let onSyncNow: () -> Void
@@ -654,6 +653,13 @@ struct HomeOverviewDashboardView: View {
                             .foregroundColor(CiderColors.tertiary)
                             .lineLimit(1)
 
+                        if let sourceQuote = reviewItem.sourceQuote, !sourceQuote.isEmpty {
+                            Text(sourceQuote)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.secondary)
+                                .lineLimit(2)
+                        }
+
                         HStack(spacing: Spacing.xs) {
                             Text(reviewItem.suggestedAction)
                                 .font(CiderFont.captionSemibold)
@@ -685,50 +691,47 @@ struct HomeOverviewDashboardView: View {
             .disabled(reviewItem.item == nil)
 
             HStack(spacing: Spacing.xxs) {
-                if reviewItem.canCorrect, let item = reviewItem.item {
-                    Button {
-                        onOpenItem(item)
-                    } label: {
-                        Image(systemName: "arrow.up.right.square")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help(reviewOpenHelp(for: reviewItem))
-                    .accessibilityLabel(reviewOpenHelp(for: reviewItem))
-                }
-
-                if reviewItem.canApprove {
-                    Button {
-                        if onApproveReview(reviewItem) {
-                            resolvedReviewIDs.insert(reviewItem.id)
-                        }
-                    } label: {
-                        Image(systemName: "checkmark.circle")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help(reviewApproveHelp(for: reviewItem))
-                    .accessibilityLabel(reviewApproveHelp(for: reviewItem))
-                }
-
-                if reviewItem.canDefer {
-                    Button {
-                        if onDeferReview(reviewItem) {
-                            resolvedReviewIDs.insert(reviewItem.id)
-                        }
-                    } label: {
-                        Image(systemName: "clock")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Defer review")
-                    .accessibilityLabel("Defer review")
+                ForEach(reviewItem.reviewActions) { action in
+                    reviewActionButton(action, for: reviewItem)
                 }
             }
             .font(CiderFont.captionSemibold)
             .foregroundColor(CiderColors.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func reviewActionButton(
+        _ action: HomeReviewCockpitAction,
+        for reviewItem: HomeReviewCockpitItem
+    ) -> some View {
+        switch action {
+        case .openSource:
+            if let item = reviewItem.item {
+                Button {
+                    onOpenItem(item)
+                } label: {
+                    Image(systemName: action.systemImage)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .help(reviewActionHelp(action, for: reviewItem))
+                .accessibilityLabel(reviewActionHelp(action, for: reviewItem))
+            }
+        case .accept, .reject, .deferReview:
+            Button {
+                if onPerformReviewAction(reviewItem, action) {
+                    resolvedReviewIDs.insert(reviewItem.id)
+                }
+            } label: {
+                Image(systemName: action.systemImage)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .help(reviewActionHelp(action, for: reviewItem))
+            .accessibilityLabel(reviewActionHelp(action, for: reviewItem))
+        }
     }
 
     private func reviewIcon(for item: HomeReviewCockpitItem) -> String {
@@ -762,6 +765,24 @@ struct HomeOverviewDashboardView: View {
 
     private func reviewOpenHelp(for item: HomeReviewCockpitItem) -> String {
         item.dateSuggestionApproval == nil ? "Open item to correct routing" : "Open bookmark details"
+    }
+
+    private func reviewActionHelp(
+        _ action: HomeReviewCockpitAction,
+        for item: HomeReviewCockpitItem
+    ) -> String {
+        switch action {
+        case .accept:
+            if item.kindLabel == "Memory Candidate" { return "Accept memory" }
+            if item.kindLabel == "Graph Candidate" { return "Accept graph candidate" }
+            return reviewApproveHelp(for: item)
+        case .reject:
+            return "Reject suggestion"
+        case .deferReview:
+            return "Defer for later"
+        case .openSource:
+            return reviewOpenHelp(for: item)
+        }
     }
 
     private func recentActivityPanel(fixedHeight: CGFloat? = nil) -> some View {

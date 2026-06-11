@@ -151,6 +151,24 @@ struct HomeReviewCockpitDateSuggestionApproval: Equatable {
     let destination: LibraryEntityType
 }
 
+enum HomeReviewCockpitAction: String, Equatable, Identifiable {
+    case accept
+    case reject
+    case deferReview = "defer"
+    case openSource
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .accept: return "checkmark.circle"
+        case .reject: return "xmark.circle"
+        case .deferReview: return "clock"
+        case .openSource: return "arrow.up.right.square"
+        }
+    }
+}
+
 struct HomeReviewCockpitItem: Equatable, Identifiable {
     let id: String
     let sourceReviewID: String
@@ -170,6 +188,8 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
     let canDefer: Bool
     let safeActions: [String]
     let dateSuggestionApproval: HomeReviewCockpitDateSuggestionApproval?
+    let reviewActions: [HomeReviewCockpitAction]
+    let candidateID: String?
     let candidateRef: String?
     let sourceQuote: String?
     let memoryKind: String?
@@ -194,6 +214,8 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         canDefer: Bool,
         safeActions: [String],
         dateSuggestionApproval: HomeReviewCockpitDateSuggestionApproval?,
+        reviewActions: [HomeReviewCockpitAction] = [],
+        candidateID: String? = nil,
         candidateRef: String? = nil,
         sourceQuote: String? = nil,
         memoryKind: String? = nil,
@@ -217,6 +239,8 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         self.canDefer = canDefer
         self.safeActions = safeActions
         self.dateSuggestionApproval = dateSuggestionApproval
+        self.reviewActions = reviewActions
+        self.candidateID = candidateID
         self.candidateRef = candidateRef
         self.sourceQuote = sourceQuote
         self.memoryKind = memoryKind

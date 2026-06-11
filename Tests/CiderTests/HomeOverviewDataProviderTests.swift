@@ -714,6 +714,64 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(cockpitItem.memoryKind, "relationship_context")
         XCTAssertEqual(cockpitItem.linkedOwnerRefs, ["contact:jami"])
         XCTAssertEqual(cockpitItem.confidenceLabel, "83% confidence")
+        XCTAssertEqual(cockpitItem.reviewActions, [.openSource, .accept, .reject, .deferReview])
+        XCTAssertTrue(cockpitItem.canApprove)
+        XCTAssertTrue(cockpitItem.canCorrect)
+        XCTAssertTrue(cockpitItem.canDefer)
+    }
+
+    func testReviewCockpitKeepsAmbiguousGraphCandidateAcceptUnavailable() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let noteID = UUID()
+        let note = Note(
+            id: noteID,
+            title: "Movie journal",
+            createdAt: now,
+            modifiedAt: now,
+            relativePath: "Daily/2026-06-10.md"
+        )
+        let reviewItem = CiderReviewQueueItem(
+            id: "review-graph-candidate-\(UUID().uuidString)",
+            kind: "graph_candidate",
+            source: "graph_candidate",
+            itemID: noteID,
+            itemType: "note",
+            title: "The Way Way Back",
+            relativePath: "Daily/2026-06-10.md",
+            reason: "Review extracted movie candidate from source quote; possible relation: watched.",
+            suggestedAction: "Review graph candidate",
+            reviewState: "suggested",
+            confidence: 0.78,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now,
+            safeActions: ["inspect_source", "link_existing", "create_object", "correct", "reject", "delegate_enrichment"],
+            candidateID: "candidate-456",
+            candidateRef: "graph_candidate:candidate-456",
+            sourceQuote: "Watched The Way Way Back tonight.",
+            possibleTypes: ["movie", "media"],
+            possibleRelations: ["watched"]
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.note(note)],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: [reviewItem],
+            surfacingDays: 7,
+            now: now
+        )
+
+        let cockpitItem = try! XCTUnwrap(snapshot.reviewCockpitItems.first)
+        XCTAssertEqual(cockpitItem.kindLabel, "Graph Candidate")
+        XCTAssertEqual(cockpitItem.candidateID, "candidate-456")
+        XCTAssertEqual(cockpitItem.candidateRef, "graph_candidate:candidate-456")
+        XCTAssertEqual(cockpitItem.sourceQuote, "Watched The Way Way Back tonight.")
+        XCTAssertEqual(cockpitItem.targetLabel, "movie, media")
+        XCTAssertEqual(cockpitItem.reviewActions, [.openSource, .reject])
+        XCTAssertFalse(cockpitItem.canApprove)
+        XCTAssertTrue(cockpitItem.canCorrect)
+        XCTAssertFalse(cockpitItem.canDefer)
     }
 
     func testReviewCockpitToleratesDuplicateLibraryItemUUIDs() {
