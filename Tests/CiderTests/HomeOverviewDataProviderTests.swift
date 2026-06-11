@@ -1255,7 +1255,7 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertTrue(cockpitItem.reviewActions.contains(.openSource))
         XCTAssertTrue(cockpitItem.reviewActions.contains(.reject))
         XCTAssertEqual(cockpitItem.sourceQuote, "Journal source mentions Cactus.")
-        XCTAssertEqual(cockpitItem.sourceEvidenceFindQuery, "Journal source mentions Cactus.")
+        XCTAssertEqual(cockpitItem.sourceEvidenceFindQuery, "Journal source mentions Cactus")
         guard case .note(let note) = sourceItem else {
             XCTFail("Expected fallback note source item")
             return
@@ -1447,13 +1447,41 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(memoryCandidate.detailOwnerRefsLabel, "contact:jami")
         XCTAssertEqual(memoryCandidate.detailCorrectionActionLabel, "Edit value")
         XCTAssertEqual(memoryCandidate.detailCorrectionHelp, "Edit value from the source evidence")
-        XCTAssertEqual(memoryCandidate.sourceEvidenceFindQuery, "Jami likes this.")
+        XCTAssertEqual(memoryCandidate.sourceEvidenceFindQuery, "Jami likes this")
+
+        let memoryCandidateWithEvidencePreamble = HomeReviewCockpitItem(
+            id: "memory-candidate-preamble",
+            sourceReviewID: "review-memory-preamble",
+            itemID: itemID,
+            itemType: "note",
+            item: nil,
+            title: "Jami preference",
+            kindLabel: "Memory Candidate",
+            reason: "Candidate fact",
+            suggestedAction: "Review",
+            reviewStateLabel: "Needs review",
+            confidenceLabel: nil,
+            targetLabel: nil,
+            sourceLabel: "Memory Candidate",
+            canApprove: true,
+            canCorrect: true,
+            canDefer: true,
+            safeActions: ["approve", "correct", "defer"],
+            dateSuggestionApproval: nil,
+            reviewActions: [.openSource, .accept, .reject, .deferReview],
+            candidateID: "candidate-789",
+            candidateRef: "memory_candidate:candidate-789",
+            sourceQuote: "Daily journal source says Jami loved that pineapple coconut drink.",
+            memoryKind: "relationship_context",
+            linkedOwnerRefs: ["contact:jami"]
+        )
+        XCTAssertEqual(memoryCandidateWithEvidencePreamble.sourceEvidenceFindQuery, "Jami loved that pineapple coconut drink")
 
         XCTAssertEqual(graphCandidate.detailExtractedValueLabel, "movie, media")
         XCTAssertNil(graphCandidate.detailOwnerRefsLabel)
         XCTAssertEqual(graphCandidate.detailCorrectionActionLabel, "Delegate / inspect")
         XCTAssertEqual(graphCandidate.detailCorrectionHelp, "Delegate / inspect before accepting this graph relation")
-        XCTAssertEqual(graphCandidate.sourceEvidenceFindQuery, "Watched The Way Way Back tonight.")
+        XCTAssertEqual(graphCandidate.sourceEvidenceFindQuery, "Watched The Way Way Back tonight")
     }
 
 }

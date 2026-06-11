@@ -251,9 +251,23 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
 extension HomeReviewCockpitItem {
     var sourceEvidenceFindQuery: String? {
         guard let sourceQuote else { return nil }
-        let normalized = sourceQuote
+        var normalized = sourceQuote
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let evidencePreambles = [
+            #"(?i)^daily\s+journal\s+source\s+says\s+"#,
+            #"(?i)^journal\s+source\s+says\s+"#,
+            #"(?i)^journal\s+note\s+says\s+"#,
+            #"(?i)^source\s+says\s+"#,
+        ]
+        for preamble in evidencePreambles {
+            normalized = normalized.replacingOccurrences(
+                of: preamble,
+                with: "",
+                options: .regularExpression
+            )
+        }
+        normalized = normalized.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
         return normalized.isEmpty ? nil : normalized
     }
 
