@@ -76,11 +76,14 @@ final class CiderBookmarkDateSuggestionService {
     }
 
     func suggestions(for bookmark: Bookmark) -> [CiderBookmarkDateSuggestion] {
+        // Bookmark OCR is currently produced from saved preview/thumbnail imagery, not from
+        // an explicit user intent to turn the image into a reminder. Keep date suggestions
+        // scoped to user/page-owned text so app-store screenshots and marketing thumbnails
+        // do not become false reminders.
         let fields: [(name: String, text: String)] = [
             ("title", bookmark.title),
             ("notes", bookmark.notes),
             ("aiSummary", bookmark.aiSummary ?? ""),
-            ("ocrText", bookmark.ocrText ?? ""),
         ]
             .map { field in (name: field.0, text: boundedFieldText(field.1)) }
             .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
