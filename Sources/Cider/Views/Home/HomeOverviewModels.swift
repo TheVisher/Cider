@@ -248,6 +248,40 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
     }
 }
 
+extension HomeReviewCockpitItem {
+    var detailExtractedValueLabel: String {
+        targetLabel ?? reason
+    }
+
+    var detailOwnerRefsLabel: String? {
+        guard linkedOwnerRefs.isEmpty == false else { return nil }
+        return linkedOwnerRefs.joined(separator: ", ")
+    }
+
+    var detailCorrectionActionLabel: String? {
+        switch kindLabel {
+        case "Memory Candidate":
+            return "Edit value"
+        case "Graph Candidate":
+            return canApprove ? "Inspect relation" : "Delegate / inspect"
+        default:
+            return canCorrect ? "Correct source" : nil
+        }
+    }
+
+    var detailCorrectionHelp: String? {
+        guard let actionLabel = detailCorrectionActionLabel else { return nil }
+        switch kindLabel {
+        case "Memory Candidate":
+            return "\(actionLabel) from the source evidence"
+        case "Graph Candidate":
+            return "\(actionLabel) before accepting this graph relation"
+        default:
+            return "\(actionLabel) for this review item"
+        }
+    }
+}
+
 struct HomeReviewCockpitBadge: Equatable, Identifiable {
     let id: String
     let label: String

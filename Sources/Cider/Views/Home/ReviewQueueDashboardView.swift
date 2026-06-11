@@ -11,6 +11,7 @@ struct ReviewQueueDashboardView: View {
     @State private var batchEnrichmentIsConfirming = false
     @State private var scheduledBatchEnrichmentCount: Int?
     @State private var selectedLaneLabel: String?
+    @State private var selectedDetailItemID: String?
 
     private var visibleItems: [HomeReviewCockpitItem] {
         items.filter { item in
@@ -18,6 +19,11 @@ struct ReviewQueueDashboardView: View {
             guard let selectedLaneLabel else { return true }
             return item.kindLabel == selectedLaneLabel
         }
+    }
+
+    private var selectedDetailItem: HomeReviewCockpitItem? {
+        guard let selectedDetailItemID else { return nil }
+        return visibleItems.first { $0.id == selectedDetailItemID }
     }
 
     var body: some View {
@@ -201,6 +207,11 @@ struct ReviewQueueDashboardView: View {
                     .foregroundColor(CiderColors.tertiary)
             } else {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
+                    if let selectedDetailItem {
+                        candidateDetailPanel(selectedDetailItem)
+                        Divider()
+                            .background(CiderColors.separator)
+                    }
                     ForEach(visibleItems) { item in
                         reviewRow(item)
                         if item.id != visibleItems.last?.id {
@@ -211,6 +222,82 @@ struct ReviewQueueDashboardView: View {
                 }
             }
         }
+    }
+
+    private func candidateDetailPanel(_ reviewItem: HomeReviewCockpitItem) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text("Candidate Detail")
+                        .font(CiderFont.labelSemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Text("\(reviewItem.kindLabel) • \(reviewItem.sourceLabel)")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                Spacer()
+                Button {
+                    selectedDetailItemID = nil
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .help("Close candidate detail")
+                .accessibilityLabel("Close candidate detail")
+            }
+
+            detailLine(title: "Extracted value / relation", value: reviewItem.detailExtractedValueLabel)
+            if let sourceQuote = reviewItem.sourceQuote, sourceQuote.isEmpty == false {
+                detailLine(title: "Source quote", value: sourceQuote)
+            }
+            if let ownerRefs = reviewItem.detailOwnerRefsLabel {
+                detailLine(title: "Linked owner refs", value: ownerRefs)
+            }
+            if let confidenceLabel = reviewItem.confidenceLabel {
+                detailLine(title: "Confidence", value: confidenceLabel)
+            }
+            if let candidateRef = reviewItem.candidateRef {
+                detailLine(title: "Candidate ref", value: candidateRef)
+            }
+
+            HStack(spacing: Spacing.xs) {
+                ForEach(reviewItem.reviewActions) { action in
+                    reviewActionButton(action, for: reviewItem)
+                }
+                if let correctionLabel = reviewItem.detailCorrectionActionLabel,
+                   let item = reviewItem.item {
+                    Button(correctionLabel) {
+                        onOpenItem(item)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(reviewItem.detailCorrectionHelp ?? correctionLabel)
+                    .accessibilityLabel(correctionLabel)
+                }
+            }
+        }
+        .padding(Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.surfaceElevated)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .stroke(CiderColors.controlAccent.opacity(0.45), lineWidth: 1)
+                )
+        )
+    }
+
+    private func detailLine(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            Text(title)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.secondary)
+            Text(value)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.primary)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func reviewRow(_ reviewItem: HomeReviewCockpitItem) -> some View {
@@ -246,6 +333,16 @@ struct ReviewQueueDashboardView: View {
             .disabled(reviewItem.item == nil)
 
             HStack(spacing: Spacing.xxs) {
+                Button {
+                    selectedDetailItemID = reviewItem.id
+                } label: {
+                    Image(systemName: "info.circle")
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .help("Show candidate detail")
+                .accessibilityLabel("Show candidate detail")
+
                 ForEach(reviewItem.reviewActions) { action in
                     reviewActionButton(action, for: reviewItem)
                 }

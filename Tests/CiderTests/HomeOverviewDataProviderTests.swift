@@ -1388,4 +1388,69 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertTrue(snapshot.reviewCockpitItems.isEmpty)
     }
 
+    func testReviewCandidateDetailPresentationLabelsCorrectionPaths() {
+        let itemID = UUID()
+        let memoryCandidate = HomeReviewCockpitItem(
+            id: "memory-candidate",
+            sourceReviewID: "review-memory",
+            itemID: itemID,
+            itemType: "note",
+            item: nil,
+            title: "Jami preference",
+            kindLabel: "Memory Candidate",
+            reason: "Candidate fact",
+            suggestedAction: "Review",
+            reviewStateLabel: "Needs review",
+            confidenceLabel: "83% confidence",
+            targetLabel: "Relationship Context • contact:jami",
+            sourceLabel: "Memory Candidate",
+            canApprove: true,
+            canCorrect: true,
+            canDefer: true,
+            safeActions: ["approve", "correct", "defer"],
+            dateSuggestionApproval: nil,
+            reviewActions: [.openSource, .accept, .reject, .deferReview],
+            candidateID: "candidate-123",
+            candidateRef: "memory_candidate:candidate-123",
+            sourceQuote: "Jami likes this.",
+            memoryKind: "relationship_context",
+            linkedOwnerRefs: ["contact:jami"]
+        )
+        let graphCandidate = HomeReviewCockpitItem(
+            id: "graph-candidate",
+            sourceReviewID: "review-graph",
+            itemID: itemID,
+            itemType: "note",
+            item: nil,
+            title: "Movie link",
+            kindLabel: "Graph Candidate",
+            reason: "Ambiguous relation",
+            suggestedAction: "Inspect",
+            reviewStateLabel: "Needs review",
+            confidenceLabel: nil,
+            targetLabel: "movie, media",
+            sourceLabel: "Graph Candidate",
+            canApprove: false,
+            canCorrect: true,
+            canDefer: false,
+            safeActions: ["correct"],
+            dateSuggestionApproval: nil,
+            reviewActions: [.openSource, .reject],
+            candidateID: "candidate-456",
+            candidateRef: "graph_candidate:candidate-456",
+            sourceQuote: "Watched The Way Way Back tonight.",
+            linkedOwnerRefs: []
+        )
+
+        XCTAssertEqual(memoryCandidate.detailExtractedValueLabel, "Relationship Context • contact:jami")
+        XCTAssertEqual(memoryCandidate.detailOwnerRefsLabel, "contact:jami")
+        XCTAssertEqual(memoryCandidate.detailCorrectionActionLabel, "Edit value")
+        XCTAssertEqual(memoryCandidate.detailCorrectionHelp, "Edit value from the source evidence")
+
+        XCTAssertEqual(graphCandidate.detailExtractedValueLabel, "movie, media")
+        XCTAssertNil(graphCandidate.detailOwnerRefsLabel)
+        XCTAssertEqual(graphCandidate.detailCorrectionActionLabel, "Delegate / inspect")
+        XCTAssertEqual(graphCandidate.detailCorrectionHelp, "Delegate / inspect before accepting this graph relation")
+    }
+
 }
