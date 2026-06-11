@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeOverviewDashboardView: View {
     let snapshot: HomeOverviewSnapshot
     let onOpenItem: (LibraryItemV2) -> Void
+    let onOpenReviewSource: (HomeReviewCockpitItem) -> Void
     let onOpenTarget: (HomeOverviewActionTarget) -> Void
     let onOpenKanbanCard: (String, String) -> Void
     let onPerformReviewAction: (HomeReviewCockpitItem, HomeReviewCockpitAction) -> Bool
@@ -638,9 +639,7 @@ struct HomeOverviewDashboardView: View {
     private func reviewQueueRow(_ reviewItem: HomeReviewCockpitItem) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Button {
-                if let item = reviewItem.item {
-                    onOpenItem(item)
-                }
+                openReviewSource(reviewItem)
             } label: {
                 HStack(alignment: .top, spacing: Spacing.sm) {
                     Image(systemName: reviewIcon(for: reviewItem))
@@ -714,9 +713,9 @@ struct HomeOverviewDashboardView: View {
     ) -> some View {
         switch action {
         case .openSource:
-            if let item = reviewItem.item {
+            if reviewItem.item != nil {
                 Button {
-                    onOpenItem(item)
+                    openReviewSource(reviewItem)
                 } label: {
                     Image(systemName: action.systemImage)
                         .frame(width: 20, height: 20)
@@ -789,6 +788,11 @@ struct HomeOverviewDashboardView: View {
         case .openSource:
             return reviewOpenHelp(for: item)
         }
+    }
+
+    private func openReviewSource(_ reviewItem: HomeReviewCockpitItem) {
+        guard reviewItem.item != nil else { return }
+        onOpenReviewSource(reviewItem)
     }
 
     private func recentActivityPanel(fixedHeight: CGFloat? = nil) -> some View {

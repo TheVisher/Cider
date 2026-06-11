@@ -108,6 +108,24 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(!SecondBrainGraphCandidateContract.canTransition(from: .accepted, to: .suggested))
     }
 
+    @Test("journal extractor ignores Cider feature example prose")
+    func journalExtractorIgnoresCiderFeatureExampleProse() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: """
+            Cider should surface source-backed memory_candidate and graph_candidate rows in the Review Queue.
+            Examples it should show during review:
+            - Watched The Way Way Back last night.
+            - Jami loved that pineapple coconut drink.
+            - Baine liked the tacos.
+            - We stopped at Cactus.
+            """
+        )
+
+        #expect(result.outputs.isEmpty)
+    }
+
     @Test("graph candidate persists through enrichment outputs table")
     func graphCandidatePersistsThroughEnrichmentOutputsTable() throws {
         let (db, url) = try makeTestDB()

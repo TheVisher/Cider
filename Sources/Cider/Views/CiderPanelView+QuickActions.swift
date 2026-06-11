@@ -87,7 +87,7 @@ extension CiderPanelView {
 
     // MARK: - Note Detail
 
-    func openNoteDetail(_ note: Note) {
+    func openNoteDetail(_ note: Note, sourceEvidenceFindQuery: String? = nil) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
         if isDetailOpen { saveBookmarkDetails() }
         if isNoteDetailOpen { notesViewModel.flushSave() }
@@ -96,7 +96,12 @@ extension CiderPanelView {
         notesViewModel.selectNote(note)
         selectedNote = note
         isEditingNoteTitle = false
-        DispatchQueue.main.async { notesViewModel.focusEditorIfFindBarHidden() }
+        if let sourceEvidenceFindQuery {
+            notesViewModel.showFindBar()
+            notesViewModel.updateFindQuery(sourceEvidenceFindQuery)
+        } else {
+            DispatchQueue.main.async { notesViewModel.focusEditorIfFindBarHidden() }
+        }
         if !wasExpanded, detailViewMode == .slideOut {
             NotificationCenter.default.post(
                 name: .expandCiderPanelForSlideOut,

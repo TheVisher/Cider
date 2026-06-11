@@ -14,6 +14,10 @@ struct SecondBrainJournalGraphCandidateExtractor {
         date: String? = nil,
         time: String? = nil
     ) -> SecondBrainJournalGraphCandidateExtractionResult {
+        guard !isCiderCandidateExampleDocument(rawContent) else {
+            return SecondBrainJournalGraphCandidateExtractionResult(outputs: [])
+        }
+
         let sentences = splitSentences(rawContent)
         var outputs: [SecondBrainEnrichmentOutput] = []
         for sentence in sentences {
@@ -227,6 +231,40 @@ struct SecondBrainJournalGraphCandidateExtractor {
     private func splitSentences(_ text: String) -> [String] {
         text.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
             .compactMap(trimmedNonEmpty)
+    }
+
+    private func isCiderCandidateExampleDocument(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let candidateMarkers = [
+            "graph_candidate",
+            "memory_candidate",
+            "graph candidate",
+            "memory candidate",
+            "source-backed memory",
+            "source-backed graph",
+            "review queue",
+        ]
+        let exampleMarkers = [
+            "example",
+            "examples",
+            "should capture",
+            "should surface",
+            "should show",
+            "confirm?",
+            "accept?",
+            "save as",
+        ]
+        let ciderMarkers = [
+            "cider",
+            "feature",
+            "product",
+            "prototype",
+            "north star",
+        ]
+
+        return candidateMarkers.contains { lower.contains($0) }
+            && exampleMarkers.contains { lower.contains($0) }
+            && ciderMarkers.contains { lower.contains($0) }
     }
 
     private struct RegexMatch {

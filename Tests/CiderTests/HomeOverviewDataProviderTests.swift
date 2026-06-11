@@ -1255,6 +1255,7 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertTrue(cockpitItem.reviewActions.contains(.openSource))
         XCTAssertTrue(cockpitItem.reviewActions.contains(.reject))
         XCTAssertEqual(cockpitItem.sourceQuote, "Journal source mentions Cactus.")
+        XCTAssertEqual(cockpitItem.sourceEvidenceFindQuery, "Journal source mentions Cactus.")
         guard case .note(let note) = sourceItem else {
             XCTFail("Expected fallback note source item")
             return
@@ -1446,11 +1447,13 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(memoryCandidate.detailOwnerRefsLabel, "contact:jami")
         XCTAssertEqual(memoryCandidate.detailCorrectionActionLabel, "Edit value")
         XCTAssertEqual(memoryCandidate.detailCorrectionHelp, "Edit value from the source evidence")
+        XCTAssertEqual(memoryCandidate.sourceEvidenceFindQuery, "Jami likes this.")
 
         XCTAssertEqual(graphCandidate.detailExtractedValueLabel, "movie, media")
         XCTAssertNil(graphCandidate.detailOwnerRefsLabel)
         XCTAssertEqual(graphCandidate.detailCorrectionActionLabel, "Delegate / inspect")
         XCTAssertEqual(graphCandidate.detailCorrectionHelp, "Delegate / inspect before accepting this graph relation")
+        XCTAssertEqual(graphCandidate.sourceEvidenceFindQuery, "Watched The Way Way Back tonight.")
     }
 
 }

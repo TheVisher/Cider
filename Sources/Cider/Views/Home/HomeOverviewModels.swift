@@ -249,6 +249,14 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
 }
 
 extension HomeReviewCockpitItem {
+    var sourceEvidenceFindQuery: String? {
+        guard let sourceQuote else { return nil }
+        let normalized = sourceQuote
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
+    }
+
     var detailExtractedValueLabel: String {
         targetLabel ?? reason
     }

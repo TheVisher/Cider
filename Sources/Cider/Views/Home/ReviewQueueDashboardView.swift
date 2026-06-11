@@ -4,6 +4,7 @@ struct ReviewQueueDashboardView: View {
     let items: [HomeReviewCockpitItem]
     let summary: HomeReviewCockpitSummary
     let onOpenItem: (LibraryItemV2) -> Void
+    let onOpenReviewSource: (HomeReviewCockpitItem) -> Void
     let onPerformReviewAction: (HomeReviewCockpitItem, HomeReviewCockpitAction) -> Bool
     let onEnrichReviewBatch: () -> Bool
 
@@ -266,9 +267,9 @@ struct ReviewQueueDashboardView: View {
                     reviewActionButton(action, for: reviewItem)
                 }
                 if let correctionLabel = reviewItem.detailCorrectionActionLabel,
-                   let item = reviewItem.item {
+                   reviewItem.item != nil {
                     Button(correctionLabel) {
-                        onOpenItem(item)
+                        openReviewSource(reviewItem)
                     }
                     .buttonStyle(.borderless)
                     .help(reviewItem.detailCorrectionHelp ?? correctionLabel)
@@ -303,9 +304,7 @@ struct ReviewQueueDashboardView: View {
     private func reviewRow(_ reviewItem: HomeReviewCockpitItem) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Button {
-                if let item = reviewItem.item {
-                    onOpenItem(item)
-                }
+                openReviewSource(reviewItem)
             } label: {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     Text(reviewItem.title)
@@ -359,9 +358,9 @@ struct ReviewQueueDashboardView: View {
     ) -> some View {
         switch action {
         case .openSource:
-            if let item = reviewItem.item {
+            if reviewItem.item != nil {
                 Button {
-                    onOpenItem(item)
+                    openReviewSource(reviewItem)
                 } label: {
                     Image(systemName: action.systemImage)
                         .frame(width: 20, height: 20)
@@ -401,5 +400,10 @@ struct ReviewQueueDashboardView: View {
         case .openSource:
             return "Open source item"
         }
+    }
+
+    private func openReviewSource(_ reviewItem: HomeReviewCockpitItem) {
+        guard reviewItem.item != nil else { return }
+        onOpenReviewSource(reviewItem)
     }
 }

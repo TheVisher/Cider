@@ -312,6 +312,9 @@ final class NotesViewModel: ObservableObject {
             lastSyncedDiskContent = content
             isLoadingNote = true
             pushContentToEditor(content)
+            if isFindBarVisible, !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                updateFindQuery(findQuery)
+            }
         }
     }
 

@@ -534,6 +534,7 @@ extension CiderPanelView {
                 surfacingDays: CiderConfig.load().dateCardSurfacingDays
             ),
             onOpenItem: { item in openDashboardItem(item) },
+            onOpenReviewSource: { reviewItem in openDashboardReviewSource(reviewItem) },
             onOpenTarget: { target in openDashboardTarget(target) },
             onOpenKanbanCard: { boardID, cardID in
                 openKanbanCardDetail(boardID: boardID, cardID: cardID)
@@ -578,6 +579,7 @@ extension CiderPanelView {
             items: snapshot.reviewCockpitItems,
             summary: snapshot.reviewCockpitSummary,
             onOpenItem: { item in openDashboardItem(item) },
+            onOpenReviewSource: { reviewItem in openDashboardReviewSource(reviewItem) },
             onPerformReviewAction: { reviewItem, action in
                 performHomeReviewAction(reviewItem, action: action)
             },
@@ -616,11 +618,7 @@ extension CiderPanelView {
         case .deferReview:
             return deferHomeReviewItem(reviewItem)
         case .openSource:
-            if let item = reviewItem.item {
-                openDashboardItem(item)
-                return true
-            }
-            return false
+            return openDashboardReviewSource(reviewItem)
         }
     }
 
@@ -736,6 +734,18 @@ extension CiderPanelView {
         case .vaultFile(let file):
             openVaultFileDetail(file)
         }
+    }
+
+    @discardableResult
+    func openDashboardReviewSource(_ reviewItem: HomeReviewCockpitItem) -> Bool {
+        guard let item = reviewItem.item else { return false }
+        switch item {
+        case .note(let note):
+            openNoteDetail(note, sourceEvidenceFindQuery: reviewItem.sourceEvidenceFindQuery)
+        default:
+            openDashboardItem(item)
+        }
+        return true
     }
 
     func openDashboardTarget(_ target: HomeOverviewActionTarget) {
