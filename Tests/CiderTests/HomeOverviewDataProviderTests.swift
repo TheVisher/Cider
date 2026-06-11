@@ -1160,6 +1160,109 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertFalse(snapshot.reviewCockpitItems[1].canDefer)
     }
 
+    func testReviewCockpitCollapsesMultipleDateSuggestionsFromSameBookmark() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let bookmark = Bookmark(
+            id: UUID(),
+            title: "Remindio giveaway",
+            urlString: "https://example.com/remindio",
+            createdAt: now,
+            updatedAt: now,
+            folderID: nil
+        )
+        let lowConfidenceSuggestion = CiderBookmarkDateSuggestion(
+            bookmarkID: bookmark.id,
+            bookmarkTitle: bookmark.title,
+            sourceURL: bookmark.urlString,
+            kind: "event_date",
+            confidence: 0.58,
+            date: now.addingTimeInterval(60 * 60 * 24 * 4),
+            sourceField: "ocrText",
+            sourceSnippet: "Meeting tomorrow",
+            nextSafeAction: "review_date_suggestion"
+        )
+        let preferredSuggestion = CiderBookmarkDateSuggestion(
+            bookmarkID: bookmark.id,
+            bookmarkTitle: bookmark.title,
+            sourceURL: bookmark.urlString,
+            kind: "deadline",
+            confidence: 0.91,
+            date: now.addingTimeInterval(60 * 60 * 24 * 8),
+            sourceField: "ocrText",
+            sourceSnippet: "Save by June 12, 2026",
+            nextSafeAction: "review_date_suggestion"
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.bookmark(bookmark)],
+            recentItems: [],
+            folders: [],
+            bookmarkDateSuggestionResults: [
+                CiderBookmarkDateSuggestionResult(
+                    command: "bookmark.date-suggestions",
+                    bookmarkID: bookmark.id,
+                    bookmarkTitle: bookmark.title,
+                    sourceURL: bookmark.urlString,
+                    suggestions: [lowConfidenceSuggestion, preferredSuggestion]
+                )
+            ],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.reviewCockpitItems.map(\.title), ["Remindio giveaway"])
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.suggestionIndex, 1)
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.suggestionKey, preferredSuggestion.suggestionKey)
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].confidenceLabel, "91% confidence")
+    }
+
+    func testReviewCockpitBuildsFallbackNoteSourceForCandidateRows() throws {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let sourceNoteID = UUID()
+        let reviewItem = CiderReviewQueueItem(
+            id: "graph-candidate-cactus",
+            kind: "graph_candidate",
+            source: "second_brain",
+            itemID: sourceNoteID,
+            itemType: "note",
+            title: "Cactus",
+            relativePath: "Daily/2026-06-11.md",
+            reason: "Source-backed graph candidate",
+            suggestedAction: "Inspect Source",
+            reviewState: "needs_review",
+            confidence: 0.76,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now,
+            safeActions: ["inspect_source", "reject"],
+            candidateID: "graph-candidate-cactus",
+            candidateRef: "graph_candidate:graph-candidate-cactus",
+            sourceQuote: "Journal source mentions Cactus."
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: [reviewItem],
+            surfacingDays: 7,
+            now: now
+        )
+        let cockpitItem = try XCTUnwrap(snapshot.reviewCockpitItems.first)
+        let sourceItem = try XCTUnwrap(cockpitItem.item)
+
+        XCTAssertEqual(sourceItem.id, "note-\(sourceNoteID.uuidString)")
+        XCTAssertTrue(cockpitItem.reviewActions.contains(.openSource))
+        XCTAssertTrue(cockpitItem.reviewActions.contains(.reject))
+        XCTAssertEqual(cockpitItem.sourceQuote, "Journal source mentions Cactus.")
+        guard case .note(let note) = sourceItem else {
+            XCTFail("Expected fallback note source item")
+            return
+        }
+        XCTAssertEqual(note.relativePath, "Daily/2026-06-11.md")
+        XCTAssertEqual(note.title, "2026-06-11")
+    }
+
     func testReviewCockpitReservesSlotForDateSuggestionWhenQueueIsFull() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let reviewBookmarks = (0..<6).map { index in

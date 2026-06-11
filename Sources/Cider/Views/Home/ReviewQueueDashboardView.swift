@@ -10,9 +10,14 @@ struct ReviewQueueDashboardView: View {
     @State private var resolvedReviewIDs: Set<String> = []
     @State private var batchEnrichmentIsConfirming = false
     @State private var scheduledBatchEnrichmentCount: Int?
+    @State private var selectedLaneLabel: String?
 
     private var visibleItems: [HomeReviewCockpitItem] {
-        items.filter { !resolvedReviewIDs.contains($0.id) }
+        items.filter { item in
+            guard resolvedReviewIDs.contains(item.id) == false else { return false }
+            guard let selectedLaneLabel else { return true }
+            return item.kindLabel == selectedLaneLabel
+        }
     }
 
     var body: some View {
@@ -100,35 +105,52 @@ struct ReviewQueueDashboardView: View {
                     spacing: Spacing.sm
                 ) {
                     ForEach(lanes) { lane in
-                        VStack(alignment: .leading, spacing: Spacing.xxs) {
-                            HStack {
-                                Text(lane.title)
-                                    .font(CiderFont.labelSemibold)
-                                    .foregroundColor(CiderColors.primary)
-                                Spacer()
-                                Text("\(lane.count)")
-                                    .font(CiderFont.monospacedBody)
-                                    .foregroundColor(CiderColors.secondary)
-                            }
-                            Text(lane.actionLabel)
-                                .font(CiderFont.captionSemibold)
-                                .foregroundColor(CiderColors.secondary)
-                            ForEach(lane.sampleTitles.prefix(3), id: \.self) { title in
-                                Text(title)
-                                    .font(CiderFont.caption)
-                                    .foregroundColor(CiderColors.tertiary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        .padding(Spacing.sm)
-                        .background(
-                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                                .fill(CiderColors.surfaceInput)
-                        )
+                        laneCard(lane)
                     }
                 }
             }
         }
+    }
+
+    private func laneCard(_ lane: HomeReviewCockpitLane) -> some View {
+        let isSelected = selectedLaneLabel == lane.title
+        return Button {
+            selectedLaneLabel = isSelected ? nil : lane.title
+        } label: {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                HStack {
+                    Text(lane.title)
+                        .font(CiderFont.labelSemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Spacer()
+                    Text("\(lane.count)")
+                        .font(CiderFont.monospacedBody)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                Text(lane.actionLabel)
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.secondary)
+                ForEach(lane.sampleTitles.prefix(3), id: \.self) { title in
+                    Text(title)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isSelected ? CiderColors.surfaceElevated : CiderColors.surfaceInput)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .stroke(isSelected ? CiderColors.controlAccent : CiderColors.borderSubtle, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .help(isSelected ? "Show all review items" : "Show \(lane.title) items")
+        .accessibilityLabel(isSelected ? "Show all review items" : "Show \(lane.title) items")
     }
 
     @ViewBuilder
@@ -172,7 +194,7 @@ struct ReviewQueueDashboardView: View {
     }
 
     private var itemsBand: some View {
-        HomeOverviewPanel(title: "Items") {
+        HomeOverviewPanel(title: selectedLaneLabel.map { "Items: \($0)" } ?? "Items") {
             if visibleItems.isEmpty {
                 Text("Nothing is waiting in the visible review queue.")
                     .font(CiderFont.body)

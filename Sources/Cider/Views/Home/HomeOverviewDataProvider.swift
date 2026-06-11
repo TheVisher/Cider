@@ -520,7 +520,7 @@ enum HomeOverviewDataProvider {
         }, uniquingKeysWith: { first, _ in first })
 
         let queueItems = reviewItems.map { reviewItem in
-            let linkedItem = itemsByUUID[reviewItem.itemID]
+            let linkedItem = itemsByUUID[reviewItem.itemID] ?? fallbackSourceItem(for: reviewItem)
             let safeActions = Set(reviewItem.safeActions.map { $0.lowercased() })
             let hasRoutingDecision = reviewItem.routingDecisionID != nil
             let reviewActions = reviewActions(
@@ -558,26 +558,70 @@ enum HomeOverviewDataProvider {
             )
         }
 
-        let suggestionItems: [HomeReviewCockpitItem] = bookmarkDateSuggestionResults.flatMap { result in
-            result.suggestions.enumerated().compactMap { index, suggestion in
+        let suggestionItems: [HomeReviewCockpitItem] = bookmarkDateSuggestionResults.compactMap { result in
+            var preferredSuggestion: (index: Int, suggestion: CiderBookmarkDateSuggestion)?
+            for (index, suggestion) in result.suggestions.enumerated() {
                 guard approvedDateSuggestionExists(
                     bookmarkID: result.bookmarkID,
                     suggestion: suggestion,
                     libraryItems: libraryItems
                 ) == false else {
-                    return nil
+                    continue
                 }
 
-                return dateSuggestionReviewItem(
-                    result: result,
-                    suggestion: suggestion,
-                    suggestionIndex: index,
-                    linkedItem: itemsByUUID[result.bookmarkID]
-                )
+                if preferredSuggestion == nil || suggestion.confidence > preferredSuggestion!.suggestion.confidence {
+                    preferredSuggestion = (index, suggestion)
+                }
             }
+
+            guard let preferredSuggestion else { return nil }
+            return dateSuggestionReviewItem(
+                result: result,
+                suggestion: preferredSuggestion.suggestion,
+                suggestionIndex: preferredSuggestion.index,
+                linkedItem: itemsByUUID[result.bookmarkID]
+            )
         }
 
         return cappedReviewCockpitItems(queueItems: queueItems, suggestionItems: suggestionItems)
+    }
+
+    private static func fallbackSourceItem(for reviewItem: CiderReviewQueueItem) -> LibraryItemV2? {
+        guard isSourceBackedCandidate(reviewItem.kind),
+              reviewItem.itemType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "note" else {
+            return nil
+        }
+
+        let relativePath = reviewItem.relativePath ?? ""
+        let pathTitle = relativePath
+            .split(separator: "/")
+            .last
+            .map(String.init)?
+            .replacingOccurrences(of: ".md", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let title: String
+        if let pathTitle, pathTitle.isEmpty == false {
+            title = pathTitle
+        } else {
+            title = reviewItem.title
+        }
+
+        return .note(Note(
+            id: reviewItem.itemID,
+            title: title,
+            createdAt: reviewItem.createdAt,
+            modifiedAt: reviewItem.createdAt,
+            relativePath: relativePath
+        ))
+    }
+
+    private static func isSourceBackedCandidate(_ kind: String) -> Bool {
+        switch kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "memory_candidate", "graph_candidate":
+            return true
+        default:
+            return false
+        }
     }
 
     private static func isVisibleReviewCockpitItem(_ item: CiderReviewQueueItem) -> Bool {
