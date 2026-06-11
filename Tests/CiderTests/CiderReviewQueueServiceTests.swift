@@ -421,6 +421,61 @@ struct CiderReviewQueueServiceTests {
         #expect(worklistDictionary["confidence"] as? Double == 0.78)
     }
 
+    @Test("review list limit does not hide source-backed candidates behind routing rows")
+    func reviewListLimitDoesNotHideSourceBackedCandidatesBehindRoutingRows() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let routing = CiderRoutingDecisionService(database: db)
+        for index in 0..<5 {
+            let itemID = try insertBookmark(
+                db,
+                title: "Routing review \(index)",
+                url: "https://example.com/routing-\(index)",
+                relativePath: "Inbox/Bookmarks/Routing review \(index).webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: Date()
+            )
+            _ = try routing.recordDecision(
+                itemID: itemID,
+                itemType: "bookmark",
+                target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+                confidence: 0,
+                reason: "No deterministic route was supplied.",
+                actor: "agent",
+                source: "capture.add",
+                reviewState: "needs_review"
+            )
+        }
+
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Movie journal",
+            relativePath: "Journal/Movie journal.md"
+        )
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString),
+            candidateKind: .objectRelation,
+            mentionText: "The Way Way Back",
+            sourceQuote: "Watched The Way Way Back tonight.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie],
+            relationGuesses: [.watched],
+            actionGuesses: ["watched"],
+            safeActions: [.inspectSource, .reject],
+            confidence: 0.78,
+            confidenceReason: "The source sentence explicitly names the movie.",
+            source: "graph_candidate.test"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+
+        let queue = CiderReviewQueueService(database: db, routingDecisionService: routing)
+        let result = try queue.list(limit: 1)
+
+        #expect(result.items.map(\.kind) == ["graph_candidate"])
+        #expect(result.items.first?.candidateID == output.id)
+    }
+
     @Test("review queue surfaces memory candidates as source-backed triage items")
     func reviewQueueSurfacesMemoryCandidatesAsSourceBackedTriageItems() throws {
         let (db, url) = try makeTempDB()

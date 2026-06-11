@@ -536,35 +536,41 @@ struct HomeOverviewDashboardView: View {
             spacing: Spacing.xs
         ) {
             ForEach(snapshot.reviewCockpitSummary.visibleLanes) { lane in
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    HStack(spacing: Spacing.xs) {
-                        Text("\(lane.count)")
-                            .font(CiderFont.labelSemibold)
-                            .foregroundColor(CiderColors.primary)
-                            .monospacedDigit()
-                        Text(lane.title)
-                            .font(CiderFont.captionSemibold)
-                            .foregroundColor(CiderColors.secondary)
+                Button {
+                    onOpenTarget(.review)
+                } label: {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        HStack(spacing: Spacing.xs) {
+                            Text("\(lane.count)")
+                                .font(CiderFont.labelSemibold)
+                                .foregroundColor(CiderColors.primary)
+                                .monospacedDigit()
+                            Text(lane.title)
+                                .font(CiderFont.captionSemibold)
+                                .foregroundColor(CiderColors.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Text(lane.actionLabel)
+                            .font(CiderFont.caption)
+                            .foregroundColor(lane.keepsRoutingSeparate ? CiderColors.warning : CiderColors.quaternary)
                             .lineLimit(1)
                     }
-
-                    Text(lane.actionLabel)
-                        .font(CiderFont.caption)
-                        .foregroundColor(lane.keepsRoutingSeparate ? CiderColors.warning : CiderColors.quaternary)
-                        .lineLimit(1)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                    .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                            )
+                    )
                 }
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.surfaceInput)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                                .stroke(CiderColors.borderSubtle, lineWidth: 1)
-                        )
-                )
-                .accessibilityElement(children: .combine)
+                .buttonStyle(.plain)
+                .help("Open Review Queue")
+                .accessibilityLabel("Open \(lane.title) review items")
             }
         }
     }

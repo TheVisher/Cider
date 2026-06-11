@@ -2497,11 +2497,11 @@ final class CiderReviewQueueService {
 
     private func sortRank(_ item: CiderReviewQueueItem) -> Int {
         switch item.kind {
-        case "low_confidence_routing":
-            return 0
         case "graph_candidate":
-            return 1
+            return 0
         case "memory_candidate":
+            return 1
+        case "low_confidence_routing":
             return 2
         case "enrichment":
             return 3
