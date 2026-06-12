@@ -671,6 +671,13 @@ struct HomeOverviewDashboardView: View {
                                 .foregroundColor(CiderColors.secondary)
                                 .lineLimit(1)
 
+                            if let sourceProvenanceLabel = reviewItem.sourceProvenanceLabel {
+                                Text(sourceProvenanceLabel)
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(CiderColors.quaternary)
+                                    .lineLimit(1)
+                            }
+
                             Text(reviewItem.sourceLabel)
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.quaternary)
@@ -721,8 +728,8 @@ struct HomeOverviewDashboardView: View {
                         .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.plain)
-                .help(reviewActionHelp(action, for: reviewItem))
-                .accessibilityLabel(reviewActionHelp(action, for: reviewItem))
+                .help(action.helpLabel(for: reviewItem))
+                .accessibilityLabel(action.helpLabel(for: reviewItem))
             }
         case .accept, .reject, .deferReview:
             Button {
@@ -734,8 +741,8 @@ struct HomeOverviewDashboardView: View {
                     .frame(width: 20, height: 20)
             }
             .buttonStyle(.plain)
-            .help(reviewActionHelp(action, for: reviewItem))
-            .accessibilityLabel(reviewActionHelp(action, for: reviewItem))
+            .help(action.helpLabel(for: reviewItem))
+            .accessibilityLabel(action.helpLabel(for: reviewItem))
         }
     }
 
@@ -758,35 +765,6 @@ struct HomeOverviewDashboardView: View {
         case "Inbox": return CiderColors.tertiary
         case "Date Suggestion": return CiderColors.success
         default: return CiderColors.secondary
-        }
-    }
-
-    private func reviewApproveHelp(for item: HomeReviewCockpitItem) -> String {
-        if let approval = item.dateSuggestionApproval {
-            return approval.destination == .todo ? "Approve Todo due date" : "Approve Date Card"
-        }
-        return "Approve suggested route"
-    }
-
-    private func reviewOpenHelp(for item: HomeReviewCockpitItem) -> String {
-        item.dateSuggestionApproval == nil ? "Open item to correct routing" : "Open bookmark details"
-    }
-
-    private func reviewActionHelp(
-        _ action: HomeReviewCockpitAction,
-        for item: HomeReviewCockpitItem
-    ) -> String {
-        switch action {
-        case .accept:
-            if item.kindLabel == "Memory Candidate" { return "Accept memory" }
-            if item.kindLabel == "Graph Candidate" { return "Accept graph candidate" }
-            return reviewApproveHelp(for: item)
-        case .reject:
-            return "Reject suggestion"
-        case .deferReview:
-            return "Defer for later"
-        case .openSource:
-            return reviewOpenHelp(for: item)
         }
     }
 

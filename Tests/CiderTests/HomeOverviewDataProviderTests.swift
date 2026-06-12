@@ -1256,6 +1256,7 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertTrue(cockpitItem.reviewActions.contains(.reject))
         XCTAssertEqual(cockpitItem.sourceQuote, "Journal source mentions Cactus.")
         XCTAssertEqual(cockpitItem.sourceEvidenceFindQuery, "Journal source mentions Cactus")
+        XCTAssertEqual(cockpitItem.sourceProvenanceLabel, "Daily Journal 2026-06-11")
         guard case .note(let note) = sourceItem else {
             XCTFail("Expected fallback note source item")
             return
@@ -1448,6 +1449,10 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(memoryCandidate.detailCorrectionActionLabel, "Edit value")
         XCTAssertEqual(memoryCandidate.detailCorrectionHelp, "Edit value from the source evidence")
         XCTAssertEqual(memoryCandidate.sourceEvidenceFindQuery, "Jami likes this")
+        XCTAssertEqual(HomeReviewCockpitAction.openSource.helpLabel(for: memoryCandidate), "Open source evidence")
+        XCTAssertEqual(HomeReviewCockpitAction.accept.helpLabel(for: memoryCandidate), "Accept memory")
+        XCTAssertEqual(HomeReviewCockpitAction.reject.helpLabel(for: memoryCandidate), "Reject suggestion")
+        XCTAssertEqual(HomeReviewCockpitAction.deferReview.helpLabel(for: memoryCandidate), "Defer for later")
 
         let memoryCandidateWithEvidencePreamble = HomeReviewCockpitItem(
             id: "memory-candidate-preamble",
@@ -1526,6 +1531,8 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(graphCandidate.detailCorrectionActionLabel, "Delegate / inspect")
         XCTAssertEqual(graphCandidate.detailCorrectionHelp, "Delegate / inspect before accepting this graph relation")
         XCTAssertEqual(graphCandidate.sourceEvidenceFindQuery, "Watched The Way Way Back tonight")
+        XCTAssertEqual(HomeReviewCockpitAction.openSource.helpLabel(for: graphCandidate), "Open source evidence")
+        XCTAssertEqual(HomeReviewCockpitAction.accept.helpLabel(for: graphCandidate), "Accept graph candidate")
     }
 
 }

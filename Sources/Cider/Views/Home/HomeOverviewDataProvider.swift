@@ -553,6 +553,7 @@ enum HomeOverviewDataProvider {
                 candidateID: reviewItem.candidateID,
                 candidateRef: reviewItem.candidateRef,
                 sourceQuote: reviewItem.sourceQuote,
+                sourceProvenanceLabel: reviewSourceProvenanceLabel(linkedItem: linkedItem, reviewItem: reviewItem),
                 memoryKind: reviewItem.memoryKind,
                 linkedOwnerRefs: reviewItem.linkedOwnerRefs
             )
@@ -622,6 +623,37 @@ enum HomeOverviewDataProvider {
         default:
             return false
         }
+    }
+
+    private static func reviewSourceProvenanceLabel(
+        linkedItem: LibraryItemV2?,
+        reviewItem: CiderReviewQueueItem
+    ) -> String? {
+        guard isSourceBackedCandidate(reviewItem.kind) else { return nil }
+        if let relativePath = reviewItem.relativePath,
+           let dailyJournalDate = dailyJournalDateLabel(from: relativePath) {
+            return "Daily Journal \(dailyJournalDate)"
+        }
+
+        if let title = linkedItem?.title.trimmingCharacters(in: .whitespacesAndNewlines),
+           title.isEmpty == false {
+            return title
+        }
+
+        guard let relativePath = reviewItem.relativePath else { return nil }
+        let pathTitle = relativePath
+            .split(separator: "/")
+            .last
+            .map(String.init)?
+            .replacingOccurrences(of: ".md", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return pathTitle?.isEmpty == false ? pathTitle : nil
+    }
+
+    private static func dailyJournalDateLabel(from relativePath: String) -> String? {
+        let pattern = #"\b\d{4}-\d{2}-\d{2}\b"#
+        guard let range = relativePath.range(of: pattern, options: .regularExpression) else { return nil }
+        return String(relativePath[range])
     }
 
     private static func isVisibleReviewCockpitItem(_ item: CiderReviewQueueItem) -> Bool {

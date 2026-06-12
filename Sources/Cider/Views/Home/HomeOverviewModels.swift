@@ -167,6 +167,27 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
         case .openSource: return "arrow.up.right.square"
         }
     }
+
+    func helpLabel(for item: HomeReviewCockpitItem) -> String {
+        switch self {
+        case .accept:
+            if item.kindLabel == "Memory Candidate" { return "Accept memory" }
+            if item.kindLabel == "Graph Candidate" { return "Accept graph candidate" }
+            if let approval = item.dateSuggestionApproval {
+                return approval.destination == .todo ? "Approve Todo due date" : "Approve Date Card"
+            }
+            return "Approve review"
+        case .reject:
+            return "Reject suggestion"
+        case .deferReview:
+            return "Defer for later"
+        case .openSource:
+            if item.kindLabel == "Memory Candidate" || item.kindLabel == "Graph Candidate" {
+                return "Open source evidence"
+            }
+            return item.dateSuggestionApproval == nil ? "Open source item" : "Open bookmark details"
+        }
+    }
 }
 
 struct HomeReviewCockpitItem: Equatable, Identifiable {
@@ -192,6 +213,7 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
     let candidateID: String?
     let candidateRef: String?
     let sourceQuote: String?
+    let sourceProvenanceLabel: String?
     let memoryKind: String?
     let linkedOwnerRefs: [String]
 
@@ -218,6 +240,7 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         candidateID: String? = nil,
         candidateRef: String? = nil,
         sourceQuote: String? = nil,
+        sourceProvenanceLabel: String? = nil,
         memoryKind: String? = nil,
         linkedOwnerRefs: [String] = []
     ) {
@@ -243,6 +266,7 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         self.candidateID = candidateID
         self.candidateRef = candidateRef
         self.sourceQuote = sourceQuote
+        self.sourceProvenanceLabel = sourceProvenanceLabel
         self.memoryKind = memoryKind
         self.linkedOwnerRefs = linkedOwnerRefs
     }

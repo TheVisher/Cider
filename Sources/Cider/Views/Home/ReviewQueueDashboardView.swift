@@ -232,7 +232,7 @@ struct ReviewQueueDashboardView: View {
                     Text("Candidate Detail")
                         .font(CiderFont.labelSemibold)
                         .foregroundColor(CiderColors.primary)
-                    Text("\(reviewItem.kindLabel) • \(reviewItem.sourceLabel)")
+                    Text("\(reviewItem.kindLabel) • \(reviewItem.sourceProvenanceLabel ?? reviewItem.sourceLabel)")
                         .font(CiderFont.captionSemibold)
                         .foregroundColor(CiderColors.secondary)
                 }
@@ -249,6 +249,9 @@ struct ReviewQueueDashboardView: View {
             }
 
             detailLine(title: "Extracted value / relation", value: reviewItem.detailExtractedValueLabel)
+            if let sourceProvenanceLabel = reviewItem.sourceProvenanceLabel {
+                detailLine(title: "Source", value: sourceProvenanceLabel)
+            }
             if let sourceQuote = reviewItem.sourceQuote, sourceQuote.isEmpty == false {
                 detailLine(title: "Source quote", value: sourceQuote)
             }
@@ -321,7 +324,7 @@ struct ReviewQueueDashboardView: View {
                             .foregroundColor(CiderColors.secondary)
                             .lineLimit(2)
                     }
-                    Text("\(reviewItem.suggestedAction) • \(reviewItem.sourceLabel) • \(reviewItem.targetLabel ?? reviewItem.reviewStateLabel)")
+                    Text(reviewMetadataLine(for: reviewItem))
                         .font(CiderFont.captionSemibold)
                         .foregroundColor(CiderColors.secondary)
                         .lineLimit(1)
@@ -339,8 +342,8 @@ struct ReviewQueueDashboardView: View {
                         .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.plain)
-                .help("Show candidate detail")
-                .accessibilityLabel("Show candidate detail")
+                .help("Inspect candidate details")
+                .accessibilityLabel("Inspect candidate details")
 
                 ForEach(reviewItem.reviewActions) { action in
                     reviewActionButton(action, for: reviewItem)
@@ -366,8 +369,8 @@ struct ReviewQueueDashboardView: View {
                         .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.plain)
-                .help(reviewActionHelp(action, for: reviewItem))
-                .accessibilityLabel(reviewActionHelp(action, for: reviewItem))
+                .help(action.helpLabel(for: reviewItem))
+                .accessibilityLabel(action.helpLabel(for: reviewItem))
             }
         case .accept, .reject, .deferReview:
             Button {
@@ -379,27 +382,23 @@ struct ReviewQueueDashboardView: View {
                     .frame(width: 20, height: 20)
             }
             .buttonStyle(.plain)
-            .help(reviewActionHelp(action, for: reviewItem))
-            .accessibilityLabel(reviewActionHelp(action, for: reviewItem))
+            .help(action.helpLabel(for: reviewItem))
+            .accessibilityLabel(action.helpLabel(for: reviewItem))
         }
     }
 
-    private func reviewActionHelp(
-        _ action: HomeReviewCockpitAction,
-        for item: HomeReviewCockpitItem
-    ) -> String {
-        switch action {
-        case .accept:
-            if item.kindLabel == "Memory Candidate" { return "Accept memory" }
-            if item.kindLabel == "Graph Candidate" { return "Accept graph candidate" }
-            return item.dateSuggestionApproval == nil ? "Approve review" : "Approve suggestion"
-        case .reject:
-            return "Reject suggestion"
-        case .deferReview:
-            return "Defer for later"
-        case .openSource:
-            return "Open source item"
+    private func reviewMetadataLine(for item: HomeReviewCockpitItem) -> String {
+        [
+            item.suggestedAction,
+            item.sourceProvenanceLabel,
+            item.sourceLabel,
+            item.targetLabel ?? item.reviewStateLabel
+        ]
+        .compactMap { value in
+            guard let value, value.isEmpty == false else { return nil }
+            return value
         }
+        .joined(separator: " • ")
     }
 
     private func openReviewSource(_ reviewItem: HomeReviewCockpitItem) {
