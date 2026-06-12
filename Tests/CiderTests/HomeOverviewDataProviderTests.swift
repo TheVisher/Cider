@@ -1477,6 +1477,50 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         )
         XCTAssertEqual(memoryCandidateWithEvidencePreamble.sourceEvidenceFindQuery, "Jami loved that pineapple coconut drink")
 
+        let bulletPrefixedGraphCandidate = HomeReviewCockpitItem(
+            id: "graph-candidate-bullet",
+            sourceReviewID: "review-graph-bullet",
+            itemID: itemID,
+            itemType: "note",
+            item: nil,
+            title: "\"saw blades\" or something similar and did not eat all of it",
+            kindLabel: "Graph Candidate",
+            reason: "Review extracted media candidate",
+            suggestedAction: "Review",
+            reviewStateLabel: "Needs review",
+            confidenceLabel: nil,
+            targetLabel: "movie, media",
+            sourceLabel: "Graph Candidate",
+            canApprove: false,
+            canCorrect: true,
+            canDefer: false,
+            safeActions: ["reject"],
+            dateSuggestionApproval: nil,
+            reviewActions: [.openSource, .reject],
+            candidateID: "candidate-bullet",
+            candidateRef: "graph_candidate:candidate-bullet",
+            sourceQuote: "- Ryker said his throat felt like \"saw blades\" or something similar and did not eat all of it",
+            memoryKind: nil,
+            linkedOwnerRefs: []
+        )
+        XCTAssertEqual(
+            bulletPrefixedGraphCandidate.sourceEvidenceFindQuery,
+            "Ryker said his throat felt like \"saw blades\" or something similar and did not eat all of it"
+        )
+        XCTAssertTrue(bulletPrefixedGraphCandidate.sourceEvidenceFindQueries.contains("saw blades"))
+        XCTAssertEqual(
+            bulletPrefixedGraphCandidate.bestSourceEvidenceFindQuery(
+                in: "- Ryker said his throat felt like \"saw blades\" or something similar and did not eat all of it"
+            ),
+            "Ryker said his throat felt like \"saw blades\" or something similar and did not eat all of it"
+        )
+        XCTAssertEqual(
+            bulletPrefixedGraphCandidate.bestSourceEvidenceFindQuery(
+                in: "- Ryker said his throat felt like “saw blades” or something similar and did not eat all of it"
+            ),
+            "saw blades"
+        )
+
         XCTAssertEqual(graphCandidate.detailExtractedValueLabel, "movie, media")
         XCTAssertNil(graphCandidate.detailOwnerRefsLabel)
         XCTAssertEqual(graphCandidate.detailCorrectionActionLabel, "Delegate / inspect")

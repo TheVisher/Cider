@@ -250,7 +250,11 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
 
 extension HomeReviewCockpitItem {
     var sourceEvidenceFindQuery: String? {
-        guard let sourceQuote else { return nil }
+        sourceEvidenceFindQueries.first
+    }
+
+    var sourceEvidenceFindQueries: [String] {
+        guard let sourceQuote else { return [] }
         var normalized = sourceQuote
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -267,8 +271,61 @@ extension HomeReviewCockpitItem {
                 options: .regularExpression
             )
         }
-        normalized = normalized.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
-        return normalized.isEmpty ? nil : normalized
+        normalized = Self.stripMarkdownLinePrefix(from: normalized)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+
+        var queries: [String] = []
+        Self.appendUnique(normalized, to: &queries)
+
+        let quotedPhrasePattern = #"[“”"]([^“”"]{3,})[“”"]"#
+        if let regex = try? NSRegularExpression(pattern: quotedPhrasePattern) {
+            let nsNormalized = normalized as NSString
+            let range = NSRange(location: 0, length: nsNormalized.length)
+            for match in regex.matches(in: normalized, range: range) {
+                guard match.numberOfRanges > 1 else { continue }
+                let phrase = nsNormalized.substring(with: match.range(at: 1))
+                    .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+                Self.appendUnique(phrase, to: &queries)
+            }
+        }
+
+        let titleCandidate = Self.stripMarkdownLinePrefix(from: title)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        if titleCandidate.count >= 4 {
+            Self.appendUnique(titleCandidate, to: &queries)
+        }
+
+        return queries
+    }
+
+    func bestSourceEvidenceFindQuery(in sourceText: String) -> String? {
+        let normalizedSource = Self.normalizedComparableText(sourceText)
+        return sourceEvidenceFindQueries.first { query in
+            normalizedSource.localizedCaseInsensitiveContains(Self.normalizedComparableText(query))
+        } ?? sourceEvidenceFindQuery
+    }
+
+    private static func stripMarkdownLinePrefix(from value: String) -> String {
+        value.replacingOccurrences(
+            of: #"^\s*(?:[-+*]|\d+[.)])\s+"#,
+            with: "",
+            options: .regularExpression
+        )
+    }
+
+    private static func normalizedComparableText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func appendUnique(_ value: String, to queries: inout [String]) {
+        let normalized = value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.isEmpty == false else { return }
+        guard queries.contains(where: { $0.caseInsensitiveCompare(normalized) == .orderedSame }) == false else { return }
+        queries.append(normalized)
     }
 
     var detailExtractedValueLabel: String {

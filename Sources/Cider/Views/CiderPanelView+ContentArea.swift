@@ -741,7 +741,11 @@ extension CiderPanelView {
         guard let item = reviewItem.item else { return false }
         switch item {
         case .note(let note):
-            openNoteDetail(note, sourceEvidenceFindQuery: reviewItem.sourceEvidenceFindQuery)
+            let sourceContent = NotesStorage.shared.loadContent(for: note)
+            openNoteDetail(
+                note,
+                sourceEvidenceFindQuery: reviewItem.bestSourceEvidenceFindQuery(in: sourceContent)
+            )
         default:
             openDashboardItem(item)
         }
