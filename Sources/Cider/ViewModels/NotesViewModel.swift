@@ -338,9 +338,13 @@ final class NotesViewModel: ObservableObject {
             logger.error("pushContentToEditor: JSON encoding failed")
             return
         }
-        webView.evaluateJavaScript("window.editorAPI.setContent(\(jsonString))") { _, error in
+        webView.evaluateJavaScript("window.editorAPI.setContent(\(jsonString))") { [weak self] _, error in
             if let error {
                 logger.error("pushContentToEditor JS failed: \(error.localizedDescription)")
+                return
+            }
+            Task { @MainActor [weak self] in
+                self?.reapplyFindQueryAfterEditorContentLoad()
             }
         }
     }
@@ -807,6 +811,12 @@ final class NotesViewModel: ObservableObject {
             return
         }
 
+        runFindCommand("findSetQuery", stringArgument: query)
+    }
+
+    private func reapplyFindQueryAfterEditorContentLoad() {
+        let query = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isFindBarVisible, !query.isEmpty else { return }
         runFindCommand("findSetQuery", stringArgument: query)
     }
 
