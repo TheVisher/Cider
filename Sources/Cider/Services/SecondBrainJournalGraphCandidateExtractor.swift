@@ -14,11 +14,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
         date: String? = nil,
         time: String? = nil
     ) -> SecondBrainJournalGraphCandidateExtractionResult {
-        guard !isCiderCandidateExampleDocument(rawContent) else {
-            return SecondBrainJournalGraphCandidateExtractionResult(outputs: [])
-        }
-
-        let sentences = splitSentences(rawContent)
+        let sentences = candidateSentences(from: rawContent)
         var outputs: [SecondBrainEnrichmentOutput] = []
         for sentence in sentences {
             outputs.append(contentsOf: watchedCandidates(sourceOwner: sourceOwner, sentence: sentence))
@@ -233,7 +229,46 @@ struct SecondBrainJournalGraphCandidateExtractor {
             .compactMap(trimmedNonEmpty)
     }
 
-    private func isCiderCandidateExampleDocument(_ text: String) -> Bool {
+    private func candidateSentences(from text: String) -> [String] {
+        var sentences: [String] = []
+        var recentlySawCiderCandidateContext = false
+        var suppressingCiderExampleBlock = false
+
+        for rawLine in text.components(separatedBy: .newlines) {
+            guard let line = trimmedNonEmpty(rawLine) else {
+                recentlySawCiderCandidateContext = false
+                suppressingCiderExampleBlock = false
+                continue
+            }
+
+            if isCiderCandidateContextLine(line) {
+                recentlySawCiderCandidateContext = true
+                continue
+            }
+
+            if isCandidateExampleContextLine(line),
+               recentlySawCiderCandidateContext || suppressingCiderExampleBlock {
+                recentlySawCiderCandidateContext = false
+                suppressingCiderExampleBlock = true
+                continue
+            }
+
+            let lineSentences = splitSentences(line)
+            if suppressingCiderExampleBlock {
+                if lineSentences.allSatisfy(isLikelyCandidateExampleLine) {
+                    continue
+                }
+                suppressingCiderExampleBlock = false
+            }
+            recentlySawCiderCandidateContext = false
+
+            sentences.append(contentsOf: lineSentences)
+        }
+
+        return sentences
+    }
+
+    private func isCiderCandidateContextLine(_ text: String) -> Bool {
         let lower = text.lowercased()
         let candidateMarkers = [
             "graph_candidate",
@@ -244,16 +279,6 @@ struct SecondBrainJournalGraphCandidateExtractor {
             "source-backed graph",
             "review queue",
         ]
-        let exampleMarkers = [
-            "example",
-            "examples",
-            "should capture",
-            "should surface",
-            "should show",
-            "confirm?",
-            "accept?",
-            "save as",
-        ]
         let ciderMarkers = [
             "cider",
             "feature",
@@ -263,8 +288,52 @@ struct SecondBrainJournalGraphCandidateExtractor {
         ]
 
         return candidateMarkers.contains { lower.contains($0) }
-            && exampleMarkers.contains { lower.contains($0) }
             && ciderMarkers.contains { lower.contains($0) }
+    }
+
+    private func isCandidateExampleContextLine(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let exampleMarkers = [
+            "example",
+            "examples",
+            "for example",
+            "should capture",
+            "should surface",
+            "should show",
+            "app should capture",
+            "confirm?",
+            "accept?",
+            "save as",
+        ]
+        return exampleMarkers.contains { lower.contains($0) }
+    }
+
+    private func isLikelyCandidateExampleLine(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let exampleVerbs = [
+            "watched",
+            "rewatched",
+            "saw",
+            "loved",
+            "liked",
+            "hated",
+            "disliked",
+            "stopped at",
+            "went to",
+            "visited",
+            "ate at",
+            "had dinner at",
+            "had lunch at",
+            "ate",
+            "had",
+            "tried",
+            "drank",
+            "want to",
+            "wants to",
+            "wanted to",
+            "would like to",
+        ]
+        return exampleVerbs.contains { lower.contains($0) }
     }
 
     private struct RegexMatch {

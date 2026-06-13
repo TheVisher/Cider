@@ -126,6 +126,43 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(result.outputs.isEmpty)
     }
 
+    @Test("journal extractor ignores Cider feature example blocks without losing later real notes")
+    func journalExtractorIgnoresCiderFeatureExampleBlocksWithoutLosingLaterRealNotes() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: """
+            Cider Review Queue planning:
+            Examples the app should capture and show:
+            Watched The Way Way Back last night.
+            Jami loved that pineapple coconut drink.
+            Baine liked the tacos.
+            We stopped at Cactus.
+
+            Family notes:
+            Baine liked tacos at dinner.
+            """
+        )
+
+        #expect(result.outputs.map(\.value) == ["tacos"])
+        #expect(result.outputs.first?.evidence == "Baine liked tacos at dinner")
+    }
+
+    @Test("journal extractor keeps ordinary journal memories")
+    func journalExtractorKeepsOrdinaryJournalMemories() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: """
+            Family notes:
+            Jami loved that pineapple coconut drink.
+            Baine liked the tacos.
+            """
+        )
+
+        #expect(result.outputs.map(\.value) == ["pineapple coconut drink", "tacos"])
+    }
+
     @Test("graph candidate persists through enrichment outputs table")
     func graphCandidatePersistsThroughEnrichmentOutputsTable() throws {
         let (db, url) = try makeTestDB()
