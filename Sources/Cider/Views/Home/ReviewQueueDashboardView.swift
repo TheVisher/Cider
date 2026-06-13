@@ -249,6 +249,9 @@ struct ReviewQueueDashboardView: View {
             }
 
             detailLine(title: "Extracted value / relation", value: reviewItem.detailExtractedValueLabel)
+            if let acceptanceEffectLabel = reviewItem.acceptanceEffectLabel {
+                detailLine(title: "What accepting will do", value: acceptanceEffectLabel)
+            }
             if let sourceProvenanceLabel = reviewItem.sourceProvenanceLabel {
                 detailLine(title: "Source", value: sourceProvenanceLabel)
             }
@@ -259,7 +262,7 @@ struct ReviewQueueDashboardView: View {
                 detailLine(title: "Linked owner refs", value: ownerRefs)
             }
             if let confidenceLabel = reviewItem.confidenceLabel {
-                detailLine(title: "Confidence", value: confidenceLabel)
+                detailLine(title: "Confidence", value: [confidenceLabel, reviewItem.confidenceReason].compactMap { $0 }.joined(separator: " — "))
             }
             if let candidateRef = reviewItem.candidateRef {
                 detailLine(title: "Candidate ref", value: candidateRef)
@@ -365,8 +368,9 @@ struct ReviewQueueDashboardView: View {
                 Button {
                     openReviewSource(reviewItem)
                 } label: {
-                    Image(systemName: action.systemImage)
-                        .frame(width: 20, height: 20)
+                    Label(action.buttonTitle(for: reviewItem), systemImage: action.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .font(CiderFont.captionSemibold)
                 }
                 .buttonStyle(.plain)
                 .help(action.helpLabel(for: reviewItem))
@@ -378,8 +382,9 @@ struct ReviewQueueDashboardView: View {
                     resolvedReviewIDs.insert(reviewItem.id)
                 }
             } label: {
-                Image(systemName: action.systemImage)
-                    .frame(width: 20, height: 20)
+                Label(action.buttonTitle(for: reviewItem), systemImage: action.systemImage)
+                    .labelStyle(.titleAndIcon)
+                    .font(CiderFont.captionSemibold)
             }
             .buttonStyle(.plain)
             .help(action.helpLabel(for: reviewItem))

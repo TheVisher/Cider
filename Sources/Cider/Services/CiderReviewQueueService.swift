@@ -563,6 +563,7 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var suggestedAction: String
     var reviewState: String
     var confidence: Double?
+    var confidenceReason: String? = nil
     var routingDecisionID: UUID?
     var target: CiderRoutingDecisionTarget?
     var createdAt: Date
@@ -601,6 +602,9 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         }
         if let confidence {
             dictionary["confidence"] = confidence
+        }
+        if let confidenceReason {
+            dictionary["confidenceReason"] = confidenceReason
         }
         if let routingDecisionID {
             dictionary["routingDecisionID"] = routingDecisionID.uuidString
@@ -1907,6 +1911,7 @@ final class CiderReviewQueueService {
                 suggestedAction: "Review graph candidate",
                 reviewState: output.reviewState,
                 confidence: candidate.confidence,
+                confidenceReason: candidate.confidenceReason,
                 routingDecisionID: nil,
                 target: nil,
                 createdAt: output.createdAt,

@@ -384,6 +384,7 @@ struct CiderReviewQueueServiceTests {
         #expect(item.title == "The Way Way Back")
         #expect(item.reviewState == "suggested")
         #expect(item.confidence == 0.78)
+        #expect(item.confidenceReason == "The sentence explicitly says this was watched.")
         #expect(item.candidateID == output.id)
         #expect(item.candidateRef == "graph_candidate:\(output.id)")
         #expect(item.sourceQuote == "Watched The Way Way Back tonight and loved the water park scene.")
@@ -398,6 +399,7 @@ struct CiderReviewQueueServiceTests {
         #expect(dictionary["candidateID"] as? String == output.id)
         #expect(dictionary["sourceQuote"] as? String == output.evidence)
         #expect(dictionary["possibleTypes"] as? [String] == ["movie", "media"])
+        #expect(dictionary["confidenceReason"] as? String == "The sentence explicitly says this was watched.")
         #expect(dictionary["safeNextCommands"] as? [String] == item.safeNextCommands)
 
         let summary = try queue.summary()

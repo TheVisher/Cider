@@ -555,7 +555,11 @@ enum HomeOverviewDataProvider {
                 sourceQuote: reviewItem.sourceQuote,
                 sourceProvenanceLabel: reviewSourceProvenanceLabel(linkedItem: linkedItem, reviewItem: reviewItem),
                 memoryKind: reviewItem.memoryKind,
-                linkedOwnerRefs: reviewItem.linkedOwnerRefs
+                linkedOwnerRefs: reviewItem.linkedOwnerRefs,
+                possibleTypeLabels: reviewItem.possibleTypes,
+                possibleRelationLabels: reviewItem.possibleRelations,
+                candidateActionLabels: reviewItem.candidateActions,
+                confidenceReason: reviewItem.confidenceReason
             )
         }
 

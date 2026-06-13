@@ -742,6 +742,7 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             suggestedAction: "Review graph candidate",
             reviewState: "suggested",
             confidence: 0.78,
+            confidenceReason: "Journal sentence uses a watched verb for a media title.",
             routingDecisionID: nil,
             target: nil,
             createdAt: now,
@@ -768,6 +769,12 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(cockpitItem.candidateRef, "graph_candidate:candidate-456")
         XCTAssertEqual(cockpitItem.sourceQuote, "Watched The Way Way Back tonight.")
         XCTAssertEqual(cockpitItem.targetLabel, "movie, media")
+        XCTAssertEqual(cockpitItem.possibleTypeLabels, ["movie", "media"])
+        XCTAssertEqual(cockpitItem.possibleRelationLabels, ["watched"])
+        XCTAssertEqual(cockpitItem.confidenceReason, "Journal sentence uses a watched verb for a media title.")
+        XCTAssertEqual(cockpitItem.detailExtractedValueLabel, "Proposes watched → The Way Way Back (movie, media)")
+        XCTAssertEqual(cockpitItem.acceptanceEffectLabel, "Resolve or create the target object before accepting; then Cider will add a watched relation from this source note to that object.")
+        XCTAssertEqual(cockpitItem.detailCorrectionActionLabel, "Resolve / correct target")
         XCTAssertEqual(cockpitItem.reviewActions, [.openSource, .reject])
         XCTAssertFalse(cockpitItem.canApprove)
         XCTAssertTrue(cockpitItem.canCorrect)

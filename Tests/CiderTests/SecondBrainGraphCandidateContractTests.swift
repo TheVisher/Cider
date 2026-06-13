@@ -170,6 +170,7 @@ struct SecondBrainGraphCandidateContractTests {
             sourceOwner: owner,
             rawContent: """
             - Jami and Visher watched Reminders of Him while eating.
+            - Later I watched The Way Way Back and thought about Reminders of Him while eating.
             - Visher did not really want to watch it because it seemed like a chick-flick type movie, but watched it with her and thought it was actually pretty decent.
             - After the movie, they went to bed.
             - Ryker said his throat felt like “saw blades” or something similar and did not eat all of it.
@@ -178,8 +179,12 @@ struct SecondBrainGraphCandidateContractTests {
         )
 
         let graphOutputs = result.outputs.filter { $0.kind == "graph_candidate" }
-        #expect(graphOutputs.map(\.value) == ["Reminders of Him", "the Marysville outlet mall"])
+        #expect(graphOutputs.map(\.value) == ["Reminders of Him", "The Way Way Back", "the Marysville outlet mall", "Nike store"])
         #expect(graphOutputs.map(\.evidence).contains("- Jami and Visher watched Reminders of Him while eating"))
+        #expect(graphOutputs.first { $0.value == "The Way Way Back" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"watched\"]")
+        #expect(graphOutputs.first { $0.value == "the Marysville outlet mall" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"visited\"]")
+        #expect(graphOutputs.first { $0.value == "Nike store" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.subjectText] == "Bane")
+        #expect(graphOutputs.first { $0.value == "Nike store" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"wants\"]")
         #expect(!graphOutputs.map(\.value).contains("it"))
         #expect(!graphOutputs.map(\.value).contains("bed"))
         #expect(!graphOutputs.contains { $0.value.localizedCaseInsensitiveContains("saw blades") })

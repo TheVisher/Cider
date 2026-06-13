@@ -168,6 +168,22 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
         }
     }
 
+    func buttonTitle(for item: HomeReviewCockpitItem) -> String {
+        switch self {
+        case .accept:
+            return item.kindLabel == "Graph Candidate" ? "Accept relation" : "Accept"
+        case .reject:
+            return "Reject"
+        case .deferReview:
+            return "Defer"
+        case .openSource:
+            if item.kindLabel == "Graph Candidate", item.canApprove == false {
+                return "Resolve target"
+            }
+            return "Open source"
+        }
+    }
+
     func helpLabel(for item: HomeReviewCockpitItem) -> String {
         switch self {
         case .accept:
@@ -216,6 +232,10 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
     let sourceProvenanceLabel: String?
     let memoryKind: String?
     let linkedOwnerRefs: [String]
+    let possibleTypeLabels: [String]
+    let possibleRelationLabels: [String]
+    let candidateActionLabels: [String]
+    let confidenceReason: String?
 
     init(
         id: String,
@@ -242,7 +262,11 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         sourceQuote: String? = nil,
         sourceProvenanceLabel: String? = nil,
         memoryKind: String? = nil,
-        linkedOwnerRefs: [String] = []
+        linkedOwnerRefs: [String] = [],
+        possibleTypeLabels: [String] = [],
+        possibleRelationLabels: [String] = [],
+        candidateActionLabels: [String] = [],
+        confidenceReason: String? = nil
     ) {
         self.id = id
         self.sourceReviewID = sourceReviewID
@@ -269,6 +293,10 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         self.sourceProvenanceLabel = sourceProvenanceLabel
         self.memoryKind = memoryKind
         self.linkedOwnerRefs = linkedOwnerRefs
+        self.possibleTypeLabels = possibleTypeLabels
+        self.possibleRelationLabels = possibleRelationLabels
+        self.candidateActionLabels = candidateActionLabels
+        self.confidenceReason = confidenceReason
     }
 }
 
@@ -353,7 +381,27 @@ extension HomeReviewCockpitItem {
     }
 
     var detailExtractedValueLabel: String {
-        targetLabel ?? reason
+        if kindLabel == "Graph Candidate" {
+            let relation = possibleRelationLabels.first ?? "mentions"
+            let typeSuffix = possibleTypeLabels.isEmpty ? "" : " (\(possibleTypeLabels.joined(separator: ", ")))"
+            return "Proposes \(relation) → \(title)\(typeSuffix)"
+        }
+        return targetLabel ?? reason
+    }
+
+    var acceptanceEffectLabel: String? {
+        switch kindLabel {
+        case "Graph Candidate":
+            let relation = possibleRelationLabels.first ?? "mentions"
+            if canApprove {
+                return "Accepting will add a \(relation) relation from this source note to the resolved graph target."
+            }
+            return "Resolve or create the target object before accepting; then Cider will add a \(relation) relation from this source note to that object."
+        case "Memory Candidate":
+            return "Accepting will mark this source-backed memory candidate as approved for promotion."
+        default:
+            return nil
+        }
     }
 
     var detailOwnerRefsLabel: String? {
@@ -366,7 +414,7 @@ extension HomeReviewCockpitItem {
         case "Memory Candidate":
             return "Edit value"
         case "Graph Candidate":
-            return canApprove ? "Inspect relation" : "Delegate / inspect"
+            return canApprove ? "Inspect relation" : "Resolve / correct target"
         default:
             return canCorrect ? "Correct source" : nil
         }

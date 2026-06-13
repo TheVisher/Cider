@@ -724,8 +724,9 @@ struct HomeOverviewDashboardView: View {
                 Button {
                     openReviewSource(reviewItem)
                 } label: {
-                    Image(systemName: action.systemImage)
-                        .frame(width: 20, height: 20)
+                    Label(action.buttonTitle(for: reviewItem), systemImage: action.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .font(CiderFont.captionSemibold)
                 }
                 .buttonStyle(.plain)
                 .help(action.helpLabel(for: reviewItem))
@@ -737,8 +738,9 @@ struct HomeOverviewDashboardView: View {
                     resolvedReviewIDs.insert(reviewItem.id)
                 }
             } label: {
-                Image(systemName: action.systemImage)
-                    .frame(width: 20, height: 20)
+                Label(action.buttonTitle(for: reviewItem), systemImage: action.systemImage)
+                    .labelStyle(.titleAndIcon)
+                    .font(CiderFont.captionSemibold)
             }
             .buttonStyle(.plain)
             .help(action.helpLabel(for: reviewItem))

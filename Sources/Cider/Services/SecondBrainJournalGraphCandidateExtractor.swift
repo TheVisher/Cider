@@ -144,12 +144,13 @@ struct SecondBrainJournalGraphCandidateExtractor {
         sentence: String
     ) -> [SecondBrainEnrichmentOutput] {
         regexMatches(
-            pattern: #"(?i)^\s*(?:(I|we|[A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*){0,2})\s+)?(?:want|wants|wanted|would like)\s+to\s+(?:try|visit|go to|watch|read)\s+(.+?)$"#,
+            pattern: #"(?i)\b(?:(I|we|[A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*){0,2})\s+)?(?:want|wants|wanted|would like)(?:\s+to\s+(?:try|visit|go to|watch|read))?\s+(.+?)$"#,
             in: sentence
         ).compactMap { match in
             guard match.captures.count >= 2,
                   let mention = cleanedMention(match.captures[1], kind: .object) else { return nil }
-            let subject = trimmedNonEmpty(match.captures[0])
+            let subject = trimmedNonEmpty(match.captures[0])?
+                .replacingOccurrences(of: #"(?i)^and\s+"#, with: "", options: .regularExpression)
             return makeCandidate(
                 sourceOwner: sourceOwner,
                 candidateKind: .objectRelation,
@@ -475,6 +476,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
             #"(?i)\s+today$"#,
             #"(?i)\s+again$"#,
             #"(?i)\s+while\s+.+$"#,
+            #"(?i)\s+and\s+(?:thought|talked|spoke|wondered|worried|laughed|joked)\s+.+$"#,
             #"(?i)\s+because\s+.+$"#,
             #"(?i)\s+but\s+.+$"#,
             #"(?i)\s+with\s+.+$"#,
@@ -487,6 +489,9 @@ struct SecondBrainJournalGraphCandidateExtractor {
         value = value
             .replacingOccurrences(of: #"(?i)^(that|those|a|an|some)\s+"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        if kind == .object, value.lowercased().contains("store") {
+            value = value.replacingOccurrences(of: #"(?i)^the\s+"#, with: "", options: .regularExpression)
+        }
         guard let cleaned = trimmedNonEmpty(value), !isLowQualityMention(cleaned, kind: kind) else {
             return nil
         }
