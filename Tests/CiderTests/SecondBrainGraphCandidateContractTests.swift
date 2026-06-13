@@ -163,6 +163,57 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(result.outputs.map(\.value) == ["pineapple coconut drink", "tacos"])
     }
 
+    @Test("journal extractor suppresses noisy dogfood false positives")
+    func journalExtractorSuppressesNoisyDogfoodFalsePositives() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: """
+            - Jami and Visher watched Reminders of Him while eating.
+            - Visher did not really want to watch it because it seemed like a chick-flick type movie, but watched it with her and thought it was actually pretty decent.
+            - After the movie, they went to bed.
+            - Ryker said his throat felt like “saw blades” or something similar and did not eat all of it.
+            - They went to the Marysville outlet mall, and Bane wanted the Nike store.
+            """
+        )
+
+        let graphOutputs = result.outputs.filter { $0.kind == "graph_candidate" }
+        #expect(graphOutputs.map(\.value) == ["Reminders of Him", "the Marysville outlet mall"])
+        #expect(graphOutputs.map(\.evidence).contains("- Jami and Visher watched Reminders of Him while eating"))
+        #expect(!graphOutputs.map(\.value).contains("it"))
+        #expect(!graphOutputs.map(\.value).contains("bed"))
+        #expect(!graphOutputs.contains { $0.value.localizedCaseInsensitiveContains("saw blades") })
+    }
+
+    @Test("journal extractor proposes useful source backed memory candidates")
+    func journalExtractorProposesUsefulSourceBackedMemoryCandidates() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: """
+            - This is Visher’s first weekend overtime in five years or more.
+            - The reason he asked about hourly wages was motivation: knowing today is about $82.26/hr and Sunday is about $109.68/hr makes it easier to get up and do the overtime.
+            - Visher said the overtime-heavy first hourly paycheck matters because his budget normally depends on one full paycheck for bills and one full paycheck for rent.
+            - Consider an overnight oats reminder on nights before early weekend overtime.
+            """,
+            date: "2026-06-13",
+            time: "03:16"
+        )
+
+        let memoryOutputs = result.outputs.filter { $0.kind == "memory_candidate" }
+        #expect(memoryOutputs.map(\.value) == [
+            "Visher has returned to weekend overtime after five years or more.",
+            "Overtime pay calculations help Visher motivate himself to get up for early weekend overtime.",
+            "Visher's budget normally depends on one full paycheck for bills and one full paycheck for rent.",
+            "Consider an overnight oats reminder on nights before early weekend overtime.",
+        ])
+        #expect(memoryOutputs.allSatisfy { $0.reviewState == "suggested" })
+        #expect(memoryOutputs.first { $0.metadata["memory_key"] == "overtime-pay-motivation" }?.evidence.contains("$109.68/hr") == true)
+        #expect(memoryOutputs.allSatisfy { $0.metadata["requires_review"] == "true" })
+        #expect(memoryOutputs.allSatisfy { $0.metadata["journal_date"] == "2026-06-13" })
+        #expect(memoryOutputs.map { $0.metadata["memory_kind"] } == ["pattern", "pattern", "pattern", "pattern"])
+    }
+
     @Test("graph candidate persists through enrichment outputs table")
     func graphCandidatePersistsThroughEnrichmentOutputsTable() throws {
         let (db, url) = try makeTestDB()

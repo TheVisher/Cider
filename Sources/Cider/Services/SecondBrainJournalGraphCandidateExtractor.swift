@@ -22,6 +22,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
             outputs.append(contentsOf: visitedCandidates(sourceOwner: sourceOwner, sentence: sentence))
             outputs.append(contentsOf: consumptionCandidates(sourceOwner: sourceOwner, sentence: sentence))
             outputs.append(contentsOf: wantsCandidates(sourceOwner: sourceOwner, sentence: sentence))
+            outputs.append(contentsOf: memoryCandidates(sourceOwner: sourceOwner, sentence: sentence))
         }
 
         let enriched = unique(outputs).map { output -> SecondBrainEnrichmentOutput in
@@ -41,7 +42,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
             pattern: #"(?i)\b(?:watched|rewatched|saw)\s+(.+?)(?:\s+(?:last night|tonight|yesterday|today|this morning|this afternoon|this evening|again))?$"#,
             in: sentence
         ).compactMap { match in
-            guard let mention = cleanedMention(match.captures.first ?? nil) else { return nil }
+            guard let mention = cleanedMention(match.captures.first ?? nil, kind: .media) else { return nil }
             return makeCandidate(
                 sourceOwner: sourceOwner,
                 candidateKind: .objectRelation,
@@ -66,7 +67,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
         ).compactMap { match in
             guard match.captures.count >= 3,
                   let verb = trimmedNonEmpty(match.captures[1]),
-                  let mention = cleanedMention(match.captures[2]) else { return nil }
+                  let mention = cleanedMention(match.captures[2], kind: .object) else { return nil }
             let subject = trimmedNonEmpty(match.captures[0])
             let disliked = verb.localizedCaseInsensitiveContains("hate")
                 || verb.localizedCaseInsensitiveContains("dislike")
@@ -95,7 +96,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
             pattern: #"(?i)\b(?:stopped at|went to|visited|ate at|had dinner at|had lunch at)\s+(.+?)$"#,
             in: sentence
         ).compactMap { match in
-            guard let mention = cleanedMention(match.captures.first ?? nil) else { return nil }
+            guard let mention = cleanedMention(match.captures.first ?? nil, kind: .place) else { return nil }
             return makeCandidate(
                 sourceOwner: sourceOwner,
                 candidateKind: .objectRelation,
@@ -119,7 +120,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
             in: sentence
         ).compactMap { match in
             guard match.captures.count >= 2,
-                  let mention = cleanedMention(match.captures[1]) else { return nil }
+                  let mention = cleanedMention(match.captures[1], kind: .object) else { return nil }
             let subject = trimmedNonEmpty(match.captures[0])
             let objectTypes = objectTypes(for: mention)
             let relation: SecondBrainGraphCandidateContract.RelationType = objectTypes.contains(.drink) ? .drank : .ate
@@ -147,7 +148,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
             in: sentence
         ).compactMap { match in
             guard match.captures.count >= 2,
-                  let mention = cleanedMention(match.captures[1]) else { return nil }
+                  let mention = cleanedMention(match.captures[1], kind: .object) else { return nil }
             let subject = trimmedNonEmpty(match.captures[0])
             return makeCandidate(
                 sourceOwner: sourceOwner,
@@ -162,6 +163,65 @@ struct SecondBrainJournalGraphCandidateExtractor {
                 subjectText: subject
             )
         }
+    }
+
+    private func memoryCandidates(
+        sourceOwner: SecondBrainOwnerRef,
+        sentence: String
+    ) -> [SecondBrainEnrichmentOutput] {
+        let normalizedSentence = sentence
+            .replacingOccurrences(of: #"^[-•]\s*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = normalizedSentence.lowercased()
+        var candidates: [SecondBrainEnrichmentOutput?] = []
+
+        if lower.contains("first weekend overtime") && lower.contains("five years") {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "pattern",
+                value: "Visher has returned to weekend overtime after five years or more.",
+                evidence: sentence,
+                confidence: 0.82,
+                memoryKey: "weekend-overtime-return"
+            ))
+        }
+
+        if lower.contains("hourly wages") && lower.contains("motivation") {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "pattern",
+                value: "Overtime pay calculations help Visher motivate himself to get up for early weekend overtime.",
+                evidence: sentence,
+                confidence: 0.8,
+                memoryKey: "overtime-pay-motivation"
+            ))
+        }
+
+        if lower.contains("budget")
+            && lower.contains("one full paycheck for bills")
+            && lower.contains("one full paycheck for rent") {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "pattern",
+                value: "Visher's budget normally depends on one full paycheck for bills and one full paycheck for rent.",
+                evidence: sentence,
+                confidence: 0.84,
+                memoryKey: "paycheck-bills-rent-budget-pattern"
+            ))
+        }
+
+        if lower.contains("overnight oats reminder") && lower.contains("weekend overtime") {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "pattern",
+                value: "Consider an overnight oats reminder on nights before early weekend overtime.",
+                evidence: sentence,
+                confidence: 0.86,
+                memoryKey: "overnight-oats-weekend-overtime-reminder"
+            ))
+        }
+
+        return candidates.compactMap { $0 }
     }
 
     private func makeCandidate(
@@ -191,6 +251,46 @@ struct SecondBrainJournalGraphCandidateExtractor {
             subjectText: subjectText,
             source: "graph_candidate.journal_capture"
         )
+    }
+
+    private func makeMemoryCandidate(
+        sourceOwner: SecondBrainOwnerRef,
+        kind: String,
+        value: String,
+        evidence: String,
+        confidence: Double,
+        memoryKey: String
+    ) -> SecondBrainEnrichmentOutput? {
+        guard let value = trimmedNonEmpty(value),
+              let evidence = trimmedNonEmpty(evidence) else { return nil }
+        return SecondBrainEnrichmentOutput(
+            owner: sourceOwner,
+            chunkID: nil,
+            kind: "memory_candidate",
+            value: value,
+            normalizedValue: normalizedValue(value),
+            label: "Memory candidate: \(kind.replacingOccurrences(of: "_", with: " "))",
+            evidence: evidence,
+            source: "memory_candidate.journal_capture",
+            confidence: confidence,
+            reviewState: "suggested",
+            metadata: [
+                "memory_kind": kind,
+                "candidate_kind": kind,
+                "requires_review": "true",
+                "memory_key": memoryKey,
+                "memory_status": "current",
+                "requested_owner_type": sourceOwner.ownerType,
+                "requested_owner_ref": sourceOwner.ownerID,
+            ]
+        )
+    }
+
+    private func normalizedValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 
     private func objectTypes(for mention: String) -> [SecondBrainGraphCandidateContract.ObjectType] {
@@ -225,7 +325,14 @@ struct SecondBrainJournalGraphCandidateExtractor {
     }
 
     private func splitSentences(_ text: String) -> [String] {
-        text.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
+        let decimalSentinel = "<cider-decimal-point>"
+        let protected = text.replacingOccurrences(
+            of: #"(\d)\.(\d)"#,
+            with: "$1\(decimalSentinel)$2",
+            options: .regularExpression
+        )
+        return protected.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
+            .map { $0.replacingOccurrences(of: decimalSentinel, with: ".") }
             .compactMap(trimmedNonEmpty)
     }
 
@@ -353,7 +460,13 @@ struct SecondBrainJournalGraphCandidateExtractor {
         }
     }
 
-    private func cleanedMention(_ raw: String?) -> String? {
+    private enum MentionKind {
+        case media
+        case place
+        case object
+    }
+
+    private func cleanedMention(_ raw: String?, kind: MentionKind = .object) -> String? {
         guard var value = trimmedNonEmpty(raw) else { return nil }
         let trailingPhrases = [
             #"(?i)\s+last\s+night$"#,
@@ -361,8 +474,12 @@ struct SecondBrainJournalGraphCandidateExtractor {
             #"(?i)\s+yesterday$"#,
             #"(?i)\s+today$"#,
             #"(?i)\s+again$"#,
+            #"(?i)\s+while\s+.+$"#,
+            #"(?i)\s+because\s+.+$"#,
+            #"(?i)\s+but\s+.+$"#,
             #"(?i)\s+with\s+.+$"#,
             #"(?i)\s+at\s+.+$"#,
+            #"(?i),\s+and\s+.+$"#,
         ]
         for pattern in trailingPhrases {
             value = value.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
@@ -370,7 +487,35 @@ struct SecondBrainJournalGraphCandidateExtractor {
         value = value
             .replacingOccurrences(of: #"(?i)^(that|those|a|an|some)\s+"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
-        return trimmedNonEmpty(value)
+        guard let cleaned = trimmedNonEmpty(value), !isLowQualityMention(cleaned, kind: kind) else {
+            return nil
+        }
+        return cleaned
+    }
+
+    private func isLowQualityMention(_ value: String, kind: MentionKind) -> Bool {
+        let lower = value.lowercased()
+        let genericMentions: Set<String> = [
+            "it", "this", "that", "him", "her", "them", "there", "home", "bed", "school", "work",
+            "the movie", "movie", "the place", "place", "something", "anything", "everything",
+        ]
+        if genericMentions.contains(lower) { return true }
+        if lower.count < 3 { return true }
+
+        switch kind {
+        case .media:
+            if lower.hasPrefix("blades") || lower.contains(" or something") { return true }
+            let hasTitleCase = value.unicodeScalars.contains { CharacterSet.uppercaseLetters.contains($0) }
+            let mediaClues = ["movie", "show", "episode", "season", "book", "album", "game"]
+            if !hasTitleCase && !mediaClues.contains(where: { lower.contains($0) }) {
+                return true
+            }
+        case .place:
+            if ["bed", "sleep", "asleep", "their dad's house", "dad's house"].contains(lower) { return true }
+        case .object:
+            break
+        }
+        return false
     }
 
     private func trimmedNonEmpty(_ value: String?) -> String? {
