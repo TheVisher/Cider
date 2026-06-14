@@ -2511,6 +2511,181 @@ struct CiderCLIAgentSafetyTests {
         #expect(reviewedList["count"] as? Int == 3)
     }
 
+    @Test("graph object candidate accept creates cited canonical entity and blocks conflicts without approval")
+    func graphObjectCandidateAcceptCreatesCitedCanonicalEntityAndBlocksConflictsWithoutApproval() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-canonical-entity-accept-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceNoteID = try createNote(
+            title: "Daily Journal 2026-06-16",
+            content: "Jami wants to try Pine House again. Pinehouse is how the group typed it later.",
+            vault: vault
+        )
+        let conflictNoteID = try createNote(
+            title: "Daily Journal 2026-06-17",
+            content: "Pine House might be the project codename, not the restaurant.",
+            vault: vault
+        )
+        let sourceOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: sourceNoteID)
+        let conflictOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: conflictNoteID)
+        let acceptOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: sourceOwner,
+            candidateKind: .objectRelation,
+            mentionText: "Pine House",
+            sourceQuote: "Jami wants to try Pine House again.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.restaurant, .place],
+            relationGuesses: [.wants],
+            actionGuesses: ["wants_to_try"],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.77,
+            subjectText: "Jami",
+            source: "graph_candidate.test"
+        )
+        let conflictOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: conflictOwner,
+            candidateKind: .object,
+            mentionText: "Pine House",
+            sourceQuote: "Pine House might be the project codename, not the restaurant.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.project],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.65,
+            source: "graph_candidate.test"
+        )
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let service = SecondBrainEnrichmentOutputService(database: db)
+        try service.record(acceptOutput)
+        try service.record(conflictOutput)
+        db.close()
+
+        let blockedResult = try runCLI(args: [
+            "item", "accept-graph-candidate", acceptOutput.id,
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let blocked = try parseJSONObject(blockedResult.stdout)
+        #expect(blockedResult.status != 0)
+        #expect(blocked["ok"] as? Bool == false)
+        #expect(blocked["command"] as? String == "item.accept-graph-candidate")
+        #expect(blocked["changed"] as? Bool == false)
+        #expect(blocked["errorCode"] as? String == "graph_candidate_conflicts_block_accept")
+        #expect((blocked["blockingIssues"] as? [String])?.contains("graph_object_conflict") == true)
+        #expect(((blocked["conflicts"] as? [[String: Any]]) ?? []).contains { $0["candidateID"] as? String == conflictOutput.id })
+        #expect(((blocked["safeNextCommands"] as? [String]) ?? []).contains("cider-cli item delegate-graph-candidate \(acceptOutput.id) --task-kind find_object_evidence --json"))
+
+        let acceptResult = try runCLI(args: [
+            "item", "accept-graph-candidate", acceptOutput.id,
+            "--actor", "codex-test",
+            "--allow-conflicts",
+            "--alias", "Pinehouse",
+            "--json",
+        ], vault: vault)
+        let accept = try parseJSONObject(acceptResult.stdout)
+        #expect(acceptResult.status == 0)
+        #expect(accept["command"] as? String == "item.accept-graph-candidate")
+        #expect(accept["changed"] as? Bool == true)
+        #expect(accept["reviewState"] as? String == "accepted")
+        let canonicalEntity = try #require(accept["canonicalEntity"] as? [String: Any])
+        #expect(canonicalEntity["stableKey"] as? String == "graph_object:pine-house")
+        #expect(canonicalEntity["displayName"] as? String == "Pine House")
+        #expect(canonicalEntity["owner"] as? [String: Any] != nil)
+        #expect((canonicalEntity["aliases"] as? [String])?.contains("Pinehouse") == true)
+        #expect(canonicalEntity["acceptedAsTruth"] as? Bool == true)
+        #expect(canonicalEntity["approvalSource"] as? String == "explicit_command")
+        #expect(canonicalEntity["acceptedCandidateRef"] as? String == "graph_candidate:\(acceptOutput.id)")
+        #expect(canonicalEntity["conflictPolicy"] as? String == "accepted_with_explicit_conflict_override")
+        #expect((canonicalEntity["blockingIssues"] as? [String])?.contains("conflicts_reviewed_by_explicit_override") == true)
+        let sourceEvidence = try #require(canonicalEntity["sourceEvidence"] as? [[String: Any]])
+        #expect(sourceEvidence.contains { evidence in
+            evidence["candidateRef"] as? String == "graph_candidate:\(acceptOutput.id)"
+                && evidence["sourceQuote"] as? String == "Jami wants to try Pine House again."
+        })
+        let aliasDecisions = try #require(accept["aliasDecisions"] as? [[String: Any]])
+        #expect(aliasDecisions.contains { decision in
+            decision["alias"] as? String == "Pinehouse"
+                && decision["relationType"] as? String == "alias_of"
+                && decision["approvalSource"] as? String == "explicit_command"
+        })
+        let candidate = try #require(accept["candidate"] as? [String: Any])
+        let acceptedHub = try #require(candidate["objectHubCandidate"] as? [String: Any])
+        #expect(acceptedHub["acceptedAsTruth"] as? Bool == true)
+        #expect(acceptedHub["canonicalEntity"] as? [String: Any] != nil)
+
+        let recall = try parseJSONObject(try runCLI(args: ["item", "recall-context", "--item", "note", sourceNoteID, "--json"], vault: vault).stdout)
+        let acceptedFacts = try #require(recall["acceptedFacts"] as? [[String: Any]])
+        #expect(acceptedFacts.contains { fact in
+            fact["candidateRef"] as? String == "graph_candidate:\(acceptOutput.id)"
+                && fact["truthState"] as? String == "accepted"
+                && fact["sourceQuote"] as? String == "Jami wants to try Pine House again."
+        })
+        let defaultCandidates = try parseJSONObject(try runCLI(args: ["item", "graph-candidates", "--json"], vault: vault).stdout)
+        let reviewableCandidates = try #require(defaultCandidates["candidates"] as? [[String: Any]])
+        #expect(!reviewableCandidates.contains { $0["id"] as? String == acceptOutput.id })
+        #expect(reviewableCandidates.contains { $0["id"] as? String == conflictOutput.id })
+
+        let secondAcceptResult = try runCLI(args: [
+            "item", "accept-graph-candidate", acceptOutput.id,
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let secondAccept = try parseJSONObject(secondAcceptResult.stdout)
+        #expect(secondAcceptResult.status != 0)
+        #expect(secondAccept["ok"] as? Bool == false)
+        #expect(secondAccept["errorCode"] as? String == "graph_candidate_not_reviewable")
+        #expect(secondAccept["changed"] as? Bool == false)
+    }
+
+    @Test("graph object candidate accept returns structured errors for malformed and missing refs")
+    func graphObjectCandidateAcceptReturnsStructuredErrorsForMalformedAndMissingRefs() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-canonical-entity-errors-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missing = try parseJSONObject(try runCLI(args: [
+            "item", "accept-graph-candidate", "missing-candidate-id", "--json",
+        ], vault: vault).stdout)
+        #expect(missing["ok"] as? Bool == false)
+        #expect(missing["command"] as? String == "item.accept-graph-candidate")
+        #expect(missing["errorCode"] as? String == "graph_candidate_not_found")
+        #expect(missing["changed"] as? Bool == false)
+
+        let noteID = try createNote(title: "Daily Journal 2026-06-18", content: "Try Cactus later.", vault: vault)
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .object,
+            mentionText: "Cactus",
+            sourceQuote: "Try Cactus later.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.restaurant],
+            safeActions: [.inspectSource, .createObject, .reject],
+            confidence: 0.7,
+            source: "graph_candidate.test"
+        )
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+        db.close()
+
+        let malformedResult = try runCLI(args: [
+            "item", "accept-graph-candidate", output.id,
+            "--target-owner", "not-a-canonical-ref",
+            "--json",
+        ], vault: vault)
+        let malformed = try parseJSONObject(malformedResult.stdout)
+        #expect(malformedResult.status != 0)
+        #expect(malformed["ok"] as? Bool == false)
+        #expect(malformed["command"] as? String == "item.accept-graph-candidate")
+        #expect(malformed["errorCode"] as? String == "malformed_target_owner")
+        #expect(malformed["changed"] as? Bool == false)
+    }
+
     @Test("read-only folder filters do not adopt untracked disk folders")
     func readOnlyFolderFiltersDoNotAdoptUntrackedDiskFolders() throws {
         let vault = FileManager.default.temporaryDirectory

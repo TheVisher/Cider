@@ -16109,6 +16109,57 @@ struct CiderCLI {
         )
     }
 
+    struct GraphCandidateMutationCLIError: Error, LocalizedError, @unchecked Sendable {
+        var command: String
+        var errorCode: String
+        var message: String
+        var candidateID: String
+        var blockingIssues: [String] = []
+        var conflicts: [[String: Any]] = []
+        var safeNextCommands: [String] = []
+
+        var errorDescription: String? { message }
+    }
+
+    static func printGraphCandidateMutationError(_ error: GraphCandidateMutationCLIError) {
+        processExitCode = 1
+        let payload: [String: Any] = [
+            "ok": false,
+            "command": error.command,
+            "readOnly": false,
+            "changed": false,
+            "candidateID": error.candidateID,
+            "candidateRef": "graph_candidate:\(error.candidateID)",
+            "errorCode": error.errorCode,
+            "error": error.message,
+            "blockingIssues": error.blockingIssues,
+            "conflicts": error.conflicts,
+            "safeNextCommands": error.safeNextCommands,
+            "safeCommands": error.safeNextCommands,
+        ]
+        if jsonOutput {
+            outputJSON(payload)
+        } else {
+            print("Error: \(error.message)")
+        }
+    }
+
+    static func graphCandidateMutationErrorCode(_ error: Error, action: String) -> String {
+        let message = error.localizedDescription.lowercased()
+        if message.contains("not found") { return "graph_candidate_not_found" }
+        if message.contains("cannot be mutated") { return "graph_candidate_not_reviewable" }
+        if message.contains("owner references must") || message.contains("target-owner") { return "malformed_target_owner" }
+        return "graph_candidate_\(action)_failed"
+    }
+
+    static func graphCandidateMutationFallbackCommands(candidateID: String) -> [String] {
+        [
+            "cider-cli item graph-candidate \(candidateID) --json",
+            "cider-cli item graph-candidates --json",
+            "cider-cli capture review-queue --json",
+        ]
+    }
+
     static func handleGraphCandidateReadCommand(subcommand: String, args: [String]) {
         let positional = leadingPositionalArgs(from: args)
         let service = SecondBrainEnrichmentOutputService(database: .shared)
@@ -16189,8 +16240,18 @@ struct CiderCLI {
                 print("\(payload["action"] ?? action) graph candidate: \(candidateID)")
                 print("  State: \(payload["reviewState"] ?? "")")
             }
+        } catch let error as GraphCandidateMutationCLIError {
+            printGraphCandidateMutationError(error)
         } catch {
-            printCLIError(error.localizedDescription)
+            printGraphCandidateMutationError(
+                GraphCandidateMutationCLIError(
+                    command: "item.\(action)-graph-candidate",
+                    errorCode: graphCandidateMutationErrorCode(error, action: action),
+                    message: error.localizedDescription,
+                    candidateID: candidateID,
+                    safeNextCommands: graphCandidateMutationFallbackCommands(candidateID: candidateID)
+                )
+            )
         }
     }
 
@@ -16200,17 +16261,31 @@ struct CiderCLI {
         store: SecondBrainStore
     ) throws -> [String: Any] {
         let service = SecondBrainEnrichmentOutputService(database: .shared)
-        let output = try graphCandidateOutput(candidateID, service: service)
+        let output = try graphCandidateOutputForMutation(candidateID, action: "accept", service: service)
         let candidate = try SecondBrainGraphCandidateContract.validate(output)
-        try requireReviewableGraphCandidate(candidate)
+        try requireReviewableGraphCandidate(candidate, action: "accept")
 
         let actor = parseFlag("--actor", from: args) ?? "user"
         let source = parseFlag("--source", from: args) ?? "graph_candidate.accept"
         let relationType = parseFlag("--relation", from: args)
             ?? candidate.relationGuesses.first?.rawValue
             ?? SecondBrainGraphCandidateContract.RelationType.mentions.rawValue
-        let targetOwner = try graphCandidateAcceptedTargetOwner(candidate: candidate, args: args)
+        let targetOwner = try graphCandidateAcceptedTargetOwnerForMutation(candidate: candidate, args: args)
         let relationSourceOwner = candidate.subjectOwner ?? output.owner
+        let conflicts = graphObjectHubConflicts(candidate: candidate, output: output)
+        let allowConflicts = args.contains("--allow-conflicts") || args.contains("--approve-conflicts")
+        if !conflicts.isEmpty && !allowConflicts {
+            throw GraphCandidateMutationCLIError(
+                command: "item.accept-graph-candidate",
+                errorCode: "graph_candidate_conflicts_block_accept",
+                message: "Graph candidate '\(candidateID)' has object hub conflicts and needs explicit --allow-conflicts approval before acceptance.",
+                candidateID: candidateID,
+                blockingIssues: ["graph_object_conflict"],
+                conflicts: conflicts,
+                safeNextCommands: graphCandidateConflictSafeCommands(output: output)
+            )
+        }
+        let aliases = graphCandidateAcceptedAliases(candidate: candidate, output: output, args: args)
 
         var accepted = output
         accepted.reviewState = SecondBrainGraphCandidateContract.ReviewState.accepted.rawValue
@@ -16221,8 +16296,22 @@ struct CiderCLI {
         accepted.metadata["reviewed_by"] = actor
         accepted.metadata["accepted_source_owner_ref"] = output.owner.canonicalRef
         accepted.metadata["accepted_relation_source_owner_ref"] = relationSourceOwner.canonicalRef
+        accepted.metadata["canonical_stable_key"] = graphObjectStableKey(for: candidate.mentionText)
+        accepted.metadata["canonical_display_name"] = graphObjectDisplayName(for: candidate.mentionText)
+        accepted.metadata["canonical_owner_ref"] = targetOwner.canonicalRef
+        accepted.metadata["canonical_aliases"] = DatabaseHelpers.encode(aliases)
+        accepted.metadata["canonical_approval_source"] = "explicit_command"
+        accepted.metadata["canonical_conflict_count"] = String(conflicts.count)
+        accepted.metadata["canonical_conflict_policy"] = conflicts.isEmpty ? "accepted_no_conflicts" : "accepted_with_explicit_conflict_override"
         accepted.updatedAt = Date()
         _ = try SecondBrainGraphCandidateContract.validate(accepted)
+
+        var relationMetadata = graphCandidateRelationMetadata(output: output, candidate: candidate, targetOwner: targetOwner)
+        relationMetadata["canonical_stable_key"] = graphObjectStableKey(for: candidate.mentionText)
+        relationMetadata["canonical_display_name"] = graphObjectDisplayName(for: candidate.mentionText)
+        relationMetadata["canonical_aliases"] = DatabaseHelpers.encode(aliases)
+        relationMetadata["approval_source"] = "explicit_command"
+        relationMetadata["conflict_policy"] = accepted.metadata["canonical_conflict_policy"]
 
         let relation = SecondBrainRelation(
             sourceOwner: relationSourceOwner,
@@ -16232,7 +16321,15 @@ struct CiderCLI {
             source: source,
             actor: actor,
             confidence: output.confidence,
-            metadata: graphCandidateRelationMetadata(output: output, candidate: candidate, targetOwner: targetOwner)
+            metadata: relationMetadata
+        )
+        let aliasRelations = graphCandidateAliasRelations(
+            aliases: aliases,
+            canonicalOwner: targetOwner,
+            output: output,
+            candidate: candidate,
+            actor: actor,
+            source: "graph_candidate.accept.alias"
         )
         let action = SecondBrainAgentAction(
             owner: output.owner,
@@ -16247,20 +16344,37 @@ struct CiderCLI {
                 "actor": actor,
                 "targetOwner": targetOwner.canonicalRef,
                 "relationType": relationType,
+                "aliases": DatabaseHelpers.encode(aliases),
+                "allowConflicts": String(allowConflicts),
             ]),
             resultJSON: DatabaseHelpers.encodeJSON([
                 "reviewState": accepted.reviewState,
                 "relationID": relation.id,
+                "aliasRelationIDs": DatabaseHelpers.encode(aliasRelations.map(\.id)),
             ])
         )
 
         try CiderDatabase.shared.withTransaction {
             try store.recordRelation(relation)
+            for aliasRelation in aliasRelations {
+                try store.recordRelation(aliasRelation)
+            }
             try service.record(accepted)
             try store.recordAgentAction(action)
         }
 
         let safeCommands = graphCandidatePostMutationSafeCommands(output: accepted, targetOwner: targetOwner)
+        let aliasDecisions = aliasRelations.map { graphCandidateAliasDecisionToDict($0, canonicalOwner: targetOwner) }
+        let canonicalEntity = graphAcceptedCanonicalEntity(
+            output: accepted,
+            candidate: candidate,
+            targetOwner: targetOwner,
+            actor: actor,
+            aliases: aliases,
+            conflicts: conflicts,
+            relationIDs: [relation.id] + aliasRelations.map(\.id),
+            aliasDecisions: aliasDecisions
+        )
         return [
             "ok": true,
             "command": "item.accept-graph-candidate",
@@ -16272,6 +16386,8 @@ struct CiderCLI {
             "reviewState": accepted.reviewState,
             "candidate": graphCandidateToDict(accepted),
             "relation": ownerRelationToDict(relation),
+            "canonicalEntity": canonicalEntity,
+            "aliasDecisions": aliasDecisions,
             "agentAction": agentActionToDict(action),
             "targetOwner": ownerToDict(targetOwner),
             "safeNextCommands": safeCommands,
@@ -16285,9 +16401,9 @@ struct CiderCLI {
         store: SecondBrainStore
     ) throws -> [String: Any] {
         let service = SecondBrainEnrichmentOutputService(database: .shared)
-        let output = try graphCandidateOutput(candidateID, service: service)
+        let output = try graphCandidateOutputForMutation(candidateID, action: "reject", service: service)
         let candidate = try SecondBrainGraphCandidateContract.validate(output)
-        try requireReviewableGraphCandidate(candidate)
+        try requireReviewableGraphCandidate(candidate, action: "reject")
 
         let actor = parseFlag("--actor", from: args) ?? "user"
         let source = parseFlag("--source", from: args) ?? "graph_candidate.reject"
@@ -16347,9 +16463,9 @@ struct CiderCLI {
         store: SecondBrainStore
     ) throws -> [String: Any] {
         let service = SecondBrainEnrichmentOutputService(database: .shared)
-        let output = try graphCandidateOutput(candidateID, service: service)
+        let output = try graphCandidateOutputForMutation(candidateID, action: "delegate", service: service)
         let candidate = try SecondBrainGraphCandidateContract.validate(output)
-        try requireReviewableGraphCandidate(candidate)
+        try requireReviewableGraphCandidate(candidate, action: "delegate")
 
         let actor = parseFlag("--actor", from: args) ?? "user"
         let source = parseFlag("--source", from: args) ?? "graph_candidate.delegate"
@@ -16446,12 +16562,33 @@ struct CiderCLI {
         return output
     }
 
-    static func requireReviewableGraphCandidate(_ candidate: SecondBrainGraphCandidateContract.Candidate) throws {
+    static func graphCandidateOutputForMutation(
+        _ candidateID: String,
+        action: String,
+        service: SecondBrainEnrichmentOutputService
+    ) throws -> SecondBrainEnrichmentOutput {
+        do {
+            return try graphCandidateOutput(candidateID, service: service)
+        } catch {
+            throw GraphCandidateMutationCLIError(
+                command: "item.\(action)-graph-candidate",
+                errorCode: "graph_candidate_not_found",
+                message: error.localizedDescription,
+                candidateID: candidateID,
+                safeNextCommands: graphCandidateMutationFallbackCommands(candidateID: candidateID)
+            )
+        }
+    }
+
+    static func requireReviewableGraphCandidate(_ candidate: SecondBrainGraphCandidateContract.Candidate, action: String) throws {
         guard candidate.reviewState.isReviewable else {
-            throw NSError(
-                domain: "CiderCLI",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Graph candidate '\(candidate.id)' is \(candidate.reviewState.rawValue) and cannot be mutated by this review command."]
+            throw GraphCandidateMutationCLIError(
+                command: "item.\(action)-graph-candidate",
+                errorCode: "graph_candidate_not_reviewable",
+                message: "Graph candidate '\(candidate.id)' is \(candidate.reviewState.rawValue) and cannot be mutated by this review command.",
+                candidateID: candidate.id,
+                blockingIssues: ["candidate_already_reviewed"],
+                safeNextCommands: graphCandidateMutationFallbackCommands(candidateID: candidate.id)
             )
         }
     }
@@ -16472,6 +16609,23 @@ struct CiderCLI {
             ownerType: "graph_object",
             ownerID: "\(objectType)-\(slugForGraphObject(candidate.mentionText))"
         )
+    }
+
+    static func graphCandidateAcceptedTargetOwnerForMutation(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        args: [String]
+    ) throws -> SecondBrainOwnerRef {
+        do {
+            return try graphCandidateAcceptedTargetOwner(candidate: candidate, args: args)
+        } catch {
+            throw GraphCandidateMutationCLIError(
+                command: "item.accept-graph-candidate",
+                errorCode: "malformed_target_owner",
+                message: error.localizedDescription,
+                candidateID: candidate.id,
+                safeNextCommands: graphCandidateMutationFallbackCommands(candidateID: candidate.id)
+            )
+        }
     }
 
     static func ownerRefFromCanonical(_ raw: String) throws -> SecondBrainOwnerRef {
@@ -16539,6 +16693,147 @@ struct CiderCLI {
         metadata["relation_guesses"] = DatabaseHelpers.encode(candidate.relationGuesses.map(\.rawValue))
         metadata["action_guesses"] = DatabaseHelpers.encode(candidate.actionGuesses)
         return metadata
+    }
+
+    static func graphCandidateAcceptedAliases(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput,
+        args: [String]
+    ) -> [String] {
+        let explicitAliases = parseFlagAll("--alias", from: args)
+        let existingAliases = graphObjectAliases(from: [output] + graphObjectHubRelatedOutputs(stableKey: graphObjectStableKey(for: candidate.mentionText), currentOutput: output))
+        var seen = Set<String>()
+        return (existingAliases + explicitAliases).compactMap { raw in
+            let alias = graphObjectDisplayName(for: raw)
+            return seen.insert(alias.lowercased()).inserted ? alias : nil
+        }
+    }
+
+    static func graphObjectHubConflicts(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput
+    ) -> [[String: Any]] {
+        guard candidate.kind == .object || candidate.kind == .objectRelation else { return [] }
+        let stableKey = graphObjectStableKey(for: candidate.mentionText)
+        let currentTypes = candidate.objectTypeGuesses.map(\.rawValue)
+        return graphObjectHubRelatedOutputs(stableKey: stableKey, currentOutput: output).compactMap { relatedOutput -> [String: Any]? in
+            guard let relatedCandidate = try? SecondBrainGraphCandidateContract.validate(relatedOutput) else { return nil }
+            let relatedTypes = relatedCandidate.objectTypeGuesses.map(\.rawValue)
+            guard relatedTypes != currentTypes else { return nil }
+            return [
+                "candidateID": relatedOutput.id,
+                "candidateRef": "graph_candidate:\(relatedOutput.id)",
+                "stableKey": stableKey,
+                "displayName": graphObjectDisplayName(for: relatedCandidate.mentionText),
+                "possibleTypes": relatedTypes,
+                "reviewState": relatedCandidate.reviewState.rawValue,
+                "sourceOwner": ownerToDict(relatedOutput.owner),
+                "sourceQuote": relatedCandidate.sourceQuote,
+                "conflictReason": "same_stable_key_different_type_guesses",
+                "safeNextCommands": graphCandidateSafeCommands(for: relatedOutput),
+            ]
+        }
+    }
+
+    static func graphCandidateConflictSafeCommands(output: SecondBrainEnrichmentOutput) -> [String] {
+        var commands = graphCandidateSafeCommands(for: output)
+        commands.append("cider-cli item delegate-graph-candidate \(output.id) --task-kind find_object_evidence --json")
+        commands.append("cider-cli item reject-graph-candidate \(output.id) --reason \"conflicting object hub candidate\" --json")
+        commands.append("cider-cli item accept-graph-candidate \(output.id) --allow-conflicts --json")
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func graphCandidateAliasRelations(
+        aliases: [String],
+        canonicalOwner: SecondBrainOwnerRef,
+        output: SecondBrainEnrichmentOutput,
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        actor: String,
+        source: String
+    ) -> [SecondBrainRelation] {
+        aliases.filter { $0.caseInsensitiveCompare(graphObjectDisplayName(for: candidate.mentionText)) != .orderedSame }.map { alias in
+            let aliasOwner = SecondBrainOwnerRef(ownerType: "graph_alias", ownerID: slugForGraphObject(alias))
+            return SecondBrainRelation(
+                sourceOwner: aliasOwner,
+                targetOwner: canonicalOwner,
+                relationType: "alias_of",
+                evidence: candidate.sourceQuote,
+                source: source,
+                actor: actor,
+                confidence: output.confidence,
+                metadata: [
+                    "alias": alias,
+                    "canonical_owner_ref": canonicalOwner.canonicalRef,
+                    "candidate_id": output.id,
+                    "candidate_ref": "graph_candidate:\(output.id)",
+                    "source_quote": candidate.sourceQuote,
+                    "source_owner_ref": output.owner.canonicalRef,
+                    "approval_source": "explicit_command",
+                ]
+            )
+        }
+    }
+
+    static func graphCandidateAliasDecisionToDict(
+        _ relation: SecondBrainRelation,
+        canonicalOwner: SecondBrainOwnerRef
+    ) -> [String: Any] {
+        [
+            "id": relation.id,
+            "alias": relation.metadata["alias"] ?? relation.sourceOwner.ownerID,
+            "aliasOwner": ownerToDict(relation.sourceOwner),
+            "canonicalOwner": ownerToDict(canonicalOwner),
+            "relationType": relation.relationType,
+            "sourceQuote": relation.metadata["source_quote"] ?? relation.evidence,
+            "candidateRef": relation.metadata["candidate_ref"] ?? "",
+            "approvalSource": relation.metadata["approval_source"] ?? "explicit_command",
+            "safeNextCommands": [
+                "cider-cli item related-owners \(canonicalOwner.ownerType) \(canonicalOwner.ownerID) --json",
+                "cider-cli item graph-candidate \(relation.metadata["candidate_id"] ?? "") --json",
+            ],
+        ]
+    }
+
+    static func graphAcceptedCanonicalEntity(
+        output: SecondBrainEnrichmentOutput,
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        targetOwner: SecondBrainOwnerRef,
+        actor: String,
+        aliases: [String],
+        conflicts: [[String: Any]],
+        relationIDs: [String],
+        aliasDecisions: [[String: Any]]
+    ) -> [String: Any] {
+        let conflictPolicy = conflicts.isEmpty ? "accepted_no_conflicts" : "accepted_with_explicit_conflict_override"
+        var dict: [String: Any] = [
+            "stableKey": graphObjectStableKey(for: candidate.mentionText),
+            "displayName": graphObjectDisplayName(for: candidate.mentionText),
+            "owner": ownerToDict(targetOwner),
+            "canonicalOwner": ownerToDict(targetOwner),
+            "aliases": aliases,
+            "possibleTypes": candidate.objectTypeGuesses.map(\.rawValue),
+            "acceptedAsTruth": output.reviewState == SecondBrainGraphCandidateContract.ReviewState.accepted.rawValue,
+            "acceptedCandidateRef": "graph_candidate:\(output.id)",
+            "approvalSource": "explicit_command",
+            "acceptedBy": actor,
+            "sourceEvidence": graphObjectSourceEvidence(from: [output]),
+            "conflictCount": conflicts.count,
+            "conflicts": conflicts,
+            "conflictPolicy": conflictPolicy,
+            "blockingIssues": conflicts.isEmpty ? [] : ["conflicts_reviewed_by_explicit_override"],
+            "createdRelationRefs": relationIDs,
+            "aliasDecisions": aliasDecisions,
+            "reviewSafety": [
+                "accepted_by_explicit_command",
+                "source_citations_retained",
+                "no_silent_auto_merge",
+            ],
+            "safeNextCommands": graphCandidatePostMutationSafeCommands(output: output, targetOwner: targetOwner),
+        ]
+        if let confidence = output.confidence { dict["confidence"] = confidence }
+        if let confidenceReason = candidate.confidenceReason { dict["confidenceReason"] = confidenceReason }
+        return dict
     }
 
     struct GraphCandidateDelegationTask {
@@ -16876,29 +17171,12 @@ struct CiderCLI {
         let relatedOutputs = graphObjectHubRelatedOutputs(stableKey: stableKey, currentOutput: output)
         let aliases = graphObjectAliases(from: [output] + relatedOutputs)
         let sourceEvidence = graphObjectSourceEvidence(from: [output] + relatedOutputs)
-        let currentTypes = candidate.objectTypeGuesses.map(\.rawValue)
-        let conflicts = relatedOutputs.compactMap { relatedOutput -> [String: Any]? in
-            guard let relatedCandidate = try? SecondBrainGraphCandidateContract.validate(relatedOutput) else { return nil }
-            let relatedTypes = relatedCandidate.objectTypeGuesses.map(\.rawValue)
-            guard relatedTypes != currentTypes else { return nil }
-            return [
-                "candidateID": relatedOutput.id,
-                "candidateRef": "graph_candidate:\(relatedOutput.id)",
-                "stableKey": stableKey,
-                "displayName": graphObjectDisplayName(for: relatedCandidate.mentionText),
-                "possibleTypes": relatedTypes,
-                "reviewState": relatedCandidate.reviewState.rawValue,
-                "sourceOwner": ownerToDict(relatedOutput.owner),
-                "sourceQuote": relatedCandidate.sourceQuote,
-                "conflictReason": "same_stable_key_different_type_guesses",
-                "safeNextCommands": graphCandidateSafeCommands(for: relatedOutput),
-            ]
-        }
+        let conflicts = graphObjectHubConflicts(candidate: candidate, output: output)
         var dict: [String: Any] = [
             "stableKey": stableKey,
             "displayName": graphObjectDisplayName(for: candidate.mentionText),
             "aliases": aliases,
-            "possibleTypes": currentTypes,
+            "possibleTypes": candidate.objectTypeGuesses.map(\.rawValue),
             "reviewState": candidate.reviewState.rawValue,
             "acceptedAsTruth": candidate.reviewState == .accepted,
             "sourceEvidence": sourceEvidence,
@@ -16915,6 +17193,20 @@ struct CiderCLI {
         if let confidenceReason = candidate.confidenceReason { dict["confidenceReason"] = confidenceReason }
         if let subjectText = candidate.subjectText { dict["subjectText"] = subjectText }
         if let subjectOwner = candidate.subjectOwner { dict["subjectOwner"] = ownerToDict(subjectOwner) }
+        if candidate.reviewState == .accepted,
+           let acceptedOwner = candidate.acceptedTargetOwner {
+            let acceptedAliases = DatabaseHelpers.decodeStringArray(output.metadata["canonical_aliases"])
+            dict["canonicalEntity"] = graphAcceptedCanonicalEntity(
+                output: output,
+                candidate: candidate,
+                targetOwner: acceptedOwner,
+                actor: output.metadata["reviewed_by"] ?? "unknown",
+                aliases: acceptedAliases.isEmpty ? aliases : acceptedAliases,
+                conflicts: conflicts,
+                relationIDs: [],
+                aliasDecisions: []
+            )
+        }
         return dict
     }
 
