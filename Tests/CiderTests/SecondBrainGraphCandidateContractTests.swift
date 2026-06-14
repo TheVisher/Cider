@@ -70,6 +70,24 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(candidate.reviewState.isReviewable)
     }
 
+    @Test("contract trims stored string array metadata")
+    func contractTrimsStoredStringArrayMetadata() throws {
+        let sourceOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: sourceOwner,
+            candidateKind: .object,
+            mentionText: " Cactus ",
+            sourceQuote: " We went to Cactus. ",
+            objectTypeGuesses: [.restaurant],
+            actionGuesses: [" visited ", "   ", "liked"],
+            safeActions: [.inspectSource, .reject]
+        )
+
+        #expect(DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.actionGuesses]) == ["visited", "liked"])
+        #expect(DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.safeActions]) == ["inspect_source", "reject"])
+    }
+
     @Test("contract covers source object relation and accepted graph truth states")
     func contractCoversSourceCandidateAndAcceptedGraphTruthStates() throws {
         let bookmark = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)

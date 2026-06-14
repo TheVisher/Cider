@@ -343,7 +343,7 @@ enum SecondBrainGraphCandidateContract {
     }
 
     private static func encodeStringArray(_ values: [String]) -> String {
-        DatabaseHelpers.encode(values.filter { trimmedNonEmpty($0) != nil })
+        DatabaseHelpers.encode(values.compactMap(trimmedNonEmpty))
     }
 
     private static func decodedStringArray(_ value: String?) -> [String] {
