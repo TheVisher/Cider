@@ -14361,15 +14361,28 @@ struct CiderCLI {
         owner: SecondBrainOwnerRef
     ) {
         if jsonOutput {
+            let outgoing = relations.filter { $0.sourceOwner == owner }
+            let backlinks = relations.filter { $0.targetOwner == owner }
+            let safeNextCommands = ownerRelationSafeNextCommands(owner: owner, relations: relations)
             outputJSON([
                 "ok": true,
                 "command": command,
+                "readOnly": true,
+                "changed": false,
                 "sourceRef": [
                     "type": sourceType,
                     "ref": sourceRef,
                 ],
                 "owner": ownerToDict(owner),
+                "relationCount": relations.count,
                 "relations": relations.map(ownerRelationToDict),
+                "sourceEvidence": sourceEvidenceToDict(
+                    owner: owner,
+                    ownerRelations: outgoing,
+                    backlinks: backlinks
+                ),
+                "safeNextCommands": safeNextCommands,
+                "safeCommands": safeNextCommands,
             ])
             return
         }
@@ -14380,6 +14393,19 @@ struct CiderCLI {
         for relation in relations {
             print("  [\(relation.relationType)] \(relation.sourceOwner.canonicalRef) -> \(relation.targetOwner.canonicalRef) (\(relation.source))")
         }
+    }
+
+    static func ownerRelationSafeNextCommands(owner: SecondBrainOwnerRef, relations: [SecondBrainRelation]) -> [String] {
+        var commands = ["cider-cli item context \(owner.ownerType) \(owner.ownerID) --json"]
+        for relation in relations.prefix(5) {
+            let relatedOwner = relation.sourceOwner == owner ? relation.targetOwner : relation.sourceOwner
+            commands.append("cider-cli item context \(relatedOwner.ownerType) \(relatedOwner.ownerID) --json")
+            if let candidateID = relation.metadata["candidate_id"] {
+                commands.append("cider-cli item graph-candidate \(candidateID) --json")
+            }
+        }
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
     }
 
     static func printReferenceExtractionResults(
