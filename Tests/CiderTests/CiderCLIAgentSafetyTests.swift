@@ -2121,6 +2121,96 @@ struct CiderCLIAgentSafetyTests {
         #expect(inspectSafeCommands.contains("cider-cli item context note \(noteID) --json"))
     }
 
+    @Test("graph object candidates expose stable hub identity and conflicts")
+    func graphObjectCandidatesExposeStableHubIdentityAndConflicts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-graph-object-hub-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let firstNoteID = try createNote(
+            title: "Daily Journal 2026-06-14",
+            content: "Avery Stone mentioned Pine House after the Cider graph hub conversation.",
+            vault: vault
+        )
+        let secondNoteID = try createNote(
+            title: "Daily Journal 2026-06-15",
+            content: "Avery Stone said Pine House might be a restaurant or a project codename.",
+            vault: vault
+        )
+        let firstOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: firstNoteID)
+        let secondOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: secondNoteID)
+        let firstOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: firstOwner,
+            candidateKind: .objectRelation,
+            mentionText: "Pine House",
+            sourceQuote: "Avery Stone mentioned Pine House after the Cider graph hub conversation.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.place, .restaurant],
+            relationGuesses: [.mentions],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.71,
+            subjectText: "Avery Stone",
+            source: "graph_candidate.test"
+        )
+        let conflictingOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: secondOwner,
+            candidateKind: .object,
+            mentionText: "Pine House",
+            sourceQuote: "Avery Stone said Pine House might be a restaurant or a project codename.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.project, .restaurant],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.66,
+            source: "graph_candidate.test"
+        )
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let service = SecondBrainEnrichmentOutputService(database: db)
+        try service.record(firstOutput)
+        try service.record(conflictingOutput)
+        db.close()
+
+        let listResult = try runCLI(args: ["item", "graph-candidates", "--json"], vault: vault)
+        let list = try parseJSONObject(listResult.stdout)
+        #expect(listResult.status == 0)
+        let candidates = try #require(list["candidates"] as? [[String: Any]])
+        let firstCandidate = try #require(candidates.first { $0["id"] as? String == firstOutput.id })
+        let hub = try #require(firstCandidate["objectHubCandidate"] as? [String: Any])
+        #expect(hub["stableKey"] as? String == "graph_object:pine-house")
+        #expect(hub["displayName"] as? String == "Pine House")
+        #expect(hub["aliases"] as? [String] == ["Pine House"])
+        #expect(hub["possibleTypes"] as? [String] == ["place", "restaurant"])
+        #expect(hub["reviewState"] as? String == "suggested")
+        #expect(hub["acceptedAsTruth"] as? Bool == false)
+        #expect(hub["reviewSafety"] as? [String] == [
+            "reviewable_candidate_not_truth",
+            "accept_requires_explicit_command",
+            "no_auto_merge",
+        ])
+
+        let sourceEvidence = try #require(hub["sourceEvidence"] as? [[String: Any]])
+        #expect(sourceEvidence.contains { evidence in
+            evidence["candidateID"] as? String == firstOutput.id
+                && evidence["sourceQuote"] as? String == "Avery Stone mentioned Pine House after the Cider graph hub conversation."
+                && (evidence["sourceOwner"] as? [String: Any])?["ownerID"] as? String == firstNoteID
+        })
+        #expect(hub["conflictCount"] as? Int == 1)
+        let conflicts = try #require(hub["conflicts"] as? [[String: Any]])
+        #expect(conflicts.contains { conflict in
+            conflict["candidateID"] as? String == conflictingOutput.id
+                && conflict["stableKey"] as? String == "graph_object:pine-house"
+                && conflict["conflictReason"] as? String == "same_stable_key_different_type_guesses"
+                && conflict["possibleTypes"] as? [String] == ["project", "restaurant"]
+        })
+
+        let inspectResult = try runCLI(args: ["item", "graph-candidate", firstOutput.id, "--json"], vault: vault)
+        let inspect = try parseJSONObject(inspectResult.stdout)
+        let inspected = try #require(inspect["candidate"] as? [String: Any])
+        #expect(inspected["objectHubCandidate"] as? [String: Any] != nil)
+    }
+
     @Test("item graph candidate mutations accept reject and delegate explicitly")
     func itemGraphCandidateMutationsAcceptRejectAndDelegateExplicitly() throws {
         let vault = FileManager.default.temporaryDirectory

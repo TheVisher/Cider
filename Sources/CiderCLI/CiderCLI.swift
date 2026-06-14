@@ -16557,6 +16557,9 @@ struct CiderCLI {
             if let subjectOwner = candidate.subjectOwner { dict["subjectOwner"] = ownerToDict(subjectOwner) }
             if let acceptedTargetOwner = candidate.acceptedTargetOwner { dict["acceptedTargetOwner"] = ownerToDict(acceptedTargetOwner) }
             if let acceptedRelationType = candidate.acceptedRelationType { dict["acceptedRelationType"] = acceptedRelationType.rawValue }
+            if let objectHubCandidate = graphObjectHubCandidateToDict(candidate: candidate, output: output) {
+                dict["objectHubCandidate"] = objectHubCandidate
+            }
         } catch {
             dict["contractValid"] = false
             dict["contractError"] = error.localizedDescription
@@ -16568,6 +16571,117 @@ struct CiderCLI {
         }
 
         return dict
+    }
+
+    static func graphObjectHubCandidateToDict(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput
+    ) -> [String: Any]? {
+        guard candidate.kind == .object || candidate.kind == .objectRelation else { return nil }
+        let stableKey = graphObjectStableKey(for: candidate.mentionText)
+        let relatedOutputs = graphObjectHubRelatedOutputs(stableKey: stableKey, currentOutput: output)
+        let aliases = graphObjectAliases(from: [output] + relatedOutputs)
+        let sourceEvidence = graphObjectSourceEvidence(from: [output] + relatedOutputs)
+        let currentTypes = candidate.objectTypeGuesses.map(\.rawValue)
+        let conflicts = relatedOutputs.compactMap { relatedOutput -> [String: Any]? in
+            guard let relatedCandidate = try? SecondBrainGraphCandidateContract.validate(relatedOutput) else { return nil }
+            let relatedTypes = relatedCandidate.objectTypeGuesses.map(\.rawValue)
+            guard relatedTypes != currentTypes else { return nil }
+            return [
+                "candidateID": relatedOutput.id,
+                "candidateRef": "graph_candidate:\(relatedOutput.id)",
+                "stableKey": stableKey,
+                "displayName": graphObjectDisplayName(for: relatedCandidate.mentionText),
+                "possibleTypes": relatedTypes,
+                "reviewState": relatedCandidate.reviewState.rawValue,
+                "sourceOwner": ownerToDict(relatedOutput.owner),
+                "sourceQuote": relatedCandidate.sourceQuote,
+                "conflictReason": "same_stable_key_different_type_guesses",
+                "safeNextCommands": graphCandidateSafeCommands(for: relatedOutput),
+            ]
+        }
+        var dict: [String: Any] = [
+            "stableKey": stableKey,
+            "displayName": graphObjectDisplayName(for: candidate.mentionText),
+            "aliases": aliases,
+            "possibleTypes": currentTypes,
+            "reviewState": candidate.reviewState.rawValue,
+            "acceptedAsTruth": candidate.reviewState == .accepted,
+            "sourceEvidence": sourceEvidence,
+            "conflictCount": conflicts.count,
+            "conflicts": conflicts,
+            "reviewSafety": [
+                "reviewable_candidate_not_truth",
+                "accept_requires_explicit_command",
+                "no_auto_merge",
+            ],
+            "safeNextCommands": graphCandidateSafeCommands(for: output),
+        ]
+        if let confidence = candidate.confidence { dict["confidence"] = confidence }
+        if let confidenceReason = candidate.confidenceReason { dict["confidenceReason"] = confidenceReason }
+        if let subjectText = candidate.subjectText { dict["subjectText"] = subjectText }
+        if let subjectOwner = candidate.subjectOwner { dict["subjectOwner"] = ownerToDict(subjectOwner) }
+        return dict
+    }
+
+    static func graphObjectHubRelatedOutputs(
+        stableKey: String,
+        currentOutput: SecondBrainEnrichmentOutput
+    ) -> [SecondBrainEnrichmentOutput] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        guard let outputs = try? service.outputs(
+            kind: SecondBrainGraphCandidateContract.outputKind,
+            reviewStates: nil,
+            limit: 500
+        ) else { return [] }
+        return outputs.filter { output in
+            output.id != currentOutput.id
+                && graphObjectStableKey(for: output.metadata[SecondBrainGraphCandidateContract.MetadataKey.mentionText] ?? output.value) == stableKey
+                && ((try? SecondBrainGraphCandidateContract.validate(output)).map { $0.kind == .object || $0.kind == .objectRelation } ?? false)
+        }
+    }
+
+    static func graphObjectAliases(from outputs: [SecondBrainEnrichmentOutput]) -> [String] {
+        var seen = Set<String>()
+        return outputs.compactMap { output in
+            let alias = graphObjectDisplayName(for: output.metadata[SecondBrainGraphCandidateContract.MetadataKey.mentionText] ?? output.value)
+            return seen.insert(alias.lowercased()).inserted ? alias : nil
+        }
+    }
+
+    static func graphObjectSourceEvidence(from outputs: [SecondBrainEnrichmentOutput]) -> [[String: Any]] {
+        outputs.compactMap { output in
+            guard let candidate = try? SecondBrainGraphCandidateContract.validate(output) else { return nil }
+            return [
+                "candidateID": output.id,
+                "candidateRef": "graph_candidate:\(output.id)",
+                "sourceOwner": ownerToDict(output.owner),
+                "sourceQuote": candidate.sourceQuote,
+                "mentionText": candidate.mentionText,
+                "reviewState": candidate.reviewState.rawValue,
+                "possibleTypes": candidate.objectTypeGuesses.map(\.rawValue),
+            ]
+        }
+    }
+
+    static func graphObjectStableKey(for mentionText: String) -> String {
+        let slug = mentionText
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return "graph_object:\(slug.isEmpty ? "unknown" : slug)"
+    }
+
+    static func graphObjectDisplayName(for mentionText: String) -> String {
+        let normalized = mentionText
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return "Unknown Object" }
+        return normalized.split(separator: " ").map { word in
+            let lower = word.lowercased()
+            return lower.prefix(1).uppercased() + lower.dropFirst()
+        }.joined(separator: " ")
     }
 
     static func graphCandidateSafeCommands(
