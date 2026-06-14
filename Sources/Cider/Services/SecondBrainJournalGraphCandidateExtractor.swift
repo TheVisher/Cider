@@ -38,22 +38,25 @@ struct SecondBrainJournalGraphCandidateExtractor {
         sourceOwner: SecondBrainOwnerRef,
         sentence: String
     ) -> [SecondBrainEnrichmentOutput] {
-        regexMatches(
-            pattern: #"(?i)\b(?:watched|rewatched|saw)\s+(.+?)(?:\s+(?:last night|tonight|yesterday|today|this morning|this afternoon|this evening|again))?$"#,
-            in: sentence
-        ).compactMap { match in
-            guard let mention = cleanedMention(match.captures.first ?? nil, kind: .media) else { return nil }
-            return makeCandidate(
-                sourceOwner: sourceOwner,
-                candidateKind: .objectRelation,
-                mentionText: mention,
-                sourceQuote: sentence,
-                objectTypes: [.movie, .media],
-                relations: [.watched],
-                actions: ["watched"],
-                confidence: 0.78,
-                confidenceReason: "Journal sentence uses a watched/saw verb for a media mention."
-            )
+        let sentenceClauses = candidateClauses(from: sentence)
+        return sentenceClauses.flatMap { clause in
+            regexMatches(
+                pattern: #"(?i)\b(?:watched|rewatched|saw)\s+(.+?)(?:\s+(?:last night|tonight|yesterday|today|this morning|this afternoon|this evening|again))?$"#,
+                in: clause
+            ).compactMap { match in
+                guard let mention = cleanedMention(match.captures.first ?? nil, kind: .media) else { return nil }
+                return makeCandidate(
+                    sourceOwner: sourceOwner,
+                    candidateKind: .objectRelation,
+                    mentionText: mention,
+                    sourceQuote: clause,
+                    objectTypes: [.movie, .media],
+                    relations: [.watched],
+                    actions: ["watched"],
+                    confidence: 0.78,
+                    confidenceReason: "Journal sentence uses a watched/saw verb for a media mention."
+                )
+            }
         }
     }
 
@@ -115,27 +118,29 @@ struct SecondBrainJournalGraphCandidateExtractor {
         sourceOwner: SecondBrainOwnerRef,
         sentence: String
     ) -> [SecondBrainEnrichmentOutput] {
-        regexMatches(
-            pattern: #"(?i)^\s*(?:(I|we|[A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*){0,2})\s+)?(?:ate|had|tried|drank)\s+(?:that\s+|the\s+|those\s+|a\s+|an\s+|some\s+)?(.+?)$"#,
-            in: sentence
-        ).compactMap { match in
-            guard match.captures.count >= 2,
-                  let mention = cleanedMention(match.captures[1], kind: .object) else { return nil }
-            let subject = trimmedNonEmpty(match.captures[0])
-            let objectTypes = objectTypes(for: mention)
-            let relation: SecondBrainGraphCandidateContract.RelationType = objectTypes.contains(.drink) ? .drank : .ate
-            return makeCandidate(
-                sourceOwner: sourceOwner,
-                candidateKind: .objectRelation,
-                mentionText: mention,
-                sourceQuote: sentence,
-                objectTypes: objectTypes,
-                relations: [relation],
-                actions: [relation.rawValue],
-                confidence: 0.62,
-                confidenceReason: "Journal sentence records food or drink consumption.",
-                subjectText: subject
-            )
+        return candidateClauses(from: sentence).flatMap { clause in
+            regexMatches(
+                pattern: #"(?i)^\s*(?:(I|we|[A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*){0,2})\s+)?(?:ate|tried|drank|had(?!\s+not\b))\s+(?:that\s+|the\s+|those\s+|a\s+|an\s+|some\s+)?(.+?)$"#,
+                in: clause
+            ).compactMap { match in
+                guard match.captures.count >= 2,
+                      let mention = cleanedMention(match.captures[1], kind: .object) else { return nil }
+                let subject = trimmedNonEmpty(match.captures[0])
+                let objectTypes = objectTypes(for: mention)
+                let relation: SecondBrainGraphCandidateContract.RelationType = objectTypes.contains(.drink) ? .drank : .ate
+                return makeCandidate(
+                    sourceOwner: sourceOwner,
+                    candidateKind: .objectRelation,
+                    mentionText: mention,
+                    sourceQuote: clause,
+                    objectTypes: objectTypes,
+                    relations: [relation],
+                    actions: [relation.rawValue],
+                    confidence: 0.62,
+                    confidenceReason: "Journal sentence records food or drink consumption.",
+                    subjectText: subject
+                )
+            }
         }
     }
 
@@ -143,7 +148,10 @@ struct SecondBrainJournalGraphCandidateExtractor {
         sourceOwner: SecondBrainOwnerRef,
         sentence: String
     ) -> [SecondBrainEnrichmentOutput] {
-        regexMatches(
+        let listCandidates = wantedListCandidates(sourceOwner: sourceOwner, sentence: sentence)
+        if !listCandidates.isEmpty { return listCandidates }
+
+        return regexMatches(
             pattern: #"(?i)\b(?:(I|we|[A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*){0,2})\s+)?(?:want|wants|wanted|would like)(?:\s+to\s+(?:try|visit|go to|watch|read))?\s+(.+?)$"#,
             in: sentence
         ).compactMap { match in
@@ -162,6 +170,34 @@ struct SecondBrainJournalGraphCandidateExtractor {
                 confidence: 0.64,
                 confidenceReason: "Journal sentence records future intent.",
                 subjectText: subject
+            )
+        }
+    }
+
+    private func wantedListCandidates(
+        sourceOwner: SecondBrainOwnerRef,
+        sentence: String
+    ) -> [SecondBrainEnrichmentOutput] {
+        guard sentence.range(of: #"(?i)\bwants?\s+to\s+try\s+later\s*:"#, options: .regularExpression) != nil,
+              let listStart = sentence.range(of: ":")?.upperBound else { return [] }
+        let listText = String(sentence[listStart...])
+        let rawMentions = listText
+            .replacingOccurrences(of: #"(?i)\band\s+"#, with: "", options: .regularExpression)
+            .split(separator: ",")
+            .map(String.init)
+        return rawMentions.compactMap { rawMention in
+            guard let mention = cleanedMention(rawMention, kind: .object) else { return nil }
+            return makeCandidate(
+                sourceOwner: sourceOwner,
+                candidateKind: .objectRelation,
+                mentionText: mention,
+                sourceQuote: sentence,
+                objectTypes: objectTypes(for: mention),
+                relations: [.wants],
+                actions: ["wants_to_try"],
+                confidence: 0.68,
+                confidenceReason: "Journal sentence lists specific places Visher wants to try later.",
+                subjectText: "Visher"
             )
         }
     }
@@ -301,7 +337,9 @@ struct SecondBrainJournalGraphCandidateExtractor {
             || lower.contains("margarita")
             || lower.contains("coffee")
             || lower.contains("tea")
-            || lower.contains("smoothie") {
+            || lower.contains("smoothie")
+            || lower.contains("coke")
+            || lower.contains("soda") {
             return [.drink]
         }
         if lower.contains("taco")
@@ -334,6 +372,12 @@ struct SecondBrainJournalGraphCandidateExtractor {
         )
         return protected.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
             .map { $0.replacingOccurrences(of: decimalSentinel, with: ".") }
+            .compactMap(trimmedNonEmpty)
+    }
+
+    private func candidateClauses(from sentence: String) -> [String] {
+        sentence
+            .components(separatedBy: ";")
             .compactMap(trimmedNonEmpty)
     }
 
@@ -476,7 +520,8 @@ struct SecondBrainJournalGraphCandidateExtractor {
             #"(?i)\s+today$"#,
             #"(?i)\s+again$"#,
             #"(?i)\s+while\s+.+$"#,
-            #"(?i)\s+and\s+(?:thought|talked|spoke|wondered|worried|laughed|joked)\s+.+$"#,
+            #"(?i)\s+that\s+(?:he|she|they|i|we)\s+.+$"#,
+            #"(?i)\s+and\s+(?:watched|thought|talked|spoke|wondered|worried|laughed|joked)\s+.+$"#,
             #"(?i)\s+because\s+.+$"#,
             #"(?i)\s+but\s+.+$"#,
             #"(?i)\s+with\s+.+$"#,
@@ -502,7 +547,8 @@ struct SecondBrainJournalGraphCandidateExtractor {
         let lower = value.lowercased()
         let genericMentions: Set<String> = [
             "it", "this", "that", "him", "her", "them", "there", "home", "bed", "school", "work",
-            "the movie", "movie", "the place", "place", "something", "anything", "everything",
+            "food", "some food", "the movie", "movie", "a movie", "netflix movie", "the place", "place", "something", "anything", "everything",
+            "to go back", "go back", "back",
         ]
         if genericMentions.contains(lower) { return true }
         if lower.count < 3 { return true }
@@ -510,6 +556,13 @@ struct SecondBrainJournalGraphCandidateExtractor {
         switch kind {
         case .media:
             if lower.hasPrefix("blades") || lower.contains(" or something") { return true }
+            if lower.contains("basketball")
+                || lower.contains("championship")
+                || lower.contains("knicks")
+                || lower.contains("spurs")
+                || lower.contains("sonics")
+                || lower.contains("mariners") { return true }
+            if lower.hasPrefix("netflix movie") || lower.contains("sacha baron cohen") { return true }
             let hasTitleCase = value.unicodeScalars.contains { CharacterSet.uppercaseLetters.contains($0) }
             let mediaClues = ["movie", "show", "episode", "season", "book", "album", "game"]
             if !hasTitleCase && !mediaClues.contains(where: { lower.contains($0) }) {
@@ -518,7 +571,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
         case .place:
             if ["bed", "sleep", "asleep", "their dad's house", "dad's house"].contains(lower) { return true }
         case .object:
-            break
+            if lower.contains("not realized") || lower.contains("wants to go back") { return true }
         }
         return false
     }

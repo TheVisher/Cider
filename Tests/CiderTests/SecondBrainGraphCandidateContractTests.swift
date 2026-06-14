@@ -208,6 +208,45 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(!graphOutputs.contains { $0.value.localizedCaseInsensitiveContains("saw blades") })
     }
 
+    @Test("journal extractor keeps fresh live journal retest candidates bounded")
+    func journalExtractorKeepsFreshLiveJournalRetestCandidatesBounded() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: """
+            After Visher got home, it was just him and Jami for the day. Visher ate some food and watched a Netflix movie, a Sacha Baron Cohen movie where his misogynistic character hits his head and the world is run by women. Visher thought it might be called "Ladies First" or something similar and found it pretty funny.
+            After that, Jami and Visher hung out for a while, then went to Din Tai Fung in Bellevue. They had not been there in a while. Visher had a sea salt foam black tea that he thought was delicious; Jami had a Diet Coke.
+            Visher noticed several restaurants there that he wants to try later: a sushi place, Seoul Bowl / Korean barbecue bowl place, a bubble tea/tea place, a coffee stand, and a steakhouse. He had not realized that area had so many restaurants and wants to go back.
+            Visher thinks they watched the New York Knicks beat the Spurs for the championship. Visher has not watched much basketball since the Sonics left Seattle almost two decades ago, but he enjoyed it.
+            """
+        )
+
+        let graphOutputs = result.outputs.filter { $0.kind == "graph_candidate" }
+        let values = graphOutputs.map(\.value)
+        #expect(values.contains("Din Tai Fung in Bellevue"))
+        #expect(values.contains("sea salt foam black tea"))
+        #expect(values.contains("Diet Coke"))
+        #expect(values.contains("sushi place"))
+        #expect(values.contains("Seoul Bowl / Korean barbecue bowl place"))
+        #expect(values.contains("bubble tea/tea place"))
+        #expect(values.contains("coffee stand"))
+        #expect(values.contains("steakhouse"))
+
+        #expect(!values.contains("much basketball since the Sonics left Seattle almost two decades ago"))
+        #expect(!values.contains("the New York Knicks beat the Spurs for the championship"))
+        #expect(!values.contains("to go back"))
+        #expect(!values.contains("not realized that area had so many restaurants and wants to go back"))
+        #expect(!values.contains("not been there in a while"))
+        #expect(!values.contains { $0.localizedCaseInsensitiveContains("sea salt foam black tea that he thought was delicious; Jami had a Diet Coke") })
+        #expect(!values.contains { $0.localizedCaseInsensitiveContains("Sacha Baron Cohen movie") })
+
+        #expect(graphOutputs.first { $0.value == "Din Tai Fung in Bellevue" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"visited\"]")
+        #expect(graphOutputs.first { $0.value == "sea salt foam black tea" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"drank\"]")
+        #expect(graphOutputs.first { $0.value == "Diet Coke" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.subjectText] == "Jami")
+        #expect(graphOutputs.first { $0.value == "Diet Coke" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"drank\"]")
+        #expect(graphOutputs.first { $0.value == "sushi place" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"wants\"]")
+    }
+
     @Test("journal extractor proposes useful source backed memory candidates")
     func journalExtractorProposesUsefulSourceBackedMemoryCandidates() throws {
         let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
