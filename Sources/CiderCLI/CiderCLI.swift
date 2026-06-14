@@ -15053,7 +15053,7 @@ struct CiderCLI {
     }
 
     static func itemContextBundleToDict(_ bundle: CiderItemContextBundle) -> [String: Any] {
-        [
+        var dict: [String: Any] = [
             "item": itemSummaryToDict(bundle.item, ownerRelations: bundle.ownerRelations),
             "owner": ownerToDict(bundle.owner),
             "sections": bundle.sections.map(secondBrainSectionToDict),
@@ -15076,6 +15076,75 @@ struct CiderCLI {
             "enrichmentOutputs": bundle.enrichmentOutputs.map(enrichmentOutputToDict),
             "captureProvenance": bundle.captureProvenance.map(captureProvenanceToDict),
         ]
+        CiderAgentDecisionContract.merge(itemContextBundleDecisionDictionary(for: bundle), into: &dict)
+        return dict
+    }
+
+    static func itemContextBundleDecisionDictionary(for bundle: CiderItemContextBundle) -> [String: Any] {
+        let latestReview = bundle.routingDecisions.sorted { lhs, rhs in
+            lhs.createdAt > rhs.createdAt
+        }.first
+        let reviewStatus = latestReview?.status
+        let hasSuggestedRelationCandidates = bundle.relationCandidates.contains {
+            $0.reviewState == "suggested" || $0.reviewState == "needs_review"
+        }
+        let hasSuggestedGraphCandidates = bundle.enrichmentOutputs.contains {
+            $0.kind == SecondBrainGraphCandidateContract.outputKind
+                && ($0.reviewState == "suggested" || $0.reviewState == "needs_review")
+        }
+        let hasSuggestedMemoryCandidates = bundle.enrichmentOutputs.contains {
+            $0.kind == "memory_candidate"
+                && ($0.reviewState == "suggested" || $0.reviewState == "needs_review")
+        }
+        let needsReview = reviewStatus == "needs_review"
+            || hasSuggestedRelationCandidates
+            || hasSuggestedGraphCandidates
+            || hasSuggestedMemoryCandidates
+        let needsRouting = reviewStatus == "needs_review" || latestReview?.targetPath != nil
+        var blockingIssues: [String] = []
+        if reviewStatus == "needs_review" {
+            blockingIssues.append("routing_needs_review")
+        }
+        if hasSuggestedRelationCandidates || hasSuggestedGraphCandidates {
+            blockingIssues.append("relation_candidates_need_review")
+        }
+        if hasSuggestedMemoryCandidates {
+            blockingIssues.append("memory_candidates_need_review")
+        }
+
+        let recommendedNextAction: String
+        if reviewStatus == "needs_review" {
+            recommendedNextAction = "review_route"
+        } else if hasSuggestedRelationCandidates || hasSuggestedGraphCandidates {
+            recommendedNextAction = "review_relation_candidates"
+        } else if hasSuggestedMemoryCandidates {
+            recommendedNextAction = "review_memory_candidates"
+        } else {
+            recommendedNextAction = "inspect_item"
+        }
+
+        return CiderAgentDecisionContract.dictionary(
+            saved: true,
+            needsReview: needsReview,
+            needsEnrichment: false,
+            needsRouting: needsRouting,
+            confidence: latestReview?.confidence,
+            blockingIssues: blockingIssues,
+            recommendedNextAction: recommendedNextAction,
+            safeNextCommands: itemContextBundleSafeNextCommands(for: bundle)
+        )
+    }
+
+    static func itemContextBundleSafeNextCommands(for bundle: CiderItemContextBundle) -> [String] {
+        var commands = [
+            contextCommand(for: bundle.owner),
+            "cider-cli capture review-queue --limit 20 --json",
+        ]
+        if bundle.enrichmentOutputs.contains(where: { $0.kind == SecondBrainGraphCandidateContract.outputKind }) {
+            commands.append("cider-cli item graph-candidates \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json")
+        }
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
     }
 
     static func captureProvenanceToDict(_ provenance: CiderItemCaptureProvenance) -> [String: Any] {
