@@ -4930,7 +4930,7 @@ struct CiderCLI {
               cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind preference|pattern|project_context|relationship_context|agent_lesson --value <text> --evidence <text> [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status current|historical|superseded] [--source <source>] [--confidence <0-1>] [--json]
               cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
               cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
-              cider-cli item backfill-journals [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
+              cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
               cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
               cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]
               cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
@@ -5601,10 +5601,18 @@ struct CiderCLI {
         case "backfill-journals", "journal-backfill", "backfill-daily-journals":
             do {
                 let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+                let date = parseFlag("--date", from: args)
                 let threshold = parseFlag("--threshold", from: args).flatMap(Double.init) ?? 0.34
                 let candidateLimit = parseFlag("--candidate-limit", from: args).flatMap(Int.init) ?? 10
+                let dryRun = args.contains("--dry-run")
                 let result = try SecondBrainJournalBackfillService(database: .shared, store: store, notesStorage: NotesStorage.shared)
-                    .backfillDailyJournals(limit: limit, threshold: threshold, candidateLimit: candidateLimit)
+                    .backfillDailyJournals(
+                        limit: limit,
+                        date: date,
+                        threshold: threshold,
+                        candidateLimit: candidateLimit,
+                        dryRun: dryRun
+                    )
                 printJournalBackfillResult(result)
             } catch {
                 printCLIError(error.localizedDescription)
@@ -17196,11 +17204,15 @@ struct CiderCLI {
         var payload: [String: Any] = [
             "ok": true,
             "command": "item.backfill-journals",
-            "changed": result.ownerCount > 0,
-            "readOnly": false,
+            "changed": result.ownerCount > 0 && !result.dryRun,
+            "readOnly": result.dryRun,
             "scope": result.scope,
+            "dryRun": result.dryRun,
             "selectedCount": result.selectedCount,
+            "skippedCount": result.skippedCount,
             "ownerCount": result.ownerCount,
+            "errorCount": result.errorCount,
+            "errors": result.errors.map(journalBackfillErrorToDict),
             "limit": result.limit,
             "threshold": result.threshold,
             "candidateLimit": result.candidateLimit,
@@ -17212,11 +17224,28 @@ struct CiderCLI {
             "memoryCandidateCount": result.memoryCandidateCount,
             "reviewRequired": result.reviewRequired,
             "owners": result.owners.map(journalBackfillOwnerResultToDict),
-            "safetyRule": "Backfill reprocesses existing Daily Journal notes into chunks, references, enrichment outputs, similarity candidates, and reviewable graph/memory candidates; it does not create a new journal or silently accept graph/memory truth.",
+            "safetyRule": result.dryRun
+                ? "Dry run only reports which Daily Journal notes would be reprocessed; it does not rebuild chunks, references, enrichment outputs, similarity candidates, graph candidates, or memory candidates."
+                : "Backfill reprocesses existing Daily Journal notes into chunks, references, enrichment outputs, similarity candidates, and reviewable graph/memory candidates; it does not create a new journal or silently accept graph/memory truth.",
         ]
+        if let date = result.date {
+            payload["date"] = date
+        }
         payload["safeNextCommands"] = safeNextCommands
         payload["safeNextActions"] = safeNextCommands.map(journalBackfillSafeNextAction)
         return payload
+    }
+
+    static func journalBackfillErrorToDict(_ error: SecondBrainJournalBackfillError) -> [String: Any] {
+        var dict: [String: Any] = [
+            "owner": ownerToDict(error.owner),
+            "title": error.title,
+            "message": error.message,
+        ]
+        if let date = error.date {
+            dict["date"] = date
+        }
+        return dict
     }
 
     static func journalBackfillSafeNextCommands(for result: SecondBrainJournalBackfillResult) -> [String] {
@@ -17262,7 +17291,12 @@ struct CiderCLI {
             return
         }
 
-        print("Backfilled \(result.ownerCount) Daily Journal note(s).")
+        let mode = result.dryRun ? "Would backfill" : "Backfilled"
+        let dateSuffix = result.date.map { " for \($0)" } ?? ""
+        print("\(mode) \(result.ownerCount) Daily Journal note(s)\(dateSuffix).")
+        print("  Selected: \(result.selectedCount)")
+        print("  Skipped: \(result.skippedCount)")
+        print("  Errors: \(result.errorCount)")
         print("  Chunks: \(result.chunkCount)")
         print("  References: \(result.referenceCount)")
         print("  Enrichment outputs: \(result.enrichmentOutputCount)")
@@ -18869,7 +18903,7 @@ struct CiderCLI {
           cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
           cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
           cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
-          cider-cli item backfill-journals [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
+          cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
           cider-cli item sync-project <project-id-or-name> [--json]
 
         DOCTOR

@@ -1860,6 +1860,79 @@ struct CiderCLIAgentSafetyTests {
         })
     }
 
+    @Test("item backfill journals supports dry run date selector and repeated runs stay bounded")
+    func itemBackfillJournalsSupportsDryRunDateSelectorAndRepeatedRunsStayBounded() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-backfill-journals-selectors-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let selectedJournalID = try createNote(
+            title: "Daily Journal 2026-06-01",
+            content: "Jami loved pineapple coconut drink. First weekend overtime in five years; hourly wages motivation helped.",
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Daily Journal 2026-06-02",
+            content: "Alex prefers late coffee catch-ups.",
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Regular Project Note",
+            content: "Jami loved pineapple coconut drink.",
+            vault: vault
+        )
+
+        let dryRunResult = try runCLI(args: [
+            "item", "backfill-journals",
+            "--date", "2026-06-01",
+            "--limit", "5",
+            "--dry-run",
+            "--json",
+        ], vault: vault)
+        let dryRun = try parseJSONObject(dryRunResult.stdout)
+        #expect(dryRun["ok"] as? Bool == true)
+        #expect(dryRun["dryRun"] as? Bool == true)
+        #expect(dryRun["changed"] as? Bool == false)
+        #expect(dryRun["readOnly"] as? Bool == true)
+        #expect(dryRun["selectedCount"] as? Int == 1)
+        #expect(dryRun["skippedCount"] as? Int == 1)
+        #expect(dryRun["errorCount"] as? Int == 0)
+        #expect(dryRun["graphCandidateCount"] as? Int == 0)
+        #expect(dryRun["memoryCandidateCount"] as? Int == 0)
+        let dryRunOwners = try #require(dryRun["owners"] as? [[String: Any]])
+        let dryRunOwner = try #require(dryRunOwners.first)
+        #expect(dryRunOwner["date"] as? String == "2026-06-01")
+        let dryRunOwnerRef = try #require(dryRunOwner["owner"] as? [String: Any])
+        #expect(dryRunOwnerRef["ownerID"] as? String == selectedJournalID)
+
+        let firstRunResult = try runCLI(args: [
+            "item", "backfill-journals",
+            "--date", "2026-06-01",
+            "--limit", "5",
+            "--json",
+        ], vault: vault)
+        let firstRun = try parseJSONObject(firstRunResult.stdout)
+        #expect(firstRun["dryRun"] as? Bool == false)
+        #expect(firstRun["selectedCount"] as? Int == 1)
+        #expect(firstRun["skippedCount"] as? Int == 1)
+        #expect((firstRun["graphCandidateCount"] as? Int ?? 0) > 0)
+        #expect((firstRun["memoryCandidateCount"] as? Int ?? 0) > 0)
+
+        let secondRunResult = try runCLI(args: [
+            "item", "backfill-journals",
+            "--date", "2026-06-01",
+            "--limit", "5",
+            "--json",
+        ], vault: vault)
+        let secondRun = try parseJSONObject(secondRunResult.stdout)
+        #expect(secondRun["selectedCount"] as? Int == 1)
+        #expect(secondRun["skippedCount"] as? Int == 1)
+        #expect(secondRun["graphCandidateCount"] as? Int == firstRun["graphCandidateCount"] as? Int)
+        #expect(secondRun["memoryCandidateCount"] as? Int == firstRun["memoryCandidateCount"] as? Int)
+        #expect(secondRun["enrichmentOutputCount"] as? Int == firstRun["enrichmentOutputCount"] as? Int)
+    }
+
     @Test("item dogfood intelligence exposes entity relation candidates through similarity JSON")
     func itemDogfoodIntelligenceExposesEntityRelationCandidatesThroughSimilarityJSON() throws {
         let vault = FileManager.default.temporaryDirectory
