@@ -2121,6 +2121,154 @@ struct CiderCLIAgentSafetyTests {
         #expect(inspectSafeCommands.contains("cider-cli item context note \(noteID) --json"))
     }
 
+    @Test("recall context bundle cites accepted graph evidence and reviewable candidates")
+    func recallContextBundleCitesAcceptedGraphEvidenceAndReviewableCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-recall-context-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-14",
+            content: "Jami loved the pineapple coconut drink. Avery Stone mentioned Pine House after the graph conversation.",
+            vault: vault
+        )
+        let relatedNoteID = try createNote(
+            title: "Pine House dinner notes",
+            content: "Pine House looked like a possible restaurant to review later.",
+            vault: vault
+        )
+        let journalRef = LibraryEntityRef(type: .note, entityID: UUID(uuidString: journalID)!)
+        let relatedRef = LibraryEntityRef(type: .note, entityID: UUID(uuidString: relatedNoteID)!)
+        let journalOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: journalID)
+        let drinkOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: journalOwner,
+            candidateKind: .object,
+            mentionText: "pineapple coconut drink",
+            sourceQuote: "Jami loved the pineapple coconut drink.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            safeActions: [.inspectSource, .createObject, .reject],
+            confidence: 0.82,
+            source: "recall_context.test"
+        )
+        let placeOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: journalOwner,
+            candidateKind: .objectRelation,
+            mentionText: "Pine House",
+            sourceQuote: "Avery Stone mentioned Pine House after the graph conversation.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.restaurant, .place],
+            relationGuesses: [.mentions],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.7,
+            source: "recall_context.test"
+        )
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let store = SecondBrainStore(database: db)
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(drinkOutput)
+        try outputService.record(placeOutput)
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: journalOwner,
+            targetOwner: SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "drink-pineapple-coconut-drink"),
+            relationType: "liked",
+            evidence: "Jami loved the pineapple coconut drink.",
+            source: "graph_candidate.accept",
+            actor: "codex-test",
+            confidence: 0.82,
+            metadata: [
+                "candidate_id": drinkOutput.id,
+                "candidate_ref": "graph_candidate:\(drinkOutput.id)",
+                "mention_text": "pineapple coconut drink",
+                "source_quote": "Jami loved the pineapple coconut drink.",
+            ]
+        ))
+        try ItemLinkService(database: db).addDirectLink(from: journalRef, to: relatedRef)
+        try store.upsertSection(SecondBrainSection(
+            owner: journalOwner,
+            itemID: journalID,
+            sectionKey: "summary",
+            title: "Summary",
+            body: "Journal mentions Jami's pineapple coconut drink and Pine House.",
+            source: "test",
+            sortOrder: 0
+        ))
+        try store.replaceChunks(owner: journalOwner, chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: journalID,
+                source: "note-body",
+                title: "Journal body",
+                body: "Jami loved the pineapple coconut drink. Avery Stone mentioned Pine House after the graph conversation.",
+                chunkIndex: 0
+            )
+        ])
+        db.close()
+
+        let result = try runCLI(args: ["item", "recall-context", "--item", "note", journalID, "--query", "Pine House", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+        #expect(result.status == 0)
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.recall-context")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["safetyBoundary"] as? [String] == [
+            "accepted_facts_are_cited",
+            "reviewable_candidates_are_not_truth",
+            "accept_requires_explicit_command",
+            "no_silent_memory_or_graph_promotion",
+        ])
+        let anchors = try #require(payload["anchors"] as? [[String: Any]])
+        #expect(anchors.contains { ($0["owner"] as? [String: Any])?["ownerID"] as? String == journalID })
+        let contentBlocks = try #require(payload["contentBlocks"] as? [[String: Any]])
+        #expect(contentBlocks.contains { ($0["citation"] as? [String: Any])?["ownerID"] as? String == journalID })
+        let relatedItems = try #require(payload["relatedItems"] as? [[String: Any]])
+        #expect(relatedItems.contains { ($0["id"] as? String) == relatedNoteID })
+        let acceptedFacts = try #require(payload["acceptedFacts"] as? [[String: Any]])
+        let accepted = try #require(acceptedFacts.first { $0["candidateRef"] as? String == "graph_candidate:\(drinkOutput.id)" })
+        #expect(accepted["truthState"] as? String == "accepted")
+        #expect(accepted["sourceQuote"] as? String == "Jami loved the pineapple coconut drink.")
+        #expect((accepted["citation"] as? [String: Any])?["ownerID"] as? String == journalID)
+        let candidates = try #require(payload["reviewableCandidates"] as? [[String: Any]])
+        let candidate = try #require(candidates.first { $0["id"] as? String == placeOutput.id })
+        #expect(candidate["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect(candidate["sourceQuote"] as? String == "Avery Stone mentioned Pine House after the graph conversation.")
+        #expect((candidate["citation"] as? [String: Any])?["ownerID"] as? String == journalID)
+        let review = try #require(payload["reviewStatus"] as? [String: Any])
+        #expect(review["needsReview"] as? Bool == true)
+        #expect((review["blockingIssues"] as? [String])?.contains("graph_candidates_need_review") == true)
+        let commands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(commands.contains("cider-cli item context note \(journalID) --json"))
+        #expect(commands.contains("cider-cli item graph-candidates note \(journalID) --json"))
+    }
+
+    @Test("recall context bundle returns structured selector failures")
+    func recallContextBundleReturnsStructuredSelectorFailures() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-recall-context-errors-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let malformedResult = try runCLI(args: ["item", "recall-context", "--item", "note", "not-a-uuid", "--json"], vault: vault)
+        let malformed = try parseJSONObject(malformedResult.stdout)
+        #expect(malformedResult.status != 0)
+        #expect(malformed["ok"] as? Bool == false)
+        #expect(malformed["errorCode"] as? String == "malformed_or_unresolved_selector")
+        #expect(malformed["readOnly"] as? Bool == true)
+        #expect(malformed["changed"] as? Bool == false)
+
+        let noMatchResult = try runCLI(args: ["item", "recall-context", "--query", "zzzz no such topic", "--json"], vault: vault)
+        let noMatch = try parseJSONObject(noMatchResult.stdout)
+        #expect(noMatchResult.status != 0)
+        #expect(noMatch["ok"] as? Bool == false)
+        #expect(noMatch["errorCode"] as? String == "no_recall_matches")
+        #expect(noMatch["warnings"] as? [[String: Any]] != nil)
+        let commands = try #require(noMatch["safeNextCommands"] as? [String])
+        #expect(commands.contains("cider-cli item search \"zzzz no such topic\" --json"))
+    }
+
     @Test("graph object candidates expose stable hub identity and conflicts")
     func graphObjectCandidatesExposeStableHubIdentityAndConflicts() throws {
         let vault = FileManager.default.temporaryDirectory

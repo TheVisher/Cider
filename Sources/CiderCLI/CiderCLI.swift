@@ -4907,6 +4907,7 @@ struct CiderCLI {
                 Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
               cider-cli item open <type> <id-or-ref> [--json]
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
+              cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--json]
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
               cider-cli item capability-map [--json]
               cider-cli item graph-health [--json]
@@ -5140,6 +5141,22 @@ struct CiderCLI {
                 )
             } catch {
                 printCLIError(error.localizedDescription)
+            }
+
+        case "recall-context", "context-bundle", "recall-bundle":
+            do {
+                let payload = try recallContextPayload(args: args, contextService: contextService)
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Recall context bundle: \((payload["anchors"] as? [[String: Any]])?.count ?? 0) anchor(s)")
+                    print("  Accepted facts: \((payload["acceptedFacts"] as? [[String: Any]])?.count ?? 0)")
+                    print("  Reviewable candidates: \((payload["reviewableCandidates"] as? [[String: Any]])?.count ?? 0)")
+                }
+            } catch let error as RecallContextCLIError {
+                printRecallContextError(error, args: args)
+            } catch {
+                printRecallContextError(.malformedOrUnresolvedSelector(error.localizedDescription), args: args)
             }
 
         case "context", "agent-context":
@@ -15084,6 +15101,283 @@ struct CiderCLI {
             "subtitle": summary.subtitle,
             "symbol": summary.symbol,
         ]
+    }
+
+    enum RecallContextCLIError: Error, LocalizedError {
+        case missingSelector
+        case malformedOrUnresolvedSelector(String)
+        case noRecallMatches(String)
+
+        var errorCode: String {
+            switch self {
+            case .missingSelector: return "missing_selector"
+            case .malformedOrUnresolvedSelector: return "malformed_or_unresolved_selector"
+            case .noRecallMatches: return "no_recall_matches"
+            }
+        }
+
+        var errorDescription: String? {
+            switch self {
+            case .missingSelector:
+                return "Usage: cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--json]"
+            case .malformedOrUnresolvedSelector(let message):
+                return message
+            case .noRecallMatches(let query):
+                return "No recall context matches found for '\(query)'."
+            }
+        }
+    }
+
+    static func recallContextPayload(
+        args: [String],
+        contextService: CiderItemContextService
+    ) throws -> [String: Any] {
+        let limit = max(1, Int(parseFlag("--limit", from: args) ?? "") ?? 5)
+        let query = parseFlag("--query", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var warnings: [[String: Any]] = []
+        var anchorRefs: [LibraryEntityRef] = []
+        if let itemSelector = parseRecallItemSelector(from: args) {
+            do {
+                let type = try ItemLinkService.entityType(from: itemSelector.type)
+                let ref = try ItemLinkService.shared.resolve(type: type, ref: itemSelector.ref)
+                anchorRefs.append(ref)
+            } catch {
+                throw RecallContextCLIError.malformedOrUnresolvedSelector(error.localizedDescription)
+            }
+        }
+        if let query, !query.isEmpty {
+            let results = try contextService.search(query, limit: limit)
+            let refs = results.compactMap(\.item).map { LibraryEntityRef(type: $0.type, entityID: $0.id) }
+            if refs.isEmpty && anchorRefs.isEmpty {
+                throw RecallContextCLIError.noRecallMatches(query)
+            }
+            if refs.count > 1 {
+                warnings.append([
+                    "kind": "ambiguous_selector",
+                    "message": "Query matched \(refs.count) possible anchors; returning a bounded bundle instead of choosing one silently.",
+                    "query": query,
+                ])
+            }
+            anchorRefs.append(contentsOf: refs)
+        }
+        anchorRefs = orderedUniqueLibraryRefs(anchorRefs)
+        guard !anchorRefs.isEmpty else { throw RecallContextCLIError.missingSelector }
+
+        let bundles = try anchorRefs.prefix(limit).map { try contextService.context(for: $0) }
+        var anchorDicts: [[String: Any]] = []
+        var contentBlocks: [[String: Any]] = []
+        var relatedItems: [[String: Any]] = []
+        var acceptedFacts: [[String: Any]] = []
+        var reviewableCandidates: [[String: Any]] = []
+        var safeCommands: [String] = []
+        var blockingIssues: [String] = []
+
+        for bundle in bundles {
+            let citation = recallCitation(owner: bundle.owner)
+            anchorDicts.append([
+                "item": itemSummaryToDict(bundle.item, ownerRelations: bundle.ownerRelations),
+                "owner": ownerToDict(bundle.owner),
+                "citation": citation,
+            ])
+            if bundle.chunks.isEmpty {
+                warnings.append([
+                    "kind": "missing_chunks",
+                    "message": "Anchor has no indexed content chunks; run the safe rebuild command before relying on chunk recall.",
+                    "owner": ownerToDict(bundle.owner),
+                    "safeRepairCommand": "cider-cli item rebuild-chunks \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json",
+                ])
+            }
+            for section in bundle.sections.prefix(3) {
+                contentBlocks.append([
+                    "kind": "section",
+                    "title": section.title,
+                    "body": section.body,
+                    "source": section.source,
+                    "citation": citation,
+                ])
+            }
+            for chunk in bundle.chunks.prefix(3) {
+                contentBlocks.append([
+                    "kind": "chunk",
+                    "id": chunk.id,
+                    "title": chunk.title,
+                    "body": chunk.body,
+                    "source": chunk.source,
+                    "citation": citation,
+                ])
+            }
+            relatedItems.append(contentsOf: bundle.related.prefix(5).map { itemLinkSummaryToDict($0) })
+            acceptedFacts.append(contentsOf: recallAcceptedFacts(from: bundle.ownerRelations + bundle.backlinks))
+            let candidateOutputs = bundle.enrichmentOutputs.filter {
+                $0.kind == SecondBrainGraphCandidateContract.outputKind && ["suggested", "needs_review", "deferred"].contains($0.reviewState)
+            }
+            if !candidateOutputs.isEmpty { blockingIssues.append("graph_candidates_need_review") }
+            reviewableCandidates.append(contentsOf: candidateOutputs.map(recallGraphCandidateToDict))
+            let memoryOutputs = bundle.enrichmentOutputs.filter {
+                $0.kind == "memory_candidate" && ["suggested", "needs_review", "deferred"].contains($0.reviewState)
+            }
+            if !memoryOutputs.isEmpty { blockingIssues.append("memory_candidates_need_review") }
+            reviewableCandidates.append(contentsOf: memoryOutputs.map(recallMemoryCandidateToDict))
+            safeCommands.append("cider-cli item context \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json")
+            safeCommands.append("cider-cli item graph-candidates \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json")
+            safeCommands.append("cider-cli item related-owners \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json")
+        }
+        if let query, !query.isEmpty {
+            safeCommands.append("cider-cli item search \"\(recallEscapedCommandArgument(query))\" --json")
+            safeCommands.append("cider-cli item search-debug \"\(recallEscapedCommandArgument(query))\" --json")
+        }
+        safeCommands.append("cider-cli capture review-queue --limit 20 --json")
+
+        return [
+            "ok": true,
+            "command": "item.recall-context",
+            "readOnly": true,
+            "changed": false,
+            "selector": recallSelectorDict(args: args, query: query),
+            "safetyBoundary": recallContextSafetyBoundary(),
+            "anchors": anchorDicts,
+            "contentBlocks": contentBlocks,
+            "relatedItems": orderedUniqueDictionaries(relatedItems, key: "id"),
+            "acceptedFacts": orderedUniqueDictionaries(acceptedFacts, key: "id"),
+            "reviewableCandidates": orderedUniqueDictionaries(reviewableCandidates, key: "id"),
+            "reviewStatus": [
+                "needsReview": !blockingIssues.isEmpty,
+                "blockingIssues": orderedUniqueStrings(blockingIssues),
+                "copy": blockingIssues.isEmpty ? "No reviewable candidates were found in this bundle." : "Reviewable candidates are not accepted memory or graph truth until an explicit accept command is run.",
+            ],
+            "warnings": warnings,
+            "safeNextCommands": orderedUniqueStrings(safeCommands),
+        ]
+    }
+
+    static func parseRecallItemSelector(from args: [String]) -> (type: String, ref: String)? {
+        guard let flagIndex = args.firstIndex(of: "--item"), flagIndex + 2 < args.count else { return nil }
+        return (args[flagIndex + 1], args[flagIndex + 2])
+    }
+
+    static func recallSelectorDict(args: [String], query: String?) -> [String: Any] {
+        var dict: [String: Any] = [:]
+        if let item = parseRecallItemSelector(from: args) {
+            dict["item"] = ["type": item.type, "ref": item.ref]
+        }
+        if let query, !query.isEmpty { dict["query"] = query }
+        return dict
+    }
+
+    static func recallContextSafetyBoundary() -> [String] {
+        [
+            "accepted_facts_are_cited",
+            "reviewable_candidates_are_not_truth",
+            "accept_requires_explicit_command",
+            "no_silent_memory_or_graph_promotion",
+        ]
+    }
+
+    static func recallCitation(owner: SecondBrainOwnerRef) -> [String: Any] {
+        var dict = ownerToDict(owner)
+        dict["ref"] = owner.canonicalRef
+        dict["safeNextCommand"] = contextCommand(for: owner)
+        return dict
+    }
+
+    static func recallAcceptedFacts(from relations: [SecondBrainRelation]) -> [[String: Any]] {
+        relations.filter { $0.source == "graph_candidate.accept" || $0.metadata["candidate_ref"] != nil }.map { relation in
+            var dict: [String: Any] = [
+                "id": relation.id,
+                "truthState": "accepted",
+                "sourceOwner": ownerToDict(relation.sourceOwner),
+                "targetOwner": ownerToDict(relation.targetOwner),
+                "relationType": relation.relationType,
+                "evidence": relation.evidence,
+                "sourceQuote": relation.metadata["source_quote"] ?? relation.evidence,
+                "source": relation.source,
+                "citation": recallCitation(owner: relation.sourceOwner),
+                "metadata": relation.metadata,
+                "safeNextCommands": sourceEvidenceSafeCommands(for: relation),
+            ]
+            if let candidateRef = relation.metadata["candidate_ref"] ?? relation.metadata["candidate_id"].map({ "graph_candidate:\($0)" }) {
+                dict["candidateRef"] = candidateRef
+            }
+            if let mentionText = relation.metadata["mention_text"] { dict["mentionText"] = mentionText }
+            if let confidence = relation.confidence { dict["confidence"] = confidence }
+            return dict
+        }
+    }
+
+    static func recallGraphCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        var dict = graphCandidateToDict(output)
+        dict["truthState"] = "reviewable_candidate_not_truth"
+        dict["citation"] = recallCitation(owner: output.owner)
+        dict["safetyBoundary"] = [
+            "reviewable_candidate_not_truth",
+            "accept_requires_explicit_command",
+            "no_silent_memory_or_graph_promotion",
+        ]
+        return dict
+    }
+
+    static func recallMemoryCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        var dict = memoryCandidateToDict(output)
+        dict["truthState"] = "reviewable_candidate_not_truth"
+        dict["citation"] = recallCitation(owner: output.owner)
+        dict["safetyBoundary"] = [
+            "reviewable_candidate_not_truth",
+            "accept_requires_explicit_command",
+            "no_silent_memory_or_graph_promotion",
+        ]
+        return dict
+    }
+
+    static func printRecallContextError(_ error: RecallContextCLIError, args: [String]) {
+        processExitCode = 1
+        let query = parseFlag("--query", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeCommands: [String]
+        if let query, !query.isEmpty {
+            safeCommands = [
+                "cider-cli item search \"\(recallEscapedCommandArgument(query))\" --json",
+                "cider-cli item search-debug \"\(recallEscapedCommandArgument(query))\" --json",
+                "cider-cli item doctor --json",
+            ]
+        } else {
+            safeCommands = ["cider-cli item search <query> --json", "cider-cli item doctor --json"]
+        }
+        if jsonOutput {
+            outputJSON([
+                "ok": false,
+                "command": "item.recall-context",
+                "readOnly": true,
+                "changed": false,
+                "errorCode": error.errorCode,
+                "error": error.localizedDescription,
+                "warnings": error.errorCode == "no_recall_matches" ? [[
+                    "kind": "no_matches",
+                    "message": error.localizedDescription,
+                ]] : [],
+                "safeNextCommands": safeCommands,
+            ])
+        } else {
+            print("Error: \(error.localizedDescription)")
+        }
+    }
+
+    static func orderedUniqueLibraryRefs(_ refs: [LibraryEntityRef]) -> [LibraryEntityRef] {
+        var seen = Set<String>()
+        return refs.filter { ref in
+            seen.insert("\(ref.type.rawValue):\(ref.entityID.uuidString)").inserted
+        }
+    }
+
+    static func recallEscapedCommandArgument(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    static func orderedUniqueDictionaries(_ dicts: [[String: Any]], key: String) -> [[String: Any]] {
+        var seen = Set<String>()
+        return dicts.filter { dict in
+            guard let value = dict[key] else { return true }
+            return seen.insert(String(describing: value)).inserted
+        }
     }
 
     static func itemContextBundleToDict(_ bundle: CiderItemContextBundle) -> [String: Any] {
