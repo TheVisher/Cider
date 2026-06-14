@@ -416,7 +416,7 @@ struct CiderCLI {
         case "review":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
         case "item":
-            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "accept-graph-candidate", "reject-graph-candidate", "delegate-graph-candidate", "accept-memory-candidate", "reject-memory-candidate", "defer-memory-candidate", "correct-memory-candidate", "delegate-memory-candidate", "sync-project", "project-sync"])
+            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "backfill-journals", "journal-backfill", "accept-similarity", "accept-graph-candidate", "reject-graph-candidate", "delegate-graph-candidate", "accept-memory-candidate", "reject-memory-candidate", "defer-memory-candidate", "correct-memory-candidate", "delegate-memory-candidate", "sync-project", "project-sync"])
         case "test-run", "testrun":
             return isMutationSubcommand(subcommand, in: ["cleanup"])
         case "label", "tag":
@@ -4930,6 +4930,7 @@ struct CiderCLI {
               cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind preference|pattern|project_context|relationship_context|agent_lesson --value <text> --evidence <text> [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status current|historical|superseded] [--source <source>] [--confidence <0-1>] [--json]
               cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
               cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
+              cider-cli item backfill-journals [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
               cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
               cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]
               cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
@@ -5593,6 +5594,18 @@ struct CiderCLI {
                 let result = try SecondBrainIntelligenceDogfoodService(database: .shared, store: store)
                     .rebuild(limit: limit, threshold: threshold, candidateLimit: candidateLimit)
                 printIntelligenceDogfoodResult(result)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "backfill-journals", "journal-backfill", "backfill-daily-journals":
+            do {
+                let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+                let threshold = parseFlag("--threshold", from: args).flatMap(Double.init) ?? 0.34
+                let candidateLimit = parseFlag("--candidate-limit", from: args).flatMap(Int.init) ?? 10
+                let result = try SecondBrainJournalBackfillService(database: .shared, store: store, notesStorage: NotesStorage.shared)
+                    .backfillDailyJournals(limit: limit, threshold: threshold, candidateLimit: candidateLimit)
+                printJournalBackfillResult(result)
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -17087,6 +17100,114 @@ struct CiderCLI {
         return payload
     }
 
+    static func journalBackfillOwnerResultToDict(_ result: SecondBrainJournalBackfillOwnerResult) -> [String: Any] {
+        var dict: [String: Any] = [
+            "owner": ownerToDict(result.owner),
+            "title": result.title,
+            "chunkCount": result.chunkCount,
+            "referenceCount": result.referenceCount,
+            "enrichmentOutputCount": result.enrichmentOutputCount,
+            "enrichmentKindCounts": result.enrichmentKindCounts,
+            "enrichmentReviewStates": result.enrichmentReviewStates,
+            "similarityCandidateCount": result.similarityCandidateCount,
+            "similarityReviewStates": result.similarityReviewStates,
+            "graphCandidateCount": result.graphCandidateCount,
+            "memoryCandidateCount": result.memoryCandidateCount,
+            "graphCandidates": result.graphCandidates.prefix(10).map(graphCandidateToDict),
+            "memoryCandidates": result.memoryCandidates.prefix(10).map(memoryCandidateToDict),
+        ]
+        if let date = result.date {
+            dict["date"] = date
+        }
+        return dict
+    }
+
+    static func journalBackfillResultToDict(_ result: SecondBrainJournalBackfillResult) -> [String: Any] {
+        let safeNextCommands = journalBackfillSafeNextCommands(for: result)
+        var payload: [String: Any] = [
+            "ok": true,
+            "command": "item.backfill-journals",
+            "changed": result.ownerCount > 0,
+            "readOnly": false,
+            "scope": result.scope,
+            "selectedCount": result.selectedCount,
+            "ownerCount": result.ownerCount,
+            "limit": result.limit,
+            "threshold": result.threshold,
+            "candidateLimit": result.candidateLimit,
+            "chunkCount": result.chunkCount,
+            "referenceCount": result.referenceCount,
+            "enrichmentOutputCount": result.enrichmentOutputCount,
+            "similarityCandidateCount": result.similarityCandidateCount,
+            "graphCandidateCount": result.graphCandidateCount,
+            "memoryCandidateCount": result.memoryCandidateCount,
+            "reviewRequired": result.reviewRequired,
+            "owners": result.owners.map(journalBackfillOwnerResultToDict),
+            "safetyRule": "Backfill reprocesses existing Daily Journal notes into chunks, references, enrichment outputs, similarity candidates, and reviewable graph/memory candidates; it does not create a new journal or silently accept graph/memory truth.",
+        ]
+        payload["safeNextCommands"] = safeNextCommands
+        payload["safeNextActions"] = safeNextCommands.map(journalBackfillSafeNextAction)
+        return payload
+    }
+
+    static func journalBackfillSafeNextCommands(for result: SecondBrainJournalBackfillResult) -> [String] {
+        var commands: [String] = [
+            "cider-cli item graph-health --json",
+        ]
+        if result.reviewRequired {
+            commands.insert("cider-cli capture review-queue --limit 20 --json", at: 0)
+        }
+        for owner in result.owners.prefix(5) {
+            commands.append("cider-cli item context \(owner.owner.ownerType) \(owner.owner.ownerID) --json")
+            if owner.graphCandidateCount > 0 {
+                commands.append("cider-cli item graph-candidates \(owner.owner.ownerType) \(owner.owner.ownerID) --json")
+            }
+        }
+        return Array(NSOrderedSet(array: commands).compactMap { $0 as? String })
+    }
+
+    static func journalBackfillSafeNextAction(for command: String) -> [String: Any] {
+        let reason: String
+        if command.contains(" capture review-queue ") {
+            reason = "review_backfilled_journal_candidates"
+        } else if command.contains(" graph-health ") {
+            reason = "verify_graph_intelligence_counts"
+        } else if command.contains(" graph-candidates ") {
+            reason = "inspect_backfilled_graph_candidates"
+        } else if command.contains(" item context ") {
+            reason = "inspect_backfilled_journal_context"
+        } else {
+            reason = "inspect_backfilled_journal_intelligence"
+        }
+        return [
+            "command": command,
+            "readOnly": true,
+            "requiresApproval": false,
+            "reason": reason,
+        ]
+    }
+
+    static func printJournalBackfillResult(_ result: SecondBrainJournalBackfillResult) {
+        if jsonOutput {
+            outputJSON(journalBackfillResultToDict(result))
+            return
+        }
+
+        print("Backfilled \(result.ownerCount) Daily Journal note(s).")
+        print("  Chunks: \(result.chunkCount)")
+        print("  References: \(result.referenceCount)")
+        print("  Enrichment outputs: \(result.enrichmentOutputCount)")
+        print("  Similarity candidates: \(result.similarityCandidateCount)")
+        print("  Graph candidates: \(result.graphCandidateCount)")
+        print("  Memory candidates: \(result.memoryCandidateCount)")
+        if result.reviewRequired {
+            print("  Review required before applying generated graph or memory suggestions.")
+        }
+        for owner in result.owners {
+            print("  \(owner.owner.canonicalRef): \(owner.chunkCount) chunk(s), \(owner.graphCandidateCount) graph candidate(s), \(owner.memoryCandidateCount) memory candidate(s)")
+        }
+    }
+
     static func intelligenceDogfoodSafeNextCommands(for result: SecondBrainIntelligenceDogfoodResult) -> [String] {
         var commands: [String] = [
             "cider-cli item graph-health --json",
@@ -18679,6 +18800,7 @@ struct CiderCLI {
           cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
           cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
           cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
+          cider-cli item backfill-journals [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
           cider-cli item sync-project <project-id-or-name> [--json]
 
         DOCTOR

@@ -1798,6 +1798,68 @@ struct CiderCLIAgentSafetyTests {
         })
     }
 
+    @Test("item backfill journals reprocesses only Daily Journal notes into reviewable candidates")
+    func itemBackfillJournalsReprocessesOnlyDailyJournalNotesIntoReviewableCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-backfill-journals-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-01",
+            content: "Jami loved pineapple coconut drink. First weekend overtime in five years; hourly wages motivation helped.",
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Regular Project Note",
+            content: "I gave Jami that pineapple coconut drink and she loved it.",
+            vault: vault
+        )
+
+        let result = try runCLI(args: ["item", "backfill-journals", "--limit", "5", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.backfill-journals")
+        #expect(payload["changed"] as? Bool == true)
+        #expect(payload["scope"] as? String == "daily_journal")
+        #expect(payload["selectedCount"] as? Int == 1)
+        #expect(payload["ownerCount"] as? Int == 1)
+        #expect(payload["reviewRequired"] as? Bool == true)
+        #expect((payload["chunkCount"] as? Int ?? 0) > 0)
+        #expect((payload["enrichmentOutputCount"] as? Int ?? 0) > 0)
+        #expect((payload["similarityCandidateCount"] as? Int ?? 0) >= 0)
+        #expect((payload["graphCandidateCount"] as? Int ?? 0) > 0)
+        #expect((payload["memoryCandidateCount"] as? Int ?? 0) > 0)
+
+        let owners = try #require(payload["owners"] as? [[String: Any]])
+        let owner = try #require(owners.first)
+        let ownerRef = try #require(owner["owner"] as? [String: Any])
+        #expect(ownerRef["ownerType"] as? String == "note")
+        #expect(ownerRef["ownerID"] as? String == journalID)
+        #expect(owner["title"] as? String == "Daily Journal 2026-06-01")
+        #expect((owner["graphCandidateCount"] as? Int ?? 0) > 0)
+        #expect((owner["memoryCandidateCount"] as? Int ?? 0) > 0)
+        let graphCandidates = try #require(owner["graphCandidates"] as? [[String: Any]])
+        #expect(graphCandidates.contains { candidate in
+            candidate["reviewState"] as? String == "suggested"
+                && (candidate["mentionText"] as? String)?.localizedCaseInsensitiveContains("pineapple coconut drink") == true
+        })
+
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli capture review-queue --limit 20 --json"))
+        #expect(safeNextCommands.contains("cider-cli item graph-candidates note \(journalID) --json"))
+        #expect(safeNextCommands.contains("cider-cli item context note \(journalID) --json"))
+
+        let reviewResult = try runCLI(args: ["capture", "review-queue", "--limit", "20", "--json"], vault: vault)
+        let review = try parseJSONObject(reviewResult.stdout)
+        let reviewItems = try #require(review["items"] as? [[String: Any]])
+        #expect(reviewItems.contains { item in
+            item["kind"] as? String == "graph_candidate"
+                || item["kind"] as? String == "memory_candidate"
+        })
+    }
+
     @Test("item dogfood intelligence exposes entity relation candidates through similarity JSON")
     func itemDogfoodIntelligenceExposesEntityRelationCandidatesThroughSimilarityJSON() throws {
         let vault = FileManager.default.temporaryDirectory
