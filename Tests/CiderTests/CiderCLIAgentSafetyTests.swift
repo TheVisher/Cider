@@ -1860,6 +1860,90 @@ struct CiderCLIAgentSafetyTests {
         })
     }
 
+    @Test("review queue candidate rows explain source storage proposed change and quality")
+    func reviewQueueCandidateRowsExplainSourceStorageProposedChangeAndQuality() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-explain-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-08",
+            content: "He usually wants really expensive stuff like an e-bike, but I am not buying that for this birthday. Later it moved closer and Ryker to have one became a confusing fragment. Jami loved pineapple coconut drink.",
+            vault: vault
+        )
+        _ = try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-08", "--limit", "5", "--json"], vault: vault)
+
+        let reviewResult = try runCLI(args: ["capture", "review-queue", "--kind", "graph_candidate", "--limit", "20", "--json"], vault: vault)
+        let review = try parseJSONObject(reviewResult.stdout)
+        let items = try #require(review["items"] as? [[String: Any]])
+        let graphItem = try #require(items.first { $0["kind"] as? String == "graph_candidate" })
+
+        #expect(graphItem["reviewFamily"] as? String == "graph_candidate")
+        #expect(graphItem["sourceItemRef"] as? String == "note:\(journalID)")
+        #expect(graphItem["sourceItemTitle"] as? String == "Daily Journal 2026-06-08")
+        #expect(graphItem["sourceItemDate"] as? String == "2026-06-08")
+        #expect((graphItem["sourceQuote"] as? String)?.contains("e-bike") == true
+            || (graphItem["sourceQuote"] as? String)?.contains("pineapple coconut") == true)
+        #expect((graphItem["extractionReason"] as? String)?.contains("not accepted graph truth") == true
+            || (graphItem["extractionReason"] as? String)?.contains("not truth") == true)
+        #expect(graphItem["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((graphItem["safeNextCommands"] as? [String])?.contains { $0.contains("item graph-candidate") } == true)
+
+        let proposedChange = try #require(graphItem["proposedChange"] as? [String: Any])
+        #expect(proposedChange["changeType"] as? String == "graph_relation_candidate")
+        #expect(proposedChange["truthState"] as? String == "reviewable_candidate_not_truth")
+        let storage = try #require(graphItem["storage"] as? [String: Any])
+        #expect(storage["table"] as? String == "enrichment_outputs")
+        #expect(storage["service"] as? String == "SecondBrainEnrichmentOutputService")
+        let quality = try #require(graphItem["quality"] as? [String: Any])
+        #expect(quality["level"] as? String != nil)
+
+        let lowQuality = CiderReviewQueueService.candidateQualitySignal(
+            mentionText: "it moved closer",
+            sourceQuote: "Later it moved closer."
+        )
+        #expect(lowQuality.level == "low")
+        #expect(lowQuality.codes.contains("event_clause_not_object"))
+    }
+
+    @Test("review queue memory candidate filter exposes visible rows and explanation fields")
+    func reviewQueueMemoryCandidateFilterExposesVisibleRowsAndExplanationFields() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-memory-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-09",
+            content: "Jami loved pineapple coconut drink. First weekend overtime in five years; hourly wages motivation helped. Jami wants Thai food next Friday.",
+            vault: vault
+        )
+        _ = try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-09", "--limit", "5", "--json"], vault: vault)
+
+        let summaryResult = try runCLI(args: ["review", "summary", "--json"], vault: vault)
+        let summary = try parseJSONObject(summaryResult.stdout)
+        let countsByKind = try #require(summary["countsByKind"] as? [String: Any])
+        let memoryCount = countsByKind["memory_candidate"] as? Int ?? 0
+        #expect(memoryCount > 0)
+
+        let memoryResult = try runCLI(args: ["capture", "review-queue", "--kind", "memory_candidate", "--limit", "20", "--json"], vault: vault)
+        let memory = try parseJSONObject(memoryResult.stdout)
+        let visibleMemoryItems = try #require(memory["items"] as? [[String: Any]])
+        #expect(visibleMemoryItems.count == memoryCount)
+        let item = try #require(visibleMemoryItems.first)
+        #expect(item["kind"] as? String == "memory_candidate")
+        #expect(item["reviewFamily"] as? String == "memory_candidate")
+        #expect(item["sourceItemRef"] as? String == "note:\(journalID)")
+        #expect(item["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((item["extractionReason"] as? String)?.contains("not promoted until accepted") == true)
+        #expect((item["acceptEffect"] as? String)?.contains("never writes user-owned memory truth") == true)
+        let proposedChange = try #require(item["proposedChange"] as? [String: Any])
+        #expect(proposedChange["changeType"] as? String == "memory_candidate")
+        let storage = try #require(item["storage"] as? [String: Any])
+        #expect(storage["kind"] as? String == "memory_candidate")
+    }
+
     @Test("item backfill journals supports dry run date selector and repeated runs stay bounded")
     func itemBackfillJournalsSupportsDryRunDateSelectorAndRepeatedRunsStayBounded() throws {
         let vault = FileManager.default.temporaryDirectory

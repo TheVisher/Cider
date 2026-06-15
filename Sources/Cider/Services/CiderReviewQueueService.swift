@@ -79,6 +79,19 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var observedDate: String? = nil
     var memoryKey: String? = nil
     var memoryStatus: String? = nil
+    var reviewFamily: String? = nil
+    var sourceItemRef: String? = nil
+    var sourceItemTitle: String? = nil
+    var sourceItemDate: String? = nil
+    var extractionReason: String? = nil
+    var proposedChange: [String: String] = [:]
+    var storage: [String: String] = [:]
+    var truthState: String? = nil
+    var acceptEffect: String? = nil
+    var rejectEffect: String? = nil
+    var candidateQualityLevel: String? = nil
+    var candidateQualityCodes: [String] = []
+    var candidateQualityExplanation: String? = nil
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -155,6 +168,24 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
         }
         if let memoryStatus {
             dictionary["memoryStatus"] = memoryStatus
+        }
+        if let reviewFamily { dictionary["reviewFamily"] = reviewFamily }
+        if let sourceItemRef { dictionary["sourceItemRef"] = sourceItemRef }
+        if let sourceItemTitle { dictionary["sourceItemTitle"] = sourceItemTitle }
+        if let sourceItemDate { dictionary["sourceItemDate"] = sourceItemDate }
+        if let extractionReason { dictionary["extractionReason"] = extractionReason }
+        if !proposedChange.isEmpty { dictionary["proposedChange"] = proposedChange }
+        if !storage.isEmpty { dictionary["storage"] = storage }
+        if let truthState { dictionary["truthState"] = truthState }
+        if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
+        if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
+        if candidateQualityLevel != nil || !candidateQualityCodes.isEmpty || candidateQualityExplanation != nil {
+            var quality: [String: Any] = [:]
+            if let candidateQualityLevel { quality["level"] = candidateQualityLevel }
+            if !candidateQualityCodes.isEmpty { quality["codes"] = candidateQualityCodes }
+            if let candidateQualityExplanation { quality["explanation"] = candidateQualityExplanation }
+            dictionary["quality"] = quality
+            dictionary["qualityFlags"] = candidateQualityCodes
         }
         CiderAgentDecisionContract.merge(agentDecisionDictionary(), into: &dictionary)
         return dictionary
@@ -580,6 +611,19 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var memoryKey: String? = nil
     var memoryStatus: String? = nil
     var safeNextCommands: [String] = []
+    var reviewFamily: String? = nil
+    var sourceItemRef: String? = nil
+    var sourceItemTitle: String? = nil
+    var sourceItemDate: String? = nil
+    var extractionReason: String? = nil
+    var proposedChange: [String: String] = [:]
+    var storage: [String: String] = [:]
+    var truthState: String? = nil
+    var acceptEffect: String? = nil
+    var rejectEffect: String? = nil
+    var candidateQualityLevel: String? = nil
+    var candidateQualityCodes: [String] = []
+    var candidateQualityExplanation: String? = nil
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -644,6 +688,24 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         }
         if let memoryStatus {
             dictionary["memoryStatus"] = memoryStatus
+        }
+        if let reviewFamily { dictionary["reviewFamily"] = reviewFamily }
+        if let sourceItemRef { dictionary["sourceItemRef"] = sourceItemRef }
+        if let sourceItemTitle { dictionary["sourceItemTitle"] = sourceItemTitle }
+        if let sourceItemDate { dictionary["sourceItemDate"] = sourceItemDate }
+        if let extractionReason { dictionary["extractionReason"] = extractionReason }
+        if !proposedChange.isEmpty { dictionary["proposedChange"] = proposedChange }
+        if !storage.isEmpty { dictionary["storage"] = storage }
+        if let truthState { dictionary["truthState"] = truthState }
+        if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
+        if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
+        if candidateQualityLevel != nil || !candidateQualityCodes.isEmpty || candidateQualityExplanation != nil {
+            var quality: [String: Any] = [:]
+            if let candidateQualityLevel { quality["level"] = candidateQualityLevel }
+            if !candidateQualityCodes.isEmpty { quality["codes"] = candidateQualityCodes }
+            if let candidateQualityExplanation { quality["explanation"] = candidateQualityExplanation }
+            dictionary["quality"] = quality
+            dictionary["qualityFlags"] = candidateQualityCodes
         }
         if !safeNextCommands.isEmpty {
             dictionary["safeNextCommands"] = safeNextCommands
@@ -1870,6 +1932,62 @@ final class CiderReviewQueueService {
         )
     }
 
+    static func candidateQualitySignal(mentionText: String, sourceQuote: String?) -> (level: String, codes: [String], explanation: String) {
+        let normalized = mentionText
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+            .lowercased()
+        var codes: [String] = []
+        let words = normalized.split(separator: " ").map(String.init)
+        let weakPronouns: Set<String> = ["it", "this", "that", "one", "thing", "stuff", "whatever", "something", "anything"]
+        if words.isEmpty {
+            codes.append("empty_mention")
+        }
+        if words.allSatisfy({ weakPronouns.contains($0) }) {
+            codes.append("pronoun_or_placeholder_only")
+        }
+        if words.count <= 3 && words.contains(where: { weakPronouns.contains($0) }) {
+            codes.append("vague_pronoun_fragment")
+        }
+        if normalized.hasPrefix("to ") || normalized.hasPrefix("about ") || normalized.hasPrefix("and ") || normalized.hasPrefix("but ") {
+            codes.append("clause_fragment")
+        }
+        if normalized.contains(" to have ") || normalized.contains(" to talk ") || normalized.contains(" moved closer") {
+            codes.append("event_clause_not_object")
+        }
+        if normalized.contains("whatever") || normalized.contains("stuff like") {
+            codes.append("contains_vague_modifier")
+        }
+        if words.count > 7 {
+            codes.append("long_phrase_maybe_not_canonical_object")
+        }
+        let level: String
+        let explanation: String
+        if codes.contains("pronoun_or_placeholder_only") || codes.contains("vague_pronoun_fragment") || codes.contains("event_clause_not_object") {
+            level = "low"
+            explanation = "Likely noisy: extracted phrase is vague, pronoun-heavy, or reads like a clause rather than a canonical object. Keep the source quote and reject/correct/delegate instead of accepting as truth."
+        } else if codes.isEmpty {
+            level = "good"
+            explanation = "Looks like a concrete source-backed candidate; still review before accepting because candidates are not truth."
+        } else {
+            level = "needs_review"
+            explanation = "Review carefully: candidate is source-backed but has wording that may need correction before becoming a canonical object."
+        }
+        return (level, codes, explanation)
+    }
+
+    private func reviewSourceItemDate(from item: CiderRoutingItemSummary) -> String? {
+        let pattern = #"\b\d{4}-\d{2}-\d{2}\b"#
+        if let relativePath = item.relativePath,
+           let range = relativePath.range(of: pattern, options: .regularExpression) {
+            return String(relativePath[range])
+        }
+        if let range = item.title.range(of: pattern, options: .regularExpression) {
+            return String(item.title[range])
+        }
+        return nil
+    }
+
     private func graphCandidateReviewItems(
         in db: CiderDatabase,
         itemsByID: [UUID: CiderRoutingItemSummary],
@@ -1897,6 +2015,9 @@ final class CiderReviewQueueService {
             let reason = relationLabel.map {
                 "Review extracted \(typeLabel) candidate from source quote; possible relation: \($0)."
             } ?? "Review extracted \(typeLabel) candidate from source quote."
+            let quality = Self.candidateQualitySignal(mentionText: candidate.mentionText, sourceQuote: candidate.sourceQuote)
+            let sourceItemRef = "\(item.type):\(item.id.uuidString)"
+            let relation = possibleRelations.first ?? "mentions"
 
             return CiderReviewQueueItem(
                 id: "review-graph-candidate-\(output.id)",
@@ -1924,7 +2045,31 @@ final class CiderReviewQueueService {
                 possibleTypes: possibleTypes,
                 possibleRelations: possibleRelations,
                 candidateActions: candidate.actionGuesses,
-                safeNextCommands: graphCandidateSafeNextCommands(output: output, sourceItem: item)
+                safeNextCommands: graphCandidateSafeNextCommands(output: output, sourceItem: item),
+                reviewFamily: "graph_candidate",
+                sourceItemRef: sourceItemRef,
+                sourceItemTitle: item.title,
+                sourceItemDate: reviewSourceItemDate(from: item),
+                extractionReason: "Cider extracted '\(candidate.mentionText)' from the exact source quote and inferred a reviewable \(relation) graph candidate. This is not accepted graph truth until explicitly accepted.",
+                proposedChange: [
+                    "changeType": "graph_relation_candidate",
+                    "mentionText": candidate.mentionText,
+                    "relationType": relation,
+                    "targetKind": typeLabel,
+                    "truthState": "reviewable_candidate_not_truth",
+                ],
+                storage: [
+                    "table": "enrichment_outputs",
+                    "service": "SecondBrainEnrichmentOutputService",
+                    "kind": SecondBrainGraphCandidateContract.outputKind,
+                    "readModels": "CiderReviewQueueService.graphCandidateReviewItems; cider-cli item graph-candidate; cider-cli capture review-queue",
+                ],
+                truthState: candidate.reviewState == .accepted ? "accepted_graph_truth" : "reviewable_candidate_not_truth",
+                acceptEffect: "Accepting records an explicit cited graph relation/canonical object decision; it does not happen silently from extraction.",
+                rejectEffect: "Rejecting marks this candidate rejected while preserving the source quote and audit trail.",
+                candidateQualityLevel: quality.level,
+                candidateQualityCodes: quality.codes,
+                candidateQualityExplanation: quality.explanation
             )
         }
     }
@@ -1962,6 +2107,7 @@ final class CiderReviewQueueService {
             let memoryKind = output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? "memory"
             let linkedOwnerRefs = DatabaseHelpers.decodeStringArray(output.metadata["linked_owner_refs"])
             let reason = "Review source-backed \(memoryKind.replacingOccurrences(of: "_", with: " ")) memory candidate before promotion."
+            let sourceItemRef = "\(item.type):\(item.id.uuidString)"
 
             return CiderReviewQueueItem(
                 id: "review-memory-candidate-\(output.id)",
@@ -1988,7 +2134,30 @@ final class CiderReviewQueueService {
                 observedDate: output.metadata["observed_date"],
                 memoryKey: output.metadata["memory_key"],
                 memoryStatus: output.metadata["memory_status"],
-                safeNextCommands: memoryCandidateSafeNextCommands(output: output, sourceItem: item)
+                safeNextCommands: memoryCandidateSafeNextCommands(output: output, sourceItem: item),
+                reviewFamily: "memory_candidate",
+                sourceItemRef: sourceItemRef,
+                sourceItemTitle: item.title,
+                sourceItemDate: reviewSourceItemDate(from: item),
+                extractionReason: "Cider extracted a source-backed memory candidate from the exact source quote; it remains reviewable and is not promoted until accepted.",
+                proposedChange: [
+                    "changeType": "memory_candidate",
+                    "memoryKind": memoryKind,
+                    "value": output.value,
+                    "truthState": "reviewable_candidate_not_truth",
+                ],
+                storage: [
+                    "table": "enrichment_outputs",
+                    "service": "SecondBrainEnrichmentOutputService",
+                    "kind": "memory_candidate",
+                    "readModels": "CiderReviewQueueService.memoryCandidateReviewItems; cider-cli item memory-candidate; cider-cli capture review-queue",
+                ],
+                truthState: output.reviewState == "accepted" ? "accepted_memory_candidate" : "reviewable_candidate_not_truth",
+                acceptEffect: "Accepting marks the source-backed memory candidate accepted for promotion; extraction alone never writes user-owned memory truth.",
+                rejectEffect: "Rejecting marks this memory candidate rejected while preserving source evidence and audit history.",
+                candidateQualityLevel: "needs_review",
+                candidateQualityCodes: ["requires_human_memory_review"],
+                candidateQualityExplanation: "Memory candidates are intentionally reviewable; inspect the source quote before accepting."
             )
         }
     }
@@ -2275,7 +2444,20 @@ final class CiderReviewQueueService {
             linkedOwnerRefs: item.linkedOwnerRefs,
             observedDate: item.observedDate,
             memoryKey: item.memoryKey,
-            memoryStatus: item.memoryStatus
+            memoryStatus: item.memoryStatus,
+            reviewFamily: item.reviewFamily,
+            sourceItemRef: item.sourceItemRef,
+            sourceItemTitle: item.sourceItemTitle,
+            sourceItemDate: item.sourceItemDate,
+            extractionReason: item.extractionReason,
+            proposedChange: item.proposedChange,
+            storage: item.storage,
+            truthState: item.truthState,
+            acceptEffect: item.acceptEffect,
+            rejectEffect: item.rejectEffect,
+            candidateQualityLevel: item.candidateQualityLevel,
+            candidateQualityCodes: item.candidateQualityCodes,
+            candidateQualityExplanation: item.candidateQualityExplanation
         )
     }
 

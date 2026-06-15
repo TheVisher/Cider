@@ -559,7 +559,14 @@ enum HomeOverviewDataProvider {
                 possibleTypeLabels: reviewItem.possibleTypes,
                 possibleRelationLabels: reviewItem.possibleRelations,
                 candidateActionLabels: reviewItem.candidateActions,
-                confidenceReason: reviewItem.confidenceReason
+                confidenceReason: reviewItem.confidenceReason,
+                truthState: reviewItem.truthState,
+                extractionReason: reviewItem.extractionReason,
+                proposedChangeLabel: reviewProposedChangeLabel(reviewItem.proposedChange),
+                storageLabel: reviewStorageLabel(reviewItem.storage),
+                candidateQualityLevel: reviewItem.candidateQualityLevel,
+                candidateQualityFlags: reviewItem.candidateQualityCodes,
+                candidateQualityExplanation: reviewItem.candidateQualityExplanation
             )
         }
 
@@ -589,6 +596,29 @@ enum HomeOverviewDataProvider {
         }
 
         return cappedReviewCockpitItems(queueItems: queueItems, suggestionItems: suggestionItems)
+    }
+
+    private static func reviewProposedChangeLabel(_ proposedChange: [String: String]) -> String? {
+        guard let changeType = proposedChange["changeType"] else { return nil }
+        switch changeType {
+        case "graph_relation_candidate":
+            let relation = proposedChange["relationType"] ?? "mentions"
+            let mention = proposedChange["mentionText"] ?? "candidate"
+            let target = proposedChange["targetKind"] ?? "object"
+            return "Proposes \(relation) → \(mention) (\(target)); still reviewable, not truth."
+        case "memory_candidate":
+            let kind = proposedChange["memoryKind"] ?? "memory"
+            let value = proposedChange["value"] ?? "candidate"
+            return "Proposes \(kind.replacingOccurrences(of: "_", with: " ")) memory: \(value); still reviewable, not truth."
+        default:
+            return proposedChange.values.joined(separator: " • ")
+        }
+    }
+
+    private static func reviewStorageLabel(_ storage: [String: String]) -> String? {
+        guard let table = storage["table"], let service = storage["service"] else { return nil }
+        let kind = storage["kind"].map { " kind=\($0)" } ?? ""
+        return "Stored in \(table) via \(service)\(kind)."
     }
 
     private static func fallbackSourceItem(for reviewItem: CiderReviewQueueItem) -> LibraryItemV2? {
@@ -679,12 +709,27 @@ enum HomeOverviewDataProvider {
         limit: Int = 6
     ) -> [HomeReviewCockpitItem] {
         guard limit > 0 else { return [] }
-        guard !suggestionItems.isEmpty else { return Array(queueItems.prefix(limit)) }
-        guard queueItems.count >= limit else {
-            return Array((queueItems + suggestionItems).prefix(limit))
+        let baseLimit = suggestionItems.isEmpty ? limit : max(0, limit - 1)
+        var selected: [HomeReviewCockpitItem] = []
+        var selectedIDs = Set<String>()
+
+        // Keep count badges honest: when a lane such as Memory Candidate has nonzero
+        // items but Graph Candidate rows sort first, reserve a representative row per
+        // source-backed review family before filling the remaining slots.
+        for family in ["Memory Candidate", "Graph Candidate"] where selected.count < baseLimit {
+            if let item = queueItems.first(where: { $0.kindLabel == family }), selectedIDs.insert(item.id).inserted {
+                selected.append(item)
+            }
         }
 
-        return Array(queueItems.prefix(limit - 1)) + Array(suggestionItems.prefix(1))
+        for item in queueItems where selected.count < baseLimit {
+            if selectedIDs.insert(item.id).inserted {
+                selected.append(item)
+            }
+        }
+
+        let combined = selected + suggestionItems.prefix(max(0, limit - selected.count))
+        return Array(combined.prefix(limit))
     }
 
     private static func reviewCockpitSummary(

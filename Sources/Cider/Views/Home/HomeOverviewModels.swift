@@ -236,6 +236,13 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
     let possibleRelationLabels: [String]
     let candidateActionLabels: [String]
     let confidenceReason: String?
+    let truthState: String?
+    let extractionReason: String?
+    let proposedChangeLabel: String?
+    let storageLabel: String?
+    let candidateQualityLevel: String?
+    let candidateQualityFlags: [String]
+    let candidateQualityExplanation: String?
 
     init(
         id: String,
@@ -266,7 +273,14 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         possibleTypeLabels: [String] = [],
         possibleRelationLabels: [String] = [],
         candidateActionLabels: [String] = [],
-        confidenceReason: String? = nil
+        confidenceReason: String? = nil,
+        truthState: String? = nil,
+        extractionReason: String? = nil,
+        proposedChangeLabel: String? = nil,
+        storageLabel: String? = nil,
+        candidateQualityLevel: String? = nil,
+        candidateQualityFlags: [String] = [],
+        candidateQualityExplanation: String? = nil
     ) {
         self.id = id
         self.sourceReviewID = sourceReviewID
@@ -297,6 +311,13 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         self.possibleRelationLabels = possibleRelationLabels
         self.candidateActionLabels = candidateActionLabels
         self.confidenceReason = confidenceReason
+        self.truthState = truthState
+        self.extractionReason = extractionReason
+        self.proposedChangeLabel = proposedChangeLabel
+        self.storageLabel = storageLabel
+        self.candidateQualityLevel = candidateQualityLevel
+        self.candidateQualityFlags = candidateQualityFlags
+        self.candidateQualityExplanation = candidateQualityExplanation
     }
 }
 
@@ -381,6 +402,7 @@ extension HomeReviewCockpitItem {
     }
 
     var detailExtractedValueLabel: String {
+        if let proposedChangeLabel { return proposedChangeLabel }
         if kindLabel == "Graph Candidate" {
             let relation = possibleRelationLabels.first ?? "mentions"
             let typeSuffix = possibleTypeLabels.isEmpty ? "" : " (\(possibleTypeLabels.joined(separator: ", ")))"

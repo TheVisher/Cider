@@ -720,6 +720,88 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertTrue(cockpitItem.canDefer)
     }
 
+    func testReviewCockpitKeepsMemoryCandidateVisibleWhenGraphCandidatesFillCap() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let noteID = UUID()
+        let note = Note(
+            id: noteID,
+            title: "Daily context",
+            createdAt: now,
+            modifiedAt: now,
+            relativePath: "Daily/2026-06-10.md"
+        )
+        let graphItems = (0..<7).map { index in
+            CiderReviewQueueItem(
+                id: "review-graph-candidate-\(index)",
+                kind: "graph_candidate",
+                source: "graph_candidate",
+                itemID: noteID,
+                itemType: "note",
+                title: "Graph candidate \(index)",
+                relativePath: "Daily/2026-06-10.md",
+                reason: "Review extracted object candidate from source quote.",
+                suggestedAction: "Review graph candidate",
+                reviewState: "suggested",
+                confidence: 0.7,
+                routingDecisionID: nil,
+                target: nil,
+                createdAt: now.addingTimeInterval(Double(index)),
+                safeActions: ["inspect_source", "reject"],
+                candidateID: "graph-\(index)",
+                candidateRef: "graph_candidate:graph-\(index)",
+                sourceQuote: "Graph source \(index)",
+                reviewFamily: "graph_candidate"
+            )
+        }
+        let memoryItem = CiderReviewQueueItem(
+            id: "review-memory-candidate-visible",
+            kind: "memory_candidate",
+            source: "memory_candidate",
+            itemID: noteID,
+            itemType: "note",
+            title: "Jami likes pineapple coconut drinks.",
+            relativePath: "Daily/2026-06-10.md",
+            reason: "Review source-backed relationship context memory candidate before promotion.",
+            suggestedAction: "Review memory candidate",
+            reviewState: "needs_review",
+            confidence: 0.83,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now.addingTimeInterval(-10),
+            safeActions: ["inspect_source", "accept", "reject", "defer"],
+            candidateID: "memory-123",
+            candidateRef: "memory_candidate:memory-123",
+            sourceQuote: "Corrected source says Jami likes pineapple coconut drinks.",
+            memoryKind: "relationship_context",
+            linkedOwnerRefs: ["contact:jami"],
+            reviewFamily: "memory_candidate"
+        )
+        let summary = CiderReviewQueueSummaryResult(
+            command: "review.summary",
+            generatedAt: now,
+            totalCount: 8,
+            countsByKind: ["graph_candidate": 7, "memory_candidate": 1],
+            countsByItemType: ["note": 8],
+            countsByReviewState: ["suggested": 7, "needs_review": 1],
+            countsBySafeAction: ["reject": 8, "accept": 1],
+            groups: [],
+            batchEnrichmentPreview: .empty
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.note(note)],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: graphItems + [memoryItem],
+            reviewQueueSummary: summary,
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.reviewCockpitSummary.badges.first { $0.label == "Memory Candidate" }?.value, 1)
+        XCTAssertTrue(snapshot.reviewCockpitItems.contains { $0.kindLabel == "Memory Candidate" })
+    }
+
     func testReviewCockpitKeepsAmbiguousGraphCandidateAcceptUnavailable() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let noteID = UUID()

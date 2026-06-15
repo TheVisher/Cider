@@ -15554,6 +15554,30 @@ struct CiderCLI {
         dict["linkedOwners"] = linkedOwnerRefs.compactMap { try? ownerRefFromCanonical($0) }.map(ownerToDict)
         dict["safeNextCommands"] = memoryCandidateSafeCommands(owner: output.owner)
         dict["reviewActionCommands"] = memoryCandidateReviewActionCommands(for: output)
+        let memoryKind = output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? "memory"
+        dict["reviewFamily"] = "memory_candidate"
+        dict["truthState"] = output.reviewState == "accepted" ? "accepted_memory_candidate" : "reviewable_candidate_not_truth"
+        dict["extractionReason"] = "Cider extracted a source-backed memory candidate from the exact source quote; it is not user-owned memory truth until accepted."
+        dict["proposedChange"] = [
+            "changeType": "memory_candidate",
+            "memoryKind": memoryKind,
+            "value": output.value,
+            "truthState": dict["truthState"] as? String ?? "reviewable_candidate_not_truth",
+        ]
+        dict["storage"] = [
+            "table": "enrichment_outputs",
+            "service": "SecondBrainEnrichmentOutputService",
+            "kind": "memory_candidate",
+            "readModels": "CiderReviewQueueService.memoryCandidateReviewItems; cider-cli capture review-queue",
+        ]
+        dict["acceptEffect"] = "Accepting marks the source-backed memory candidate accepted for promotion; extraction alone never writes user-owned memory truth."
+        dict["rejectEffect"] = "Rejecting marks this memory candidate rejected while preserving source evidence and audit history."
+        dict["quality"] = [
+            "level": "needs_review",
+            "codes": ["requires_human_memory_review"],
+            "explanation": "Memory candidates are intentionally reviewable; inspect the source quote before accepting.",
+        ] as [String: Any]
+        dict["qualityFlags"] = ["requires_human_memory_review"]
         if let observedDate = output.metadata["observed_date"] { dict["observedDate"] = observedDate }
         if let memoryKey = output.metadata["memory_key"] { dict["memoryKey"] = memoryKey }
         if let memoryStatus = output.metadata["memory_status"] { dict["memoryStatus"] = memoryStatus }
@@ -17142,6 +17166,31 @@ struct CiderCLI {
                 .map { graphCandidateDelegationTaskToDict($0, candidateID: output.id) }
             if let sourceKind = candidate.sourceKind { dict["sourceKind"] = sourceKind }
             if let confidenceReason = candidate.confidenceReason { dict["confidenceReason"] = confidenceReason }
+            let quality = CiderReviewQueueService.candidateQualitySignal(mentionText: candidate.mentionText, sourceQuote: candidate.sourceQuote)
+            dict["reviewFamily"] = "graph_candidate"
+            dict["truthState"] = candidate.reviewState == .accepted ? "accepted_graph_truth" : "reviewable_candidate_not_truth"
+            dict["extractionReason"] = "Cider extracted '\(candidate.mentionText)' from the exact source quote and inferred a reviewable graph candidate; it is not graph truth until explicitly accepted."
+            dict["proposedChange"] = [
+                "changeType": "graph_relation_candidate",
+                "mentionText": candidate.mentionText,
+                "relationType": candidate.relationGuesses.first?.rawValue ?? "mentions",
+                "targetKind": candidate.objectTypeGuesses.first?.rawValue ?? "object",
+                "truthState": candidate.reviewState == .accepted ? "accepted_graph_truth" : "reviewable_candidate_not_truth",
+            ]
+            dict["storage"] = [
+                "table": "enrichment_outputs",
+                "service": "SecondBrainEnrichmentOutputService",
+                "kind": SecondBrainGraphCandidateContract.outputKind,
+                "readModels": "CiderReviewQueueService.graphCandidateReviewItems; cider-cli item graph-candidate; cider-cli capture review-queue",
+            ]
+            dict["acceptEffect"] = "Accepting records an explicit cited graph relation/canonical object decision; extraction alone never writes graph truth."
+            dict["rejectEffect"] = "Rejecting marks this candidate rejected while preserving the source quote and audit trail."
+            dict["quality"] = [
+                "level": quality.level,
+                "codes": quality.codes,
+                "explanation": quality.explanation,
+            ] as [String: Any]
+            dict["qualityFlags"] = quality.codes
             if let subjectText = candidate.subjectText { dict["subjectText"] = subjectText }
             if let subjectOwner = candidate.subjectOwner { dict["subjectOwner"] = ownerToDict(subjectOwner) }
             if let acceptedTargetOwner = candidate.acceptedTargetOwner { dict["acceptedTargetOwner"] = ownerToDict(acceptedTargetOwner) }

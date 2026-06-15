@@ -665,6 +665,13 @@ struct HomeOverviewDashboardView: View {
                                 .lineLimit(2)
                         }
 
+                        if let extractionReason = reviewItem.extractionReason {
+                            Text(extractionReason)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                                .lineLimit(2)
+                        }
+
                         HStack(spacing: Spacing.xs) {
                             Text(reviewItem.suggestedAction)
                                 .font(CiderFont.captionSemibold)
@@ -692,6 +699,13 @@ struct HomeOverviewDashboardView: View {
                                 Text(confidenceLabel)
                                     .font(CiderFont.caption)
                                     .foregroundColor(CiderColors.quaternary)
+                                    .lineLimit(1)
+                            }
+
+                            if let quality = reviewItem.candidateQualityLevel {
+                                Text("Quality: \(quality)")
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(quality == "low" ? CiderColors.warning : CiderColors.quaternary)
                                     .lineLimit(1)
                             }
                         }
