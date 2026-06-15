@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 26
+    static let latestVersion: Int = 27
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -131,7 +131,30 @@ enum DatabaseMigrations {
         }
         if currentVersion < 26 {
             try migrateToV26(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 27 {
+            try migrateToV27(db)
+        }
+    }
+
+    // MARK: - V26 -> V27: Durable action receipt ledger
+
+    private static func migrateToV27(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 27...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createActionReceipts)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_action_receipts_created ON action_receipts(created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_action_receipts_owner ON action_receipts(owner_type, owner_id, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_action_receipts_action ON action_receipts(action, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_action_receipts_actor ON action_receipts(actor, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_action_receipts_status ON action_receipts(status, created_at);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (27);")
+        }
+
+        logger.info("Migration to v27 complete")
     }
 
     // MARK: - V25 -> V26: Similarity reconciliation runs

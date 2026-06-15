@@ -37,6 +37,54 @@ struct CiderCLIAgentSafetyTests {
         #expect((receipt["safeNextCommands"] as? [String])?.contains("cider-cli item due-to-surface --json") == true)
     }
 
+    @Test("action ledger CLI lists and inspects recorded receipts")
+    func actionLedgerCLIListsAndInspectsRecordedReceipts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-action-ledger-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let capture = try assertStrictProcessJSON(
+            runCLI(args: [
+                "capture", "add", "--kind", "event",
+                "--title", "Ledger smoke dinner",
+                "--date", "2026-06-16",
+                "--json",
+            ], vault: vault),
+            command: "capture.add"
+        )
+        let item = try #require(capture["item"] as? [String: Any])
+        let id = try #require(item["id"] as? String)
+
+        let why = try assertStrictProcessJSON(
+            runCLI(args: ["item", "why-surfaced", "dateCard", id, "--json"], vault: vault),
+            command: "item.why-surfaced"
+        )
+        #expect((why["actionReceipt"] as? [String: Any])?["changed"] as? Bool == false)
+
+        let list = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--owner", "dateCard:\(id)", "--action", "inspect_surfacing", "--limit", "5", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        #expect(list["readOnly"] as? Bool == true)
+        #expect(list["changed"] as? Bool == false)
+        let entries = try #require(list["entries"] as? [[String: Any]])
+        let entry = try #require(entries.first)
+        #expect(entry["command"] as? String == "item.why-surfaced")
+        #expect(entry["action"] as? String == "inspect_surfacing")
+        #expect(entry["status"] as? String == "succeeded")
+        #expect(entry["changed"] as? Bool == false)
+        let entryID = try #require(entry["id"] as? String)
+
+        let inspect = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "inspect", entryID, "--json"], vault: vault),
+            command: "item.action-ledger.inspect"
+        )
+        let inspected = try #require(inspect["entry"] as? [String: Any])
+        #expect(inspected["id"] as? String == entryID)
+        #expect((inspected["safeVerificationCommands"] as? [String])?.contains("cider-cli item why-surfaced dateCard \(id) --json") == true)
+    }
+
     @Test("note JSON exposes project artifact metadata")
     func noteJSONExposesProjectArtifactMetadata() throws {
         let note = Note(

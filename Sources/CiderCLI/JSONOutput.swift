@@ -225,6 +225,33 @@ func agentActionReceiptToDict(
     return dict
 }
 
+func actionReceiptRecordToDict(_ record: SecondBrainActionReceiptRecord) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": record.id,
+        "command": record.command,
+        "action": record.action,
+        "actor": record.actor,
+        "status": record.status,
+        "sourceRefs": record.sourceRefs,
+        "evidenceRefs": record.evidenceRefs,
+        "readOnly": record.readOnly,
+        "changed": record.changed,
+        "safeVerificationCommands": record.safeVerificationCommands,
+        "safeNextCommands": record.safeNextCommands,
+        "createdAt": ISO8601DateFormatter().string(from: record.createdAt),
+    ]
+    if let owner = record.owner {
+        dict["owner"] = secondBrainOwnerRefToDict(owner)
+        dict["ownerRef"] = owner.canonicalRef
+    }
+    if let beforeJSON = record.beforeJSON { dict["beforeJSON"] = beforeJSON }
+    if let afterJSON = record.afterJSON { dict["afterJSON"] = afterJSON }
+    if let errorCode = record.errorCode { dict["errorCode"] = errorCode }
+    if let correlationID = record.correlationID { dict["correlationID"] = correlationID }
+    if let receiptJSON = record.receiptJSON { dict["receiptJSON"] = receiptJSON }
+    return dict
+}
+
 func reminderActionResultToDict(_ result: CiderReminderActionResult) -> [String: Any] {
     let formatter = ISO8601DateFormatter()
     let command = "reminder.\(result.action.rawValue)"

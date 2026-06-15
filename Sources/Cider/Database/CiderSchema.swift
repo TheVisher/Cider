@@ -585,6 +585,30 @@ enum CiderSchema {
         );
         """
 
+    static let createActionReceipts = """
+        CREATE TABLE IF NOT EXISTS action_receipts (
+            id                         TEXT PRIMARY KEY,
+            command                    TEXT NOT NULL,
+            action                     TEXT NOT NULL,
+            actor                      TEXT NOT NULL,
+            status                     TEXT NOT NULL,
+            owner_type                 TEXT,
+            owner_id                   TEXT,
+            source_refs_json           TEXT NOT NULL DEFAULT '[]',
+            evidence_refs_json         TEXT NOT NULL DEFAULT '[]',
+            read_only                  INTEGER NOT NULL,
+            changed                    INTEGER NOT NULL,
+            before_json                TEXT,
+            after_json                 TEXT,
+            error_code                 TEXT,
+            safe_verification_commands TEXT NOT NULL DEFAULT '[]',
+            safe_next_commands         TEXT NOT NULL DEFAULT '[]',
+            correlation_id             TEXT,
+            receipt_json               TEXT NOT NULL DEFAULT '{}',
+            created_at                 REAL NOT NULL
+        );
+        """
+
     // MARK: - Trash
 
     static let createTrash = """
@@ -718,6 +742,11 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_content_chunks_section ON content_chunks(section_id) WHERE section_id IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_agent_actions_owner ON agent_actions(owner_type, owner_id, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_agent_actions_tool ON agent_actions(tool_name, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_action_receipts_created ON action_receipts(created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_action_receipts_owner ON action_receipts(owner_type, owner_id, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_action_receipts_action ON action_receipts(action, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_action_receipts_actor ON action_receipts(actor, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_action_receipts_status ON action_receipts(status, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_owner ON second_brain_routing_decisions(owner_type, owner_id, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_status ON second_brain_routing_decisions(status, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_bookmarks_url     ON bookmarks(url);",
@@ -773,6 +802,7 @@ enum CiderSchema {
         createRoutingDecisions,
         createSecondBrainRoutingDecisions,
         createAgentActions,
+        createActionReceipts,
         createTrash,
         createMutationAudit,
         createFolderSyncDecisions,

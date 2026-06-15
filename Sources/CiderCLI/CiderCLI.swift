@@ -1018,7 +1018,9 @@ struct CiderCLI {
             }
 
             if jsonOutput {
-                outputJSON(reminderActionResultToDict(result))
+                let payload = reminderActionResultToDict(result)
+                persistActionReceiptIfPresent(payload)
+                outputJSON(payload)
             } else {
                 switch result.action {
                 case .complete:
@@ -4910,6 +4912,8 @@ struct CiderCLI {
               cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--json]
               cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
+              cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--action <action>] [--actor <actor>] [--status <status>] [--limit <n>] [--json]
+              cider-cli item action-ledger inspect <receipt-id> [--json]
               cider-cli item capability-map [--json]
               cider-cli item graph-health [--json]
               cider-cli item entity list [--limit <n>] [--json]
@@ -5365,6 +5369,9 @@ struct CiderCLI {
         case "delegate-memory-candidate", "memory-candidate-delegate":
             handleMemoryCandidateMutationCommand(action: "delegate", args: args, store: store)
 
+        case "action-ledger", "actions", "activity":
+            handleActionLedgerCommand(args: args)
+
         case "why-surfaced", "why":
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
@@ -5402,6 +5409,7 @@ struct CiderCLI {
                     )
                     payload["safeVerificationCommands"] = (payload["actionReceipt"] as? [String: Any])?["safeVerificationCommands"] ?? []
                     payload["summary"] = packet["summary"]
+                    persistActionReceiptIfPresent(payload)
                     if jsonOutput {
                         outputJSON(payload)
                     } else if let surfacing = payload["surfacing"] as? [String: Any] {
@@ -5460,6 +5468,7 @@ struct CiderCLI {
                 )
                 payload["safeVerificationCommands"] = (payload["actionReceipt"] as? [String: Any])?["safeVerificationCommands"] ?? []
                 CiderAgentDecisionContract.merge(itemAgentDecisionDictionary(for: packet), into: &payload)
+                persistActionReceiptIfPresent(payload)
                 if jsonOutput {
                     outputJSON(payload)
                 } else {
@@ -13041,6 +13050,85 @@ struct CiderCLI {
         printCLIError(message, details: nil)
     }
 
+    static func persistActionReceiptIfPresent(_ payload: [String: Any]) {
+        guard let receipt = payload["actionReceipt"] as? [String: Any],
+              let record = try? SecondBrainActionReceiptRecord(receiptDictionary: receipt) else { return }
+        _ = try? SecondBrainActionReceiptLedgerService(database: .shared).record(record)
+    }
+
+    static func actionLedgerFilter(from args: [String]) -> SecondBrainActionReceiptFilter {
+        let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+        let owner: SecondBrainOwnerRef?
+        if let rawOwner = parseFlag("--owner", from: args), let separator = rawOwner.firstIndex(of: ":") {
+            let type = String(rawOwner[..<separator])
+            let id = String(rawOwner[rawOwner.index(after: separator)...])
+            owner = SecondBrainOwnerRef(ownerType: type, ownerID: id)
+        } else if let ownerType = parseFlag("--owner-type", from: args), let ownerID = parseFlag("--owner-id", from: args) {
+            owner = SecondBrainOwnerRef(ownerType: ownerType, ownerID: ownerID)
+        } else {
+            owner = nil
+        }
+        return SecondBrainActionReceiptFilter(
+            owner: owner,
+            action: parseFlag("--action", from: args),
+            actor: parseFlag("--actor", from: args),
+            status: parseFlag("--status", from: args),
+            limit: limit
+        )
+    }
+
+    static func handleActionLedgerCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first ?? "list"
+        let service = SecondBrainActionReceiptLedgerService(database: .shared)
+        do {
+            switch action {
+            case "list", "recent":
+                let filter = actionLedgerFilter(from: args)
+                let entries = try service.list(filter: filter)
+                if jsonOutput {
+                    outputJSON([
+                        "ok": true,
+                        "command": "item.action-ledger.list",
+                        "readOnly": true,
+                        "changed": false,
+                        "count": entries.count,
+                        "limit": filter.limit,
+                        "entries": entries.map(actionReceiptRecordToDict),
+                    ])
+                } else {
+                    for entry in entries {
+                        print("\(entry.id) \(entry.command) \(entry.action) \(entry.status) changed=\(entry.changed)")
+                    }
+                }
+            case "inspect", "get":
+                guard positional.count >= 2 else {
+                    printCLIError("Usage: cider-cli item action-ledger inspect <receipt-id> [--json]")
+                    return
+                }
+                guard let entry = try service.inspect(id: positional[1]) else {
+                    printCLIError("No action ledger entry found matching '\(positional[1])'.", details: ["errorCode": "not_found"])
+                    return
+                }
+                if jsonOutput {
+                    outputJSON([
+                        "ok": true,
+                        "command": "item.action-ledger.inspect",
+                        "readOnly": true,
+                        "changed": false,
+                        "entry": actionReceiptRecordToDict(entry),
+                    ])
+                } else {
+                    print("\(entry.id) \(entry.command) \(entry.action) \(entry.status)")
+                }
+            default:
+                printCLIError("Unknown action-ledger command: \(action). Commands: list, inspect")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
     static let supportedAgentItemTypes = ["bookmark", "note", "todo", "dateCard", "contact", "vaultFile"]
 
     static func unsupportedItemTypeErrorDetails(command: String, action: String, rawType: String, ref: String?) -> [String: Any] {
@@ -13078,6 +13166,7 @@ struct CiderCLI {
                     }
                 }
             }
+            persistActionReceiptIfPresent(dict)
             outputJSON(dict)
         } else {
             print("Error: \(message)")

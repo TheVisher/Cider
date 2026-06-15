@@ -37,6 +37,7 @@ Current second-brain foundation tables include:
 - `content_chunks_fts`: FTS5 exact-search index over chunk title/body.
 - `routing_decisions`: durable record of where an item was routed, why, by whom, and with what confidence.
 - `agent_actions`: durable record of agent/CLI/tool actions against an item or projected owner.
+- `action_receipts`: durable agent-safe command receipt ledger for representative read-only and mutation-style actions, including owner refs, source/evidence refs, safety semantics, verification/follow-up commands, and structured failures.
 - `owner_relations`: typed graph edges between universal owners such as items, Kanban cards, projects, capture events, capture attachments, docs, and future owner types.
 - `projects`: backend project graph rows used by project context, project-scoped artifacts, board/card relations, and agent-safe project inspection.
 - `capture_events`: canonical capture provenance records with source surface/channel/message/sender context and produced-item relations.
