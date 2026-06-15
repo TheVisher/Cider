@@ -620,6 +620,19 @@ struct CiderReviewQueueServiceTests {
         #expect(actions.map(\.actionType).contains("memory_candidate.accept"))
         #expect(actions.map(\.actionType).contains("memory_candidate.reject"))
         #expect(actions.map(\.actionType).contains("memory_candidate.defer"))
+
+        let lifecycle = SecondBrainReviewLifecycleService(database: db)
+        let acceptEvents = try lifecycle.events(candidateRef: "memory_candidate:\(acceptCandidate.id)")
+        #expect(acceptEvents.map(\.eventKind).contains("suggested"))
+        #expect(acceptEvents.map(\.eventKind).contains("accepted"))
+        #expect(acceptEvents.last?.actor == "tester")
+        #expect(acceptEvents.last?.sourceEvidenceRef?.hasPrefix("source_evidence:") == true)
+        let rejectEvents = try lifecycle.events(candidateRef: "memory_candidate:\(rejectCandidate.id)")
+        #expect(rejectEvents.map(\.eventKind).contains("rejected"))
+        #expect(rejectEvents.last?.reason == "Nope.")
+        let deferEvents = try lifecycle.events(candidateRef: "memory_candidate:\(deferCandidate.id)")
+        #expect(deferEvents.map(\.eventKind).contains("deferred"))
+        #expect(deferEvents.last?.reason == "Later.")
     }
 
     @Test("candidate action service rejects ambiguous graph accept but can reject candidate")
@@ -680,6 +693,16 @@ struct CiderReviewQueueServiceTests {
         #expect(relations.count == 1)
         #expect(relations.first?.targetOwner == resolvedTarget)
         #expect(relations.first?.relationType == "watched")
+
+        let lifecycle = SecondBrainReviewLifecycleService(database: db)
+        let rejectedEvents = try lifecycle.events(candidateRef: "graph_candidate:\(output.id)")
+        #expect(rejectedEvents.map(\.eventKind).contains("suggested"))
+        #expect(rejectedEvents.map(\.eventKind).contains("rejected"))
+        #expect(rejectedEvents.last?.reason == "Wrong movie.")
+        let acceptedEvents = try lifecycle.events(candidateRef: "graph_candidate:\(resolved.id)")
+        #expect(acceptedEvents.map(\.eventKind).contains("accepted"))
+        #expect(acceptedEvents.contains { $0.eventKind == "accepted_truth_recorded" })
+        #expect(acceptedEvents.last?.sourceEvidenceRef?.hasPrefix("source_evidence:") == true)
     }
 
     @Test("review queue filters by kind and required safe action")

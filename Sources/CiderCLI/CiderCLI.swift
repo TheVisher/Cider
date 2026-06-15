@@ -14411,7 +14411,68 @@ struct CiderCLI {
         if let evidenceRecord = sourceEvidenceRecordToDict(for: relation) {
             dict["sourceEvidenceRecord"] = evidenceRecord
         }
+        let lifecycle = lifecycleHistoryToDict(for: relation)
+        if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
         return dict
+    }
+
+    static func reviewLifecycleEventToDict(_ event: SecondBrainReviewLifecycleEvent) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": event.id,
+            "owner": ownerToDict(event.owner),
+            "ownerRef": event.ownerRef,
+            "lifecycleState": event.lifecycleState,
+            "eventKind": event.eventKind,
+            "actor": event.actor,
+            "source": event.source,
+            "createdAt": ISO8601DateFormatter().string(from: event.createdAt),
+            "metadata": event.metadata,
+        ]
+        if let candidateRef = event.candidateRef { dict["candidateRef"] = candidateRef }
+        if let toolName = event.toolName { dict["toolName"] = toolName }
+        if let reason = event.reason { dict["reason"] = reason }
+        if let decisionNote = event.decisionNote { dict["decisionNote"] = decisionNote }
+        if let sourceEvidenceID = event.sourceEvidenceID { dict["sourceEvidenceID"] = sourceEvidenceID }
+        if let sourceEvidenceRef = event.sourceEvidenceRef { dict["sourceEvidenceRef"] = sourceEvidenceRef }
+        if let supersedesRef = event.supersedesRef { dict["supersedesRef"] = supersedesRef }
+        if let invalidatesRef = event.invalidatesRef { dict["invalidatesRef"] = invalidatesRef }
+        if let correctsRef = event.correctsRef { dict["correctsRef"] = correctsRef }
+        dict["truthBoundary"] = event.lifecycleState == "accepted"
+            ? "accepted_truth_requires_explicit_event"
+            : "reviewable_candidate_not_truth"
+        return dict
+    }
+
+    static func lifecycleHistoryToDict(for output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
+        let service = SecondBrainReviewLifecycleService(database: .shared)
+        let owner = SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: output.id)
+        do {
+            var events = try service.events(owner: owner)
+            if let candidateRef = SecondBrainReviewLifecycleService.candidateRef(for: output) {
+                let byCandidate = try service.events(candidateRef: candidateRef)
+                var seen = Set(events.map(\.id))
+                events.append(contentsOf: byCandidate.filter { seen.insert($0.id).inserted })
+            }
+            return events.sorted { $0.createdAt < $1.createdAt }.map(reviewLifecycleEventToDict)
+        } catch {
+            return []
+        }
+    }
+
+    static func lifecycleHistoryToDict(for relation: SecondBrainRelation) -> [[String: Any]] {
+        let service = SecondBrainReviewLifecycleService(database: .shared)
+        let owner = SecondBrainOwnerRef(ownerType: "owner_relation", ownerID: relation.id)
+        do {
+            var events = try service.events(owner: owner)
+            if let candidateRef = relation.metadata["candidate_ref"] ?? relation.metadata["candidate_id"].map({ "graph_candidate:\($0)" }) {
+                let byCandidate = try service.events(candidateRef: candidateRef)
+                var seen = Set(events.map(\.id))
+                events.append(contentsOf: byCandidate.filter { seen.insert($0.id).inserted })
+            }
+            return events.sorted { $0.createdAt < $1.createdAt }.map(reviewLifecycleEventToDict)
+        } catch {
+            return []
+        }
     }
 
     static func sourceEvidenceSafeCommands(for relation: SecondBrainRelation) -> [String] {
@@ -15361,6 +15422,8 @@ struct CiderCLI {
             if let evidenceRecord = sourceEvidenceRecordToDict(for: relation) {
                 dict["sourceEvidenceRecord"] = evidenceRecord
             }
+            let lifecycle = lifecycleHistoryToDict(for: relation)
+            if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
             return dict
         }
     }
@@ -15577,6 +15640,8 @@ struct CiderCLI {
         if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
         if let confidence = output.confidence { dict["confidence"] = confidence }
         if let evidenceRecord = sourceEvidenceRecordToDict(for: output) { dict["sourceEvidenceRecord"] = evidenceRecord }
+        let lifecycle = lifecycleHistoryToDict(for: output)
+        if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
         return dict
     }
 
@@ -17436,6 +17501,8 @@ struct CiderCLI {
         if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
         if let confidence = output.confidence { dict["confidence"] = confidence }
         if let evidenceRecord = sourceEvidenceRecordToDict(for: output) { dict["sourceEvidenceRecord"] = evidenceRecord }
+        let lifecycle = lifecycleHistoryToDict(for: output)
+        if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
 
         do {
             let candidate = try SecondBrainGraphCandidateContract.validate(output)

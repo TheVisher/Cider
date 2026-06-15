@@ -608,7 +608,15 @@ final class SecondBrainStore {
             .bind(updatedAt, at: 13)
         try stmt.step()
         if let evidenceRecord {
-            try SecondBrainSourceEvidenceService(database: database).record(evidenceRecord)
+            let evidenceService = SecondBrainSourceEvidenceService(database: database)
+            try evidenceService.record(evidenceRecord)
+            let storedEvidence = try evidenceService.record(derivedOwner: evidenceRecord.derivedOwner, evidenceKind: evidenceRecord.evidenceKind) ?? evidenceRecord
+            _ = try SecondBrainReviewLifecycleService(database: database).recordAcceptedRelationLifecycle(
+                relation: relation,
+                sourceEvidence: storedEvidence
+            )
+        } else {
+            _ = try SecondBrainReviewLifecycleService(database: database).recordAcceptedRelationLifecycle(relation: relation)
         }
     }
 

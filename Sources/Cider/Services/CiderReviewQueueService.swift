@@ -88,6 +88,49 @@ struct CiderReviewQueueSourceEvidenceRecord: Equatable {
     }
 }
 
+struct CiderReviewQueueLifecycleEventRecord: Equatable {
+    var id: String
+    var candidateRef: String?
+    var lifecycleState: String
+    var eventKind: String
+    var actor: String
+    var source: String
+    var toolName: String?
+    var reason: String?
+    var sourceEvidenceRef: String?
+    var createdAt: Date
+
+    init(_ event: SecondBrainReviewLifecycleEvent) {
+        self.id = event.id
+        self.candidateRef = event.candidateRef
+        self.lifecycleState = event.lifecycleState
+        self.eventKind = event.eventKind
+        self.actor = event.actor
+        self.source = event.source
+        self.toolName = event.toolName
+        self.reason = event.reason
+        self.sourceEvidenceRef = event.sourceEvidenceRef
+        self.createdAt = event.createdAt
+    }
+
+    func toDictionary() -> [String: Any] {
+        var dictionary: [String: Any] = [
+            "id": id,
+            "lifecycleState": lifecycleState,
+            "eventKind": eventKind,
+            "actor": actor,
+            "source": source,
+            "createdAt": ISO8601DateFormatter().string(from: createdAt),
+            "truthBoundary": lifecycleState == "accepted" ? "accepted_truth_requires_explicit_event" : "reviewable_candidate_not_truth",
+        ]
+        if let candidateRef { dictionary["candidateRef"] = candidateRef }
+        if let toolName { dictionary["toolName"] = toolName }
+        if let reason { dictionary["reason"] = reason }
+        if let sourceEvidenceRef { dictionary["sourceEvidenceRef"] = sourceEvidenceRef }
+        return dictionary
+    }
+}
+
 struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var id: String
     var kind: String
@@ -136,6 +179,7 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var candidateQualityCodes: [String] = []
     var candidateQualityExplanation: String? = nil
     var sourceEvidenceRecord: CiderReviewQueueSourceEvidenceRecord? = nil
+    var lifecycleHistory: [CiderReviewQueueLifecycleEventRecord] = []
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -221,6 +265,7 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
         if !proposedChange.isEmpty { dictionary["proposedChange"] = proposedChange }
         if !storage.isEmpty { dictionary["storage"] = storage }
         if let sourceEvidenceRecord { dictionary["sourceEvidenceRecord"] = sourceEvidenceRecord.toDictionary() }
+        if !lifecycleHistory.isEmpty { dictionary["lifecycleHistory"] = lifecycleHistory.map { $0.toDictionary() } }
         if let truthState { dictionary["truthState"] = truthState }
         if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
         if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
@@ -670,6 +715,7 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var candidateQualityCodes: [String] = []
     var candidateQualityExplanation: String? = nil
     var sourceEvidenceRecord: CiderReviewQueueSourceEvidenceRecord? = nil
+    var lifecycleHistory: [CiderReviewQueueLifecycleEventRecord] = []
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -743,6 +789,7 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         if !proposedChange.isEmpty { dictionary["proposedChange"] = proposedChange }
         if !storage.isEmpty { dictionary["storage"] = storage }
         if let sourceEvidenceRecord { dictionary["sourceEvidenceRecord"] = sourceEvidenceRecord.toDictionary() }
+        if !lifecycleHistory.isEmpty { dictionary["lifecycleHistory"] = lifecycleHistory.map { $0.toDictionary() } }
         if let truthState { dictionary["truthState"] = truthState }
         if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
         if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
@@ -2117,7 +2164,8 @@ final class CiderReviewQueueService {
                 candidateQualityLevel: quality.level,
                 candidateQualityCodes: quality.codes,
                 candidateQualityExplanation: quality.explanation,
-                sourceEvidenceRecord: SecondBrainSourceEvidenceService.recordFromOutput(output).map(CiderReviewQueueSourceEvidenceRecord.init)
+                sourceEvidenceRecord: SecondBrainSourceEvidenceService.recordFromOutput(output).map(CiderReviewQueueSourceEvidenceRecord.init),
+                lifecycleHistory: lifecycleHistoryRecords(for: output, in: db)
             )
         }
     }
@@ -2206,8 +2254,25 @@ final class CiderReviewQueueService {
                 candidateQualityLevel: "needs_review",
                 candidateQualityCodes: ["requires_human_memory_review"],
                 candidateQualityExplanation: "Memory candidates are intentionally reviewable; inspect the source quote before accepting.",
-                sourceEvidenceRecord: SecondBrainSourceEvidenceService.recordFromOutput(output).map(CiderReviewQueueSourceEvidenceRecord.init)
+                sourceEvidenceRecord: SecondBrainSourceEvidenceService.recordFromOutput(output).map(CiderReviewQueueSourceEvidenceRecord.init),
+                lifecycleHistory: lifecycleHistoryRecords(for: output, in: db)
             )
+        }
+    }
+
+    private func lifecycleHistoryRecords(for output: SecondBrainEnrichmentOutput, in db: CiderDatabase) -> [CiderReviewQueueLifecycleEventRecord] {
+        let service = SecondBrainReviewLifecycleService(database: db)
+        let owner = SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: output.id)
+        do {
+            var events = try service.events(owner: owner)
+            if let candidateRef = SecondBrainReviewLifecycleService.candidateRef(for: output) {
+                let byCandidate = try service.events(candidateRef: candidateRef)
+                var seen = Set(events.map(\.id))
+                events.append(contentsOf: byCandidate.filter { seen.insert($0.id).inserted })
+            }
+            return events.sorted { $0.createdAt < $1.createdAt }.map(CiderReviewQueueLifecycleEventRecord.init)
+        } catch {
+            return []
         }
     }
 
@@ -2418,7 +2483,33 @@ final class CiderReviewQueueService {
                 routingDecisionID: nil,
                 target: nil,
                 createdAt: now,
-                safeActions: ["inspect_duplicates", "manual_review"]
+                safeActions: ["inspect_duplicates", "manual_review"],
+                candidateRef: "duplicate_candidate:\(finding.id)",
+                storage: [
+                    "service": "VaultDuplicateAuditor",
+                    "kind": "duplicate_candidate",
+                    "lifecycleExtensionPoint": "review_lifecycle_events can store duplicate_candidate:<id> decisions when duplicate mutation flows are added",
+                ],
+                truthState: "reviewable_candidate_not_truth",
+                lifecycleHistory: [
+                    CiderReviewQueueLifecycleEventRecord(SecondBrainReviewLifecycleEvent(
+                        id: "duplicate-candidate-suggested-\(finding.id)",
+                        owner: SecondBrainOwnerRef(ownerType: "duplicate_candidate", ownerID: finding.id),
+                        candidateRef: "duplicate_candidate:\(finding.id)",
+                        lifecycleState: "needs_review",
+                        eventKind: "suggested",
+                        actor: "system",
+                        source: "duplicate_auditor",
+                        toolName: "VaultDuplicateAuditor",
+                        reason: finding.detail,
+                        metadata: [
+                            "entity_type": finding.entityType.rawValue,
+                            "duplicate_kind": finding.kind.rawValue,
+                            "confidence": finding.confidence.rawValue,
+                        ],
+                        createdAt: now
+                    ))
+                ]
             )
         }
     }
@@ -3065,6 +3156,28 @@ final class CiderReviewQueueService {
             ].filter { !$0.value.isEmpty },
             source: actor == "agent" ? .agent : nil
         )
+
+        if let db = resolvedDatabase {
+            try SecondBrainReviewLifecycleService(database: db).record(
+                SecondBrainReviewLifecycleEvent(
+                    owner: SecondBrainOwnerRef(ownerType: "routing_decision", ownerID: latest.id.uuidString),
+                    candidateRef: "routing_decision:\(latest.id.uuidString)",
+                    lifecycleState: latest.reviewState,
+                    eventKind: status,
+                    actor: actor,
+                    source: action,
+                    toolName: action,
+                    reason: latest.reason,
+                    supersedesRef: latest.supersedesDecisionID.map { "routing_decision:\($0.uuidString)" },
+                    metadata: [
+                        "item_ref": "\(after.item.type):\(after.item.id.uuidString)",
+                        "target_relative_path": latest.target.relativePath,
+                        "confidence": String(latest.confidence),
+                    ],
+                    createdAt: latest.createdAt
+                )
+            )
+        }
 
         return result
     }

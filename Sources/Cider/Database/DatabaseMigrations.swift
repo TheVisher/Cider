@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 21
+    static let latestVersion: Int = 22
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -111,7 +111,29 @@ enum DatabaseMigrations {
         }
         if currentVersion < 21 {
             try migrateToV21(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 22 {
+            try migrateToV22(db)
+        }
+    }
+
+    // MARK: - V21 -> V22: Review lifecycle events
+
+    private static func migrateToV22(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 22...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createReviewLifecycleEvents)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_owner ON review_lifecycle_events(owner_type, owner_id, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_candidate ON review_lifecycle_events(candidate_ref, created_at) WHERE candidate_ref IS NOT NULL;")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_evidence ON review_lifecycle_events(source_evidence_id, created_at) WHERE source_evidence_id IS NOT NULL;")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_state ON review_lifecycle_events(lifecycle_state, event_kind, created_at);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (22);")
+        }
+
+        logger.info("Migration to v22 complete")
     }
 
     // MARK: - V20 -> V21: Shared source evidence spans

@@ -331,6 +331,30 @@ enum CiderSchema {
         );
         """
 
+    static let createReviewLifecycleEvents = """
+        CREATE TABLE IF NOT EXISTS review_lifecycle_events (
+            id                  TEXT PRIMARY KEY,
+            owner_type          TEXT NOT NULL,
+            owner_id            TEXT NOT NULL,
+            candidate_ref       TEXT,
+            lifecycle_state     TEXT NOT NULL,
+            event_kind          TEXT NOT NULL,
+            actor               TEXT NOT NULL,
+            source              TEXT NOT NULL,
+            tool_name           TEXT,
+            reason              TEXT,
+            decision_note       TEXT,
+            source_evidence_id  TEXT,
+            source_evidence_ref TEXT,
+            supersedes_ref      TEXT,
+            invalidates_ref     TEXT,
+            corrects_ref        TEXT,
+            metadata            TEXT,
+            created_at          REAL NOT NULL,
+            FOREIGN KEY (source_evidence_id) REFERENCES source_evidence(id) ON DELETE SET NULL
+        );
+        """
+
     static let createSimilarityCandidates = """
         CREATE TABLE IF NOT EXISTS similarity_candidates (
             id                 TEXT PRIMARY KEY,
@@ -569,6 +593,10 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_source_evidence_source ON source_evidence(source_owner_type, source_owner_id, evidence_kind, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_source_evidence_derived ON source_evidence(derived_owner_type, derived_owner_id, evidence_kind);",
         "CREATE INDEX IF NOT EXISTS idx_source_evidence_candidate ON source_evidence(candidate_ref) WHERE candidate_ref IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_owner ON review_lifecycle_events(owner_type, owner_id, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_candidate ON review_lifecycle_events(candidate_ref, created_at) WHERE candidate_ref IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_evidence ON review_lifecycle_events(source_evidence_id, created_at) WHERE source_evidence_id IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_state ON review_lifecycle_events(lifecycle_state, event_kind, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_source ON similarity_candidates(source_owner_type, source_owner_id, review_state, score);",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_target ON similarity_candidates(target_owner_type, target_owner_id, review_state, score);",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_review ON similarity_candidates(review_state, updated_at);",
@@ -619,6 +647,7 @@ enum CiderSchema {
         createCaptureAttachments,
         createEnrichmentOutputs,
         createSourceEvidence,
+        createReviewLifecycleEvents,
         createSimilarityCandidates,
         createSpaceMemberships,
         createItemSections,

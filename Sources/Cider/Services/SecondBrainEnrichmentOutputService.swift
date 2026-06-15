@@ -137,6 +137,7 @@ final class SecondBrainEnrichmentOutputService {
     }
 
     func record(_ output: SecondBrainEnrichmentOutput) throws {
+        let previous = try self.output(id: output.id)
         var output = output
         let evidenceRecord = SecondBrainSourceEvidenceService.recordFromOutput(output)
         if let evidenceRecord {
@@ -183,7 +184,19 @@ final class SecondBrainEnrichmentOutputService {
             .bind(updatedAt, at: 15)
         try stmt.step()
         if let evidenceRecord {
-            try SecondBrainSourceEvidenceService(database: database).record(evidenceRecord)
+            let evidenceService = SecondBrainSourceEvidenceService(database: database)
+            try evidenceService.record(evidenceRecord)
+            let storedEvidence = try evidenceService.record(derivedOwner: evidenceRecord.derivedOwner, evidenceKind: evidenceRecord.evidenceKind) ?? evidenceRecord
+            _ = try SecondBrainReviewLifecycleService(database: database).recordEnrichmentLifecycle(
+                previous: previous,
+                current: output,
+                sourceEvidence: storedEvidence
+            )
+        } else {
+            _ = try SecondBrainReviewLifecycleService(database: database).recordEnrichmentLifecycle(
+                previous: previous,
+                current: output
+            )
         }
     }
 
