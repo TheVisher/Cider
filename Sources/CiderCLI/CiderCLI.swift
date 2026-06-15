@@ -4911,6 +4911,8 @@ struct CiderCLI {
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
               cider-cli item capability-map [--json]
               cider-cli item graph-health [--json]
+              cider-cli item entity list [--limit <n>] [--json]
+              cider-cli item entity inspect <entity-ref|name|alias> [--json]
               cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
               cider-cli item graph-candidate <candidate-id> [--json]
               cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
@@ -5285,6 +5287,9 @@ struct CiderCLI {
             } catch {
                 printCLIError(error.localizedDescription)
             }
+
+        case "entity", "entities", "canonical-entity", "canonical-entities":
+            handleEntityCommand(args: args)
 
         case "graph-candidates", "graph-candidate", "graph-candidate-inspect":
             handleGraphCandidateReadCommand(subcommand: subcommand ?? "graph-candidates", args: args)
@@ -16229,6 +16234,229 @@ struct CiderCLI {
         } catch {
             printCLIError(error.localizedDescription)
         }
+    }
+
+    static func handleEntityCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first?.lowercased() ?? "list"
+        let service = SecondBrainCanonicalEntityService(database: .shared)
+        do {
+            switch action {
+            case "list", "ls":
+                let limit = parseFlag("--limit", from: args).flatMap(Int.init)
+                let payload = try entityListPayload(service: service, limit: limit)
+                if jsonOutput { outputJSON(payload) } else {
+                    print("Accepted canonical entities: \(payload["count"] ?? 0)")
+                    for entity in (payload["entities"] as? [[String: Any]]) ?? [] {
+                        print("  \(entity["displayName"] ?? "") — \(entity["ref"] ?? "")")
+                    }
+                }
+            case "inspect", "show", "get":
+                guard positional.count >= 2 else {
+                    printEntityInspectError(selector: "", error: SecondBrainCanonicalEntityLookupError.notFound(selector: ""))
+                    return
+                }
+                let selector = positional.dropFirst().joined(separator: " ")
+                let payload = try entityInspectPayload(selector: selector, service: service)
+                if jsonOutput { outputJSON(payload) } else {
+                    print("Entity: \((payload["acceptedCanonicalState"] as? [String: Any])?["displayName"] ?? selector)")
+                    print("  Truth: \(payload["truthState"] ?? "")")
+                }
+            default:
+                printCLIError("Usage: cider-cli item entity list [--limit <n>] [--json]\n       cider-cli item entity inspect <entity-ref|name|alias> [--json]")
+            }
+        } catch let error as SecondBrainCanonicalEntityLookupError {
+            printEntityInspectError(selector: positional.dropFirst().joined(separator: " "), error: error)
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func entityListPayload(
+        service: SecondBrainCanonicalEntityService = SecondBrainCanonicalEntityService(database: .shared),
+        limit: Int? = nil
+    ) throws -> [String: Any] {
+        let entities = try service.listEntities(limit: limit)
+        return [
+            "ok": true,
+            "command": "item.entity.list",
+            "readOnly": true,
+            "changed": false,
+            "truthBoundary": entityTruthBoundary(),
+            "count": entities.count,
+            "entities": entities.map(entitySummaryToDict),
+            "safeNextCommands": ["cider-cli item entity list --json"],
+        ]
+    }
+
+    static func entityInspectPayload(
+        selector: String,
+        service: SecondBrainCanonicalEntityService = SecondBrainCanonicalEntityService(database: .shared)
+    ) throws -> [String: Any] {
+        let inspection = try service.inspect(selector: selector)
+        let summary = inspection.summary
+        let reviewableCandidates = summary.reviewableCandidates.map(entityReviewableCandidateToDict)
+        let safeCommands = entityInspectSafeCommands(summary: summary, reviewableCandidates: summary.reviewableCandidates)
+        return [
+            "ok": true,
+            "command": "item.entity.inspect",
+            "readOnly": true,
+            "changed": false,
+            "selector": selector,
+            "truthState": "accepted_graph_truth",
+            "truthBoundary": entityTruthBoundary(),
+            "entity": entitySummaryToDict(summary),
+            "acceptedCanonicalState": entityAcceptedCanonicalStateToDict(summary),
+            "aliases": summary.aliases,
+            "sourceEvidence": inspection.sourceEvidence.map(entitySourceEvidenceToDict),
+            "acceptedRelations": inspection.relatedRelations.map(ownerRelationToDict),
+            "relatedAcceptedRelations": inspection.relatedRelations.map(ownerRelationToDict),
+            "reviewableCandidates": reviewableCandidates,
+            "reviewableMentions": reviewableCandidates,
+            "conflictCount": inspection.conflicts.count,
+            "conflicts": inspection.conflicts.map(entitySummaryToDict),
+            "safeNextCommands": safeCommands,
+            "safeCommands": safeCommands,
+        ]
+    }
+
+    static func entityInspectErrorPayload(
+        selector: String,
+        error: SecondBrainCanonicalEntityLookupError
+    ) -> [String: Any] {
+        switch error {
+        case .notFound(let selector):
+            return [
+                "ok": false,
+                "command": "item.entity.inspect",
+                "readOnly": true,
+                "changed": false,
+                "errorCode": "entity_not_found",
+                "message": error.localizedDescription,
+                "selector": selector,
+                "safeNextCommands": [
+                    "cider-cli item entity list --json",
+                    "cider-cli item graph-candidates --include-reviewed --json",
+                ],
+            ]
+        case .ambiguous(let selector, let matches):
+            return [
+                "ok": false,
+                "command": "item.entity.inspect",
+                "readOnly": true,
+                "changed": false,
+                "errorCode": "entity_lookup_ambiguous",
+                "message": error.localizedDescription,
+                "selector": selector,
+                "candidates": matches.map(entitySummaryToDict),
+                "safeNextCommands": ["cider-cli item entity list --json"] + matches.map { "cider-cli item entity inspect \($0.ref) --json" },
+            ]
+        }
+    }
+
+    static func printEntityInspectError(selector: String, error: SecondBrainCanonicalEntityLookupError) {
+        let payload = entityInspectErrorPayload(selector: selector, error: error)
+        if jsonOutput { outputJSON(payload) } else { printCLIError(payload["message"] as? String ?? error.localizedDescription) }
+    }
+
+    static func entitySummaryToDict(_ summary: SecondBrainCanonicalEntitySummary) -> [String: Any] {
+        [
+            "ref": summary.ref,
+            "owner": ownerToDict(summary.owner),
+            "stableKey": summary.stableKey,
+            "displayName": summary.displayName,
+            "label": summary.displayName,
+            "aliases": summary.aliases,
+            "possibleTypes": summary.possibleTypes,
+            "kind": summary.possibleTypes.first ?? "object",
+            "truthState": "accepted_graph_truth",
+            "acceptedAsTruth": true,
+            "sourceEvidenceCount": summary.sourceEvidenceCount,
+            "acceptedRelationCount": summary.acceptedRelationCount,
+            "acceptedFactCount": summary.acceptedRelationCount,
+            "reviewableCandidateCount": summary.reviewableCandidateCount,
+            "reviewableMentionCount": summary.reviewableCandidateCount,
+            "safeInspectCommand": "cider-cli item entity inspect \(summary.ref) --json",
+            "safeNextCommands": ["cider-cli item entity inspect \(summary.ref) --json"],
+        ]
+    }
+
+    static func entityAcceptedCanonicalStateToDict(_ summary: SecondBrainCanonicalEntitySummary) -> [String: Any] {
+        [
+            "ref": summary.ref,
+            "owner": ownerToDict(summary.owner),
+            "stableKey": summary.stableKey,
+            "displayName": summary.displayName,
+            "aliases": summary.aliases,
+            "possibleTypes": summary.possibleTypes,
+            "acceptedAsTruth": true,
+            "truthState": "accepted_graph_truth",
+            "approvalSource": "explicit_command",
+            "reviewSafety": entityTruthBoundary(),
+            "acceptedCandidateRefs": summary.acceptedOutputs.map { "graph_candidate:\($0.id)" },
+        ]
+    }
+
+    static func entitySourceEvidenceToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        let candidate = try? SecondBrainGraphCandidateContract.validate(output)
+        let sourceOwner = output.owner
+        var sourceItem: [String: Any] = [
+            "owner": ownerToDict(sourceOwner),
+            "ref": sourceOwner.canonicalRef,
+        ]
+        if sourceOwner.ownerType == "note",
+           let uuid = UUID(uuidString: sourceOwner.ownerID),
+           let note = NotesStorage.shared.notes.first(where: { $0.id == uuid }) {
+            sourceItem["title"] = note.title
+            sourceItem["relativePath"] = note.relativePath
+            sourceItem["createdAt"] = ISO8601DateFormatter().string(from: note.createdAt)
+            sourceItem["updatedAt"] = ISO8601DateFormatter().string(from: note.modifiedAt)
+        }
+        return [
+            "candidateID": output.id,
+            "candidateRef": "graph_candidate:\(output.id)",
+            "sourceOwner": ownerToDict(sourceOwner),
+            "sourceItem": sourceItem,
+            "sourceItemRef": sourceOwner.canonicalRef,
+            "sourceQuote": candidate?.sourceQuote ?? output.evidence,
+            "mentionText": candidate?.mentionText ?? output.value,
+            "reviewState": output.reviewState,
+            "truthState": "accepted_graph_truth",
+            "confidence": output.confidence as Any,
+            "safeNextCommands": graphCandidateSafeCommands(for: output),
+        ]
+    }
+
+    static func entityReviewableCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        var dict = graphCandidateToDict(output)
+        dict["truthState"] = "reviewable_candidate_not_truth"
+        dict["acceptedAsTruth"] = false
+        dict["reviewSafety"] = ["reviewable_candidate_not_truth", "accept_requires_explicit_command", "no_silent_merge"]
+        return dict
+    }
+
+    static func entityInspectSafeCommands(
+        summary: SecondBrainCanonicalEntitySummary,
+        reviewableCandidates: [SecondBrainEnrichmentOutput]
+    ) -> [String] {
+        var commands = [
+            "cider-cli item entity list --json",
+            "cider-cli item related-owners \(summary.owner.ownerType) \(summary.owner.ownerID) --json",
+        ]
+        commands.append(contentsOf: summary.acceptedOutputs.map { "cider-cli item graph-candidate \($0.id) --json" })
+        commands.append(contentsOf: reviewableCandidates.map { "cider-cli item graph-candidate \($0.id) --json" })
+        commands.append("cider-cli capture review-queue --kind graph_candidate --json")
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func entityTruthBoundary() -> [String] {
+        [
+            "accepted_graph_truth_only_from_explicit_accept",
+            "reviewable_candidates_are_not_truth",
+            "no_silent_merge_or_inference",
+            "source_quotes_retained",
+        ]
     }
 
     static func handleGraphCandidateMutationCommand(
