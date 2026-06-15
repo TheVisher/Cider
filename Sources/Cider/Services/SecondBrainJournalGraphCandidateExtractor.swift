@@ -99,7 +99,8 @@ struct SecondBrainJournalGraphCandidateExtractor {
             pattern: #"(?i)\b(?:stopped at|went to|visited|ate at|had dinner at|had lunch at)\s+(.+?)$"#,
             in: sentence
         ).compactMap { match in
-            guard let mention = cleanedMention(match.captures.first ?? nil, kind: .place) else { return nil }
+            guard let mention = cleanedMention(match.captures.first ?? nil, kind: .place),
+                  !isSchoolingBackgroundVisit(sentence: sentence, mention: mention) else { return nil }
             return makeCandidate(
                 sourceOwner: sourceOwner,
                 candidateKind: .objectRelation,
@@ -330,6 +331,44 @@ struct SecondBrainJournalGraphCandidateExtractor {
             .lowercased()
     }
 
+    private func isSchoolingBackgroundVisit(sentence: String, mention: String) -> Bool {
+        let lowerSentence = sentence.lowercased()
+        let lowerMention = mention.lowercased()
+        let strongSchoolingMarkers = [
+            "beauty school",
+            "cosmetology school",
+            "barber school",
+            "hair school",
+            "law school",
+            "medical school",
+            "nursing school",
+            "grad school",
+            "graduate school",
+        ]
+        if strongSchoolingMarkers.contains(where: { lowerMention.contains($0) }) {
+            return lowerSentence.contains("went to")
+        }
+
+        let broadSchoolingMarkers = [
+            "college",
+            "university",
+        ]
+        guard broadSchoolingMarkers.contains(where: { lowerMention.contains($0) }) else { return false }
+        let backgroundMarkers = [
+            "doesn’t do",
+            "doesn't do",
+            "professionally",
+            "anymore",
+            "used to",
+            "studied",
+            "degree",
+            "trained",
+            "school and",
+        ]
+        return lowerSentence.contains("went to")
+            && backgroundMarkers.contains(where: { lowerSentence.contains($0) })
+    }
+
     private func objectTypes(for mention: String) -> [SecondBrainGraphCandidateContract.ObjectType] {
         let lower = mention.lowercased()
         if lower.contains("drink")
@@ -525,6 +564,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
             #"(?i)\s+because\s+.+$"#,
             #"(?i)\s+but\s+.+$"#,
             #"(?i)\s+with\s+.+$"#,
+            #"(?i)\s+for\s+(?:dinner|lunch|breakfast|brunch|dessert|coffee|drinks?)$"#,
             #"(?i)\s+at\s+.+$"#,
             #"(?i),\s+and\s+.+$"#,
         ]

@@ -208,6 +208,41 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(!graphOutputs.contains { $0.value.localizedCaseInsensitiveContains("saw blades") })
     }
 
+    @Test("journal extractor suppresses schooling background as place visits")
+    func journalExtractorSuppressesSchoolingBackgroundAsPlaceVisits() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: "Jami went to beauty school and doesn’t do hair professionally anymore, but she still does hair consistently for her mom, her sisters, and her mom’s friend Darcy"
+        )
+
+        let graphOutputs = result.outputs.filter { $0.kind == "graph_candidate" }
+        #expect(!graphOutputs.contains { candidate in
+            candidate.evidence == "Jami went to beauty school and doesn’t do hair professionally anymore, but she still does hair consistently for her mom, her sisters, and her mom’s friend Darcy"
+                && (candidate.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses]?.contains("visited") == true
+                    || candidate.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses]?.contains("restaurant") == true
+                    || candidate.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses]?.contains("place") == true)
+        })
+        #expect(!graphOutputs.contains { $0.value.localizedCaseInsensitiveContains("beauty school") })
+        #expect(result.outputs.allSatisfy { $0.reviewState == "suggested" })
+    }
+
+    @Test("journal extractor keeps real restaurant place visits")
+    func journalExtractorKeepsRealRestaurantPlaceVisits() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: "After work, we went to Cactus for dinner."
+        )
+
+        let graphOutputs = result.outputs.filter { $0.kind == "graph_candidate" }
+        let cactus = try #require(graphOutputs.first { $0.value == "Cactus" })
+        #expect(cactus.evidence == "After work, we went to Cactus for dinner")
+        #expect(cactus.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"visited\"]")
+        #expect(cactus.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses] == "[\"restaurant\",\"place\"]")
+        #expect(cactus.reviewState == "suggested")
+    }
+
     @Test("journal extractor keeps fresh live journal retest candidates bounded")
     func journalExtractorKeepsFreshLiveJournalRetestCandidatesBounded() throws {
         let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
