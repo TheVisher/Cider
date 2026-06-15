@@ -4908,6 +4908,7 @@ struct CiderCLI {
               cider-cli item open <type> <id-or-ref> [--json]
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
               cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--json]
+              cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
               cider-cli item capability-map [--json]
               cider-cli item graph-health [--json]
@@ -5179,6 +5180,24 @@ struct CiderCLI {
                     "events": events.map(recallAccessEventToDict),
                 ]
                 if jsonOutput { outputJSON(payload) } else { print("Recall access events: \(events.count)") }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "due-to-surface", "resurface", "resurfacing-feed":
+            do {
+                let limit = max(1, Int(parseFlag("--limit", from: args) ?? "") ?? 20)
+                let includeSuppressed = args.contains("--include-suppressed") || args.contains("--all")
+                let staleAfterDays = max(0, Int(parseFlag("--stale-after-days", from: args) ?? "") ?? 3)
+                let feed = try dueToSurfaceFeedPayload(limit: limit, includeSuppressed: includeSuppressed, staleAfterDays: staleAfterDays)
+                if jsonOutput {
+                    outputJSON(dueToSurfaceFeedToDict(feed))
+                } else {
+                    print("Due-to-surface candidates: \(feed.candidates.count)")
+                    for candidate in feed.candidates {
+                        print("  [\(candidate.family.rawValue)] \(candidate.title) — \(candidate.whyNow)")
+                    }
+                }
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -15398,6 +15417,99 @@ struct CiderCLI {
             "subtitle": summary.subtitle,
             "symbol": summary.symbol,
         ]
+    }
+
+    static func dueToSurfaceFeedPayload(limit: Int, includeSuppressed: Bool = false, staleAfterDays: Int = 3) throws -> CiderDueToSurfaceFeed {
+        let now = Date()
+        let agenda = AgendaBriefingService.build(
+            todos: TodoCardStorage.shared.todoCards,
+            dateCards: DateCardStorage.shared.dateCards,
+            now: now
+        )
+        let reviewItems: [CiderReviewQueueItem]
+        do {
+            reviewItems = try CiderReviewQueueService().list(limit: limit, includeDeferred: includeSuppressed, now: now).items
+                .filter { !isCompletedReminderOwner(itemType: $0.itemType, itemID: $0.itemID) }
+        } catch {
+            reviewItems = []
+        }
+        let staleCaptures = staleCaptureSignals(now: now, staleAfterDays: staleAfterDays)
+        let linkedContext = linkedContextSignals(limit: limit)
+        return CiderDueToSurfaceFeedService.build(
+            agenda: agenda,
+            reviewItems: reviewItems,
+            staleCaptures: staleCaptures,
+            linkedContext: linkedContext,
+            now: now,
+            limit: limit
+        )
+    }
+
+    static func isCompletedReminderOwner(itemType: String, itemID: UUID) -> Bool {
+        let normalized = itemType.lowercased().replacingOccurrences(of: "_", with: "-")
+        if normalized == "todo" {
+            return TodoCardStorage.shared.todoCards.first(where: { $0.id == itemID })?.isCompleted == true
+        }
+        if normalized == "datecard" || normalized == "date-card" || normalized == "event" {
+            return DateCardStorage.shared.dateCards.first(where: { $0.id == itemID })?.isCompleted == true
+        }
+        return false
+    }
+
+    static func staleCaptureSignals(now: Date, staleAfterDays: Int = 3) -> [CiderDueToSurfaceStaleCapture] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -staleAfterDays, to: now) ?? now
+        var captures: [CiderDueToSurfaceStaleCapture] = []
+        captures += NotesStorage.shared.notes.compactMap { note in
+            guard note.modifiedAt <= cutoff,
+                  note.folderID == nil || note.relativePath.hasPrefix("Inbox/") else { return nil }
+            return CiderDueToSurfaceStaleCapture(
+                owner: SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString),
+                title: note.title,
+                itemType: "note",
+                relativePath: note.relativePath,
+                createdAt: note.createdAt,
+                updatedAt: note.modifiedAt,
+                reasonCodes: ["stale_capture", "inbox_unfiled"]
+            )
+        }
+        captures += BookmarksStorage.shared.bookmarks.compactMap { bookmark in
+            guard bookmark.updatedAt <= cutoff,
+                  bookmark.folderID == nil || (bookmark.relativePath?.hasPrefix("Inbox/") == true) else { return nil }
+            return CiderDueToSurfaceStaleCapture(
+                owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmark.id.uuidString),
+                title: bookmark.title,
+                itemType: "bookmark",
+                relativePath: bookmark.relativePath,
+                createdAt: bookmark.createdAt,
+                updatedAt: bookmark.updatedAt,
+                reasonCodes: ["stale_capture", "inbox_unfiled"]
+            )
+        }
+        return captures.sorted { lhs, rhs in lhs.updatedAt < rhs.updatedAt }
+    }
+
+    static func linkedContextSignals(limit: Int) -> [CiderDueToSurfaceLinkedContext] {
+        guard CiderDatabase.shared.isOpen else { return [] }
+        let service = SecondBrainSimilarityCandidateService(database: .shared)
+        let candidates = (try? service.reviewableCandidates(limit: limit)) ?? []
+        return candidates.map { candidate in
+            let evidence = (try? service.sourceEvidenceRecord(for: candidate))
+            return CiderDueToSurfaceLinkedContext(
+                id: candidate.id,
+                sourceOwner: candidate.sourceOwner,
+                targetOwner: candidate.targetOwner,
+                title: "Review possible \(candidate.candidateType) link",
+                reason: candidate.reason,
+                reasonCodes: candidate.metadata["reason_codes"]?.split(separator: ",").map(String.init) ?? [candidate.signal],
+                confidence: candidate.score,
+                reviewState: candidate.reviewState,
+                evidenceRef: evidence.map { "source_evidence:\($0.id)" },
+                safeNextCommands: [
+                    "cider-cli item similarity \(candidate.sourceOwner.ownerType) \(candidate.sourceOwner.ownerID) --json",
+                    "cider-cli item accept-similarity \(candidate.id) --relation similar_to --json",
+                ]
+            )
+        }
     }
 
     enum RecallContextCLIError: Error, LocalizedError {

@@ -1190,3 +1190,68 @@ private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
         "vaultRoot": StoragePaths.cachedVaultDirectoryURL.path,
     ]
 }
+
+func dueToSurfaceFeedToDict(_ feed: CiderDueToSurfaceFeed) -> [String: Any] {
+    let formatter = ISO8601DateFormatter()
+    return [
+        "ok": true,
+        "command": feed.command,
+        "generatedAt": formatter.string(from: feed.generatedAt),
+        "readOnly": feed.readOnly,
+        "changed": feed.changed,
+        "count": feed.candidates.count,
+        "countsByFamily": feed.countsByFamily,
+        "truthBoundary": "reviewable_candidate_not_truth",
+        "candidates": feed.candidates.map { dueToSurfaceCandidateToDict($0, formatter: formatter) },
+        "safeNextCommands": feed.safeNextCommands,
+    ]
+}
+
+func dueToSurfaceCandidateToDict(_ candidate: CiderDueToSurfaceCandidate, formatter: ISO8601DateFormatter) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": candidate.id,
+        "family": candidate.family.rawValue,
+        "owner": [
+            "ownerType": candidate.owner.ownerType,
+            "ownerID": candidate.owner.ownerID,
+            "ref": candidate.owner.canonicalRef,
+        ],
+        "title": candidate.title,
+        "itemType": candidate.itemType,
+        "whyNow": candidate.whyNow,
+        "reasonCodes": candidate.reasonCodes,
+        "urgency": candidate.urgency,
+        "confidence": candidate.confidence,
+        "reviewState": candidate.reviewState,
+        "truthBoundary": candidate.truthBoundary,
+        "score": candidate.score,
+        "sourceRefs": candidate.sourceRefs,
+        "citedEvidence": candidate.citedEvidence.map(dueToSurfaceEvidenceToDict),
+        "safeNextCommands": candidate.safeNextCommands,
+        "window": dueToSurfaceWindowToDict(candidate.window, formatter: formatter),
+    ]
+    if candidate.truthBoundary == "reviewable_candidate_not_truth" {
+        dict["needsReview"] = true
+        dict["acceptedTruth"] = false
+    }
+    return dict
+}
+
+func dueToSurfaceWindowToDict(_ window: CiderDueToSurfaceWindow, formatter: ISO8601DateFormatter) -> [String: Any] {
+    var dict: [String: Any] = ["label": window.label]
+    if let startsAt = window.startsAt { dict["startsAt"] = formatter.string(from: startsAt) }
+    if let endsAt = window.endsAt { dict["endsAt"] = formatter.string(from: endsAt) }
+    return dict
+}
+
+func dueToSurfaceEvidenceToDict(_ evidence: CiderDueToSurfaceEvidence) -> [String: Any] {
+    var dict: [String: Any] = [
+        "ref": evidence.ref,
+        "kind": evidence.kind,
+        "summary": evidence.summary,
+        "metadata": evidence.metadata,
+    ]
+    if let sourceOwnerRef = evidence.sourceOwnerRef { dict["sourceOwnerRef"] = sourceOwnerRef }
+    if let candidateRef = evidence.candidateRef { dict["candidateRef"] = candidateRef }
+    return dict
+}

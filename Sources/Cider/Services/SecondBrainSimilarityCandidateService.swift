@@ -111,6 +111,24 @@ final class SecondBrainSimilarityCandidateService {
         return candidates
     }
 
+    func reviewableCandidates(limit: Int = 20) throws -> [SecondBrainSimilarityCandidate] {
+        let stmt = try database.prepare("""
+            SELECT id, source_owner_type, source_owner_id, target_owner_type, target_owner_id,
+                   candidate_type, signal, score, reason, evidence, source, review_state,
+                   metadata, created_at, updated_at, reviewed_at
+            FROM similarity_candidates
+            WHERE review_state IS NULL OR review_state NOT IN ('accepted', 'rejected')
+            ORDER BY score DESC, updated_at DESC
+            LIMIT ?;
+            """)
+        stmt.bind(max(0, limit), at: 1)
+        var candidates: [SecondBrainSimilarityCandidate] = []
+        while try stmt.step() {
+            candidates.append(candidate(from: stmt))
+        }
+        return candidates
+    }
+
     func health(owner: SecondBrainOwnerRef? = nil, staleAfter: TimeInterval = 86_400) throws -> SecondBrainSimilarityHealthReport {
         let candidates = try similarityCandidates(owner: owner)
         var families: [String: Int] = ["chunk_overlap": 0, "entity_enrichment": 0]
