@@ -318,6 +318,19 @@ final class SecondBrainStore {
             try stmt.step()
         }
 
+        if try tableExists("source_evidence") {
+            let deleteEvidence = try database.prepare("""
+                DELETE FROM source_evidence
+                WHERE (source_owner_type = ? AND source_owner_id = ?)
+                   OR (derived_owner_type = ? AND derived_owner_id = ?);
+                """)
+            deleteEvidence.bind(ownerType, at: 1)
+                .bind(ownerID, at: 2)
+                .bind(ownerType, at: 3)
+                .bind(ownerID, at: 4)
+            try deleteEvidence.step()
+        }
+
         if try tableExists("similarity_candidates") {
             let deleteSimilarity = try database.prepare("""
                 DELETE FROM similarity_candidates
@@ -357,6 +370,19 @@ final class SecondBrainStore {
             stmt.bind(ownerType, at: 1)
                 .bind(ownerIDLike, at: 2)
             try stmt.step()
+        }
+
+        if try tableExists("source_evidence") {
+            let deleteEvidence = try database.prepare("""
+                DELETE FROM source_evidence
+                WHERE (source_owner_type = ? AND source_owner_id LIKE ? ESCAPE '\\')
+                   OR (derived_owner_type = ? AND derived_owner_id LIKE ? ESCAPE '\\');
+                """)
+            deleteEvidence.bind(ownerType, at: 1)
+                .bind(ownerIDLike, at: 2)
+                .bind(ownerType, at: 3)
+                .bind(ownerIDLike, at: 4)
+            try deleteEvidence.step()
         }
 
         if try tableExists("similarity_candidates") {
@@ -540,6 +566,15 @@ final class SecondBrainStore {
 
     func recordRelation(_ relation: SecondBrainRelation) throws {
         guard relation.sourceOwner != relation.targetOwner else { return }
+        var relation = relation
+        let evidenceRecord = SecondBrainSourceEvidenceService.recordFromRelation(relation)
+        if let evidenceRecord {
+            relation.metadata["source_evidence_id"] = evidenceRecord.id
+            relation.metadata["source_evidence_ref"] = "source_evidence:\(evidenceRecord.id)"
+            relation.metadata["source_evidence_kind"] = evidenceRecord.evidenceKind
+            relation.metadata["source_owner_ref"] = evidenceRecord.sourceOwnerRef
+            relation.metadata["derived_owner_ref"] = evidenceRecord.derivedOwnerRef
+        }
         let now = Date()
         let createdAt = DatabaseHelpers.encode(relation.createdAt)
         let updatedAt = DatabaseHelpers.encode(relation.updatedAt > relation.createdAt ? relation.updatedAt : now)
@@ -572,6 +607,9 @@ final class SecondBrainStore {
             .bind(createdAt, at: 12)
             .bind(updatedAt, at: 13)
         try stmt.step()
+        if let evidenceRecord {
+            try SecondBrainSourceEvidenceService(database: database).record(evidenceRecord)
+        }
     }
 
     func replaceRelations(

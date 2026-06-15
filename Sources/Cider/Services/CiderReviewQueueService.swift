@@ -45,6 +45,49 @@ struct CiderCaptureReviewWorklistResult: Equatable {
     }
 }
 
+struct CiderReviewQueueSourceEvidenceRecord: Equatable {
+    var id: String
+    var evidenceKind: String
+    var sourceOwnerRef: String
+    var sourceQuote: String
+    var spanStart: Int? = nil
+    var spanEnd: Int? = nil
+    var extractionSource: String
+    var derivedOwnerRef: String
+    var derivedKind: String
+    var candidateRef: String? = nil
+
+    init(record: SecondBrainSourceEvidenceRecord) {
+        id = record.id
+        evidenceKind = record.evidenceKind
+        sourceOwnerRef = record.sourceOwnerRef
+        sourceQuote = record.sourceQuote
+        spanStart = record.spanStart
+        spanEnd = record.spanEnd
+        extractionSource = record.extractionSource
+        derivedOwnerRef = record.derivedOwnerRef
+        derivedKind = record.derivedKind
+        candidateRef = record.candidateRef
+    }
+
+    func toDictionary() -> [String: Any] {
+        var dictionary: [String: Any] = [
+            "id": id,
+            "ref": "source_evidence:\(id)",
+            "evidenceKind": evidenceKind,
+            "sourceOwnerRef": sourceOwnerRef,
+            "sourceQuote": sourceQuote,
+            "extractionSource": extractionSource,
+            "derivedOwnerRef": derivedOwnerRef,
+            "derivedKind": derivedKind,
+        ]
+        if let spanStart { dictionary["spanStart"] = spanStart }
+        if let spanEnd { dictionary["spanEnd"] = spanEnd }
+        if let candidateRef { dictionary["candidateRef"] = candidateRef }
+        return dictionary
+    }
+}
+
 struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var id: String
     var kind: String
@@ -92,6 +135,7 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var candidateQualityLevel: String? = nil
     var candidateQualityCodes: [String] = []
     var candidateQualityExplanation: String? = nil
+    var sourceEvidenceRecord: CiderReviewQueueSourceEvidenceRecord? = nil
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -176,6 +220,7 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
         if let extractionReason { dictionary["extractionReason"] = extractionReason }
         if !proposedChange.isEmpty { dictionary["proposedChange"] = proposedChange }
         if !storage.isEmpty { dictionary["storage"] = storage }
+        if let sourceEvidenceRecord { dictionary["sourceEvidenceRecord"] = sourceEvidenceRecord.toDictionary() }
         if let truthState { dictionary["truthState"] = truthState }
         if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
         if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
@@ -624,6 +669,7 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var candidateQualityLevel: String? = nil
     var candidateQualityCodes: [String] = []
     var candidateQualityExplanation: String? = nil
+    var sourceEvidenceRecord: CiderReviewQueueSourceEvidenceRecord? = nil
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -696,6 +742,7 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         if let extractionReason { dictionary["extractionReason"] = extractionReason }
         if !proposedChange.isEmpty { dictionary["proposedChange"] = proposedChange }
         if !storage.isEmpty { dictionary["storage"] = storage }
+        if let sourceEvidenceRecord { dictionary["sourceEvidenceRecord"] = sourceEvidenceRecord.toDictionary() }
         if let truthState { dictionary["truthState"] = truthState }
         if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
         if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
@@ -2069,7 +2116,8 @@ final class CiderReviewQueueService {
                 rejectEffect: "Rejecting marks this candidate rejected while preserving the source quote and audit trail.",
                 candidateQualityLevel: quality.level,
                 candidateQualityCodes: quality.codes,
-                candidateQualityExplanation: quality.explanation
+                candidateQualityExplanation: quality.explanation,
+                sourceEvidenceRecord: SecondBrainSourceEvidenceService.recordFromOutput(output).map(CiderReviewQueueSourceEvidenceRecord.init)
             )
         }
     }
@@ -2157,7 +2205,8 @@ final class CiderReviewQueueService {
                 rejectEffect: "Rejecting marks this memory candidate rejected while preserving source evidence and audit history.",
                 candidateQualityLevel: "needs_review",
                 candidateQualityCodes: ["requires_human_memory_review"],
-                candidateQualityExplanation: "Memory candidates are intentionally reviewable; inspect the source quote before accepting."
+                candidateQualityExplanation: "Memory candidates are intentionally reviewable; inspect the source quote before accepting.",
+                sourceEvidenceRecord: SecondBrainSourceEvidenceService.recordFromOutput(output).map(CiderReviewQueueSourceEvidenceRecord.init)
             )
         }
     }
@@ -2457,7 +2506,8 @@ final class CiderReviewQueueService {
             rejectEffect: item.rejectEffect,
             candidateQualityLevel: item.candidateQualityLevel,
             candidateQualityCodes: item.candidateQualityCodes,
-            candidateQualityExplanation: item.candidateQualityExplanation
+            candidateQualityExplanation: item.candidateQualityExplanation,
+            sourceEvidenceRecord: item.sourceEvidenceRecord
         )
     }
 

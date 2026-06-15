@@ -303,6 +303,34 @@ enum CiderSchema {
         );
         """
 
+    static let createSourceEvidence = """
+        CREATE TABLE IF NOT EXISTS source_evidence (
+            id                  TEXT PRIMARY KEY,
+            evidence_kind       TEXT NOT NULL DEFAULT 'source_span',
+            source_owner_type   TEXT NOT NULL,
+            source_owner_id     TEXT NOT NULL,
+            source_kind         TEXT,
+            source_quote        TEXT NOT NULL DEFAULT '',
+            span_start          INTEGER,
+            span_end            INTEGER,
+            observed_at         REAL,
+            captured_at         REAL,
+            extracted_at        REAL,
+            extraction_source   TEXT NOT NULL,
+            extraction_run_id   TEXT,
+            extraction_provider TEXT,
+            extraction_model    TEXT,
+            derived_owner_type  TEXT NOT NULL,
+            derived_owner_id    TEXT NOT NULL,
+            derived_kind        TEXT NOT NULL,
+            candidate_ref       TEXT,
+            metadata            TEXT NOT NULL DEFAULT '{}',
+            created_at          REAL NOT NULL,
+            updated_at          REAL NOT NULL,
+            UNIQUE(derived_owner_type, derived_owner_id, evidence_kind)
+        );
+        """
+
     static let createSimilarityCandidates = """
         CREATE TABLE IF NOT EXISTS similarity_candidates (
             id                 TEXT PRIMARY KEY,
@@ -538,6 +566,9 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_capture_attachments_source ON capture_attachments(source_attachment_id) WHERE source_attachment_id IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_owner ON enrichment_outputs(owner_type, owner_id, kind, review_state);",
         "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_kind ON enrichment_outputs(kind, normalized_value);",
+        "CREATE INDEX IF NOT EXISTS idx_source_evidence_source ON source_evidence(source_owner_type, source_owner_id, evidence_kind, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_source_evidence_derived ON source_evidence(derived_owner_type, derived_owner_id, evidence_kind);",
+        "CREATE INDEX IF NOT EXISTS idx_source_evidence_candidate ON source_evidence(candidate_ref) WHERE candidate_ref IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_source ON similarity_candidates(source_owner_type, source_owner_id, review_state, score);",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_target ON similarity_candidates(target_owner_type, target_owner_id, review_state, score);",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_review ON similarity_candidates(review_state, updated_at);",
@@ -587,6 +618,7 @@ enum CiderSchema {
         createCaptureEvents,
         createCaptureAttachments,
         createEnrichmentOutputs,
+        createSourceEvidence,
         createSimilarityCandidates,
         createSpaceMemberships,
         createItemSections,

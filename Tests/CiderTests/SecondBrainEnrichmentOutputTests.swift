@@ -50,6 +50,54 @@ struct SecondBrainEnrichmentOutputTests {
         #expect(outputs.contains { $0.kind == "date" && $0.evidence.contains("June 20, 2026") })
         #expect(outputs.contains { $0.kind == "topic" && $0.normalizedValue == "productlaunch" })
         #expect(outputs.contains { $0.kind == "entity" && $0.value == "Jane Doe" })
+
+        let link = try #require(outputs.first { $0.kind == "link" && $0.value == "https://example.com/launch" })
+        let evidence = try #require(try SecondBrainSourceEvidenceService(database: db).record(
+            derivedOwner: SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: link.id)
+        ))
+        #expect(evidence.sourceOwner == owner)
+        #expect(evidence.derivedOwner == SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: link.id))
+        #expect(evidence.sourceQuote.contains("https://example.com/launch"))
+        #expect(evidence.spanStart != nil)
+        #expect(evidence.spanEnd != nil)
+        #expect(evidence.extractionSource == "chunk_enrichment.item_index.note")
+        #expect(evidence.derivedKind == "link")
+        #expect(link.metadata["source_evidence_id"] == evidence.id)
+    }
+
+    @Test("accepted relation records shared source evidence")
+    func acceptedRelationRecordsSharedSourceEvidence() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let source = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let target = SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "pine-house")
+        let relation = SecondBrainRelation(
+            sourceOwner: source,
+            targetOwner: target,
+            relationType: "visited",
+            evidence: "Avery visited Pine House for dinner.",
+            source: "graph_candidate.accept",
+            actor: "test",
+            confidence: 0.82,
+            metadata: [
+                "source_quote": "Avery visited Pine House for dinner.",
+                "source_owner_ref": source.canonicalRef,
+                "candidate_id": "candidate-123",
+                "candidate_ref": "graph_candidate:candidate-123",
+                "mention_text": "Pine House",
+            ]
+        )
+
+        try SecondBrainStore(database: db).recordRelation(relation)
+        let evidence = try #require(try SecondBrainSourceEvidenceService(database: db).record(
+            derivedOwner: SecondBrainOwnerRef(ownerType: "owner_relation", ownerID: relation.id)
+        ))
+        #expect(evidence.sourceOwner == source)
+        #expect(evidence.derivedOwner == SecondBrainOwnerRef(ownerType: "owner_relation", ownerID: relation.id))
+        #expect(evidence.sourceQuote == "Avery visited Pine House for dinner.")
+        #expect(evidence.candidateRef == "graph_candidate:candidate-123")
+        #expect(evidence.extractionSource == "graph_candidate.accept")
     }
 
     @Test("item context includes enrichment outputs")

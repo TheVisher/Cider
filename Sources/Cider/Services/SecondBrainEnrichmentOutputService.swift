@@ -137,6 +137,15 @@ final class SecondBrainEnrichmentOutputService {
     }
 
     func record(_ output: SecondBrainEnrichmentOutput) throws {
+        var output = output
+        let evidenceRecord = SecondBrainSourceEvidenceService.recordFromOutput(output)
+        if let evidenceRecord {
+            output.metadata["source_evidence_id"] = evidenceRecord.id
+            output.metadata["source_evidence_ref"] = "source_evidence:\(evidenceRecord.id)"
+            output.metadata["source_evidence_kind"] = evidenceRecord.evidenceKind
+            output.metadata["source_owner_ref"] = evidenceRecord.sourceOwnerRef
+            output.metadata["derived_owner_ref"] = evidenceRecord.derivedOwnerRef
+        }
         let now = Date()
         let createdAt = DatabaseHelpers.encode(output.createdAt)
         let updatedAt = DatabaseHelpers.encode(output.updatedAt > output.createdAt ? output.updatedAt : now)
@@ -173,6 +182,9 @@ final class SecondBrainEnrichmentOutputService {
             .bind(createdAt, at: 14)
             .bind(updatedAt, at: 15)
         try stmt.step()
+        if let evidenceRecord {
+            try SecondBrainSourceEvidenceService(database: database).record(evidenceRecord)
+        }
     }
 
     private struct ChunkSource {
@@ -302,7 +314,12 @@ final class SecondBrainEnrichmentOutputService {
             source: "chunk_enrichment.\(chunk.source)",
             confidence: confidence,
             reviewState: "suggested",
-            metadata: ["chunk_title": chunk.title]
+            metadata: [
+                "chunk_title": chunk.title,
+                "source_span_start": String(evidenceRange.location),
+                "source_span_end": String(evidenceRange.location + evidenceRange.length),
+                "source_evidence_kind": "source_span",
+            ]
         )
     }
 

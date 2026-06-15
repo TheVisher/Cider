@@ -14278,7 +14278,57 @@ struct CiderCLI {
         if let confidence = relation.confidence {
             dict["confidence"] = confidence
         }
+        if let evidenceRecord = sourceEvidenceRecordToDict(for: relation) {
+            dict["sourceEvidenceRecord"] = evidenceRecord
+        }
         return dict
+    }
+
+    static func sourceEvidenceRecordToDict(_ record: SecondBrainSourceEvidenceRecord) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": record.id,
+            "ref": "source_evidence:\(record.id)",
+            "evidenceKind": record.evidenceKind,
+            "sourceOwner": ownerToDict(record.sourceOwner),
+            "sourceOwnerRef": record.sourceOwnerRef,
+            "sourceQuote": record.sourceQuote,
+            "extractionSource": record.extractionSource,
+            "derivedOwner": ownerToDict(record.derivedOwner),
+            "derivedOwnerRef": record.derivedOwnerRef,
+            "derivedKind": record.derivedKind,
+            "metadata": record.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: record.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: record.updatedAt),
+        ]
+        if let sourceKind = record.sourceKind { dict["sourceKind"] = sourceKind }
+        if let spanStart = record.spanStart { dict["spanStart"] = spanStart }
+        if let spanEnd = record.spanEnd { dict["spanEnd"] = spanEnd }
+        if let observedAt = record.observedAt { dict["observedAt"] = ISO8601DateFormatter().string(from: observedAt) }
+        if let capturedAt = record.capturedAt { dict["capturedAt"] = ISO8601DateFormatter().string(from: capturedAt) }
+        if let extractedAt = record.extractedAt { dict["extractedAt"] = ISO8601DateFormatter().string(from: extractedAt) }
+        if let extractionRunID = record.extractionRunID { dict["extractionRunID"] = extractionRunID }
+        if let extractionProvider = record.extractionProvider { dict["extractionProvider"] = extractionProvider }
+        if let extractionModel = record.extractionModel { dict["extractionModel"] = extractionModel }
+        if let candidateRef = record.candidateRef { dict["candidateRef"] = candidateRef }
+        return dict
+    }
+
+    static func sourceEvidenceRecordToDict(for output: SecondBrainEnrichmentOutput) -> [String: Any]? {
+        if let stored = try? SecondBrainSourceEvidenceService(database: .shared).record(
+            derivedOwner: SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: output.id)
+        ) {
+            return sourceEvidenceRecordToDict(stored)
+        }
+        return SecondBrainSourceEvidenceService.recordFromOutput(output).map(sourceEvidenceRecordToDict)
+    }
+
+    static func sourceEvidenceRecordToDict(for relation: SecondBrainRelation) -> [String: Any]? {
+        if let stored = try? SecondBrainSourceEvidenceService(database: .shared).record(
+            derivedOwner: SecondBrainOwnerRef(ownerType: "owner_relation", ownerID: relation.id)
+        ) {
+            return sourceEvidenceRecordToDict(stored)
+        }
+        return SecondBrainSourceEvidenceService.recordFromRelation(relation).map(sourceEvidenceRecordToDict)
     }
 
     static func sourceEvidenceToDict(
@@ -14357,6 +14407,9 @@ struct CiderCLI {
         }
         if let sourceOwnerRef = metadata["source_owner_ref"] {
             dict["evidenceSourceOwnerRef"] = sourceOwnerRef
+        }
+        if let evidenceRecord = sourceEvidenceRecordToDict(for: relation) {
+            dict["sourceEvidenceRecord"] = evidenceRecord
         }
         return dict
     }
@@ -15305,6 +15358,9 @@ struct CiderCLI {
             }
             if let mentionText = relation.metadata["mention_text"] { dict["mentionText"] = mentionText }
             if let confidence = relation.confidence { dict["confidence"] = confidence }
+            if let evidenceRecord = sourceEvidenceRecordToDict(for: relation) {
+                dict["sourceEvidenceRecord"] = evidenceRecord
+            }
             return dict
         }
     }
@@ -15520,6 +15576,7 @@ struct CiderCLI {
         ]
         if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
         if let confidence = output.confidence { dict["confidence"] = confidence }
+        if let evidenceRecord = sourceEvidenceRecordToDict(for: output) { dict["sourceEvidenceRecord"] = evidenceRecord }
         return dict
     }
 
@@ -17378,6 +17435,7 @@ struct CiderCLI {
         ]
         if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
         if let confidence = output.confidence { dict["confidence"] = confidence }
+        if let evidenceRecord = sourceEvidenceRecordToDict(for: output) { dict["sourceEvidenceRecord"] = evidenceRecord }
 
         do {
             let candidate = try SecondBrainGraphCandidateContract.validate(output)

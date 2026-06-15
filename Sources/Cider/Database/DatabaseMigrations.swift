@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 20
+    static let latestVersion: Int = 21
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -107,7 +107,28 @@ enum DatabaseMigrations {
         }
         if currentVersion < 20 {
             try migrateToV20(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 21 {
+            try migrateToV21(db)
+        }
+    }
+
+    // MARK: - V20 -> V21: Shared source evidence spans
+
+    private static func migrateToV21(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 21...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createSourceEvidence)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_source_evidence_source ON source_evidence(source_owner_type, source_owner_id, evidence_kind, updated_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_source_evidence_derived ON source_evidence(derived_owner_type, derived_owner_id, evidence_kind);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_source_evidence_candidate ON source_evidence(candidate_ref) WHERE candidate_ref IS NOT NULL;")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (21);")
+        }
+
+        logger.info("Migration to v21 complete")
     }
 
     // MARK: - V19 -> V20: Capture attachment provenance
