@@ -110,7 +110,7 @@ enum CiderDueToSurfaceFeedService {
 
     private static func agendaCandidate(_ item: AgendaBriefingItem, now: Date) -> CiderDueToSurfaceCandidate? {
         guard item.surfaceToday else { return nil }
-        let ownerType = item.itemType == .todo ? "todo" : "date_card"
+        let ownerType = item.itemType == .todo ? "todo" : "dateCard"
         let urgency = item.surfacingExplanation.urgency
         return CiderDueToSurfaceCandidate(
             id: "agenda:\(ownerType):\(item.id.uuidString)",

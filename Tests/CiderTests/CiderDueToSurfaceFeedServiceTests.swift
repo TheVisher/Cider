@@ -12,10 +12,11 @@ final class CiderDueToSurfaceFeedServiceTests: XCTestCase {
         calendar.date(from: DateComponents(timeZone: calendar.timeZone, year: year, month: month, day: day, hour: hour))!
     }
 
-    func testDueToSurfaceFeedCombinesAgendaReviewStaleCaptureAndLinkedContextWithEvidence() {
+    func testDueToSurfaceFeedCombinesAgendaReviewStaleCaptureAndLinkedContextWithEvidence() throws {
         let now = date(2026, 6, 15)
         let dueTodo = TodoCard(title: "Pay rent", dueDate: now, priority: .high, actionURLString: "https://rent.example.com")
         let completedTodo = TodoCard(title: "Pay insurance", dueDate: now, isCompleted: true, completedAt: now)
+        let dueDateCard = DateCard(title: "Dinner with Jami", startAt: now)
         let staleNote = CiderDueToSurfaceStaleCapture(
             owner: SecondBrainOwnerRef(ownerType: "note", ownerID: "stale-note"),
             title: "Inbox capture about Pine House",
@@ -60,7 +61,7 @@ final class CiderDueToSurfaceFeedServiceTests: XCTestCase {
         )
 
         let feed = CiderDueToSurfaceFeedService.build(
-            agenda: AgendaBriefingService.build(todos: [dueTodo, completedTodo], dateCards: [], now: now, calendar: calendar),
+            agenda: AgendaBriefingService.build(todos: [dueTodo, completedTodo], dateCards: [dueDateCard], now: now, calendar: calendar),
             reviewItems: [reviewItem],
             staleCaptures: [staleNote],
             linkedContext: [linked],
@@ -70,8 +71,13 @@ final class CiderDueToSurfaceFeedServiceTests: XCTestCase {
 
         XCTAssertEqual(feed.command, "item.due-to-surface")
         XCTAssertFalse(feed.changed)
-        XCTAssertEqual(feed.candidates.count, 4)
+        XCTAssertEqual(feed.candidates.count, 5)
         XCTAssertTrue(feed.candidates.contains { $0.family == .agenda && $0.owner.ownerID == dueTodo.id.uuidString })
+        let dateCardCandidate = try XCTUnwrap(feed.candidates.first { $0.family == .agenda && $0.owner.ownerID == dueDateCard.id.uuidString })
+        XCTAssertEqual(dateCardCandidate.owner.ownerType, "dateCard")
+        XCTAssertTrue(dateCardCandidate.sourceRefs.contains("dateCard:\(dueDateCard.id.uuidString)"))
+        XCTAssertTrue(dateCardCandidate.safeNextCommands.contains("cider-cli item why-surfaced dateCard \(dueDateCard.id.uuidString) --json"))
+        XCTAssertFalse(dateCardCandidate.safeNextCommands.contains { $0.contains("date_card") })
         XCTAssertFalse(feed.candidates.contains { $0.title == "Pay insurance" })
         XCTAssertTrue(feed.candidates.contains { $0.family == .reviewItem && $0.reasonCodes.contains("reviewable_candidate") && $0.truthBoundary == "reviewable_candidate_not_truth" })
         XCTAssertTrue(feed.candidates.contains { $0.family == .staleCapture && $0.reasonCodes.contains("stale_capture") })
