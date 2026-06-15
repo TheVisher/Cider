@@ -696,6 +696,13 @@ struct CiderDatabaseTests {
         #expect(DatabaseHelpers.decodeUUIDArray(nil).isEmpty)
     }
 
+    @Test("Malformed array JSON decodes to empty arrays")
+    func malformedArrayJsonDecodesToEmpty() {
+        #expect(DatabaseHelpers.decodeStringArray("not-json").isEmpty)
+        #expect(DatabaseHelpers.decodeStringArray("{\"value\":\"not an array\"}").isEmpty)
+        #expect(DatabaseHelpers.decodeUUIDArray("[\"not-a-uuid\"]").isEmpty)
+    }
+
     @Test("Codable round-trips through JSON encode/decode")
     func codableRoundTrip() {
         struct TestModel: Codable, Equatable {
