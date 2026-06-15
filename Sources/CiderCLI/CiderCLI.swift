@@ -5288,6 +5288,9 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "entity-resolution", "entity-resolution-candidate", "entity-resolution-candidates":
+            handleEntityResolutionCommand(args: args)
+
         case "entity", "entities", "canonical-entity", "canonical-entities":
             handleEntityCommand(args: args)
 
@@ -16356,6 +16359,126 @@ struct CiderCLI {
         } catch {
             printCLIError(error.localizedDescription)
         }
+    }
+
+    static func handleEntityResolutionCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first?.lowercased() ?? "list"
+        let service = SecondBrainEntityResolutionService(database: .shared)
+        do {
+            switch action {
+            case "list", "ls", "candidates":
+                let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 50
+                let candidates = try service.candidates(reviewStates: nil, limit: limit)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.entity-resolution.list",
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "reviewable_candidate_not_truth",
+                    "count": candidates.count,
+                    "candidates": candidates.map(entityResolutionCandidateToDict),
+                    "safeNextCommands": ["cider-cli item entity-resolution list --json"],
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Entity-resolution candidates: \(candidates.count)") }
+            case "inspect", "show", "get":
+                guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution inspect <candidate-id> [--json]"); return }
+                guard let candidate = try service.candidate(id: positional[1]) else { printCLIError("Entity-resolution candidate not found: \(positional[1])"); return }
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.entity-resolution.inspect",
+                    "readOnly": true,
+                    "changed": false,
+                    "candidate": entityResolutionCandidateToDict(candidate),
+                    "safeNextCommands": candidate.safeNextCommands,
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Entity-resolution candidate: \(candidate.id)") }
+            case "accept", "approve":
+                guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution accept <candidate-id> [--reason <text>] [--json]"); return }
+                let candidate = try service.accept(candidateID: positional[1], actor: parseFlag("--actor", from: args) ?? "cider-cli", reason: parseFlag("--reason", from: args))
+                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.accept")
+            case "merge":
+                guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution merge <candidate-id> [--reason <text>] [--json]"); return }
+                let candidate = try service.merge(candidateID: positional[1], actor: parseFlag("--actor", from: args) ?? "cider-cli", reason: parseFlag("--reason", from: args))
+                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.merge")
+            case "reject":
+                guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution reject <candidate-id> [--reason <text>] [--json]"); return }
+                let candidate = try service.reject(candidateID: positional[1], actor: parseFlag("--actor", from: args) ?? "cider-cli", reason: parseFlag("--reason", from: args))
+                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.reject")
+            default:
+                printCLIError("Usage: cider-cli item entity-resolution list|inspect|accept|reject|merge [candidate-id] [--json]")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func outputEntityResolutionMutation(_ candidate: SecondBrainEntityResolutionCandidate, command: String) {
+        let payload: [String: Any] = [
+            "ok": true,
+            "command": command,
+            "readOnly": false,
+            "changed": true,
+            "truthBoundary": candidate.truthBoundary,
+            "candidate": entityResolutionCandidateToDict(candidate),
+            "safeNextCommands": candidate.safeNextCommands,
+        ]
+        if jsonOutput { outputJSON(payload) } else { print("Updated entity-resolution candidate: \(candidate.id) -> \(candidate.reviewState)") }
+    }
+
+    static func entityResolutionCandidateToDict(_ candidate: SecondBrainEntityResolutionCandidate) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": candidate.id,
+            "ref": candidate.candidateRef,
+            "candidateRef": candidate.candidateRef,
+            "candidateType": candidate.candidateType,
+            "sourceEntity": ownerToDict(candidate.sourceEntity),
+            "sourceEntityRef": candidate.sourceEntityRef,
+            "sourceLabel": candidate.sourceLabel,
+            "inputMention": candidate.inputMention,
+            "targetEntity": ownerToDict(candidate.targetEntity),
+            "targetEntityRef": candidate.targetEntityRef,
+            "targetLabel": candidate.targetLabel,
+            "sourceOwner": ownerToDict(candidate.sourceOwner),
+            "sourceOwnerRef": candidate.sourceOwner.canonicalRef,
+            "sourceQuote": candidate.sourceQuote,
+            "reviewState": candidate.reviewState,
+            "lifecycleState": candidate.reviewState,
+            "truthBoundary": candidate.truthBoundary,
+            "source": candidate.source,
+            "actor": candidate.actor,
+            "confidenceReasons": candidate.confidenceReasons,
+            "hasConflicts": candidate.hasConflicts,
+            "conflictCount": candidate.conflictCount,
+            "conflicts": candidate.conflicts.map(entityResolutionConflictToDict),
+            "metadata": candidate.metadata,
+            "safeNextCommands": candidate.safeNextCommands,
+            "safeCommands": candidate.safeNextCommands,
+            "createdAt": ISO8601DateFormatter().string(from: candidate.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: candidate.updatedAt),
+        ]
+        if let confidence = candidate.confidence { dict["confidence"] = confidence }
+        if let sourceEvidenceID = candidate.sourceEvidenceID { dict["sourceEvidenceID"] = sourceEvidenceID }
+        if let sourceEvidenceRef = candidate.sourceEvidenceRef { dict["sourceEvidenceRef"] = sourceEvidenceRef }
+        if let relationID = candidate.acceptedRelationID { dict["acceptedRelationID"] = relationID }
+        if let note = candidate.decisionNote { dict["decisionNote"] = note }
+        if let reviewedAt = candidate.reviewedAt { dict["reviewedAt"] = ISO8601DateFormatter().string(from: reviewedAt) }
+        if let evidence = candidate.sourceEvidenceRecord { dict["sourceEvidenceRecord"] = sourceEvidenceRecordToDict(evidence) }
+        if !candidate.lifecycleHistory.isEmpty { dict["lifecycleHistory"] = candidate.lifecycleHistory.map(reviewLifecycleEventToDict) }
+        return dict
+    }
+
+    static func entityResolutionConflictToDict(_ conflict: SecondBrainEntityResolutionConflict) -> [String: Any] {
+        var dict: [String: Any] = [
+            "kind": conflict.kind,
+            "severity": conflict.severity,
+            "message": conflict.message,
+        ]
+        if let owner = conflict.conflictingOwner {
+            dict["conflictingOwner"] = ownerToDict(owner)
+            dict["conflictingOwnerRef"] = owner.canonicalRef
+        }
+        return dict
     }
 
     static func handleEntityCommand(args: [String]) {

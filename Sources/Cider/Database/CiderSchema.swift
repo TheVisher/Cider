@@ -355,6 +355,38 @@ enum CiderSchema {
         );
         """
 
+    static let createEntityResolutionCandidates = """
+        CREATE TABLE IF NOT EXISTS entity_resolution_candidates (
+            id                       TEXT PRIMARY KEY,
+            candidate_type           TEXT NOT NULL,
+            source_entity_type       TEXT NOT NULL,
+            source_entity_id         TEXT NOT NULL,
+            source_label             TEXT NOT NULL,
+            input_mention            TEXT NOT NULL,
+            target_entity_type       TEXT NOT NULL,
+            target_entity_id         TEXT NOT NULL,
+            target_label             TEXT NOT NULL,
+            source_owner_type        TEXT NOT NULL,
+            source_owner_id          TEXT NOT NULL,
+            source_quote             TEXT NOT NULL DEFAULT '',
+            confidence               REAL,
+            confidence_reasons       TEXT NOT NULL DEFAULT '[]',
+            conflicts_json           TEXT NOT NULL DEFAULT '[]',
+            review_state             TEXT NOT NULL DEFAULT 'suggested',
+            source                   TEXT NOT NULL,
+            actor                    TEXT NOT NULL,
+            source_evidence_id       TEXT,
+            source_evidence_ref      TEXT,
+            accepted_relation_id     TEXT,
+            decision_note            TEXT,
+            metadata                 TEXT NOT NULL DEFAULT '{}',
+            created_at               REAL NOT NULL,
+            updated_at               REAL NOT NULL,
+            reviewed_at              REAL,
+            UNIQUE(candidate_type, source_entity_type, source_entity_id, target_entity_type, target_entity_id, source)
+        );
+        """
+
     static let createSimilarityCandidates = """
         CREATE TABLE IF NOT EXISTS similarity_candidates (
             id                 TEXT PRIMARY KEY,
@@ -597,6 +629,10 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_candidate ON review_lifecycle_events(candidate_ref, created_at) WHERE candidate_ref IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_evidence ON review_lifecycle_events(source_evidence_id, created_at) WHERE source_evidence_id IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_state ON review_lifecycle_events(lifecycle_state, event_kind, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_entity_resolution_review ON entity_resolution_candidates(review_state, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_entity_resolution_source ON entity_resolution_candidates(source_entity_type, source_entity_id, review_state);",
+        "CREATE INDEX IF NOT EXISTS idx_entity_resolution_target ON entity_resolution_candidates(target_entity_type, target_entity_id, review_state);",
+        "CREATE INDEX IF NOT EXISTS idx_entity_resolution_evidence ON entity_resolution_candidates(source_evidence_id) WHERE source_evidence_id IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_source ON similarity_candidates(source_owner_type, source_owner_id, review_state, score);",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_target ON similarity_candidates(target_owner_type, target_owner_id, review_state, score);",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_review ON similarity_candidates(review_state, updated_at);",
@@ -648,6 +684,7 @@ enum CiderSchema {
         createEnrichmentOutputs,
         createSourceEvidence,
         createReviewLifecycleEvents,
+        createEntityResolutionCandidates,
         createSimilarityCandidates,
         createSpaceMemberships,
         createItemSections,

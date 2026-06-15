@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 22
+    static let latestVersion: Int = 23
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -115,7 +115,29 @@ enum DatabaseMigrations {
         }
         if currentVersion < 22 {
             try migrateToV22(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 23 {
+            try migrateToV23(db)
+        }
+    }
+
+    // MARK: - V22 -> V23: Entity-resolution review candidates
+
+    private static func migrateToV23(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 23...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createEntityResolutionCandidates)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_entity_resolution_review ON entity_resolution_candidates(review_state, updated_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_entity_resolution_source ON entity_resolution_candidates(source_entity_type, source_entity_id, review_state);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_entity_resolution_target ON entity_resolution_candidates(target_entity_type, target_entity_id, review_state);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_entity_resolution_evidence ON entity_resolution_candidates(source_evidence_id) WHERE source_evidence_id IS NOT NULL;")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (23);")
+        }
+
+        logger.info("Migration to v23 complete")
     }
 
     // MARK: - V21 -> V22: Review lifecycle events
