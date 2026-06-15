@@ -5161,6 +5161,25 @@ struct CiderCLI {
                 printRecallContextError(.malformedOrUnresolvedSelector(error.localizedDescription), args: args)
             }
 
+        case "recall-access-log", "recall-access-events":
+            do {
+                let limit = max(1, Int(parseFlag("--limit", from: args) ?? "") ?? 20)
+                let service = CiderRecallExplanationService(database: .shared)
+                let events = try service.recentAccessEvents(limit: limit)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.recall-access-log",
+                    "readOnly": true,
+                    "changed": false,
+                    "queryTextStored": false,
+                    "count": events.count,
+                    "events": events.map(recallAccessEventToDict),
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Recall access events: \(events.count)") }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case "context", "agent-context":
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
@@ -14317,21 +14336,83 @@ struct CiderCLI {
     }
 
     static func sourceEvidenceRecordToDict(for output: SecondBrainEnrichmentOutput) -> [String: Any]? {
+        sourceEvidenceRecord(for: output).map(sourceEvidenceRecordToDict)
+    }
+
+    static func sourceEvidenceRecord(for output: SecondBrainEnrichmentOutput) -> SecondBrainSourceEvidenceRecord? {
         if let stored = try? SecondBrainSourceEvidenceService(database: .shared).record(
             derivedOwner: SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: output.id)
         ) {
-            return sourceEvidenceRecordToDict(stored)
+            return stored
         }
-        return SecondBrainSourceEvidenceService.recordFromOutput(output).map(sourceEvidenceRecordToDict)
+        return SecondBrainSourceEvidenceService.recordFromOutput(output)
     }
 
     static func sourceEvidenceRecordToDict(for relation: SecondBrainRelation) -> [String: Any]? {
+        sourceEvidenceRecord(for: relation).map(sourceEvidenceRecordToDict)
+    }
+
+    static func sourceEvidenceRecord(for relation: SecondBrainRelation) -> SecondBrainSourceEvidenceRecord? {
         if let stored = try? SecondBrainSourceEvidenceService(database: .shared).record(
             derivedOwner: SecondBrainOwnerRef(ownerType: "owner_relation", ownerID: relation.id)
         ) {
-            return sourceEvidenceRecordToDict(stored)
+            return stored
         }
-        return SecondBrainSourceEvidenceService.recordFromRelation(relation).map(sourceEvidenceRecordToDict)
+        return SecondBrainSourceEvidenceService.recordFromRelation(relation)
+    }
+
+    static func scoreReasonsToDict(_ reasons: [CiderRecallScoreReason]) -> [[String: Any]] {
+        reasons.map { reason in
+            var dict: [String: Any] = [
+                "id": reason.id,
+                "kind": reason.kind,
+                "weight": reason.weight,
+                "summary": reason.summary,
+                "metadata": reason.metadata,
+            ]
+            if let owner = reason.owner { dict["owner"] = ownerToDict(owner); dict["ownerRef"] = owner.canonicalRef }
+            if let evidenceRef = reason.evidenceRef { dict["evidenceRef"] = evidenceRef }
+            if let candidateRef = reason.candidateRef { dict["candidateRef"] = candidateRef }
+            if let relationID = reason.relationID { dict["relationID"] = relationID }
+            if let reviewState = reason.reviewState { dict["reviewState"] = reviewState }
+            return dict
+        }
+    }
+
+    static func recallAccessEventToDict(_ event: CiderRecallAccessEvent) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": event.id,
+            "surface": event.surface,
+            "selectorKind": event.selectorKind,
+            "queryTextStored": false,
+            "anchorRefs": event.anchorRefs,
+            "surfacedRefs": event.surfacedRefs,
+            "reasonKinds": event.reasonKinds,
+            "metadata": event.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: event.createdAt),
+        ]
+        if let queryHash = event.queryHash { dict["queryHash"] = queryHash }
+        if let queryLength = event.queryLength { dict["queryLength"] = queryLength }
+        if let tokenCount = event.queryTokenCount { dict["queryTokenCount"] = tokenCount }
+        return dict
+    }
+
+    static func accessLogSummaryToDict(_ event: CiderRecallAccessEvent) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": event.id,
+            "ref": "recall_access_event:\(event.id)",
+            "recorded": true,
+            "queryTextStored": false,
+            "selectorKind": event.selectorKind,
+            "anchorRefs": event.anchorRefs,
+            "surfacedRefs": event.surfacedRefs,
+            "reasonKinds": event.reasonKinds,
+            "safeNextCommands": ["cider-cli item recall-access-log --limit 20 --json"],
+        ]
+        if let queryHash = event.queryHash { dict["queryHash"] = queryHash }
+        if let queryLength = event.queryLength { dict["queryLength"] = queryLength }
+        if let tokenCount = event.queryTokenCount { dict["queryTokenCount"] = tokenCount }
+        return dict
     }
 
     static func sourceEvidenceToDict(
@@ -14446,7 +14527,7 @@ struct CiderCLI {
         return dict
     }
 
-    static func lifecycleHistoryToDict(for output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
+    static func lifecycleHistoryEvents(for output: SecondBrainEnrichmentOutput) -> [SecondBrainReviewLifecycleEvent] {
         let service = SecondBrainReviewLifecycleService(database: .shared)
         let owner = SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: output.id)
         do {
@@ -14456,13 +14537,17 @@ struct CiderCLI {
                 var seen = Set(events.map(\.id))
                 events.append(contentsOf: byCandidate.filter { seen.insert($0.id).inserted })
             }
-            return events.sorted { $0.createdAt < $1.createdAt }.map(reviewLifecycleEventToDict)
+            return events.sorted { $0.createdAt < $1.createdAt }
         } catch {
             return []
         }
     }
 
-    static func lifecycleHistoryToDict(for relation: SecondBrainRelation) -> [[String: Any]] {
+    static func lifecycleHistoryToDict(for output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
+        lifecycleHistoryEvents(for: output).map(reviewLifecycleEventToDict)
+    }
+
+    static func lifecycleHistoryEvents(for relation: SecondBrainRelation) -> [SecondBrainReviewLifecycleEvent] {
         let service = SecondBrainReviewLifecycleService(database: .shared)
         let owner = SecondBrainOwnerRef(ownerType: "owner_relation", ownerID: relation.id)
         do {
@@ -14472,10 +14557,14 @@ struct CiderCLI {
                 var seen = Set(events.map(\.id))
                 events.append(contentsOf: byCandidate.filter { seen.insert($0.id).inserted })
             }
-            return events.sorted { $0.createdAt < $1.createdAt }.map(reviewLifecycleEventToDict)
+            return events.sorted { $0.createdAt < $1.createdAt }
         } catch {
             return []
         }
+    }
+
+    static func lifecycleHistoryToDict(for relation: SecondBrainRelation) -> [[String: Any]] {
+        lifecycleHistoryEvents(for: relation).map(reviewLifecycleEventToDict)
     }
 
     static func sourceEvidenceSafeCommands(for relation: SecondBrainRelation) -> [String] {
@@ -15286,6 +15375,8 @@ struct CiderCLI {
         guard !anchorRefs.isEmpty else { throw RecallContextCLIError.missingSelector }
 
         let bundles = try anchorRefs.prefix(limit).map { try contextService.context(for: $0) }
+        let scoringService = CiderRecallExplanationService(database: .shared)
+        let explicitItemSelector = parseRecallItemSelector(from: args) != nil
         var anchorDicts: [[String: Any]] = []
         var contentBlocks: [[String: Any]] = []
         var relatedItems: [[String: Any]] = []
@@ -15293,13 +15384,20 @@ struct CiderCLI {
         var reviewableCandidates: [[String: Any]] = []
         var safeCommands: [String] = []
         var blockingIssues: [String] = []
+        var surfacedRefs: [String] = []
+        var reasonKinds: [String] = []
 
         for bundle in bundles {
             let citation = recallCitation(owner: bundle.owner)
+            let anchorReasons = scoringService.anchorReasons(bundle: bundle, query: query, explicitItem: explicitItemSelector)
+            reasonKinds.append(contentsOf: anchorReasons.map(\.kind))
+            surfacedRefs.append(bundle.owner.canonicalRef)
             anchorDicts.append([
                 "item": itemSummaryToDict(bundle.item, ownerRelations: bundle.ownerRelations),
                 "owner": ownerToDict(bundle.owner),
                 "citation": citation,
+                "recallScore": scoringService.score(anchorReasons),
+                "scoreReasons": scoreReasonsToDict(anchorReasons),
             ])
             if bundle.chunks.isEmpty {
                 warnings.append([
@@ -15310,15 +15408,21 @@ struct CiderCLI {
                 ])
             }
             for section in bundle.sections.prefix(3) {
+                let reasons = scoringService.contentReasons(owner: bundle.owner, kind: "section", id: section.id, source: section.source)
+                reasonKinds.append(contentsOf: reasons.map(\.kind))
                 contentBlocks.append([
                     "kind": "section",
                     "title": section.title,
                     "body": section.body,
                     "source": section.source,
                     "citation": citation,
+                    "recallScore": scoringService.score(reasons),
+                    "scoreReasons": scoreReasonsToDict(reasons),
                 ])
             }
             for chunk in bundle.chunks.prefix(3) {
+                let reasons = scoringService.contentReasons(owner: bundle.owner, kind: "chunk", id: chunk.id, source: chunk.source)
+                reasonKinds.append(contentsOf: reasons.map(\.kind))
                 contentBlocks.append([
                     "kind": "chunk",
                     "id": chunk.id,
@@ -15326,20 +15430,40 @@ struct CiderCLI {
                     "body": chunk.body,
                     "source": chunk.source,
                     "citation": citation,
+                    "recallScore": scoringService.score(reasons),
+                    "scoreReasons": scoreReasonsToDict(reasons),
                 ])
             }
-            relatedItems.append(contentsOf: bundle.related.prefix(5).map { itemLinkSummaryToDict($0) })
-            acceptedFacts.append(contentsOf: recallAcceptedFacts(from: bundle.ownerRelations + bundle.backlinks))
+            for related in bundle.related.prefix(5) {
+                var dict = itemLinkSummaryToDict(related)
+                let relatedID = dict["id"] as? String
+                let reasons = scoringService.relatedItemReasons(sourceOwner: bundle.owner, relatedID: relatedID)
+                reasonKinds.append(contentsOf: reasons.map(\.kind))
+                if let relatedID { surfacedRefs.append("item:\(relatedID)") }
+                dict["recallScore"] = scoringService.score(reasons)
+                dict["scoreReasons"] = scoreReasonsToDict(reasons)
+                relatedItems.append(dict)
+            }
+            let accepted = recallAcceptedFacts(from: bundle.ownerRelations + bundle.backlinks, scoringService: scoringService)
+            reasonKinds.append(contentsOf: accepted.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
+            surfacedRefs.append(contentsOf: accepted.compactMap { ($0["id"] as? String).map { "owner_relation:\($0)" } })
+            acceptedFacts.append(contentsOf: accepted)
             let candidateOutputs = bundle.enrichmentOutputs.filter {
                 $0.kind == SecondBrainGraphCandidateContract.outputKind && ["suggested", "needs_review", "deferred"].contains($0.reviewState)
             }
             if !candidateOutputs.isEmpty { blockingIssues.append("graph_candidates_need_review") }
-            reviewableCandidates.append(contentsOf: candidateOutputs.map(recallGraphCandidateToDict))
+            let graphCandidates = candidateOutputs.map { recallGraphCandidateToDict($0, scoringService: scoringService) }
+            reasonKinds.append(contentsOf: graphCandidates.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
+            surfacedRefs.append(contentsOf: graphCandidates.compactMap { $0["candidateRef"] as? String })
+            reviewableCandidates.append(contentsOf: graphCandidates)
             let memoryOutputs = bundle.enrichmentOutputs.filter {
                 $0.kind == "memory_candidate" && ["suggested", "needs_review", "deferred"].contains($0.reviewState)
             }
             if !memoryOutputs.isEmpty { blockingIssues.append("memory_candidates_need_review") }
-            reviewableCandidates.append(contentsOf: memoryOutputs.map(recallMemoryCandidateToDict))
+            let memoryCandidates = memoryOutputs.map { recallMemoryCandidateToDict($0, scoringService: scoringService) }
+            reasonKinds.append(contentsOf: memoryCandidates.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
+            surfacedRefs.append(contentsOf: memoryCandidates.compactMap { $0["candidateRef"] as? String ?? ($0["id"] as? String).map { "memory_candidate:\($0)" } })
+            reviewableCandidates.append(contentsOf: memoryCandidates)
             safeCommands.append("cider-cli item context \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json")
             safeCommands.append("cider-cli item graph-candidates \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json")
             safeCommands.append("cider-cli item related-owners \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json")
@@ -15350,6 +15474,18 @@ struct CiderCLI {
         }
         safeCommands.append("cider-cli capture review-queue --limit 20 --json")
 
+        let accessEvent = try scoringService.recordAccess(
+            selectorKind: parseRecallItemSelector(from: args) != nil && !(query?.isEmpty ?? true) ? "item_and_query" : (parseRecallItemSelector(from: args) != nil ? "item" : "query"),
+            query: query,
+            anchorRefs: bundles.map { $0.owner.canonicalRef },
+            surfacedRefs: surfacedRefs,
+            reasonKinds: reasonKinds,
+            metadata: [
+                "raw_query_stored": "false",
+                "bundle_count": String(bundles.count),
+            ]
+        )
+
         return [
             "ok": true,
             "command": "item.recall-context",
@@ -15357,6 +15493,13 @@ struct CiderCLI {
             "changed": false,
             "selector": recallSelectorDict(args: args, query: query),
             "safetyBoundary": recallContextSafetyBoundary(),
+            "scoreSummary": [
+                "reasonKinds": orderedUniqueStrings(reasonKinds),
+                "anchorCount": anchorDicts.count,
+                "surfacedRefCount": orderedUniqueStrings(surfacedRefs).count,
+                "queryTextStored": false,
+            ],
+            "accessLog": accessLogSummaryToDict(accessEvent),
             "anchors": anchorDicts,
             "contentBlocks": contentBlocks,
             "relatedItems": orderedUniqueDictionaries(relatedItems, key: "id"),
@@ -15402,7 +15545,7 @@ struct CiderCLI {
         return dict
     }
 
-    static func recallAcceptedFacts(from relations: [SecondBrainRelation]) -> [[String: Any]] {
+    static func recallAcceptedFacts(from relations: [SecondBrainRelation], scoringService: CiderRecallExplanationService) -> [[String: Any]] {
         relations.filter { $0.source == "graph_candidate.accept" || $0.metadata["candidate_ref"] != nil }.map { relation in
             var dict: [String: Any] = [
                 "id": relation.id,
@@ -15422,16 +15565,21 @@ struct CiderCLI {
             }
             if let mentionText = relation.metadata["mention_text"] { dict["mentionText"] = mentionText }
             if let confidence = relation.confidence { dict["confidence"] = confidence }
-            if let evidenceRecord = sourceEvidenceRecordToDict(for: relation) {
-                dict["sourceEvidenceRecord"] = evidenceRecord
+            let evidenceRecord = sourceEvidenceRecord(for: relation)
+            if let evidenceRecord {
+                dict["sourceEvidenceRecord"] = sourceEvidenceRecordToDict(evidenceRecord)
             }
-            let lifecycle = lifecycleHistoryToDict(for: relation)
+            let lifecycleEvents = lifecycleHistoryEvents(for: relation)
+            let lifecycle = lifecycleEvents.map(reviewLifecycleEventToDict)
             if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
+            let reasons = scoringService.acceptedFactReasons(relation: relation, evidenceRecord: evidenceRecord, lifecycleHistory: lifecycleEvents)
+            dict["recallScore"] = scoringService.score(reasons)
+            dict["scoreReasons"] = scoreReasonsToDict(reasons)
             return dict
         }
     }
 
-    static func recallGraphCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+    static func recallGraphCandidateToDict(_ output: SecondBrainEnrichmentOutput, scoringService: CiderRecallExplanationService) -> [String: Any] {
         var dict = graphCandidateToDict(output)
         dict["truthState"] = "reviewable_candidate_not_truth"
         dict["citation"] = recallCitation(owner: output.owner)
@@ -15440,10 +15588,16 @@ struct CiderCLI {
             "accept_requires_explicit_command",
             "no_silent_memory_or_graph_promotion",
         ]
+        let evidenceRecord = sourceEvidenceRecord(for: output)
+        let lifecycle = lifecycleHistoryEvents(for: output)
+        let reasons = scoringService.candidateReasons(output: output, evidenceRecord: evidenceRecord, lifecycleHistory: lifecycle)
+        dict["recallScore"] = scoringService.score(reasons)
+        dict["scoreReasons"] = scoreReasonsToDict(reasons)
+        if dict["candidateRef"] == nil { dict["candidateRef"] = "graph_candidate:\(output.id)" }
         return dict
     }
 
-    static func recallMemoryCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+    static func recallMemoryCandidateToDict(_ output: SecondBrainEnrichmentOutput, scoringService: CiderRecallExplanationService) -> [String: Any] {
         var dict = memoryCandidateToDict(output)
         dict["truthState"] = "reviewable_candidate_not_truth"
         dict["citation"] = recallCitation(owner: output.owner)
@@ -15452,6 +15606,12 @@ struct CiderCLI {
             "accept_requires_explicit_command",
             "no_silent_memory_or_graph_promotion",
         ]
+        let evidenceRecord = sourceEvidenceRecord(for: output)
+        let lifecycle = lifecycleHistoryEvents(for: output)
+        let reasons = scoringService.candidateReasons(output: output, evidenceRecord: evidenceRecord, lifecycleHistory: lifecycle)
+        dict["recallScore"] = scoringService.score(reasons)
+        dict["scoreReasons"] = scoreReasonsToDict(reasons)
+        if dict["candidateRef"] == nil { dict["candidateRef"] = "memory_candidate:\(output.id)" }
         return dict
     }
 

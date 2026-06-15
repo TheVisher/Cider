@@ -355,6 +355,22 @@ enum CiderSchema {
         );
         """
 
+    static let createRecallAccessEvents = """
+        CREATE TABLE IF NOT EXISTS recall_access_events (
+            id                TEXT PRIMARY KEY,
+            surface           TEXT NOT NULL,
+            selector_kind     TEXT NOT NULL,
+            query_hash        TEXT,
+            query_length      INTEGER,
+            query_token_count INTEGER,
+            anchor_refs       TEXT NOT NULL DEFAULT '[]',
+            surfaced_refs     TEXT NOT NULL DEFAULT '[]',
+            reason_kinds      TEXT NOT NULL DEFAULT '[]',
+            metadata          TEXT NOT NULL DEFAULT '{}',
+            created_at        REAL NOT NULL
+        );
+        """
+
     static let createEntityResolutionCandidates = """
         CREATE TABLE IF NOT EXISTS entity_resolution_candidates (
             id                       TEXT PRIMARY KEY,
@@ -629,6 +645,9 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_candidate ON review_lifecycle_events(candidate_ref, created_at) WHERE candidate_ref IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_evidence ON review_lifecycle_events(source_evidence_id, created_at) WHERE source_evidence_id IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_state ON review_lifecycle_events(lifecycle_state, event_kind, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_recall_access_created ON recall_access_events(created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_recall_access_surface ON recall_access_events(surface, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_recall_access_query ON recall_access_events(query_hash, created_at) WHERE query_hash IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_entity_resolution_review ON entity_resolution_candidates(review_state, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_entity_resolution_source ON entity_resolution_candidates(source_entity_type, source_entity_id, review_state);",
         "CREATE INDEX IF NOT EXISTS idx_entity_resolution_target ON entity_resolution_candidates(target_entity_type, target_entity_id, review_state);",
@@ -684,6 +703,7 @@ enum CiderSchema {
         createEnrichmentOutputs,
         createSourceEvidence,
         createReviewLifecycleEvents,
+        createRecallAccessEvents,
         createEntityResolutionCandidates,
         createSimilarityCandidates,
         createSpaceMemberships,

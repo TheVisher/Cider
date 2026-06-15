@@ -42,7 +42,11 @@ Current second-brain foundation tables include:
 - `capture_events`: canonical capture provenance records with source surface/channel/message/sender context and produced-item relations.
 - `capture_attachments`: per-attachment capture provenance with source filename, local/remote reference, MIME type, byte size when available, and owner relations to capture events/items.
 - `enrichment_outputs`: structured AI/enrichment outputs such as entities, topics, dates, links, summaries, and review state.
+- `source_evidence`: shared provenance/source-span records connecting source owners, quotes/spans, extraction runs, candidates, accepted facts, and recall citations.
+- `review_lifecycle_events`: append-only lifecycle events for reviewable candidates and accepted truth records.
+- `entity_resolution_candidates`: reviewable entity/alias/merge suggestions with explicit accept/reject/merge semantics.
 - `similarity_candidates`: reviewable grouping/linking suggestions that can be accepted into typed owner relations.
+- `recall_access_events`: local retrieval/access audit rows for recall/context explanations; they store selector/query hashes and surfaced refs/reason kinds, not raw private query text.
 
 Vectors and embeddings may augment retrieval later, but they are not the source of truth. Hybrid retrieval should layer structured filters, FTS5, links/graph expansion, optional embeddings, and reranking.
 

@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 23
+    static let latestVersion: Int = 24
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -119,7 +119,28 @@ enum DatabaseMigrations {
         }
         if currentVersion < 23 {
             try migrateToV23(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 24 {
+            try migrateToV24(db)
+        }
+    }
+
+    // MARK: - V23 -> V24: Recall access explanations
+
+    private static func migrateToV24(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 24...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createRecallAccessEvents)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_recall_access_created ON recall_access_events(created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_recall_access_surface ON recall_access_events(surface, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_recall_access_query ON recall_access_events(query_hash, created_at) WHERE query_hash IS NOT NULL;")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (24);")
+        }
+
+        logger.info("Migration to v24 complete")
     }
 
     // MARK: - V22 -> V23: Entity-resolution review candidates
