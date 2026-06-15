@@ -4913,6 +4913,7 @@ struct CiderCLI {
               cider-cli item graph-health [--json]
               cider-cli item entity list [--limit <n>] [--json]
               cider-cli item entity inspect <entity-ref|name|alias> [--json]
+              cider-cli item fact-validity list|inspect|state|propose|accept|reject|defer ... [--json]
               cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
               cider-cli item graph-candidate <candidate-id> [--json]
               cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
@@ -5312,6 +5313,9 @@ struct CiderCLI {
 
         case "entity", "entities", "canonical-entity", "canonical-entities":
             handleEntityCommand(args: args)
+
+        case "fact-validity", "fact-invalidation", "fact-supersession":
+            handleFactValidityCommand(args: args)
 
         case "graph-candidates", "graph-candidate", "graph-candidate-inspect":
             handleGraphCandidateReadCommand(subcommand: subcommand ?? "graph-candidates", args: args)
@@ -14303,6 +14307,14 @@ struct CiderCLI {
         if let evidenceRecord = sourceEvidenceRecordToDict(for: relation) {
             dict["sourceEvidenceRecord"] = evidenceRecord
         }
+        let validity = factValidityStateToDict(targetRef: "owner_relation:\(relation.id)")
+        dict["factValidity"] = validity ?? [
+            "targetRef": "owner_relation:\(relation.id)",
+            "currentState": "current",
+            "isCurrent": true,
+            "truthState": "current_truth",
+        ]
+        dict["truthState"] = (validity?["truthState"] as? String) ?? "current_truth"
         return dict
     }
 
@@ -14413,6 +14425,75 @@ struct CiderCLI {
         if let queryLength = event.queryLength { dict["queryLength"] = queryLength }
         if let tokenCount = event.queryTokenCount { dict["queryTokenCount"] = tokenCount }
         return dict
+    }
+
+    static func factValidityCandidateToDict(_ view: SecondBrainFactValidityCandidateView) -> [String: Any] {
+        let candidate = view.candidate
+        var dict: [String: Any] = [
+            "id": candidate.id,
+            "candidateRef": candidate.candidateRef,
+            "targetRef": candidate.targetRef,
+            "proposedState": candidate.proposedState,
+            "sourceOwner": ownerToDict(candidate.sourceOwner),
+            "sourceQuote": candidate.sourceQuote,
+            "reason": candidate.reason,
+            "reviewState": candidate.reviewState,
+            "truthBoundary": candidate.truthBoundary,
+            "source": candidate.source,
+            "actor": candidate.actor,
+            "metadata": candidate.metadata,
+            "lifecycleHistory": view.lifecycleHistory.map(reviewLifecycleEventToDict),
+            "safeNextCommands": factValiditySafeCommands(candidateID: candidate.id, targetRef: candidate.targetRef),
+            "createdAt": ISO8601DateFormatter().string(from: candidate.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: candidate.updatedAt),
+        ]
+        if let validAt = candidate.validAt { dict["validAt"] = ISO8601DateFormatter().string(from: validAt) }
+        if let invalidAt = candidate.invalidAt { dict["invalidAt"] = ISO8601DateFormatter().string(from: invalidAt) }
+        if let expiredAt = candidate.expiredAt { dict["expiredAt"] = ISO8601DateFormatter().string(from: expiredAt) }
+        if let supersedesRef = candidate.supersedesRef { dict["supersedesRef"] = supersedesRef }
+        if let supersededByRef = candidate.supersededByRef { dict["supersededByRef"] = supersededByRef }
+        if let sourceEvidenceRef = candidate.sourceEvidenceRef { dict["sourceEvidenceRef"] = sourceEvidenceRef }
+        if let decisionNote = candidate.decisionNote { dict["decisionNote"] = decisionNote }
+        if let reviewedAt = candidate.reviewedAt { dict["reviewedAt"] = ISO8601DateFormatter().string(from: reviewedAt) }
+        if let evidence = view.sourceEvidenceRecord { dict["sourceEvidenceRecord"] = sourceEvidenceRecordToDict(evidence) }
+        return dict
+    }
+
+    static func factValidityStateToDict(_ state: SecondBrainFactValidityState) -> [String: Any] {
+        var dict: [String: Any] = [
+            "targetRef": state.targetRef,
+            "currentState": state.currentState,
+            "isCurrent": state.isCurrent,
+            "truthState": state.isCurrent ? "current_truth" : "stale_or_superseded_truth",
+            "stateRef": state.stateRef,
+            "acceptedCandidate": factValidityCandidateToDict(SecondBrainFactValidityCandidateView(
+                candidate: state.acceptedCandidate,
+                sourceEvidenceRecord: state.sourceEvidenceRecord,
+                lifecycleHistory: state.lifecycleHistory
+            )),
+            "lifecycleHistory": state.lifecycleHistory.map(reviewLifecycleEventToDict),
+        ]
+        if let validAt = state.validAt { dict["validAt"] = ISO8601DateFormatter().string(from: validAt) }
+        if let invalidAt = state.invalidAt { dict["invalidAt"] = ISO8601DateFormatter().string(from: invalidAt) }
+        if let expiredAt = state.expiredAt { dict["expiredAt"] = ISO8601DateFormatter().string(from: expiredAt) }
+        if let supersedesRef = state.supersedesRef { dict["supersedesRef"] = supersedesRef }
+        if let supersededByRef = state.supersededByRef { dict["supersededByRef"] = supersededByRef }
+        if let evidence = state.sourceEvidenceRecord { dict["sourceEvidenceRecord"] = sourceEvidenceRecordToDict(evidence) }
+        return dict
+    }
+
+    static func factValidityStateToDict(targetRef: String) -> [String: Any]? {
+        guard let state = try? SecondBrainFactValidityService(database: .shared).validityState(targetRef: targetRef) else { return nil }
+        return factValidityStateToDict(state)
+    }
+
+    static func factValiditySafeCommands(candidateID: String, targetRef: String) -> [String] {
+        [
+            "cider-cli item fact-validity inspect \(candidateID) --json",
+            "cider-cli item fact-validity list --json",
+            "cider-cli item fact-validity accept \(candidateID) --reason <reason> --json",
+            "cider-cli item fact-validity reject \(candidateID) --reason <reason> --json",
+        ]
     }
 
     static func sourceEvidenceToDict(
@@ -15569,6 +15650,15 @@ struct CiderCLI {
             if let evidenceRecord {
                 dict["sourceEvidenceRecord"] = sourceEvidenceRecordToDict(evidenceRecord)
             }
+            let validity = factValidityStateToDict(targetRef: "owner_relation:\(relation.id)")
+            dict["factValidity"] = validity ?? [
+                "targetRef": "owner_relation:\(relation.id)",
+                "currentState": "current",
+                "isCurrent": true,
+                "truthState": "current_truth",
+            ]
+            dict["truthState"] = ((validity?["isCurrent"] as? Bool) == false) ? "stale_or_superseded_truth" : "accepted"
+            dict["isCurrentTruth"] = (validity?["isCurrent"] as? Bool) ?? true
             let lifecycleEvents = lifecycleHistoryEvents(for: relation)
             let lifecycle = lifecycleEvents.map(reviewLifecycleEventToDict)
             if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
@@ -16421,6 +16511,146 @@ struct CiderCLI {
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: message]
         )
+    }
+
+    static func handleFactValidityCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first ?? "list"
+        let service = SecondBrainFactValidityService(database: .shared)
+        do {
+            switch action {
+            case "list", "candidates":
+                let states = parseFlag("--state", from: args)
+                    .map { $0.split(separator: ",").map(String.init) }
+                    ?? ["suggested", "needs_review", "deferred"]
+                let candidates = try service.candidates(reviewStates: states)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.fact-validity.list",
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "reviewable_candidate_not_truth",
+                    "count": candidates.count,
+                    "candidates": candidates.map(factValidityCandidateToDict),
+                    "safeNextCommands": ["cider-cli item fact-validity list --json"],
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Fact validity candidates: \(candidates.count)") }
+
+            case "inspect", "get":
+                guard positional.count >= 2 else { throw factValidityError("Usage: cider-cli item fact-validity inspect <candidate-id> [--json]") }
+                guard let candidate = try service.candidate(id: normalizedFactValidityCandidateID(positional[1])) else {
+                    throw factValidityError("Fact validity candidate not found: \(positional[1])")
+                }
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.fact-validity.inspect",
+                    "readOnly": true,
+                    "changed": false,
+                    "candidate": factValidityCandidateToDict(candidate),
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Fact validity candidate: \(candidate.id)") }
+
+            case "state":
+                guard let targetRef = parseFlag("--target-ref", from: args) ?? positional.dropFirst().first else {
+                    throw factValidityError("Usage: cider-cli item fact-validity state --target-ref <owner_relation:id> [--json]")
+                }
+                let state = try service.validityState(targetRef: targetRef)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.fact-validity.state",
+                    "readOnly": true,
+                    "changed": false,
+                    "targetRef": targetRef,
+                    "factValidity": state.map(factValidityStateToDict) as Any,
+                    "truthState": state.map { $0.isCurrent ? "current_truth" : "stale_or_superseded_truth" } ?? "current_truth",
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Fact validity: \(targetRef)") }
+
+            case "propose", "propose-invalidation", "propose-supersession":
+                guard let targetRef = parseFlag("--target-ref", from: args) else { throw factValidityError("Missing --target-ref <owner_relation:id>") }
+                let proposedState = parseFlag("--state", from: args) ?? (action.contains("supersession") ? "superseded" : "invalidated")
+                guard let sourceOwnerRef = parseFlag("--source-owner", from: args),
+                      let sourceOwner = ownerRef(from: sourceOwnerRef) else { throw factValidityError("Missing or invalid --source-owner <type:id>") }
+                let quote = parseFlag("--quote", from: args) ?? parseFlag("--source-quote", from: args) ?? ""
+                guard !quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw factValidityError("Missing --quote <source quote>") }
+                let reason = parseFlag("--reason", from: args) ?? "Fact validity review proposed from newer evidence."
+                let candidate = try service.propose(
+                    targetRef: targetRef,
+                    proposedState: proposedState,
+                    sourceOwner: sourceOwner,
+                    sourceQuote: quote,
+                    actor: parseFlag("--actor", from: args) ?? "cider-cli",
+                    reason: reason,
+                    supersedesRef: parseFlag("--supersedes-ref", from: args),
+                    supersededByRef: parseFlag("--superseded-by-ref", from: args),
+                    validAt: parseFactValidityDate(parseFlag("--valid-at", from: args)),
+                    invalidAt: parseFactValidityDate(parseFlag("--invalid-at", from: args)),
+                    expiredAt: parseFactValidityDate(parseFlag("--expired-at", from: args))
+                )
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.fact-validity.propose",
+                    "readOnly": false,
+                    "changed": true,
+                    "truthBoundary": "reviewable_candidate_not_truth",
+                    "candidate": factValidityCandidateToDict(candidate),
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Proposed fact validity candidate: \(candidate.id)") }
+
+            case "accept", "reject", "defer":
+                guard positional.count >= 2 else { throw factValidityError("Usage: cider-cli item fact-validity \(action) <candidate-id> --reason <reason> [--json]") }
+                let id = normalizedFactValidityCandidateID(positional[1])
+                let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+                let reason = parseFlag("--reason", from: args) ?? parseFlag("--decision-note", from: args) ?? "Fact validity review action."
+                let candidate: SecondBrainFactValidityCandidateView
+                if action == "accept" {
+                    candidate = try service.accept(candidateID: id, actor: actor, decisionNote: reason)
+                } else if action == "reject" {
+                    candidate = try service.reject(candidateID: id, actor: actor, reason: reason)
+                } else {
+                    candidate = try service.deferReview(candidateID: id, actor: actor, reason: reason)
+                }
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.fact-validity.\(action)",
+                    "readOnly": false,
+                    "changed": true,
+                    "candidate": factValidityCandidateToDict(candidate),
+                    "factValidity": (try service.validityState(targetRef: candidate.targetRef)).map(factValidityStateToDict) as Any,
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Fact validity \(action): \(candidate.id)") }
+
+            default:
+                throw factValidityError("Usage: cider-cli item fact-validity list|inspect|state|propose|accept|reject|defer ... [--json]")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func normalizedFactValidityCandidateID(_ value: String) -> String {
+        value.replacingOccurrences(of: "fact_validity_candidate:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func ownerRef(from ref: String) -> SecondBrainOwnerRef? {
+        guard let idx = ref.firstIndex(of: ":") else { return nil }
+        let type = String(ref[..<idx])
+        let id = String(ref[ref.index(after: idx)...])
+        guard !type.isEmpty, !id.isEmpty else { return nil }
+        return SecondBrainOwnerRef(ownerType: type, ownerID: id)
+    }
+
+    static func parseFactValidityDate(_ raw: String?) -> Date? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let date = ISO8601DateFormatter().date(from: raw) { return date }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: raw)
+    }
+
+    static func factValidityError(_ message: String) -> NSError {
+        NSError(domain: "CiderCLI.FactValidity", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 
     struct GraphCandidateMutationCLIError: Error, LocalizedError, @unchecked Sendable {

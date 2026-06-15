@@ -371,6 +371,34 @@ enum CiderSchema {
         );
         """
 
+    static let createFactValidityCandidates = """
+        CREATE TABLE IF NOT EXISTS fact_validity_candidates (
+            id                  TEXT PRIMARY KEY,
+            target_ref          TEXT NOT NULL,
+            proposed_state      TEXT NOT NULL,
+            valid_at            REAL,
+            invalid_at          REAL,
+            expired_at          REAL,
+            supersedes_ref      TEXT,
+            superseded_by_ref   TEXT,
+            source_owner_type   TEXT NOT NULL,
+            source_owner_id     TEXT NOT NULL,
+            source_quote        TEXT NOT NULL DEFAULT '',
+            reason              TEXT NOT NULL DEFAULT '',
+            review_state        TEXT NOT NULL DEFAULT 'suggested',
+            source              TEXT NOT NULL,
+            actor               TEXT NOT NULL,
+            source_evidence_id  TEXT,
+            source_evidence_ref TEXT,
+            decision_note       TEXT,
+            metadata            TEXT NOT NULL DEFAULT '{}',
+            created_at          REAL NOT NULL,
+            updated_at          REAL NOT NULL,
+            reviewed_at         REAL,
+            FOREIGN KEY (source_evidence_id) REFERENCES source_evidence(id) ON DELETE SET NULL
+        );
+        """
+
     static let createEntityResolutionCandidates = """
         CREATE TABLE IF NOT EXISTS entity_resolution_candidates (
             id                       TEXT PRIMARY KEY,
@@ -648,6 +676,9 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_recall_access_created ON recall_access_events(created_at);",
         "CREATE INDEX IF NOT EXISTS idx_recall_access_surface ON recall_access_events(surface, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_recall_access_query ON recall_access_events(query_hash, created_at) WHERE query_hash IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_fact_validity_target ON fact_validity_candidates(target_ref, review_state, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_fact_validity_review ON fact_validity_candidates(review_state, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_fact_validity_evidence ON fact_validity_candidates(source_evidence_id) WHERE source_evidence_id IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_entity_resolution_review ON entity_resolution_candidates(review_state, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_entity_resolution_source ON entity_resolution_candidates(source_entity_type, source_entity_id, review_state);",
         "CREATE INDEX IF NOT EXISTS idx_entity_resolution_target ON entity_resolution_candidates(target_entity_type, target_entity_id, review_state);",
@@ -704,6 +735,7 @@ enum CiderSchema {
         createSourceEvidence,
         createReviewLifecycleEvents,
         createRecallAccessEvents,
+        createFactValidityCandidates,
         createEntityResolutionCandidates,
         createSimilarityCandidates,
         createSpaceMemberships,

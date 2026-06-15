@@ -2377,6 +2377,94 @@ struct CiderCLIAgentSafetyTests {
         #expect(String(describing: event).contains("Pine House") == false)
     }
 
+    @Test("recall context demotes accepted facts after accepted validity supersession")
+    func recallContextDemotesAcceptedFactsAfterAcceptedValiditySupersession() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-fact-validity-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Daily Journal Fact Validity",
+            content: "Jami's favorite restaurant was Pine House. Jami now says Lotus Garden is her favorite.",
+            vault: vault
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let relation = SecondBrainRelation(
+            sourceOwner: owner,
+            targetOwner: SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "pine-house"),
+            relationType: "favorite_restaurant",
+            evidence: "Jami's favorite restaurant was Pine House.",
+            source: "graph_candidate.accept",
+            actor: "test",
+            confidence: 0.88,
+            metadata: [
+                "candidate_ref": "graph_candidate:favorite-pine-house",
+                "candidate_id": "favorite-pine-house",
+                "source_quote": "Jami's favorite restaurant was Pine House.",
+                "mention_text": "Pine House",
+            ]
+        )
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        try SecondBrainStore(database: db).recordRelation(relation)
+        try SecondBrainStore(database: db).replaceChunks(owner: owner, chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: noteID,
+                source: "note-body",
+                title: "Journal body",
+                body: "Jami's favorite restaurant was Pine House. Jami now says Lotus Garden is her favorite.",
+                chunkIndex: 0
+            )
+        ])
+        db.close()
+
+        let propose = try runCLI(
+            args: [
+                "item", "fact-validity", "propose",
+                "--target-ref", "owner_relation:\(relation.id)",
+                "--state", "superseded",
+                "--source-owner", "note:\(noteID)",
+                "--quote", "Jami now says Lotus Garden is her favorite.",
+                "--reason", "Newer journal evidence supersedes the prior favorite restaurant fact.",
+                "--superseded-by-ref", "owner_relation:favorite-lotus-garden",
+                "--json",
+            ],
+            vault: vault
+        )
+        let proposedPayload = try parseJSONObject(propose.stdout)
+        #expect(propose.status == 0)
+        let proposed = try #require(proposedPayload["candidate"] as? [String: Any])
+        #expect(proposed["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        let candidateID = try #require(proposed["id"] as? String)
+
+        let accept = try runCLI(
+            args: ["item", "fact-validity", "accept", candidateID, "--reason", "Confirmed newer evidence.", "--json"],
+            vault: vault
+        )
+        let acceptedPayload = try parseJSONObject(accept.stdout)
+        #expect(accept.status == 0)
+        let acceptedCandidate = try #require(acceptedPayload["candidate"] as? [String: Any])
+        #expect(acceptedCandidate["truthBoundary"] as? String == "accepted_fact_validity")
+        let acceptedState = try #require(acceptedPayload["factValidity"] as? [String: Any])
+        #expect(acceptedState["currentState"] as? String == "superseded")
+        #expect(acceptedState["isCurrent"] as? Bool == false)
+        #expect(acceptedState["sourceEvidenceRecord"] as? [String: Any] != nil)
+
+        let recallResult = try runCLI(args: ["item", "recall-context", "--item", "note", noteID, "--query", "Pine House", "--json"], vault: vault)
+        let recall = try parseJSONObject(recallResult.stdout)
+        #expect(recallResult.status == 0)
+        let facts = try #require(recall["acceptedFacts"] as? [[String: Any]])
+        let fact = try #require(facts.first { $0["id"] as? String == relation.id })
+        #expect(fact["truthState"] as? String == "stale_or_superseded_truth")
+        #expect(fact["isCurrentTruth"] as? Bool == false)
+        let factValidity = try #require(fact["factValidity"] as? [String: Any])
+        #expect(factValidity["currentState"] as? String == "superseded")
+        #expect(factValidity["supersededByRef"] as? String == "owner_relation:favorite-lotus-garden")
+        #expect(factValidity["sourceEvidenceRecord"] as? [String: Any] != nil)
+    }
+
     @Test("recall context bundle returns structured selector failures")
     func recallContextBundleReturnsStructuredSelectorFailures() throws {
         let vault = FileManager.default.temporaryDirectory

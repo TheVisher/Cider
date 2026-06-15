@@ -45,6 +45,7 @@ Current second-brain foundation tables include:
 - `source_evidence`: shared provenance/source-span records connecting source owners, quotes/spans, extraction runs, candidates, accepted facts, and recall citations.
 - `review_lifecycle_events`: append-only lifecycle events for reviewable candidates and accepted truth records.
 - `entity_resolution_candidates`: reviewable entity/alias/merge suggestions with explicit accept/reject/merge semantics.
+- `fact_validity_candidates`: reviewable invalidation/supersession/expiration assertions for accepted facts and owner relations; accepted rows mark current vs stale/superseded truth without deleting provenance.
 - `similarity_candidates`: reviewable grouping/linking suggestions that can be accepted into typed owner relations.
 - `recall_access_events`: local retrieval/access audit rows for recall/context explanations; they store selector/query hashes and surfaced refs/reason kinds, not raw private query text.
 
