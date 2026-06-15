@@ -47,6 +47,7 @@ Current second-brain foundation tables include:
 - `entity_resolution_candidates`: reviewable entity/alias/merge suggestions with explicit accept/reject/merge semantics.
 - `fact_validity_candidates`: reviewable invalidation/supersession/expiration assertions for accepted facts and owner relations; accepted rows mark current vs stale/superseded truth without deleting provenance.
 - `similarity_candidates`: reviewable grouping/linking suggestions that can be accepted into typed owner relations.
+- `similarity_reconciliation_runs`: bounded live-seeding/repair job metadata for similarity/link candidates, including candidate families and stale/unseeded counts.
 - `recall_access_events`: local retrieval/access audit rows for recall/context explanations; they store selector/query hashes and surfaced refs/reason kinds, not raw private query text.
 
 Vectors and embeddings may augment retrieval later, but they are not the source of truth. Hybrid retrieval should layer structured filters, FTS5, links/graph expansion, optional embeddings, and reranking.

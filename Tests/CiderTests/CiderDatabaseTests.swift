@@ -87,6 +87,7 @@ struct CiderDatabaseTests {
             "item_labels", "dismissed_labels", "tags", "item_tags",
             "item_links", "owner_relations", "projects", "capture_events",
             "capture_attachments", "enrichment_outputs", "similarity_candidates",
+            "similarity_reconciliation_runs",
             "trash", "mutation_audit", "folder_sync_decisions",
             "schema_version", "schema_migrations",
         ]

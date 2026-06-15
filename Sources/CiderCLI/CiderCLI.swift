@@ -4933,6 +4933,8 @@ struct CiderCLI {
               cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
               cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind preference|pattern|project_context|relationship_context|agent_lesson --value <text> --evidence <text> [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status current|historical|superseded] [--source <source>] [--confidence <0-1>] [--json]
               cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
+              cider-cli item similarity-health [<owner-type> <owner-id-or-ref>] [--json]
+              cider-cli item reconcile-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
               cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
               cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
               cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
@@ -5608,28 +5610,31 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
-        case "rebuild-similarity", "similarity-rebuild":
+        case "rebuild-similarity", "similarity-rebuild", "reconcile-similarity", "similarity-reconcile":
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
-                printCLIError("Usage: cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]")
+                printCLIError("Usage: cider-cli item reconcile-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]")
                 return
             }
             do {
                 let owner = normalizedOwner(type: positional[0], ref: positional[1])
                 let threshold = parseFlag("--threshold", from: args).flatMap(Double.init) ?? 0.34
                 let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 10
+                let actor = parseFlag("--actor", from: args) ?? "cider-cli"
                 let service = SecondBrainSimilarityCandidateService(database: .shared, store: store)
-                let result = try service.rebuildChunkOverlapCandidates(for: owner, threshold: threshold, limit: limit)
-                let candidates = try service.candidates(for: owner)
-                printSimilarityCandidates(
-                    candidates,
-                    command: "item.rebuild-similarity",
-                    owner: result.owner,
-                    extra: [
-                        "candidateCount": result.candidateCount,
-                        "signal": result.signal,
-                    ]
-                )
+                let result = try service.reconcile(owner: owner, threshold: threshold, limit: limit, actor: actor)
+                printSimilarityReconcileResult(result, command: "item.reconcile-similarity")
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "similarity-health", "similarity-reconcile-health":
+            let positional = leadingPositionalArgs(from: args)
+            do {
+                let owner = positional.count >= 2 ? normalizedOwner(type: positional[0], ref: positional[1]) : nil
+                let staleAfter = parseFlag("--stale-after", from: args).flatMap(TimeInterval.init) ?? 86_400
+                let report = try SecondBrainSimilarityCandidateService(database: .shared, store: store).health(owner: owner, staleAfter: staleAfter)
+                printSimilarityHealth(report, command: "item.similarity-health")
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -18767,23 +18772,122 @@ struct CiderCLI {
     static func similarityCandidateToDict(_ candidate: SecondBrainSimilarityCandidate) -> [String: Any] {
         var dict: [String: Any] = [
             "id": candidate.id,
+            "candidateRef": "similarity_candidate:\(candidate.id)",
             "sourceOwner": ownerToDict(candidate.sourceOwner),
             "targetOwner": ownerToDict(candidate.targetOwner),
             "candidateType": candidate.candidateType,
             "signal": candidate.signal,
             "score": candidate.score,
             "reason": candidate.reason,
+            "reasonCodes": candidate.metadata["reason_codes"]?.split(separator: ",").map(String.init) ?? [candidate.signal],
             "evidence": candidate.evidence,
             "source": candidate.source,
             "reviewState": candidate.reviewState,
+            "truthBoundary": candidate.reviewState == "accepted" ? "accepted_relation" : "reviewable_candidate_not_truth",
             "metadata": candidate.metadata,
+            "safeNextCommands": [
+                "cider-cli item similarity \(candidate.sourceOwner.ownerType) \(candidate.sourceOwner.ownerID) --json",
+                "cider-cli item accept-similarity \(candidate.id) --json",
+                "cider-cli item context \(candidate.sourceOwner.ownerType) \(candidate.sourceOwner.ownerID) --json",
+            ],
             "createdAt": ISO8601DateFormatter().string(from: candidate.createdAt),
             "updatedAt": ISO8601DateFormatter().string(from: candidate.updatedAt),
         ]
+        if let evidence = try? SecondBrainSourceEvidenceService(database: .shared).record(
+            derivedOwner: SecondBrainOwnerRef(ownerType: "similarity_candidate", ownerID: candidate.id)
+        ) {
+            dict["sourceEvidenceRecord"] = sourceEvidenceRecordToDict(evidence)
+        }
+        if let lifecycle = try? SecondBrainSimilarityCandidateService(database: .shared).lifecycleHistory(for: candidate), !lifecycle.isEmpty {
+            dict["lifecycleHistory"] = lifecycle.map(reviewLifecycleEventToDict)
+        }
         if let reviewedAt = candidate.reviewedAt {
             dict["reviewedAt"] = ISO8601DateFormatter().string(from: reviewedAt)
         }
         return dict
+    }
+
+    static func similarityRunToDict(_ run: SecondBrainSimilarityReconciliationRun) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": run.id,
+            "trigger": run.trigger,
+            "scope": run.scope,
+            "threshold": run.threshold,
+            "candidateLimit": run.candidateLimit,
+            "selectedCount": run.selectedCount,
+            "createdCount": run.createdCount,
+            "updatedCount": run.updatedCount,
+            "unchangedCount": run.unchangedCount,
+            "staleCount": run.staleCount,
+            "unseededCount": run.unseededCount,
+            "candidateFamilies": run.candidateFamilies,
+            "metadata": run.metadata,
+            "startedAt": ISO8601DateFormatter().string(from: run.startedAt),
+            "finishedAt": ISO8601DateFormatter().string(from: run.finishedAt),
+        ]
+        if let owner = run.owner { dict["owner"] = ownerToDict(owner) }
+        return dict
+    }
+
+    static func similarityHealthToDict(_ report: SecondBrainSimilarityHealthReport) -> [String: Any] {
+        var dict: [String: Any] = [
+            "totalCandidates": report.totalCandidates,
+            "staleCount": report.staleCount,
+            "unseededCount": report.unseededCount,
+            "candidateFamilies": report.candidateFamilies,
+            "safeRepairCommands": report.safeRepairCommands,
+            "checkedAt": ISO8601DateFormatter().string(from: report.checkedAt),
+        ]
+        if let owner = report.owner { dict["owner"] = ownerToDict(owner) }
+        if let lastRun = report.lastRun { dict["lastRun"] = similarityRunToDict(lastRun) }
+        return dict
+    }
+
+    static func printSimilarityHealth(_ report: SecondBrainSimilarityHealthReport, command: String) {
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "command": command,
+                "readOnly": true,
+                "changed": false,
+                "health": similarityHealthToDict(report),
+                "totalCandidates": report.totalCandidates,
+                "staleCount": report.staleCount,
+                "unseededCount": report.unseededCount,
+                "candidateFamilies": report.candidateFamilies,
+                "safeRepairCommands": report.safeRepairCommands,
+            ])
+        } else {
+            print("Similarity health: \(report.totalCandidates) candidates, \(report.unseededCount) unseeded, \(report.staleCount) stale")
+        }
+    }
+
+    static func printSimilarityReconcileResult(_ result: SecondBrainSimilarityReconcileResult, command: String) {
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "command": command,
+                "readOnly": false,
+                "changed": result.changed,
+                "truthBoundary": result.truthBoundary,
+                "owner": ownerToDict(result.owner),
+                "selectedCount": result.selectedCount,
+                "createdOrUpdatedCount": result.createdOrUpdatedCount,
+                "unchangedCount": result.unchangedCount,
+                "candidateCount": result.candidates.count,
+                "candidates": result.candidates.map(similarityCandidateToDict),
+                "health": similarityHealthToDict(result.health),
+                "run": similarityRunToDict(result.run),
+                "safeNextCommands": result.health.safeRepairCommands,
+                "safetyBoundary": [
+                    "similarity_candidates_are_reviewable_not_truth",
+                    "accept_requires_explicit_command",
+                    "no_silent_link_or_relation_promotion",
+                ],
+            ])
+        } else {
+            print("Reconciled similarity for \(result.owner.canonicalRef): \(result.candidates.count) candidates")
+        }
     }
 
     static func intelligenceDogfoodOwnerResultToDict(_ result: SecondBrainIntelligenceDogfoodOwnerResult) -> [String: Any] {
@@ -19011,6 +19115,8 @@ struct CiderCLI {
             var payload: [String: Any] = [
                 "ok": true,
                 "command": command,
+                "readOnly": true,
+                "changed": false,
                 "owner": ownerToDict(owner),
                 "candidates": candidates.map(similarityCandidateToDict),
             ]

@@ -453,6 +453,28 @@ enum CiderSchema {
         );
         """
 
+    static let createSimilarityReconciliationRuns = """
+        CREATE TABLE IF NOT EXISTS similarity_reconciliation_runs (
+            id                 TEXT PRIMARY KEY,
+            owner_type         TEXT,
+            owner_id           TEXT,
+            trigger            TEXT NOT NULL,
+            scope              TEXT NOT NULL,
+            threshold          REAL NOT NULL,
+            candidate_limit    INTEGER NOT NULL,
+            selected_count     INTEGER NOT NULL,
+            created_count      INTEGER NOT NULL,
+            updated_count      INTEGER NOT NULL,
+            unchanged_count    INTEGER NOT NULL,
+            stale_count        INTEGER NOT NULL,
+            unseeded_count     INTEGER NOT NULL,
+            candidate_families TEXT NOT NULL DEFAULT '{}',
+            metadata           TEXT NOT NULL DEFAULT '{}',
+            started_at         REAL NOT NULL,
+            finished_at        REAL NOT NULL
+        );
+        """
+
     static let createSpaceMemberships = """
         CREATE TABLE IF NOT EXISTS space_memberships (
             space_id   TEXT NOT NULL,
@@ -686,6 +708,8 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_source ON similarity_candidates(source_owner_type, source_owner_id, review_state, score);",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_target ON similarity_candidates(target_owner_type, target_owner_id, review_state, score);",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_review ON similarity_candidates(review_state, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_similarity_reconciliation_owner ON similarity_reconciliation_runs(owner_type, owner_id, started_at);",
+        "CREATE INDEX IF NOT EXISTS idx_similarity_reconciliation_trigger ON similarity_reconciliation_runs(trigger, started_at);",
         "CREATE INDEX IF NOT EXISTS idx_space_memberships_item ON space_memberships(item_id, item_type);",
         "CREATE INDEX IF NOT EXISTS idx_space_memberships_space ON space_memberships(space_id, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_item_sections_owner ON item_sections(owner_type, owner_id, sort_order);",
@@ -738,6 +762,7 @@ enum CiderSchema {
         createFactValidityCandidates,
         createEntityResolutionCandidates,
         createSimilarityCandidates,
+        createSimilarityReconciliationRuns,
         createSpaceMemberships,
         createItemSections,
         createContentChunks,
