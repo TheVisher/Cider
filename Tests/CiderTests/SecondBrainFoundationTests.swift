@@ -779,11 +779,35 @@ struct SecondBrainFoundationTests {
         #expect(whyPayload["command"] as? String == "item.why-surfaced")
         #expect(whyPayload["readOnly"] as? Bool == true)
         #expect(whyPayload["changed"] as? Bool == false)
+        let whyReceipt = try #require(whyPayload["actionReceipt"] as? [String: Any])
+        #expect(whyReceipt["command"] as? String == "item.why-surfaced")
+        #expect(whyReceipt["action"] as? String == "inspect_surfacing")
+        #expect(whyReceipt["actor"] as? String == "cider-cli")
+        #expect(whyReceipt["readOnly"] as? Bool == true)
+        #expect(whyReceipt["changed"] as? Bool == false)
+        let whyReceiptOwner = try #require(whyReceipt["owner"] as? [String: Any])
+        #expect(whyReceiptOwner["ownerType"] as? String == "bookmark")
+        #expect(whyReceiptOwner["ownerID"] as? String == bookmarkID)
+        let whyVerification = try #require(whyReceipt["safeVerificationCommands"] as? [String])
+        #expect(whyVerification.contains("cider-cli item why-surfaced bookmark \(bookmarkID) --json"))
         #expect(whyPayload["needsReview"] as? Bool == true)
         #expect(whyPayload["recommendedNextAction"] as? String == "review_route")
         let whyNextActions = try #require(whyPayload["nextActions"] as? [[String: Any]])
         #expect(whyNextActions.first?["action"] as? String == "review_route")
         #expect(whyNextActions.first?["requiresApproval"] as? Bool == true)
+
+        let unsupportedWhyResult = try runCLIResult([
+            "item", "why-surfaced", "date_card", bookmarkID,
+            "--json",
+        ], vaultURL: vault)
+        #expect(unsupportedWhyResult.status == 1)
+        let unsupportedWhyPayload = try jsonObject(from: unsupportedWhyResult.stdout)
+        #expect(unsupportedWhyPayload["ok"] as? Bool == false)
+        #expect(unsupportedWhyPayload["errorCode"] as? String == "unsupported_item_type")
+        #expect((unsupportedWhyPayload["supportedTypes"] as? [String])?.contains("dateCard") == true)
+        let failureReceipt = try #require(unsupportedWhyPayload["actionReceipt"] as? [String: Any])
+        #expect(failureReceipt["status"] as? String == "failed")
+        #expect(failureReceipt["errorCode"] as? String == "unsupported_item_type")
 
         let explainPayload = try jsonObject(from: runCLI([
             "routing", "explain", bookmarkID,

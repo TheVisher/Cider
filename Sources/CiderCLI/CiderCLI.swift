@@ -5387,6 +5387,20 @@ struct CiderCLI {
                         "surfacing": packet["surfacing"] ?? [:],
                         "safeCommands": packet["safeCommands"] ?? [],
                     ]
+                    payload["actionReceipt"] = agentActionReceiptToDict(
+                        command: "item.why-surfaced",
+                        action: "inspect_surfacing",
+                        owner: normalizedOwner(type: "card", ref: positional[1]),
+                        sourceRefs: ["kanban_card:\(positional[1])"],
+                        readOnly: true,
+                        changed: false,
+                        safeVerificationCommands: [
+                            "cider-cli item why-surfaced card \(positional[1]) --json",
+                            "cider-cli item context card \(positional[1]) --json",
+                        ],
+                        safeNextCommands: packet["safeCommands"] as? [String] ?? []
+                    )
+                    payload["safeVerificationCommands"] = (payload["actionReceipt"] as? [String: Any])?["safeVerificationCommands"] ?? []
                     payload["summary"] = packet["summary"]
                     if jsonOutput {
                         outputJSON(payload)
@@ -5400,7 +5414,21 @@ struct CiderCLI {
                 return
             }
             do {
-                let type = try ItemLinkService.entityType(from: positional[0])
+                let type: LibraryEntityType
+                do {
+                    type = try ItemLinkService.entityType(from: positional[0])
+                } catch {
+                    printCLIError(
+                        error.localizedDescription,
+                        details: unsupportedItemTypeErrorDetails(
+                            command: "item.why-surfaced",
+                            action: "inspect_surfacing",
+                            rawType: positional[0],
+                            ref: positional[1]
+                        )
+                    )
+                    return
+                }
                 let ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
                 let packet = try contextService.agentContext(for: ref, limits: itemAgentContextLimits(from: args))
                 var payload: [String: Any] = [
@@ -5409,14 +5437,28 @@ struct CiderCLI {
                     "readOnly": true,
                     "changed": false,
                     "sourceRef": [
-                        "type": positional[0],
-                        "ref": positional[1],
+                        "type": type.rawValue,
+                        "ref": ref.entityID.uuidString,
                     ],
                     "item": itemSummaryToDict(packet.item),
                     "surfacing": surfacingExplanationToDict(packet.surfacing),
                     "safeCommands": packet.safeCommands,
                     "summary": packet.summary,
                 ]
+                payload["actionReceipt"] = agentActionReceiptToDict(
+                    command: "item.why-surfaced",
+                    action: "inspect_surfacing",
+                    owner: SecondBrainOwnerRef(ownerType: type.rawValue, ownerID: ref.entityID.uuidString),
+                    sourceRefs: ["\(type.rawValue):\(ref.entityID.uuidString)"],
+                    readOnly: true,
+                    changed: false,
+                    safeVerificationCommands: [
+                        "cider-cli item why-surfaced \(type.rawValue) \(ref.entityID.uuidString) --json",
+                        "cider-cli item context \(type.rawValue) \(ref.entityID.uuidString) --json",
+                    ],
+                    safeNextCommands: packet.safeCommands
+                )
+                payload["safeVerificationCommands"] = (payload["actionReceipt"] as? [String: Any])?["safeVerificationCommands"] ?? []
                 CiderAgentDecisionContract.merge(itemAgentDecisionDictionary(for: packet), into: &payload)
                 if jsonOutput {
                     outputJSON(payload)
@@ -12999,12 +13041,42 @@ struct CiderCLI {
         printCLIError(message, details: nil)
     }
 
+    static let supportedAgentItemTypes = ["bookmark", "note", "todo", "dateCard", "contact", "vaultFile"]
+
+    static func unsupportedItemTypeErrorDetails(command: String, action: String, rawType: String, ref: String?) -> [String: Any] {
+        let receipt = agentActionReceiptToDict(
+            command: command,
+            action: action,
+            readOnly: true,
+            changed: false,
+            status: "failed",
+            errorCode: "unsupported_item_type",
+            error: "Unsupported item type '\(rawType)'.",
+            supportedTypes: supportedAgentItemTypes,
+            safeVerificationCommands: ["cider-cli item due-to-surface --json"],
+            safeNextCommands: ["Use one of: \(supportedAgentItemTypes.joined(separator: ", "))"]
+        )
+        var details: [String: Any] = [
+            "errorCode": "unsupported_item_type",
+            "unsupportedType": rawType,
+            "supportedTypes": supportedAgentItemTypes,
+            "actionReceipt": receipt,
+        ]
+        if let ref { details["ref"] = ref }
+        return details
+    }
+
     static func printCLIError(_ message: String, details: [String: Any]?) {
         processExitCode = 1
         if jsonOutput {
             var dict: [String: Any] = ["ok": false, "error": message]
             if let details {
                 dict["details"] = details
+                for promotedKey in ["errorCode", "supportedTypes", "safeVerificationCommands", "safeNextCommands", "actionReceipt"] {
+                    if let value = details[promotedKey] {
+                        dict[promotedKey] = value
+                    }
+                }
             }
             outputJSON(dict)
         } else {

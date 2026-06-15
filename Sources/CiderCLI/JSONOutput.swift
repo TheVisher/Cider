@@ -175,14 +175,71 @@ func surfacingExplanationToDict(_ explanation: CiderSurfacingExplanation) -> [St
     return dict
 }
 
+func secondBrainOwnerRefToDict(_ owner: SecondBrainOwnerRef) -> [String: Any] {
+    [
+        "ownerType": owner.ownerType,
+        "ownerID": owner.ownerID,
+        "ref": owner.canonicalRef,
+    ]
+}
+
+func agentActionReceiptToDict(
+    command: String,
+    action: String,
+    actor: String = "cider-cli",
+    owner: SecondBrainOwnerRef? = nil,
+    sourceRefs: [String] = [],
+    evidenceRefs: [String] = [],
+    readOnly: Bool,
+    changed: Bool,
+    status: String = "succeeded",
+    errorCode: String? = nil,
+    error: String? = nil,
+    supportedTypes: [String]? = nil,
+    before: [String: Any]? = nil,
+    after: [String: Any]? = nil,
+    safeVerificationCommands: [String] = [],
+    safeNextCommands: [String] = []
+) -> [String: Any] {
+    var dict: [String: Any] = [
+        "command": command,
+        "action": action,
+        "actor": actor,
+        "status": status,
+        "readOnly": readOnly,
+        "changed": changed,
+        "sourceRefs": sourceRefs,
+        "evidenceRefs": evidenceRefs,
+        "safeVerificationCommands": safeVerificationCommands,
+        "safeNextCommands": safeNextCommands,
+    ]
+    if let owner {
+        dict["owner"] = secondBrainOwnerRefToDict(owner)
+        dict["ownerRef"] = owner.canonicalRef
+    }
+    if let errorCode { dict["errorCode"] = errorCode }
+    if let error { dict["error"] = error }
+    if let supportedTypes { dict["supportedTypes"] = supportedTypes }
+    if let before { dict["before"] = before }
+    if let after { dict["after"] = after }
+    return dict
+}
+
 func reminderActionResultToDict(_ result: CiderReminderActionResult) -> [String: Any] {
     let formatter = ISO8601DateFormatter()
+    let command = "reminder.\(result.action.rawValue)"
+    let owner = SecondBrainOwnerRef(ownerType: result.itemType.rawValue, ownerID: result.id.uuidString)
     var dict: [String: Any] = [
+        "ok": true,
+        "command": command,
+        "readOnly": false,
+        "changed": true,
         "itemType": result.itemType.rawValue,
         "id": result.id.uuidString,
         "title": result.title,
         "action": result.action.rawValue,
         "completed": result.completed,
+        "owner": secondBrainOwnerRefToDict(owner),
     ]
     if let snoozedUntil = result.snoozedUntil {
         dict["snoozedUntil"] = formatter.string(from: snoozedUntil)
@@ -200,6 +257,24 @@ func reminderActionResultToDict(_ result: CiderReminderActionResult) -> [String:
         }
         dict["surfacing"] = surfacingDict
     }
+    dict["actionReceipt"] = agentActionReceiptToDict(
+        command: command,
+        action: result.action.rawValue,
+        owner: owner,
+        sourceRefs: [owner.canonicalRef],
+        readOnly: false,
+        changed: true,
+        before: ["completed": !result.completed],
+        after: ["completed": result.completed],
+        safeVerificationCommands: [
+            "cider-cli item why-surfaced \(result.itemType.rawValue) \(result.id.uuidString) --json",
+            "cider-cli item context \(result.itemType.rawValue) \(result.id.uuidString) --json",
+        ],
+        safeNextCommands: [
+            "cider-cli item due-to-surface --json",
+            "cider-cli agenda --json",
+        ]
+    )
     return dict
 }
 

@@ -6,6 +6,37 @@ import Testing
 @Suite("Cider CLI Agent Safety Tests", .serialized)
 @MainActor
 struct CiderCLIAgentSafetyTests {
+    @Test("reminder mutation result exposes shared action receipt")
+    func reminderMutationResultExposesSharedActionReceipt() throws {
+        let id = UUID()
+        let result = CiderReminderActionResult(
+            itemType: .todo,
+            id: id,
+            title: "Pay utilities",
+            action: .complete,
+            completed: true,
+            snoozedUntil: nil,
+            surfacing: nil
+        )
+
+        let dict = reminderActionResultToDict(result)
+
+        #expect(dict["command"] as? String == "reminder.complete")
+        #expect(dict["readOnly"] as? Bool == false)
+        #expect(dict["changed"] as? Bool == true)
+        let receipt = try #require(dict["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "reminder.complete")
+        #expect(receipt["action"] as? String == "complete")
+        #expect(receipt["actor"] as? String == "cider-cli")
+        #expect(receipt["readOnly"] as? Bool == false)
+        #expect(receipt["changed"] as? Bool == true)
+        let owner = try #require(receipt["owner"] as? [String: Any])
+        #expect(owner["ownerType"] as? String == "todo")
+        #expect(owner["ownerID"] as? String == id.uuidString)
+        #expect((receipt["safeVerificationCommands"] as? [String])?.contains("cider-cli item why-surfaced todo \(id.uuidString) --json") == true)
+        #expect((receipt["safeNextCommands"] as? [String])?.contains("cider-cli item due-to-surface --json") == true)
+    }
+
     @Test("note JSON exposes project artifact metadata")
     func noteJSONExposesProjectArtifactMetadata() throws {
         let note = Note(
