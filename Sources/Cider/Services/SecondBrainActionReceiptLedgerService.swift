@@ -115,16 +115,37 @@ struct SecondBrainActionReceiptRecord: Identifiable, Equatable {
 
 struct SecondBrainActionReceiptFilter: Equatable {
     var owner: SecondBrainOwnerRef?
+    var command: String?
     var action: String?
     var actor: String?
     var status: String?
+    var sourceRef: String?
+    var evidenceRef: String?
+    var since: Date?
+    var before: Date?
     var limit: Int
 
-    init(owner: SecondBrainOwnerRef? = nil, action: String? = nil, actor: String? = nil, status: String? = nil, limit: Int = 20) {
+    init(
+        owner: SecondBrainOwnerRef? = nil,
+        command: String? = nil,
+        action: String? = nil,
+        actor: String? = nil,
+        status: String? = nil,
+        sourceRef: String? = nil,
+        evidenceRef: String? = nil,
+        since: Date? = nil,
+        before: Date? = nil,
+        limit: Int = 20
+    ) {
         self.owner = owner
+        self.command = command
         self.action = action
         self.actor = actor
         self.status = status
+        self.sourceRef = sourceRef
+        self.evidenceRef = evidenceRef
+        self.since = since
+        self.before = before
         self.limit = max(1, min(limit, 100))
     }
 }
@@ -186,6 +207,10 @@ final class SecondBrainActionReceiptLedgerService {
             bindings.append(owner.ownerType)
             bindings.append(owner.ownerID)
         }
+        if let command = filter.command {
+            clauses.append("command = ?")
+            bindings.append(command)
+        }
         if let action = filter.action {
             clauses.append("action = ?")
             bindings.append(action)
@@ -197,6 +222,22 @@ final class SecondBrainActionReceiptLedgerService {
         if let status = filter.status {
             clauses.append("status = ?")
             bindings.append(status)
+        }
+        if let sourceRef = filter.sourceRef {
+            clauses.append("source_refs_json LIKE ?")
+            bindings.append(Self.jsonArrayContainsPattern(sourceRef))
+        }
+        if let evidenceRef = filter.evidenceRef {
+            clauses.append("evidence_refs_json LIKE ?")
+            bindings.append(Self.jsonArrayContainsPattern(evidenceRef))
+        }
+        if let since = filter.since {
+            clauses.append("created_at >= ?")
+            bindings.append(String(since.timeIntervalSince1970))
+        }
+        if let before = filter.before {
+            clauses.append("created_at < ?")
+            bindings.append(String(before.timeIntervalSince1970))
         }
         if !clauses.isEmpty {
             sql += " WHERE " + clauses.joined(separator: " AND ")
@@ -221,6 +262,13 @@ final class SecondBrainActionReceiptLedgerService {
                safe_next_commands, correlation_id, receipt_json, created_at
         FROM action_receipts
         """
+
+    private static func jsonArrayContainsPattern(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "%\"\(escaped)\"%"
+    }
 
     private static func record(from stmt: SQLStatement) -> SecondBrainActionReceiptRecord {
         let ownerType = stmt.optionalString(at: 5)

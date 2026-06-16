@@ -104,6 +104,76 @@ struct SecondBrainActionReceiptLedgerTests {
         #expect(inspected.safeVerificationCommands == ["cider-cli item why-surfaced dateCard \(owner.ownerID) --json"])
     }
 
+    @Test("service filters action receipts by command refs and time windows")
+    func serviceFiltersActionReceiptsByCommandRefsAndTimeWindows() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let service = SecondBrainActionReceiptLedgerService(database: db)
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let sourceRef = "fact_validity_candidate:cid-531"
+        let evidenceRef = "source_evidence:cid-531"
+        let old = Date(timeIntervalSince1970: 1_700_000_000)
+        let middle = Date(timeIntervalSince1970: 1_700_000_100)
+        let newest = Date(timeIntervalSince1970: 1_700_000_200)
+
+        _ = try service.record(SecondBrainActionReceiptRecord(
+            command: "item.fact-validity.inspect",
+            action: "inspect",
+            actor: "cider-cli",
+            status: "failed",
+            owner: owner,
+            sourceRefs: [sourceRef],
+            evidenceRefs: [evidenceRef],
+            readOnly: true,
+            changed: false,
+            errorCode: "fact_validity_candidate_not_found",
+            safeVerificationCommands: [],
+            safeNextCommands: [],
+            createdAt: old
+        ))
+        _ = try service.record(SecondBrainActionReceiptRecord(
+            command: "item.fact-validity.accept",
+            action: "accept",
+            actor: "cider-cli",
+            status: "succeeded",
+            owner: owner,
+            sourceRefs: [sourceRef],
+            evidenceRefs: [evidenceRef],
+            readOnly: false,
+            changed: true,
+            safeVerificationCommands: [],
+            safeNextCommands: [],
+            createdAt: middle
+        ))
+        _ = try service.record(SecondBrainActionReceiptRecord(
+            command: "item.entity-resolution.inspect",
+            action: "inspect",
+            actor: "cider-cli",
+            status: "succeeded",
+            owner: owner,
+            sourceRefs: ["entity_resolution_candidate:cid-531"],
+            evidenceRefs: [],
+            readOnly: true,
+            changed: false,
+            safeVerificationCommands: [],
+            safeNextCommands: [],
+            createdAt: newest
+        ))
+
+        let commandMatches = try service.list(filter: .init(command: "item.fact-validity.inspect", limit: 10))
+        #expect(commandMatches.map(\.command) == ["item.fact-validity.inspect"])
+        #expect(commandMatches.first?.errorCode == "fact_validity_candidate_not_found")
+
+        let refMatches = try service.list(filter: .init(sourceRef: sourceRef, evidenceRef: evidenceRef, limit: 10))
+        #expect(refMatches.map(\.command) == ["item.fact-validity.accept", "item.fact-validity.inspect"])
+
+        let windowMatches = try service.list(filter: .init(owner: owner, since: old.addingTimeInterval(50), before: newest, limit: 10))
+        #expect(windowMatches.map(\.command) == ["item.fact-validity.accept"])
+
+        let limited = try service.list(filter: .init(owner: owner, limit: 2))
+        #expect(limited.map(\.command) == ["item.entity-resolution.inspect", "item.fact-validity.accept"])
+    }
+
     @Test("ledger recording does not silently accept graph candidates")
     func ledgerRecordingDoesNotSilentlyAcceptGraphCandidates() throws {
         let (db, url) = try makeTempDB()

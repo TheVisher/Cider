@@ -4912,7 +4912,7 @@ struct CiderCLI {
               cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--json]
               cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
-              cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--action <action>] [--actor <actor>] [--status <status>] [--limit <n>] [--json]
+              cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
               cider-cli item action-ledger inspect <receipt-id> [--json]
               cider-cli item capability-map [--json]
               cider-cli item graph-health [--json]
@@ -13144,7 +13144,8 @@ struct CiderCLI {
         status: String = "succeeded",
         errorCode: String? = nil,
         beforeState: String?,
-        factValidity: [String: Any]? = nil
+        factValidity: [String: Any]? = nil,
+        readOnly: Bool = false
     ) -> [String: Any] {
         let candidate = view.candidate
         var evidenceRefs = [candidate.sourceOwner.canonicalRef]
@@ -13166,7 +13167,7 @@ struct CiderCLI {
                 candidate.sourceOwner.canonicalRef,
             ]),
             evidenceRefs: orderedUniqueStrings(evidenceRefs),
-            readOnly: false,
+            readOnly: readOnly,
             changed: changed,
             status: status,
             errorCode: errorCode,
@@ -13200,11 +13201,34 @@ struct CiderCLI {
         }
         return SecondBrainActionReceiptFilter(
             owner: owner,
+            command: parseFlag("--command", from: args),
             action: parseFlag("--action", from: args),
             actor: parseFlag("--actor", from: args),
             status: parseFlag("--status", from: args),
+            sourceRef: parseFlag("--source-ref", from: args) ?? parseFlag("--source", from: args),
+            evidenceRef: parseFlag("--evidence-ref", from: args) ?? parseFlag("--evidence", from: args),
+            since: parseFactValidityDate(parseFlag("--since", from: args)),
+            before: parseFactValidityDate(parseFlag("--before", from: args)),
             limit: limit
         )
+    }
+
+    static func actionLedgerFilterToDict(_ filter: SecondBrainActionReceiptFilter) -> [String: Any] {
+        var dict: [String: Any] = ["limit": filter.limit]
+        if let owner = filter.owner {
+            dict["owner"] = ownerToDict(owner)
+            dict["ownerRef"] = owner.canonicalRef
+        }
+        if let command = filter.command { dict["command"] = command }
+        if let action = filter.action { dict["action"] = action }
+        if let actor = filter.actor { dict["actor"] = actor }
+        if let status = filter.status { dict["status"] = status }
+        if let sourceRef = filter.sourceRef { dict["sourceRef"] = sourceRef }
+        if let evidenceRef = filter.evidenceRef { dict["evidenceRef"] = evidenceRef }
+        let formatter = ISO8601DateFormatter()
+        if let since = filter.since { dict["since"] = formatter.string(from: since) }
+        if let before = filter.before { dict["before"] = formatter.string(from: before) }
+        return dict
     }
 
     static func handleActionLedgerCommand(args: [String]) {
@@ -13224,6 +13248,7 @@ struct CiderCLI {
                         "changed": false,
                         "count": entries.count,
                         "limit": filter.limit,
+                        "filters": actionLedgerFilterToDict(filter),
                         "entries": entries.map(actionReceiptRecordToDict),
                     ])
                 } else {
@@ -16994,16 +17019,62 @@ struct CiderCLI {
 
             case "inspect", "get":
                 guard positional.count >= 2 else { throw factValidityError("Usage: cider-cli item fact-validity inspect <candidate-id> [--json]") }
-                guard let candidate = try service.candidate(id: normalizedFactValidityCandidateID(positional[1])) else {
-                    throw factValidityError("Fact validity candidate not found: \(positional[1])")
+                let rawID = positional[1]
+                let candidateID = normalizedFactValidityCandidateID(rawID)
+                guard let candidate = try service.candidate(id: candidateID) else {
+                    let receipt = agentActionReceiptToDict(
+                        command: "item.fact-validity.inspect",
+                        action: "inspect",
+                        actor: "cider-cli",
+                        owner: nil,
+                        sourceRefs: ["fact_validity_candidate:\(candidateID)"],
+                        evidenceRefs: [],
+                        readOnly: true,
+                        changed: false,
+                        status: "failed",
+                        errorCode: "fact_validity_candidate_not_found",
+                        error: "Fact validity candidate not found: \(rawID)",
+                        safeVerificationCommands: [
+                            "cider-cli item fact-validity inspect \(candidateID) --json",
+                            "cider-cli item action-ledger list --command item.fact-validity.inspect --status failed --json",
+                        ],
+                        safeNextCommands: ["cider-cli item fact-validity list --json"]
+                    )
+                    let payload: [String: Any] = [
+                        "ok": false,
+                        "command": "item.fact-validity.inspect",
+                        "readOnly": true,
+                        "changed": false,
+                        "candidateID": candidateID,
+                        "candidateRef": "fact_validity_candidate:\(candidateID)",
+                        "errorCode": "fact_validity_candidate_not_found",
+                        "error": "Fact validity candidate not found: \(rawID)",
+                        "actionReceipt": receipt,
+                        "safeVerificationCommands": receipt["safeVerificationCommands"] as? [String] ?? [],
+                        "safeNextCommands": receipt["safeNextCommands"] as? [String] ?? [],
+                    ]
+                    processExitCode = 1
+                    persistActionReceiptIfPresent(payload)
+                    if jsonOutput { outputJSON(payload) } else { print("Error: Fact validity candidate not found: \(rawID)") }
+                    return
                 }
-                let payload: [String: Any] = [
+                var payload: [String: Any] = [
                     "ok": true,
                     "command": "item.fact-validity.inspect",
                     "readOnly": true,
                     "changed": false,
                     "candidate": factValidityCandidateToDict(candidate),
                 ]
+                payload["actionReceipt"] = actionReceiptForFactValidityMutation(
+                    view: candidate,
+                    command: "item.fact-validity.inspect",
+                    action: "inspect",
+                    actor: "cider-cli",
+                    changed: false,
+                    beforeState: candidate.reviewState,
+                    readOnly: true
+                )
+                persistActionReceiptIfPresent(payload)
                 if jsonOutput { outputJSON(payload) } else { print("Fact validity candidate: \(candidate.id)") }
 
             case "state":
@@ -17274,7 +17345,7 @@ struct CiderCLI {
             case "inspect", "show", "get":
                 guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution inspect <candidate-id> [--json]"); return }
                 guard let candidate = try service.candidate(id: positional[1]) else { printCLIError("Entity-resolution candidate not found: \(positional[1])"); return }
-                let payload: [String: Any] = [
+                var payload: [String: Any] = [
                     "ok": true,
                     "command": "item.entity-resolution.inspect",
                     "readOnly": true,
@@ -17282,6 +17353,8 @@ struct CiderCLI {
                     "candidate": entityResolutionCandidateToDict(candidate),
                     "safeNextCommands": candidate.safeNextCommands,
                 ]
+                payload["actionReceipt"] = actionReceiptForEntityResolutionInspection(candidate)
+                persistActionReceiptIfPresent(payload)
                 if jsonOutput { outputJSON(payload) } else { print("Entity-resolution candidate: \(candidate.id)") }
             case "accept", "approve":
                 guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution accept <candidate-id> [--reason <text>] [--json]"); return }
@@ -17307,6 +17380,38 @@ struct CiderCLI {
         } catch {
             printCLIError(error.localizedDescription)
         }
+    }
+
+    static func actionReceiptForEntityResolutionInspection(_ candidate: SecondBrainEntityResolutionCandidate) -> [String: Any] {
+        var evidenceRefs = [candidate.sourceOwner.canonicalRef]
+        if let evidenceRef = candidate.sourceEvidenceRef { evidenceRefs.append(evidenceRef) }
+        return agentActionReceiptToDict(
+            command: "item.entity-resolution.inspect",
+            action: "inspect",
+            actor: "cider-cli",
+            owner: candidate.sourceOwner,
+            sourceRefs: orderedUniqueStrings([
+                candidate.candidateRef,
+                candidate.sourceOwner.canonicalRef,
+                candidate.sourceEntityRef,
+                candidate.targetEntityRef,
+            ]),
+            evidenceRefs: orderedUniqueStrings(evidenceRefs),
+            readOnly: true,
+            changed: false,
+            status: "succeeded",
+            before: nil,
+            after: [
+                "reviewState": candidate.reviewState,
+                "truthBoundary": candidate.truthBoundary,
+            ],
+            safeVerificationCommands: [
+                "cider-cli item entity-resolution inspect \(candidate.id) --json",
+                "cider-cli item action-ledger list --owner \(candidate.sourceOwner.canonicalRef) --command item.entity-resolution.inspect --json",
+                "cider-cli item context \(candidate.sourceOwner.ownerType) \(candidate.sourceOwner.ownerID) --max-history 10 --json",
+            ],
+            safeNextCommands: candidate.safeNextCommands
+        )
     }
 
     static func outputEntityResolutionMutation(

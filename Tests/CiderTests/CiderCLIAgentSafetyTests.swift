@@ -123,6 +123,138 @@ struct CiderCLIAgentSafetyTests {
         #expect((inspected["safeVerificationCommands"] as? [String])?.contains("cider-cli item why-surfaced dateCard \(id) --json") == true)
     }
 
+    @Test("action ledger CLI filters by command refs and time windows")
+    func actionLedgerCLIFiltersByCommandRefsAndTimeWindows() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-action-ledger-filter-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceID = try createNote(title: "Ledger Filter Source", content: "Source", vault: vault)
+        let targetID = try createNote(title: "Ledger Filter Target", content: "Target", vault: vault)
+        let beforeMutation = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-60))
+        _ = try parseJSONObject(try runCLI(args: ["item", "link", "note", sourceID, "note", targetID, "--json"], vault: vault).stdout)
+        let afterMutation = ISO8601DateFormatter().string(from: Date().addingTimeInterval(60))
+        _ = try parseJSONObject(try runCLI(args: ["item", "why-surfaced", "note", sourceID, "--json"], vault: vault).stdout)
+
+        let byCommand = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(sourceID)", "--command", "link.add", "--limit", "10", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let commandEntries = try #require(byCommand["entries"] as? [[String: Any]])
+        #expect(commandEntries.map { $0["command"] as? String } == ["link.add"])
+        #expect((byCommand["filters"] as? [String: Any])?["command"] as? String == "link.add")
+
+        let byEvidence = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--evidence-ref", "note:\(targetID)", "--since", beforeMutation, "--before", afterMutation, "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let evidenceEntries = try #require(byEvidence["entries"] as? [[String: Any]])
+        #expect(evidenceEntries.contains { entry in
+            entry["command"] as? String == "link.add"
+                && (entry["evidenceRefs"] as? [String])?.contains("note:\(targetID)") == true
+        })
+        let filters = try #require(byEvidence["filters"] as? [String: Any])
+        #expect(filters["evidenceRef"] as? String == "note:\(targetID)")
+        #expect(filters["since"] as? String == beforeMutation)
+        #expect(filters["before"] as? String == afterMutation)
+    }
+
+    @Test("fact validity inspect not found returns and persists structured failure receipt")
+    func factValidityInspectNotFoundReturnsAndPersistsStructuredFailureReceipt() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-fact-validity-failure-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missingID = "missing-cid-531"
+        let result = try runCLI(args: ["item", "fact-validity", "inspect", missingID, "--json"], vault: vault)
+        #expect(result.status != 0)
+        let payload = try parseJSONObject(result.stdout)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == "item.fact-validity.inspect")
+        #expect(payload["errorCode"] as? String == "fact_validity_candidate_not_found")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        let receipt = try #require(payload["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.fact-validity.inspect")
+        #expect(receipt["action"] as? String == "inspect")
+        #expect(receipt["status"] as? String == "failed")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        #expect(receipt["errorCode"] as? String == "fact_validity_candidate_not_found")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("fact_validity_candidate:\(missingID)") == true)
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--command", "item.fact-validity.inspect", "--status", "failed", "--limit", "5", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["errorCode"] as? String == "fact_validity_candidate_not_found"
+                && (entry["sourceRefs"] as? [String])?.contains("fact_validity_candidate:\(missingID)") == true
+        })
+    }
+
+    @Test("entity resolution inspect persists receipt and appears in item context history")
+    func entityResolutionInspectPersistsReceiptAndAppearsInItemContextHistory() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-entity-resolution-inspect-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Entity Resolution Inspect Source",
+            content: "We went to Cactus for dinner.",
+            vault: vault
+        )
+        let targetID = try createNote(title: "Cactus Restaurant", content: "Saved place entity.", vault: vault)
+        let sourceOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let sourceEntity = SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "cactus-inspect")
+        let targetEntity = SecondBrainOwnerRef(ownerType: "note", ownerID: targetID)
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let candidate = try SecondBrainEntityResolutionService(database: db, store: SecondBrainStore(database: db)).suggest(
+            candidateType: "place_alias",
+            sourceEntity: sourceEntity,
+            sourceLabel: "Cactus",
+            inputMention: "Cactus",
+            targetEntity: targetEntity,
+            targetLabel: "Cactus Restaurant",
+            sourceOwner: sourceOwner,
+            sourceQuote: "We went to Cactus for dinner.",
+            confidence: 0.91,
+            confidenceReasons: ["exact_alias", "place_visit_context"],
+            actor: "test-agent",
+            source: "entity_resolution.test"
+        )
+        db.close()
+
+        let inspect = try assertStrictProcessJSON(
+            runCLI(args: ["item", "entity-resolution", "inspect", candidate.id, "--json"], vault: vault),
+            command: "item.entity-resolution.inspect"
+        )
+        #expect(inspect["readOnly"] as? Bool == true)
+        #expect(inspect["changed"] as? Bool == false)
+        let receipt = try #require(inspect["actionReceipt"] as? [String: Any])
+        #expect(receipt["action"] as? String == "inspect")
+        #expect(receipt["ownerRef"] as? String == "note:\(noteID)")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("entity_resolution_candidate:\(candidate.id)") == true)
+
+        let context = try assertStrictProcessJSON(
+            runCLI(args: ["item", "context", "note", noteID, "--max-history", "10", "--json"], vault: vault),
+            command: "item.context"
+        )
+        let history = try #require(context["recentHistory"] as? [[String: Any]])
+        #expect(history.contains { entry in
+            entry["kind"] as? String == "action_receipt"
+                && entry["command"] as? String == "item.entity-resolution.inspect"
+                && entry["action"] as? String == "inspect"
+                && entry["changed"] as? Bool == false
+        })
+    }
+
     @Test("note JSON exposes project artifact metadata")
     func noteJSONExposesProjectArtifactMetadata() throws {
         let note = Note(
