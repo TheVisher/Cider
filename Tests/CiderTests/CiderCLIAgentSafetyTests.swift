@@ -496,6 +496,84 @@ struct CiderCLIAgentSafetyTests {
         #expect(relationRows.isEmpty)
     }
 
+    @Test("review drilldown selector failures are structured and do not default to empty feeds")
+    func reviewDrilldownSelectorFailuresAreStructuredAndDoNotDefaultToEmptyFeeds() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-review-drilldown-selector-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let malformed = try assertStrictFailureJSON(
+            runCLI(args: ["review", "drilldown", "bad-group", "--json"], vault: vault),
+            command: "review.drilldown",
+            errorCode: "malformed_review_drilldown_group_id"
+        )
+        #expect(malformed["readOnly"] as? Bool == true)
+        #expect(malformed["changed"] as? Bool == false)
+        let malformedSelector = try #require(malformed["selector"] as? [String: Any])
+        #expect(malformedSelector["name"] as? String == "groupID")
+        #expect(malformedSelector["value"] as? String == "bad-group")
+        #expect(malformed["expectedFormat"] as? String == "kind:reviewState:requiredSafeAction:itemType")
+
+        let unknownKind = try assertStrictFailureJSON(
+            runCLI(args: ["review", "drilldown", "unknown_kind:needs_review:accept:note", "--json"], vault: vault),
+            command: "review.drilldown",
+            errorCode: "unsupported_review_drilldown_group_value"
+        )
+        let unknownSelector = try #require(unknownKind["selector"] as? [String: Any])
+        #expect(unknownSelector["name"] as? String == "kind")
+        #expect(unknownSelector["value"] as? String == "unknown_kind")
+        #expect((unknownKind["supportedValues"] as? [String])?.contains("graph_candidate") == true)
+
+        let malformedLimit = try assertStrictFailureJSON(
+            runCLI(args: ["review", "drilldown", "graph_candidate:needs_review:accept:note", "--limit", "not-a-number", "--json"], vault: vault),
+            command: "review.drilldown",
+            errorCode: "malformed_numeric_filter"
+        )
+        let limitFilter = try #require(malformedLimit["filter"] as? [String: Any])
+        #expect(limitFilter["name"] as? String == "limit")
+        #expect(limitFilter["value"] as? String == "not-a-number")
+    }
+
+    @Test("unsupported owner selector policy fails while valid empty graph owner reads stay read-only")
+    func unsupportedOwnerSelectorPolicyFailsWhileValidEmptyGraphOwnerReadsStayReadOnly() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-owner-selector-policy-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let unsupportedRelations = try assertStrictFailureJSON(
+            runCLI(args: ["item", "relations", "made_up_owner", "ref", "--json"], vault: vault),
+            command: "item.relations",
+            errorCode: "unsupported_owner_type"
+        )
+        #expect(unsupportedRelations["readOnly"] as? Bool == true)
+        #expect(unsupportedRelations["changed"] as? Bool == false)
+        let relationSelector = try #require(unsupportedRelations["selector"] as? [String: Any])
+        #expect(relationSelector["type"] as? String == "made_up_owner")
+        #expect(relationSelector["ref"] as? String == "ref")
+        #expect((unsupportedRelations["supportedTypes"] as? [String])?.contains("graph_object") == true)
+
+        let unsupportedOwnerGet = try assertStrictFailureJSON(
+            runCLI(args: ["item", "owner-get", "made_up_owner", "ref", "--json"], vault: vault),
+            command: "item.owner-get",
+            errorCode: "unsupported_owner_type"
+        )
+        #expect(unsupportedOwnerGet["readOnly"] as? Bool == true)
+        #expect(unsupportedOwnerGet["changed"] as? Bool == false)
+
+        let validGraphRelations = try assertStrictProcessJSON(
+            runCLI(args: ["item", "relations", "graph_object", "cid536-empty-owner", "--json"], vault: vault),
+            command: "item.relations"
+        )
+        #expect(validGraphRelations["ok"] as? Bool == true)
+        #expect(validGraphRelations["readOnly"] as? Bool == true)
+        #expect(validGraphRelations["changed"] as? Bool == false)
+        #expect(validGraphRelations["relationCount"] as? Int == 0)
+        let graphRows = try #require(validGraphRelations["relations"] as? [[String: Any]])
+        #expect(graphRows.isEmpty)
+    }
+
     @Test("link helper failures return structured receipts without mutation")
     func linkHelperFailuresReturnStructuredReceiptsWithoutMutation() throws {
         let vault = FileManager.default.temporaryDirectory

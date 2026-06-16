@@ -1714,14 +1714,20 @@ struct CiderCLI {
 
         case "drilldown", "lane":
             guard let groupID = args.first else {
-                printCLIError("Usage: cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]")
+                printCLIError(
+                    "Usage: cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]",
+                    details: malformedReviewDrilldownGroupDetails(groupID: "")
+                )
                 return
             }
+            guard validateReviewDrilldownGroupID(groupID) else { return }
+            guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: "review.drilldown", minimum: 0) else { return }
+            guard let parsedOffset = parsePositiveIntFlag("--offset", from: args, command: "review.drilldown", minimum: 0) else { return }
             do {
                 let result = try service.drilldown(
                     groupID: groupID,
-                    limit: parseFlag("--limit", from: args).flatMap(Int.init) ?? 50,
-                    offset: parseFlag("--offset", from: args).flatMap(Int.init) ?? 0
+                    limit: parsedLimit ?? 50,
+                    offset: parsedOffset ?? 0
                 )
                 printReviewQueueDrilldownResult(result)
             } catch {
@@ -5072,6 +5078,7 @@ struct CiderCLI {
                 printFolderOwnerInspection(ref: positional[1])
                 return
             }
+            guard validateOwnerSelectorPolicy(command: "item.owner-get", type: positional[0], ref: positional[1]) else { return }
             do {
                 try printOwnerInspection(
                     type: positional[0],
@@ -5562,6 +5569,7 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli item relations <owner-type> <owner-id-or-ref> [--json]")
                 return
             }
+            guard validateOwnerSelectorPolicy(command: "item.relations", type: positional[0], ref: positional[1]) else { return }
             do {
                 let owner = normalizedOwner(type: positional[0], ref: positional[1])
                 let relations = try store.outgoingRelations(for: owner)
@@ -5576,6 +5584,7 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]")
                 return
             }
+            guard validateOwnerSelectorPolicy(command: "item.backlinks", type: positional[0], ref: positional[1]) else { return }
             do {
                 let owner = normalizedOwner(type: positional[0], ref: positional[1])
                 let relations = try store.backlinks(for: owner)
@@ -5590,6 +5599,7 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli item related-owners <owner-type> <owner-id-or-ref> [--json]")
                 return
             }
+            guard validateOwnerSelectorPolicy(command: "item.related-owners", type: positional[0], ref: positional[1]) else { return }
             do {
                 let owner = normalizedOwner(type: positional[0], ref: positional[1])
                 let relations = try store.relatedRelations(for: owner)
@@ -13452,6 +13462,21 @@ struct CiderCLI {
         "review enrichment-reconcile-plan",
         "review enrichment-reconcile-samples",
     ]
+    static let supportedReviewDrilldownSafeActions = supportedReviewSafeActions + ["none"]
+    static let supportedOwnerSelectorTypes = [
+        "bookmark",
+        "note",
+        "todo",
+        "dateCard",
+        "contact",
+        "vaultFile",
+        "card",
+        "kanban_card",
+        "graph_object",
+        "accepted_fact",
+        "source_evidence",
+        "capture_event",
+    ]
 
     static func reviewFilterEcho(
         kind: String?,
@@ -13487,6 +13512,115 @@ struct CiderCLI {
             return false
         }
         return true
+    }
+
+    static func validateReviewDrilldownGroupID(_ groupID: String) -> Bool {
+        let parts = groupID.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 4, parts.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            printCLIError(
+                "Malformed review drilldown group ID '\(groupID)'. Expected kind:reviewState:requiredSafeAction:itemType.",
+                details: malformedReviewDrilldownGroupDetails(groupID: groupID)
+            )
+            return false
+        }
+
+        let validations: [(name: String, value: String, supportedValues: [String])] = [
+            ("kind", parts[0], supportedReviewKinds),
+            ("reviewState", parts[1], supportedReviewStates),
+            ("requiredSafeAction", parts[2], supportedReviewDrilldownSafeActions),
+            ("itemType", parts[3], supportedReviewItemTypes),
+        ]
+        for validation in validations where !validation.supportedValues.contains(validation.value) {
+            printCLIError(
+                "Unsupported \(validation.name) value '\(validation.value)' in review drilldown group ID.",
+                details: unsupportedReviewDrilldownGroupValueDetails(
+                    groupID: groupID,
+                    name: validation.name,
+                    value: validation.value,
+                    supportedValues: validation.supportedValues
+                )
+            )
+            return false
+        }
+        return true
+    }
+
+    static func validateOwnerSelectorPolicy(command: String, type rawType: String, ref rawRef: String) -> Bool {
+        let normalizedType = normalizedOwnerTypeName(rawType)
+        guard supportedOwnerSelectorTypes.contains(normalizedType) else {
+            printCLIError(
+                "Unsupported owner type '\(rawType)' for \(command).",
+                details: unsupportedOwnerSelectorDetails(command: command, type: rawType, ref: rawRef)
+            )
+            return false
+        }
+        return true
+    }
+
+    static func normalizedOwnerTypeName(_ rawType: String) -> String {
+        let normalizedType = rawType
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+        switch normalizedType {
+        case "datecard", "date_card": return "dateCard"
+        case "vaultfile", "vault_file", "file": return "vaultFile"
+        case "kanban", "kanban_card", "card": return normalizedType == "card" ? "card" : "kanban_card"
+        default: return normalizedType
+        }
+    }
+
+    static func malformedReviewDrilldownGroupDetails(groupID: String) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: "review.drilldown",
+            readOnly: true,
+            errorCode: "malformed_review_drilldown_group_id",
+            safeVerificationCommands: [
+                "cider-cli review list --limit 20 --json",
+                "cider-cli review summary --json",
+            ],
+            safeNextCommands: ["Use a groupID emitted by cider-cli review list --json groups[].groupID."]
+        )
+        details["selector"] = ["name": "groupID", "value": groupID]
+        details["expectedFormat"] = "kind:reviewState:requiredSafeAction:itemType"
+        details["policyNote"] = "Review drilldown only accepts complete group IDs emitted by review list/review queue groups; malformed selectors are failures, not empty feeds."
+        return details
+    }
+
+    static func unsupportedReviewDrilldownGroupValueDetails(groupID: String, name: String, value: String, supportedValues: [String]) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: "review.drilldown",
+            readOnly: true,
+            errorCode: "unsupported_review_drilldown_group_value",
+            safeVerificationCommands: [
+                "cider-cli review list --limit 20 --json",
+                "cider-cli review summary --json",
+            ],
+            safeNextCommands: ["Use a groupID emitted by cider-cli review list --json groups[].groupID."]
+        )
+        details["selector"] = ["name": name, "value": value, "groupID": groupID]
+        details["supportedValues"] = supportedValues
+        details["expectedFormat"] = "kind:reviewState:requiredSafeAction:itemType"
+        return details
+    }
+
+    static func unsupportedOwnerSelectorDetails(command: String, type rawType: String, ref rawRef: String) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: command,
+            readOnly: true,
+            errorCode: "unsupported_owner_type",
+            safeVerificationCommands: [
+                "cider-cli item owner-get note <id-or-ref> --json",
+                "cider-cli item relations graph_object <stable-key> --json",
+                "cider-cli item related-owners graph_object <stable-key> --json",
+            ],
+            safeNextCommands: ["Use a supported owner type or resolve the item through cider-cli item search <query> --json first."]
+        )
+        details["selector"] = ["type": rawType, "ref": rawRef]
+        details["sourceRef"] = ["type": rawType, "ref": rawRef]
+        details["supportedTypes"] = supportedOwnerSelectorTypes
+        details["policyNote"] = "Arbitrary owner types are rejected so unsupported selectors do not masquerade as valid empty read-model results."
+        return details
     }
 
     static func parsePositiveIntFlag(_ flag: String, from args: [String], command: String, minimum: Int) -> Int?? {
@@ -13668,7 +13802,7 @@ struct CiderCLI {
             var dict: [String: Any] = ["ok": false, "error": message]
             if let details {
                 dict["details"] = details
-                for promotedKey in ["command", "readOnly", "changed", "errorCode", "supportedTypes", "supportedValues", "filter", "minimum", "sourceRef", "safeVerificationCommands", "safeNextCommands", "actionReceipt"] {
+                for promotedKey in ["command", "readOnly", "changed", "errorCode", "supportedTypes", "supportedValues", "filter", "selector", "expectedFormat", "minimum", "policyNote", "sourceRef", "safeVerificationCommands", "safeNextCommands", "actionReceipt"] {
                     if let value = details[promotedKey] {
                         dict[promotedKey] = value
                     }
