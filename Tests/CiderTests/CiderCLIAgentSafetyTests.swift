@@ -574,6 +574,131 @@ struct CiderCLIAgentSafetyTests {
         #expect(graphRows.isEmpty)
     }
 
+    @Test("accepted memory facts list inspect and recall stay separate from reviewable candidates")
+    func acceptedMemoryFactsListInspectAndRecallStaySeparateFromReviewableCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-accepted-memory-facts-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Memory Source", content: "Erik prefers espresso in the morning.", vault: vault)
+        let acceptedCandidate = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "preference",
+                "--value", "Erik prefers espresso in the morning",
+                "--evidence", "Erik prefers espresso in the morning.",
+                "--memory-key", "erik.morning.coffee",
+                "--confidence", "0.93",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let acceptedCandidateDict = try #require(acceptedCandidate["candidate"] as? [String: Any])
+        let acceptedCandidateID = try #require(acceptedCandidateDict["id"] as? String)
+
+        let suggestedCandidate = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "pattern",
+                "--value", "Erik sometimes mentions afternoon walks",
+                "--evidence", "Maybe afternoon walks are useful.",
+                "--memory-key", "erik.afternoon.walks",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let suggestedCandidateDict = try #require(suggestedCandidate["candidate"] as? [String: Any])
+        let suggestedCandidateID = try #require(suggestedCandidateDict["id"] as? String)
+
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedCandidateID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+
+        let list = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "list", "--json"], vault: vault),
+            command: "item.memory-facts.list"
+        )
+        #expect(list["readOnly"] as? Bool == true)
+        #expect(list["changed"] as? Bool == false)
+        let facts = try #require(list["facts"] as? [[String: Any]])
+        #expect(facts.count == 1)
+        #expect(facts.first?["candidateID"] as? String == acceptedCandidateID)
+        #expect(facts.first?["truthBoundary"] as? String == "accepted_memory_fact")
+        #expect(facts.first?["truthState"] as? String == "accepted")
+        #expect(facts.first?["reviewState"] as? String == "accepted")
+        #expect(facts.first?["sourceEvidenceRecord"] != nil)
+        #expect(facts.first?["actionHistory"] != nil)
+        #expect(facts.first?["reviewActionCommands"] == nil)
+        #expect(facts.contains { $0["candidateID"] as? String == suggestedCandidateID } == false)
+
+        let inspect = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "inspect", acceptedCandidateID, "--json"], vault: vault),
+            command: "item.memory-facts.inspect"
+        )
+        let inspectedFact = try #require(inspect["fact"] as? [String: Any])
+        #expect(inspectedFact["candidateRef"] as? String == "memory_candidate:\(acceptedCandidateID)")
+        #expect(inspectedFact["sourceQuote"] as? String == "Erik prefers espresso in the morning.")
+        #expect((inspectedFact["safeVerificationCommands"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedCandidateID) --json") == true)
+
+        let recall = try assertStrictProcessJSON(
+            runCLI(args: ["item", "recall-context", "--item", "note", noteID, "--json"], vault: vault),
+            command: "item.recall-context"
+        )
+        let acceptedFacts = try #require(recall["acceptedFacts"] as? [[String: Any]])
+        #expect(acceptedFacts.contains { fact in
+            fact["kind"] as? String == "accepted_memory_fact"
+                && fact["candidateID"] as? String == acceptedCandidateID
+                && fact["truthBoundary"] as? String == "accepted_memory_fact"
+        })
+        let reviewable = try #require(recall["reviewableCandidates"] as? [[String: Any]])
+        #expect(reviewable.contains { candidate in
+            candidate["id"] as? String == suggestedCandidateID
+                && candidate["truthState"] as? String == "reviewable_candidate_not_truth"
+        })
+        #expect(reviewable.contains { $0["id"] as? String == acceptedCandidateID } == false)
+    }
+
+    @Test("accepted memory fact selectors return structured failures")
+    func acceptedMemoryFactSelectorsReturnStructuredFailures() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-accepted-memory-fact-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missing = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "inspect", "missing-memory-fact", "--json"], vault: vault),
+            command: "item.memory-facts.inspect",
+            errorCode: "accepted_memory_fact_not_found"
+        )
+        #expect(missing["readOnly"] as? Bool == true)
+        #expect(missing["changed"] as? Bool == false)
+        let selector = try #require(missing["selector"] as? [String: Any])
+        #expect(selector["candidateID"] as? String == "missing-memory-fact")
+
+        let noteID = try createNote(title: "Unaccepted Memory Source", content: "Candidate only.", vault: vault)
+        let candidatePayload = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "preference",
+                "--value", "Candidate only memory",
+                "--evidence", "Candidate only.",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let candidate = try #require(candidatePayload["candidate"] as? [String: Any])
+        let candidateID = try #require(candidate["id"] as? String)
+        let unaccepted = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "inspect", candidateID, "--json"], vault: vault),
+            command: "item.memory-facts.inspect",
+            errorCode: "memory_candidate_not_accepted"
+        )
+        #expect(unaccepted["reviewState"] as? String == "suggested")
+        #expect((unaccepted["safeNextCommands"] as? [String])?.contains("cider-cli capture review-queue --kind memory_candidate --json") == true)
+    }
+
     @Test("link helper failures return structured receipts without mutation")
     func linkHelperFailuresReturnStructuredReceiptsWithoutMutation() throws {
         let vault = FileManager.default.temporaryDirectory

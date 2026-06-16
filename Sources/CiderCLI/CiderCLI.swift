@@ -4944,6 +4944,8 @@ struct CiderCLI {
               cider-cli item entity list [--limit <n>] [--json]
               cider-cli item entity inspect <entity-ref|name|alias> [--json]
               cider-cli item fact-validity list|inspect|state|propose|accept|reject|defer ... [--json]
+              cider-cli item memory-facts list [--limit <n>] [--json]
+              cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
               cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
               cider-cli item graph-candidate <candidate-id> [--json]
               cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
@@ -5414,6 +5416,9 @@ struct CiderCLI {
 
         case "delegate-graph-candidate", "graph-candidate-delegate":
             handleGraphCandidateMutationCommand(action: "delegate", args: args, store: store)
+
+        case "memory-facts", "memory-fact", "accepted-memory-facts", "accepted-memory":
+            handleAcceptedMemoryFactsCommand(args: args)
 
         case "accept-memory-candidate", "memory-candidate-accept":
             handleMemoryCandidateMutationCommand(action: "accept", args: args, store: store)
@@ -13802,7 +13807,7 @@ struct CiderCLI {
             var dict: [String: Any] = ["ok": false, "error": message]
             if let details {
                 dict["details"] = details
-                for promotedKey in ["command", "readOnly", "changed", "errorCode", "supportedTypes", "supportedValues", "filter", "selector", "expectedFormat", "minimum", "policyNote", "sourceRef", "safeVerificationCommands", "safeNextCommands", "actionReceipt"] {
+                for promotedKey in ["command", "readOnly", "changed", "errorCode", "supportedTypes", "supportedValues", "filter", "selector", "reviewState", "truthBoundary", "expectedFormat", "minimum", "policyNote", "sourceRef", "safeVerificationCommands", "safeNextCommands", "actionReceipt"] {
                     if let value = details[promotedKey] {
                         dict[promotedKey] = value
                     }
@@ -16457,6 +16462,11 @@ struct CiderCLI {
             reasonKinds.append(contentsOf: accepted.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
             surfacedRefs.append(contentsOf: accepted.compactMap { ($0["id"] as? String).map { "owner_relation:\($0)" } })
             acceptedFacts.append(contentsOf: accepted)
+            let acceptedMemoryOutputs = bundle.enrichmentOutputs.filter { $0.kind == "memory_candidate" && $0.reviewState == "accepted" }
+            let acceptedMemoryFacts = acceptedMemoryOutputs.map { recallAcceptedMemoryFactToDict($0, scoringService: scoringService) }
+            reasonKinds.append(contentsOf: acceptedMemoryFacts.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
+            surfacedRefs.append(contentsOf: acceptedMemoryFacts.compactMap { $0["factRef"] as? String })
+            acceptedFacts.append(contentsOf: acceptedMemoryFacts)
             let candidateOutputs = bundle.enrichmentOutputs.filter {
                 $0.kind == SecondBrainGraphCandidateContract.outputKind && ["suggested", "needs_review", "deferred"].contains($0.reviewState)
             }
@@ -16662,6 +16672,23 @@ struct CiderCLI {
             dict["scoreReasons"] = scoreReasonsToDict(reasons)
             return dict
         }
+    }
+
+    static func recallAcceptedMemoryFactToDict(_ output: SecondBrainEnrichmentOutput, scoringService: CiderRecallExplanationService) -> [String: Any] {
+        var dict = acceptedMemoryFactToDict(SecondBrainAcceptedMemoryFact(candidate: output))
+        dict["citation"] = recallCitation(owner: output.owner)
+        let evidenceRecord = sourceEvidenceRecord(for: output)
+        let lifecycle = lifecycleHistoryEvents(for: output)
+        let reasons = scoringService.candidateReasons(output: output, evidenceRecord: evidenceRecord, lifecycleHistory: lifecycle)
+        dict["recallScore"] = scoringService.score(reasons)
+        dict["scoreReasons"] = scoreReasonsToDict(reasons)
+        dict["safetyBoundary"] = [
+            "accepted_memory_fact_requires_explicit_accept",
+            "reviewable_candidates_are_not_truth",
+            "action_receipts_are_command_outcomes_not_truth",
+            "source_quote_and_citation_required",
+        ]
+        return dict
     }
 
     static func recallGraphCandidateToDict(_ output: SecondBrainEnrichmentOutput, scoringService: CiderRecallExplanationService) -> [String: Any] {
@@ -16982,6 +17009,185 @@ struct CiderCLI {
         commands.append("cider-cli item owner-get \(owner.ownerType) \(owner.ownerID) --json")
         var seen = Set<String>()
         return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func handleAcceptedMemoryFactsCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first ?? "list"
+        let service = SecondBrainAcceptedMemoryFactService(database: .shared)
+        do {
+            switch action {
+            case "list", "ls":
+                let limit = max(1, min(parseFlag("--limit", from: args).flatMap(Int.init) ?? 50, 100))
+                let facts = try service.list(limit: limit)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.memory-facts.list",
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "accepted_memory_facts_only",
+                    "candidateBoundary": "reviewable_memory_candidates_excluded",
+                    "count": facts.count,
+                    "facts": facts.map(acceptedMemoryFactToDict),
+                    "safeNextCommands": [
+                        "cider-cli item memory-facts list --json",
+                        "cider-cli capture review-queue --kind memory_candidate --json",
+                    ],
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Accepted memory facts: \(facts.count)") }
+            case "inspect", "get":
+                let rawID = positional.dropFirst().first ?? parseFlag("--id", from: args) ?? parseFlag("--candidate", from: args)
+                do {
+                    let fact = try service.inspect(rawID)
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.inspect",
+                        "readOnly": true,
+                        "changed": false,
+                        "selector": ["candidateID": fact.id, "factRef": fact.factRef, "candidateRef": fact.candidateRef],
+                        "fact": acceptedMemoryFactToDict(fact),
+                        "safeNextCommands": acceptedMemoryFactSafeCommands(fact.candidate),
+                    ]
+                    if jsonOutput { outputJSON(payload) } else { print("Accepted memory fact: \(fact.id)") }
+                } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
+                    printAcceptedMemoryFactError(factError, rawID: rawID)
+                }
+            default:
+                printCLIError(
+                    "Unsupported accepted memory fact action '\(action)'.",
+                    details: [
+                        "ok": false,
+                        "command": "item.memory-facts",
+                        "readOnly": true,
+                        "changed": false,
+                        "errorCode": "unsupported_memory_facts_action",
+                        "supportedActions": ["list", "inspect"],
+                        "safeNextCommands": ["cider-cli item memory-facts list --json"],
+                    ]
+                )
+            }
+        } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
+            printAcceptedMemoryFactError(factError, rawID: nil)
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func acceptedMemoryFactToDict(_ fact: SecondBrainAcceptedMemoryFact) -> [String: Any] {
+        let output = fact.candidate
+        var dict: [String: Any] = [
+            "id": fact.factRef,
+            "kind": "accepted_memory_fact",
+            "factRef": fact.factRef,
+            "candidateID": output.id,
+            "candidateRef": fact.candidateRef,
+            "owner": ownerToDict(output.owner),
+            "ownerRef": output.owner.canonicalRef,
+            "memoryKind": output.metadata["accepted_memory_kind"] ?? output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? "memory",
+            "value": output.metadata["accepted_value"] ?? output.value,
+            "normalizedValue": output.normalizedValue,
+            "sourceQuote": output.evidence,
+            "evidence": output.evidence,
+            "source": output.source,
+            "reviewState": output.reviewState,
+            "truthState": "accepted",
+            "truthBoundary": "accepted_memory_fact",
+            "isAcceptedTruth": true,
+            "candidateBoundary": "reviewable_memory_candidates_excluded",
+            "createdAt": ISO8601DateFormatter().string(from: output.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: output.updatedAt),
+            "metadata": output.metadata,
+            "citation": recallCitation(owner: output.owner),
+            "safeVerificationCommands": ["cider-cli item memory-facts inspect \(output.id) --json"],
+            "safeNextCommands": acceptedMemoryFactSafeCommands(output),
+            "safetyBoundary": [
+                "accepted_memory_fact_requires_explicit_accept",
+                "reviewable_candidates_are_not_truth",
+                "action_receipts_are_command_outcomes_not_truth",
+                "source_quote_and_citation_required",
+            ],
+        ]
+        if let confidence = output.confidence { dict["confidence"] = confidence }
+        if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
+        if let observedDate = output.metadata["observed_date"] { dict["observedDate"] = observedDate }
+        if let memoryKey = output.metadata["memory_key"] { dict["memoryKey"] = memoryKey }
+        if let memoryStatus = output.metadata["memory_status"] { dict["memoryStatus"] = memoryStatus }
+        if let reviewedAt = output.metadata["reviewed_at"] { dict["acceptedAt"] = reviewedAt; dict["reviewedAt"] = reviewedAt }
+        if let reviewedBy = output.metadata["reviewed_by"] { dict["acceptedBy"] = reviewedBy; dict["reviewedBy"] = reviewedBy }
+        if let evidenceRecord = sourceEvidenceRecordToDict(for: output) { dict["sourceEvidenceRecord"] = evidenceRecord }
+        let lifecycle = lifecycleHistoryToDict(for: output)
+        if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
+        let history = acceptedMemoryFactActionHistory(output)
+        if !history.isEmpty { dict["actionHistory"] = history }
+        return dict
+    }
+
+    static func acceptedMemoryFactActionHistory(_ output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
+        do {
+            let records = try SecondBrainActionReceiptLedgerService(database: .shared).list(filter: SecondBrainActionReceiptFilter(
+                owner: output.owner,
+                command: "item.accept-memory-candidate",
+                sourceRef: "memory_candidate:\(output.id)",
+                limit: 10
+            ))
+            return records.map(recallActionHistoryEntryToDict)
+        } catch {
+            return []
+        }
+    }
+
+    static func acceptedMemoryFactSafeCommands(_ output: SecondBrainEnrichmentOutput) -> [String] {
+        var commands = [
+            "cider-cli item memory-facts inspect \(output.id) --json",
+            "cider-cli item memory-facts list --json",
+            "cider-cli item recall-context --item \(output.owner.ownerType) \(output.owner.ownerID) --json",
+            "cider-cli item owner-get \(output.owner.ownerType) \(output.owner.ownerID) --json",
+            "cider-cli item action-ledger list --owner \(output.owner.canonicalRef) --command item.accept-memory-candidate --json",
+        ]
+        commands.append(contentsOf: memoryCandidateSafeCommands(owner: output.owner))
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func printAcceptedMemoryFactError(
+        _ error: SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError,
+        rawID: String?
+    ) {
+        let requested = (rawID ?? "")
+            .replacingOccurrences(of: "accepted_memory_fact:", with: "")
+            .replacingOccurrences(of: "memory_candidate:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var details: [String: Any] = [
+            "ok": false,
+            "command": "item.memory-facts.inspect",
+            "readOnly": true,
+            "changed": false,
+            "error": error.localizedDescription,
+            "selector": ["candidateID": requested],
+            "safeNextCommands": [
+                "cider-cli item memory-facts list --json",
+                "cider-cli capture review-queue --kind memory_candidate --json",
+            ],
+        ]
+        switch error {
+        case .missingID:
+            details["errorCode"] = "missing_accepted_memory_fact_selector"
+            details["usage"] = "cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> --json"
+        case .notFound(let id):
+            details["errorCode"] = "accepted_memory_fact_not_found"
+            details["selector"] = ["candidateID": id]
+        case .notAccepted(let candidateID, let reviewState):
+            details["errorCode"] = "memory_candidate_not_accepted"
+            details["selector"] = ["candidateID": candidateID, "candidateRef": "memory_candidate:\(candidateID)"]
+            details["reviewState"] = reviewState
+            details["truthBoundary"] = "reviewable_candidate_not_truth"
+        case .wrongKind(let candidateID, let kind):
+            details["errorCode"] = "not_memory_candidate"
+            details["selector"] = ["candidateID": candidateID]
+            details["actualKind"] = kind
+            details["supportedKind"] = "memory_candidate"
+        }
+        printCLIError(error.localizedDescription, details: details)
     }
 
     static func handleMemoryCandidateMutationCommand(
