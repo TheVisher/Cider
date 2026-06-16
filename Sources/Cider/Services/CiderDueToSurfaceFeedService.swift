@@ -31,6 +31,7 @@ struct CiderDueToSurfaceCandidate: Identifiable, Equatable {
         case reviewItem = "review_item"
         case staleCapture = "stale_capture"
         case linkedContext = "linked_context"
+        case acceptedMemoryFact = "accepted_memory_fact"
     }
 
     var id: String
@@ -45,6 +46,13 @@ struct CiderDueToSurfaceCandidate: Identifiable, Equatable {
     var confidence: Double
     var reviewState: String
     var truthBoundary: String
+    var candidateBoundary: String? = nil
+    var explanation: String? = nil
+    var factRef: String? = nil
+    var candidateRef: String? = nil
+    var sourceCitation: String? = nil
+    var relatedRefs: [String] = []
+    var safeVerificationCommands: [String] = []
     var score: Double
     var sourceRefs: [String]
     var citedEvidence: [CiderDueToSurfaceEvidence]
@@ -80,6 +88,7 @@ enum CiderDueToSurfaceFeedService {
         reviewItems: [CiderReviewQueueItem],
         staleCaptures: [CiderDueToSurfaceStaleCapture],
         linkedContext: [CiderDueToSurfaceLinkedContext],
+        acceptedMemoryFacts: [SecondBrainAcceptedMemoryFact] = [],
         now: Date = Date(),
         limit: Int = 20
     ) -> CiderDueToSurfaceFeed {
@@ -88,6 +97,7 @@ enum CiderDueToSurfaceFeedService {
         candidates += reviewItems.map { reviewCandidate($0, now: now) }
         candidates += staleCaptures.map { staleCaptureCandidate($0, now: now) }
         candidates += linkedContext.map { linkedContextCandidate($0, now: now) }
+        candidates += acceptedMemoryFacts.map { acceptedMemoryFactCandidate($0, now: now) }
 
         let sorted = candidates.sorted { lhs, rhs in
             if lhs.score != rhs.score { return lhs.score > rhs.score }
@@ -103,8 +113,79 @@ enum CiderDueToSurfaceFeedService {
                 "cider-cli agenda --json",
                 "cider-cli capture review-queue --limit 20 --json",
                 "cider-cli item recall-context --query <topic> --json",
+                "cider-cli item memory-facts resurface --json",
                 "cider-cli item similarity-health --json",
             ]
+        )
+    }
+
+    static func acceptedMemoryFactCandidates(
+        _ facts: [SecondBrainAcceptedMemoryFact],
+        now: Date = Date(),
+        limit: Int = 20
+    ) -> [CiderDueToSurfaceCandidate] {
+        facts.map { acceptedMemoryFactCandidate($0, now: now) }
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            .prefix(max(0, limit))
+            .map { $0 }
+    }
+
+    private static func acceptedMemoryFactCandidate(_ fact: SecondBrainAcceptedMemoryFact, now: Date) -> CiderDueToSurfaceCandidate {
+        let output = fact.candidate
+        let memoryKind = output.metadata["accepted_memory_kind"] ?? output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? "memory"
+        let memoryStatus = output.metadata["memory_status"] ?? "current"
+        let reviewedAt = output.metadata["reviewed_at"].flatMap { ISO8601DateFormatter().date(from: $0) }
+        var reasonCodes = ["accepted_memory_fact", "follow_up_relevance", memoryKind, memoryStatus]
+        if output.metadata["memory_key"] != nil { reasonCodes.append("has_memory_key") }
+        if output.metadata["linked_owner_refs"] != nil { reasonCodes.append("has_linked_owners") }
+        let relatedRefs = DatabaseHelpers.decodeStringArray(output.metadata["linked_owner_refs"])
+        let evidenceRef = output.metadata["source_evidence_ref"] ?? "source_evidence:\(output.id)"
+        let sourceCitation = output.metadata["source_owner_ref"] ?? output.owner.canonicalRef
+        let explanation = "Accepted memory fact is eligible for follow-up relevance because it was explicitly accepted and has source-backed evidence."
+        let safeCommands = [
+            "cider-cli item memory-facts inspect \(output.id) --json",
+            "cider-cli item recall-context --item \(output.owner.ownerType) \(output.owner.ownerID) --json",
+            "cider-cli item action-ledger list --owner \(output.owner.canonicalRef) --command item.accept-memory-candidate --json",
+        ]
+        return CiderDueToSurfaceCandidate(
+            id: fact.factRef,
+            family: .acceptedMemoryFact,
+            owner: output.owner,
+            title: output.metadata["accepted_value"] ?? output.value,
+            itemType: memoryKind,
+            whyNow: explanation,
+            reasonCodes: Array(Set(reasonCodes)).sorted(),
+            urgency: "context",
+            window: CiderDueToSurfaceWindow(label: "accepted memory follow-up", startsAt: reviewedAt ?? output.updatedAt, endsAt: nil),
+            confidence: output.confidence ?? 0.75,
+            reviewState: output.reviewState,
+            truthBoundary: "accepted_memory_fact",
+            candidateBoundary: "reviewable_memory_candidates_excluded",
+            explanation: explanation,
+            factRef: fact.factRef,
+            candidateRef: fact.candidateRef,
+            sourceCitation: sourceCitation,
+            relatedRefs: relatedRefs,
+            safeVerificationCommands: ["cider-cli item memory-facts inspect \(output.id) --json"],
+            score: 58 + ((output.confidence ?? 0.75) * 10),
+            sourceRefs: Array(Set([fact.factRef, fact.candidateRef, output.owner.canonicalRef, sourceCitation] + relatedRefs)).sorted(),
+            citedEvidence: [
+                CiderDueToSurfaceEvidence(
+                    ref: evidenceRef,
+                    kind: "accepted_memory_fact_source",
+                    summary: output.evidence,
+                    sourceOwnerRef: sourceCitation,
+                    candidateRef: fact.candidateRef,
+                    metadata: [
+                        "truthBoundary": "accepted_memory_fact",
+                        "candidateBoundary": "reviewable_memory_candidates_excluded",
+                    ]
+                ),
+            ],
+            safeNextCommands: safeCommands
         )
     }
 
@@ -264,6 +345,10 @@ enum CiderDueToSurfaceFeedService {
     }
 
     private static func reviewUrgency(severity: String, priority: TimeInterval) -> String { "review" }
+
+    static func groupedFamilyCounts(_ candidates: [CiderDueToSurfaceCandidate]) -> [String: Int] {
+        groupedCounts(candidates.map { $0.family.rawValue })
+    }
 
     private static func groupedCounts(_ values: [String]) -> [String: Int] {
         values.reduce(into: [:]) { counts, value in counts[value, default: 0] += 1 }

@@ -4946,6 +4946,7 @@ struct CiderCLI {
               cider-cli item fact-validity list|inspect|state|propose|accept|reject|defer ... [--json]
               cider-cli item memory-facts list [--limit <n>] [--json]
               cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
+              cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
               cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
               cider-cli item graph-candidate <candidate-id> [--json]
               cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
@@ -16247,11 +16248,13 @@ struct CiderCLI {
         }
         let staleCaptures = staleCaptureSignals(now: now, staleAfterDays: staleAfterDays)
         let linkedContext = linkedContextSignals(limit: limit)
+        let acceptedMemoryFacts = acceptedMemoryFactsForResurfacing(limit: limit)
         return CiderDueToSurfaceFeedService.build(
             agenda: agenda,
             reviewItems: reviewItems,
             staleCaptures: staleCaptures,
             linkedContext: linkedContext,
+            acceptedMemoryFacts: acceptedMemoryFacts,
             now: now,
             limit: limit
         )
@@ -16298,6 +16301,16 @@ struct CiderCLI {
             )
         }
         return captures.sorted { lhs, rhs in lhs.updatedAt < rhs.updatedAt }
+    }
+
+    static func acceptedMemoryFactsForResurfacing(limit: Int, factID: String? = nil) -> [SecondBrainAcceptedMemoryFact] {
+        do {
+            let service = SecondBrainAcceptedMemoryFactService(database: .shared)
+            if let factID { return [try service.inspect(factID)] }
+            return try service.list(limit: limit)
+        } catch {
+            return []
+        }
     }
 
     static func linkedContextSignals(limit: Int) -> [CiderDueToSurfaceLinkedContext] {
@@ -17050,7 +17063,41 @@ struct CiderCLI {
                     ]
                     if jsonOutput { outputJSON(payload) } else { print("Accepted memory fact: \(fact.id)") }
                 } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
-                    printAcceptedMemoryFactError(factError, rawID: rawID)
+                    printAcceptedMemoryFactError(factError, rawID: rawID, command: "item.memory-facts.inspect")
+                }
+            case "resurface", "relevance", "surface":
+                guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: "item.memory-facts.resurface", minimum: 1) else { return }
+                let limit = min(parsedLimit ?? 20, 100)
+                let rawFactID = parseFlag("--fact", from: args) ?? parseFlag("--candidate", from: args)
+                let facts: [SecondBrainAcceptedMemoryFact]
+                do {
+                    if let rawFactID {
+                        facts = [try service.inspect(rawFactID)]
+                    } else {
+                        facts = try service.list(limit: limit)
+                    }
+                    let candidates = CiderDueToSurfaceFeedService.acceptedMemoryFactCandidates(facts, limit: limit)
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.resurface",
+                        "readOnly": true,
+                        "changed": false,
+                        "truthBoundary": "accepted_memory_fact",
+                        "candidateBoundary": "reviewable_memory_candidates_excluded",
+                        "count": candidates.count,
+                        "countsByFamily": CiderDueToSurfaceFeedService.groupedFamilyCounts(candidates),
+                        "selector": rawFactID.map { ["candidateID": $0] } ?? [:],
+                        "candidates": candidates.map { dueToSurfaceCandidateToDict($0, formatter: ISO8601DateFormatter()) },
+                        "safeVerificationCommands": ["cider-cli item memory-facts resurface --json"],
+                        "safeNextCommands": [
+                            "cider-cli item memory-facts list --json",
+                            "cider-cli item due-to-surface --json",
+                            "cider-cli item recall-context --query <topic> --json",
+                        ],
+                    ]
+                    if jsonOutput { outputJSON(payload) } else { print("Accepted memory fact relevance candidates: \(candidates.count)") }
+                } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
+                    printAcceptedMemoryFactError(factError, rawID: rawFactID, command: "item.memory-facts.resurface")
                 }
             default:
                 printCLIError(
@@ -17151,7 +17198,8 @@ struct CiderCLI {
 
     static func printAcceptedMemoryFactError(
         _ error: SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError,
-        rawID: String?
+        rawID: String?,
+        command: String = "item.memory-facts.inspect"
     ) {
         let requested = (rawID ?? "")
             .replacingOccurrences(of: "accepted_memory_fact:", with: "")
@@ -17159,7 +17207,7 @@ struct CiderCLI {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         var details: [String: Any] = [
             "ok": false,
-            "command": "item.memory-facts.inspect",
+            "command": command,
             "readOnly": true,
             "changed": false,
             "error": error.localizedDescription,

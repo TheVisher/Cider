@@ -1303,7 +1303,7 @@ func dueToSurfaceFeedToDict(_ feed: CiderDueToSurfaceFeed) -> [String: Any] {
         "changed": feed.changed,
         "count": feed.candidates.count,
         "countsByFamily": feed.countsByFamily,
-        "truthBoundary": "reviewable_candidate_not_truth",
+        "truthBoundary": "mixed_reviewable_and_accepted_truth_boundaries",
         "candidates": feed.candidates.map { dueToSurfaceCandidateToDict($0, formatter: formatter) },
         "safeNextCommands": feed.safeNextCommands,
     ]
@@ -1332,9 +1332,19 @@ func dueToSurfaceCandidateToDict(_ candidate: CiderDueToSurfaceCandidate, format
         "safeNextCommands": candidate.safeNextCommands,
         "window": dueToSurfaceWindowToDict(candidate.window, formatter: formatter),
     ]
+    if let candidateBoundary = candidate.candidateBoundary { dict["candidateBoundary"] = candidateBoundary }
+    if let explanation = candidate.explanation { dict["explanation"] = explanation }
+    if let factRef = candidate.factRef { dict["factRef"] = factRef }
+    if let candidateRef = candidate.candidateRef { dict["candidateRef"] = candidateRef }
+    if let sourceCitation = candidate.sourceCitation { dict["sourceCitation"] = sourceCitation }
+    if !candidate.relatedRefs.isEmpty { dict["relatedRefs"] = candidate.relatedRefs }
+    if !candidate.safeVerificationCommands.isEmpty { dict["safeVerificationCommands"] = candidate.safeVerificationCommands }
     if candidate.truthBoundary == "reviewable_candidate_not_truth" {
         dict["needsReview"] = true
         dict["acceptedTruth"] = false
+    } else if candidate.truthBoundary == "accepted_memory_fact" {
+        dict["needsReview"] = false
+        dict["acceptedTruth"] = true
     }
     return dict
 }
