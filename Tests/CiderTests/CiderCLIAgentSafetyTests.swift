@@ -255,6 +255,171 @@ struct CiderCLIAgentSafetyTests {
         })
     }
 
+    @Test("action ledger inspect missing returns and persists structured failure receipt")
+    func actionLedgerInspectMissingReturnsAndPersistsStructuredFailureReceipt() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-action-ledger-missing-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missingID = "missing-action-receipt-cid532"
+        let result = try runCLI(args: ["item", "action-ledger", "inspect", missingID, "--json"], vault: vault)
+        #expect(result.status != 0)
+        let payload = try parseJSONObject(result.stdout)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == "item.action-ledger.inspect")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["errorCode"] as? String == "action_receipt_not_found")
+        let receipt = try #require(payload["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.action-ledger.inspect")
+        #expect(receipt["action"] as? String == "inspect")
+        #expect(receipt["status"] as? String == "failed")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        #expect(receipt["errorCode"] as? String == "action_receipt_not_found")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("action_receipt:\(missingID)") == true)
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--command", "item.action-ledger.inspect", "--status", "failed", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["errorCode"] as? String == "action_receipt_not_found"
+                && (entry["sourceRefs"] as? [String])?.contains("action_receipt:\(missingID)") == true
+        })
+    }
+
+    @Test("entity resolution inspect missing returns and persists structured failure receipt")
+    func entityResolutionInspectMissingReturnsAndPersistsStructuredFailureReceipt() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-entity-resolution-missing-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missingID = "missing-entity-resolution-cid532"
+        let result = try runCLI(args: ["item", "entity-resolution", "inspect", missingID, "--json"], vault: vault)
+        #expect(result.status != 0)
+        let payload = try parseJSONObject(result.stdout)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == "item.entity-resolution.inspect")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["errorCode"] as? String == "entity_resolution_candidate_not_found")
+        let receipt = try #require(payload["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.entity-resolution.inspect")
+        #expect(receipt["status"] as? String == "failed")
+        #expect(receipt["errorCode"] as? String == "entity_resolution_candidate_not_found")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("entity_resolution_candidate:\(missingID)") == true)
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--command", "item.entity-resolution.inspect", "--status", "failed", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in entry["errorCode"] as? String == "entity_resolution_candidate_not_found" })
+    }
+
+    @Test("fact validity missing and duplicate defer return structured failure or no-op receipts")
+    func factValidityMissingAndDuplicateDeferReturnStructuredReceipts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-fact-validity-noop-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missingID = "missing-fact-validity-cid532"
+        let missing = try runCLI(args: ["item", "fact-validity", "reject", missingID, "--reason", "Missing candidate.", "--json"], vault: vault)
+        #expect(missing.status != 0)
+        let missingPayload = try parseJSONObject(missing.stdout)
+        #expect(missingPayload["command"] as? String == "item.fact-validity.reject")
+        #expect(missingPayload["errorCode"] as? String == "fact_validity_candidate_not_found")
+        #expect(missingPayload["readOnly"] as? Bool == false)
+        #expect(missingPayload["changed"] as? Bool == false)
+        let missingReceipt = try #require(missingPayload["actionReceipt"] as? [String: Any])
+        #expect(missingReceipt["status"] as? String == "failed")
+        #expect(missingReceipt["errorCode"] as? String == "fact_validity_candidate_not_found")
+        #expect((missingReceipt["sourceRefs"] as? [String])?.contains("fact_validity_candidate:\(missingID)") == true)
+
+        let noteID = try createNote(title: "Fact Validity No-op Source", content: "Newer evidence exists.", vault: vault)
+        let propose = try runCLI(
+            args: [
+                "item", "fact-validity", "propose",
+                "--target-ref", "owner_relation:cid532-target",
+                "--state", "superseded",
+                "--source-owner", "note:\(noteID)",
+                "--quote", "Newer evidence exists.",
+                "--reason", "Testing no-op defer.",
+                "--json",
+            ],
+            vault: vault
+        )
+        let proposed = try parseJSONObject(propose.stdout)
+        let candidate = try #require(proposed["candidate"] as? [String: Any])
+        let candidateID = try #require(candidate["id"] as? String)
+
+        let firstDefer = try runCLI(args: ["item", "fact-validity", "defer", candidateID, "--reason", "Later.", "--json"], vault: vault)
+        #expect(firstDefer.status == 0)
+        let duplicateDefer = try runCLI(args: ["item", "fact-validity", "defer", candidateID, "--reason", "Still later.", "--json"], vault: vault)
+        let duplicatePayload = try parseJSONObject(duplicateDefer.stdout)
+        #expect(duplicateDefer.status == 0)
+        #expect(duplicatePayload["changed"] as? Bool == false)
+        #expect(duplicatePayload["errorCode"] as? String == "fact_validity_already_deferred")
+        let duplicateReceipt = try #require(duplicatePayload["actionReceipt"] as? [String: Any])
+        #expect(duplicateReceipt["status"] as? String == "no_op")
+        #expect(duplicateReceipt["changed"] as? Bool == false)
+        #expect(duplicateReceipt["errorCode"] as? String == "fact_validity_already_deferred")
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--source-ref", "fact_validity_candidate:\(candidateID)", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { $0["errorCode"] as? String == "fact_validity_already_deferred" && $0["status"] as? String == "no_op" })
+    }
+
+    @Test("recall context action history supports filters windows and selector echo")
+    func recallContextActionHistorySupportsFiltersWindowsAndSelectorEcho() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-recall-history-filter-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceID = try createNote(title: "Recall History Source", content: "Source", vault: vault)
+        let targetID = try createNote(title: "Recall History Target", content: "Target", vault: vault)
+        let since = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-60))
+        _ = try parseJSONObject(try runCLI(args: ["item", "link", "note", sourceID, "note", targetID, "--json"], vault: vault).stdout)
+        _ = try parseJSONObject(try runCLI(args: ["item", "why-surfaced", "note", sourceID, "--json"], vault: vault).stdout)
+        let before = ISO8601DateFormatter().string(from: Date().addingTimeInterval(60))
+
+        let recall = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "recall-context", "--item", "note", sourceID,
+                "--history-command", "link.add",
+                "--history-status", "succeeded",
+                "--history-evidence-ref", "note:\(targetID)",
+                "--history-since", since,
+                "--history-before", before,
+                "--history-limit", "1",
+                "--json",
+            ], vault: vault),
+            command: "item.recall-context"
+        )
+        let filters = try #require(recall["actionHistoryFilters"] as? [String: Any])
+        #expect(filters["command"] as? String == "link.add")
+        #expect(filters["status"] as? String == "succeeded")
+        #expect(filters["evidenceRef"] as? String == "note:\(targetID)")
+        #expect(filters["since"] as? String == since)
+        #expect(filters["before"] as? String == before)
+        #expect(filters["limit"] as? Int == 1)
+        let history = try #require(recall["actionHistory"] as? [[String: Any]])
+        #expect(history.count == 1)
+        #expect(history.first?["command"] as? String == "link.add")
+        #expect(history.first?["status"] as? String == "succeeded")
+        #expect((history.first?["evidenceRefs"] as? [String])?.contains("note:\(targetID)") == true)
+        #expect(history.first?["truthBoundary"] as? String == "action_receipt_not_fact_truth")
+    }
+
     @Test("note JSON exposes project artifact metadata")
     func noteJSONExposesProjectArtifactMetadata() throws {
         let note = Note(

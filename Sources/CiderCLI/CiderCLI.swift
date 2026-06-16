@@ -4909,7 +4909,7 @@ struct CiderCLI {
                 Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
               cider-cli item open <type> <id-or-ref> [--json]
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
-              cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--json]
+              cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
               cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
               cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
@@ -13213,6 +13213,47 @@ struct CiderCLI {
         )
     }
 
+    static func structuredActionReceiptFailurePayload(
+        command: String,
+        action: String,
+        actor: String = "cider-cli",
+        owner: SecondBrainOwnerRef? = nil,
+        readOnly: Bool,
+        errorCode: String,
+        error: String,
+        sourceRefs: [String],
+        evidenceRefs: [String] = [],
+        safeVerificationCommands: [String],
+        safeNextCommands: [String]
+    ) -> [String: Any] {
+        let receipt = agentActionReceiptToDict(
+            command: command,
+            action: action,
+            actor: actor,
+            owner: owner,
+            sourceRefs: sourceRefs,
+            evidenceRefs: evidenceRefs,
+            readOnly: readOnly,
+            changed: false,
+            status: "failed",
+            errorCode: errorCode,
+            error: error,
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: safeNextCommands
+        )
+        return [
+            "ok": false,
+            "command": command,
+            "readOnly": readOnly,
+            "changed": false,
+            "errorCode": errorCode,
+            "error": error,
+            "actionReceipt": receipt,
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": safeNextCommands,
+        ]
+    }
+
     static func actionLedgerFilterToDict(_ filter: SecondBrainActionReceiptFilter) -> [String: Any] {
         var dict: [String: Any] = ["limit": filter.limit]
         if let owner = filter.owner {
@@ -13261,8 +13302,26 @@ struct CiderCLI {
                     printCLIError("Usage: cider-cli item action-ledger inspect <receipt-id> [--json]")
                     return
                 }
-                guard let entry = try service.inspect(id: positional[1]) else {
-                    printCLIError("No action ledger entry found matching '\(positional[1])'.", details: ["errorCode": "not_found"])
+                let receiptID = positional[1]
+                guard let entry = try service.inspect(id: receiptID) else {
+                    var payload = structuredActionReceiptFailurePayload(
+                        command: "item.action-ledger.inspect",
+                        action: "inspect",
+                        readOnly: true,
+                        errorCode: "action_receipt_not_found",
+                        error: "No action ledger entry found matching '\(receiptID)'.",
+                        sourceRefs: ["action_receipt:\(receiptID)"],
+                        safeVerificationCommands: [
+                            "cider-cli item action-ledger inspect \(receiptID) --json",
+                            "cider-cli item action-ledger list --command item.action-ledger.inspect --status failed --json",
+                        ],
+                        safeNextCommands: ["cider-cli item action-ledger list --json"]
+                    )
+                    payload["receiptID"] = receiptID
+                    payload["receiptRef"] = "action_receipt:\(receiptID)"
+                    processExitCode = 1
+                    persistActionReceiptIfPresent(payload)
+                    if jsonOutput { outputJSON(payload) } else { print("Error: No action ledger entry found matching '\(receiptID)'.") }
                     return
                 }
                 if jsonOutput {
@@ -15844,7 +15903,7 @@ struct CiderCLI {
         var errorDescription: String? {
             switch self {
             case .missingSelector:
-                return "Usage: cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--json]"
+                return "Usage: cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--history-command <command>] [--history-status <status>] [--history-limit <n>] [--json]"
             case .malformedOrUnresolvedSelector(let message):
                 return message
             case .noRecallMatches(let query):
@@ -15889,6 +15948,9 @@ struct CiderCLI {
         guard !anchorRefs.isEmpty else { throw RecallContextCLIError.missingSelector }
 
         let bundles = try anchorRefs.prefix(limit).map { try contextService.context(for: $0) }
+        let actionHistoryLimit = boundedRecallActionHistoryLimit(from: args)
+        let actionHistoryFilters = recallActionHistoryFilterToDict(args: args, limit: actionHistoryLimit)
+        let actionLedgerService = SecondBrainActionReceiptLedgerService(database: .shared)
         let scoringService = CiderRecallExplanationService(database: .shared)
         let explicitItemSelector = parseRecallItemSelector(from: args) != nil
         var anchorDicts: [[String: Any]] = []
@@ -15979,7 +16041,8 @@ struct CiderCLI {
             reasonKinds.append(contentsOf: memoryCandidates.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
             surfacedRefs.append(contentsOf: memoryCandidates.compactMap { $0["candidateRef"] as? String ?? ($0["id"] as? String).map { "memory_candidate:\($0)" } })
             reviewableCandidates.append(contentsOf: memoryCandidates)
-            let history = bundle.actionReceipts.prefix(5).map(recallActionHistoryEntryToDict)
+            let historyRecords = try actionLedgerService.list(filter: recallActionHistoryFilter(from: args, owner: bundle.owner, limit: actionHistoryLimit))
+            let history = historyRecords.map(recallActionHistoryEntryToDict)
             actionHistory.append(contentsOf: history)
             surfacedRefs.append(contentsOf: history.compactMap { $0["receiptRef"] as? String })
             reasonKinds.append(contentsOf: history.map { _ in "action_receipt_history" })
@@ -16025,6 +16088,7 @@ struct CiderCLI {
             "acceptedFacts": orderedUniqueDictionaries(acceptedFacts, key: "id"),
             "reviewableCandidates": orderedUniqueDictionaries(reviewableCandidates, key: "id"),
             "actionHistory": orderedUniqueDictionaries(actionHistory, key: "id"),
+            "actionHistoryFilters": actionHistoryFilters,
             "reviewStatus": [
                 "needsReview": !blockingIssues.isEmpty,
                 "blockingIssues": orderedUniqueStrings(blockingIssues),
@@ -16033,6 +16097,35 @@ struct CiderCLI {
             "warnings": warnings,
             "safeNextCommands": orderedUniqueStrings(safeCommands),
         ]
+    }
+
+    static func boundedRecallActionHistoryLimit(from args: [String]) -> Int {
+        let raw = parseFlag("--history-limit", from: args)
+            ?? parseFlag("--action-history-limit", from: args)
+            ?? "5"
+        return max(1, min(Int(raw) ?? 5, 50))
+    }
+
+    static func recallActionHistoryFilter(from args: [String], owner: SecondBrainOwnerRef, limit: Int) -> SecondBrainActionReceiptFilter {
+        SecondBrainActionReceiptFilter(
+            owner: owner,
+            command: parseFlag("--history-command", from: args) ?? parseFlag("--action-history-command", from: args),
+            action: parseFlag("--history-action", from: args) ?? parseFlag("--action-history-action", from: args),
+            actor: parseFlag("--history-actor", from: args) ?? parseFlag("--action-history-actor", from: args),
+            status: parseFlag("--history-status", from: args) ?? parseFlag("--action-history-status", from: args),
+            sourceRef: parseFlag("--history-source-ref", from: args) ?? parseFlag("--action-history-source-ref", from: args),
+            evidenceRef: parseFlag("--history-evidence-ref", from: args) ?? parseFlag("--action-history-evidence-ref", from: args),
+            since: parseFactValidityDate(parseFlag("--history-since", from: args) ?? parseFlag("--action-history-since", from: args)),
+            before: parseFactValidityDate(parseFlag("--history-before", from: args) ?? parseFlag("--action-history-before", from: args)),
+            limit: limit
+        )
+    }
+
+    static func recallActionHistoryFilterToDict(args: [String], limit: Int) -> [String: Any] {
+        var dict = actionLedgerFilterToDict(recallActionHistoryFilter(from: args, owner: SecondBrainOwnerRef(ownerType: "_any", ownerID: "_any"), limit: limit))
+        dict.removeValue(forKey: "owner")
+        dict.removeValue(forKey: "ownerRef")
+        return dict
     }
 
     static func parseRecallItemSelector(from args: [String]) -> (type: String, ref: String)? {
@@ -17139,18 +17232,30 @@ struct CiderCLI {
                 let actor = parseFlag("--actor", from: args) ?? "cider-cli"
                 let reason = parseFlag("--reason", from: args) ?? parseFlag("--decision-note", from: args) ?? "Fact validity review action."
                 let existing = try service.candidate(id: id)
+                guard let existing else {
+                    outputMissingFactValidityMutation(candidateID: id, command: "item.fact-validity.\(action)", action: action, actor: actor)
+                    return
+                }
                 let candidate: SecondBrainFactValidityCandidateView
                 if action == "accept" {
                     candidate = try service.accept(candidateID: id, actor: actor, decisionNote: reason)
                 } else if action == "reject" {
-                    candidate = try service.reject(candidateID: id, actor: actor, reason: reason)
+                    if existing.reviewState == "rejected" {
+                        candidate = existing
+                    } else {
+                        candidate = try service.reject(candidateID: id, actor: actor, reason: reason)
+                    }
                 } else {
-                    candidate = try service.deferReview(candidateID: id, actor: actor, reason: reason)
+                    if existing.reviewState == "deferred" {
+                        candidate = existing
+                    } else {
+                        candidate = try service.deferReview(candidateID: id, actor: actor, reason: reason)
+                    }
                 }
-                let beforeState = existing?.reviewState
+                let beforeState = existing.reviewState
                 let changed = beforeState != candidate.reviewState
                 let factValidityDict = try service.validityState(targetRef: candidate.targetRef).map(factValidityStateToDict)
-                let errorCode = (!changed && action == "accept" && candidate.reviewState == "accepted") ? "fact_validity_already_accepted" : nil
+                let errorCode = factValidityNoOpErrorCode(action: action, reviewState: candidate.reviewState, changed: changed)
                 var payload: [String: Any] = [
                     "ok": true,
                     "command": "item.fact-validity.\(action)",
@@ -17179,6 +17284,42 @@ struct CiderCLI {
             }
         } catch {
             printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func outputMissingFactValidityMutation(candidateID: String, command: String, action: String, actor: String) {
+        var payload = structuredActionReceiptFailurePayload(
+            command: command,
+            action: action,
+            actor: actor,
+            readOnly: false,
+            errorCode: "fact_validity_candidate_not_found",
+            error: "Fact validity candidate not found: \(candidateID)",
+            sourceRefs: ["fact_validity_candidate:\(candidateID)"],
+            safeVerificationCommands: [
+                "cider-cli item fact-validity inspect \(candidateID) --json",
+                "cider-cli item action-ledger list --command \(command) --status failed --json",
+            ],
+            safeNextCommands: ["cider-cli item fact-validity list --json"]
+        )
+        payload["candidateID"] = candidateID
+        payload["candidateRef"] = "fact_validity_candidate:\(candidateID)"
+        processExitCode = 1
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput { outputJSON(payload) } else { print("Error: Fact validity candidate not found: \(candidateID)") }
+    }
+
+    static func factValidityNoOpErrorCode(action: String, reviewState: String, changed: Bool) -> String? {
+        guard !changed else { return nil }
+        switch (action, reviewState) {
+        case ("accept", "accepted"):
+            return "fact_validity_already_accepted"
+        case ("reject", "rejected"):
+            return "fact_validity_already_rejected"
+        case ("defer", "deferred"):
+            return "fact_validity_already_deferred"
+        default:
+            return nil
         }
     }
 
@@ -17344,7 +17485,28 @@ struct CiderCLI {
                 if jsonOutput { outputJSON(payload) } else { print("Entity-resolution candidates: \(candidates.count)") }
             case "inspect", "show", "get":
                 guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution inspect <candidate-id> [--json]"); return }
-                guard let candidate = try service.candidate(id: positional[1]) else { printCLIError("Entity-resolution candidate not found: \(positional[1])"); return }
+                let candidateID = positional[1]
+                guard let candidate = try service.candidate(id: candidateID) else {
+                    var payload = structuredActionReceiptFailurePayload(
+                        command: "item.entity-resolution.inspect",
+                        action: "inspect",
+                        readOnly: true,
+                        errorCode: "entity_resolution_candidate_not_found",
+                        error: "Entity-resolution candidate not found: \(candidateID)",
+                        sourceRefs: ["entity_resolution_candidate:\(candidateID)"],
+                        safeVerificationCommands: [
+                            "cider-cli item entity-resolution inspect \(candidateID) --json",
+                            "cider-cli item action-ledger list --command item.entity-resolution.inspect --status failed --json",
+                        ],
+                        safeNextCommands: ["cider-cli item entity-resolution list --json"]
+                    )
+                    payload["candidateID"] = candidateID
+                    payload["candidateRef"] = "entity_resolution_candidate:\(candidateID)"
+                    processExitCode = 1
+                    persistActionReceiptIfPresent(payload)
+                    if jsonOutput { outputJSON(payload) } else { print("Error: Entity-resolution candidate not found: \(candidateID)") }
+                    return
+                }
                 var payload: [String: Any] = [
                     "ok": true,
                     "command": "item.entity-resolution.inspect",
@@ -17359,27 +17521,58 @@ struct CiderCLI {
             case "accept", "approve":
                 guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution accept <candidate-id> [--reason <text>] [--json]"); return }
                 let actor = parseFlag("--actor", from: args) ?? "cider-cli"
-                let before = try service.candidate(id: positional[1])
+                guard let before = try service.candidate(id: positional[1]) else {
+                    outputMissingEntityResolutionMutation(candidateID: positional[1], command: "item.entity-resolution.accept", action: "accept", actor: actor)
+                    return
+                }
                 let candidate = try service.accept(candidateID: positional[1], actor: actor, reason: parseFlag("--reason", from: args))
-                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.accept", action: "accept", actor: actor, beforeState: before?.reviewState)
+                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.accept", action: "accept", actor: actor, beforeState: before.reviewState)
             case "merge":
                 guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution merge <candidate-id> [--reason <text>] [--json]"); return }
                 let actor = parseFlag("--actor", from: args) ?? "cider-cli"
-                let before = try service.candidate(id: positional[1])
+                guard let before = try service.candidate(id: positional[1]) else {
+                    outputMissingEntityResolutionMutation(candidateID: positional[1], command: "item.entity-resolution.merge", action: "merge", actor: actor)
+                    return
+                }
                 let candidate = try service.merge(candidateID: positional[1], actor: actor, reason: parseFlag("--reason", from: args))
-                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.merge", action: "merge", actor: actor, beforeState: before?.reviewState)
+                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.merge", action: "merge", actor: actor, beforeState: before.reviewState)
             case "reject":
                 guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution reject <candidate-id> [--reason <text>] [--json]"); return }
                 let actor = parseFlag("--actor", from: args) ?? "cider-cli"
-                let before = try service.candidate(id: positional[1])
+                guard let before = try service.candidate(id: positional[1]) else {
+                    outputMissingEntityResolutionMutation(candidateID: positional[1], command: "item.entity-resolution.reject", action: "reject", actor: actor)
+                    return
+                }
                 let candidate = try service.reject(candidateID: positional[1], actor: actor, reason: parseFlag("--reason", from: args))
-                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.reject", action: "reject", actor: actor, beforeState: before?.reviewState)
+                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.reject", action: "reject", actor: actor, beforeState: before.reviewState)
             default:
                 printCLIError("Usage: cider-cli item entity-resolution list|inspect|accept|reject|merge [candidate-id] [--json]")
             }
         } catch {
             printCLIError(error.localizedDescription)
         }
+    }
+
+    static func outputMissingEntityResolutionMutation(candidateID: String, command: String, action: String, actor: String) {
+        var payload = structuredActionReceiptFailurePayload(
+            command: command,
+            action: action,
+            actor: actor,
+            readOnly: false,
+            errorCode: "entity_resolution_candidate_not_found",
+            error: "Entity-resolution candidate not found: \(candidateID)",
+            sourceRefs: ["entity_resolution_candidate:\(candidateID)"],
+            safeVerificationCommands: [
+                "cider-cli item entity-resolution inspect \(candidateID) --json",
+                "cider-cli item action-ledger list --command \(command) --status failed --json",
+            ],
+            safeNextCommands: ["cider-cli item entity-resolution list --json"]
+        )
+        payload["candidateID"] = candidateID
+        payload["candidateRef"] = "entity_resolution_candidate:\(candidateID)"
+        processExitCode = 1
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput { outputJSON(payload) } else { print("Error: Entity-resolution candidate not found: \(candidateID)") }
     }
 
     static func actionReceiptForEntityResolutionInspection(_ candidate: SecondBrainEntityResolutionCandidate) -> [String: Any] {
@@ -17422,7 +17615,7 @@ struct CiderCLI {
         beforeState: String?
     ) {
         let changed = beforeState != candidate.reviewState
-        let errorCode = (!changed && candidate.reviewState == "accepted") ? "entity_resolution_already_accepted" : nil
+        let errorCode = entityResolutionNoOpErrorCode(action: action, reviewState: candidate.reviewState, changed: changed)
         var payload: [String: Any] = [
             "ok": true,
             "command": command,
@@ -17445,6 +17638,18 @@ struct CiderCLI {
         )
         persistActionReceiptIfPresent(payload)
         if jsonOutput { outputJSON(payload) } else { print("Updated entity-resolution candidate: \(candidate.id) -> \(candidate.reviewState)") }
+    }
+
+    static func entityResolutionNoOpErrorCode(action: String, reviewState: String, changed: Bool) -> String? {
+        guard !changed else { return nil }
+        switch (action, reviewState) {
+        case ("accept", "accepted"), ("merge", "accepted"):
+            return "entity_resolution_already_accepted"
+        case ("reject", "rejected"):
+            return "entity_resolution_already_rejected"
+        default:
+            return nil
+        }
     }
 
     static func entityResolutionCandidateToDict(_ candidate: SecondBrainEntityResolutionCandidate) -> [String: Any] {
