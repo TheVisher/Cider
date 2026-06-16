@@ -2573,6 +2573,12 @@ struct CiderCLIAgentSafetyTests {
         )
         let proposedPayload = try parseJSONObject(propose.stdout)
         #expect(propose.status == 0)
+        let proposeReceipt = try #require(proposedPayload["actionReceipt"] as? [String: Any])
+        #expect(proposeReceipt["command"] as? String == "item.fact-validity.propose")
+        #expect(proposeReceipt["action"] as? String == "propose")
+        #expect(proposeReceipt["actor"] as? String == "cider-cli")
+        #expect(proposeReceipt["changed"] as? Bool == true)
+        #expect((proposeReceipt["sourceRefs"] as? [String])?.contains("owner_relation:\(relation.id)") == true)
         let proposed = try #require(proposedPayload["candidate"] as? [String: Any])
         #expect(proposed["truthBoundary"] as? String == "reviewable_candidate_not_truth")
         let candidateID = try #require(proposed["id"] as? String)
@@ -2583,12 +2589,44 @@ struct CiderCLIAgentSafetyTests {
         )
         let acceptedPayload = try parseJSONObject(accept.stdout)
         #expect(accept.status == 0)
+        let acceptReceipt = try #require(acceptedPayload["actionReceipt"] as? [String: Any])
+        #expect(acceptReceipt["command"] as? String == "item.fact-validity.accept")
+        #expect(acceptReceipt["action"] as? String == "accept")
+        #expect(acceptReceipt["changed"] as? Bool == true)
+        #expect((acceptReceipt["sourceRefs"] as? [String])?.contains("fact_validity_candidate:\(candidateID)") == true)
         let acceptedCandidate = try #require(acceptedPayload["candidate"] as? [String: Any])
         #expect(acceptedCandidate["truthBoundary"] as? String == "accepted_fact_validity")
         let acceptedState = try #require(acceptedPayload["factValidity"] as? [String: Any])
         #expect(acceptedState["currentState"] as? String == "superseded")
         #expect(acceptedState["isCurrent"] as? Bool == false)
         #expect(acceptedState["sourceEvidenceRecord"] as? [String: Any] != nil)
+
+        let duplicateAccept = try runCLI(
+            args: ["item", "fact-validity", "accept", candidateID, "--reason", "Already accepted.", "--json"],
+            vault: vault
+        )
+        let duplicatePayload = try parseJSONObject(duplicateAccept.stdout)
+        #expect(duplicateAccept.status == 0)
+        #expect(duplicatePayload["changed"] as? Bool == false)
+        #expect(duplicatePayload["errorCode"] as? String == "fact_validity_already_accepted")
+        let duplicateReceipt = try #require(duplicatePayload["actionReceipt"] as? [String: Any])
+        #expect(duplicateReceipt["status"] as? String == "no_op")
+        #expect(duplicateReceipt["changed"] as? Bool == false)
+        #expect(duplicateReceipt["errorCode"] as? String == "fact_validity_already_accepted")
+
+        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(noteID)", "--limit", "20", "--json"], vault: vault).stdout)
+        let ledgerEntries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(ledgerEntries.contains { entry in
+            entry["command"] as? String == "item.fact-validity.accept"
+                && entry["action"] as? String == "accept"
+                && entry["changed"] as? Bool == true
+                && (entry["sourceRefs"] as? [String])?.contains("fact_validity_candidate:\(candidateID)") == true
+        })
+        #expect(ledgerEntries.contains { entry in
+            entry["command"] as? String == "item.fact-validity.accept"
+                && entry["status"] as? String == "no_op"
+                && entry["errorCode"] as? String == "fact_validity_already_accepted"
+        })
 
         let recallResult = try runCLI(args: ["item", "recall-context", "--item", "note", noteID, "--query", "Pine House", "--json"], vault: vault)
         let recall = try parseJSONObject(recallResult.stdout)
@@ -2601,6 +2639,86 @@ struct CiderCLIAgentSafetyTests {
         #expect(factValidity["currentState"] as? String == "superseded")
         #expect(factValidity["supersededByRef"] as? String == "owner_relation:favorite-lotus-garden")
         #expect(factValidity["sourceEvidenceRecord"] as? [String: Any] != nil)
+        let actionHistory = try #require(recall["actionHistory"] as? [[String: Any]])
+        #expect(actionHistory.contains { entry in
+            entry["kind"] as? String == "action_receipt"
+                && entry["command"] as? String == "item.fact-validity.accept"
+                && entry["action"] as? String == "accept"
+                && entry["truthBoundary"] as? String == "action_receipt_not_fact_truth"
+        })
+    }
+
+    @Test("entity resolution merge persists action receipt and recall action history")
+    func entityResolutionMergePersistsActionReceiptAndRecallActionHistory() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-entity-resolution-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Daily Journal Entity Resolution",
+            content: "We went to Cactus for dinner and it should resolve to the saved Cactus place.",
+            vault: vault
+        )
+        let targetID = try createNote(
+            title: "Cactus Restaurant",
+            content: "Saved restaurant entity for Cactus.",
+            vault: vault
+        )
+        let sourceOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let sourceEntity = SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "cactus-mention")
+        let targetEntity = SecondBrainOwnerRef(ownerType: "note", ownerID: targetID)
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let candidate = try SecondBrainEntityResolutionService(database: db, store: SecondBrainStore(database: db)).suggest(
+            candidateType: "place_alias",
+            sourceEntity: sourceEntity,
+            sourceLabel: "Cactus",
+            inputMention: "Cactus",
+            targetEntity: targetEntity,
+            targetLabel: "Cactus Restaurant",
+            sourceOwner: sourceOwner,
+            sourceQuote: "We went to Cactus for dinner.",
+            confidence: 0.91,
+            confidenceReasons: ["exact_alias", "place_visit_context"],
+            actor: "test-agent",
+            source: "entity_resolution.test"
+        )
+        db.close()
+
+        let mergeResult = try runCLI(args: ["item", "entity-resolution", "merge", candidate.id, "--actor", "codex-test", "--reason", "Confirmed Cactus place entity.", "--json"], vault: vault)
+        let merge = try parseJSONObject(mergeResult.stdout)
+        #expect(mergeResult.status == 0)
+        #expect(merge["command"] as? String == "item.entity-resolution.merge")
+        #expect(merge["changed"] as? Bool == true)
+        let receipt = try #require(merge["actionReceipt"] as? [String: Any])
+        #expect(receipt["action"] as? String == "merge")
+        #expect(receipt["actor"] as? String == "codex-test")
+        #expect(receipt["ownerRef"] as? String == "note:\(noteID)")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("entity_resolution_candidate:\(candidate.id)") == true)
+        #expect((receipt["sourceRefs"] as? [String])?.contains("graph_object:cactus-mention") == true)
+        #expect((receipt["evidenceRefs"] as? [String])?.contains("note:\(noteID)") == true)
+
+        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(noteID)", "--action", "merge", "--json"], vault: vault).stdout)
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "item.entity-resolution.merge"
+                && entry["status"] as? String == "succeeded"
+                && entry["changed"] as? Bool == true
+                && (entry["sourceRefs"] as? [String])?.contains("entity_resolution_candidate:\(candidate.id)") == true
+        })
+
+        let recallResult = try runCLI(args: ["item", "recall-context", "--item", "note", noteID, "--query", "Cactus", "--json"], vault: vault)
+        let recall = try parseJSONObject(recallResult.stdout)
+        #expect(recallResult.status == 0)
+        let actionHistory = try #require(recall["actionHistory"] as? [[String: Any]])
+        #expect(actionHistory.contains { entry in
+            entry["kind"] as? String == "action_receipt"
+                && entry["command"] as? String == "item.entity-resolution.merge"
+                && entry["action"] as? String == "merge"
+                && entry["truthBoundary"] as? String == "action_receipt_not_fact_truth"
+        })
     }
 
     @Test("recall context bundle returns structured selector failures")
