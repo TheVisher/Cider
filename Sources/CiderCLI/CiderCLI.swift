@@ -4828,7 +4828,7 @@ struct CiderCLI {
                 try service.addLink(from: source, to: target)
                 printLinkMutation(action: "linked", source: source, target: target, service: service)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printLinkFailure(command: "link.add", action: "link", args: args, error: error)
             }
 
         case "remove", "rm", "delete":
@@ -4841,7 +4841,7 @@ struct CiderCLI {
                 try service.removeLink(from: source, to: target)
                 printLinkMutation(action: "unlinked", source: source, target: target, service: service)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printLinkFailure(command: "link.remove", action: "unlink", args: args, error: error)
             }
 
         case "list":
@@ -4854,7 +4854,7 @@ struct CiderCLI {
                 let refs = try service.outgoingRefs(for: ref)
                 printLinkSummaries(refs, service: service)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printLinkFailure(command: "link.list", action: "list_links", args: args, error: error)
             }
 
         case "backlinks":
@@ -4867,7 +4867,7 @@ struct CiderCLI {
                 let refs = try service.backlinkRefs(for: ref)
                 printLinkSummaries(refs, service: service)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printLinkFailure(command: "link.backlinks", action: "list_backlinks", args: args, error: error)
             }
 
         case "related":
@@ -4880,7 +4880,7 @@ struct CiderCLI {
                 let refs = try service.relatedRefs(for: ref)
                 printLinkSummaries(refs, service: service)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printLinkFailure(command: "link.related", action: "list_related", args: args, error: error)
             }
 
         default:
@@ -5111,7 +5111,16 @@ struct CiderCLI {
             }
             if let entityType = try? ItemLinkService.entityType(from: positional[0]) {
                 do {
-                    let ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
+                    let ref: LibraryEntityRef
+                    do {
+                        ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
+                    } catch {
+                        printCLIError(
+                            error.localizedDescription,
+                            details: itemNotFoundErrorDetails(command: "item.get", type: entityType.rawValue, ref: positional[1])
+                        )
+                        return
+                    }
                     let bundle = try contextService.context(for: ref)
                     if jsonOutput {
                         var dict = itemContextBundleToDict(bundle)
@@ -5229,8 +5238,26 @@ struct CiderCLI {
                 return
             }
             do {
-                let type = try ItemLinkService.entityType(from: positional[0])
-                let ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+                let type: LibraryEntityType
+                do {
+                    type = try ItemLinkService.entityType(from: positional[0])
+                } catch {
+                    printCLIError(
+                        error.localizedDescription,
+                        details: unsupportedReadOnlyItemTypeErrorDetails(command: "item.context", rawType: positional[0], ref: positional[1])
+                    )
+                    return
+                }
+                let ref: LibraryEntityRef
+                do {
+                    ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+                } catch {
+                    printCLIError(
+                        error.localizedDescription,
+                        details: itemNotFoundErrorDetails(command: "item.context", type: type.rawValue, ref: positional[1])
+                    )
+                    return
+                }
                 let packet = try contextService.agentContext(for: ref, limits: itemAgentContextLimits(from: args))
                 if jsonOutput {
                     var dict = itemAgentContextPacketToDict(packet)
@@ -5437,7 +5464,30 @@ struct CiderCLI {
                     )
                     return
                 }
-                let ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+                let ref: LibraryEntityRef
+                do {
+                    ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+                } catch {
+                    var payload = structuredActionReceiptFailurePayload(
+                        command: "item.why-surfaced",
+                        action: "inspect_surfacing",
+                        owner: nil,
+                        readOnly: true,
+                        errorCode: "item_not_found",
+                        error: error.localizedDescription,
+                        sourceRefs: ["\(type.rawValue):\(positional[1])"],
+                        safeVerificationCommands: [
+                            "cider-cli item why-surfaced \(type.rawValue) \(positional[1]) --json",
+                            "cider-cli item search \(positional[1]) --json",
+                        ],
+                        safeNextCommands: ["cider-cli item search <query> --json"]
+                    )
+                    payload["sourceRef"] = ["type": type.rawValue, "ref": positional[1]]
+                    processExitCode = 1
+                    persistActionReceiptIfPresent(payload)
+                    if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
+                    return
+                }
                 let packet = try contextService.agentContext(for: ref, limits: itemAgentContextLimits(from: args))
                 var payload: [String: Any] = [
                     "ok": true,
@@ -13345,6 +13395,110 @@ struct CiderCLI {
 
     static let supportedAgentItemTypes = ["bookmark", "note", "todo", "dateCard", "contact", "vaultFile"]
 
+    static func structuredCLIErrorDetails(
+        command: String,
+        readOnly: Bool,
+        errorCode: String,
+        safeVerificationCommands: [String] = [],
+        safeNextCommands: [String] = []
+    ) -> [String: Any] {
+        [
+            "command": command,
+            "readOnly": readOnly,
+            "changed": false,
+            "errorCode": errorCode,
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": safeNextCommands,
+        ]
+    }
+
+    static func unsupportedReadOnlyItemTypeErrorDetails(command: String, rawType: String, ref: String?) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: command,
+            readOnly: true,
+            errorCode: "unsupported_item_type",
+            safeVerificationCommands: ["cider-cli item capability-map --json"],
+            safeNextCommands: ["Use one of: \(supportedAgentItemTypes.joined(separator: ", "))"]
+        )
+        details["unsupportedType"] = rawType
+        details["supportedTypes"] = supportedAgentItemTypes
+        if let ref { details["ref"] = ref }
+        return details
+    }
+
+    static func itemNotFoundErrorDetails(command: String, type: String, ref: String) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: command,
+            readOnly: true,
+            errorCode: "item_not_found",
+            safeVerificationCommands: [
+                "cider-cli item get \(type) \(ref) --json",
+                "cider-cli item search \(ref) --json",
+            ],
+            safeNextCommands: ["cider-cli item search <query> --json"]
+        )
+        details["sourceRef"] = ["type": type, "ref": ref]
+        return details
+    }
+
+    static func linkFailurePayload(
+        command: String,
+        action: String,
+        errorCode: String,
+        error: String,
+        sourceRefs: [String],
+        safeVerificationCommands: [String] = [],
+        safeNextCommands: [String] = []
+    ) -> [String: Any] {
+        structuredActionReceiptFailurePayload(
+            command: command,
+            action: action,
+            readOnly: false,
+            errorCode: errorCode,
+            error: error,
+            sourceRefs: sourceRefs,
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: safeNextCommands
+        )
+    }
+
+    static func printLinkFailure(command: String, action: String, args: [String], error: Error) {
+        let positional = nonFlagArgs(args)
+        let message = error.localizedDescription
+        let errorCode: String
+        if message.contains("Unsupported link type") || message.contains("Usage: cider-cli link") {
+            errorCode = "unsupported_item_type"
+        } else if message.hasPrefix("No ") && message.contains(" found matching ") {
+            errorCode = "item_not_found"
+        } else {
+            errorCode = "link_failed"
+        }
+        var sourceRefs: [String] = []
+        if positional.count >= 2 { sourceRefs.append("\(positional[0]):\(positional[1])") }
+        if positional.count >= 4 { sourceRefs.append("\(positional[2]):\(positional[3])") }
+        if sourceRefs.isEmpty { sourceRefs = [command] }
+        var payload = linkFailurePayload(
+            command: command,
+            action: action,
+            errorCode: errorCode,
+            error: message,
+            sourceRefs: sourceRefs,
+            safeVerificationCommands: ["cider-cli item link \(positional.joined(separator: " ")) --json"],
+            safeNextCommands: ["cider-cli item search <query> --json"]
+        )
+        if errorCode == "unsupported_item_type" {
+            payload["supportedTypes"] = supportedAgentItemTypes
+            if let first = positional.first { payload["unsupportedType"] = first }
+            if var receipt = payload["actionReceipt"] as? [String: Any] {
+                receipt["supportedTypes"] = supportedAgentItemTypes
+                payload["actionReceipt"] = receipt
+            }
+        }
+        processExitCode = 1
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput { outputJSON(payload) } else { print("Error: \(message)") }
+    }
+
     static func unsupportedItemTypeErrorDetails(command: String, action: String, rawType: String, ref: String?) -> [String: Any] {
         let receipt = agentActionReceiptToDict(
             command: command,
@@ -13374,7 +13528,7 @@ struct CiderCLI {
             var dict: [String: Any] = ["ok": false, "error": message]
             if let details {
                 dict["details"] = details
-                for promotedKey in ["errorCode", "supportedTypes", "safeVerificationCommands", "safeNextCommands", "actionReceipt"] {
+                for promotedKey in ["command", "readOnly", "changed", "errorCode", "supportedTypes", "sourceRef", "safeVerificationCommands", "safeNextCommands", "actionReceipt"] {
                     if let value = details[promotedKey] {
                         dict[promotedKey] = value
                     }

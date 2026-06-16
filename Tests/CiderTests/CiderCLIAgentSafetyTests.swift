@@ -378,6 +378,84 @@ struct CiderCLIAgentSafetyTests {
         #expect(entries.contains { $0["errorCode"] as? String == "fact_validity_already_deferred" && $0["status"] as? String == "no_op" })
     }
 
+    @Test("legacy item read failures return structured agent-safe JSON")
+    func legacyItemReadFailuresReturnStructuredAgentSafeJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-structured-read-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let unsupportedContext = try assertStrictFailureJSON(
+            runCLI(args: ["item", "context", "badtype", "missing-cid533", "--json"], vault: vault),
+            command: "item.context",
+            errorCode: "unsupported_item_type"
+        )
+        #expect(unsupportedContext["readOnly"] as? Bool == true)
+        #expect(unsupportedContext["changed"] as? Bool == false)
+        #expect((unsupportedContext["supportedTypes"] as? [String])?.contains("note") == true)
+
+        let missingContext = try assertStrictFailureJSON(
+            runCLI(args: ["item", "context", "note", "missing-cid533", "--json"], vault: vault),
+            command: "item.context",
+            errorCode: "item_not_found"
+        )
+        #expect(missingContext["readOnly"] as? Bool == true)
+        #expect(missingContext["changed"] as? Bool == false)
+        let sourceRef = try #require(missingContext["sourceRef"] as? [String: Any])
+        #expect(sourceRef["type"] as? String == "note")
+        #expect(sourceRef["ref"] as? String == "missing-cid533")
+
+        let missingGet = try assertStrictFailureJSON(
+            runCLI(args: ["item", "get", "note", "missing-cid533", "--json"], vault: vault),
+            command: "item.get",
+            errorCode: "item_not_found"
+        )
+        #expect(missingGet["readOnly"] as? Bool == true)
+        #expect(missingGet["changed"] as? Bool == false)
+
+        let missingWhy = try assertStrictFailureJSON(
+            runCLI(args: ["item", "why-surfaced", "note", "missing-cid533", "--json"], vault: vault),
+            command: "item.why-surfaced",
+            errorCode: "item_not_found"
+        )
+        #expect(missingWhy["readOnly"] as? Bool == true)
+        #expect(missingWhy["changed"] as? Bool == false)
+        let whyReceipt = try #require(missingWhy["actionReceipt"] as? [String: Any])
+        #expect(whyReceipt["status"] as? String == "failed")
+        #expect(whyReceipt["changed"] as? Bool == false)
+    }
+
+    @Test("link helper failures return structured receipts without mutation")
+    func linkHelperFailuresReturnStructuredReceiptsWithoutMutation() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-structured-link-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let unsupported = try assertStrictFailureJSON(
+            runCLI(args: ["item", "link", "badtype", "source", "note", "target", "--json"], vault: vault),
+            command: "link.add",
+            errorCode: "unsupported_item_type"
+        )
+        #expect(unsupported["readOnly"] as? Bool == false)
+        #expect(unsupported["changed"] as? Bool == false)
+        #expect((unsupported["supportedTypes"] as? [String])?.contains("note") == true)
+        let unsupportedReceipt = try #require(unsupported["actionReceipt"] as? [String: Any])
+        #expect(unsupportedReceipt["status"] as? String == "failed")
+        #expect(unsupportedReceipt["readOnly"] as? Bool == false)
+        #expect(unsupportedReceipt["changed"] as? Bool == false)
+
+        let missing = try assertStrictFailureJSON(
+            runCLI(args: ["item", "link", "note", "missing-source", "note", "missing-target", "--json"], vault: vault),
+            command: "link.add",
+            errorCode: "item_not_found"
+        )
+        #expect(missing["readOnly"] as? Bool == false)
+        #expect(missing["changed"] as? Bool == false)
+        let missingReceipt = try #require(missing["actionReceipt"] as? [String: Any])
+        #expect((missingReceipt["sourceRefs"] as? [String])?.contains("note:missing-source") == true)
+    }
+
     @Test("recall context action history supports filters windows and selector echo")
     func recallContextActionHistorySupportsFiltersWindowsAndSelectorEcho() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -5242,6 +5320,22 @@ struct CiderCLIAgentSafetyTests {
         #expect(result.stdout.first == "{", "Expected \(command) JSON to start at byte 0")
         let payload = try parseJSONObject(result.stdout)
         #expect(payload["command"] as? String == command)
+        #expect(payload["legacyRemoved"] == nil)
+        return payload
+    }
+
+    private func assertStrictFailureJSON(
+        _ result: (stdout: String, stderr: String, status: Int32),
+        command: String,
+        errorCode: String
+    ) throws -> [String: Any] {
+        #expect(result.status != 0, "Expected \(command) to fail")
+        #expect(result.stdout.first == "{", "Expected \(command) JSON failure to start at byte 0; stdout: \(result.stdout)")
+        let payload = try parseJSONObject(result.stdout)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == command)
+        #expect(payload["errorCode"] as? String == errorCode)
+        #expect(payload["changed"] as? Bool == false)
         #expect(payload["legacyRemoved"] == nil)
         return payload
     }
