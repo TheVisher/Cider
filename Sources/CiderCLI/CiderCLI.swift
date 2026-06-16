@@ -1569,16 +1569,27 @@ struct CiderCLI {
 
         case "review-queue", "worklist":
             do {
+                guard let limit = parsePositiveIntFlag("--limit", from: args, command: "capture.review-queue", minimum: 0) else { return }
+                let kind = parseFlag("--kind", from: args)
+                guard validateReviewFilterIfPresent(command: "capture.review-queue", name: "kind", value: kind, supportedValues: supportedReviewKinds) else { return }
+                let itemType = parseFlag("--item-type", from: args)
+                guard validateReviewFilterIfPresent(command: "capture.review-queue", name: "item-type", value: itemType, supportedValues: supportedReviewItemTypes) else { return }
+                let reviewState = parseFlag("--state", from: args)
+                guard validateReviewFilterIfPresent(command: "capture.review-queue", name: "state", value: reviewState, supportedValues: supportedReviewStates) else { return }
+                let safeAction = parseFlag("--safe-action", from: args)
+                guard validateReviewFilterIfPresent(command: "capture.review-queue", name: "safe-action", value: safeAction, supportedValues: supportedReviewSafeActions) else { return }
                 let result = try CiderReviewQueueService().captureReviewWorklist(
-                    limit: parseFlag("--limit", from: args).flatMap(Int.init) ?? 50,
+                    limit: limit ?? 50,
                     includeDeferred: args.contains("--include-deferred"),
-                    kind: parseFlag("--kind", from: args),
-                    itemType: parseFlag("--item-type", from: args),
-                    reviewState: parseFlag("--state", from: args),
-                    requiredSafeAction: parseFlag("--safe-action", from: args)
+                    kind: kind,
+                    itemType: itemType,
+                    reviewState: reviewState,
+                    requiredSafeAction: safeAction
                 )
                 if jsonOutput {
-                    outputJSON(result.toDictionary())
+                    var payload = result.toDictionary()
+                    payload["filters"] = reviewFilterEcho(kind: kind, itemType: itemType, reviewState: reviewState, safeAction: safeAction, includeDeferred: args.contains("--include-deferred"), limit: limit ?? 50)
+                    outputJSON(payload)
                 } else {
                     print("Capture review queue: \(result.totalCount) item(s) need attention.")
                     for item in result.items {
@@ -1615,17 +1626,25 @@ struct CiderCLI {
 
         switch subcommand {
         case "list", "ls":
-            let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 50
+            guard let limit = parsePositiveIntFlag("--limit", from: args, command: "review.list", minimum: 0) else { return }
+            let kind = parseFlag("--kind", from: args)
+            guard validateReviewFilterIfPresent(command: "review.list", name: "kind", value: kind, supportedValues: supportedReviewKinds) else { return }
+            let itemType = parseFlag("--item-type", from: args)
+            guard validateReviewFilterIfPresent(command: "review.list", name: "item-type", value: itemType, supportedValues: supportedReviewItemTypes) else { return }
+            let reviewState = parseFlag("--state", from: args)
+            guard validateReviewFilterIfPresent(command: "review.list", name: "state", value: reviewState, supportedValues: supportedReviewStates) else { return }
+            let safeAction = parseFlag("--safe-action", from: args)
+            guard validateReviewFilterIfPresent(command: "review.list", name: "safe-action", value: safeAction, supportedValues: supportedReviewSafeActions) else { return }
             do {
                 let result = try service.list(
-                    limit: limit,
+                    limit: limit ?? 50,
                     includeDeferred: args.contains("--include-deferred"),
-                    kind: parseFlag("--kind", from: args),
-                    itemType: parseFlag("--item-type", from: args),
-                    reviewState: parseFlag("--state", from: args),
-                    requiredSafeAction: parseFlag("--safe-action", from: args)
+                    kind: kind,
+                    itemType: itemType,
+                    reviewState: reviewState,
+                    requiredSafeAction: safeAction
                 )
-                printReviewQueueResult(result)
+                printReviewQueueResult(result, filters: reviewFilterEcho(kind: kind, itemType: itemType, reviewState: reviewState, safeAction: safeAction, includeDeferred: args.contains("--include-deferred"), limit: limit ?? 50))
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -5199,12 +5218,20 @@ struct CiderCLI {
 
         case "due-to-surface", "resurface", "resurfacing-feed":
             do {
-                let limit = max(1, Int(parseFlag("--limit", from: args) ?? "") ?? 20)
+                guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: "item.due-to-surface", minimum: 1) else { return }
+                guard let parsedStaleAfterDays = parsePositiveIntFlag("--stale-after-days", from: args, command: "item.due-to-surface", minimum: 0) else { return }
+                let limit = parsedLimit ?? 20
                 let includeSuppressed = args.contains("--include-suppressed") || args.contains("--all")
-                let staleAfterDays = max(0, Int(parseFlag("--stale-after-days", from: args) ?? "") ?? 3)
+                let staleAfterDays = parsedStaleAfterDays ?? 3
                 let feed = try dueToSurfaceFeedPayload(limit: limit, includeSuppressed: includeSuppressed, staleAfterDays: staleAfterDays)
                 if jsonOutput {
-                    outputJSON(dueToSurfaceFeedToDict(feed))
+                    var payload = dueToSurfaceFeedToDict(feed)
+                    payload["filters"] = [
+                        "limit": limit,
+                        "staleAfterDays": staleAfterDays,
+                        "includeSuppressed": includeSuppressed,
+                    ]
+                    outputJSON(payload)
                 } else {
                     print("Due-to-surface candidates: \(feed.candidates.count)")
                     for candidate in feed.candidates {
@@ -11758,9 +11785,11 @@ struct CiderCLI {
         print("  Next safe action: \(explanation.nextSafeAction)")
     }
 
-    static func printReviewQueueResult(_ result: CiderReviewQueueResult) {
+    static func printReviewQueueResult(_ result: CiderReviewQueueResult, filters: [String: Any]? = nil) {
         if jsonOutput {
-            outputJSON(result.toDictionary())
+            var payload = result.toDictionary()
+            if let filters { payload["filters"] = filters }
+            outputJSON(payload)
             return
         }
 
@@ -13394,6 +13423,117 @@ struct CiderCLI {
     }
 
     static let supportedAgentItemTypes = ["bookmark", "note", "todo", "dateCard", "contact", "vaultFile"]
+    static let supportedReviewKinds = [
+        "enrichment",
+        "graph_candidate",
+        "memory_candidate",
+        "inbox_backlog",
+        "duplicate_candidate",
+        "unsupported_attachment",
+        "indexing",
+        "low_confidence_routing",
+        "deferred_routing",
+    ]
+    static let supportedReviewItemTypes = ["bookmark", "note", "todo", "dateCard", "contact", "vaultFile", "capture_event"]
+    static let supportedReviewStates = ["suggested", "needs_review", "deferred", "accepted", "rejected"]
+    static let supportedReviewSafeActions = [
+        "accept",
+        "reject",
+        "defer",
+        "correct",
+        "enrich",
+        "inspect_source",
+        "inspect_duplicates",
+        "manual_review",
+        "review summary",
+        "review list",
+        "bookmark get",
+        "routing explain",
+        "review enrichment-reconcile-plan",
+        "review enrichment-reconcile-samples",
+    ]
+
+    static func reviewFilterEcho(
+        kind: String?,
+        itemType: String?,
+        reviewState: String?,
+        safeAction: String?,
+        includeDeferred: Bool,
+        limit: Int
+    ) -> [String: Any] {
+        var filters: [String: Any] = [
+            "includeDeferred": includeDeferred,
+            "limit": limit,
+        ]
+        if let kind { filters["kind"] = kind }
+        if let itemType { filters["itemType"] = itemType }
+        if let reviewState { filters["state"] = reviewState }
+        if let safeAction { filters["safeAction"] = safeAction }
+        return filters
+    }
+
+    static func validateReviewFilterIfPresent(
+        command: String,
+        name: String,
+        value: String?,
+        supportedValues: [String]
+    ) -> Bool {
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
+        guard supportedValues.contains(value) else {
+            printCLIError(
+                "Unsupported \(name) filter '\(value)' for \(command).",
+                details: unsupportedReviewFilterDetails(command: command, name: name, value: value, supportedValues: supportedValues)
+            )
+            return false
+        }
+        return true
+    }
+
+    static func parsePositiveIntFlag(_ flag: String, from args: [String], command: String, minimum: Int) -> Int?? {
+        guard let raw = parseFlag(flag, from: args) else { return .some(nil) }
+        guard let value = Int(raw), value >= minimum else {
+            printCLIError(
+                "Malformed numeric filter \(flag)='\(raw)' for \(command).",
+                details: malformedNumericFilterDetails(command: command, flag: flag, value: raw, minimum: minimum)
+            )
+            return nil
+        }
+        return .some(value)
+    }
+
+    static func unsupportedReviewFilterDetails(command: String, name: String, value: String, supportedValues: [String]) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: command,
+            readOnly: true,
+            errorCode: "unsupported_review_filter_value",
+            safeVerificationCommands: [
+                "cider-cli capture review-queue --limit 20 --json",
+                "cider-cli review summary --json",
+                "cider-cli item due-to-surface --json",
+            ],
+            safeNextCommands: ["Use supported \(name) values only; valid zero-result reads return ok=true with count=0."]
+        )
+        details["filter"] = ["name": name, "value": value]
+        details["supportedValues"] = supportedValues
+        return details
+    }
+
+    static func malformedNumericFilterDetails(command: String, flag: String, value: String, minimum: Int) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: command,
+            readOnly: true,
+            errorCode: "malformed_numeric_filter",
+            safeVerificationCommands: [
+                "cider-cli capture review-queue --limit 20 --json",
+                "cider-cli review list --limit 20 --json",
+                "cider-cli item due-to-surface --limit 20 --json",
+            ],
+            safeNextCommands: ["Use an integer >= \(minimum) for \(flag)."]
+        )
+        details["filter"] = ["name": flag.replacingOccurrences(of: "--", with: ""), "value": value]
+        details["minimum"] = minimum
+        return details
+    }
 
     static func structuredCLIErrorDetails(
         command: String,
@@ -13528,7 +13668,7 @@ struct CiderCLI {
             var dict: [String: Any] = ["ok": false, "error": message]
             if let details {
                 dict["details"] = details
-                for promotedKey in ["command", "readOnly", "changed", "errorCode", "supportedTypes", "sourceRef", "safeVerificationCommands", "safeNextCommands", "actionReceipt"] {
+                for promotedKey in ["command", "readOnly", "changed", "errorCode", "supportedTypes", "supportedValues", "filter", "minimum", "sourceRef", "safeVerificationCommands", "safeNextCommands", "actionReceipt"] {
                     if let value = details[promotedKey] {
                         dict[promotedKey] = value
                     }
@@ -13915,9 +14055,13 @@ struct CiderCLI {
         var dict: [String: Any] = [
             "ok": true,
             "command": command,
+            "readOnly": true,
+            "changed": false,
             "exists": ownerResolved,
             "ownerResolved": ownerResolved,
             "legacyOwnerInspection": true,
+            "relationCount": relations.count,
+            "backlinkCount": backlinks.count,
             "sourceRef": [
                 "type": rawType,
                 "ref": rawRef,

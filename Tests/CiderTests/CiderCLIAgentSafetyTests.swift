@@ -425,6 +425,77 @@ struct CiderCLIAgentSafetyTests {
         #expect(whyReceipt["changed"] as? Bool == false)
     }
 
+    @Test("feed filter failures distinguish invalid selectors from valid empty reads")
+    func feedFilterFailuresDistinguishInvalidSelectorsFromValidEmptyReads() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-feed-filter-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let invalidCaptureKind = try assertStrictFailureJSON(
+            runCLI(args: ["capture", "review-queue", "--kind", "not_a_review_kind", "--json"], vault: vault),
+            command: "capture.review-queue",
+            errorCode: "unsupported_review_filter_value"
+        )
+        #expect(invalidCaptureKind["readOnly"] as? Bool == true)
+        #expect(invalidCaptureKind["changed"] as? Bool == false)
+        let captureFilter = try #require(invalidCaptureKind["filter"] as? [String: Any])
+        #expect(captureFilter["name"] as? String == "kind")
+        #expect(captureFilter["value"] as? String == "not_a_review_kind")
+        #expect((invalidCaptureKind["supportedValues"] as? [String])?.contains("graph_candidate") == true)
+
+        let invalidReviewState = try assertStrictFailureJSON(
+            runCLI(args: ["review", "list", "--state", "not_a_state", "--json"], vault: vault),
+            command: "review.list",
+            errorCode: "unsupported_review_filter_value"
+        )
+        let reviewFilter = try #require(invalidReviewState["filter"] as? [String: Any])
+        #expect(reviewFilter["name"] as? String == "state")
+        #expect((invalidReviewState["supportedValues"] as? [String])?.contains("needs_review") == true)
+
+        let malformedResurfaceLimit = try assertStrictFailureJSON(
+            runCLI(args: ["item", "due-to-surface", "--limit", "not-a-number", "--json"], vault: vault),
+            command: "item.due-to-surface",
+            errorCode: "malformed_numeric_filter"
+        )
+        let resurfaceFilter = try #require(malformedResurfaceLimit["filter"] as? [String: Any])
+        #expect(resurfaceFilter["name"] as? String == "limit")
+        #expect(resurfaceFilter["value"] as? String == "not-a-number")
+        #expect(malformedResurfaceLimit["readOnly"] as? Bool == true)
+        #expect(malformedResurfaceLimit["changed"] as? Bool == false)
+    }
+
+    @Test("valid zero-result owner relation reads stay successful and read-only")
+    func validZeroResultOwnerRelationReadsStaySuccessfulAndReadOnly() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-owner-zero-results-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Unlinked Owner", content: "No owner relations yet.", vault: vault)
+
+        let ownerGet = try assertStrictProcessJSON(
+            runCLI(args: ["item", "owner-get", "note", noteID, "--json"], vault: vault),
+            command: "item.owner-get"
+        )
+        #expect(ownerGet["ok"] as? Bool == true)
+        #expect(ownerGet["readOnly"] as? Bool == true)
+        #expect(ownerGet["changed"] as? Bool == false)
+        #expect(ownerGet["relationCount"] as? Int == 0)
+        #expect(ownerGet["ownerResolved"] as? Bool == true)
+
+        let relations = try assertStrictProcessJSON(
+            runCLI(args: ["item", "relations", "note", noteID, "--json"], vault: vault),
+            command: "item.relations"
+        )
+        #expect(relations["ok"] as? Bool == true)
+        #expect(relations["readOnly"] as? Bool == true)
+        #expect(relations["changed"] as? Bool == false)
+        #expect(relations["relationCount"] as? Int == 0)
+        let relationRows = try #require(relations["relations"] as? [[String: Any]])
+        #expect(relationRows.isEmpty)
+    }
+
     @Test("link helper failures return structured receipts without mutation")
     func linkHelperFailuresReturnStructuredReceiptsWithoutMutation() throws {
         let vault = FileManager.default.temporaryDirectory
