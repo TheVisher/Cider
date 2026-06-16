@@ -37,6 +37,44 @@ struct CiderCLIAgentSafetyTests {
         #expect((receipt["safeNextCommands"] as? [String])?.contains("cider-cli item due-to-surface --json") == true)
     }
 
+    @Test("link mutation persists action receipt and appears in item context")
+    func linkMutationPersistsActionReceiptAndAppearsInItemContext() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-link-action-ledger-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceID = try createNote(title: "Ledger Link Source", content: "Source", vault: vault)
+        let targetID = try createNote(title: "Ledger Link Target", content: "Target", vault: vault)
+
+        let link = try parseJSONObject(try runCLI(args: ["item", "link", "note", sourceID, "note", targetID, "--json"], vault: vault).stdout)
+        #expect(link["command"] as? String == "link.add")
+        #expect(link["readOnly"] as? Bool == false)
+        #expect(link["changed"] as? Bool == true)
+        let receipt = try #require(link["actionReceipt"] as? [String: Any])
+        #expect(receipt["action"] as? String == "link")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("note:\(sourceID)") == true)
+        #expect((receipt["evidenceRefs"] as? [String])?.contains("note:\(targetID)") == true)
+
+        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(sourceID)", "--action", "link", "--json"], vault: vault).stdout)
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "link.add"
+                && entry["status"] as? String == "succeeded"
+                && entry["changed"] as? Bool == true
+                && (entry["evidenceRefs"] as? [String])?.contains("note:\(targetID)") == true
+        })
+
+        let context = try parseJSONObject(try runCLI(args: ["item", "context", "note", sourceID, "--max-history", "10", "--json"], vault: vault).stdout)
+        let recentHistory = try #require(context["recentHistory"] as? [[String: Any]])
+        #expect(recentHistory.contains { entry in
+            entry["kind"] as? String == "action_receipt"
+                && entry["command"] as? String == "link.add"
+                && entry["action"] as? String == "link"
+                && entry["changed"] as? Bool == true
+        })
+    }
+
     @Test("action ledger CLI lists and inspects recorded receipts")
     func actionLedgerCLIListsAndInspectsRecordedReceipts() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -283,6 +321,7 @@ struct CiderCLIAgentSafetyTests {
             spaceMemberships: [],
             routingDecisions: [],
             agentActions: [],
+            actionReceipts: [],
             enrichmentOutputs: [],
             relationCandidates: [],
             captureProvenance: []
@@ -2021,6 +2060,26 @@ struct CiderCLIAgentSafetyTests {
         #expect(proposedChange["changeType"] as? String == "memory_candidate")
         let storage = try #require(item["storage"] as? [String: Any])
         #expect(storage["kind"] as? String == "memory_candidate")
+
+        let candidateID = try #require(item["candidateID"] as? String)
+        let acceptResult = try runCLI(args: ["item", "accept-memory-candidate", candidateID, "--actor", "codex-test", "--json"], vault: vault)
+        let accept = try parseJSONObject(acceptResult.stdout)
+        #expect(acceptResult.status == 0)
+        #expect(accept["command"] as? String == "item.accept-memory-candidate")
+        let receipt = try #require(accept["actionReceipt"] as? [String: Any])
+        #expect(receipt["action"] as? String == "accept")
+        #expect(receipt["actor"] as? String == "codex-test")
+        #expect(receipt["changed"] as? Bool == true)
+        #expect((receipt["sourceRefs"] as? [String])?.contains("memory_candidate:\(candidateID)") == true)
+
+        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(journalID)", "--action", "accept", "--json"], vault: vault).stdout)
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "item.accept-memory-candidate"
+                && entry["status"] as? String == "succeeded"
+                && entry["changed"] as? Bool == true
+                && (entry["sourceRefs"] as? [String])?.contains("memory_candidate:\(candidateID)") == true
+        })
     }
 
     @Test("item backfill journals supports dry run date selector and repeated runs stay bounded")
@@ -2805,6 +2864,34 @@ struct CiderCLIAgentSafetyTests {
         #expect(agentActions.contains { $0["actionType"] as? String == "graph_candidate.reject" })
         #expect(agentActions.contains { $0["actionType"] as? String == "graph_candidate.delegate_enrichment" })
 
+        let acceptReceipt = try #require(accept["actionReceipt"] as? [String: Any])
+        #expect(acceptReceipt["command"] as? String == "item.accept-graph-candidate")
+        #expect(acceptReceipt["action"] as? String == "accept")
+        #expect(acceptReceipt["actor"] as? String == "codex-test")
+        #expect(acceptReceipt["changed"] as? Bool == true)
+        #expect((acceptReceipt["sourceRefs"] as? [String])?.contains("graph_candidate:\(acceptOutput.id)") == true)
+        #expect((acceptReceipt["evidenceRefs"] as? [String])?.contains("note:\(noteID)") == true)
+
+        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(noteID)", "--action", "accept", "--json"], vault: vault).stdout)
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "item.accept-graph-candidate"
+                && entry["status"] as? String == "succeeded"
+                && entry["changed"] as? Bool == true
+                && (entry["sourceRefs"] as? [String])?.contains("graph_candidate:\(acceptOutput.id)") == true
+        })
+
+        let agentContextResult = try runCLI(args: ["item", "context", "note", noteID, "--max-history", "10", "--json"], vault: vault)
+        let agentContext = try parseJSONObject(agentContextResult.stdout)
+        let recentHistory = try #require(agentContext["recentHistory"] as? [[String: Any]])
+        #expect(recentHistory.contains { entry in
+            entry["kind"] as? String == "action_receipt"
+                && entry["command"] as? String == "item.accept-graph-candidate"
+                && entry["action"] as? String == "accept"
+                && entry["status"] as? String == "succeeded"
+                && entry["changed"] as? Bool == true
+        })
+
         let defaultList = try parseJSONObject(try runCLI(args: ["item", "graph-candidates", "note", noteID, "--json"], vault: vault).stdout)
         #expect(defaultList["count"] as? Int == 1)
         let reviewedList = try parseJSONObject(try runCLI(args: ["item", "graph-candidates", "note", noteID, "--include-reviewed", "--json"], vault: vault).stdout)
@@ -2877,6 +2964,17 @@ struct CiderCLIAgentSafetyTests {
         #expect((blocked["blockingIssues"] as? [String])?.contains("graph_object_conflict") == true)
         #expect(((blocked["conflicts"] as? [[String: Any]]) ?? []).contains { $0["candidateID"] as? String == conflictOutput.id })
         #expect(((blocked["safeNextCommands"] as? [String]) ?? []).contains("cider-cli item delegate-graph-candidate \(acceptOutput.id) --task-kind find_object_evidence --json"))
+        let blockedReceipt = try #require(blocked["actionReceipt"] as? [String: Any])
+        #expect(blockedReceipt["status"] as? String == "failed")
+        #expect(blockedReceipt["errorCode"] as? String == "graph_candidate_conflicts_block_accept")
+        #expect((blockedReceipt["sourceRefs"] as? [String])?.contains("graph_candidate:\(acceptOutput.id)") == true)
+        let failedLedger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--status", "failed", "--action", "accept", "--json"], vault: vault).stdout)
+        let failedEntries = try #require(failedLedger["entries"] as? [[String: Any]])
+        #expect(failedEntries.contains { entry in
+            entry["command"] as? String == "item.accept-graph-candidate"
+                && entry["errorCode"] as? String == "graph_candidate_conflicts_block_accept"
+                && entry["changed"] as? Bool == false
+        })
 
         let acceptResult = try runCLI(args: [
             "item", "accept-graph-candidate", acceptOutput.id,

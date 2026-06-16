@@ -13056,6 +13056,41 @@ struct CiderCLI {
         _ = try? SecondBrainActionReceiptLedgerService(database: .shared).record(record)
     }
 
+    static func ownerRefString(for ref: LibraryEntityRef) -> String {
+        "\(ref.type.rawValue):\(ref.entityID.uuidString)"
+    }
+
+    static func actionReceiptForCandidateMutation(
+        command: String,
+        action: String,
+        actor: String,
+        status: String = "succeeded",
+        output: SecondBrainEnrichmentOutput,
+        candidateRefPrefix: String,
+        readOnly: Bool = false,
+        changed: Bool = true,
+        errorCode: String? = nil,
+        safeVerificationCommands: [String],
+        safeNextCommands: [String]
+    ) -> [String: Any] {
+        agentActionReceiptToDict(
+            command: command,
+            action: action,
+            actor: actor,
+            owner: output.owner,
+            sourceRefs: [output.owner.canonicalRef, "\(candidateRefPrefix):\(output.id)"],
+            evidenceRefs: [output.owner.canonicalRef],
+            readOnly: readOnly,
+            changed: changed,
+            status: status,
+            errorCode: errorCode,
+            before: ["reviewState": output.reviewState],
+            after: nil,
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: safeNextCommands
+        )
+    }
+
     static func actionLedgerFilter(from args: [String]) -> SecondBrainActionReceiptFilter {
         let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
         let owner: SecondBrainOwnerRef?
@@ -16299,6 +16334,7 @@ struct CiderCLI {
             }
 
             if jsonOutput {
+                persistActionReceiptIfPresent(payload)
                 outputJSON(payload)
             } else {
                 print("\(payload["action"] ?? action) memory candidate: \(candidateID)")
@@ -16629,6 +16665,7 @@ struct CiderCLI {
         agentAction: SecondBrainAgentAction
     ) -> [String: Any] {
         let safeCommands = memoryCandidatePostMutationSafeCommands(output: candidate)
+        let actor = candidate.metadata["reviewed_by"] ?? "user"
         return [
             "ok": true,
             "command": command,
@@ -16640,6 +16677,15 @@ struct CiderCLI {
             "reviewState": candidate.reviewState,
             "candidate": memoryCandidateToDict(candidate),
             "agentAction": agentActionToDict(agentAction),
+            "actionReceipt": actionReceiptForCandidateMutation(
+                command: command,
+                action: action,
+                actor: actor,
+                output: candidate,
+                candidateRefPrefix: "memory_candidate",
+                safeVerificationCommands: ["cider-cli item action-ledger list --owner \(candidate.owner.canonicalRef) --json"],
+                safeNextCommands: safeCommands
+            ),
             "safeNextCommands": safeCommands,
             "safeCommands": safeCommands,
         ]
@@ -16945,7 +16991,7 @@ struct CiderCLI {
 
     static func printGraphCandidateMutationError(_ error: GraphCandidateMutationCLIError) {
         processExitCode = 1
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "ok": false,
             "command": error.command,
             "readOnly": false,
@@ -16959,6 +17005,23 @@ struct CiderCLI {
             "safeNextCommands": error.safeNextCommands,
             "safeCommands": error.safeNextCommands,
         ]
+        let receipt = agentActionReceiptToDict(
+            command: error.command,
+            action: error.command.replacingOccurrences(of: "item.", with: "").replacingOccurrences(of: "-graph-candidate", with: ""),
+            actor: "cider-cli",
+            owner: nil,
+            sourceRefs: ["graph_candidate:\(error.candidateID)"],
+            evidenceRefs: [],
+            readOnly: false,
+            changed: false,
+            status: "failed",
+            errorCode: error.errorCode,
+            error: error.message,
+            safeVerificationCommands: error.safeNextCommands,
+            safeNextCommands: error.safeNextCommands
+        )
+        payload["actionReceipt"] = receipt
+        persistActionReceiptIfPresent(payload)
         if jsonOutput {
             outputJSON(payload)
         } else {
@@ -17400,6 +17463,7 @@ struct CiderCLI {
             }
 
             if jsonOutput {
+                persistActionReceiptIfPresent(payload)
                 outputJSON(payload)
             } else {
                 print("\(payload["action"] ?? action) graph candidate: \(candidateID)")
@@ -17554,6 +17618,15 @@ struct CiderCLI {
             "canonicalEntity": canonicalEntity,
             "aliasDecisions": aliasDecisions,
             "agentAction": agentActionToDict(action),
+            "actionReceipt": actionReceiptForCandidateMutation(
+                command: "item.accept-graph-candidate",
+                action: "accept",
+                actor: actor,
+                output: accepted,
+                candidateRefPrefix: "graph_candidate",
+                safeVerificationCommands: ["cider-cli item action-ledger list --owner \(accepted.owner.canonicalRef) --json"],
+                safeNextCommands: safeCommands
+            ),
             "targetOwner": ownerToDict(targetOwner),
             "safeNextCommands": safeCommands,
             "safeCommands": safeCommands,
@@ -17617,6 +17690,15 @@ struct CiderCLI {
             "reviewState": rejected.reviewState,
             "candidate": graphCandidateToDict(rejected),
             "agentAction": agentActionToDict(action),
+            "actionReceipt": actionReceiptForCandidateMutation(
+                command: "item.reject-graph-candidate",
+                action: "reject",
+                actor: actor,
+                output: rejected,
+                candidateRefPrefix: "graph_candidate",
+                safeVerificationCommands: ["cider-cli item action-ledger list --owner \(rejected.owner.canonicalRef) --json"],
+                safeNextCommands: safeCommands
+            ),
             "safeNextCommands": safeCommands,
             "safeCommands": safeCommands,
         ]
@@ -17696,6 +17778,16 @@ struct CiderCLI {
             "reviewState": delegated.reviewState,
             "candidate": graphCandidateToDict(delegated),
             "agentAction": agentActionToDict(action),
+            "actionReceipt": actionReceiptForCandidateMutation(
+                command: "item.delegate-graph-candidate",
+                action: "delegate",
+                actor: actor,
+                status: "requested",
+                output: delegated,
+                candidateRefPrefix: "graph_candidate",
+                safeVerificationCommands: ["cider-cli item action-ledger list --owner \(delegated.owner.canonicalRef) --json"],
+                safeNextCommands: safeCommands
+            ),
             "delegation": [
                 "status": "requested",
                 "task": graphCandidateDelegationTaskToDict(task, candidateID: output.id),
@@ -19555,7 +19647,7 @@ struct CiderCLI {
     }
 
     static func itemAgentContextHistoryToDict(_ entry: CiderItemAgentContextHistoryEntry) -> [String: Any] {
-        [
+        var dict: [String: Any] = [
             "id": entry.id,
             "kind": entry.kind,
             "summary": entry.summary,
@@ -19563,6 +19655,14 @@ struct CiderCLI {
             "status": entry.status,
             "createdAt": ISO8601DateFormatter().string(from: entry.createdAt),
         ]
+        if let command = entry.command { dict["command"] = command }
+        if let action = entry.action { dict["action"] = action }
+        if let readOnly = entry.readOnly { dict["readOnly"] = readOnly }
+        if let changed = entry.changed { dict["changed"] = changed }
+        if !entry.sourceRefs.isEmpty { dict["sourceRefs"] = entry.sourceRefs }
+        if !entry.evidenceRefs.isEmpty { dict["evidenceRefs"] = entry.evidenceRefs }
+        if !entry.safeVerificationCommands.isEmpty { dict["safeVerificationCommands"] = entry.safeVerificationCommands }
+        return dict
     }
 
     static func itemSearchResultToDict(_ result: CiderItemSearchResult) -> [String: Any] {
@@ -20628,12 +20728,41 @@ struct CiderCLI {
         target: LibraryEntityRef,
         service: ItemLinkService
     ) {
+        let command = action == "linked" ? "link.add" : "link.remove"
+        let receiptAction = action == "linked" ? "link" : "unlink"
+        let sourceRef = ownerRefString(for: source)
+        let targetRef = ownerRefString(for: target)
+        let receipt = agentActionReceiptToDict(
+            command: command,
+            action: receiptAction,
+            actor: "cider-cli",
+            owner: SecondBrainOwnerRef(ownerType: source.type.rawValue, ownerID: source.entityID.uuidString),
+            sourceRefs: [sourceRef, targetRef],
+            evidenceRefs: [targetRef],
+            readOnly: false,
+            changed: true,
+            safeVerificationCommands: [
+                "cider-cli link related \(source.type.rawValue) \(source.entityID.uuidString) --json",
+                "cider-cli item action-ledger list --owner \(sourceRef) --json",
+            ],
+            safeNextCommands: [
+                "cider-cli item context \(source.type.rawValue) \(source.entityID.uuidString) --json",
+                "cider-cli item context \(target.type.rawValue) \(target.entityID.uuidString) --json",
+            ]
+        )
+        let payload: [String: Any] = [
+            "ok": true,
+            "command": command,
+            "action": receiptAction,
+            "readOnly": false,
+            "changed": true,
+            "source": linkRefToDict(source, service: service),
+            "target": linkRefToDict(target, service: service),
+            "actionReceipt": receipt,
+        ]
+        persistActionReceiptIfPresent(payload)
         if jsonOutput {
-            outputJSON([
-                "action": action,
-                "source": linkRefToDict(source, service: service),
-                "target": linkRefToDict(target, service: service)
-            ])
+            outputJSON(payload)
         } else {
             let sourceTitle = service.summary(for: source)?.title ?? source.entityID.uuidString
             let targetTitle = service.summary(for: target)?.title ?? target.entityID.uuidString
