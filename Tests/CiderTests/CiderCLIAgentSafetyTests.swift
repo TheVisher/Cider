@@ -952,7 +952,8 @@ struct CiderCLIAgentSafetyTests {
             command: "item.due-to-surface"
         )
         let dueCandidates = try #require(due["candidates"] as? [[String: Any]])
-        #expect(dueCandidates.contains { $0["family"] as? String == "review_item" && ($0["sourceRefs"] as? [String])?.contains("follow_up_proposal:\(proposalID)") == true })
+        let dueProposal = try #require(dueCandidates.first { $0["family"] as? String == "review_item" && ($0["sourceRefs"] as? [String])?.contains("follow_up_proposal:\(proposalID)") == true })
+        #expect((dueProposal["safeNextCommands"] as? [String])?.contains("cider-cli item memory-facts proposals preview \(proposalID) --json") == true)
 
         let accepted = try assertStrictProcessJSON(
             runCLI(args: ["item", "memory-facts", "proposals", "accept", proposalID, "--actor", "cody-test", "--json"], vault: vault),
@@ -964,6 +965,148 @@ struct CiderCLIAgentSafetyTests {
         #expect(acceptedProposal["createsTodo"] as? Bool == false)
         #expect(acceptedProposal["createsLink"] as? Bool == false)
         #expect(acceptedProposal["createsNag"] as? Bool == false)
+    }
+
+    @Test("accepted memory follow-up proposal execution preview is dry run and non mutating")
+    func acceptedMemoryFollowUpProposalExecutionPreviewIsDryRunAndNonMutating() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-follow-up-preview-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Preview Source", content: "Accepted proposals need preview before acting.", vault: vault)
+        let suggested = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Accepted proposals need preview before acting",
+                "--evidence", "Accepted proposals need preview before acting.",
+                "--memory-key", "cid541.preview",
+                "--confidence", "0.97",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let candidate = try #require(suggested["candidate"] as? [String: Any])
+        let acceptedID = try #require(candidate["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+        let created = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "create", "--fact", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.create"
+        )
+        let createdProposal = try #require(created["proposal"] as? [String: Any])
+        let proposalID = try #require(createdProposal["proposalID"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "accept", proposalID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.accept"
+        )
+
+        let preview = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "preview", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.preview"
+        )
+        #expect(preview["readOnly"] as? Bool == true)
+        #expect(preview["changed"] as? Bool == false)
+        #expect(preview["truthBoundary"] as? String == "execution_preview_not_truth")
+        #expect(preview["executionBoundary"] as? String == "dry_run_preview_not_execution")
+        let previewBody = try #require(preview["executionPreview"] as? [String: Any])
+        #expect(previewBody["proposalRef"] as? String == "follow_up_proposal:\(proposalID)")
+        #expect(previewBody["mappedCommandFamily"] as? String == "recall_context")
+        #expect(previewBody["mappedCommand"] as? String == "cider-cli item recall-context --item note \(noteID) --json")
+        #expect(previewBody["dryRun"] as? Bool == true)
+        #expect(previewBody["wouldExecute"] as? Bool == false)
+        #expect(previewBody["requiresConfirmation"] as? Bool == true)
+        #expect(previewBody["predictedMutationType"] as? String == "none_read_only_context_review")
+        #expect(previewBody["createsReminder"] as? Bool == false)
+        #expect(previewBody["createsTodo"] as? Bool == false)
+        #expect(previewBody["createsLink"] as? Bool == false)
+        #expect(previewBody["createsNag"] as? Bool == false)
+        let receipt = try #require(preview["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.memory-facts.proposals.preview")
+        #expect(receipt["action"] as? String == "preview_follow_up_proposal_execution")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        #expect(receipt["truthBoundary"] as? String == "action_receipt_not_fact_truth")
+
+        let inspected = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "inspect", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.inspect"
+        )
+        let inspectedProposal = try #require(inspected["proposal"] as? [String: Any])
+        #expect(inspectedProposal["status"] as? String == "accepted")
+        #expect(inspectedProposal["createsReminder"] as? Bool == false)
+        #expect(inspectedProposal["createsTodo"] as? Bool == false)
+        #expect(inspectedProposal["createsLink"] as? Bool == false)
+        #expect(inspectedProposal["createsNag"] as? Bool == false)
+    }
+
+    @Test("accepted memory follow-up proposal execution preview failures and no op reads are structured")
+    func acceptedMemoryFollowUpProposalExecutionPreviewFailuresAndNoOpReadsAreStructured() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-follow-up-preview-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let empty = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "previews", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.previews"
+        )
+        #expect(empty["status"] as? String == "no_op")
+        #expect(empty["readOnly"] as? Bool == true)
+        #expect(empty["changed"] as? Bool == false)
+        #expect(empty["count"] as? Int == 0)
+
+        let missing = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "preview", "missing-preview", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.preview",
+            errorCode: "follow_up_proposal_not_found"
+        )
+        #expect(missing["readOnly"] as? Bool == true)
+        #expect(missing["changed"] as? Bool == false)
+
+        let noteID = try createNote(title: "Unaccepted Preview Source", content: "Unaccepted proposals must not preview as executable.", vault: vault)
+        let suggested = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Unaccepted proposals must not preview as executable",
+                "--evidence", "Unaccepted proposals must not preview as executable.",
+                "--memory-key", "cid541.preview.unaccepted",
+                "--confidence", "0.97",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let candidate = try #require(suggested["candidate"] as? [String: Any])
+        let acceptedID = try #require(candidate["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+        let created = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "create", "--fact", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.create"
+        )
+        let proposalID = try #require((created["proposal"] as? [String: Any])?["proposalID"] as? String)
+        let unaccepted = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "preview", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.preview",
+            errorCode: "follow_up_proposal_not_accepted"
+        )
+        #expect(unaccepted["readOnly"] as? Bool == true)
+        #expect(unaccepted["changed"] as? Bool == false)
+        #expect((unaccepted["safeNextCommands"] as? [String])?.contains("cider-cli item memory-facts proposals accept \(proposalID) --json") == true)
+
+        let unsupported = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "execute", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals",
+            errorCode: "unsupported_follow_up_proposal_action"
+        )
+        let unsupportedDetails = try #require(unsupported["details"] as? [String: Any])
+        #expect((unsupportedDetails["supportedActions"] as? [String])?.contains("preview") == true)
     }
 
     @Test("accepted memory follow-up proposal failures and empty reads are structured")

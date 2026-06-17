@@ -11,6 +11,22 @@ struct SecondBrainFollowUpProposal: Identifiable, Equatable {
     var owner: SecondBrainOwnerRef { output.owner }
 }
 
+struct SecondBrainFollowUpExecutionPreview: Identifiable, Equatable {
+    var id: String { "follow_up_execution_preview:\(proposal.id)" }
+    var proposal: SecondBrainFollowUpProposal
+    var mappedCommandFamily: String
+    var mappedCommand: String
+    var predictedMutationType: String
+    var requiresConfirmation: Bool
+    var confirmationPolicy: String
+    var dryRun: Bool = true
+    var wouldExecute: Bool = false
+    var createsReminder: Bool = false
+    var createsTodo: Bool = false
+    var createsLink: Bool = false
+    var createsNag: Bool = false
+}
+
 @MainActor
 final class SecondBrainFollowUpProposalService {
     static let outputKind = "follow_up_proposal"
@@ -20,6 +36,7 @@ final class SecondBrainFollowUpProposalService {
         case notFound(String)
         case wrongKind(proposalID: String, kind: String)
         case missingIntent(String)
+        case notAccepted(proposalID: String, status: String)
 
         var errorDescription: String? {
             switch self {
@@ -31,6 +48,8 @@ final class SecondBrainFollowUpProposalService {
                 return "Record '\(proposalID)' is kind \(kind), not follow_up_proposal."
             case .missingIntent(let factID):
                 return "Accepted memory fact '\(factID)' has no action intent to propose."
+            case .notAccepted(let proposalID, let status):
+                return "Follow-up proposal '\(proposalID)' is \(status), not accepted for execution preview."
             }
         }
     }
@@ -118,6 +137,40 @@ final class SecondBrainFollowUpProposalService {
         proposal.output.metadata["proposal_lifecycle_action"] = status
         try outputService.record(proposal.output)
         return proposal
+    }
+
+    func preview(_ rawID: String?) throws -> SecondBrainFollowUpExecutionPreview {
+        let proposal = try inspect(rawID)
+        guard proposal.status == "accepted" else {
+            throw FollowUpProposalError.notAccepted(proposalID: proposal.id, status: proposal.status)
+        }
+        return Self.preview(for: proposal)
+    }
+
+    func previews(limit: Int = 50) throws -> [SecondBrainFollowUpExecutionPreview] {
+        try list(statuses: ["accepted"], limit: limit).map { Self.preview(for: $0) }
+    }
+
+    static func preview(for proposal: SecondBrainFollowUpProposal) -> SecondBrainFollowUpExecutionPreview {
+        let family = proposal.output.metadata["proposed_command_family"] ?? "recall_context"
+        let command = proposal.output.metadata["proposed_command"] ?? "cider-cli item recall-context --item \(proposal.owner.ownerType) \(proposal.owner.ownerID) --json"
+        let predictedMutation: String
+        switch family {
+        case "recall_context":
+            predictedMutation = "none_read_only_context_review"
+        case "reminder", "todo", "link", "nag":
+            predictedMutation = "requires_confirmed_\(family)_mutation"
+        default:
+            predictedMutation = "unknown_requires_confirmation"
+        }
+        return SecondBrainFollowUpExecutionPreview(
+            proposal: proposal,
+            mappedCommandFamily: family,
+            mappedCommand: command,
+            predictedMutationType: predictedMutation,
+            requiresConfirmation: proposal.output.metadata["requires_confirmation"] != "false",
+            confirmationPolicy: proposal.output.metadata["confirmation_policy"] ?? "explicit_existing_command_required"
+        )
     }
 
     static func normalizedProposalID(_ rawID: String?) throws -> String {

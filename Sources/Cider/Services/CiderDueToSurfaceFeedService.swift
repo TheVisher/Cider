@@ -90,6 +90,7 @@ enum CiderDueToSurfaceFeedService {
         staleCaptures: [CiderDueToSurfaceStaleCapture],
         linkedContext: [CiderDueToSurfaceLinkedContext],
         acceptedMemoryFacts: [SecondBrainAcceptedMemoryFact] = [],
+        followUpExecutionPreviews: [SecondBrainFollowUpExecutionPreview] = [],
         now: Date = Date(),
         limit: Int = 20
     ) -> CiderDueToSurfaceFeed {
@@ -99,6 +100,7 @@ enum CiderDueToSurfaceFeedService {
         candidates += staleCaptures.map { staleCaptureCandidate($0, now: now) }
         candidates += linkedContext.map { linkedContextCandidate($0, now: now) }
         candidates += acceptedMemoryFacts.map { acceptedMemoryFactCandidate($0, now: now) }
+        candidates += followUpExecutionPreviews.map { followUpExecutionPreviewCandidate($0, now: now) }
 
         let sorted = candidates.sorted { lhs, rhs in
             if lhs.score != rhs.score { return lhs.score > rhs.score }
@@ -188,6 +190,55 @@ enum CiderDueToSurfaceFeedService {
                 ),
             ],
             safeNextCommands: safeCommands
+        )
+    }
+
+    private static func followUpExecutionPreviewCandidate(_ preview: SecondBrainFollowUpExecutionPreview, now: Date) -> CiderDueToSurfaceCandidate {
+        let proposal = preview.proposal
+        let explanation = "Accepted follow-up proposal has a read-only execution preview; previewing does not create reminders, todos, links, or nags."
+        let sourceRefs = Array(Set([proposal.proposalRef, proposal.factRef, proposal.candidateRef, proposal.owner.canonicalRef])).filter { !$0.isEmpty }.sorted()
+        let evidenceRefs = DatabaseHelpers.decodeStringArray(proposal.output.metadata["evidence_refs"])
+        return CiderDueToSurfaceCandidate(
+            id: preview.id,
+            family: .reviewItem,
+            owner: proposal.owner,
+            title: proposal.output.value,
+            itemType: "follow_up_execution_preview",
+            whyNow: explanation,
+            reasonCodes: ["follow_up_execution_preview", "dry_run_preview", "accepted_proposal", preview.mappedCommandFamily],
+            urgency: "context",
+            window: CiderDueToSurfaceWindow(label: "accepted proposal execution preview", startsAt: proposal.output.updatedAt, endsAt: nil),
+            confidence: proposal.output.confidence ?? 0.75,
+            reviewState: "accepted",
+            truthBoundary: "execution_preview_not_truth",
+            candidateBoundary: "dry_run_preview_not_execution",
+            explanation: explanation,
+            factRef: proposal.factRef.isEmpty ? nil : proposal.factRef,
+            candidateRef: proposal.proposalRef,
+            sourceCitation: proposal.output.metadata["source_citation"] ?? proposal.owner.canonicalRef,
+            safeVerificationCommands: ["cider-cli item memory-facts proposals preview \(proposal.id) --json"],
+            score: 62 + ((proposal.output.confidence ?? 0.75) * 10),
+            sourceRefs: sourceRefs,
+            citedEvidence: evidenceRefs.map {
+                CiderDueToSurfaceEvidence(
+                    ref: $0,
+                    kind: "follow_up_execution_preview_source",
+                    summary: proposal.output.evidence,
+                    sourceOwnerRef: proposal.owner.canonicalRef,
+                    candidateRef: proposal.proposalRef,
+                    metadata: [
+                        "truthBoundary": "execution_preview_not_truth",
+                        "executionBoundary": "dry_run_preview_not_execution",
+                        "predictedMutationType": preview.predictedMutationType,
+                    ]
+                )
+            },
+            safeNextCommands: [
+                "cider-cli item memory-facts proposals preview \(proposal.id) --json",
+                "cider-cli item memory-facts proposals inspect \(proposal.id) --json",
+                preview.mappedCommand,
+                "cider-cli item action-ledger list --owner \(proposal.owner.canonicalRef) --json",
+            ].filter { !$0.isEmpty }
         )
     }
 
