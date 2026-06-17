@@ -8141,6 +8141,9 @@ struct CiderCLI {
     static func handleBoard(subcommand: String?, args: [String]) {
         let storage = KanbanStorage.shared
         switch subcommand {
+        case nil, "help", "--help", "-h":
+            printUsage()
+
         case "list", "ls":
             let boards = storage.boards
             if jsonOutput {

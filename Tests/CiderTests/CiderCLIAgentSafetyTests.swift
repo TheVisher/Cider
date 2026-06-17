@@ -2718,6 +2718,18 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("Unknown command") == true)
     }
 
+    @Test("board help aliases print usage instead of unknown command")
+    func boardHelpAliasesPrintUsageInsteadOfUnknownCommand() throws {
+        for alias in ["--help", "-h", "help"] {
+            let result = try runCLI(args: ["board", alias])
+
+            #expect(result.status == 0, "Expected cider-cli board \(alias) to exit successfully")
+            #expect(result.stdout.contains("BOARD WORKFLOW"))
+            #expect(result.stdout.contains("cider-cli board add-card"))
+            #expect(!result.stdout.contains("Unknown board command"))
+        }
+    }
+
     @Test("remaining command families fail closed with json errors")
     func remainingCommandFamiliesFailClosedWithJSONErrors() throws {
         let cases: [(args: [String], expectedError: String)] = [
