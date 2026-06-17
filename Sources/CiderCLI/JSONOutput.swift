@@ -1338,6 +1338,7 @@ func dueToSurfaceCandidateToDict(_ candidate: CiderDueToSurfaceCandidate, format
     if let candidateRef = candidate.candidateRef { dict["candidateRef"] = candidateRef }
     if let sourceCitation = candidate.sourceCitation { dict["sourceCitation"] = sourceCitation }
     if !candidate.relatedRefs.isEmpty { dict["relatedRefs"] = candidate.relatedRefs }
+    if !candidate.actionIntentRefs.isEmpty { dict["actionIntentRefs"] = candidate.actionIntentRefs }
     if !candidate.safeVerificationCommands.isEmpty { dict["safeVerificationCommands"] = candidate.safeVerificationCommands }
     if candidate.truthBoundary == "reviewable_candidate_not_truth" {
         dict["needsReview"] = true

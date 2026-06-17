@@ -791,6 +791,101 @@ struct CiderCLIAgentSafetyTests {
         #expect(filter["name"] as? String == "limit")
     }
 
+    @Test("accepted memory fact action intents are read-only and referenced by resurfacing")
+    func acceptedMemoryFactActionIntentsAreReadOnlyAndReferencedByResurfacing() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-accepted-memory-intents-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Memory Intent Source", content: "Accepted memory facts should suggest safe next actions.", vault: vault)
+        let suggested = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Accepted memory facts should suggest safe next actions",
+                "--evidence", "Accepted memory facts should suggest safe next actions.",
+                "--memory-key", "cid507.accepted-memory.action-intent",
+                "--confidence", "0.96",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let candidate = try #require(suggested["candidate"] as? [String: Any])
+        let acceptedID = try #require(candidate["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+
+        let intentsPayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "intents", "--fact", acceptedID, "--json"], vault: vault),
+            command: "item.memory-facts.intents"
+        )
+        #expect(intentsPayload["readOnly"] as? Bool == true)
+        #expect(intentsPayload["changed"] as? Bool == false)
+        #expect(intentsPayload["truthBoundary"] as? String == "accepted_memory_fact")
+        #expect(intentsPayload["candidateBoundary"] as? String == "reviewable_memory_candidates_excluded")
+        let receipt = try #require(intentsPayload["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.memory-facts.intents")
+        #expect(receipt["action"] as? String == "propose_action_intents")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        let intents = try #require(intentsPayload["intents"] as? [[String: Any]])
+        let intent = try #require(intents.first)
+        #expect(intent["factRef"] as? String == "accepted_memory_fact:\(acceptedID)")
+        #expect(intent["candidateRef"] as? String == "memory_candidate:\(acceptedID)")
+        #expect(intent["intentType"] as? String == "follow_up_review")
+        #expect(intent["sourceCitation"] != nil)
+        #expect(intent["reason"] != nil)
+        #expect(intent["proposedCommandFamily"] as? String == "recall_context")
+        #expect(intent["requiresConfirmation"] as? Bool == true)
+        #expect(intent["mutationBoundary"] as? String == "read_only_intent_no_mutation")
+        #expect((intent["safeVerificationCommands"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedID) --json") == true)
+
+        let due = try assertStrictProcessJSON(
+            runCLI(args: ["item", "due-to-surface", "--limit", "10", "--stale-after-days", "999", "--json"], vault: vault),
+            command: "item.due-to-surface"
+        )
+        let dueCandidates = try #require(due["candidates"] as? [[String: Any]])
+        let surfaced = try #require(dueCandidates.first { $0["factRef"] as? String == "accepted_memory_fact:\(acceptedID)" })
+        let intentRefs = try #require(surfaced["actionIntentRefs"] as? [String])
+        #expect(intentRefs.contains("accepted_memory_fact_action_intent:\(acceptedID):follow_up_review"))
+    }
+
+    @Test("accepted memory fact action intent selectors return structured no-op and failures")
+    func acceptedMemoryFactActionIntentSelectorsReturnStructuredNoOpAndFailures() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-accepted-memory-intents-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let empty = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "intents", "--json"], vault: vault),
+            command: "item.memory-facts.intents"
+        )
+        #expect(empty["status"] as? String == "no_op")
+        #expect(empty["errorCode"] as? String == "no_action_intents")
+        #expect(empty["readOnly"] as? Bool == true)
+        #expect(empty["changed"] as? Bool == false)
+
+        let missing = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "intents", "--fact", "missing-intent-fact", "--json"], vault: vault),
+            command: "item.memory-facts.intents",
+            errorCode: "accepted_memory_fact_not_found"
+        )
+        #expect(missing["readOnly"] as? Bool == true)
+        #expect(missing["changed"] as? Bool == false)
+
+        let badLimit = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "intents", "--limit", "nope", "--json"], vault: vault),
+            command: "item.memory-facts.intents",
+            errorCode: "malformed_numeric_filter"
+        )
+        let filter = try #require(badLimit["filter"] as? [String: Any])
+        #expect(filter["name"] as? String == "limit")
+    }
+
     @Test("link helper failures return structured receipts without mutation")
     func linkHelperFailuresReturnStructuredReceiptsWithoutMutation() throws {
         let vault = FileManager.default.temporaryDirectory

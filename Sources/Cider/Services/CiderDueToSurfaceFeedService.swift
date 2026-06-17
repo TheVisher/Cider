@@ -52,6 +52,7 @@ struct CiderDueToSurfaceCandidate: Identifiable, Equatable {
     var candidateRef: String? = nil
     var sourceCitation: String? = nil
     var relatedRefs: [String] = []
+    var actionIntentRefs: [String] = []
     var safeVerificationCommands: [String] = []
     var score: Double
     var sourceRefs: [String]
@@ -169,6 +170,7 @@ enum CiderDueToSurfaceFeedService {
             candidateRef: fact.candidateRef,
             sourceCitation: sourceCitation,
             relatedRefs: relatedRefs,
+            actionIntentRefs: SecondBrainAcceptedMemoryFactActionIntentService.intentRefs(for: fact),
             safeVerificationCommands: ["cider-cli item memory-facts inspect \(output.id) --json"],
             score: 58 + ((output.confidence ?? 0.75) * 10),
             sourceRefs: Array(Set([fact.factRef, fact.candidateRef, output.owner.canonicalRef, sourceCitation] + relatedRefs)).sorted(),

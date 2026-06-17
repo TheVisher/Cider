@@ -4947,6 +4947,7 @@ struct CiderCLI {
               cider-cli item memory-facts list [--limit <n>] [--json]
               cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
               cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
+              cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
               cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
               cider-cli item graph-candidate <candidate-id> [--json]
               cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
@@ -17099,6 +17100,45 @@ struct CiderCLI {
                 } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
                     printAcceptedMemoryFactError(factError, rawID: rawFactID, command: "item.memory-facts.resurface")
                 }
+            case "intents", "intent", "action-intents", "actions":
+                guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: "item.memory-facts.intents", minimum: 1) else { return }
+                let limit = min(parsedLimit ?? 20, 100)
+                let rawFactID = parseFlag("--fact", from: args) ?? parseFlag("--candidate", from: args)
+                do {
+                    let facts: [SecondBrainAcceptedMemoryFact]
+                    if let rawFactID {
+                        facts = [try service.inspect(rawFactID)]
+                    } else {
+                        facts = try service.list(limit: limit)
+                    }
+                    let intents = SecondBrainAcceptedMemoryFactActionIntentService.intents(for: facts, limit: limit)
+                    var payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.intents",
+                        "status": intents.isEmpty ? "no_op" : "succeeded",
+                        "readOnly": true,
+                        "changed": false,
+                        "truthBoundary": "accepted_memory_fact",
+                        "candidateBoundary": "reviewable_memory_candidates_excluded",
+                        "count": intents.count,
+                        "selector": rawFactID.map { ["candidateID": $0] } ?? [:],
+                        "intents": intents.map(acceptedMemoryFactActionIntentToDict),
+                        "actionReceipt": acceptedMemoryFactIntentActionReceipt(intents: intents, rawFactID: rawFactID),
+                        "safeVerificationCommands": ["cider-cli item memory-facts intents --json"],
+                        "safeNextCommands": [
+                            "cider-cli item memory-facts resurface --json",
+                            "cider-cli item due-to-surface --json",
+                            "cider-cli item recall-context --query <topic> --json",
+                        ],
+                    ]
+                    if intents.isEmpty {
+                        payload["errorCode"] = "no_action_intents"
+                        payload["message"] = "No accepted memory facts currently have action intents for this selector."
+                    }
+                    if jsonOutput { outputJSON(payload) } else { print("Accepted memory fact action intents: \(intents.count)") }
+                } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
+                    printAcceptedMemoryFactError(factError, rawID: rawFactID, command: "item.memory-facts.intents")
+                }
             default:
                 printCLIError(
                     "Unsupported accepted memory fact action '\(action)'.",
@@ -17108,7 +17148,7 @@ struct CiderCLI {
                         "readOnly": true,
                         "changed": false,
                         "errorCode": "unsupported_memory_facts_action",
-                        "supportedActions": ["list", "inspect"],
+                        "supportedActions": ["list", "inspect", "resurface", "intents"],
                         "safeNextCommands": ["cider-cli item memory-facts list --json"],
                     ]
                 )
@@ -17162,11 +17202,58 @@ struct CiderCLI {
         if let reviewedAt = output.metadata["reviewed_at"] { dict["acceptedAt"] = reviewedAt; dict["reviewedAt"] = reviewedAt }
         if let reviewedBy = output.metadata["reviewed_by"] { dict["acceptedBy"] = reviewedBy; dict["reviewedBy"] = reviewedBy }
         if let evidenceRecord = sourceEvidenceRecordToDict(for: output) { dict["sourceEvidenceRecord"] = evidenceRecord }
+        dict["actionIntentRefs"] = SecondBrainAcceptedMemoryFactActionIntentService.intentRefs(for: fact)
         let lifecycle = lifecycleHistoryToDict(for: output)
         if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
         let history = acceptedMemoryFactActionHistory(output)
         if !history.isEmpty { dict["actionHistory"] = history }
         return dict
+    }
+
+    static func acceptedMemoryFactActionIntentToDict(_ intent: SecondBrainAcceptedMemoryFactActionIntent) -> [String: Any] {
+        [
+            "id": intent.intentRef,
+            "intentRef": intent.intentRef,
+            "factRef": intent.factRef,
+            "candidateRef": intent.candidateRef,
+            "owner": ownerToDict(intent.owner),
+            "ownerRef": intent.owner.canonicalRef,
+            "intentType": intent.intentType,
+            "proposedCommandFamily": intent.proposedCommandFamily,
+            "proposedCommand": intent.proposedCommand,
+            "reason": intent.reason,
+            "explanation": intent.explanation,
+            "sourceCitation": intent.sourceCitation,
+            "sourceRefs": intent.sourceRefs,
+            "evidenceRefs": intent.evidenceRefs,
+            "truthBoundary": intent.truthBoundary,
+            "candidateBoundary": intent.candidateBoundary,
+            "mutationBoundary": intent.mutationBoundary,
+            "requiresConfirmation": intent.requiresConfirmation,
+            "confirmationPolicy": intent.confirmationPolicy,
+            "safeNextCommands": intent.safeNextCommands,
+            "safeVerificationCommands": intent.safeVerificationCommands,
+        ]
+    }
+
+    static func acceptedMemoryFactIntentActionReceipt(intents: [SecondBrainAcceptedMemoryFactActionIntent], rawFactID: String?) -> [String: Any] {
+        var receipt: [String: Any] = [
+            "command": "item.memory-facts.intents",
+            "action": "propose_action_intents",
+            "actor": "cider-cli",
+            "status": intents.isEmpty ? "no_op" : "succeeded",
+            "readOnly": true,
+            "changed": false,
+            "truthBoundary": "action_receipt_not_fact_truth",
+            "sourceRefs": Array(Set(intents.flatMap(\.sourceRefs))).sorted(),
+            "evidenceRefs": Array(Set(intents.flatMap(\.evidenceRefs))).sorted(),
+            "safeVerificationCommands": ["cider-cli item memory-facts intents --json"],
+            "safeNextCommands": ["cider-cli item due-to-surface --json"],
+        ]
+        if let rawFactID { receipt["selector"] = ["candidateID": rawFactID] }
+        if let owner = intents.first?.owner { receipt["owner"] = ownerToDict(owner); receipt["ownerRef"] = owner.canonicalRef }
+        if intents.isEmpty { receipt["errorCode"] = "no_action_intents" }
+        return receipt
     }
 
     static func acceptedMemoryFactActionHistory(_ output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
@@ -17186,6 +17273,7 @@ struct CiderCLI {
     static func acceptedMemoryFactSafeCommands(_ output: SecondBrainEnrichmentOutput) -> [String] {
         var commands = [
             "cider-cli item memory-facts inspect \(output.id) --json",
+            "cider-cli item memory-facts intents --fact \(output.id) --json",
             "cider-cli item memory-facts list --json",
             "cider-cli item recall-context --item \(output.owner.ownerType) \(output.owner.ownerID) --json",
             "cider-cli item owner-get \(output.owner.ownerType) \(output.owner.ownerID) --json",
