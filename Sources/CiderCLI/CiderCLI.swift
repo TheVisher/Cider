@@ -4948,6 +4948,7 @@ struct CiderCLI {
               cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
               cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
               cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
+              cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer ... [--json]
               cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
               cider-cli item graph-candidate <candidate-id> [--json]
               cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
@@ -16240,13 +16241,14 @@ struct CiderCLI {
             dateCards: DateCardStorage.shared.dateCards,
             now: now
         )
-        let reviewItems: [CiderReviewQueueItem]
+        var reviewItems: [CiderReviewQueueItem]
         do {
             reviewItems = try CiderReviewQueueService().list(limit: limit, includeDeferred: includeSuppressed, now: now).items
                 .filter { !isCompletedReminderOwner(itemType: $0.itemType, itemID: $0.itemID) }
         } catch {
             reviewItems = []
         }
+        reviewItems.append(contentsOf: followUpProposalReviewItems(limit: limit, includeDeferred: includeSuppressed))
         let staleCaptures = staleCaptureSignals(now: now, staleAfterDays: staleAfterDays)
         let linkedContext = linkedContextSignals(limit: limit)
         let acceptedMemoryFacts = acceptedMemoryFactsForResurfacing(limit: limit)
@@ -16309,6 +16311,58 @@ struct CiderCLI {
             let service = SecondBrainAcceptedMemoryFactService(database: .shared)
             if let factID { return [try service.inspect(factID)] }
             return try service.list(limit: limit)
+        } catch {
+            return []
+        }
+    }
+
+    static func followUpProposalReviewItems(limit: Int, includeDeferred: Bool = false) -> [CiderReviewQueueItem] {
+        do {
+            let states: Set<String> = includeDeferred ? ["suggested", "needs_review", "deferred"] : ["suggested", "needs_review"]
+            let proposals = try SecondBrainFollowUpProposalService(database: .shared).list(statuses: states, limit: limit)
+            return proposals.compactMap { proposal in
+                guard let itemID = UUID(uuidString: proposal.owner.ownerID) else { return nil }
+                let title = proposal.output.value
+                return CiderReviewQueueItem(
+                    id: "review-follow-up-proposal-\(proposal.id)",
+                    kind: "follow_up_proposal",
+                    source: "follow_up_proposal",
+                    itemID: itemID,
+                    itemType: proposal.owner.ownerType,
+                    title: title,
+                    relativePath: nil,
+                    reason: "Review proposed follow-up before creating any reminder, todo, link, or nag.",
+                    reasonCodes: ["follow_up_proposal_review", "action_intent_review"],
+                    suggestedAction: "Review follow-up proposal",
+                    reviewState: proposal.status,
+                    confidence: proposal.output.confidence,
+                    routingDecisionID: nil,
+                    target: nil,
+                    createdAt: proposal.output.createdAt,
+                    safeActions: ["inspect", "accept", "reject", "defer"],
+                    candidateID: proposal.id,
+                    candidateRef: proposal.proposalRef,
+                    sourceQuote: proposal.output.evidence,
+                    safeNextCommands: followUpProposalSafeCommands(proposal),
+                    reviewFamily: "follow_up_proposal",
+                    sourceItemRef: proposal.owner.canonicalRef,
+                    sourceItemTitle: title,
+                    extractionReason: "This is a reviewable follow-up proposal derived from an accepted memory fact action intent; it is not a reminder, todo, link, nag, or accepted truth.",
+                    proposedChange: [
+                        "changeType": "follow_up_action_proposal",
+                        "truthState": "reviewable_follow_up_proposal_not_truth",
+                        "mutationBoundary": "proposal_record_only_no_external_mutation",
+                    ],
+                    storage: [
+                        "table": "enrichment_outputs",
+                        "service": "SecondBrainFollowUpProposalService",
+                        "kind": SecondBrainFollowUpProposalService.outputKind,
+                    ],
+                    truthState: "reviewable_follow_up_proposal_not_truth",
+                    acceptEffect: "Accepting only marks the proposal reviewed; it does not create a reminder, todo, link, or nag automatically.",
+                    rejectEffect: "Rejecting preserves the proposal record and marks it rejected."
+                )
+            }
         } catch {
             return []
         }
@@ -17139,6 +17193,8 @@ struct CiderCLI {
                 } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
                     printAcceptedMemoryFactError(factError, rawID: rawFactID, command: "item.memory-facts.intents")
                 }
+            case "proposals", "proposal", "follow-up-proposals":
+                handleAcceptedMemoryFactProposalCommand(args: args, service: service)
             default:
                 printCLIError(
                     "Unsupported accepted memory fact action '\(action)'.",
@@ -17148,7 +17204,7 @@ struct CiderCLI {
                         "readOnly": true,
                         "changed": false,
                         "errorCode": "unsupported_memory_facts_action",
-                        "supportedActions": ["list", "inspect", "resurface", "intents"],
+                        "supportedActions": ["list", "inspect", "resurface", "intents", "proposals"],
                         "safeNextCommands": ["cider-cli item memory-facts list --json"],
                     ]
                 )
@@ -17158,6 +17214,196 @@ struct CiderCLI {
         } catch {
             printCLIError(error.localizedDescription)
         }
+    }
+
+    static func handleAcceptedMemoryFactProposalCommand(args: [String], service: SecondBrainAcceptedMemoryFactService) {
+        let positional = leadingPositionalArgs(from: args)
+        let subaction = positional.dropFirst().first ?? "list"
+        let proposalService = SecondBrainFollowUpProposalService(database: .shared)
+        let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+        do {
+            switch subaction {
+            case "create", "propose":
+                let rawFactID = parseFlag("--fact", from: args) ?? parseFlag("--candidate", from: args)
+                do {
+                    let fact = try service.inspect(rawFactID)
+                    let proposal = try proposalService.create(from: fact, actor: actor)
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.proposals.create",
+                        "readOnly": false,
+                        "changed": true,
+                        "mutationBoundary": "proposal_record_only_no_external_mutation",
+                        "truthBoundary": "reviewable_follow_up_proposal_not_truth",
+                        "candidateBoundary": "accepted_fact_action_intent_review_record",
+                        "proposal": followUpProposalToDict(proposal),
+                        "actionReceipt": followUpProposalActionReceipt(command: "item.memory-facts.proposals.create", action: "create_follow_up_proposal", proposal: proposal, changed: true, readOnly: false),
+                        "safeVerificationCommands": ["cider-cli item memory-facts proposals inspect \(proposal.id) --json"],
+                        "safeNextCommands": followUpProposalSafeCommands(proposal),
+                    ]
+                    if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal created: \(proposal.id)") }
+                } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
+                    printAcceptedMemoryFactError(factError, rawID: rawFactID, command: "item.memory-facts.proposals.create", readOnly: false)
+                }
+            case "list", "ls":
+                let limit = max(1, min(parseFlag("--limit", from: args).flatMap(Int.init) ?? 50, 100))
+                let status = parseFlag("--status", from: args)
+                let statuses = status.map { Set([$0]) }
+                let proposals = try proposalService.list(statuses: statuses, limit: limit)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.memory-facts.proposals.list",
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "reviewable_follow_up_proposal_not_truth",
+                    "candidateBoundary": "accepted_fact_action_intent_review_record",
+                    "count": proposals.count,
+                    "proposals": proposals.map(followUpProposalToDict),
+                    "safeNextCommands": ["cider-cli item memory-facts proposals list --json"],
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Follow-up proposals: \(proposals.count)") }
+            case "inspect", "get":
+                let rawID = positional.dropFirst(2).first ?? parseFlag("--id", from: args) ?? parseFlag("--proposal", from: args)
+                do {
+                    let proposal = try proposalService.inspect(rawID)
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.proposals.inspect",
+                        "readOnly": true,
+                        "changed": false,
+                        "proposal": followUpProposalToDict(proposal),
+                        "safeNextCommands": followUpProposalSafeCommands(proposal),
+                    ]
+                    if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal: \(proposal.id)") }
+                } catch let proposalError as SecondBrainFollowUpProposalService.FollowUpProposalError {
+                    printFollowUpProposalError(proposalError, rawID: rawID, command: "item.memory-facts.proposals.inspect", readOnly: true)
+                }
+            case "accept", "reject", "defer":
+                let rawID = positional.dropFirst(2).first ?? parseFlag("--id", from: args) ?? parseFlag("--proposal", from: args)
+                do {
+                    let status = subaction == "accept" ? "accepted" : (subaction == "reject" ? "rejected" : "deferred")
+                    let proposal = try proposalService.transition(rawID, status: status, actor: actor)
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.proposals.\(subaction)",
+                        "readOnly": false,
+                        "changed": true,
+                        "mutationBoundary": "proposal_lifecycle_only_no_external_mutation",
+                        "truthBoundary": "reviewable_follow_up_proposal_not_truth",
+                        "proposal": followUpProposalToDict(proposal),
+                        "actionReceipt": followUpProposalActionReceipt(command: "item.memory-facts.proposals.\(subaction)", action: "\(subaction)_follow_up_proposal", proposal: proposal, changed: true, readOnly: false),
+                        "safeVerificationCommands": ["cider-cli item memory-facts proposals inspect \(proposal.id) --json"],
+                    ]
+                    if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal \(status): \(proposal.id)") }
+                } catch let proposalError as SecondBrainFollowUpProposalService.FollowUpProposalError {
+                    printFollowUpProposalError(proposalError, rawID: rawID, command: "item.memory-facts.proposals.\(subaction)", readOnly: false)
+                }
+            default:
+                printCLIError("Unsupported follow-up proposal action '\(subaction)'.", details: [
+                    "ok": false,
+                    "command": "item.memory-facts.proposals",
+                    "readOnly": true,
+                    "changed": false,
+                    "errorCode": "unsupported_follow_up_proposal_action",
+                    "supportedActions": ["create", "list", "inspect", "accept", "reject", "defer"],
+                ])
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func followUpProposalToDict(_ proposal: SecondBrainFollowUpProposal) -> [String: Any] {
+        let output = proposal.output
+        return [
+            "id": proposal.proposalRef,
+            "proposalID": output.id,
+            "proposalRef": proposal.proposalRef,
+            "kind": "follow_up_proposal",
+            "status": output.reviewState,
+            "owner": ownerToDict(output.owner),
+            "ownerRef": output.owner.canonicalRef,
+            "title": output.value,
+            "reason": output.value,
+            "explanation": output.evidence,
+            "intentRef": proposal.intentRef,
+            "factRef": proposal.factRef,
+            "candidateRef": proposal.candidateRef,
+            "sourceCitation": output.metadata["source_citation"] ?? output.owner.canonicalRef,
+            "sourceRefs": DatabaseHelpers.decodeStringArray(output.metadata["source_refs"]),
+            "evidenceRefs": DatabaseHelpers.decodeStringArray(output.metadata["evidence_refs"]),
+            "proposedCommandFamily": output.metadata["proposed_command_family"] ?? "recall_context",
+            "proposedCommand": output.metadata["proposed_command"] ?? "",
+            "requiresConfirmation": output.metadata["requires_confirmation"] != "false",
+            "confirmationPolicy": output.metadata["confirmation_policy"] ?? "explicit_existing_command_required",
+            "mutationBoundary": output.metadata["mutation_boundary"] ?? "proposal_record_only_no_external_mutation",
+            "truthBoundary": "reviewable_follow_up_proposal_not_truth",
+            "candidateBoundary": output.metadata["candidate_boundary"] ?? "accepted_fact_action_intent_review_record",
+            "createsReminder": false,
+            "createsTodo": false,
+            "createsLink": false,
+            "createsNag": false,
+            "createdAt": ISO8601DateFormatter().string(from: output.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: output.updatedAt),
+            "safeNextCommands": followUpProposalSafeCommands(proposal),
+            "safeVerificationCommands": ["cider-cli item memory-facts proposals inspect \(output.id) --json"],
+        ]
+    }
+
+    static func followUpProposalSafeCommands(_ proposal: SecondBrainFollowUpProposal) -> [String] {
+        var seen = Set<String>()
+        return [
+            "cider-cli item memory-facts proposals inspect \(proposal.id) --json",
+            "cider-cli item memory-facts proposals list --json",
+            "cider-cli item memory-facts inspect \(proposal.candidateRef.replacingOccurrences(of: "memory_candidate:", with: "")) --json",
+            "cider-cli item due-to-surface --json",
+        ].filter { seen.insert($0).inserted }
+    }
+
+    static func followUpProposalActionReceipt(command: String, action: String, proposal: SecondBrainFollowUpProposal, changed: Bool, readOnly: Bool) -> [String: Any] {
+        [
+            "command": command,
+            "action": action,
+            "actor": "cider-cli",
+            "status": "succeeded",
+            "owner": ownerToDict(proposal.owner),
+            "ownerRef": proposal.owner.canonicalRef,
+            "sourceRefs": DatabaseHelpers.decodeStringArray(proposal.output.metadata["source_refs"]),
+            "evidenceRefs": DatabaseHelpers.decodeStringArray(proposal.output.metadata["evidence_refs"]),
+            "readOnly": readOnly,
+            "changed": changed,
+            "truthBoundary": "action_receipt_not_fact_truth",
+            "safeVerificationCommands": ["cider-cli item memory-facts proposals inspect \(proposal.id) --json"],
+            "safeNextCommands": followUpProposalSafeCommands(proposal),
+        ]
+    }
+
+    static func printFollowUpProposalError(_ error: SecondBrainFollowUpProposalService.FollowUpProposalError, rawID: String?, command: String, readOnly: Bool) {
+        let requested = (rawID ?? "").replacingOccurrences(of: "follow_up_proposal:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        var details: [String: Any] = [
+            "ok": false,
+            "command": command,
+            "readOnly": readOnly,
+            "changed": false,
+            "error": error.localizedDescription,
+            "selector": ["proposalID": requested],
+            "safeNextCommands": ["cider-cli item memory-facts proposals list --json"],
+        ]
+        switch error {
+        case .missingID:
+            details["errorCode"] = "missing_follow_up_proposal_selector"
+        case .notFound(let id):
+            details["errorCode"] = "follow_up_proposal_not_found"
+            details["selector"] = ["proposalID": id]
+        case .wrongKind(let proposalID, let kind):
+            details["errorCode"] = "not_follow_up_proposal"
+            details["selector"] = ["proposalID": proposalID]
+            details["actualKind"] = kind
+        case .missingIntent(let factID):
+            details["errorCode"] = "no_action_intent_for_fact"
+            details["selector"] = ["candidateID": factID]
+        }
+        printCLIError(error.localizedDescription, details: details)
     }
 
     static func acceptedMemoryFactToDict(_ fact: SecondBrainAcceptedMemoryFact) -> [String: Any] {
@@ -17287,7 +17533,8 @@ struct CiderCLI {
     static func printAcceptedMemoryFactError(
         _ error: SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError,
         rawID: String?,
-        command: String = "item.memory-facts.inspect"
+        command: String = "item.memory-facts.inspect",
+        readOnly: Bool = true
     ) {
         let requested = (rawID ?? "")
             .replacingOccurrences(of: "accepted_memory_fact:", with: "")
@@ -17296,7 +17543,7 @@ struct CiderCLI {
         var details: [String: Any] = [
             "ok": false,
             "command": command,
-            "readOnly": true,
+            "readOnly": readOnly,
             "changed": false,
             "error": error.localizedDescription,
             "selector": ["candidateID": requested],
