@@ -27,6 +27,18 @@ struct SecondBrainFollowUpExecutionPreview: Identifiable, Equatable {
     var createsNag: Bool = false
 }
 
+struct SecondBrainFollowUpExecutionResult: Identifiable, Equatable {
+    var id: String { "follow_up_execution_result:\(preview.proposal.id)" }
+    var preview: SecondBrainFollowUpExecutionPreview
+    var status: String = "succeeded"
+    var readOnly: Bool = true
+    var changed: Bool = false
+    var mutationBoundary: String = "existing_safe_command_read_only_execution"
+    var executionBoundary: String = "confirmed_existing_safe_command_execution"
+    var truthBoundary: String = "execution_result_not_memory_truth"
+    var outcomeBoundary: String = "command_outcome_not_memory_truth"
+}
+
 @MainActor
 final class SecondBrainFollowUpProposalService {
     static let outputKind = "follow_up_proposal"
@@ -37,6 +49,8 @@ final class SecondBrainFollowUpProposalService {
         case wrongKind(proposalID: String, kind: String)
         case missingIntent(String)
         case notAccepted(proposalID: String, status: String)
+        case confirmationRequired(proposalID: String)
+        case unsupportedExecutionFamily(String)
 
         var errorDescription: String? {
             switch self {
@@ -50,6 +64,10 @@ final class SecondBrainFollowUpProposalService {
                 return "Accepted memory fact '\(factID)' has no action intent to propose."
             case .notAccepted(let proposalID, let status):
                 return "Follow-up proposal '\(proposalID)' is \(status), not accepted for execution preview."
+            case .confirmationRequired(let proposalID):
+                return "Follow-up proposal '\(proposalID)' requires explicit execution confirmation."
+            case .unsupportedExecutionFamily(let family):
+                return "Follow-up proposal execution family '\(family)' is not supported."
             }
         }
     }
@@ -149,6 +167,25 @@ final class SecondBrainFollowUpProposalService {
 
     func previews(limit: Int = 50) throws -> [SecondBrainFollowUpExecutionPreview] {
         try list(statuses: ["accepted"], limit: limit).map { Self.preview(for: $0) }
+    }
+
+    func execute(_ rawID: String?, confirmed: Bool, confirmationToken: String?) throws -> SecondBrainFollowUpExecutionResult {
+        let preview = try self.preview(rawID)
+        return try Self.executionResult(for: preview, confirmed: confirmed, confirmationToken: confirmationToken)
+    }
+
+    static func executionResult(
+        for preview: SecondBrainFollowUpExecutionPreview,
+        confirmed: Bool,
+        confirmationToken: String?
+    ) throws -> SecondBrainFollowUpExecutionResult {
+        guard preview.mappedCommandFamily == "recall_context" else {
+            throw FollowUpProposalError.unsupportedExecutionFamily(preview.mappedCommandFamily)
+        }
+        guard confirmed, confirmationToken == "execute:\(preview.proposal.id)" else {
+            throw FollowUpProposalError.confirmationRequired(proposalID: preview.proposal.id)
+        }
+        return SecondBrainFollowUpExecutionResult(preview: preview)
     }
 
     static func preview(for proposal: SecondBrainFollowUpProposal) -> SecondBrainFollowUpExecutionPreview {
