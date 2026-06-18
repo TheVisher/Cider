@@ -232,7 +232,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
             VaultFileService.shared.file(for: id) != nil
         case .clipboard, .dropZone:
             false
-        case .aiAssistant:
+        case .aiAssistant, .journalIntelligence:
             true
         case .kanbanTestingGuide(let payload):
             KanbanStorage.shared.findCard(id: payload.cardID)?.board.id == payload.boardID
@@ -389,6 +389,8 @@ enum CiderFloatingPanelLayout {
             NSSize(width: AIAssistantPanelDesign.defaultWidth, height: AIAssistantPanelDesign.defaultHeight)
         case .kanbanTestingGuide:
             NSSize(width: 420, height: 560)
+        case .journalIntelligence:
+            NSSize(width: 720, height: 680)
         case .contact, .dateCard, .todo, .vaultFile:
             NSSize(width: 760, height: 560)
         default:

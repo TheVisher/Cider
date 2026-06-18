@@ -28,6 +28,9 @@ struct CiderFloatingSurfaceView: View {
                 onReanchor: onReanchor
             )
             .frame(minWidth: 360, minHeight: 420)
+        } else if surface == .journalIntelligence {
+            JournalIntelligencePanelView(onDock: onDock)
+                .frame(minWidth: 640, minHeight: 560)
         } else {
             fallbackView
         }
@@ -97,6 +100,8 @@ struct CiderFloatingSurfaceView: View {
             "tray.and.arrow.down"
         case .kanbanTestingGuide:
             "checkmark.seal"
+        case .journalIntelligence:
+            "brain.head.profile"
         }
     }
 
@@ -119,7 +124,7 @@ private extension CiderFloatableSurface {
         switch self {
         case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .vaultFile:
             true
-        case .clipboard, .aiAssistant, .dropZone, .kanbanTestingGuide:
+        case .clipboard, .aiAssistant, .dropZone, .journalIntelligence, .kanbanTestingGuide:
             false
         }
     }

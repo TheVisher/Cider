@@ -22,7 +22,7 @@ enum CiderReanchorSurfaceResolver {
         switch surface {
         case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .vaultFile, .aiAssistant, .kanbanTestingGuide:
             true
-        case .clipboard, .dropZone:
+        case .clipboard, .dropZone, .journalIntelligence:
             false
         }
     }
@@ -201,7 +201,7 @@ extension CiderPanelView {
                 cardID: payload.cardID,
                 metadataVisible: previousKanbanMetadataVisible
             )
-        case .clipboard, .dropZone:
+        case .clipboard, .dropZone, .journalIntelligence:
             break
         }
     }

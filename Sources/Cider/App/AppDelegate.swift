@@ -340,6 +340,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ciderMenu.addItem(statusMenuItem(title: "Show AI Panel", action: #selector(showAIAssistantPanelFromMenu), keyEquivalent: "3"))
         ciderMenu.addItem(statusMenuItem(title: "Show Clipboard Panel", action: #selector(showClipboardPanelFromMenu), keyEquivalent: "4"))
         ciderMenu.addItem(statusMenuItem(title: "Show Drop Zone", action: #selector(showDropZoneFromMenu), keyEquivalent: "5"))
+        #if DEBUG
+        ciderMenu.addItem(NSMenuItem.separator())
+        ciderMenu.addItem(debugMenuItem(title: "Show Journal Intelligence", action: #selector(showJournalIntelligenceFromMenu)))
+        #endif
     }
 
     // MARK: - Status Item
@@ -370,6 +374,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusMenuItem(title: "Show Drop Zone", action: #selector(showDropZoneFromMenu), keyEquivalent: ""))
         #if DEBUG
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(debugMenuItem(title: "Show Journal Intelligence", action: #selector(showJournalIntelligenceFromMenu)))
         menu.addItem(debugMenuItem(title: "Simulate Update Available", action: #selector(simulateUpdateAvailableFromMenu)))
         menu.addItem(debugMenuItem(title: "Clear Simulated Update", action: #selector(clearSimulatedUpdateFromMenu)))
         #endif
@@ -429,6 +434,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
         return item
+    }
+
+    @objc func showJournalIntelligenceFromMenu() {
+        floatingPanelManager?.float(.journalIntelligence)
     }
 
     @objc func simulateUpdateAvailableFromMenu() {
