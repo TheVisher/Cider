@@ -495,6 +495,175 @@ struct SecondBrainFoundationTests {
         })
     }
 
+    @Test("capture add journal creates source backed graph candidates")
+    func captureAddJournalCreatesSourceBackedGraphCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-journal-graph-candidates-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalText = """
+        Watched The Way Way Back last night. Jami loved that pineapple coconut drink. Baine liked the tacos. We stopped at Cactus.
+        """
+        let capturePayload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "journal",
+            "--date", "2026-06-10",
+            "--time", "19:30",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: journalText))
+        #expect(capturePayload["ok"] as? Bool == true)
+        let item = try #require(capturePayload["item"] as? [String: Any])
+        let noteID = try #require(item["id"] as? String)
+        let graphCandidates = try #require(capturePayload["graphCandidates"] as? [String: Any])
+        #expect(graphCandidates["status"] as? String == "suggested")
+        #expect((graphCandidates["count"] as? Int ?? 0) >= 4)
+        let candidateRefs = try #require(graphCandidates["candidateRefs"] as? [String])
+        #expect(candidateRefs.allSatisfy { $0.hasPrefix("graph_candidate:") })
+        let safeNextCommands = try #require(capturePayload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item graph-candidates note \(noteID) --json"))
+        #expect(safeNextCommands.contains("cider-cli capture review-queue --kind graph_candidate --json"))
+
+        let listPayload = try jsonObject(from: runCLI([
+            "item", "graph-candidates", "note", noteID, "--json",
+        ], vaultURL: vault))
+        #expect(listPayload["ok"] as? Bool == true)
+        #expect(listPayload["readOnly"] as? Bool == true)
+        let candidates = try #require(listPayload["candidates"] as? [[String: Any]])
+        #expect(candidates.contains { candidate in
+            candidate["mentionText"] as? String == "The Way Way Back"
+                && (candidate["relationGuesses"] as? [String])?.contains("watched") == true
+                && (candidate["objectTypeGuesses"] as? [String])?.contains("movie") == true
+        })
+        #expect(candidates.contains { candidate in
+            candidate["mentionText"] as? String == "pineapple coconut drink"
+                && candidate["subjectText"] as? String == "Jami"
+                && (candidate["relationGuesses"] as? [String])?.contains("likes_drink") == true
+        })
+        #expect(candidates.contains { candidate in
+            candidate["mentionText"] as? String == "tacos"
+                && candidate["subjectText"] as? String == "Baine"
+                && (candidate["relationGuesses"] as? [String])?.contains("likes_food") == true
+        })
+        #expect(candidates.contains { candidate in
+            candidate["mentionText"] as? String == "Cactus"
+                && (candidate["relationGuesses"] as? [String])?.contains("visited") == true
+                && (candidate["objectTypeGuesses"] as? [String])?.contains("restaurant") == true
+        })
+        #expect(candidates.allSatisfy { candidate in
+            candidate["reviewState"] as? String == "suggested"
+                && candidate["sourceKind"] as? String == "journal"
+                && candidate["reviewable"] as? Bool == true
+        })
+
+        let reviewQueue = try jsonObject(from: runCLI([
+            "capture", "review-queue", "--kind", "graph_candidate", "--json",
+        ], vaultURL: vault))
+        #expect(reviewQueue["readOnly"] as? Bool == true)
+        let reviewItems = try #require(reviewQueue["items"] as? [[String: Any]])
+        #expect(reviewItems.contains { item in
+            item["kind"] as? String == "graph_candidate"
+                && item["candidateRef"] as? String == candidateRefs.first
+        })
+    }
+
+    @Test("bookmark URL graph extractor classifies common object sources")
+    func bookmarkURLGraphExtractorClassifiesCommonObjectSources() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let extractor = SecondBrainBookmarkGraphCandidateExtractor()
+        let samples: [(url: String, title: String, objectType: String, relation: String, mention: String)] = [
+            ("https://www.imdb.com/title/tt1727388/", "The Way Way Back - IMDb", "movie", "represents", "The Way Way Back"),
+            ("https://github.com/openai/codex", "openai/codex", "project", "source_for", "openai/codex"),
+            ("https://www.allrecipes.com/recipe/123/pancakes/", "Pancakes Recipe", "recipe", "represents", "Pancakes Recipe"),
+            ("https://www.amazon.com/dp/B000000000", "Tiny Keyboard", "product", "represents", "Tiny Keyboard"),
+            ("https://www.yelp.com/biz/cactus-seattle", "Cactus", "restaurant", "represents", "Cactus"),
+            ("https://youtu.be/dQw4w9WgXcQ", "A Video - YouTube", "video", "represents", "A Video"),
+        ]
+
+        for sample in samples {
+            let result = extractor.extract(sourceOwner: owner, urlString: sample.url, title: sample.title)
+            let output = try #require(result.outputs.first, "Expected graph candidate for \(sample.url)")
+            let candidate = try SecondBrainGraphCandidateContract.validate(output)
+            #expect(candidate.sourceOwner == owner)
+            #expect(candidate.sourceKind == "bookmark")
+            #expect(candidate.kind == .objectRelation)
+            #expect(candidate.mentionText == sample.mention)
+            #expect(candidate.objectTypeGuesses.map(\.rawValue).contains(sample.objectType))
+            #expect(candidate.relationGuesses.map(\.rawValue).contains(sample.relation))
+            #expect(candidate.safeActions.contains(.delegateEnrichment))
+            #expect(output.metadata["url"] == sample.url)
+            #expect(output.metadata["resolution_state"] == "unresolved")
+        }
+    }
+
+    @Test("capture add bookmark creates source backed graph candidates")
+    func captureAddBookmarkCreatesSourceBackedGraphCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-bookmark-graph-candidates-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let capturePayload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "bookmark",
+            "--url", "https://www.imdb.com/title/tt1727388/",
+            "--title", "The Way Way Back - IMDb",
+            "--no-wait",
+            "--json",
+        ], vaultURL: vault))
+        let item = try #require(capturePayload["item"] as? [String: Any])
+        let bookmarkID = try #require(item["id"] as? String)
+        let source = try #require(capturePayload["source"] as? [String: Any])
+        #expect(source["kind"] as? String == "url")
+        #expect(source["url"] as? String == "https://www.imdb.com/title/tt1727388/")
+
+        let graphCandidates = try #require(capturePayload["graphCandidates"] as? [String: Any])
+        #expect(graphCandidates["status"] as? String == "suggested")
+        #expect(graphCandidates["count"] as? Int == 1)
+        let candidateRefs = try #require(graphCandidates["candidateRefs"] as? [String])
+        #expect(candidateRefs.count == 1)
+        #expect(candidateRefs.first?.hasPrefix("graph_candidate:") == true)
+
+        let safeNextCommands = try #require(capturePayload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item graph-candidates bookmark \(bookmarkID) --json"))
+        #expect(safeNextCommands.contains("cider-cli capture review-queue --kind graph_candidate --json"))
+
+        let enrichment = try #require(capturePayload["enrichment"] as? [String: Any])
+        #expect(enrichment["graphCandidateCount"] as? Int == 1)
+
+        let listPayload = try jsonObject(from: runCLI([
+            "item", "graph-candidates", "bookmark", bookmarkID, "--json",
+        ], vaultURL: vault))
+        #expect(listPayload["ok"] as? Bool == true)
+        #expect(listPayload["readOnly"] as? Bool == true)
+        let candidates = try #require(listPayload["candidates"] as? [[String: Any]])
+        let candidate = try #require(candidates.first)
+        #expect(candidate["mentionText"] as? String == "The Way Way Back")
+        #expect(candidate["sourceKind"] as? String == "bookmark")
+        #expect(candidate["reviewState"] as? String == "suggested")
+        #expect(candidate["reviewable"] as? Bool == true)
+        #expect((candidate["objectTypeGuesses"] as? [String])?.contains("movie") == true)
+        #expect((candidate["relationGuesses"] as? [String])?.contains("represents") == true)
+        #expect((candidate["relationGuesses"] as? [String])?.contains("source_for") == true)
+        let reviewActionCommands = try #require(candidate["reviewActionCommands"] as? [[String: Any]])
+        #expect(reviewActionCommands.contains { action in
+            action["action"] as? String == "accept"
+                && (action["command"] as? String)?.contains("accept-graph-candidate") == true
+                && action["status"] as? String == "available"
+        })
+
+        let reviewQueue = try jsonObject(from: runCLI([
+            "capture", "review-queue", "--kind", "graph_candidate", "--json",
+        ], vaultURL: vault))
+        let reviewItems = try #require(reviewQueue["items"] as? [[String: Any]])
+        #expect(reviewItems.contains { item in
+            item["kind"] as? String == "graph_candidate"
+                && item["candidateID"] as? String == candidate["id"] as? String
+                && item["itemID"] as? String == bookmarkID
+        })
+    }
+
     @Test("capture add journal defaults date to today and rejects empty content as JSON")
     func captureAddJournalDefaultsDateToTodayAndRejectsEmptyContentAsJSON() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -610,11 +779,35 @@ struct SecondBrainFoundationTests {
         #expect(whyPayload["command"] as? String == "item.why-surfaced")
         #expect(whyPayload["readOnly"] as? Bool == true)
         #expect(whyPayload["changed"] as? Bool == false)
+        let whyReceipt = try #require(whyPayload["actionReceipt"] as? [String: Any])
+        #expect(whyReceipt["command"] as? String == "item.why-surfaced")
+        #expect(whyReceipt["action"] as? String == "inspect_surfacing")
+        #expect(whyReceipt["actor"] as? String == "cider-cli")
+        #expect(whyReceipt["readOnly"] as? Bool == true)
+        #expect(whyReceipt["changed"] as? Bool == false)
+        let whyReceiptOwner = try #require(whyReceipt["owner"] as? [String: Any])
+        #expect(whyReceiptOwner["ownerType"] as? String == "bookmark")
+        #expect(whyReceiptOwner["ownerID"] as? String == bookmarkID)
+        let whyVerification = try #require(whyReceipt["safeVerificationCommands"] as? [String])
+        #expect(whyVerification.contains("cider-cli item why-surfaced bookmark \(bookmarkID) --json"))
         #expect(whyPayload["needsReview"] as? Bool == true)
         #expect(whyPayload["recommendedNextAction"] as? String == "review_route")
         let whyNextActions = try #require(whyPayload["nextActions"] as? [[String: Any]])
         #expect(whyNextActions.first?["action"] as? String == "review_route")
         #expect(whyNextActions.first?["requiresApproval"] as? Bool == true)
+
+        let unsupportedWhyResult = try runCLIResult([
+            "item", "why-surfaced", "date_card", bookmarkID,
+            "--json",
+        ], vaultURL: vault)
+        #expect(unsupportedWhyResult.status == 1)
+        let unsupportedWhyPayload = try jsonObject(from: unsupportedWhyResult.stdout)
+        #expect(unsupportedWhyPayload["ok"] as? Bool == false)
+        #expect(unsupportedWhyPayload["errorCode"] as? String == "unsupported_item_type")
+        #expect((unsupportedWhyPayload["supportedTypes"] as? [String])?.contains("dateCard") == true)
+        let failureReceipt = try #require(unsupportedWhyPayload["actionReceipt"] as? [String: Any])
+        #expect(failureReceipt["status"] as? String == "failed")
+        #expect(failureReceipt["errorCode"] as? String == "unsupported_item_type")
 
         let explainPayload = try jsonObject(from: runCLI([
             "routing", "explain", bookmarkID,

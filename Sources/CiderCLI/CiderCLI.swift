@@ -416,7 +416,7 @@ struct CiderCLI {
         case "review":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
         case "item":
-            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "accept-similarity", "sync-project", "project-sync"])
+            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "backfill-journals", "journal-backfill", "accept-similarity", "accept-graph-candidate", "reject-graph-candidate", "delegate-graph-candidate", "accept-memory-candidate", "reject-memory-candidate", "defer-memory-candidate", "correct-memory-candidate", "delegate-memory-candidate", "sync-project", "project-sync"])
         case "test-run", "testrun":
             return isMutationSubcommand(subcommand, in: ["cleanup"])
         case "label", "tag":
@@ -1018,7 +1018,9 @@ struct CiderCLI {
             }
 
             if jsonOutput {
-                outputJSON(reminderActionResultToDict(result))
+                let payload = reminderActionResultToDict(result)
+                persistActionReceiptIfPresent(payload)
+                outputJSON(payload)
             } else {
                 switch result.action {
                 case .complete:
@@ -1458,6 +1460,24 @@ struct CiderCLI {
                     ?? bookmarkService.bookmarks.first(where: { $0.id == result.item.id })
                 if jsonOutput {
                     var dict = result.toDictionary(finalBookmark: finalBookmark)
+                    if result.item.type == "bookmark" {
+                        let graphCandidates = recordBookmarkGraphCandidates(
+                            result,
+                            finalBookmark: finalBookmark
+                        )
+                        dict["graphCandidates"] = graphCandidates
+                        if var enrichment = dict["enrichment"] as? [String: Any] {
+                            enrichment["graphCandidateCount"] = graphCandidates["count"] as? Int ?? 0
+                            dict["enrichment"] = enrichment
+                        }
+                        if (graphCandidates["count"] as? Int ?? 0) > 0 {
+                            var commands = (dict["safeNextCommands"] as? [String]) ?? []
+                            for command in (graphCandidates["safeNextCommands"] as? [String]) ?? [] where !commands.contains(command) {
+                                commands.append(command)
+                            }
+                            dict["safeNextCommands"] = commands
+                        }
+                    }
                     if let testRunID {
                         let testRun = try CiderCLITestRunManifestStore.recordCapture(
                             runID: testRunID,
@@ -1549,12 +1569,27 @@ struct CiderCLI {
 
         case "review-queue", "worklist":
             do {
+                guard let limit = parsePositiveIntFlag("--limit", from: args, command: "capture.review-queue", minimum: 0) else { return }
+                let kind = parseFlag("--kind", from: args)
+                guard validateReviewFilterIfPresent(command: "capture.review-queue", name: "kind", value: kind, supportedValues: supportedReviewKinds) else { return }
+                let itemType = parseFlag("--item-type", from: args)
+                guard validateReviewFilterIfPresent(command: "capture.review-queue", name: "item-type", value: itemType, supportedValues: supportedReviewItemTypes) else { return }
+                let reviewState = parseFlag("--state", from: args)
+                guard validateReviewFilterIfPresent(command: "capture.review-queue", name: "state", value: reviewState, supportedValues: supportedReviewStates) else { return }
+                let safeAction = parseFlag("--safe-action", from: args)
+                guard validateReviewFilterIfPresent(command: "capture.review-queue", name: "safe-action", value: safeAction, supportedValues: supportedReviewSafeActions) else { return }
                 let result = try CiderReviewQueueService().captureReviewWorklist(
-                    limit: parseFlag("--limit", from: args).flatMap(Int.init) ?? 50,
-                    includeDeferred: args.contains("--include-deferred")
+                    limit: limit ?? 50,
+                    includeDeferred: args.contains("--include-deferred"),
+                    kind: kind,
+                    itemType: itemType,
+                    reviewState: reviewState,
+                    requiredSafeAction: safeAction
                 )
                 if jsonOutput {
-                    outputJSON(result.toDictionary())
+                    var payload = result.toDictionary()
+                    payload["filters"] = reviewFilterEcho(kind: kind, itemType: itemType, reviewState: reviewState, safeAction: safeAction, includeDeferred: args.contains("--include-deferred"), limit: limit ?? 50)
+                    outputJSON(payload)
                 } else {
                     print("Capture review queue: \(result.totalCount) item(s) need attention.")
                     for item in result.items {
@@ -1591,17 +1626,25 @@ struct CiderCLI {
 
         switch subcommand {
         case "list", "ls":
-            let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 50
+            guard let limit = parsePositiveIntFlag("--limit", from: args, command: "review.list", minimum: 0) else { return }
+            let kind = parseFlag("--kind", from: args)
+            guard validateReviewFilterIfPresent(command: "review.list", name: "kind", value: kind, supportedValues: supportedReviewKinds) else { return }
+            let itemType = parseFlag("--item-type", from: args)
+            guard validateReviewFilterIfPresent(command: "review.list", name: "item-type", value: itemType, supportedValues: supportedReviewItemTypes) else { return }
+            let reviewState = parseFlag("--state", from: args)
+            guard validateReviewFilterIfPresent(command: "review.list", name: "state", value: reviewState, supportedValues: supportedReviewStates) else { return }
+            let safeAction = parseFlag("--safe-action", from: args)
+            guard validateReviewFilterIfPresent(command: "review.list", name: "safe-action", value: safeAction, supportedValues: supportedReviewSafeActions) else { return }
             do {
                 let result = try service.list(
-                    limit: limit,
+                    limit: limit ?? 50,
                     includeDeferred: args.contains("--include-deferred"),
-                    kind: parseFlag("--kind", from: args),
-                    itemType: parseFlag("--item-type", from: args),
-                    reviewState: parseFlag("--state", from: args),
-                    requiredSafeAction: parseFlag("--safe-action", from: args)
+                    kind: kind,
+                    itemType: itemType,
+                    reviewState: reviewState,
+                    requiredSafeAction: safeAction
                 )
-                printReviewQueueResult(result)
+                printReviewQueueResult(result, filters: reviewFilterEcho(kind: kind, itemType: itemType, reviewState: reviewState, safeAction: safeAction, includeDeferred: args.contains("--include-deferred"), limit: limit ?? 50))
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -1671,14 +1714,20 @@ struct CiderCLI {
 
         case "drilldown", "lane":
             guard let groupID = args.first else {
-                printCLIError("Usage: cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]")
+                printCLIError(
+                    "Usage: cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]",
+                    details: malformedReviewDrilldownGroupDetails(groupID: "")
+                )
                 return
             }
+            guard validateReviewDrilldownGroupID(groupID) else { return }
+            guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: "review.drilldown", minimum: 0) else { return }
+            guard let parsedOffset = parsePositiveIntFlag("--offset", from: args, command: "review.drilldown", minimum: 0) else { return }
             do {
                 let result = try service.drilldown(
                     groupID: groupID,
-                    limit: parseFlag("--limit", from: args).flatMap(Int.init) ?? 50,
-                    offset: parseFlag("--offset", from: args).flatMap(Int.init) ?? 0
+                    limit: parsedLimit ?? 50,
+                    offset: parsedOffset ?? 0
                 )
                 printReviewQueueDrilldownResult(result)
             } catch {
@@ -2931,7 +2980,14 @@ struct CiderCLI {
         )
         let sourceContext = captureSourceContext(from: args, originalText: result.rawContent)
         let provenance = recordJournalCaptureProvenance(result, sourceContext: sourceContext)
-        return journalCapturePayload(result, args: args, sourceContext: sourceContext, provenance: provenance)
+        let graphCandidates = recordJournalGraphCandidates(result)
+        return journalCapturePayload(
+            result,
+            args: args,
+            sourceContext: sourceContext,
+            provenance: provenance,
+            graphCandidates: graphCandidates
+        )
     }
 
     static func appendDailyNoteEntry(
@@ -3129,7 +3185,11 @@ struct CiderCLI {
         _ result: DailyNoteAppendResult,
         args: [String],
         sourceContext: CaptureSourceContext?,
-        provenance: [String: Any]
+        provenance: [String: Any],
+        graphCandidates: [String: Any] = [
+            "status": "not_run",
+            "count": 0,
+        ]
     ) -> [String: Any] {
         let item: [String: Any] = [
             "id": result.note.id.uuidString,
@@ -3168,7 +3228,9 @@ struct CiderCLI {
                 "status": "not_applicable",
                 "isEnriching": false,
                 "titleState": "daily_journal",
+                "graphCandidateCount": graphCandidates["count"] as? Int ?? 0,
             ],
+            "graphCandidates": graphCandidates,
             "duplicate": [
                 "status": "not_checked",
             ],
@@ -3191,10 +3253,164 @@ struct CiderCLI {
                 "cider-cli item context note \(result.note.id.uuidString) --json",
             ],
         ] as [String: Any]
+        if (graphCandidates["count"] as? Int ?? 0) > 0 {
+            var commands = (payload["safeNextCommands"] as? [String]) ?? []
+            let graphListCommand = "cider-cli item graph-candidates note \(result.note.id.uuidString) --json"
+            let reviewQueueCommand = "cider-cli capture review-queue --kind graph_candidate --json"
+            if !commands.contains(graphListCommand) {
+                commands.append(graphListCommand)
+            }
+            if !commands.contains(reviewQueueCommand) {
+                commands.append(reviewQueueCommand)
+            }
+            payload["safeNextCommands"] = commands
+        }
         if let sourceContext {
             payload["sourceContext"] = sourceContext.toDictionary()
         }
         return payload
+    }
+
+    static func recordJournalGraphCandidates(_ result: DailyNoteAppendResult) -> [String: Any] {
+        guard CiderDatabase.shared.isOpen else {
+            return [
+                "status": "unavailable",
+                "count": 0,
+                "reason": "Graph candidate extraction could not run because no writable database is available.",
+            ] as [String: Any]
+        }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: result.note.id.uuidString)
+        let extraction = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: result.rawContent,
+            date: result.date,
+            time: result.time
+        )
+        guard !extraction.outputs.isEmpty else {
+            return [
+                "status": "none",
+                "count": 0,
+                "candidateIDs": [],
+                "candidateRefs": [],
+            ] as [String: Any]
+        }
+
+        do {
+            let service = SecondBrainEnrichmentOutputService(database: .shared)
+            for output in extraction.outputs {
+                try service.record(output)
+            }
+            let candidates = extraction.outputs.map { output -> [String: Any] in
+                [
+                    "id": output.id,
+                    "ref": "graph_candidate:\(output.id)",
+                    "mentionText": output.value,
+                    "reviewState": output.reviewState,
+                    "sourceQuote": output.evidence,
+                    "confidence": output.confidence as Any,
+                    "safeNextCommands": [
+                        "cider-cli item graph-candidate \(output.id) --json",
+                        "cider-cli item context note \(result.note.id.uuidString) --json",
+                    ],
+                ] as [String: Any]
+            }
+            return [
+                "status": "suggested",
+                "count": extraction.outputs.count,
+                "candidateIDs": extraction.ids,
+                "candidateRefs": extraction.ids.map { "graph_candidate:\($0)" },
+                "reviewState": "suggested",
+                "candidates": candidates,
+                "safeNextCommands": [
+                    "cider-cli item graph-candidates note \(result.note.id.uuidString) --json",
+                    "cider-cli capture review-queue --kind graph_candidate --json",
+                ],
+            ] as [String: Any]
+        } catch {
+            return [
+                "status": "failed",
+                "count": 0,
+                "reason": "Graph candidate extraction failed: \(error.localizedDescription)",
+            ] as [String: Any]
+        }
+    }
+
+    static func recordBookmarkGraphCandidates(
+        _ result: CiderCaptureResult,
+        finalBookmark: Bookmark?
+    ) -> [String: Any] {
+        guard CiderDatabase.shared.isOpen else {
+            return [
+                "status": "unavailable",
+                "count": 0,
+                "reason": "Graph candidate extraction could not run because no writable database is available.",
+            ] as [String: Any]
+        }
+        guard result.item.type == "bookmark",
+              let urlString = result.source.url else {
+            return [
+                "status": "not_applicable",
+                "count": 0,
+            ] as [String: Any]
+        }
+
+        let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: result.item.id.uuidString)
+        let title = finalBookmark?.title ?? result.item.title
+        let extraction = SecondBrainBookmarkGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            urlString: urlString,
+            title: title
+        )
+        guard !extraction.outputs.isEmpty else {
+            return [
+                "status": "none",
+                "count": 0,
+                "candidateIDs": [],
+                "candidateRefs": [],
+            ] as [String: Any]
+        }
+
+        do {
+            let service = SecondBrainEnrichmentOutputService(database: .shared)
+            for output in extraction.outputs {
+                try service.record(output)
+            }
+            let candidates = extraction.outputs.map { output -> [String: Any] in
+                [
+                    "id": output.id,
+                    "ref": "graph_candidate:\(output.id)",
+                    "mentionText": output.value,
+                    "reviewState": output.reviewState,
+                    "sourceQuote": output.evidence,
+                    "confidence": output.confidence as Any,
+                    "objectTypeGuesses": DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses]),
+                    "relationGuesses": DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses]),
+                    "safeNextCommands": [
+                        "cider-cli item graph-candidate \(output.id) --json",
+                        "cider-cli item context bookmark \(result.item.id.uuidString) --json",
+                    ],
+                ] as [String: Any]
+            }
+            return [
+                "status": "suggested",
+                "count": extraction.outputs.count,
+                "candidateIDs": extraction.ids,
+                "candidateRefs": extraction.ids.map { "graph_candidate:\($0)" },
+                "reviewState": "suggested",
+                "candidates": candidates,
+                "safeNextCommands": [
+                    "cider-cli item graph-candidates bookmark \(result.item.id.uuidString) --json",
+                    "cider-cli capture review-queue --kind graph_candidate --json",
+                ],
+            ] as [String: Any]
+        } catch {
+            return [
+                "status": "failed",
+                "count": 0,
+                "reason": "Graph candidate extraction failed: \(error.localizedDescription)",
+            ] as [String: Any]
+        }
     }
 
     struct DailyNoteKindSpec {
@@ -4637,7 +4853,7 @@ struct CiderCLI {
                 try service.addLink(from: source, to: target)
                 printLinkMutation(action: "linked", source: source, target: target, service: service)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printLinkFailure(command: "link.add", action: "link", args: args, error: error)
             }
 
         case "remove", "rm", "delete":
@@ -4650,7 +4866,7 @@ struct CiderCLI {
                 try service.removeLink(from: source, to: target)
                 printLinkMutation(action: "unlinked", source: source, target: target, service: service)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printLinkFailure(command: "link.remove", action: "unlink", args: args, error: error)
             }
 
         case "list":
@@ -4663,7 +4879,7 @@ struct CiderCLI {
                 let refs = try service.outgoingRefs(for: ref)
                 printLinkSummaries(refs, service: service)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printLinkFailure(command: "link.list", action: "list_links", args: args, error: error)
             }
 
         case "backlinks":
@@ -4676,7 +4892,7 @@ struct CiderCLI {
                 let refs = try service.backlinkRefs(for: ref)
                 printLinkSummaries(refs, service: service)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printLinkFailure(command: "link.backlinks", action: "list_backlinks", args: args, error: error)
             }
 
         case "related":
@@ -4689,7 +4905,7 @@ struct CiderCLI {
                 let refs = try service.relatedRefs(for: ref)
                 printLinkSummaries(refs, service: service)
             } catch {
-                print("Error: \(error.localizedDescription)")
+                printLinkFailure(command: "link.related", action: "list_related", args: args, error: error)
             }
 
         default:
@@ -4718,9 +4934,31 @@ struct CiderCLI {
                 Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
               cider-cli item open <type> <id-or-ref> [--json]
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
+              cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
+              cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
               cider-cli item why-surfaced <type> <id-or-ref> [--json]
+              cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
+              cider-cli item action-ledger inspect <receipt-id> [--json]
               cider-cli item capability-map [--json]
               cider-cli item graph-health [--json]
+              cider-cli item entity list [--limit <n>] [--json]
+              cider-cli item entity inspect <entity-ref|name|alias> [--json]
+              cider-cli item fact-validity list|inspect|state|propose|accept|reject|defer ... [--json]
+              cider-cli item memory-facts list [--limit <n>] [--json]
+              cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
+              cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
+              cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
+              cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
+              cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
+              cider-cli item graph-candidate <candidate-id> [--json]
+              cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
+              cider-cli item reject-graph-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
+              cider-cli item delegate-graph-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
+              cider-cli item accept-memory-candidate <candidate-id> [--actor <name>] [--json]
+              cider-cli item reject-memory-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
+              cider-cli item defer-memory-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
+              cider-cli item correct-memory-candidate <candidate-id> [--value <text>] [--evidence <text>] [--kind <kind>] [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status <status>] [--actor <name>] [--json]
+              cider-cli item delegate-memory-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
               cider-cli item related <type> <id-or-ref> [--json]
               cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
               cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
@@ -4728,9 +4966,12 @@ struct CiderCLI {
               cider-cli item rebuild-references <note|card|board> <id-or-ref> [--json]
               cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]
               cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
-              cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind preference|pattern|project_context|relationship_context|agent_lesson --value <text> --evidence <text> [--source <source>] [--confidence <0-1>] [--json]
+              cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind preference|pattern|project_context|relationship_context|agent_lesson --value <text> --evidence <text> [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status current|historical|superseded] [--source <source>] [--confidence <0-1>] [--json]
               cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
+              cider-cli item similarity-health [<owner-type> <owner-id-or-ref>] [--json]
+              cider-cli item reconcile-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
               cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
+              cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
               cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
               cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]
               cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
@@ -4842,6 +5083,7 @@ struct CiderCLI {
                 printFolderOwnerInspection(ref: positional[1])
                 return
             }
+            guard validateOwnerSelectorPolicy(command: "item.owner-get", type: positional[0], ref: positional[1]) else { return }
             do {
                 try printOwnerInspection(
                     type: positional[0],
@@ -4900,7 +5142,16 @@ struct CiderCLI {
             }
             if let entityType = try? ItemLinkService.entityType(from: positional[0]) {
                 do {
-                    let ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
+                    let ref: LibraryEntityRef
+                    do {
+                        ref = try ItemLinkService.shared.resolve(type: entityType, ref: positional[1])
+                    } catch {
+                        printCLIError(
+                            error.localizedDescription,
+                            details: itemNotFoundErrorDetails(command: "item.get", type: entityType.rawValue, ref: positional[1])
+                        )
+                        return
+                    }
                     let bundle = try contextService.context(for: ref)
                     if jsonOutput {
                         var dict = itemContextBundleToDict(bundle)
@@ -4942,6 +5193,67 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "recall-context", "context-bundle", "recall-bundle":
+            do {
+                let payload = try recallContextPayload(args: args, contextService: contextService)
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Recall context bundle: \((payload["anchors"] as? [[String: Any]])?.count ?? 0) anchor(s)")
+                    print("  Accepted facts: \((payload["acceptedFacts"] as? [[String: Any]])?.count ?? 0)")
+                    print("  Reviewable candidates: \((payload["reviewableCandidates"] as? [[String: Any]])?.count ?? 0)")
+                }
+            } catch let error as RecallContextCLIError {
+                printRecallContextError(error, args: args)
+            } catch {
+                printRecallContextError(.malformedOrUnresolvedSelector(error.localizedDescription), args: args)
+            }
+
+        case "recall-access-log", "recall-access-events":
+            do {
+                let limit = max(1, Int(parseFlag("--limit", from: args) ?? "") ?? 20)
+                let service = CiderRecallExplanationService(database: .shared)
+                let events = try service.recentAccessEvents(limit: limit)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.recall-access-log",
+                    "readOnly": true,
+                    "changed": false,
+                    "queryTextStored": false,
+                    "count": events.count,
+                    "events": events.map(recallAccessEventToDict),
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Recall access events: \(events.count)") }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "due-to-surface", "resurface", "resurfacing-feed":
+            do {
+                guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: "item.due-to-surface", minimum: 1) else { return }
+                guard let parsedStaleAfterDays = parsePositiveIntFlag("--stale-after-days", from: args, command: "item.due-to-surface", minimum: 0) else { return }
+                let limit = parsedLimit ?? 20
+                let includeSuppressed = args.contains("--include-suppressed") || args.contains("--all")
+                let staleAfterDays = parsedStaleAfterDays ?? 3
+                let feed = try dueToSurfaceFeedPayload(limit: limit, includeSuppressed: includeSuppressed, staleAfterDays: staleAfterDays)
+                if jsonOutput {
+                    var payload = dueToSurfaceFeedToDict(feed)
+                    payload["filters"] = [
+                        "limit": limit,
+                        "staleAfterDays": staleAfterDays,
+                        "includeSuppressed": includeSuppressed,
+                    ]
+                    outputJSON(payload)
+                } else {
+                    print("Due-to-surface candidates: \(feed.candidates.count)")
+                    for candidate in feed.candidates {
+                        print("  [\(candidate.family.rawValue)] \(candidate.title) — \(candidate.whyNow)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case "context", "agent-context":
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
@@ -4965,8 +5277,26 @@ struct CiderCLI {
                 return
             }
             do {
-                let type = try ItemLinkService.entityType(from: positional[0])
-                let ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+                let type: LibraryEntityType
+                do {
+                    type = try ItemLinkService.entityType(from: positional[0])
+                } catch {
+                    printCLIError(
+                        error.localizedDescription,
+                        details: unsupportedReadOnlyItemTypeErrorDetails(command: "item.context", rawType: positional[0], ref: positional[1])
+                    )
+                    return
+                }
+                let ref: LibraryEntityRef
+                do {
+                    ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+                } catch {
+                    printCLIError(
+                        error.localizedDescription,
+                        details: itemNotFoundErrorDetails(command: "item.context", type: type.rawValue, ref: positional[1])
+                    )
+                    return
+                }
                 let packet = try contextService.agentContext(for: ref, limits: itemAgentContextLimits(from: args))
                 if jsonOutput {
                     var dict = itemAgentContextPacketToDict(packet)
@@ -5069,6 +5399,48 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "entity-resolution", "entity-resolution-candidate", "entity-resolution-candidates":
+            handleEntityResolutionCommand(args: args)
+
+        case "entity", "entities", "canonical-entity", "canonical-entities":
+            handleEntityCommand(args: args)
+
+        case "fact-validity", "fact-invalidation", "fact-supersession":
+            handleFactValidityCommand(args: args)
+
+        case "graph-candidates", "graph-candidate", "graph-candidate-inspect":
+            handleGraphCandidateReadCommand(subcommand: subcommand ?? "graph-candidates", args: args)
+
+        case "accept-graph-candidate", "graph-candidate-accept":
+            handleGraphCandidateMutationCommand(action: "accept", args: args, store: store)
+
+        case "reject-graph-candidate", "graph-candidate-reject":
+            handleGraphCandidateMutationCommand(action: "reject", args: args, store: store)
+
+        case "delegate-graph-candidate", "graph-candidate-delegate":
+            handleGraphCandidateMutationCommand(action: "delegate", args: args, store: store)
+
+        case "memory-facts", "memory-fact", "accepted-memory-facts", "accepted-memory":
+            handleAcceptedMemoryFactsCommand(args: args)
+
+        case "accept-memory-candidate", "memory-candidate-accept":
+            handleMemoryCandidateMutationCommand(action: "accept", args: args, store: store)
+
+        case "reject-memory-candidate", "memory-candidate-reject":
+            handleMemoryCandidateMutationCommand(action: "reject", args: args, store: store)
+
+        case "defer-memory-candidate", "memory-candidate-defer":
+            handleMemoryCandidateMutationCommand(action: "defer", args: args, store: store)
+
+        case "correct-memory-candidate", "memory-candidate-correct":
+            handleMemoryCandidateMutationCommand(action: "correct", args: args, store: store)
+
+        case "delegate-memory-candidate", "memory-candidate-delegate":
+            handleMemoryCandidateMutationCommand(action: "delegate", args: args, store: store)
+
+        case "action-ledger", "actions", "activity":
+            handleActionLedgerCommand(args: args)
+
         case "why-surfaced", "why":
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
@@ -5091,7 +5463,22 @@ struct CiderCLI {
                         "surfacing": packet["surfacing"] ?? [:],
                         "safeCommands": packet["safeCommands"] ?? [],
                     ]
+                    payload["actionReceipt"] = agentActionReceiptToDict(
+                        command: "item.why-surfaced",
+                        action: "inspect_surfacing",
+                        owner: normalizedOwner(type: "card", ref: positional[1]),
+                        sourceRefs: ["kanban_card:\(positional[1])"],
+                        readOnly: true,
+                        changed: false,
+                        safeVerificationCommands: [
+                            "cider-cli item why-surfaced card \(positional[1]) --json",
+                            "cider-cli item context card \(positional[1]) --json",
+                        ],
+                        safeNextCommands: packet["safeCommands"] as? [String] ?? []
+                    )
+                    payload["safeVerificationCommands"] = (payload["actionReceipt"] as? [String: Any])?["safeVerificationCommands"] ?? []
                     payload["summary"] = packet["summary"]
+                    persistActionReceiptIfPresent(payload)
                     if jsonOutput {
                         outputJSON(payload)
                     } else if let surfacing = payload["surfacing"] as? [String: Any] {
@@ -5104,8 +5491,45 @@ struct CiderCLI {
                 return
             }
             do {
-                let type = try ItemLinkService.entityType(from: positional[0])
-                let ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+                let type: LibraryEntityType
+                do {
+                    type = try ItemLinkService.entityType(from: positional[0])
+                } catch {
+                    printCLIError(
+                        error.localizedDescription,
+                        details: unsupportedItemTypeErrorDetails(
+                            command: "item.why-surfaced",
+                            action: "inspect_surfacing",
+                            rawType: positional[0],
+                            ref: positional[1]
+                        )
+                    )
+                    return
+                }
+                let ref: LibraryEntityRef
+                do {
+                    ref = try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+                } catch {
+                    var payload = structuredActionReceiptFailurePayload(
+                        command: "item.why-surfaced",
+                        action: "inspect_surfacing",
+                        owner: nil,
+                        readOnly: true,
+                        errorCode: "item_not_found",
+                        error: error.localizedDescription,
+                        sourceRefs: ["\(type.rawValue):\(positional[1])"],
+                        safeVerificationCommands: [
+                            "cider-cli item why-surfaced \(type.rawValue) \(positional[1]) --json",
+                            "cider-cli item search \(positional[1]) --json",
+                        ],
+                        safeNextCommands: ["cider-cli item search <query> --json"]
+                    )
+                    payload["sourceRef"] = ["type": type.rawValue, "ref": positional[1]]
+                    processExitCode = 1
+                    persistActionReceiptIfPresent(payload)
+                    if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
+                    return
+                }
                 let packet = try contextService.agentContext(for: ref, limits: itemAgentContextLimits(from: args))
                 var payload: [String: Any] = [
                     "ok": true,
@@ -5113,15 +5537,30 @@ struct CiderCLI {
                     "readOnly": true,
                     "changed": false,
                     "sourceRef": [
-                        "type": positional[0],
-                        "ref": positional[1],
+                        "type": type.rawValue,
+                        "ref": ref.entityID.uuidString,
                     ],
                     "item": itemSummaryToDict(packet.item),
                     "surfacing": surfacingExplanationToDict(packet.surfacing),
                     "safeCommands": packet.safeCommands,
                     "summary": packet.summary,
                 ]
+                payload["actionReceipt"] = agentActionReceiptToDict(
+                    command: "item.why-surfaced",
+                    action: "inspect_surfacing",
+                    owner: SecondBrainOwnerRef(ownerType: type.rawValue, ownerID: ref.entityID.uuidString),
+                    sourceRefs: ["\(type.rawValue):\(ref.entityID.uuidString)"],
+                    readOnly: true,
+                    changed: false,
+                    safeVerificationCommands: [
+                        "cider-cli item why-surfaced \(type.rawValue) \(ref.entityID.uuidString) --json",
+                        "cider-cli item context \(type.rawValue) \(ref.entityID.uuidString) --json",
+                    ],
+                    safeNextCommands: packet.safeCommands
+                )
+                payload["safeVerificationCommands"] = (payload["actionReceipt"] as? [String: Any])?["safeVerificationCommands"] ?? []
                 CiderAgentDecisionContract.merge(itemAgentDecisionDictionary(for: packet), into: &payload)
+                persistActionReceiptIfPresent(payload)
                 if jsonOutput {
                     outputJSON(payload)
                 } else {
@@ -5138,6 +5577,7 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli item relations <owner-type> <owner-id-or-ref> [--json]")
                 return
             }
+            guard validateOwnerSelectorPolicy(command: "item.relations", type: positional[0], ref: positional[1]) else { return }
             do {
                 let owner = normalizedOwner(type: positional[0], ref: positional[1])
                 let relations = try store.outgoingRelations(for: owner)
@@ -5152,6 +5592,7 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]")
                 return
             }
+            guard validateOwnerSelectorPolicy(command: "item.backlinks", type: positional[0], ref: positional[1]) else { return }
             do {
                 let owner = normalizedOwner(type: positional[0], ref: positional[1])
                 let relations = try store.backlinks(for: owner)
@@ -5166,6 +5607,7 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli item related-owners <owner-type> <owner-id-or-ref> [--json]")
                 return
             }
+            guard validateOwnerSelectorPolicy(command: "item.related-owners", type: positional[0], ref: positional[1]) else { return }
             do {
                 let owner = normalizedOwner(type: positional[0], ref: positional[1])
                 let relations = try store.relatedRelations(for: owner)
@@ -5258,7 +5700,7 @@ struct CiderCLI {
         case "memory-suggest", "suggest-memory":
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
-                printCLIError("Usage: cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind <kind> --value <text> --evidence <text> [--source <source>] [--confidence <0-1>] [--json]")
+                printCLIError("Usage: cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind <kind> --value <text> --evidence <text> [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status <status>] [--source <source>] [--confidence <0-1>] [--json]")
                 return
             }
             guard let kind = parseFlag("--kind", from: args) else {
@@ -5284,6 +5726,7 @@ struct CiderCLI {
                 confidence = nil
             }
             do {
+                let linkedOwners = try parseLinkedOwnerRefs(from: args)
                 let service = SecondBrainMemoryCandidateService(database: .shared, store: store)
                 let result: SecondBrainMemoryCandidateResult
                 if positional[0].trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "project" {
@@ -5294,7 +5737,11 @@ struct CiderCLI {
                         value: value,
                         evidence: evidence,
                         source: parseFlag("--source", from: args),
-                        confidence: confidence
+                        confidence: confidence,
+                        linkedOwners: linkedOwners,
+                        observedDate: parseFlag("--observed-date", from: args),
+                        memoryKey: parseFlag("--memory-key", from: args),
+                        memoryStatus: parseFlag("--memory-status", from: args) ?? parseFlag("--status", from: args)
                     )
                 } else {
                     result = try service.suggest(
@@ -5305,7 +5752,11 @@ struct CiderCLI {
                         value: value,
                         evidence: evidence,
                         source: parseFlag("--source", from: args),
-                        confidence: confidence
+                        confidence: confidence,
+                        linkedOwners: linkedOwners,
+                        observedDate: parseFlag("--observed-date", from: args),
+                        memoryKey: parseFlag("--memory-key", from: args),
+                        memoryStatus: parseFlag("--memory-status", from: args) ?? parseFlag("--status", from: args)
                     )
                 }
                 let payload = memoryCandidateResultToDict(
@@ -5324,28 +5775,31 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
-        case "rebuild-similarity", "similarity-rebuild":
+        case "rebuild-similarity", "similarity-rebuild", "reconcile-similarity", "similarity-reconcile":
             let positional = leadingPositionalArgs(from: args)
             guard positional.count >= 2 else {
-                printCLIError("Usage: cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]")
+                printCLIError("Usage: cider-cli item reconcile-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]")
                 return
             }
             do {
                 let owner = normalizedOwner(type: positional[0], ref: positional[1])
                 let threshold = parseFlag("--threshold", from: args).flatMap(Double.init) ?? 0.34
                 let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 10
+                let actor = parseFlag("--actor", from: args) ?? "cider-cli"
                 let service = SecondBrainSimilarityCandidateService(database: .shared, store: store)
-                let result = try service.rebuildChunkOverlapCandidates(for: owner, threshold: threshold, limit: limit)
-                let candidates = try service.candidates(for: owner)
-                printSimilarityCandidates(
-                    candidates,
-                    command: "item.rebuild-similarity",
-                    owner: result.owner,
-                    extra: [
-                        "candidateCount": result.candidateCount,
-                        "signal": result.signal,
-                    ]
-                )
+                let result = try service.reconcile(owner: owner, threshold: threshold, limit: limit, actor: actor)
+                printSimilarityReconcileResult(result, command: "item.reconcile-similarity")
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "similarity-health", "similarity-reconcile-health":
+            let positional = leadingPositionalArgs(from: args)
+            do {
+                let owner = positional.count >= 2 ? normalizedOwner(type: positional[0], ref: positional[1]) : nil
+                let staleAfter = parseFlag("--stale-after", from: args).flatMap(TimeInterval.init) ?? 86_400
+                let report = try SecondBrainSimilarityCandidateService(database: .shared, store: store).health(owner: owner, staleAfter: staleAfter)
+                printSimilarityHealth(report, command: "item.similarity-health")
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -5358,6 +5812,26 @@ struct CiderCLI {
                 let result = try SecondBrainIntelligenceDogfoodService(database: .shared, store: store)
                     .rebuild(limit: limit, threshold: threshold, candidateLimit: candidateLimit)
                 printIntelligenceDogfoodResult(result)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "backfill-journals", "journal-backfill", "backfill-daily-journals":
+            do {
+                let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+                let date = parseFlag("--date", from: args)
+                let threshold = parseFlag("--threshold", from: args).flatMap(Double.init) ?? 0.34
+                let candidateLimit = parseFlag("--candidate-limit", from: args).flatMap(Int.init) ?? 10
+                let dryRun = args.contains("--dry-run")
+                let result = try SecondBrainJournalBackfillService(database: .shared, store: store, notesStorage: NotesStorage.shared)
+                    .backfillDailyJournals(
+                        limit: limit,
+                        date: date,
+                        threshold: threshold,
+                        candidateLimit: candidateLimit,
+                        dryRun: dryRun
+                    )
+                printJournalBackfillResult(result)
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -6732,12 +7206,19 @@ struct CiderCLI {
             dict["related"] = bundle.related.map(itemLinkSummaryToDict)
             dict["ownerRelations"] = bundle.ownerRelations.map(ownerRelationToDict)
             dict["backlinks"] = bundle.backlinks.map(ownerRelationToDict)
+            dict["sourceEvidence"] = sourceEvidenceToDict(
+                owner: bundle.owner,
+                ownerRelations: bundle.ownerRelations,
+                backlinks: bundle.backlinks,
+                relationCandidates: bundle.relationCandidates
+            )
             dict["routingDecisions"] = bundle.routingDecisions.map(routingDecisionToDict)
             dict["captureProvenance"] = bundle.captureProvenance.map(captureProvenanceToDict)
         } else {
             dict["related"] = []
             dict["ownerRelations"] = []
             dict["backlinks"] = []
+            dict["sourceEvidence"] = sourceEvidenceToDict(owner: SecondBrainOwnerRef(ownerType: ref.type.rawValue, ownerID: ref.entityID.uuidString))
             dict["routingDecisions"] = []
             dict["captureProvenance"] = []
         }
@@ -7660,6 +8141,9 @@ struct CiderCLI {
     static func handleBoard(subcommand: String?, args: [String]) {
         let storage = KanbanStorage.shared
         switch subcommand {
+        case nil, "help", "--help", "-h":
+            printUsage()
+
         case "list", "ls":
             let boards = storage.boards
             if jsonOutput {
@@ -11322,9 +11806,11 @@ struct CiderCLI {
         print("  Next safe action: \(explanation.nextSafeAction)")
     }
 
-    static func printReviewQueueResult(_ result: CiderReviewQueueResult) {
+    static func printReviewQueueResult(_ result: CiderReviewQueueResult, filters: [String: Any]? = nil) {
         if jsonOutput {
-            outputJSON(result.toDictionary())
+            var payload = result.toDictionary()
+            if let filters { payload["filters"] = filters }
+            outputJSON(payload)
             return
         }
 
@@ -12664,13 +13150,676 @@ struct CiderCLI {
         printCLIError(message, details: nil)
     }
 
+    static func persistActionReceiptIfPresent(_ payload: [String: Any]) {
+        guard let receipt = payload["actionReceipt"] as? [String: Any],
+              let record = try? SecondBrainActionReceiptRecord(receiptDictionary: receipt) else { return }
+        _ = try? SecondBrainActionReceiptLedgerService(database: .shared).record(record)
+    }
+
+    static func ownerRefString(for ref: LibraryEntityRef) -> String {
+        "\(ref.type.rawValue):\(ref.entityID.uuidString)"
+    }
+
+    static func actionReceiptForCandidateMutation(
+        command: String,
+        action: String,
+        actor: String,
+        status: String = "succeeded",
+        output: SecondBrainEnrichmentOutput,
+        candidateRefPrefix: String,
+        readOnly: Bool = false,
+        changed: Bool = true,
+        errorCode: String? = nil,
+        safeVerificationCommands: [String],
+        safeNextCommands: [String]
+    ) -> [String: Any] {
+        agentActionReceiptToDict(
+            command: command,
+            action: action,
+            actor: actor,
+            owner: output.owner,
+            sourceRefs: [output.owner.canonicalRef, "\(candidateRefPrefix):\(output.id)"],
+            evidenceRefs: [output.owner.canonicalRef],
+            readOnly: readOnly,
+            changed: changed,
+            status: status,
+            errorCode: errorCode,
+            before: ["reviewState": output.reviewState],
+            after: nil,
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: safeNextCommands
+        )
+    }
+
+    static func actionReceiptForEntityResolutionMutation(
+        candidate: SecondBrainEntityResolutionCandidate,
+        command: String,
+        action: String,
+        actor: String,
+        changed: Bool,
+        status: String = "succeeded",
+        errorCode: String? = nil,
+        beforeState: String?
+    ) -> [String: Any] {
+        let sourceRefs = orderedUniqueStrings([
+            candidate.candidateRef,
+            candidate.sourceOwner.canonicalRef,
+            candidate.sourceEntityRef,
+            candidate.targetEntityRef,
+        ])
+        var evidenceRefs = [candidate.sourceOwner.canonicalRef]
+        if let evidenceRef = candidate.sourceEvidenceRef { evidenceRefs.append(evidenceRef) }
+        var after: [String: Any] = ["reviewState": candidate.reviewState]
+        if let acceptedRelationID = candidate.acceptedRelationID {
+            after["acceptedRelationID"] = acceptedRelationID
+        }
+        return agentActionReceiptToDict(
+            command: command,
+            action: action,
+            actor: actor,
+            owner: candidate.sourceOwner,
+            sourceRefs: sourceRefs,
+            evidenceRefs: orderedUniqueStrings(evidenceRefs),
+            readOnly: false,
+            changed: changed,
+            status: status,
+            errorCode: errorCode,
+            before: beforeState.map { ["reviewState": $0] },
+            after: after,
+            safeVerificationCommands: [
+                "cider-cli item entity-resolution inspect \(candidate.id) --json",
+                "cider-cli item action-ledger list --owner \(candidate.sourceOwner.canonicalRef) --json",
+                "cider-cli item recall-context --item \(candidate.sourceOwner.ownerType) \(candidate.sourceOwner.ownerID) --json",
+            ],
+            safeNextCommands: candidate.safeNextCommands
+        )
+    }
+
+    static func actionReceiptForFactValidityMutation(
+        view: SecondBrainFactValidityCandidateView,
+        command: String,
+        action: String,
+        actor: String,
+        changed: Bool,
+        status: String = "succeeded",
+        errorCode: String? = nil,
+        beforeState: String?,
+        factValidity: [String: Any]? = nil,
+        readOnly: Bool = false
+    ) -> [String: Any] {
+        let candidate = view.candidate
+        var evidenceRefs = [candidate.sourceOwner.canonicalRef]
+        if let evidenceRef = candidate.sourceEvidenceRef { evidenceRefs.append(evidenceRef) }
+        var after: [String: Any] = [
+            "reviewState": candidate.reviewState,
+            "targetRef": candidate.targetRef,
+            "truthBoundary": candidate.truthBoundary,
+        ]
+        if let factValidity { after["factValidity"] = factValidity }
+        return agentActionReceiptToDict(
+            command: command,
+            action: action,
+            actor: actor,
+            owner: candidate.sourceOwner,
+            sourceRefs: orderedUniqueStrings([
+                candidate.candidateRef,
+                candidate.targetRef,
+                candidate.sourceOwner.canonicalRef,
+            ]),
+            evidenceRefs: orderedUniqueStrings(evidenceRefs),
+            readOnly: readOnly,
+            changed: changed,
+            status: status,
+            errorCode: errorCode,
+            before: beforeState.map { ["reviewState": $0] },
+            after: after,
+            safeVerificationCommands: [
+                "cider-cli item fact-validity inspect \(candidate.id) --json",
+                "cider-cli item fact-validity state --target-ref \(candidate.targetRef) --json",
+                "cider-cli item action-ledger list --owner \(candidate.sourceOwner.canonicalRef) --json",
+                "cider-cli item recall-context --item \(candidate.sourceOwner.ownerType) \(candidate.sourceOwner.ownerID) --json",
+            ],
+            safeNextCommands: [
+                "cider-cli item fact-validity inspect \(candidate.id) --json",
+                "cider-cli item fact-validity state --target-ref \(candidate.targetRef) --json",
+                "cider-cli item recall-context --item \(candidate.sourceOwner.ownerType) \(candidate.sourceOwner.ownerID) --json",
+            ]
+        )
+    }
+
+    static func actionLedgerFilter(from args: [String]) -> SecondBrainActionReceiptFilter {
+        let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+        let owner: SecondBrainOwnerRef?
+        if let rawOwner = parseFlag("--owner", from: args), let separator = rawOwner.firstIndex(of: ":") {
+            let type = String(rawOwner[..<separator])
+            let id = String(rawOwner[rawOwner.index(after: separator)...])
+            owner = SecondBrainOwnerRef(ownerType: type, ownerID: id)
+        } else if let ownerType = parseFlag("--owner-type", from: args), let ownerID = parseFlag("--owner-id", from: args) {
+            owner = SecondBrainOwnerRef(ownerType: ownerType, ownerID: ownerID)
+        } else {
+            owner = nil
+        }
+        return SecondBrainActionReceiptFilter(
+            owner: owner,
+            command: parseFlag("--command", from: args),
+            action: parseFlag("--action", from: args),
+            actor: parseFlag("--actor", from: args),
+            status: parseFlag("--status", from: args),
+            sourceRef: parseFlag("--source-ref", from: args) ?? parseFlag("--source", from: args),
+            evidenceRef: parseFlag("--evidence-ref", from: args) ?? parseFlag("--evidence", from: args),
+            since: parseFactValidityDate(parseFlag("--since", from: args)),
+            before: parseFactValidityDate(parseFlag("--before", from: args)),
+            limit: limit
+        )
+    }
+
+    static func structuredActionReceiptFailurePayload(
+        command: String,
+        action: String,
+        actor: String = "cider-cli",
+        owner: SecondBrainOwnerRef? = nil,
+        readOnly: Bool,
+        errorCode: String,
+        error: String,
+        sourceRefs: [String],
+        evidenceRefs: [String] = [],
+        safeVerificationCommands: [String],
+        safeNextCommands: [String]
+    ) -> [String: Any] {
+        let receipt = agentActionReceiptToDict(
+            command: command,
+            action: action,
+            actor: actor,
+            owner: owner,
+            sourceRefs: sourceRefs,
+            evidenceRefs: evidenceRefs,
+            readOnly: readOnly,
+            changed: false,
+            status: "failed",
+            errorCode: errorCode,
+            error: error,
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: safeNextCommands
+        )
+        return [
+            "ok": false,
+            "command": command,
+            "readOnly": readOnly,
+            "changed": false,
+            "errorCode": errorCode,
+            "error": error,
+            "actionReceipt": receipt,
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": safeNextCommands,
+        ]
+    }
+
+    static func actionLedgerFilterToDict(_ filter: SecondBrainActionReceiptFilter) -> [String: Any] {
+        var dict: [String: Any] = ["limit": filter.limit]
+        if let owner = filter.owner {
+            dict["owner"] = ownerToDict(owner)
+            dict["ownerRef"] = owner.canonicalRef
+        }
+        if let command = filter.command { dict["command"] = command }
+        if let action = filter.action { dict["action"] = action }
+        if let actor = filter.actor { dict["actor"] = actor }
+        if let status = filter.status { dict["status"] = status }
+        if let sourceRef = filter.sourceRef { dict["sourceRef"] = sourceRef }
+        if let evidenceRef = filter.evidenceRef { dict["evidenceRef"] = evidenceRef }
+        let formatter = ISO8601DateFormatter()
+        if let since = filter.since { dict["since"] = formatter.string(from: since) }
+        if let before = filter.before { dict["before"] = formatter.string(from: before) }
+        return dict
+    }
+
+    static func handleActionLedgerCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first ?? "list"
+        let service = SecondBrainActionReceiptLedgerService(database: .shared)
+        do {
+            switch action {
+            case "list", "recent":
+                let filter = actionLedgerFilter(from: args)
+                let entries = try service.list(filter: filter)
+                if jsonOutput {
+                    outputJSON([
+                        "ok": true,
+                        "command": "item.action-ledger.list",
+                        "readOnly": true,
+                        "changed": false,
+                        "count": entries.count,
+                        "limit": filter.limit,
+                        "filters": actionLedgerFilterToDict(filter),
+                        "entries": entries.map(actionReceiptRecordToDict),
+                    ])
+                } else {
+                    for entry in entries {
+                        print("\(entry.id) \(entry.command) \(entry.action) \(entry.status) changed=\(entry.changed)")
+                    }
+                }
+            case "inspect", "get":
+                guard positional.count >= 2 else {
+                    printCLIError("Usage: cider-cli item action-ledger inspect <receipt-id> [--json]")
+                    return
+                }
+                let receiptID = positional[1]
+                guard let entry = try service.inspect(id: receiptID) else {
+                    var payload = structuredActionReceiptFailurePayload(
+                        command: "item.action-ledger.inspect",
+                        action: "inspect",
+                        readOnly: true,
+                        errorCode: "action_receipt_not_found",
+                        error: "No action ledger entry found matching '\(receiptID)'.",
+                        sourceRefs: ["action_receipt:\(receiptID)"],
+                        safeVerificationCommands: [
+                            "cider-cli item action-ledger inspect \(receiptID) --json",
+                            "cider-cli item action-ledger list --command item.action-ledger.inspect --status failed --json",
+                        ],
+                        safeNextCommands: ["cider-cli item action-ledger list --json"]
+                    )
+                    payload["receiptID"] = receiptID
+                    payload["receiptRef"] = "action_receipt:\(receiptID)"
+                    processExitCode = 1
+                    persistActionReceiptIfPresent(payload)
+                    if jsonOutput { outputJSON(payload) } else { print("Error: No action ledger entry found matching '\(receiptID)'.") }
+                    return
+                }
+                if jsonOutput {
+                    outputJSON([
+                        "ok": true,
+                        "command": "item.action-ledger.inspect",
+                        "readOnly": true,
+                        "changed": false,
+                        "entry": actionReceiptRecordToDict(entry),
+                    ])
+                } else {
+                    print("\(entry.id) \(entry.command) \(entry.action) \(entry.status)")
+                }
+            default:
+                printCLIError("Unknown action-ledger command: \(action). Commands: list, inspect")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static let supportedAgentItemTypes = ["bookmark", "note", "todo", "dateCard", "contact", "vaultFile"]
+    static let supportedReviewKinds = [
+        "enrichment",
+        "graph_candidate",
+        "memory_candidate",
+        "inbox_backlog",
+        "duplicate_candidate",
+        "unsupported_attachment",
+        "indexing",
+        "low_confidence_routing",
+        "deferred_routing",
+    ]
+    static let supportedReviewItemTypes = ["bookmark", "note", "todo", "dateCard", "contact", "vaultFile", "capture_event"]
+    static let supportedReviewStates = ["suggested", "needs_review", "deferred", "accepted", "rejected"]
+    static let supportedReviewSafeActions = [
+        "accept",
+        "reject",
+        "defer",
+        "correct",
+        "enrich",
+        "inspect_source",
+        "inspect_duplicates",
+        "manual_review",
+        "review summary",
+        "review list",
+        "bookmark get",
+        "routing explain",
+        "review enrichment-reconcile-plan",
+        "review enrichment-reconcile-samples",
+    ]
+    static let supportedReviewDrilldownSafeActions = supportedReviewSafeActions + ["none"]
+    static let supportedOwnerSelectorTypes = [
+        "bookmark",
+        "note",
+        "todo",
+        "dateCard",
+        "contact",
+        "vaultFile",
+        "card",
+        "kanban_card",
+        "graph_object",
+        "accepted_fact",
+        "source_evidence",
+        "capture_event",
+    ]
+
+    static func reviewFilterEcho(
+        kind: String?,
+        itemType: String?,
+        reviewState: String?,
+        safeAction: String?,
+        includeDeferred: Bool,
+        limit: Int
+    ) -> [String: Any] {
+        var filters: [String: Any] = [
+            "includeDeferred": includeDeferred,
+            "limit": limit,
+        ]
+        if let kind { filters["kind"] = kind }
+        if let itemType { filters["itemType"] = itemType }
+        if let reviewState { filters["state"] = reviewState }
+        if let safeAction { filters["safeAction"] = safeAction }
+        return filters
+    }
+
+    static func validateReviewFilterIfPresent(
+        command: String,
+        name: String,
+        value: String?,
+        supportedValues: [String]
+    ) -> Bool {
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
+        guard supportedValues.contains(value) else {
+            printCLIError(
+                "Unsupported \(name) filter '\(value)' for \(command).",
+                details: unsupportedReviewFilterDetails(command: command, name: name, value: value, supportedValues: supportedValues)
+            )
+            return false
+        }
+        return true
+    }
+
+    static func validateReviewDrilldownGroupID(_ groupID: String) -> Bool {
+        let parts = groupID.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 4, parts.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            printCLIError(
+                "Malformed review drilldown group ID '\(groupID)'. Expected kind:reviewState:requiredSafeAction:itemType.",
+                details: malformedReviewDrilldownGroupDetails(groupID: groupID)
+            )
+            return false
+        }
+
+        let validations: [(name: String, value: String, supportedValues: [String])] = [
+            ("kind", parts[0], supportedReviewKinds),
+            ("reviewState", parts[1], supportedReviewStates),
+            ("requiredSafeAction", parts[2], supportedReviewDrilldownSafeActions),
+            ("itemType", parts[3], supportedReviewItemTypes),
+        ]
+        for validation in validations where !validation.supportedValues.contains(validation.value) {
+            printCLIError(
+                "Unsupported \(validation.name) value '\(validation.value)' in review drilldown group ID.",
+                details: unsupportedReviewDrilldownGroupValueDetails(
+                    groupID: groupID,
+                    name: validation.name,
+                    value: validation.value,
+                    supportedValues: validation.supportedValues
+                )
+            )
+            return false
+        }
+        return true
+    }
+
+    static func validateOwnerSelectorPolicy(command: String, type rawType: String, ref rawRef: String) -> Bool {
+        let normalizedType = normalizedOwnerTypeName(rawType)
+        guard supportedOwnerSelectorTypes.contains(normalizedType) else {
+            printCLIError(
+                "Unsupported owner type '\(rawType)' for \(command).",
+                details: unsupportedOwnerSelectorDetails(command: command, type: rawType, ref: rawRef)
+            )
+            return false
+        }
+        return true
+    }
+
+    static func normalizedOwnerTypeName(_ rawType: String) -> String {
+        let normalizedType = rawType
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+        switch normalizedType {
+        case "datecard", "date_card": return "dateCard"
+        case "vaultfile", "vault_file", "file": return "vaultFile"
+        case "kanban", "kanban_card", "card": return normalizedType == "card" ? "card" : "kanban_card"
+        default: return normalizedType
+        }
+    }
+
+    static func malformedReviewDrilldownGroupDetails(groupID: String) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: "review.drilldown",
+            readOnly: true,
+            errorCode: "malformed_review_drilldown_group_id",
+            safeVerificationCommands: [
+                "cider-cli review list --limit 20 --json",
+                "cider-cli review summary --json",
+            ],
+            safeNextCommands: ["Use a groupID emitted by cider-cli review list --json groups[].groupID."]
+        )
+        details["selector"] = ["name": "groupID", "value": groupID]
+        details["expectedFormat"] = "kind:reviewState:requiredSafeAction:itemType"
+        details["policyNote"] = "Review drilldown only accepts complete group IDs emitted by review list/review queue groups; malformed selectors are failures, not empty feeds."
+        return details
+    }
+
+    static func unsupportedReviewDrilldownGroupValueDetails(groupID: String, name: String, value: String, supportedValues: [String]) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: "review.drilldown",
+            readOnly: true,
+            errorCode: "unsupported_review_drilldown_group_value",
+            safeVerificationCommands: [
+                "cider-cli review list --limit 20 --json",
+                "cider-cli review summary --json",
+            ],
+            safeNextCommands: ["Use a groupID emitted by cider-cli review list --json groups[].groupID."]
+        )
+        details["selector"] = ["name": name, "value": value, "groupID": groupID]
+        details["supportedValues"] = supportedValues
+        details["expectedFormat"] = "kind:reviewState:requiredSafeAction:itemType"
+        return details
+    }
+
+    static func unsupportedOwnerSelectorDetails(command: String, type rawType: String, ref rawRef: String) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: command,
+            readOnly: true,
+            errorCode: "unsupported_owner_type",
+            safeVerificationCommands: [
+                "cider-cli item owner-get note <id-or-ref> --json",
+                "cider-cli item relations graph_object <stable-key> --json",
+                "cider-cli item related-owners graph_object <stable-key> --json",
+            ],
+            safeNextCommands: ["Use a supported owner type or resolve the item through cider-cli item search <query> --json first."]
+        )
+        details["selector"] = ["type": rawType, "ref": rawRef]
+        details["sourceRef"] = ["type": rawType, "ref": rawRef]
+        details["supportedTypes"] = supportedOwnerSelectorTypes
+        details["policyNote"] = "Arbitrary owner types are rejected so unsupported selectors do not masquerade as valid empty read-model results."
+        return details
+    }
+
+    static func parsePositiveIntFlag(_ flag: String, from args: [String], command: String, minimum: Int) -> Int?? {
+        guard let raw = parseFlag(flag, from: args) else { return .some(nil) }
+        guard let value = Int(raw), value >= minimum else {
+            printCLIError(
+                "Malformed numeric filter \(flag)='\(raw)' for \(command).",
+                details: malformedNumericFilterDetails(command: command, flag: flag, value: raw, minimum: minimum)
+            )
+            return nil
+        }
+        return .some(value)
+    }
+
+    static func unsupportedReviewFilterDetails(command: String, name: String, value: String, supportedValues: [String]) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: command,
+            readOnly: true,
+            errorCode: "unsupported_review_filter_value",
+            safeVerificationCommands: [
+                "cider-cli capture review-queue --limit 20 --json",
+                "cider-cli review summary --json",
+                "cider-cli item due-to-surface --json",
+            ],
+            safeNextCommands: ["Use supported \(name) values only; valid zero-result reads return ok=true with count=0."]
+        )
+        details["filter"] = ["name": name, "value": value]
+        details["supportedValues"] = supportedValues
+        return details
+    }
+
+    static func malformedNumericFilterDetails(command: String, flag: String, value: String, minimum: Int) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: command,
+            readOnly: true,
+            errorCode: "malformed_numeric_filter",
+            safeVerificationCommands: [
+                "cider-cli capture review-queue --limit 20 --json",
+                "cider-cli review list --limit 20 --json",
+                "cider-cli item due-to-surface --limit 20 --json",
+            ],
+            safeNextCommands: ["Use an integer >= \(minimum) for \(flag)."]
+        )
+        details["filter"] = ["name": flag.replacingOccurrences(of: "--", with: ""), "value": value]
+        details["minimum"] = minimum
+        return details
+    }
+
+    static func structuredCLIErrorDetails(
+        command: String,
+        readOnly: Bool,
+        errorCode: String,
+        safeVerificationCommands: [String] = [],
+        safeNextCommands: [String] = []
+    ) -> [String: Any] {
+        [
+            "command": command,
+            "readOnly": readOnly,
+            "changed": false,
+            "errorCode": errorCode,
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": safeNextCommands,
+        ]
+    }
+
+    static func unsupportedReadOnlyItemTypeErrorDetails(command: String, rawType: String, ref: String?) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: command,
+            readOnly: true,
+            errorCode: "unsupported_item_type",
+            safeVerificationCommands: ["cider-cli item capability-map --json"],
+            safeNextCommands: ["Use one of: \(supportedAgentItemTypes.joined(separator: ", "))"]
+        )
+        details["unsupportedType"] = rawType
+        details["supportedTypes"] = supportedAgentItemTypes
+        if let ref { details["ref"] = ref }
+        return details
+    }
+
+    static func itemNotFoundErrorDetails(command: String, type: String, ref: String) -> [String: Any] {
+        var details = structuredCLIErrorDetails(
+            command: command,
+            readOnly: true,
+            errorCode: "item_not_found",
+            safeVerificationCommands: [
+                "cider-cli item get \(type) \(ref) --json",
+                "cider-cli item search \(ref) --json",
+            ],
+            safeNextCommands: ["cider-cli item search <query> --json"]
+        )
+        details["sourceRef"] = ["type": type, "ref": ref]
+        return details
+    }
+
+    static func linkFailurePayload(
+        command: String,
+        action: String,
+        errorCode: String,
+        error: String,
+        sourceRefs: [String],
+        safeVerificationCommands: [String] = [],
+        safeNextCommands: [String] = []
+    ) -> [String: Any] {
+        structuredActionReceiptFailurePayload(
+            command: command,
+            action: action,
+            readOnly: false,
+            errorCode: errorCode,
+            error: error,
+            sourceRefs: sourceRefs,
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: safeNextCommands
+        )
+    }
+
+    static func printLinkFailure(command: String, action: String, args: [String], error: Error) {
+        let positional = nonFlagArgs(args)
+        let message = error.localizedDescription
+        let errorCode: String
+        if message.contains("Unsupported link type") || message.contains("Usage: cider-cli link") {
+            errorCode = "unsupported_item_type"
+        } else if message.hasPrefix("No ") && message.contains(" found matching ") {
+            errorCode = "item_not_found"
+        } else {
+            errorCode = "link_failed"
+        }
+        var sourceRefs: [String] = []
+        if positional.count >= 2 { sourceRefs.append("\(positional[0]):\(positional[1])") }
+        if positional.count >= 4 { sourceRefs.append("\(positional[2]):\(positional[3])") }
+        if sourceRefs.isEmpty { sourceRefs = [command] }
+        var payload = linkFailurePayload(
+            command: command,
+            action: action,
+            errorCode: errorCode,
+            error: message,
+            sourceRefs: sourceRefs,
+            safeVerificationCommands: ["cider-cli item link \(positional.joined(separator: " ")) --json"],
+            safeNextCommands: ["cider-cli item search <query> --json"]
+        )
+        if errorCode == "unsupported_item_type" {
+            payload["supportedTypes"] = supportedAgentItemTypes
+            if let first = positional.first { payload["unsupportedType"] = first }
+            if var receipt = payload["actionReceipt"] as? [String: Any] {
+                receipt["supportedTypes"] = supportedAgentItemTypes
+                payload["actionReceipt"] = receipt
+            }
+        }
+        processExitCode = 1
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput { outputJSON(payload) } else { print("Error: \(message)") }
+    }
+
+    static func unsupportedItemTypeErrorDetails(command: String, action: String, rawType: String, ref: String?) -> [String: Any] {
+        let receipt = agentActionReceiptToDict(
+            command: command,
+            action: action,
+            readOnly: true,
+            changed: false,
+            status: "failed",
+            errorCode: "unsupported_item_type",
+            error: "Unsupported item type '\(rawType)'.",
+            supportedTypes: supportedAgentItemTypes,
+            safeVerificationCommands: ["cider-cli item due-to-surface --json"],
+            safeNextCommands: ["Use one of: \(supportedAgentItemTypes.joined(separator: ", "))"]
+        )
+        var details: [String: Any] = [
+            "errorCode": "unsupported_item_type",
+            "unsupportedType": rawType,
+            "supportedTypes": supportedAgentItemTypes,
+            "actionReceipt": receipt,
+        ]
+        if let ref { details["ref"] = ref }
+        return details
+    }
+
     static func printCLIError(_ message: String, details: [String: Any]?) {
         processExitCode = 1
         if jsonOutput {
             var dict: [String: Any] = ["ok": false, "error": message]
             if let details {
                 dict["details"] = details
+                for promotedKey in ["command", "readOnly", "changed", "errorCode", "supportedTypes", "supportedValues", "filter", "selector", "reviewState", "truthBoundary", "expectedFormat", "minimum", "policyNote", "sourceRef", "safeVerificationCommands", "safeNextCommands", "actionReceipt"] {
+                    if let value = details[promotedKey] {
+                        dict[promotedKey] = value
+                    }
+                }
             }
+            persistActionReceiptIfPresent(dict)
             outputJSON(dict)
         } else {
             print("Error: \(message)")
@@ -13051,9 +14200,13 @@ struct CiderCLI {
         var dict: [String: Any] = [
             "ok": true,
             "command": command,
+            "readOnly": true,
+            "changed": false,
             "exists": ownerResolved,
             "ownerResolved": ownerResolved,
             "legacyOwnerInspection": true,
+            "relationCount": relations.count,
+            "backlinkCount": backlinks.count,
             "sourceRef": [
                 "type": rawType,
                 "ref": rawRef,
@@ -13993,7 +15146,362 @@ struct CiderCLI {
         if let confidence = relation.confidence {
             dict["confidence"] = confidence
         }
+        if let evidenceRecord = sourceEvidenceRecordToDict(for: relation) {
+            dict["sourceEvidenceRecord"] = evidenceRecord
+        }
+        let validity = factValidityStateToDict(targetRef: "owner_relation:\(relation.id)")
+        dict["factValidity"] = validity ?? [
+            "targetRef": "owner_relation:\(relation.id)",
+            "currentState": "current",
+            "isCurrent": true,
+            "truthState": "current_truth",
+        ]
+        dict["truthState"] = (validity?["truthState"] as? String) ?? "current_truth"
         return dict
+    }
+
+    static func sourceEvidenceRecordToDict(_ record: SecondBrainSourceEvidenceRecord) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": record.id,
+            "ref": "source_evidence:\(record.id)",
+            "evidenceKind": record.evidenceKind,
+            "sourceOwner": ownerToDict(record.sourceOwner),
+            "sourceOwnerRef": record.sourceOwnerRef,
+            "sourceQuote": record.sourceQuote,
+            "extractionSource": record.extractionSource,
+            "derivedOwner": ownerToDict(record.derivedOwner),
+            "derivedOwnerRef": record.derivedOwnerRef,
+            "derivedKind": record.derivedKind,
+            "metadata": record.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: record.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: record.updatedAt),
+        ]
+        if let sourceKind = record.sourceKind { dict["sourceKind"] = sourceKind }
+        if let spanStart = record.spanStart { dict["spanStart"] = spanStart }
+        if let spanEnd = record.spanEnd { dict["spanEnd"] = spanEnd }
+        if let observedAt = record.observedAt { dict["observedAt"] = ISO8601DateFormatter().string(from: observedAt) }
+        if let capturedAt = record.capturedAt { dict["capturedAt"] = ISO8601DateFormatter().string(from: capturedAt) }
+        if let extractedAt = record.extractedAt { dict["extractedAt"] = ISO8601DateFormatter().string(from: extractedAt) }
+        if let extractionRunID = record.extractionRunID { dict["extractionRunID"] = extractionRunID }
+        if let extractionProvider = record.extractionProvider { dict["extractionProvider"] = extractionProvider }
+        if let extractionModel = record.extractionModel { dict["extractionModel"] = extractionModel }
+        if let candidateRef = record.candidateRef { dict["candidateRef"] = candidateRef }
+        return dict
+    }
+
+    static func sourceEvidenceRecordToDict(for output: SecondBrainEnrichmentOutput) -> [String: Any]? {
+        sourceEvidenceRecord(for: output).map(sourceEvidenceRecordToDict)
+    }
+
+    static func sourceEvidenceRecord(for output: SecondBrainEnrichmentOutput) -> SecondBrainSourceEvidenceRecord? {
+        if let stored = try? SecondBrainSourceEvidenceService(database: .shared).record(
+            derivedOwner: SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: output.id)
+        ) {
+            return stored
+        }
+        return SecondBrainSourceEvidenceService.recordFromOutput(output)
+    }
+
+    static func sourceEvidenceRecordToDict(for relation: SecondBrainRelation) -> [String: Any]? {
+        sourceEvidenceRecord(for: relation).map(sourceEvidenceRecordToDict)
+    }
+
+    static func sourceEvidenceRecord(for relation: SecondBrainRelation) -> SecondBrainSourceEvidenceRecord? {
+        if let stored = try? SecondBrainSourceEvidenceService(database: .shared).record(
+            derivedOwner: SecondBrainOwnerRef(ownerType: "owner_relation", ownerID: relation.id)
+        ) {
+            return stored
+        }
+        return SecondBrainSourceEvidenceService.recordFromRelation(relation)
+    }
+
+    static func scoreReasonsToDict(_ reasons: [CiderRecallScoreReason]) -> [[String: Any]] {
+        reasons.map { reason in
+            var dict: [String: Any] = [
+                "id": reason.id,
+                "kind": reason.kind,
+                "weight": reason.weight,
+                "summary": reason.summary,
+                "metadata": reason.metadata,
+            ]
+            if let owner = reason.owner { dict["owner"] = ownerToDict(owner); dict["ownerRef"] = owner.canonicalRef }
+            if let evidenceRef = reason.evidenceRef { dict["evidenceRef"] = evidenceRef }
+            if let candidateRef = reason.candidateRef { dict["candidateRef"] = candidateRef }
+            if let relationID = reason.relationID { dict["relationID"] = relationID }
+            if let reviewState = reason.reviewState { dict["reviewState"] = reviewState }
+            return dict
+        }
+    }
+
+    static func recallAccessEventToDict(_ event: CiderRecallAccessEvent) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": event.id,
+            "surface": event.surface,
+            "selectorKind": event.selectorKind,
+            "queryTextStored": false,
+            "anchorRefs": event.anchorRefs,
+            "surfacedRefs": event.surfacedRefs,
+            "reasonKinds": event.reasonKinds,
+            "metadata": event.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: event.createdAt),
+        ]
+        if let queryHash = event.queryHash { dict["queryHash"] = queryHash }
+        if let queryLength = event.queryLength { dict["queryLength"] = queryLength }
+        if let tokenCount = event.queryTokenCount { dict["queryTokenCount"] = tokenCount }
+        return dict
+    }
+
+    static func accessLogSummaryToDict(_ event: CiderRecallAccessEvent) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": event.id,
+            "ref": "recall_access_event:\(event.id)",
+            "recorded": true,
+            "queryTextStored": false,
+            "selectorKind": event.selectorKind,
+            "anchorRefs": event.anchorRefs,
+            "surfacedRefs": event.surfacedRefs,
+            "reasonKinds": event.reasonKinds,
+            "safeNextCommands": ["cider-cli item recall-access-log --limit 20 --json"],
+        ]
+        if let queryHash = event.queryHash { dict["queryHash"] = queryHash }
+        if let queryLength = event.queryLength { dict["queryLength"] = queryLength }
+        if let tokenCount = event.queryTokenCount { dict["queryTokenCount"] = tokenCount }
+        return dict
+    }
+
+    static func factValidityCandidateToDict(_ view: SecondBrainFactValidityCandidateView) -> [String: Any] {
+        let candidate = view.candidate
+        var dict: [String: Any] = [
+            "id": candidate.id,
+            "candidateRef": candidate.candidateRef,
+            "targetRef": candidate.targetRef,
+            "proposedState": candidate.proposedState,
+            "sourceOwner": ownerToDict(candidate.sourceOwner),
+            "sourceQuote": candidate.sourceQuote,
+            "reason": candidate.reason,
+            "reviewState": candidate.reviewState,
+            "truthBoundary": candidate.truthBoundary,
+            "source": candidate.source,
+            "actor": candidate.actor,
+            "metadata": candidate.metadata,
+            "lifecycleHistory": view.lifecycleHistory.map(reviewLifecycleEventToDict),
+            "safeNextCommands": factValiditySafeCommands(candidateID: candidate.id, targetRef: candidate.targetRef),
+            "createdAt": ISO8601DateFormatter().string(from: candidate.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: candidate.updatedAt),
+        ]
+        if let validAt = candidate.validAt { dict["validAt"] = ISO8601DateFormatter().string(from: validAt) }
+        if let invalidAt = candidate.invalidAt { dict["invalidAt"] = ISO8601DateFormatter().string(from: invalidAt) }
+        if let expiredAt = candidate.expiredAt { dict["expiredAt"] = ISO8601DateFormatter().string(from: expiredAt) }
+        if let supersedesRef = candidate.supersedesRef { dict["supersedesRef"] = supersedesRef }
+        if let supersededByRef = candidate.supersededByRef { dict["supersededByRef"] = supersededByRef }
+        if let sourceEvidenceRef = candidate.sourceEvidenceRef { dict["sourceEvidenceRef"] = sourceEvidenceRef }
+        if let decisionNote = candidate.decisionNote { dict["decisionNote"] = decisionNote }
+        if let reviewedAt = candidate.reviewedAt { dict["reviewedAt"] = ISO8601DateFormatter().string(from: reviewedAt) }
+        if let evidence = view.sourceEvidenceRecord { dict["sourceEvidenceRecord"] = sourceEvidenceRecordToDict(evidence) }
+        return dict
+    }
+
+    static func factValidityStateToDict(_ state: SecondBrainFactValidityState) -> [String: Any] {
+        var dict: [String: Any] = [
+            "targetRef": state.targetRef,
+            "currentState": state.currentState,
+            "isCurrent": state.isCurrent,
+            "truthState": state.isCurrent ? "current_truth" : "stale_or_superseded_truth",
+            "stateRef": state.stateRef,
+            "acceptedCandidate": factValidityCandidateToDict(SecondBrainFactValidityCandidateView(
+                candidate: state.acceptedCandidate,
+                sourceEvidenceRecord: state.sourceEvidenceRecord,
+                lifecycleHistory: state.lifecycleHistory
+            )),
+            "lifecycleHistory": state.lifecycleHistory.map(reviewLifecycleEventToDict),
+        ]
+        if let validAt = state.validAt { dict["validAt"] = ISO8601DateFormatter().string(from: validAt) }
+        if let invalidAt = state.invalidAt { dict["invalidAt"] = ISO8601DateFormatter().string(from: invalidAt) }
+        if let expiredAt = state.expiredAt { dict["expiredAt"] = ISO8601DateFormatter().string(from: expiredAt) }
+        if let supersedesRef = state.supersedesRef { dict["supersedesRef"] = supersedesRef }
+        if let supersededByRef = state.supersededByRef { dict["supersededByRef"] = supersededByRef }
+        if let evidence = state.sourceEvidenceRecord { dict["sourceEvidenceRecord"] = sourceEvidenceRecordToDict(evidence) }
+        return dict
+    }
+
+    static func factValidityStateToDict(targetRef: String) -> [String: Any]? {
+        guard let state = try? SecondBrainFactValidityService(database: .shared).validityState(targetRef: targetRef) else { return nil }
+        return factValidityStateToDict(state)
+    }
+
+    static func factValiditySafeCommands(candidateID: String, targetRef: String) -> [String] {
+        [
+            "cider-cli item fact-validity inspect \(candidateID) --json",
+            "cider-cli item fact-validity list --json",
+            "cider-cli item fact-validity accept \(candidateID) --reason <reason> --json",
+            "cider-cli item fact-validity reject \(candidateID) --reason <reason> --json",
+        ]
+    }
+
+    static func sourceEvidenceToDict(
+        owner: SecondBrainOwnerRef,
+        ownerRelations: [SecondBrainRelation] = [],
+        backlinks: [SecondBrainRelation] = [],
+        relationCandidates: [SecondBrainSimilarityCandidate] = []
+    ) -> [String: Any] {
+        let outgoingFacts = ownerRelations.map {
+            sourceEvidenceFactToDict($0, owner: owner, direction: "outgoing")
+        }
+        let backlinkFacts = backlinks.map {
+            sourceEvidenceFactToDict($0, owner: owner, direction: "backlink")
+        }
+        let facts = outgoingFacts + backlinkFacts
+        return [
+            "owner": ownerToDict(owner),
+            "count": facts.count,
+            "acceptedRelationCount": facts.count,
+            "reviewCandidateCount": relationCandidates.filter { candidate in
+                ["suggested", "needs_review"].contains(candidate.reviewState)
+            }.count,
+            "facts": facts,
+            "outgoingFacts": outgoingFacts,
+            "backlinkFacts": backlinkFacts,
+        ] as [String: Any]
+    }
+
+    static func sourceEvidenceFactToDict(
+        _ relation: SecondBrainRelation,
+        owner: SecondBrainOwnerRef,
+        direction: String
+    ) -> [String: Any] {
+        let metadata = relation.metadata
+        let currentOwnerRole: String
+        if relation.sourceOwner == owner {
+            currentOwnerRole = "source"
+        } else if relation.targetOwner == owner {
+            currentOwnerRole = "target"
+        } else {
+            currentOwnerRole = "related"
+        }
+
+        var dict: [String: Any] = [
+            "id": relation.id,
+            "direction": direction,
+            "currentOwnerRole": currentOwnerRole,
+            "relationType": relation.relationType,
+            "sourceOwner": ownerToDict(relation.sourceOwner),
+            "targetOwner": ownerToDict(relation.targetOwner),
+            "sourceOwnerRef": relation.sourceOwner.canonicalRef,
+            "targetOwnerRef": relation.targetOwner.canonicalRef,
+            "evidence": relation.evidence,
+            "sourceQuote": metadata["source_quote"] ?? relation.evidence,
+            "source": relation.source,
+            "actor": relation.actor,
+            "metadata": metadata,
+            "safeNextCommands": sourceEvidenceSafeCommands(for: relation),
+            "createdAt": ISO8601DateFormatter().string(from: relation.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: relation.updatedAt),
+        ]
+        if let confidence = relation.confidence {
+            dict["confidence"] = confidence
+        }
+        if let candidateRef = metadata["candidate_ref"] {
+            dict["candidateRef"] = candidateRef
+        }
+        if let candidateID = metadata["candidate_id"] {
+            dict["candidateID"] = candidateID
+        }
+        if let mentionText = metadata["mention_text"] {
+            dict["mentionText"] = mentionText
+        }
+        if let sourceKind = metadata["source_kind"] {
+            dict["sourceKind"] = sourceKind
+        }
+        if let sourceOwnerRef = metadata["source_owner_ref"] {
+            dict["evidenceSourceOwnerRef"] = sourceOwnerRef
+        }
+        if let evidenceRecord = sourceEvidenceRecordToDict(for: relation) {
+            dict["sourceEvidenceRecord"] = evidenceRecord
+        }
+        let lifecycle = lifecycleHistoryToDict(for: relation)
+        if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
+        return dict
+    }
+
+    static func reviewLifecycleEventToDict(_ event: SecondBrainReviewLifecycleEvent) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": event.id,
+            "owner": ownerToDict(event.owner),
+            "ownerRef": event.ownerRef,
+            "lifecycleState": event.lifecycleState,
+            "eventKind": event.eventKind,
+            "actor": event.actor,
+            "source": event.source,
+            "createdAt": ISO8601DateFormatter().string(from: event.createdAt),
+            "metadata": event.metadata,
+        ]
+        if let candidateRef = event.candidateRef { dict["candidateRef"] = candidateRef }
+        if let toolName = event.toolName { dict["toolName"] = toolName }
+        if let reason = event.reason { dict["reason"] = reason }
+        if let decisionNote = event.decisionNote { dict["decisionNote"] = decisionNote }
+        if let sourceEvidenceID = event.sourceEvidenceID { dict["sourceEvidenceID"] = sourceEvidenceID }
+        if let sourceEvidenceRef = event.sourceEvidenceRef { dict["sourceEvidenceRef"] = sourceEvidenceRef }
+        if let supersedesRef = event.supersedesRef { dict["supersedesRef"] = supersedesRef }
+        if let invalidatesRef = event.invalidatesRef { dict["invalidatesRef"] = invalidatesRef }
+        if let correctsRef = event.correctsRef { dict["correctsRef"] = correctsRef }
+        dict["truthBoundary"] = event.lifecycleState == "accepted"
+            ? "accepted_truth_requires_explicit_event"
+            : "reviewable_candidate_not_truth"
+        return dict
+    }
+
+    static func lifecycleHistoryEvents(for output: SecondBrainEnrichmentOutput) -> [SecondBrainReviewLifecycleEvent] {
+        let service = SecondBrainReviewLifecycleService(database: .shared)
+        let owner = SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: output.id)
+        do {
+            var events = try service.events(owner: owner)
+            if let candidateRef = SecondBrainReviewLifecycleService.candidateRef(for: output) {
+                let byCandidate = try service.events(candidateRef: candidateRef)
+                var seen = Set(events.map(\.id))
+                events.append(contentsOf: byCandidate.filter { seen.insert($0.id).inserted })
+            }
+            return events.sorted { $0.createdAt < $1.createdAt }
+        } catch {
+            return []
+        }
+    }
+
+    static func lifecycleHistoryToDict(for output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
+        lifecycleHistoryEvents(for: output).map(reviewLifecycleEventToDict)
+    }
+
+    static func lifecycleHistoryEvents(for relation: SecondBrainRelation) -> [SecondBrainReviewLifecycleEvent] {
+        let service = SecondBrainReviewLifecycleService(database: .shared)
+        let owner = SecondBrainOwnerRef(ownerType: "owner_relation", ownerID: relation.id)
+        do {
+            var events = try service.events(owner: owner)
+            if let candidateRef = relation.metadata["candidate_ref"] ?? relation.metadata["candidate_id"].map({ "graph_candidate:\($0)" }) {
+                let byCandidate = try service.events(candidateRef: candidateRef)
+                var seen = Set(events.map(\.id))
+                events.append(contentsOf: byCandidate.filter { seen.insert($0.id).inserted })
+            }
+            return events.sorted { $0.createdAt < $1.createdAt }
+        } catch {
+            return []
+        }
+    }
+
+    static func lifecycleHistoryToDict(for relation: SecondBrainRelation) -> [[String: Any]] {
+        lifecycleHistoryEvents(for: relation).map(reviewLifecycleEventToDict)
+    }
+
+    static func sourceEvidenceSafeCommands(for relation: SecondBrainRelation) -> [String] {
+        var commands: [String] = []
+        if let candidateID = relation.metadata["candidate_id"] {
+            commands.append("cider-cli item graph-candidate \(candidateID) --json")
+        } else if let candidateRef = relation.metadata["candidate_ref"]?.split(separator: ":").last {
+            commands.append("cider-cli item graph-candidate \(candidateRef) --json")
+        }
+        commands.append(contextCommand(for: relation.sourceOwner))
+        commands.append(contextCommand(for: relation.targetOwner))
+        commands.append("cider-cli item backlinks \(relation.targetOwner.ownerType) \(relation.targetOwner.ownerID) --json")
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
     }
 
     static func printOwnerRelations(
@@ -14004,15 +15512,28 @@ struct CiderCLI {
         owner: SecondBrainOwnerRef
     ) {
         if jsonOutput {
+            let outgoing = relations.filter { $0.sourceOwner == owner }
+            let backlinks = relations.filter { $0.targetOwner == owner }
+            let safeNextCommands = ownerRelationSafeNextCommands(owner: owner, relations: relations)
             outputJSON([
                 "ok": true,
                 "command": command,
+                "readOnly": true,
+                "changed": false,
                 "sourceRef": [
                     "type": sourceType,
                     "ref": sourceRef,
                 ],
                 "owner": ownerToDict(owner),
+                "relationCount": relations.count,
                 "relations": relations.map(ownerRelationToDict),
+                "sourceEvidence": sourceEvidenceToDict(
+                    owner: owner,
+                    ownerRelations: outgoing,
+                    backlinks: backlinks
+                ),
+                "safeNextCommands": safeNextCommands,
+                "safeCommands": safeNextCommands,
             ])
             return
         }
@@ -14023,6 +15544,19 @@ struct CiderCLI {
         for relation in relations {
             print("  [\(relation.relationType)] \(relation.sourceOwner.canonicalRef) -> \(relation.targetOwner.canonicalRef) (\(relation.source))")
         }
+    }
+
+    static func ownerRelationSafeNextCommands(owner: SecondBrainOwnerRef, relations: [SecondBrainRelation]) -> [String] {
+        var commands = ["cider-cli item context \(owner.ownerType) \(owner.ownerID) --json"]
+        for relation in relations.prefix(5) {
+            let relatedOwner = relation.sourceOwner == owner ? relation.targetOwner : relation.sourceOwner
+            commands.append("cider-cli item context \(relatedOwner.ownerType) \(relatedOwner.ownerID) --json")
+            if let candidateID = relation.metadata["candidate_id"] {
+                commands.append("cider-cli item graph-candidate \(candidateID) --json")
+            }
+        }
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
     }
 
     static func printReferenceExtractionResults(
@@ -14703,8 +16237,631 @@ struct CiderCLI {
         ]
     }
 
-    static func itemContextBundleToDict(_ bundle: CiderItemContextBundle) -> [String: Any] {
+    static func dueToSurfaceFeedPayload(limit: Int, includeSuppressed: Bool = false, staleAfterDays: Int = 3) throws -> CiderDueToSurfaceFeed {
+        let now = Date()
+        let agenda = AgendaBriefingService.build(
+            todos: TodoCardStorage.shared.todoCards,
+            dateCards: DateCardStorage.shared.dateCards,
+            now: now
+        )
+        var reviewItems: [CiderReviewQueueItem]
+        do {
+            reviewItems = try CiderReviewQueueService().list(limit: limit, includeDeferred: includeSuppressed, now: now).items
+                .filter { !isCompletedReminderOwner(itemType: $0.itemType, itemID: $0.itemID) }
+        } catch {
+            reviewItems = []
+        }
+        reviewItems.append(contentsOf: followUpProposalReviewItems(limit: limit, includeDeferred: includeSuppressed))
+        let staleCaptures = staleCaptureSignals(now: now, staleAfterDays: staleAfterDays)
+        let linkedContext = linkedContextSignals(limit: limit)
+        let acceptedMemoryFacts = acceptedMemoryFactsForResurfacing(limit: limit)
+        let followUpExecutionPreviews = followUpExecutionPreviewsForSurfacing(limit: limit)
+        return CiderDueToSurfaceFeedService.build(
+            agenda: agenda,
+            reviewItems: reviewItems,
+            staleCaptures: staleCaptures,
+            linkedContext: linkedContext,
+            acceptedMemoryFacts: acceptedMemoryFacts,
+            followUpExecutionPreviews: followUpExecutionPreviews,
+            now: now,
+            limit: limit
+        )
+    }
+
+    static func isCompletedReminderOwner(itemType: String, itemID: UUID) -> Bool {
+        let normalized = itemType.lowercased().replacingOccurrences(of: "_", with: "-")
+        if normalized == "todo" {
+            return TodoCardStorage.shared.todoCards.first(where: { $0.id == itemID })?.isCompleted == true
+        }
+        if normalized == "datecard" || normalized == "date-card" || normalized == "event" {
+            return DateCardStorage.shared.dateCards.first(where: { $0.id == itemID })?.isCompleted == true
+        }
+        return false
+    }
+
+    static func staleCaptureSignals(now: Date, staleAfterDays: Int = 3) -> [CiderDueToSurfaceStaleCapture] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -staleAfterDays, to: now) ?? now
+        var captures: [CiderDueToSurfaceStaleCapture] = []
+        captures += NotesStorage.shared.notes.compactMap { note in
+            guard note.modifiedAt <= cutoff,
+                  note.folderID == nil || note.relativePath.hasPrefix("Inbox/") else { return nil }
+            return CiderDueToSurfaceStaleCapture(
+                owner: SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString),
+                title: note.title,
+                itemType: "note",
+                relativePath: note.relativePath,
+                createdAt: note.createdAt,
+                updatedAt: note.modifiedAt,
+                reasonCodes: ["stale_capture", "inbox_unfiled"]
+            )
+        }
+        captures += BookmarksStorage.shared.bookmarks.compactMap { bookmark in
+            guard bookmark.updatedAt <= cutoff,
+                  bookmark.folderID == nil || (bookmark.relativePath?.hasPrefix("Inbox/") == true) else { return nil }
+            return CiderDueToSurfaceStaleCapture(
+                owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmark.id.uuidString),
+                title: bookmark.title,
+                itemType: "bookmark",
+                relativePath: bookmark.relativePath,
+                createdAt: bookmark.createdAt,
+                updatedAt: bookmark.updatedAt,
+                reasonCodes: ["stale_capture", "inbox_unfiled"]
+            )
+        }
+        return captures.sorted { lhs, rhs in lhs.updatedAt < rhs.updatedAt }
+    }
+
+    static func acceptedMemoryFactsForResurfacing(limit: Int, factID: String? = nil) -> [SecondBrainAcceptedMemoryFact] {
+        do {
+            let service = SecondBrainAcceptedMemoryFactService(database: .shared)
+            if let factID { return [try service.inspect(factID)] }
+            return try service.list(limit: limit)
+        } catch {
+            return []
+        }
+    }
+
+    static func followUpExecutionPreviewsForSurfacing(limit: Int) -> [SecondBrainFollowUpExecutionPreview] {
+        do {
+            return try SecondBrainFollowUpProposalService(database: .shared).previews(limit: limit)
+        } catch {
+            return []
+        }
+    }
+
+    static func followUpProposalReviewItems(limit: Int, includeDeferred: Bool = false) -> [CiderReviewQueueItem] {
+        do {
+            let states: Set<String> = includeDeferred ? ["suggested", "needs_review", "deferred"] : ["suggested", "needs_review"]
+            let proposals = try SecondBrainFollowUpProposalService(database: .shared).list(statuses: states, limit: limit)
+            return proposals.compactMap { proposal in
+                guard let itemID = UUID(uuidString: proposal.owner.ownerID) else { return nil }
+                let title = proposal.output.value
+                return CiderReviewQueueItem(
+                    id: "review-follow-up-proposal-\(proposal.id)",
+                    kind: "follow_up_proposal",
+                    source: "follow_up_proposal",
+                    itemID: itemID,
+                    itemType: proposal.owner.ownerType,
+                    title: title,
+                    relativePath: nil,
+                    reason: "Review proposed follow-up before creating any reminder, todo, link, or nag.",
+                    reasonCodes: ["follow_up_proposal_review", "action_intent_review"],
+                    suggestedAction: "Review follow-up proposal",
+                    reviewState: proposal.status,
+                    confidence: proposal.output.confidence,
+                    routingDecisionID: nil,
+                    target: nil,
+                    createdAt: proposal.output.createdAt,
+                    safeActions: ["inspect", "accept", "reject", "defer"],
+                    candidateID: proposal.id,
+                    candidateRef: proposal.proposalRef,
+                    sourceQuote: proposal.output.evidence,
+                    safeNextCommands: followUpProposalSafeCommands(proposal),
+                    reviewFamily: "follow_up_proposal",
+                    sourceItemRef: proposal.owner.canonicalRef,
+                    sourceItemTitle: title,
+                    extractionReason: "This is a reviewable follow-up proposal derived from an accepted memory fact action intent; it is not a reminder, todo, link, nag, or accepted truth.",
+                    proposedChange: [
+                        "changeType": "follow_up_action_proposal",
+                        "truthState": "reviewable_follow_up_proposal_not_truth",
+                        "mutationBoundary": "proposal_record_only_no_external_mutation",
+                    ],
+                    storage: [
+                        "table": "enrichment_outputs",
+                        "service": "SecondBrainFollowUpProposalService",
+                        "kind": SecondBrainFollowUpProposalService.outputKind,
+                    ],
+                    truthState: "reviewable_follow_up_proposal_not_truth",
+                    acceptEffect: "Accepting only marks the proposal reviewed; it does not create a reminder, todo, link, or nag automatically.",
+                    rejectEffect: "Rejecting preserves the proposal record and marks it rejected."
+                )
+            }
+        } catch {
+            return []
+        }
+    }
+
+    static func linkedContextSignals(limit: Int) -> [CiderDueToSurfaceLinkedContext] {
+        guard CiderDatabase.shared.isOpen else { return [] }
+        let service = SecondBrainSimilarityCandidateService(database: .shared)
+        let candidates = (try? service.reviewableCandidates(limit: limit)) ?? []
+        return candidates.map { candidate in
+            let evidence = (try? service.sourceEvidenceRecord(for: candidate))
+            return CiderDueToSurfaceLinkedContext(
+                id: candidate.id,
+                sourceOwner: candidate.sourceOwner,
+                targetOwner: candidate.targetOwner,
+                title: "Review possible \(candidate.candidateType) link",
+                reason: candidate.reason,
+                reasonCodes: candidate.metadata["reason_codes"]?.split(separator: ",").map(String.init) ?? [candidate.signal],
+                confidence: candidate.score,
+                reviewState: candidate.reviewState,
+                evidenceRef: evidence.map { "source_evidence:\($0.id)" },
+                safeNextCommands: [
+                    "cider-cli item similarity \(candidate.sourceOwner.ownerType) \(candidate.sourceOwner.ownerID) --json",
+                    "cider-cli item accept-similarity \(candidate.id) --relation similar_to --json",
+                ]
+            )
+        }
+    }
+
+    enum RecallContextCLIError: Error, LocalizedError {
+        case missingSelector
+        case malformedOrUnresolvedSelector(String)
+        case noRecallMatches(String)
+
+        var errorCode: String {
+            switch self {
+            case .missingSelector: return "missing_selector"
+            case .malformedOrUnresolvedSelector: return "malformed_or_unresolved_selector"
+            case .noRecallMatches: return "no_recall_matches"
+            }
+        }
+
+        var errorDescription: String? {
+            switch self {
+            case .missingSelector:
+                return "Usage: cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--history-command <command>] [--history-status <status>] [--history-limit <n>] [--json]"
+            case .malformedOrUnresolvedSelector(let message):
+                return message
+            case .noRecallMatches(let query):
+                return "No recall context matches found for '\(query)'."
+            }
+        }
+    }
+
+    static func recallContextPayload(
+        args: [String],
+        contextService: CiderItemContextService
+    ) throws -> [String: Any] {
+        let limit = max(1, Int(parseFlag("--limit", from: args) ?? "") ?? 5)
+        let query = parseFlag("--query", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var warnings: [[String: Any]] = []
+        var anchorRefs: [LibraryEntityRef] = []
+        if let itemSelector = parseRecallItemSelector(from: args) {
+            do {
+                let type = try ItemLinkService.entityType(from: itemSelector.type)
+                let ref = try ItemLinkService.shared.resolve(type: type, ref: itemSelector.ref)
+                anchorRefs.append(ref)
+            } catch {
+                throw RecallContextCLIError.malformedOrUnresolvedSelector(error.localizedDescription)
+            }
+        }
+        if let query, !query.isEmpty {
+            let results = try contextService.search(query, limit: limit)
+            let refs = results.compactMap(\.item).map { LibraryEntityRef(type: $0.type, entityID: $0.id) }
+            if refs.isEmpty && anchorRefs.isEmpty {
+                throw RecallContextCLIError.noRecallMatches(query)
+            }
+            if refs.count > 1 {
+                warnings.append([
+                    "kind": "ambiguous_selector",
+                    "message": "Query matched \(refs.count) possible anchors; returning a bounded bundle instead of choosing one silently.",
+                    "query": query,
+                ])
+            }
+            anchorRefs.append(contentsOf: refs)
+        }
+        anchorRefs = orderedUniqueLibraryRefs(anchorRefs)
+        guard !anchorRefs.isEmpty else { throw RecallContextCLIError.missingSelector }
+
+        let bundles = try anchorRefs.prefix(limit).map { try contextService.context(for: $0) }
+        let actionHistoryLimit = boundedRecallActionHistoryLimit(from: args)
+        let actionHistoryFilters = recallActionHistoryFilterToDict(args: args, limit: actionHistoryLimit)
+        let actionLedgerService = SecondBrainActionReceiptLedgerService(database: .shared)
+        let scoringService = CiderRecallExplanationService(database: .shared)
+        let explicitItemSelector = parseRecallItemSelector(from: args) != nil
+        var anchorDicts: [[String: Any]] = []
+        var contentBlocks: [[String: Any]] = []
+        var relatedItems: [[String: Any]] = []
+        var acceptedFacts: [[String: Any]] = []
+        var reviewableCandidates: [[String: Any]] = []
+        var actionHistory: [[String: Any]] = []
+        var safeCommands: [String] = []
+        var blockingIssues: [String] = []
+        var surfacedRefs: [String] = []
+        var reasonKinds: [String] = []
+
+        for bundle in bundles {
+            let citation = recallCitation(owner: bundle.owner)
+            let anchorReasons = scoringService.anchorReasons(bundle: bundle, query: query, explicitItem: explicitItemSelector)
+            reasonKinds.append(contentsOf: anchorReasons.map(\.kind))
+            surfacedRefs.append(bundle.owner.canonicalRef)
+            anchorDicts.append([
+                "item": itemSummaryToDict(bundle.item, ownerRelations: bundle.ownerRelations),
+                "owner": ownerToDict(bundle.owner),
+                "citation": citation,
+                "recallScore": scoringService.score(anchorReasons),
+                "scoreReasons": scoreReasonsToDict(anchorReasons),
+            ])
+            if bundle.chunks.isEmpty {
+                warnings.append([
+                    "kind": "missing_chunks",
+                    "message": "Anchor has no indexed content chunks; run the safe rebuild command before relying on chunk recall.",
+                    "owner": ownerToDict(bundle.owner),
+                    "safeRepairCommand": "cider-cli item rebuild-chunks \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json",
+                ])
+            }
+            for section in bundle.sections.prefix(3) {
+                let reasons = scoringService.contentReasons(owner: bundle.owner, kind: "section", id: section.id, source: section.source)
+                reasonKinds.append(contentsOf: reasons.map(\.kind))
+                contentBlocks.append([
+                    "kind": "section",
+                    "title": section.title,
+                    "body": section.body,
+                    "source": section.source,
+                    "citation": citation,
+                    "recallScore": scoringService.score(reasons),
+                    "scoreReasons": scoreReasonsToDict(reasons),
+                ])
+            }
+            for chunk in bundle.chunks.prefix(3) {
+                let reasons = scoringService.contentReasons(owner: bundle.owner, kind: "chunk", id: chunk.id, source: chunk.source)
+                reasonKinds.append(contentsOf: reasons.map(\.kind))
+                contentBlocks.append([
+                    "kind": "chunk",
+                    "id": chunk.id,
+                    "title": chunk.title,
+                    "body": chunk.body,
+                    "source": chunk.source,
+                    "citation": citation,
+                    "recallScore": scoringService.score(reasons),
+                    "scoreReasons": scoreReasonsToDict(reasons),
+                ])
+            }
+            for related in bundle.related.prefix(5) {
+                var dict = itemLinkSummaryToDict(related)
+                let relatedID = dict["id"] as? String
+                let reasons = scoringService.relatedItemReasons(sourceOwner: bundle.owner, relatedID: relatedID)
+                reasonKinds.append(contentsOf: reasons.map(\.kind))
+                if let relatedID { surfacedRefs.append("item:\(relatedID)") }
+                dict["recallScore"] = scoringService.score(reasons)
+                dict["scoreReasons"] = scoreReasonsToDict(reasons)
+                relatedItems.append(dict)
+            }
+            let accepted = recallAcceptedFacts(from: bundle.ownerRelations + bundle.backlinks, scoringService: scoringService)
+            reasonKinds.append(contentsOf: accepted.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
+            surfacedRefs.append(contentsOf: accepted.compactMap { ($0["id"] as? String).map { "owner_relation:\($0)" } })
+            acceptedFacts.append(contentsOf: accepted)
+            let acceptedMemoryOutputs = bundle.enrichmentOutputs.filter { $0.kind == "memory_candidate" && $0.reviewState == "accepted" }
+            let acceptedMemoryFacts = acceptedMemoryOutputs.map { recallAcceptedMemoryFactToDict($0, scoringService: scoringService) }
+            reasonKinds.append(contentsOf: acceptedMemoryFacts.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
+            surfacedRefs.append(contentsOf: acceptedMemoryFacts.compactMap { $0["factRef"] as? String })
+            acceptedFacts.append(contentsOf: acceptedMemoryFacts)
+            let candidateOutputs = bundle.enrichmentOutputs.filter {
+                $0.kind == SecondBrainGraphCandidateContract.outputKind && ["suggested", "needs_review", "deferred"].contains($0.reviewState)
+            }
+            if !candidateOutputs.isEmpty { blockingIssues.append("graph_candidates_need_review") }
+            let graphCandidates = candidateOutputs.map { recallGraphCandidateToDict($0, scoringService: scoringService) }
+            reasonKinds.append(contentsOf: graphCandidates.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
+            surfacedRefs.append(contentsOf: graphCandidates.compactMap { $0["candidateRef"] as? String })
+            reviewableCandidates.append(contentsOf: graphCandidates)
+            let memoryOutputs = bundle.enrichmentOutputs.filter {
+                $0.kind == "memory_candidate" && ["suggested", "needs_review", "deferred"].contains($0.reviewState)
+            }
+            if !memoryOutputs.isEmpty { blockingIssues.append("memory_candidates_need_review") }
+            let memoryCandidates = memoryOutputs.map { recallMemoryCandidateToDict($0, scoringService: scoringService) }
+            reasonKinds.append(contentsOf: memoryCandidates.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
+            surfacedRefs.append(contentsOf: memoryCandidates.compactMap { $0["candidateRef"] as? String ?? ($0["id"] as? String).map { "memory_candidate:\($0)" } })
+            reviewableCandidates.append(contentsOf: memoryCandidates)
+            let historyRecords = try actionLedgerService.list(filter: recallActionHistoryFilter(from: args, owner: bundle.owner, limit: actionHistoryLimit))
+            let history = historyRecords.map(recallActionHistoryEntryToDict)
+            actionHistory.append(contentsOf: history)
+            surfacedRefs.append(contentsOf: history.compactMap { $0["receiptRef"] as? String })
+            reasonKinds.append(contentsOf: history.map { _ in "action_receipt_history" })
+            safeCommands.append("cider-cli item context \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json")
+            safeCommands.append("cider-cli item graph-candidates \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json")
+            safeCommands.append("cider-cli item related-owners \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json")
+        }
+        if let query, !query.isEmpty {
+            safeCommands.append("cider-cli item search \"\(recallEscapedCommandArgument(query))\" --json")
+            safeCommands.append("cider-cli item search-debug \"\(recallEscapedCommandArgument(query))\" --json")
+        }
+        safeCommands.append("cider-cli capture review-queue --limit 20 --json")
+
+        let accessEvent = try scoringService.recordAccess(
+            selectorKind: parseRecallItemSelector(from: args) != nil && !(query?.isEmpty ?? true) ? "item_and_query" : (parseRecallItemSelector(from: args) != nil ? "item" : "query"),
+            query: query,
+            anchorRefs: bundles.map { $0.owner.canonicalRef },
+            surfacedRefs: surfacedRefs,
+            reasonKinds: reasonKinds,
+            metadata: [
+                "raw_query_stored": "false",
+                "bundle_count": String(bundles.count),
+            ]
+        )
+
+        return [
+            "ok": true,
+            "command": "item.recall-context",
+            "readOnly": true,
+            "changed": false,
+            "selector": recallSelectorDict(args: args, query: query),
+            "safetyBoundary": recallContextSafetyBoundary(),
+            "scoreSummary": [
+                "reasonKinds": orderedUniqueStrings(reasonKinds),
+                "anchorCount": anchorDicts.count,
+                "surfacedRefCount": orderedUniqueStrings(surfacedRefs).count,
+                "queryTextStored": false,
+            ],
+            "accessLog": accessLogSummaryToDict(accessEvent),
+            "anchors": anchorDicts,
+            "contentBlocks": contentBlocks,
+            "relatedItems": orderedUniqueDictionaries(relatedItems, key: "id"),
+            "acceptedFacts": orderedUniqueDictionaries(acceptedFacts, key: "id"),
+            "reviewableCandidates": orderedUniqueDictionaries(reviewableCandidates, key: "id"),
+            "actionHistory": orderedUniqueDictionaries(actionHistory, key: "id"),
+            "actionHistoryFilters": actionHistoryFilters,
+            "reviewStatus": [
+                "needsReview": !blockingIssues.isEmpty,
+                "blockingIssues": orderedUniqueStrings(blockingIssues),
+                "copy": blockingIssues.isEmpty ? "No reviewable candidates were found in this bundle." : "Reviewable candidates are not accepted memory or graph truth until an explicit accept command is run.",
+            ],
+            "warnings": warnings,
+            "safeNextCommands": orderedUniqueStrings(safeCommands),
+        ]
+    }
+
+    static func boundedRecallActionHistoryLimit(from args: [String]) -> Int {
+        let raw = parseFlag("--history-limit", from: args)
+            ?? parseFlag("--action-history-limit", from: args)
+            ?? "5"
+        return max(1, min(Int(raw) ?? 5, 50))
+    }
+
+    static func recallActionHistoryFilter(from args: [String], owner: SecondBrainOwnerRef, limit: Int) -> SecondBrainActionReceiptFilter {
+        SecondBrainActionReceiptFilter(
+            owner: owner,
+            command: parseFlag("--history-command", from: args) ?? parseFlag("--action-history-command", from: args),
+            action: parseFlag("--history-action", from: args) ?? parseFlag("--action-history-action", from: args),
+            actor: parseFlag("--history-actor", from: args) ?? parseFlag("--action-history-actor", from: args),
+            status: parseFlag("--history-status", from: args) ?? parseFlag("--action-history-status", from: args),
+            sourceRef: parseFlag("--history-source-ref", from: args) ?? parseFlag("--action-history-source-ref", from: args),
+            evidenceRef: parseFlag("--history-evidence-ref", from: args) ?? parseFlag("--action-history-evidence-ref", from: args),
+            since: parseFactValidityDate(parseFlag("--history-since", from: args) ?? parseFlag("--action-history-since", from: args)),
+            before: parseFactValidityDate(parseFlag("--history-before", from: args) ?? parseFlag("--action-history-before", from: args)),
+            limit: limit
+        )
+    }
+
+    static func recallActionHistoryFilterToDict(args: [String], limit: Int) -> [String: Any] {
+        var dict = actionLedgerFilterToDict(recallActionHistoryFilter(from: args, owner: SecondBrainOwnerRef(ownerType: "_any", ownerID: "_any"), limit: limit))
+        dict.removeValue(forKey: "owner")
+        dict.removeValue(forKey: "ownerRef")
+        return dict
+    }
+
+    static func parseRecallItemSelector(from args: [String]) -> (type: String, ref: String)? {
+        guard let flagIndex = args.firstIndex(of: "--item"), flagIndex + 2 < args.count else { return nil }
+        return (args[flagIndex + 1], args[flagIndex + 2])
+    }
+
+    static func recallSelectorDict(args: [String], query: String?) -> [String: Any] {
+        var dict: [String: Any] = [:]
+        if let item = parseRecallItemSelector(from: args) {
+            dict["item"] = ["type": item.type, "ref": item.ref]
+        }
+        if let query, !query.isEmpty { dict["query"] = query }
+        return dict
+    }
+
+    static func recallContextSafetyBoundary() -> [String] {
         [
+            "accepted_facts_are_cited",
+            "reviewable_candidates_are_not_truth",
+            "accept_requires_explicit_command",
+            "no_silent_memory_or_graph_promotion",
+        ]
+    }
+
+    static func recallCitation(owner: SecondBrainOwnerRef) -> [String: Any] {
+        var dict = ownerToDict(owner)
+        dict["ref"] = owner.canonicalRef
+        dict["safeNextCommand"] = contextCommand(for: owner)
+        return dict
+    }
+
+    static func recallActionHistoryEntryToDict(_ record: SecondBrainActionReceiptRecord) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": record.id,
+            "kind": "action_receipt",
+            "receiptRef": "action_receipt:\(record.id)",
+            "command": record.command,
+            "action": record.action,
+            "actor": record.actor,
+            "status": record.status,
+            "readOnly": record.readOnly,
+            "changed": record.changed,
+            "sourceRefs": record.sourceRefs,
+            "evidenceRefs": record.evidenceRefs,
+            "safeVerificationCommands": record.safeVerificationCommands,
+            "createdAt": ISO8601DateFormatter().string(from: record.createdAt),
+            "truthBoundary": "action_receipt_not_fact_truth",
+            "safetyBoundary": [
+                "receipt_proves_command_outcome_only",
+                "not_memory_or_graph_truth",
+                "no_silent_acceptance",
+            ],
+        ]
+        if let owner = record.owner {
+            dict["owner"] = ownerToDict(owner)
+            dict["ownerRef"] = owner.canonicalRef
+            dict["citation"] = recallCitation(owner: owner)
+        }
+        if let errorCode = record.errorCode { dict["errorCode"] = errorCode }
+        return dict
+    }
+
+    static func recallAcceptedFacts(from relations: [SecondBrainRelation], scoringService: CiderRecallExplanationService) -> [[String: Any]] {
+        relations.filter { $0.source == "graph_candidate.accept" || $0.metadata["candidate_ref"] != nil }.map { relation in
+            var dict: [String: Any] = [
+                "id": relation.id,
+                "truthState": "accepted",
+                "sourceOwner": ownerToDict(relation.sourceOwner),
+                "targetOwner": ownerToDict(relation.targetOwner),
+                "relationType": relation.relationType,
+                "evidence": relation.evidence,
+                "sourceQuote": relation.metadata["source_quote"] ?? relation.evidence,
+                "source": relation.source,
+                "citation": recallCitation(owner: relation.sourceOwner),
+                "metadata": relation.metadata,
+                "safeNextCommands": sourceEvidenceSafeCommands(for: relation),
+            ]
+            if let candidateRef = relation.metadata["candidate_ref"] ?? relation.metadata["candidate_id"].map({ "graph_candidate:\($0)" }) {
+                dict["candidateRef"] = candidateRef
+            }
+            if let mentionText = relation.metadata["mention_text"] { dict["mentionText"] = mentionText }
+            if let confidence = relation.confidence { dict["confidence"] = confidence }
+            let evidenceRecord = sourceEvidenceRecord(for: relation)
+            if let evidenceRecord {
+                dict["sourceEvidenceRecord"] = sourceEvidenceRecordToDict(evidenceRecord)
+            }
+            let validity = factValidityStateToDict(targetRef: "owner_relation:\(relation.id)")
+            dict["factValidity"] = validity ?? [
+                "targetRef": "owner_relation:\(relation.id)",
+                "currentState": "current",
+                "isCurrent": true,
+                "truthState": "current_truth",
+            ]
+            dict["truthState"] = ((validity?["isCurrent"] as? Bool) == false) ? "stale_or_superseded_truth" : "accepted"
+            dict["isCurrentTruth"] = (validity?["isCurrent"] as? Bool) ?? true
+            let lifecycleEvents = lifecycleHistoryEvents(for: relation)
+            let lifecycle = lifecycleEvents.map(reviewLifecycleEventToDict)
+            if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
+            let reasons = scoringService.acceptedFactReasons(relation: relation, evidenceRecord: evidenceRecord, lifecycleHistory: lifecycleEvents)
+            dict["recallScore"] = scoringService.score(reasons)
+            dict["scoreReasons"] = scoreReasonsToDict(reasons)
+            return dict
+        }
+    }
+
+    static func recallAcceptedMemoryFactToDict(_ output: SecondBrainEnrichmentOutput, scoringService: CiderRecallExplanationService) -> [String: Any] {
+        var dict = acceptedMemoryFactToDict(SecondBrainAcceptedMemoryFact(candidate: output))
+        dict["citation"] = recallCitation(owner: output.owner)
+        let evidenceRecord = sourceEvidenceRecord(for: output)
+        let lifecycle = lifecycleHistoryEvents(for: output)
+        let reasons = scoringService.candidateReasons(output: output, evidenceRecord: evidenceRecord, lifecycleHistory: lifecycle)
+        dict["recallScore"] = scoringService.score(reasons)
+        dict["scoreReasons"] = scoreReasonsToDict(reasons)
+        dict["safetyBoundary"] = [
+            "accepted_memory_fact_requires_explicit_accept",
+            "reviewable_candidates_are_not_truth",
+            "action_receipts_are_command_outcomes_not_truth",
+            "source_quote_and_citation_required",
+        ]
+        return dict
+    }
+
+    static func recallGraphCandidateToDict(_ output: SecondBrainEnrichmentOutput, scoringService: CiderRecallExplanationService) -> [String: Any] {
+        var dict = graphCandidateToDict(output)
+        dict["truthState"] = "reviewable_candidate_not_truth"
+        dict["citation"] = recallCitation(owner: output.owner)
+        dict["safetyBoundary"] = [
+            "reviewable_candidate_not_truth",
+            "accept_requires_explicit_command",
+            "no_silent_memory_or_graph_promotion",
+        ]
+        let evidenceRecord = sourceEvidenceRecord(for: output)
+        let lifecycle = lifecycleHistoryEvents(for: output)
+        let reasons = scoringService.candidateReasons(output: output, evidenceRecord: evidenceRecord, lifecycleHistory: lifecycle)
+        dict["recallScore"] = scoringService.score(reasons)
+        dict["scoreReasons"] = scoreReasonsToDict(reasons)
+        if dict["candidateRef"] == nil { dict["candidateRef"] = "graph_candidate:\(output.id)" }
+        return dict
+    }
+
+    static func recallMemoryCandidateToDict(_ output: SecondBrainEnrichmentOutput, scoringService: CiderRecallExplanationService) -> [String: Any] {
+        var dict = memoryCandidateToDict(output)
+        dict["truthState"] = "reviewable_candidate_not_truth"
+        dict["citation"] = recallCitation(owner: output.owner)
+        dict["safetyBoundary"] = [
+            "reviewable_candidate_not_truth",
+            "accept_requires_explicit_command",
+            "no_silent_memory_or_graph_promotion",
+        ]
+        let evidenceRecord = sourceEvidenceRecord(for: output)
+        let lifecycle = lifecycleHistoryEvents(for: output)
+        let reasons = scoringService.candidateReasons(output: output, evidenceRecord: evidenceRecord, lifecycleHistory: lifecycle)
+        dict["recallScore"] = scoringService.score(reasons)
+        dict["scoreReasons"] = scoreReasonsToDict(reasons)
+        if dict["candidateRef"] == nil { dict["candidateRef"] = "memory_candidate:\(output.id)" }
+        return dict
+    }
+
+    static func printRecallContextError(_ error: RecallContextCLIError, args: [String]) {
+        processExitCode = 1
+        let query = parseFlag("--query", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeCommands: [String]
+        if let query, !query.isEmpty {
+            safeCommands = [
+                "cider-cli item search \"\(recallEscapedCommandArgument(query))\" --json",
+                "cider-cli item search-debug \"\(recallEscapedCommandArgument(query))\" --json",
+                "cider-cli item doctor --json",
+            ]
+        } else {
+            safeCommands = ["cider-cli item search <query> --json", "cider-cli item doctor --json"]
+        }
+        if jsonOutput {
+            outputJSON([
+                "ok": false,
+                "command": "item.recall-context",
+                "readOnly": true,
+                "changed": false,
+                "errorCode": error.errorCode,
+                "error": error.localizedDescription,
+                "warnings": error.errorCode == "no_recall_matches" ? [[
+                    "kind": "no_matches",
+                    "message": error.localizedDescription,
+                ]] : [],
+                "safeNextCommands": safeCommands,
+            ])
+        } else {
+            print("Error: \(error.localizedDescription)")
+        }
+    }
+
+    static func orderedUniqueLibraryRefs(_ refs: [LibraryEntityRef]) -> [LibraryEntityRef] {
+        var seen = Set<String>()
+        return refs.filter { ref in
+            seen.insert("\(ref.type.rawValue):\(ref.entityID.uuidString)").inserted
+        }
+    }
+
+    static func recallEscapedCommandArgument(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    static func orderedUniqueDictionaries(_ dicts: [[String: Any]], key: String) -> [[String: Any]] {
+        var seen = Set<String>()
+        return dicts.filter { dict in
+            guard let value = dict[key] else { return true }
+            return seen.insert(String(describing: value)).inserted
+        }
+    }
+
+    static func itemContextBundleToDict(_ bundle: CiderItemContextBundle) -> [String: Any] {
+        var dict: [String: Any] = [
             "item": itemSummaryToDict(bundle.item, ownerRelations: bundle.ownerRelations),
             "owner": ownerToDict(bundle.owner),
             "sections": bundle.sections.map(secondBrainSectionToDict),
@@ -14713,11 +16870,89 @@ struct CiderCLI {
             "ownerRelations": bundle.ownerRelations.map(ownerRelationToDict),
             "relationCandidates": bundle.relationCandidates.map(similarityCandidateToDict),
             "backlinks": bundle.backlinks.map(ownerRelationToDict),
+            "sourceEvidence": sourceEvidenceToDict(
+                owner: bundle.owner,
+                ownerRelations: bundle.ownerRelations,
+                backlinks: bundle.backlinks,
+                relationCandidates: bundle.relationCandidates
+            ),
+            "memoryCandidates": bundle.enrichmentOutputs
+                .filter { $0.kind == "memory_candidate" }
+                .map(memoryCandidateToDict),
             "routingDecisions": bundle.routingDecisions.map(routingDecisionToDict),
             "agentActions": bundle.agentActions.map(agentActionToDict),
             "enrichmentOutputs": bundle.enrichmentOutputs.map(enrichmentOutputToDict),
             "captureProvenance": bundle.captureProvenance.map(captureProvenanceToDict),
         ]
+        CiderAgentDecisionContract.merge(itemContextBundleDecisionDictionary(for: bundle), into: &dict)
+        return dict
+    }
+
+    static func itemContextBundleDecisionDictionary(for bundle: CiderItemContextBundle) -> [String: Any] {
+        let latestReview = bundle.routingDecisions.sorted { lhs, rhs in
+            lhs.createdAt > rhs.createdAt
+        }.first
+        let reviewStatus = latestReview?.status
+        let hasSuggestedRelationCandidates = bundle.relationCandidates.contains {
+            $0.reviewState == "suggested" || $0.reviewState == "needs_review"
+        }
+        let hasSuggestedGraphCandidates = bundle.enrichmentOutputs.contains {
+            $0.kind == SecondBrainGraphCandidateContract.outputKind
+                && ($0.reviewState == "suggested" || $0.reviewState == "needs_review")
+        }
+        let hasSuggestedMemoryCandidates = bundle.enrichmentOutputs.contains {
+            $0.kind == "memory_candidate"
+                && ($0.reviewState == "suggested" || $0.reviewState == "needs_review")
+        }
+        let needsReview = reviewStatus == "needs_review"
+            || hasSuggestedRelationCandidates
+            || hasSuggestedGraphCandidates
+            || hasSuggestedMemoryCandidates
+        let needsRouting = reviewStatus == "needs_review" || latestReview?.targetPath != nil
+        var blockingIssues: [String] = []
+        if reviewStatus == "needs_review" {
+            blockingIssues.append("routing_needs_review")
+        }
+        if hasSuggestedRelationCandidates || hasSuggestedGraphCandidates {
+            blockingIssues.append("relation_candidates_need_review")
+        }
+        if hasSuggestedMemoryCandidates {
+            blockingIssues.append("memory_candidates_need_review")
+        }
+
+        let recommendedNextAction: String
+        if reviewStatus == "needs_review" {
+            recommendedNextAction = "review_route"
+        } else if hasSuggestedRelationCandidates || hasSuggestedGraphCandidates {
+            recommendedNextAction = "review_relation_candidates"
+        } else if hasSuggestedMemoryCandidates {
+            recommendedNextAction = "review_memory_candidates"
+        } else {
+            recommendedNextAction = "inspect_item"
+        }
+
+        return CiderAgentDecisionContract.dictionary(
+            saved: true,
+            needsReview: needsReview,
+            needsEnrichment: false,
+            needsRouting: needsRouting,
+            confidence: latestReview?.confidence,
+            blockingIssues: blockingIssues,
+            recommendedNextAction: recommendedNextAction,
+            safeNextCommands: itemContextBundleSafeNextCommands(for: bundle)
+        )
+    }
+
+    static func itemContextBundleSafeNextCommands(for bundle: CiderItemContextBundle) -> [String] {
+        var commands = [
+            contextCommand(for: bundle.owner),
+            "cider-cli capture review-queue --limit 20 --json",
+        ]
+        if bundle.enrichmentOutputs.contains(where: { $0.kind == SecondBrainGraphCandidateContract.outputKind }) {
+            commands.append("cider-cli item graph-candidates \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json")
+        }
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
     }
 
     static func captureProvenanceToDict(_ provenance: CiderItemCaptureProvenance) -> [String: Any] {
@@ -14760,6 +16995,9 @@ struct CiderCLI {
         ]
         if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
         if let confidence = output.confidence { dict["confidence"] = confidence }
+        if let evidenceRecord = sourceEvidenceRecordToDict(for: output) { dict["sourceEvidenceRecord"] = evidenceRecord }
+        let lifecycle = lifecycleHistoryToDict(for: output)
+        if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
         return dict
     }
 
@@ -14780,11 +17018,60 @@ struct CiderCLI {
                 "ref": sourceRef,
             ],
             "owner": ownerToDict(result.owner),
-            "candidate": enrichmentOutputToDict(result.candidate),
+            "candidate": memoryCandidateToDict(result.candidate),
             "agentAction": agentActionToDict(result.agentAction),
             "safeNextCommands": safeCommands,
             "safeCommands": safeCommands,
         ]
+    }
+
+    static func memoryCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        var dict = enrichmentOutputToDict(output)
+        let linkedOwnerRefs = DatabaseHelpers.decodeStringArray(output.metadata["linked_owner_refs"])
+        dict["ref"] = "memory_candidate:\(output.id)"
+        dict["memoryKind"] = output.metadata["memory_kind"] ?? output.metadata["candidate_kind"]
+        dict["requiresReview"] = output.metadata["requires_review"] == "true"
+        dict["reviewable"] = ["suggested", "needs_review", "deferred"].contains(output.reviewState)
+        dict["sourceQuote"] = output.evidence
+        dict["linkedOwnerRefs"] = linkedOwnerRefs
+        dict["linkedOwners"] = linkedOwnerRefs.compactMap { try? ownerRefFromCanonical($0) }.map(ownerToDict)
+        dict["safeNextCommands"] = memoryCandidateSafeCommands(owner: output.owner)
+        dict["reviewActionCommands"] = memoryCandidateReviewActionCommands(for: output)
+        let memoryKind = output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? "memory"
+        dict["reviewFamily"] = "memory_candidate"
+        dict["truthState"] = output.reviewState == "accepted" ? "accepted_memory_candidate" : "reviewable_candidate_not_truth"
+        dict["extractionReason"] = "Cider extracted a source-backed memory candidate from the exact source quote; it is not user-owned memory truth until accepted."
+        dict["proposedChange"] = [
+            "changeType": "memory_candidate",
+            "memoryKind": memoryKind,
+            "value": output.value,
+            "truthState": dict["truthState"] as? String ?? "reviewable_candidate_not_truth",
+        ]
+        dict["storage"] = [
+            "table": "enrichment_outputs",
+            "service": "SecondBrainEnrichmentOutputService",
+            "kind": "memory_candidate",
+            "readModels": "CiderReviewQueueService.memoryCandidateReviewItems; cider-cli capture review-queue",
+        ]
+        dict["acceptEffect"] = "Accepting marks the source-backed memory candidate accepted for promotion; extraction alone never writes user-owned memory truth."
+        dict["rejectEffect"] = "Rejecting marks this memory candidate rejected while preserving source evidence and audit history."
+        dict["quality"] = [
+            "level": "needs_review",
+            "codes": ["requires_human_memory_review"],
+            "explanation": "Memory candidates are intentionally reviewable; inspect the source quote before accepting.",
+        ] as [String: Any]
+        dict["qualityFlags"] = ["requires_human_memory_review"]
+        if let observedDate = output.metadata["observed_date"] { dict["observedDate"] = observedDate }
+        if let memoryKey = output.metadata["memory_key"] { dict["memoryKey"] = memoryKey }
+        if let memoryStatus = output.metadata["memory_status"] { dict["memoryStatus"] = memoryStatus }
+        if let requestedType = output.metadata["requested_owner_type"],
+           let requestedRef = output.metadata["requested_owner_ref"] {
+            dict["requestedOwner"] = [
+                "type": requestedType,
+                "ref": requestedRef,
+            ]
+        }
+        return dict
     }
 
     static func memoryCandidateSafeCommands(owner: SecondBrainOwnerRef) -> [String] {
@@ -14803,6 +17090,3330 @@ struct CiderCLI {
         commands.append("cider-cli item owner-get \(owner.ownerType) \(owner.ownerID) --json")
         var seen = Set<String>()
         return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func handleAcceptedMemoryFactsCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first ?? "list"
+        let service = SecondBrainAcceptedMemoryFactService(database: .shared)
+        do {
+            switch action {
+            case "list", "ls":
+                let limit = max(1, min(parseFlag("--limit", from: args).flatMap(Int.init) ?? 50, 100))
+                let facts = try service.list(limit: limit)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.memory-facts.list",
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "accepted_memory_facts_only",
+                    "candidateBoundary": "reviewable_memory_candidates_excluded",
+                    "count": facts.count,
+                    "facts": facts.map(acceptedMemoryFactToDict),
+                    "safeNextCommands": [
+                        "cider-cli item memory-facts list --json",
+                        "cider-cli capture review-queue --kind memory_candidate --json",
+                    ],
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Accepted memory facts: \(facts.count)") }
+            case "inspect", "get":
+                let rawID = positional.dropFirst().first ?? parseFlag("--id", from: args) ?? parseFlag("--candidate", from: args)
+                do {
+                    let fact = try service.inspect(rawID)
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.inspect",
+                        "readOnly": true,
+                        "changed": false,
+                        "selector": ["candidateID": fact.id, "factRef": fact.factRef, "candidateRef": fact.candidateRef],
+                        "fact": acceptedMemoryFactToDict(fact),
+                        "safeNextCommands": acceptedMemoryFactSafeCommands(fact.candidate),
+                    ]
+                    if jsonOutput { outputJSON(payload) } else { print("Accepted memory fact: \(fact.id)") }
+                } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
+                    printAcceptedMemoryFactError(factError, rawID: rawID, command: "item.memory-facts.inspect")
+                }
+            case "resurface", "relevance", "surface":
+                guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: "item.memory-facts.resurface", minimum: 1) else { return }
+                let limit = min(parsedLimit ?? 20, 100)
+                let rawFactID = parseFlag("--fact", from: args) ?? parseFlag("--candidate", from: args)
+                let facts: [SecondBrainAcceptedMemoryFact]
+                do {
+                    if let rawFactID {
+                        facts = [try service.inspect(rawFactID)]
+                    } else {
+                        facts = try service.list(limit: limit)
+                    }
+                    let candidates = CiderDueToSurfaceFeedService.acceptedMemoryFactCandidates(facts, limit: limit)
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.resurface",
+                        "readOnly": true,
+                        "changed": false,
+                        "truthBoundary": "accepted_memory_fact",
+                        "candidateBoundary": "reviewable_memory_candidates_excluded",
+                        "count": candidates.count,
+                        "countsByFamily": CiderDueToSurfaceFeedService.groupedFamilyCounts(candidates),
+                        "selector": rawFactID.map { ["candidateID": $0] } ?? [:],
+                        "candidates": candidates.map { dueToSurfaceCandidateToDict($0, formatter: ISO8601DateFormatter()) },
+                        "safeVerificationCommands": ["cider-cli item memory-facts resurface --json"],
+                        "safeNextCommands": [
+                            "cider-cli item memory-facts list --json",
+                            "cider-cli item due-to-surface --json",
+                            "cider-cli item recall-context --query <topic> --json",
+                        ],
+                    ]
+                    if jsonOutput { outputJSON(payload) } else { print("Accepted memory fact relevance candidates: \(candidates.count)") }
+                } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
+                    printAcceptedMemoryFactError(factError, rawID: rawFactID, command: "item.memory-facts.resurface")
+                }
+            case "intents", "intent", "action-intents", "actions":
+                guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: "item.memory-facts.intents", minimum: 1) else { return }
+                let limit = min(parsedLimit ?? 20, 100)
+                let rawFactID = parseFlag("--fact", from: args) ?? parseFlag("--candidate", from: args)
+                do {
+                    let facts: [SecondBrainAcceptedMemoryFact]
+                    if let rawFactID {
+                        facts = [try service.inspect(rawFactID)]
+                    } else {
+                        facts = try service.list(limit: limit)
+                    }
+                    let intents = SecondBrainAcceptedMemoryFactActionIntentService.intents(for: facts, limit: limit)
+                    var payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.intents",
+                        "status": intents.isEmpty ? "no_op" : "succeeded",
+                        "readOnly": true,
+                        "changed": false,
+                        "truthBoundary": "accepted_memory_fact",
+                        "candidateBoundary": "reviewable_memory_candidates_excluded",
+                        "count": intents.count,
+                        "selector": rawFactID.map { ["candidateID": $0] } ?? [:],
+                        "intents": intents.map(acceptedMemoryFactActionIntentToDict),
+                        "actionReceipt": acceptedMemoryFactIntentActionReceipt(intents: intents, rawFactID: rawFactID),
+                        "safeVerificationCommands": ["cider-cli item memory-facts intents --json"],
+                        "safeNextCommands": [
+                            "cider-cli item memory-facts resurface --json",
+                            "cider-cli item due-to-surface --json",
+                            "cider-cli item recall-context --query <topic> --json",
+                        ],
+                    ]
+                    if intents.isEmpty {
+                        payload["errorCode"] = "no_action_intents"
+                        payload["message"] = "No accepted memory facts currently have action intents for this selector."
+                    }
+                    if jsonOutput { outputJSON(payload) } else { print("Accepted memory fact action intents: \(intents.count)") }
+                } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
+                    printAcceptedMemoryFactError(factError, rawID: rawFactID, command: "item.memory-facts.intents")
+                }
+            case "proposals", "proposal", "follow-up-proposals":
+                handleAcceptedMemoryFactProposalCommand(args: args, service: service)
+            default:
+                printCLIError(
+                    "Unsupported accepted memory fact action '\(action)'.",
+                    details: [
+                        "ok": false,
+                        "command": "item.memory-facts",
+                        "readOnly": true,
+                        "changed": false,
+                        "errorCode": "unsupported_memory_facts_action",
+                        "supportedActions": ["list", "inspect", "resurface", "intents", "proposals"],
+                        "safeNextCommands": ["cider-cli item memory-facts list --json"],
+                    ]
+                )
+            }
+        } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
+            printAcceptedMemoryFactError(factError, rawID: nil)
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func handleAcceptedMemoryFactProposalCommand(args: [String], service: SecondBrainAcceptedMemoryFactService) {
+        let positional = leadingPositionalArgs(from: args)
+        let subaction = positional.dropFirst().first ?? "list"
+        let proposalService = SecondBrainFollowUpProposalService(database: .shared)
+        let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+        do {
+            switch subaction {
+            case "create", "propose":
+                let rawFactID = parseFlag("--fact", from: args) ?? parseFlag("--candidate", from: args)
+                do {
+                    let fact = try service.inspect(rawFactID)
+                    let proposal = try proposalService.create(from: fact, actor: actor)
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.proposals.create",
+                        "readOnly": false,
+                        "changed": true,
+                        "mutationBoundary": "proposal_record_only_no_external_mutation",
+                        "truthBoundary": "reviewable_follow_up_proposal_not_truth",
+                        "candidateBoundary": "accepted_fact_action_intent_review_record",
+                        "proposal": followUpProposalToDict(proposal),
+                        "actionReceipt": followUpProposalActionReceipt(command: "item.memory-facts.proposals.create", action: "create_follow_up_proposal", proposal: proposal, changed: true, readOnly: false),
+                        "safeVerificationCommands": ["cider-cli item memory-facts proposals inspect \(proposal.id) --json"],
+                        "safeNextCommands": followUpProposalSafeCommands(proposal),
+                    ]
+                    if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal created: \(proposal.id)") }
+                } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
+                    printAcceptedMemoryFactError(factError, rawID: rawFactID, command: "item.memory-facts.proposals.create", readOnly: false)
+                }
+            case "list", "ls":
+                let limit = max(1, min(parseFlag("--limit", from: args).flatMap(Int.init) ?? 50, 100))
+                let status = parseFlag("--status", from: args)
+                let statuses = status.map { Set([$0]) }
+                let proposals = try proposalService.list(statuses: statuses, limit: limit)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.memory-facts.proposals.list",
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "reviewable_follow_up_proposal_not_truth",
+                    "candidateBoundary": "accepted_fact_action_intent_review_record",
+                    "count": proposals.count,
+                    "proposals": proposals.map(followUpProposalToDict),
+                    "safeNextCommands": ["cider-cli item memory-facts proposals list --json"],
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Follow-up proposals: \(proposals.count)") }
+            case "inspect", "get":
+                let rawID = positional.dropFirst(2).first ?? parseFlag("--id", from: args) ?? parseFlag("--proposal", from: args)
+                do {
+                    let proposal = try proposalService.inspect(rawID)
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.proposals.inspect",
+                        "readOnly": true,
+                        "changed": false,
+                        "proposal": followUpProposalToDict(proposal),
+                        "safeNextCommands": followUpProposalSafeCommands(proposal),
+                    ]
+                    if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal: \(proposal.id)") }
+                } catch let proposalError as SecondBrainFollowUpProposalService.FollowUpProposalError {
+                    printFollowUpProposalError(proposalError, rawID: rawID, command: "item.memory-facts.proposals.inspect", readOnly: true)
+                }
+            case "preview", "dry-run", "dryrun":
+                let rawID = positional.dropFirst(2).first ?? parseFlag("--id", from: args) ?? parseFlag("--proposal", from: args)
+                do {
+                    let preview = try proposalService.preview(rawID)
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.proposals.preview",
+                        "status": "succeeded",
+                        "readOnly": true,
+                        "changed": false,
+                        "truthBoundary": "execution_preview_not_truth",
+                        "executionBoundary": "dry_run_preview_not_execution",
+                        "proposal": followUpProposalToDict(preview.proposal),
+                        "executionPreview": followUpExecutionPreviewToDict(preview),
+                        "actionReceipt": followUpExecutionPreviewActionReceipt(command: "item.memory-facts.proposals.preview", preview: preview),
+                        "safeVerificationCommands": ["cider-cli item memory-facts proposals preview \(preview.proposal.id) --json"],
+                        "safeNextCommands": followUpExecutionPreviewSafeCommands(preview),
+                    ]
+                    if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal execution preview: \(preview.proposal.id)") }
+                } catch let proposalError as SecondBrainFollowUpProposalService.FollowUpProposalError {
+                    printFollowUpProposalError(proposalError, rawID: rawID, command: "item.memory-facts.proposals.preview", readOnly: true)
+                }
+            case "previews", "preview-list":
+                let limit = max(1, min(parseFlag("--limit", from: args).flatMap(Int.init) ?? 50, 100))
+                let previews = try proposalService.previews(limit: limit)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.memory-facts.proposals.previews",
+                    "status": previews.isEmpty ? "no_op" : "succeeded",
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "execution_preview_not_truth",
+                    "executionBoundary": "dry_run_preview_not_execution",
+                    "count": previews.count,
+                    "executionPreviews": previews.map(followUpExecutionPreviewToDict),
+                    "safeNextCommands": ["cider-cli item memory-facts proposals list --status accepted --json"],
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal execution previews: \(previews.count)") }
+            case "execute", "run":
+                let rawID = positional.dropFirst(2).first ?? parseFlag("--id", from: args) ?? parseFlag("--proposal", from: args)
+                do {
+                    let preview = try proposalService.preview(rawID)
+                    let confirmed = args.contains("--confirm-execution")
+                    let token = parseFlag("--confirmation-token", from: args)
+                    do {
+                        let execution = try SecondBrainFollowUpProposalService.executionResult(for: preview, confirmed: confirmed, confirmationToken: token)
+                        let recalled = try recallContextPayload(args: ["--item", preview.proposal.owner.ownerType, preview.proposal.owner.ownerID, "--limit", "5"], contextService: CiderItemContextService())
+                        let payload: [String: Any] = [
+                            "ok": true,
+                            "command": "item.memory-facts.proposals.execute",
+                            "status": "succeeded",
+                            "readOnly": execution.readOnly,
+                            "changed": execution.changed,
+                            "truthBoundary": execution.truthBoundary,
+                            "executionBoundary": execution.executionBoundary,
+                            "mutationBoundary": execution.mutationBoundary,
+                            "outcomeBoundary": execution.outcomeBoundary,
+                            "proposal": followUpProposalToDict(preview.proposal),
+                            "executionPreview": followUpExecutionPreviewToDict(preview),
+                            "executionResult": followUpExecutionResultToDict(execution, commandResult: recalled),
+                            "actionReceipt": followUpExecutionActionReceipt(command: "item.memory-facts.proposals.execute", execution: execution),
+                            "safeVerificationCommands": ["cider-cli item memory-facts proposals execute \(preview.proposal.id) --json"],
+                            "safeNextCommands": followUpExecutionResultSafeCommands(execution),
+                        ]
+                        if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal executed: \(preview.proposal.id)") }
+                    } catch let proposalError as SecondBrainFollowUpProposalService.FollowUpProposalError {
+                        printFollowUpExecutionError(proposalError, rawID: rawID, preview: preview, command: "item.memory-facts.proposals.execute")
+                    }
+                } catch let proposalError as SecondBrainFollowUpProposalService.FollowUpProposalError {
+                    printFollowUpExecutionError(proposalError, rawID: rawID, preview: nil, command: "item.memory-facts.proposals.execute")
+                }
+            case "executions", "execution-list":
+                let limit = max(1, min(parseFlag("--limit", from: args).flatMap(Int.init) ?? 50, 100))
+                let previews = try proposalService.previews(limit: limit)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.memory-facts.proposals.executions",
+                    "status": previews.isEmpty ? "no_op" : "preview_only",
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "execution_result_not_memory_truth",
+                    "executionBoundary": "dry_run_preview_not_execution",
+                    "count": 0,
+                    "executionResults": [],
+                    "executionPreviews": previews.map(followUpExecutionPreviewToDict),
+                    "safeNextCommands": ["cider-cli item memory-facts proposals previews --json"],
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal executions: 0") }
+            case "accept", "reject", "defer":
+                let rawID = positional.dropFirst(2).first ?? parseFlag("--id", from: args) ?? parseFlag("--proposal", from: args)
+                do {
+                    let status = subaction == "accept" ? "accepted" : (subaction == "reject" ? "rejected" : "deferred")
+                    let proposal = try proposalService.transition(rawID, status: status, actor: actor)
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "command": "item.memory-facts.proposals.\(subaction)",
+                        "readOnly": false,
+                        "changed": true,
+                        "mutationBoundary": "proposal_lifecycle_only_no_external_mutation",
+                        "truthBoundary": "reviewable_follow_up_proposal_not_truth",
+                        "proposal": followUpProposalToDict(proposal),
+                        "actionReceipt": followUpProposalActionReceipt(command: "item.memory-facts.proposals.\(subaction)", action: "\(subaction)_follow_up_proposal", proposal: proposal, changed: true, readOnly: false),
+                        "safeVerificationCommands": ["cider-cli item memory-facts proposals inspect \(proposal.id) --json"],
+                    ]
+                    if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal \(status): \(proposal.id)") }
+                } catch let proposalError as SecondBrainFollowUpProposalService.FollowUpProposalError {
+                    printFollowUpProposalError(proposalError, rawID: rawID, command: "item.memory-facts.proposals.\(subaction)", readOnly: false)
+                }
+            default:
+                printCLIError("Unsupported follow-up proposal action '\(subaction)'.", details: [
+                    "ok": false,
+                    "command": "item.memory-facts.proposals",
+                    "readOnly": true,
+                    "changed": false,
+                    "errorCode": "unsupported_follow_up_proposal_action",
+                    "supportedActions": ["create", "list", "inspect", "accept", "reject", "defer", "preview", "previews", "execute", "executions"],
+                ])
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func followUpProposalToDict(_ proposal: SecondBrainFollowUpProposal) -> [String: Any] {
+        let output = proposal.output
+        return [
+            "id": proposal.proposalRef,
+            "proposalID": output.id,
+            "proposalRef": proposal.proposalRef,
+            "kind": "follow_up_proposal",
+            "status": output.reviewState,
+            "owner": ownerToDict(output.owner),
+            "ownerRef": output.owner.canonicalRef,
+            "title": output.value,
+            "reason": output.value,
+            "explanation": output.evidence,
+            "intentRef": proposal.intentRef,
+            "factRef": proposal.factRef,
+            "candidateRef": proposal.candidateRef,
+            "sourceCitation": output.metadata["source_citation"] ?? output.owner.canonicalRef,
+            "sourceRefs": DatabaseHelpers.decodeStringArray(output.metadata["source_refs"]),
+            "evidenceRefs": DatabaseHelpers.decodeStringArray(output.metadata["evidence_refs"]),
+            "proposedCommandFamily": output.metadata["proposed_command_family"] ?? "recall_context",
+            "proposedCommand": output.metadata["proposed_command"] ?? "",
+            "requiresConfirmation": output.metadata["requires_confirmation"] != "false",
+            "confirmationPolicy": output.metadata["confirmation_policy"] ?? "explicit_existing_command_required",
+            "mutationBoundary": output.metadata["mutation_boundary"] ?? "proposal_record_only_no_external_mutation",
+            "truthBoundary": "reviewable_follow_up_proposal_not_truth",
+            "candidateBoundary": output.metadata["candidate_boundary"] ?? "accepted_fact_action_intent_review_record",
+            "createsReminder": false,
+            "createsTodo": false,
+            "createsLink": false,
+            "createsNag": false,
+            "createdAt": ISO8601DateFormatter().string(from: output.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: output.updatedAt),
+            "executionPreview": followUpExecutionPreviewSummaryToDict(SecondBrainFollowUpProposalService.preview(for: proposal)),
+            "safeNextCommands": followUpProposalSafeCommands(proposal),
+            "safeVerificationCommands": ["cider-cli item memory-facts proposals inspect \(output.id) --json"],
+        ]
+    }
+
+    static func followUpProposalSafeCommands(_ proposal: SecondBrainFollowUpProposal) -> [String] {
+        var seen = Set<String>()
+        return [
+            "cider-cli item memory-facts proposals inspect \(proposal.id) --json",
+            "cider-cli item memory-facts proposals preview \(proposal.id) --json",
+            "cider-cli item memory-facts proposals list --json",
+            "cider-cli item memory-facts inspect \(proposal.candidateRef.replacingOccurrences(of: "memory_candidate:", with: "")) --json",
+            "cider-cli item due-to-surface --json",
+        ].filter { seen.insert($0).inserted }
+    }
+
+    static func followUpExecutionPreviewSummaryToDict(_ preview: SecondBrainFollowUpExecutionPreview) -> [String: Any] {
+        [
+            "id": preview.id,
+            "proposalRef": preview.proposal.proposalRef,
+            "mappedCommandFamily": preview.mappedCommandFamily,
+            "mappedCommand": preview.mappedCommand,
+            "predictedMutationType": preview.predictedMutationType,
+            "requiresConfirmation": preview.requiresConfirmation,
+            "confirmationPolicy": preview.confirmationPolicy,
+            "dryRun": preview.dryRun,
+            "wouldExecute": preview.wouldExecute,
+            "truthBoundary": "execution_preview_not_truth",
+            "executionBoundary": "dry_run_preview_not_execution",
+        ]
+    }
+
+    static func followUpExecutionPreviewToDict(_ preview: SecondBrainFollowUpExecutionPreview) -> [String: Any] {
+        var dict = followUpExecutionPreviewSummaryToDict(preview)
+        dict["proposalID"] = preview.proposal.id
+        dict["intentRef"] = preview.proposal.intentRef
+        dict["factRef"] = preview.proposal.factRef
+        dict["candidateRef"] = preview.proposal.candidateRef
+        dict["owner"] = ownerToDict(preview.proposal.owner)
+        dict["ownerRef"] = preview.proposal.owner.canonicalRef
+        dict["sourceRefs"] = DatabaseHelpers.decodeStringArray(preview.proposal.output.metadata["source_refs"])
+        dict["evidenceRefs"] = DatabaseHelpers.decodeStringArray(preview.proposal.output.metadata["evidence_refs"])
+        dict["sourceCitation"] = preview.proposal.output.metadata["source_citation"] ?? preview.proposal.owner.canonicalRef
+        dict["createsReminder"] = preview.createsReminder
+        dict["createsTodo"] = preview.createsTodo
+        dict["createsLink"] = preview.createsLink
+        dict["createsNag"] = preview.createsNag
+        dict["safeNextCommands"] = followUpExecutionPreviewSafeCommands(preview)
+        dict["safeVerificationCommands"] = ["cider-cli item memory-facts proposals preview \(preview.proposal.id) --json"]
+        return dict
+    }
+
+    static func followUpExecutionPreviewSafeCommands(_ preview: SecondBrainFollowUpExecutionPreview) -> [String] {
+        var seen = Set<String>()
+        return [
+            "cider-cli item memory-facts proposals preview \(preview.proposal.id) --json",
+            "cider-cli item memory-facts proposals inspect \(preview.proposal.id) --json",
+            preview.mappedCommand,
+            "cider-cli item recall-context --item \(preview.proposal.owner.ownerType) \(preview.proposal.owner.ownerID) --json",
+            "cider-cli item action-ledger list --owner \(preview.proposal.owner.canonicalRef) --json",
+        ].filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    static func followUpExecutionPreviewActionReceipt(command: String, preview: SecondBrainFollowUpExecutionPreview) -> [String: Any] {
+        [
+            "command": command,
+            "action": "preview_follow_up_proposal_execution",
+            "actor": "cider-cli",
+            "status": "succeeded",
+            "owner": ownerToDict(preview.proposal.owner),
+            "ownerRef": preview.proposal.owner.canonicalRef,
+            "sourceRefs": DatabaseHelpers.decodeStringArray(preview.proposal.output.metadata["source_refs"]),
+            "evidenceRefs": DatabaseHelpers.decodeStringArray(preview.proposal.output.metadata["evidence_refs"]),
+            "readOnly": true,
+            "changed": false,
+            "truthBoundary": "action_receipt_not_fact_truth",
+            "executionBoundary": "dry_run_preview_not_execution",
+            "safeVerificationCommands": ["cider-cli item memory-facts proposals preview \(preview.proposal.id) --json"],
+            "safeNextCommands": followUpExecutionPreviewSafeCommands(preview),
+        ]
+    }
+
+    static func followUpExecutionResultToDict(_ execution: SecondBrainFollowUpExecutionResult, commandResult: [String: Any]) -> [String: Any] {
+        let preview = execution.preview
+        return [
+            "id": execution.id,
+            "proposalID": preview.proposal.id,
+            "proposalRef": preview.proposal.proposalRef,
+            "previewRef": preview.id,
+            "mappedCommandFamily": preview.mappedCommandFamily,
+            "mappedCommand": preview.mappedCommand,
+            "status": execution.status,
+            "readOnly": execution.readOnly,
+            "changed": execution.changed,
+            "mutationBoundary": execution.mutationBoundary,
+            "executionBoundary": execution.executionBoundary,
+            "truthBoundary": execution.truthBoundary,
+            "outcomeBoundary": execution.outcomeBoundary,
+            "result": commandResult,
+            "createsReminder": false,
+            "createsTodo": false,
+            "createsLink": false,
+            "createsNag": false,
+            "safeVerificationCommands": ["cider-cli item recall-context --item \(preview.proposal.owner.ownerType) \(preview.proposal.owner.ownerID) --json"],
+            "safeNextCommands": followUpExecutionResultSafeCommands(execution),
+        ]
+    }
+
+    static func followUpExecutionResultSafeCommands(_ execution: SecondBrainFollowUpExecutionResult) -> [String] {
+        let proposal = execution.preview.proposal
+        var seen = Set<String>()
+        return [
+            "cider-cli item memory-facts proposals inspect \(proposal.id) --json",
+            "cider-cli item memory-facts proposals preview \(proposal.id) --json",
+            "cider-cli item recall-context --item \(proposal.owner.ownerType) \(proposal.owner.ownerID) --json",
+            "cider-cli item action-ledger list --owner \(proposal.owner.canonicalRef) --json",
+        ].filter { seen.insert($0).inserted }
+    }
+
+    static func followUpExecutionActionReceipt(command: String, execution: SecondBrainFollowUpExecutionResult) -> [String: Any] {
+        let preview = execution.preview
+        return [
+            "command": command,
+            "action": "execute_follow_up_proposal",
+            "actor": "cider-cli",
+            "status": execution.status,
+            "owner": ownerToDict(preview.proposal.owner),
+            "ownerRef": preview.proposal.owner.canonicalRef,
+            "sourceRefs": DatabaseHelpers.decodeStringArray(preview.proposal.output.metadata["source_refs"]),
+            "evidenceRefs": DatabaseHelpers.decodeStringArray(preview.proposal.output.metadata["evidence_refs"]),
+            "readOnly": execution.readOnly,
+            "changed": execution.changed,
+            "truthBoundary": "action_receipt_not_fact_truth",
+            "outcomeBoundary": execution.outcomeBoundary,
+            "executionBoundary": execution.executionBoundary,
+            "mutationBoundary": execution.mutationBoundary,
+            "safeVerificationCommands": ["cider-cli item recall-context --item \(preview.proposal.owner.ownerType) \(preview.proposal.owner.ownerID) --json"],
+            "safeNextCommands": followUpExecutionResultSafeCommands(execution),
+        ]
+    }
+
+    static func followUpProposalActionReceipt(command: String, action: String, proposal: SecondBrainFollowUpProposal, changed: Bool, readOnly: Bool) -> [String: Any] {
+        [
+            "command": command,
+            "action": action,
+            "actor": "cider-cli",
+            "status": "succeeded",
+            "owner": ownerToDict(proposal.owner),
+            "ownerRef": proposal.owner.canonicalRef,
+            "sourceRefs": DatabaseHelpers.decodeStringArray(proposal.output.metadata["source_refs"]),
+            "evidenceRefs": DatabaseHelpers.decodeStringArray(proposal.output.metadata["evidence_refs"]),
+            "readOnly": readOnly,
+            "changed": changed,
+            "truthBoundary": "action_receipt_not_fact_truth",
+            "safeVerificationCommands": ["cider-cli item memory-facts proposals inspect \(proposal.id) --json"],
+            "safeNextCommands": followUpProposalSafeCommands(proposal),
+        ]
+    }
+
+    static func printFollowUpExecutionError(
+        _ error: SecondBrainFollowUpProposalService.FollowUpProposalError,
+        rawID: String?,
+        preview: SecondBrainFollowUpExecutionPreview?,
+        command: String
+    ) {
+        var details: [String: Any] = [
+            "ok": false,
+            "command": command,
+            "readOnly": true,
+            "changed": false,
+            "error": error.localizedDescription,
+            "selector": ["proposalID": rawID ?? ""],
+            "truthBoundary": "execution_result_not_memory_truth",
+            "executionBoundary": "dry_run_preview_not_execution",
+            "safeNextCommands": ["cider-cli item memory-facts proposals previews --json"],
+        ]
+        if let preview {
+            details["executionPreview"] = followUpExecutionPreviewToDict(preview)
+            details["proposal"] = followUpProposalToDict(preview.proposal)
+            details["safeNextCommands"] = [
+                "cider-cli item memory-facts proposals preview \(preview.proposal.id) --json",
+                "cider-cli item memory-facts proposals execute \(preview.proposal.id) --confirm-execution --confirmation-token execute:\(preview.proposal.id) --json",
+            ]
+        }
+        switch error {
+        case .confirmationRequired(let proposalID):
+            details["errorCode"] = "follow_up_execution_confirmation_required"
+            details["selector"] = ["proposalID": proposalID]
+            details["confirmationPolicy"] = preview?.confirmationPolicy ?? "explicit_existing_command_required"
+            details["requiredConfirmationToken"] = "execute:\(proposalID)"
+        case .unsupportedExecutionFamily(let family):
+            details["errorCode"] = "unsupported_follow_up_execution_family"
+            details["unsupportedFamily"] = family
+            details["supportedFamilies"] = ["recall_context"]
+        default:
+            printFollowUpProposalError(error, rawID: rawID, command: command, readOnly: true)
+            return
+        }
+        printCLIError(error.localizedDescription, details: details)
+    }
+
+    static func printFollowUpProposalError(_ error: SecondBrainFollowUpProposalService.FollowUpProposalError, rawID: String?, command: String, readOnly: Bool) {
+        let requested = (rawID ?? "").replacingOccurrences(of: "follow_up_proposal:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        var details: [String: Any] = [
+            "ok": false,
+            "command": command,
+            "readOnly": readOnly,
+            "changed": false,
+            "error": error.localizedDescription,
+            "selector": ["proposalID": requested],
+            "safeNextCommands": ["cider-cli item memory-facts proposals list --json"],
+        ]
+        switch error {
+        case .missingID:
+            details["errorCode"] = "missing_follow_up_proposal_selector"
+        case .notFound(let id):
+            details["errorCode"] = "follow_up_proposal_not_found"
+            details["selector"] = ["proposalID": id]
+        case .wrongKind(let proposalID, let kind):
+            details["errorCode"] = "not_follow_up_proposal"
+            details["selector"] = ["proposalID": proposalID]
+            details["actualKind"] = kind
+        case .missingIntent(let factID):
+            details["errorCode"] = "no_action_intent_for_fact"
+            details["selector"] = ["candidateID": factID]
+        case .notAccepted(let proposalID, let status):
+            details["errorCode"] = "follow_up_proposal_not_accepted"
+            details["selector"] = ["proposalID": proposalID]
+            details["status"] = status
+            details["safeNextCommands"] = [
+                "cider-cli item memory-facts proposals inspect \(proposalID) --json",
+                "cider-cli item memory-facts proposals accept \(proposalID) --json",
+            ]
+        case .confirmationRequired(let proposalID):
+            details["errorCode"] = "follow_up_execution_confirmation_required"
+            details["selector"] = ["proposalID": proposalID]
+        case .unsupportedExecutionFamily(let family):
+            details["errorCode"] = "unsupported_follow_up_execution_family"
+            details["unsupportedFamily"] = family
+        }
+        printCLIError(error.localizedDescription, details: details)
+    }
+
+    static func acceptedMemoryFactToDict(_ fact: SecondBrainAcceptedMemoryFact) -> [String: Any] {
+        let output = fact.candidate
+        var dict: [String: Any] = [
+            "id": fact.factRef,
+            "kind": "accepted_memory_fact",
+            "factRef": fact.factRef,
+            "candidateID": output.id,
+            "candidateRef": fact.candidateRef,
+            "owner": ownerToDict(output.owner),
+            "ownerRef": output.owner.canonicalRef,
+            "memoryKind": output.metadata["accepted_memory_kind"] ?? output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? "memory",
+            "value": output.metadata["accepted_value"] ?? output.value,
+            "normalizedValue": output.normalizedValue,
+            "sourceQuote": output.evidence,
+            "evidence": output.evidence,
+            "source": output.source,
+            "reviewState": output.reviewState,
+            "truthState": "accepted",
+            "truthBoundary": "accepted_memory_fact",
+            "isAcceptedTruth": true,
+            "candidateBoundary": "reviewable_memory_candidates_excluded",
+            "createdAt": ISO8601DateFormatter().string(from: output.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: output.updatedAt),
+            "metadata": output.metadata,
+            "citation": recallCitation(owner: output.owner),
+            "safeVerificationCommands": ["cider-cli item memory-facts inspect \(output.id) --json"],
+            "safeNextCommands": acceptedMemoryFactSafeCommands(output),
+            "safetyBoundary": [
+                "accepted_memory_fact_requires_explicit_accept",
+                "reviewable_candidates_are_not_truth",
+                "action_receipts_are_command_outcomes_not_truth",
+                "source_quote_and_citation_required",
+            ],
+        ]
+        if let confidence = output.confidence { dict["confidence"] = confidence }
+        if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
+        if let observedDate = output.metadata["observed_date"] { dict["observedDate"] = observedDate }
+        if let memoryKey = output.metadata["memory_key"] { dict["memoryKey"] = memoryKey }
+        if let memoryStatus = output.metadata["memory_status"] { dict["memoryStatus"] = memoryStatus }
+        if let reviewedAt = output.metadata["reviewed_at"] { dict["acceptedAt"] = reviewedAt; dict["reviewedAt"] = reviewedAt }
+        if let reviewedBy = output.metadata["reviewed_by"] { dict["acceptedBy"] = reviewedBy; dict["reviewedBy"] = reviewedBy }
+        if let evidenceRecord = sourceEvidenceRecordToDict(for: output) { dict["sourceEvidenceRecord"] = evidenceRecord }
+        dict["actionIntentRefs"] = SecondBrainAcceptedMemoryFactActionIntentService.intentRefs(for: fact)
+        let lifecycle = lifecycleHistoryToDict(for: output)
+        if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
+        let history = acceptedMemoryFactActionHistory(output)
+        if !history.isEmpty { dict["actionHistory"] = history }
+        return dict
+    }
+
+    static func acceptedMemoryFactActionIntentToDict(_ intent: SecondBrainAcceptedMemoryFactActionIntent) -> [String: Any] {
+        [
+            "id": intent.intentRef,
+            "intentRef": intent.intentRef,
+            "factRef": intent.factRef,
+            "candidateRef": intent.candidateRef,
+            "owner": ownerToDict(intent.owner),
+            "ownerRef": intent.owner.canonicalRef,
+            "intentType": intent.intentType,
+            "proposedCommandFamily": intent.proposedCommandFamily,
+            "proposedCommand": intent.proposedCommand,
+            "reason": intent.reason,
+            "explanation": intent.explanation,
+            "sourceCitation": intent.sourceCitation,
+            "sourceRefs": intent.sourceRefs,
+            "evidenceRefs": intent.evidenceRefs,
+            "truthBoundary": intent.truthBoundary,
+            "candidateBoundary": intent.candidateBoundary,
+            "mutationBoundary": intent.mutationBoundary,
+            "requiresConfirmation": intent.requiresConfirmation,
+            "confirmationPolicy": intent.confirmationPolicy,
+            "safeNextCommands": intent.safeNextCommands,
+            "safeVerificationCommands": intent.safeVerificationCommands,
+        ]
+    }
+
+    static func acceptedMemoryFactIntentActionReceipt(intents: [SecondBrainAcceptedMemoryFactActionIntent], rawFactID: String?) -> [String: Any] {
+        var receipt: [String: Any] = [
+            "command": "item.memory-facts.intents",
+            "action": "propose_action_intents",
+            "actor": "cider-cli",
+            "status": intents.isEmpty ? "no_op" : "succeeded",
+            "readOnly": true,
+            "changed": false,
+            "truthBoundary": "action_receipt_not_fact_truth",
+            "sourceRefs": Array(Set(intents.flatMap(\.sourceRefs))).sorted(),
+            "evidenceRefs": Array(Set(intents.flatMap(\.evidenceRefs))).sorted(),
+            "safeVerificationCommands": ["cider-cli item memory-facts intents --json"],
+            "safeNextCommands": ["cider-cli item due-to-surface --json"],
+        ]
+        if let rawFactID { receipt["selector"] = ["candidateID": rawFactID] }
+        if let owner = intents.first?.owner { receipt["owner"] = ownerToDict(owner); receipt["ownerRef"] = owner.canonicalRef }
+        if intents.isEmpty { receipt["errorCode"] = "no_action_intents" }
+        return receipt
+    }
+
+    static func acceptedMemoryFactActionHistory(_ output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
+        do {
+            let records = try SecondBrainActionReceiptLedgerService(database: .shared).list(filter: SecondBrainActionReceiptFilter(
+                owner: output.owner,
+                command: "item.accept-memory-candidate",
+                sourceRef: "memory_candidate:\(output.id)",
+                limit: 10
+            ))
+            return records.map(recallActionHistoryEntryToDict)
+        } catch {
+            return []
+        }
+    }
+
+    static func acceptedMemoryFactSafeCommands(_ output: SecondBrainEnrichmentOutput) -> [String] {
+        var commands = [
+            "cider-cli item memory-facts inspect \(output.id) --json",
+            "cider-cli item memory-facts intents --fact \(output.id) --json",
+            "cider-cli item memory-facts list --json",
+            "cider-cli item recall-context --item \(output.owner.ownerType) \(output.owner.ownerID) --json",
+            "cider-cli item owner-get \(output.owner.ownerType) \(output.owner.ownerID) --json",
+            "cider-cli item action-ledger list --owner \(output.owner.canonicalRef) --command item.accept-memory-candidate --json",
+        ]
+        commands.append(contentsOf: memoryCandidateSafeCommands(owner: output.owner))
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func printAcceptedMemoryFactError(
+        _ error: SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError,
+        rawID: String?,
+        command: String = "item.memory-facts.inspect",
+        readOnly: Bool = true
+    ) {
+        let requested = (rawID ?? "")
+            .replacingOccurrences(of: "accepted_memory_fact:", with: "")
+            .replacingOccurrences(of: "memory_candidate:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var details: [String: Any] = [
+            "ok": false,
+            "command": command,
+            "readOnly": readOnly,
+            "changed": false,
+            "error": error.localizedDescription,
+            "selector": ["candidateID": requested],
+            "safeNextCommands": [
+                "cider-cli item memory-facts list --json",
+                "cider-cli capture review-queue --kind memory_candidate --json",
+            ],
+        ]
+        switch error {
+        case .missingID:
+            details["errorCode"] = "missing_accepted_memory_fact_selector"
+            details["usage"] = "cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> --json"
+        case .notFound(let id):
+            details["errorCode"] = "accepted_memory_fact_not_found"
+            details["selector"] = ["candidateID": id]
+        case .notAccepted(let candidateID, let reviewState):
+            details["errorCode"] = "memory_candidate_not_accepted"
+            details["selector"] = ["candidateID": candidateID, "candidateRef": "memory_candidate:\(candidateID)"]
+            details["reviewState"] = reviewState
+            details["truthBoundary"] = "reviewable_candidate_not_truth"
+        case .wrongKind(let candidateID, let kind):
+            details["errorCode"] = "not_memory_candidate"
+            details["selector"] = ["candidateID": candidateID]
+            details["actualKind"] = kind
+            details["supportedKind"] = "memory_candidate"
+        }
+        printCLIError(error.localizedDescription, details: details)
+    }
+
+    static func handleMemoryCandidateMutationCommand(
+        action: String,
+        args: [String],
+        store: SecondBrainStore
+    ) {
+        let positional = leadingPositionalArgs(from: args)
+        guard let candidateID = parseFlag("--id", from: args)
+            ?? parseFlag("--candidate", from: args)
+            ?? positional.first else {
+            printCLIError("Usage: cider-cli item \(action)-memory-candidate <candidate-id> [--json]")
+            return
+        }
+
+        do {
+            let payload: [String: Any]
+            switch action {
+            case "accept":
+                payload = try acceptMemoryCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "reject":
+                payload = try rejectMemoryCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "defer":
+                payload = try deferMemoryCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "correct":
+                payload = try correctMemoryCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "delegate":
+                payload = try delegateMemoryCandidatePayload(candidateID: candidateID, args: args, store: store)
+            default:
+                printCLIError("Unsupported memory candidate action '\(action)'.")
+                return
+            }
+
+            if jsonOutput {
+                persistActionReceiptIfPresent(payload)
+                outputJSON(payload)
+            } else {
+                print("\(payload["action"] ?? action) memory candidate: \(candidateID)")
+                print("  State: \(payload["reviewState"] ?? "")")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func acceptMemoryCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try memoryCandidateOutput(candidateID, service: service)
+        try requireReviewableMemoryCandidate(output)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "memory_candidate.accept"
+        var accepted = reviewedMemoryCandidate(output, reviewState: "accepted", actor: actor)
+        accepted.metadata["accepted_value"] = accepted.value
+        accepted.metadata["accepted_memory_kind"] = accepted.metadata["memory_kind"] ?? accepted.metadata["candidate_kind"] ?? ""
+
+        let action = memoryCandidateAgentAction(
+            output: output,
+            toolName: "item.accept-memory-candidate",
+            actionType: "memory_candidate.accept",
+            source: source,
+            status: "succeeded",
+            summary: "Accepted memory candidate \(output.value).",
+            arguments: [
+                "candidateID": output.id,
+                "actor": actor,
+            ],
+            result: [
+                "reviewState": accepted.reviewState,
+            ]
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(accepted)
+            try store.recordAgentAction(action)
+        }
+
+        return memoryCandidateMutationResult(
+            command: "item.accept-memory-candidate",
+            action: "accept",
+            candidate: accepted,
+            agentAction: action
+        )
+    }
+
+    static func rejectMemoryCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try memoryCandidateOutput(candidateID, service: service)
+        try requireReviewableMemoryCandidate(output)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "memory_candidate.reject"
+        let reason = parseFlag("--reason", from: args) ?? "Rejected from memory candidate review."
+        var rejected = reviewedMemoryCandidate(output, reviewState: "rejected", actor: actor)
+        rejected.metadata["rejection_reason"] = reason
+
+        let action = memoryCandidateAgentAction(
+            output: output,
+            toolName: "item.reject-memory-candidate",
+            actionType: "memory_candidate.reject",
+            source: source,
+            status: "succeeded",
+            summary: "Rejected memory candidate \(output.value).",
+            arguments: [
+                "candidateID": output.id,
+                "actor": actor,
+                "reason": reason,
+            ],
+            result: [
+                "reviewState": rejected.reviewState,
+            ]
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(rejected)
+            try store.recordAgentAction(action)
+        }
+
+        return memoryCandidateMutationResult(
+            command: "item.reject-memory-candidate",
+            action: "reject",
+            candidate: rejected,
+            agentAction: action
+        )
+    }
+
+    static func deferMemoryCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try memoryCandidateOutput(candidateID, service: service)
+        try requireReviewableMemoryCandidate(output)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "memory_candidate.defer"
+        let reason = parseFlag("--reason", from: args) ?? "Deferred from memory candidate review."
+        var deferred = reviewedMemoryCandidate(output, reviewState: "deferred", actor: actor)
+        deferred.metadata["deferral_reason"] = reason
+
+        let action = memoryCandidateAgentAction(
+            output: output,
+            toolName: "item.defer-memory-candidate",
+            actionType: "memory_candidate.defer",
+            source: source,
+            status: "deferred",
+            summary: "Deferred memory candidate \(output.value).",
+            arguments: [
+                "candidateID": output.id,
+                "actor": actor,
+                "reason": reason,
+            ],
+            result: [
+                "reviewState": deferred.reviewState,
+            ]
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(deferred)
+            try store.recordAgentAction(action)
+        }
+
+        return memoryCandidateMutationResult(
+            command: "item.defer-memory-candidate",
+            action: "defer",
+            candidate: deferred,
+            agentAction: action
+        )
+    }
+
+    static func correctMemoryCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try memoryCandidateOutput(candidateID, service: service)
+        try requireReviewableMemoryCandidate(output)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "memory_candidate.correct"
+        let reason = parseFlag("--reason", from: args) ?? "Corrected during memory candidate review."
+        var corrected = output
+        var changedFields: [String] = []
+
+        if let value = parseFlag("--value", from: args) {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw memoryCandidateError("--value cannot be empty.")
+            }
+            corrected.value = trimmed
+            corrected.normalizedValue = normalizedMemoryCandidateValue(trimmed)
+            changedFields.append("value")
+        }
+        if let evidence = parseFlag("--evidence", from: args) {
+            let trimmed = evidence.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw memoryCandidateError("--evidence cannot be empty.")
+            }
+            corrected.evidence = trimmed
+            changedFields.append("evidence")
+        }
+        if let rawKind = parseFlag("--kind", from: args) {
+            let kind = normalizedMemoryCandidateKind(rawKind)
+            guard SecondBrainMemoryCandidateService.allowedKinds.contains(kind) else {
+                throw memoryCandidateError("Unsupported memory candidate kind '\(rawKind)'.")
+            }
+            corrected.metadata["memory_kind"] = kind
+            corrected.metadata["candidate_kind"] = kind
+            corrected.label = "Memory candidate: \(kind.replacingOccurrences(of: "_", with: " "))"
+            changedFields.append("kind")
+        }
+        let linkedOwnerFlags = parseFlagAll("--linked-owner", from: args)
+        if !linkedOwnerFlags.isEmpty {
+            let linkedOwners = try parseLinkedOwnerRefs(from: args)
+            corrected.metadata["linked_owner_refs"] = DatabaseHelpers.encode(linkedOwners.map(\.canonicalRef))
+            changedFields.append("linked_owner_refs")
+        }
+        if let observedDate = parseFlag("--observed-date", from: args) {
+            corrected.metadata["observed_date"] = observedDate.trimmingCharacters(in: .whitespacesAndNewlines)
+            changedFields.append("observed_date")
+        }
+        if let memoryKey = parseFlag("--memory-key", from: args) {
+            corrected.metadata["memory_key"] = memoryKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            changedFields.append("memory_key")
+        }
+        if let memoryStatus = parseFlag("--memory-status", from: args) ?? parseFlag("--status", from: args) {
+            corrected.metadata["memory_status"] = normalizedMemoryCandidateKind(memoryStatus)
+            changedFields.append("memory_status")
+        }
+        if let rawConfidence = parseFlag("--confidence", from: args) {
+            guard let confidence = Double(rawConfidence), confidence >= 0, confidence <= 1 else {
+                throw memoryCandidateError("Invalid --confidence '\(rawConfidence)'. Use a number from 0 to 1.")
+            }
+            corrected.confidence = confidence
+            changedFields.append("confidence")
+        }
+        guard !changedFields.isEmpty else {
+            throw memoryCandidateError("correct-memory-candidate requires at least one correction flag.")
+        }
+
+        corrected.reviewState = "needs_review"
+        corrected.metadata["corrected_at"] = ISO8601DateFormatter().string(from: Date())
+        corrected.metadata["corrected_by"] = actor
+        corrected.metadata["correction_reason"] = reason
+        corrected.metadata["corrected_fields"] = DatabaseHelpers.encode(changedFields)
+        corrected.updatedAt = Date()
+
+        let action = memoryCandidateAgentAction(
+            output: output,
+            toolName: "item.correct-memory-candidate",
+            actionType: "memory_candidate.correct",
+            source: source,
+            status: "corrected",
+            summary: "Corrected memory candidate \(output.value).",
+            arguments: [
+                "candidateID": output.id,
+                "actor": actor,
+                "reason": reason,
+                "changedFields": DatabaseHelpers.encode(changedFields),
+            ],
+            result: [
+                "reviewState": corrected.reviewState,
+                "candidateID": corrected.id,
+            ]
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try replaceEnrichmentOutput(corrected, service: service)
+            try store.recordAgentAction(action)
+        }
+
+        var result = memoryCandidateMutationResult(
+            command: "item.correct-memory-candidate",
+            action: "correct",
+            candidate: corrected,
+            agentAction: action
+        )
+        result["changedFields"] = changedFields
+        return result
+    }
+
+    static func delegateMemoryCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try memoryCandidateOutput(candidateID, service: service)
+        try requireReviewableMemoryCandidate(output)
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "memory_candidate.delegate"
+        let taskKind = parseFlag("--task-kind", from: args)
+            ?? parseFlag("--task", from: args)
+            ?? "clarify_memory_evidence"
+        let instructions = parseFlag("--instructions", from: args)
+            ?? defaultMemoryCandidateDelegationInstructions(output)
+        let allowedSources = ["source_item", "linked_owner_context", "user_confirmation"]
+        let resultPolicy = "return_reviewable_evidence_not_truth"
+
+        var delegated = reviewedMemoryCandidate(output, reviewState: "deferred", actor: actor)
+        delegated.metadata["delegation_status"] = "requested"
+        delegated.metadata["delegation_task_kind"] = taskKind
+        delegated.metadata["delegation_instructions"] = instructions
+        delegated.metadata["delegation_allowed_sources"] = DatabaseHelpers.encode(allowedSources)
+        delegated.metadata["delegation_result_policy"] = resultPolicy
+
+        let action = memoryCandidateAgentAction(
+            output: output,
+            toolName: "item.delegate-memory-candidate",
+            actionType: "memory_candidate.delegate_enrichment",
+            source: source,
+            status: "requested",
+            summary: "Requested bounded enrichment for memory candidate \(output.value).",
+            arguments: [
+                "candidateID": output.id,
+                "actor": actor,
+                "taskKind": taskKind,
+                "instructions": instructions,
+                "allowedSources": DatabaseHelpers.encode(allowedSources),
+            ],
+            result: [
+                "reviewState": delegated.reviewState,
+                "resultPolicy": resultPolicy,
+            ]
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(delegated)
+            try store.recordAgentAction(action)
+        }
+
+        var result = memoryCandidateMutationResult(
+            command: "item.delegate-memory-candidate",
+            action: "delegate",
+            candidate: delegated,
+            agentAction: action
+        )
+        result["delegation"] = [
+            "status": "requested",
+            "taskKind": taskKind,
+            "instructions": instructions,
+            "allowedSources": allowedSources,
+            "resultPolicy": resultPolicy,
+        ]
+        return result
+    }
+
+    static func memoryCandidateMutationResult(
+        command: String,
+        action: String,
+        candidate: SecondBrainEnrichmentOutput,
+        agentAction: SecondBrainAgentAction
+    ) -> [String: Any] {
+        let safeCommands = memoryCandidatePostMutationSafeCommands(output: candidate)
+        let actor = candidate.metadata["reviewed_by"] ?? "user"
+        return [
+            "ok": true,
+            "command": command,
+            "action": action,
+            "readOnly": false,
+            "changed": true,
+            "candidateID": candidate.id,
+            "candidateRef": "memory_candidate:\(candidate.id)",
+            "reviewState": candidate.reviewState,
+            "candidate": memoryCandidateToDict(candidate),
+            "agentAction": agentActionToDict(agentAction),
+            "actionReceipt": actionReceiptForCandidateMutation(
+                command: command,
+                action: action,
+                actor: actor,
+                output: candidate,
+                candidateRefPrefix: "memory_candidate",
+                safeVerificationCommands: ["cider-cli item action-ledger list --owner \(candidate.owner.canonicalRef) --json"],
+                safeNextCommands: safeCommands
+            ),
+            "safeNextCommands": safeCommands,
+            "safeCommands": safeCommands,
+        ]
+    }
+
+    static func memoryCandidateOutput(
+        _ candidateID: String,
+        service: SecondBrainEnrichmentOutputService
+    ) throws -> SecondBrainEnrichmentOutput {
+        let normalizedID = candidateID
+            .replacingOccurrences(of: "memory_candidate:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let output = try service.output(id: normalizedID),
+              output.kind == "memory_candidate" else {
+            throw memoryCandidateError("Memory candidate '\(candidateID)' was not found.")
+        }
+        return output
+    }
+
+    static func requireReviewableMemoryCandidate(_ output: SecondBrainEnrichmentOutput) throws {
+        guard ["suggested", "needs_review", "deferred"].contains(output.reviewState) else {
+            throw memoryCandidateError("Memory candidate '\(output.id)' is \(output.reviewState) and cannot be mutated by this review command.")
+        }
+    }
+
+    static func reviewedMemoryCandidate(
+        _ output: SecondBrainEnrichmentOutput,
+        reviewState: String,
+        actor: String
+    ) -> SecondBrainEnrichmentOutput {
+        var reviewed = output
+        reviewed.reviewState = reviewState
+        reviewed.metadata["reviewed_at"] = ISO8601DateFormatter().string(from: Date())
+        reviewed.metadata["reviewed_by"] = actor
+        reviewed.updatedAt = Date()
+        return reviewed
+    }
+
+    static func memoryCandidateAgentAction(
+        output: SecondBrainEnrichmentOutput,
+        toolName: String,
+        actionType: String,
+        source: String,
+        status: String,
+        summary: String,
+        arguments: [String: String],
+        result: [String: String]
+    ) -> SecondBrainAgentAction {
+        SecondBrainAgentAction(
+            owner: output.owner,
+            itemID: memoryCandidateItemID(for: output.owner),
+            toolName: toolName,
+            actionType: actionType,
+            source: source,
+            status: status,
+            summary: summary,
+            argumentsJSON: DatabaseHelpers.encodeJSON(arguments),
+            resultJSON: DatabaseHelpers.encodeJSON(result)
+        )
+    }
+
+    static func memoryCandidateItemID(for owner: SecondBrainOwnerRef) -> String? {
+        switch owner.ownerType {
+        case "bookmark", "note", "dateCard", "contact", "todo", "vaultFile":
+            return UUID(uuidString: owner.ownerID) == nil ? nil : owner.ownerID
+        default:
+            return nil
+        }
+    }
+
+    static func replaceEnrichmentOutput(
+        _ output: SecondBrainEnrichmentOutput,
+        service: SecondBrainEnrichmentOutputService
+    ) throws {
+        let stmt = try CiderDatabase.shared.prepare("DELETE FROM enrichment_outputs WHERE id = ?;")
+        stmt.bind(output.id, at: 1)
+        try stmt.step()
+        try service.record(output)
+    }
+
+    static func defaultMemoryCandidateDelegationInstructions(_ output: SecondBrainEnrichmentOutput) -> String {
+        let memoryKind = output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? "memory"
+        return "Inspect the source item and linked owner context for this \(memoryKind) candidate. Return only source-backed evidence or a recommendation to reject; do not promote permanent memory."
+    }
+
+    static func memoryCandidatePostMutationSafeCommands(output: SecondBrainEnrichmentOutput) -> [String] {
+        var commands = memoryCandidateSafeCommands(owner: output.owner)
+        commands.insert("cider-cli capture review-queue --kind memory_candidate --json", at: 0)
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func memoryCandidateReviewActionCommands(for output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
+        let reviewable = ["suggested", "needs_review", "deferred"].contains(output.reviewState)
+        let status = reviewable ? "available" : "unavailable"
+        return [
+            [
+                "action": "accept",
+                "command": "cider-cli item accept-memory-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": status,
+            ],
+            [
+                "action": "reject",
+                "command": "cider-cli item reject-memory-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": status,
+            ],
+            [
+                "action": "defer",
+                "command": "cider-cli item defer-memory-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": status,
+            ],
+            [
+                "action": "correct",
+                "command": "cider-cli item correct-memory-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": status,
+            ],
+            [
+                "action": "delegate",
+                "command": "cider-cli item delegate-memory-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": status,
+            ],
+        ]
+    }
+
+    static func normalizedMemoryCandidateKind(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "-", with: "_")
+            .lowercased()
+    }
+
+    static func normalizedMemoryCandidateValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    static func memoryCandidateError(_ message: String) -> NSError {
+        NSError(
+            domain: "CiderCLI",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+
+    static func handleFactValidityCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first ?? "list"
+        let service = SecondBrainFactValidityService(database: .shared)
+        do {
+            switch action {
+            case "list", "candidates":
+                let states = parseFlag("--state", from: args)
+                    .map { $0.split(separator: ",").map(String.init) }
+                    ?? ["suggested", "needs_review", "deferred"]
+                let candidates = try service.candidates(reviewStates: states)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.fact-validity.list",
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "reviewable_candidate_not_truth",
+                    "count": candidates.count,
+                    "candidates": candidates.map(factValidityCandidateToDict),
+                    "safeNextCommands": ["cider-cli item fact-validity list --json"],
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Fact validity candidates: \(candidates.count)") }
+
+            case "inspect", "get":
+                guard positional.count >= 2 else { throw factValidityError("Usage: cider-cli item fact-validity inspect <candidate-id> [--json]") }
+                let rawID = positional[1]
+                let candidateID = normalizedFactValidityCandidateID(rawID)
+                guard let candidate = try service.candidate(id: candidateID) else {
+                    let receipt = agentActionReceiptToDict(
+                        command: "item.fact-validity.inspect",
+                        action: "inspect",
+                        actor: "cider-cli",
+                        owner: nil,
+                        sourceRefs: ["fact_validity_candidate:\(candidateID)"],
+                        evidenceRefs: [],
+                        readOnly: true,
+                        changed: false,
+                        status: "failed",
+                        errorCode: "fact_validity_candidate_not_found",
+                        error: "Fact validity candidate not found: \(rawID)",
+                        safeVerificationCommands: [
+                            "cider-cli item fact-validity inspect \(candidateID) --json",
+                            "cider-cli item action-ledger list --command item.fact-validity.inspect --status failed --json",
+                        ],
+                        safeNextCommands: ["cider-cli item fact-validity list --json"]
+                    )
+                    let payload: [String: Any] = [
+                        "ok": false,
+                        "command": "item.fact-validity.inspect",
+                        "readOnly": true,
+                        "changed": false,
+                        "candidateID": candidateID,
+                        "candidateRef": "fact_validity_candidate:\(candidateID)",
+                        "errorCode": "fact_validity_candidate_not_found",
+                        "error": "Fact validity candidate not found: \(rawID)",
+                        "actionReceipt": receipt,
+                        "safeVerificationCommands": receipt["safeVerificationCommands"] as? [String] ?? [],
+                        "safeNextCommands": receipt["safeNextCommands"] as? [String] ?? [],
+                    ]
+                    processExitCode = 1
+                    persistActionReceiptIfPresent(payload)
+                    if jsonOutput { outputJSON(payload) } else { print("Error: Fact validity candidate not found: \(rawID)") }
+                    return
+                }
+                var payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.fact-validity.inspect",
+                    "readOnly": true,
+                    "changed": false,
+                    "candidate": factValidityCandidateToDict(candidate),
+                ]
+                payload["actionReceipt"] = actionReceiptForFactValidityMutation(
+                    view: candidate,
+                    command: "item.fact-validity.inspect",
+                    action: "inspect",
+                    actor: "cider-cli",
+                    changed: false,
+                    beforeState: candidate.reviewState,
+                    readOnly: true
+                )
+                persistActionReceiptIfPresent(payload)
+                if jsonOutput { outputJSON(payload) } else { print("Fact validity candidate: \(candidate.id)") }
+
+            case "state":
+                guard let targetRef = parseFlag("--target-ref", from: args) ?? positional.dropFirst().first else {
+                    throw factValidityError("Usage: cider-cli item fact-validity state --target-ref <owner_relation:id> [--json]")
+                }
+                let state = try service.validityState(targetRef: targetRef)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.fact-validity.state",
+                    "readOnly": true,
+                    "changed": false,
+                    "targetRef": targetRef,
+                    "factValidity": state.map(factValidityStateToDict) as Any,
+                    "truthState": state.map { $0.isCurrent ? "current_truth" : "stale_or_superseded_truth" } ?? "current_truth",
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Fact validity: \(targetRef)") }
+
+            case "propose", "propose-invalidation", "propose-supersession":
+                guard let targetRef = parseFlag("--target-ref", from: args) else { throw factValidityError("Missing --target-ref <owner_relation:id>") }
+                let proposedState = parseFlag("--state", from: args) ?? (action.contains("supersession") ? "superseded" : "invalidated")
+                guard let sourceOwnerRef = parseFlag("--source-owner", from: args),
+                      let sourceOwner = ownerRef(from: sourceOwnerRef) else { throw factValidityError("Missing or invalid --source-owner <type:id>") }
+                let quote = parseFlag("--quote", from: args) ?? parseFlag("--source-quote", from: args) ?? ""
+                guard !quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw factValidityError("Missing --quote <source quote>") }
+                let reason = parseFlag("--reason", from: args) ?? "Fact validity review proposed from newer evidence."
+                let candidate = try service.propose(
+                    targetRef: targetRef,
+                    proposedState: proposedState,
+                    sourceOwner: sourceOwner,
+                    sourceQuote: quote,
+                    actor: parseFlag("--actor", from: args) ?? "cider-cli",
+                    reason: reason,
+                    supersedesRef: parseFlag("--supersedes-ref", from: args),
+                    supersededByRef: parseFlag("--superseded-by-ref", from: args),
+                    validAt: parseFactValidityDate(parseFlag("--valid-at", from: args)),
+                    invalidAt: parseFactValidityDate(parseFlag("--invalid-at", from: args)),
+                    expiredAt: parseFactValidityDate(parseFlag("--expired-at", from: args))
+                )
+                var payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.fact-validity.propose",
+                    "readOnly": false,
+                    "changed": true,
+                    "truthBoundary": "reviewable_candidate_not_truth",
+                    "candidate": factValidityCandidateToDict(candidate),
+                ]
+                payload["actionReceipt"] = actionReceiptForFactValidityMutation(
+                    view: candidate,
+                    command: "item.fact-validity.propose",
+                    action: "propose",
+                    actor: candidate.candidate.actor,
+                    changed: true,
+                    beforeState: nil
+                )
+                persistActionReceiptIfPresent(payload)
+                if jsonOutput { outputJSON(payload) } else { print("Proposed fact validity candidate: \(candidate.id)") }
+
+            case "accept", "reject", "defer":
+                guard positional.count >= 2 else { throw factValidityError("Usage: cider-cli item fact-validity \(action) <candidate-id> --reason <reason> [--json]") }
+                let id = normalizedFactValidityCandidateID(positional[1])
+                let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+                let reason = parseFlag("--reason", from: args) ?? parseFlag("--decision-note", from: args) ?? "Fact validity review action."
+                let existing = try service.candidate(id: id)
+                guard let existing else {
+                    outputMissingFactValidityMutation(candidateID: id, command: "item.fact-validity.\(action)", action: action, actor: actor)
+                    return
+                }
+                let candidate: SecondBrainFactValidityCandidateView
+                if action == "accept" {
+                    candidate = try service.accept(candidateID: id, actor: actor, decisionNote: reason)
+                } else if action == "reject" {
+                    if existing.reviewState == "rejected" {
+                        candidate = existing
+                    } else {
+                        candidate = try service.reject(candidateID: id, actor: actor, reason: reason)
+                    }
+                } else {
+                    if existing.reviewState == "deferred" {
+                        candidate = existing
+                    } else {
+                        candidate = try service.deferReview(candidateID: id, actor: actor, reason: reason)
+                    }
+                }
+                let beforeState = existing.reviewState
+                let changed = beforeState != candidate.reviewState
+                let factValidityDict = try service.validityState(targetRef: candidate.targetRef).map(factValidityStateToDict)
+                let errorCode = factValidityNoOpErrorCode(action: action, reviewState: candidate.reviewState, changed: changed)
+                var payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.fact-validity.\(action)",
+                    "readOnly": false,
+                    "changed": changed,
+                    "candidate": factValidityCandidateToDict(candidate),
+                    "factValidity": factValidityDict as Any,
+                ]
+                if let errorCode { payload["errorCode"] = errorCode }
+                payload["actionReceipt"] = actionReceiptForFactValidityMutation(
+                    view: candidate,
+                    command: "item.fact-validity.\(action)",
+                    action: action,
+                    actor: actor,
+                    changed: changed,
+                    status: errorCode == nil ? "succeeded" : "no_op",
+                    errorCode: errorCode,
+                    beforeState: beforeState,
+                    factValidity: factValidityDict
+                )
+                persistActionReceiptIfPresent(payload)
+                if jsonOutput { outputJSON(payload) } else { print("Fact validity \(action): \(candidate.id)") }
+
+            default:
+                throw factValidityError("Usage: cider-cli item fact-validity list|inspect|state|propose|accept|reject|defer ... [--json]")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func outputMissingFactValidityMutation(candidateID: String, command: String, action: String, actor: String) {
+        var payload = structuredActionReceiptFailurePayload(
+            command: command,
+            action: action,
+            actor: actor,
+            readOnly: false,
+            errorCode: "fact_validity_candidate_not_found",
+            error: "Fact validity candidate not found: \(candidateID)",
+            sourceRefs: ["fact_validity_candidate:\(candidateID)"],
+            safeVerificationCommands: [
+                "cider-cli item fact-validity inspect \(candidateID) --json",
+                "cider-cli item action-ledger list --command \(command) --status failed --json",
+            ],
+            safeNextCommands: ["cider-cli item fact-validity list --json"]
+        )
+        payload["candidateID"] = candidateID
+        payload["candidateRef"] = "fact_validity_candidate:\(candidateID)"
+        processExitCode = 1
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput { outputJSON(payload) } else { print("Error: Fact validity candidate not found: \(candidateID)") }
+    }
+
+    static func factValidityNoOpErrorCode(action: String, reviewState: String, changed: Bool) -> String? {
+        guard !changed else { return nil }
+        switch (action, reviewState) {
+        case ("accept", "accepted"):
+            return "fact_validity_already_accepted"
+        case ("reject", "rejected"):
+            return "fact_validity_already_rejected"
+        case ("defer", "deferred"):
+            return "fact_validity_already_deferred"
+        default:
+            return nil
+        }
+    }
+
+    static func normalizedFactValidityCandidateID(_ value: String) -> String {
+        value.replacingOccurrences(of: "fact_validity_candidate:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func ownerRef(from ref: String) -> SecondBrainOwnerRef? {
+        guard let idx = ref.firstIndex(of: ":") else { return nil }
+        let type = String(ref[..<idx])
+        let id = String(ref[ref.index(after: idx)...])
+        guard !type.isEmpty, !id.isEmpty else { return nil }
+        return SecondBrainOwnerRef(ownerType: type, ownerID: id)
+    }
+
+    static func parseFactValidityDate(_ raw: String?) -> Date? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let date = ISO8601DateFormatter().date(from: raw) { return date }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: raw)
+    }
+
+    static func factValidityError(_ message: String) -> NSError {
+        NSError(domain: "CiderCLI.FactValidity", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    }
+
+    struct GraphCandidateMutationCLIError: Error, LocalizedError, @unchecked Sendable {
+        var command: String
+        var errorCode: String
+        var message: String
+        var candidateID: String
+        var blockingIssues: [String] = []
+        var conflicts: [[String: Any]] = []
+        var safeNextCommands: [String] = []
+
+        var errorDescription: String? { message }
+    }
+
+    static func printGraphCandidateMutationError(_ error: GraphCandidateMutationCLIError) {
+        processExitCode = 1
+        var payload: [String: Any] = [
+            "ok": false,
+            "command": error.command,
+            "readOnly": false,
+            "changed": false,
+            "candidateID": error.candidateID,
+            "candidateRef": "graph_candidate:\(error.candidateID)",
+            "errorCode": error.errorCode,
+            "error": error.message,
+            "blockingIssues": error.blockingIssues,
+            "conflicts": error.conflicts,
+            "safeNextCommands": error.safeNextCommands,
+            "safeCommands": error.safeNextCommands,
+        ]
+        let receipt = agentActionReceiptToDict(
+            command: error.command,
+            action: error.command.replacingOccurrences(of: "item.", with: "").replacingOccurrences(of: "-graph-candidate", with: ""),
+            actor: "cider-cli",
+            owner: nil,
+            sourceRefs: ["graph_candidate:\(error.candidateID)"],
+            evidenceRefs: [],
+            readOnly: false,
+            changed: false,
+            status: "failed",
+            errorCode: error.errorCode,
+            error: error.message,
+            safeVerificationCommands: error.safeNextCommands,
+            safeNextCommands: error.safeNextCommands
+        )
+        payload["actionReceipt"] = receipt
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput {
+            outputJSON(payload)
+        } else {
+            print("Error: \(error.message)")
+        }
+    }
+
+    static func graphCandidateMutationErrorCode(_ error: Error, action: String) -> String {
+        let message = error.localizedDescription.lowercased()
+        if message.contains("not found") { return "graph_candidate_not_found" }
+        if message.contains("cannot be mutated") { return "graph_candidate_not_reviewable" }
+        if message.contains("owner references must") || message.contains("target-owner") { return "malformed_target_owner" }
+        return "graph_candidate_\(action)_failed"
+    }
+
+    static func graphCandidateMutationFallbackCommands(candidateID: String) -> [String] {
+        [
+            "cider-cli item graph-candidate \(candidateID) --json",
+            "cider-cli item graph-candidates --json",
+            "cider-cli capture review-queue --json",
+        ]
+    }
+
+    static func handleGraphCandidateReadCommand(subcommand: String, args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let explicitID = parseFlag("--id", from: args) ?? parseFlag("--candidate", from: args)
+        let wantsSingle = subcommand != "graph-candidates" || explicitID != nil || positional.count == 1
+
+        do {
+            if wantsSingle {
+                guard let candidateID = explicitID ?? positional.first else {
+                    printCLIError("Usage: cider-cli item graph-candidate <candidate-id> [--json]")
+                    return
+                }
+                guard let output = try service.output(id: candidateID),
+                      output.kind == SecondBrainGraphCandidateContract.outputKind else {
+                    printGraphCandidateNotFound(candidateID)
+                    return
+                }
+                printGraphCandidateInspect(output)
+                return
+            }
+
+            let owner: SecondBrainOwnerRef?
+            if positional.isEmpty {
+                owner = nil
+            } else if positional.count >= 2 {
+                owner = normalizedOwner(type: positional[0], ref: positional[1])
+            } else {
+                owner = nil
+            }
+
+            let includeReviewed = args.contains("--include-reviewed")
+            let limit = boundedGraphCandidateLimit(from: args)
+            let states: Set<String>? = includeReviewed ? nil : ["suggested", "needs_review", "deferred"]
+            var outputs = try service.outputs(
+                kind: SecondBrainGraphCandidateContract.outputKind,
+                reviewStates: states,
+                limit: owner == nil ? limit : nil
+            )
+            if let owner {
+                outputs = Array(outputs.filter { $0.owner == owner }.prefix(limit))
+            }
+            printGraphCandidateList(outputs, owner: owner, includeReviewed: includeReviewed, limit: limit)
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func handleEntityResolutionCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first?.lowercased() ?? "list"
+        let service = SecondBrainEntityResolutionService(database: .shared)
+        do {
+            switch action {
+            case "list", "ls", "candidates":
+                let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 50
+                let candidates = try service.candidates(reviewStates: nil, limit: limit)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.entity-resolution.list",
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "reviewable_candidate_not_truth",
+                    "count": candidates.count,
+                    "candidates": candidates.map(entityResolutionCandidateToDict),
+                    "safeNextCommands": ["cider-cli item entity-resolution list --json"],
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Entity-resolution candidates: \(candidates.count)") }
+            case "inspect", "show", "get":
+                guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution inspect <candidate-id> [--json]"); return }
+                let candidateID = positional[1]
+                guard let candidate = try service.candidate(id: candidateID) else {
+                    var payload = structuredActionReceiptFailurePayload(
+                        command: "item.entity-resolution.inspect",
+                        action: "inspect",
+                        readOnly: true,
+                        errorCode: "entity_resolution_candidate_not_found",
+                        error: "Entity-resolution candidate not found: \(candidateID)",
+                        sourceRefs: ["entity_resolution_candidate:\(candidateID)"],
+                        safeVerificationCommands: [
+                            "cider-cli item entity-resolution inspect \(candidateID) --json",
+                            "cider-cli item action-ledger list --command item.entity-resolution.inspect --status failed --json",
+                        ],
+                        safeNextCommands: ["cider-cli item entity-resolution list --json"]
+                    )
+                    payload["candidateID"] = candidateID
+                    payload["candidateRef"] = "entity_resolution_candidate:\(candidateID)"
+                    processExitCode = 1
+                    persistActionReceiptIfPresent(payload)
+                    if jsonOutput { outputJSON(payload) } else { print("Error: Entity-resolution candidate not found: \(candidateID)") }
+                    return
+                }
+                var payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.entity-resolution.inspect",
+                    "readOnly": true,
+                    "changed": false,
+                    "candidate": entityResolutionCandidateToDict(candidate),
+                    "safeNextCommands": candidate.safeNextCommands,
+                ]
+                payload["actionReceipt"] = actionReceiptForEntityResolutionInspection(candidate)
+                persistActionReceiptIfPresent(payload)
+                if jsonOutput { outputJSON(payload) } else { print("Entity-resolution candidate: \(candidate.id)") }
+            case "accept", "approve":
+                guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution accept <candidate-id> [--reason <text>] [--json]"); return }
+                let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+                guard let before = try service.candidate(id: positional[1]) else {
+                    outputMissingEntityResolutionMutation(candidateID: positional[1], command: "item.entity-resolution.accept", action: "accept", actor: actor)
+                    return
+                }
+                let candidate = try service.accept(candidateID: positional[1], actor: actor, reason: parseFlag("--reason", from: args))
+                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.accept", action: "accept", actor: actor, beforeState: before.reviewState)
+            case "merge":
+                guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution merge <candidate-id> [--reason <text>] [--json]"); return }
+                let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+                guard let before = try service.candidate(id: positional[1]) else {
+                    outputMissingEntityResolutionMutation(candidateID: positional[1], command: "item.entity-resolution.merge", action: "merge", actor: actor)
+                    return
+                }
+                let candidate = try service.merge(candidateID: positional[1], actor: actor, reason: parseFlag("--reason", from: args))
+                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.merge", action: "merge", actor: actor, beforeState: before.reviewState)
+            case "reject":
+                guard positional.count >= 2 else { printCLIError("Usage: cider-cli item entity-resolution reject <candidate-id> [--reason <text>] [--json]"); return }
+                let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+                guard let before = try service.candidate(id: positional[1]) else {
+                    outputMissingEntityResolutionMutation(candidateID: positional[1], command: "item.entity-resolution.reject", action: "reject", actor: actor)
+                    return
+                }
+                let candidate = try service.reject(candidateID: positional[1], actor: actor, reason: parseFlag("--reason", from: args))
+                outputEntityResolutionMutation(candidate, command: "item.entity-resolution.reject", action: "reject", actor: actor, beforeState: before.reviewState)
+            default:
+                printCLIError("Usage: cider-cli item entity-resolution list|inspect|accept|reject|merge [candidate-id] [--json]")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func outputMissingEntityResolutionMutation(candidateID: String, command: String, action: String, actor: String) {
+        var payload = structuredActionReceiptFailurePayload(
+            command: command,
+            action: action,
+            actor: actor,
+            readOnly: false,
+            errorCode: "entity_resolution_candidate_not_found",
+            error: "Entity-resolution candidate not found: \(candidateID)",
+            sourceRefs: ["entity_resolution_candidate:\(candidateID)"],
+            safeVerificationCommands: [
+                "cider-cli item entity-resolution inspect \(candidateID) --json",
+                "cider-cli item action-ledger list --command \(command) --status failed --json",
+            ],
+            safeNextCommands: ["cider-cli item entity-resolution list --json"]
+        )
+        payload["candidateID"] = candidateID
+        payload["candidateRef"] = "entity_resolution_candidate:\(candidateID)"
+        processExitCode = 1
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput { outputJSON(payload) } else { print("Error: Entity-resolution candidate not found: \(candidateID)") }
+    }
+
+    static func actionReceiptForEntityResolutionInspection(_ candidate: SecondBrainEntityResolutionCandidate) -> [String: Any] {
+        var evidenceRefs = [candidate.sourceOwner.canonicalRef]
+        if let evidenceRef = candidate.sourceEvidenceRef { evidenceRefs.append(evidenceRef) }
+        return agentActionReceiptToDict(
+            command: "item.entity-resolution.inspect",
+            action: "inspect",
+            actor: "cider-cli",
+            owner: candidate.sourceOwner,
+            sourceRefs: orderedUniqueStrings([
+                candidate.candidateRef,
+                candidate.sourceOwner.canonicalRef,
+                candidate.sourceEntityRef,
+                candidate.targetEntityRef,
+            ]),
+            evidenceRefs: orderedUniqueStrings(evidenceRefs),
+            readOnly: true,
+            changed: false,
+            status: "succeeded",
+            before: nil,
+            after: [
+                "reviewState": candidate.reviewState,
+                "truthBoundary": candidate.truthBoundary,
+            ],
+            safeVerificationCommands: [
+                "cider-cli item entity-resolution inspect \(candidate.id) --json",
+                "cider-cli item action-ledger list --owner \(candidate.sourceOwner.canonicalRef) --command item.entity-resolution.inspect --json",
+                "cider-cli item context \(candidate.sourceOwner.ownerType) \(candidate.sourceOwner.ownerID) --max-history 10 --json",
+            ],
+            safeNextCommands: candidate.safeNextCommands
+        )
+    }
+
+    static func outputEntityResolutionMutation(
+        _ candidate: SecondBrainEntityResolutionCandidate,
+        command: String,
+        action: String,
+        actor: String,
+        beforeState: String?
+    ) {
+        let changed = beforeState != candidate.reviewState
+        let errorCode = entityResolutionNoOpErrorCode(action: action, reviewState: candidate.reviewState, changed: changed)
+        var payload: [String: Any] = [
+            "ok": true,
+            "command": command,
+            "readOnly": false,
+            "changed": changed,
+            "truthBoundary": candidate.truthBoundary,
+            "candidate": entityResolutionCandidateToDict(candidate),
+            "safeNextCommands": candidate.safeNextCommands,
+        ]
+        if let errorCode { payload["errorCode"] = errorCode }
+        payload["actionReceipt"] = actionReceiptForEntityResolutionMutation(
+            candidate: candidate,
+            command: command,
+            action: action,
+            actor: actor,
+            changed: changed,
+            status: errorCode == nil ? "succeeded" : "no_op",
+            errorCode: errorCode,
+            beforeState: beforeState
+        )
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput { outputJSON(payload) } else { print("Updated entity-resolution candidate: \(candidate.id) -> \(candidate.reviewState)") }
+    }
+
+    static func entityResolutionNoOpErrorCode(action: String, reviewState: String, changed: Bool) -> String? {
+        guard !changed else { return nil }
+        switch (action, reviewState) {
+        case ("accept", "accepted"), ("merge", "accepted"):
+            return "entity_resolution_already_accepted"
+        case ("reject", "rejected"):
+            return "entity_resolution_already_rejected"
+        default:
+            return nil
+        }
+    }
+
+    static func entityResolutionCandidateToDict(_ candidate: SecondBrainEntityResolutionCandidate) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": candidate.id,
+            "ref": candidate.candidateRef,
+            "candidateRef": candidate.candidateRef,
+            "candidateType": candidate.candidateType,
+            "sourceEntity": ownerToDict(candidate.sourceEntity),
+            "sourceEntityRef": candidate.sourceEntityRef,
+            "sourceLabel": candidate.sourceLabel,
+            "inputMention": candidate.inputMention,
+            "targetEntity": ownerToDict(candidate.targetEntity),
+            "targetEntityRef": candidate.targetEntityRef,
+            "targetLabel": candidate.targetLabel,
+            "sourceOwner": ownerToDict(candidate.sourceOwner),
+            "sourceOwnerRef": candidate.sourceOwner.canonicalRef,
+            "sourceQuote": candidate.sourceQuote,
+            "reviewState": candidate.reviewState,
+            "lifecycleState": candidate.reviewState,
+            "truthBoundary": candidate.truthBoundary,
+            "source": candidate.source,
+            "actor": candidate.actor,
+            "confidenceReasons": candidate.confidenceReasons,
+            "hasConflicts": candidate.hasConflicts,
+            "conflictCount": candidate.conflictCount,
+            "conflicts": candidate.conflicts.map(entityResolutionConflictToDict),
+            "metadata": candidate.metadata,
+            "safeNextCommands": candidate.safeNextCommands,
+            "safeCommands": candidate.safeNextCommands,
+            "createdAt": ISO8601DateFormatter().string(from: candidate.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: candidate.updatedAt),
+        ]
+        if let confidence = candidate.confidence { dict["confidence"] = confidence }
+        if let sourceEvidenceID = candidate.sourceEvidenceID { dict["sourceEvidenceID"] = sourceEvidenceID }
+        if let sourceEvidenceRef = candidate.sourceEvidenceRef { dict["sourceEvidenceRef"] = sourceEvidenceRef }
+        if let relationID = candidate.acceptedRelationID { dict["acceptedRelationID"] = relationID }
+        if let note = candidate.decisionNote { dict["decisionNote"] = note }
+        if let reviewedAt = candidate.reviewedAt { dict["reviewedAt"] = ISO8601DateFormatter().string(from: reviewedAt) }
+        if let evidence = candidate.sourceEvidenceRecord { dict["sourceEvidenceRecord"] = sourceEvidenceRecordToDict(evidence) }
+        if !candidate.lifecycleHistory.isEmpty { dict["lifecycleHistory"] = candidate.lifecycleHistory.map(reviewLifecycleEventToDict) }
+        return dict
+    }
+
+    static func entityResolutionConflictToDict(_ conflict: SecondBrainEntityResolutionConflict) -> [String: Any] {
+        var dict: [String: Any] = [
+            "kind": conflict.kind,
+            "severity": conflict.severity,
+            "message": conflict.message,
+        ]
+        if let owner = conflict.conflictingOwner {
+            dict["conflictingOwner"] = ownerToDict(owner)
+            dict["conflictingOwnerRef"] = owner.canonicalRef
+        }
+        return dict
+    }
+
+    static func handleEntityCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first?.lowercased() ?? "list"
+        let service = SecondBrainCanonicalEntityService(database: .shared)
+        do {
+            switch action {
+            case "list", "ls":
+                let limit = parseFlag("--limit", from: args).flatMap(Int.init)
+                let payload = try entityListPayload(service: service, limit: limit)
+                if jsonOutput { outputJSON(payload) } else {
+                    print("Accepted canonical entities: \(payload["count"] ?? 0)")
+                    for entity in (payload["entities"] as? [[String: Any]]) ?? [] {
+                        print("  \(entity["displayName"] ?? "") — \(entity["ref"] ?? "")")
+                    }
+                }
+            case "inspect", "show", "get":
+                guard positional.count >= 2 else {
+                    printEntityInspectError(selector: "", error: SecondBrainCanonicalEntityLookupError.notFound(selector: ""))
+                    return
+                }
+                let selector = positional.dropFirst().joined(separator: " ")
+                let payload = try entityInspectPayload(selector: selector, service: service)
+                if jsonOutput { outputJSON(payload) } else {
+                    print("Entity: \((payload["acceptedCanonicalState"] as? [String: Any])?["displayName"] ?? selector)")
+                    print("  Truth: \(payload["truthState"] ?? "")")
+                }
+            default:
+                printCLIError("Usage: cider-cli item entity list [--limit <n>] [--json]\n       cider-cli item entity inspect <entity-ref|name|alias> [--json]")
+            }
+        } catch let error as SecondBrainCanonicalEntityLookupError {
+            printEntityInspectError(selector: positional.dropFirst().joined(separator: " "), error: error)
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func entityListPayload(
+        service: SecondBrainCanonicalEntityService = SecondBrainCanonicalEntityService(database: .shared),
+        limit: Int? = nil
+    ) throws -> [String: Any] {
+        let entities = try service.listEntities(limit: limit)
+        return [
+            "ok": true,
+            "command": "item.entity.list",
+            "readOnly": true,
+            "changed": false,
+            "truthBoundary": entityTruthBoundary(),
+            "count": entities.count,
+            "entities": entities.map(entitySummaryToDict),
+            "safeNextCommands": ["cider-cli item entity list --json"],
+        ]
+    }
+
+    static func entityInspectPayload(
+        selector: String,
+        service: SecondBrainCanonicalEntityService = SecondBrainCanonicalEntityService(database: .shared)
+    ) throws -> [String: Any] {
+        let inspection = try service.inspect(selector: selector)
+        let summary = inspection.summary
+        let reviewableCandidates = summary.reviewableCandidates.map(entityReviewableCandidateToDict)
+        let safeCommands = entityInspectSafeCommands(summary: summary, reviewableCandidates: summary.reviewableCandidates)
+        return [
+            "ok": true,
+            "command": "item.entity.inspect",
+            "readOnly": true,
+            "changed": false,
+            "selector": selector,
+            "truthState": "accepted_graph_truth",
+            "truthBoundary": entityTruthBoundary(),
+            "entity": entitySummaryToDict(summary),
+            "acceptedCanonicalState": entityAcceptedCanonicalStateToDict(summary),
+            "aliases": summary.aliases,
+            "sourceEvidence": inspection.sourceEvidence.map(entitySourceEvidenceToDict),
+            "acceptedRelations": inspection.relatedRelations.map(ownerRelationToDict),
+            "relatedAcceptedRelations": inspection.relatedRelations.map(ownerRelationToDict),
+            "reviewableCandidates": reviewableCandidates,
+            "reviewableMentions": reviewableCandidates,
+            "conflictCount": inspection.conflicts.count,
+            "conflicts": inspection.conflicts.map(entitySummaryToDict),
+            "safeNextCommands": safeCommands,
+            "safeCommands": safeCommands,
+        ]
+    }
+
+    static func entityInspectErrorPayload(
+        selector: String,
+        error: SecondBrainCanonicalEntityLookupError
+    ) -> [String: Any] {
+        switch error {
+        case .notFound(let selector):
+            return [
+                "ok": false,
+                "command": "item.entity.inspect",
+                "readOnly": true,
+                "changed": false,
+                "errorCode": "entity_not_found",
+                "message": error.localizedDescription,
+                "selector": selector,
+                "safeNextCommands": [
+                    "cider-cli item entity list --json",
+                    "cider-cli item graph-candidates --include-reviewed --json",
+                ],
+            ]
+        case .ambiguous(let selector, let matches):
+            return [
+                "ok": false,
+                "command": "item.entity.inspect",
+                "readOnly": true,
+                "changed": false,
+                "errorCode": "entity_lookup_ambiguous",
+                "message": error.localizedDescription,
+                "selector": selector,
+                "candidates": matches.map(entitySummaryToDict),
+                "safeNextCommands": ["cider-cli item entity list --json"] + matches.map { "cider-cli item entity inspect \($0.ref) --json" },
+            ]
+        }
+    }
+
+    static func printEntityInspectError(selector: String, error: SecondBrainCanonicalEntityLookupError) {
+        let payload = entityInspectErrorPayload(selector: selector, error: error)
+        if jsonOutput { outputJSON(payload) } else { printCLIError(payload["message"] as? String ?? error.localizedDescription) }
+    }
+
+    static func entitySummaryToDict(_ summary: SecondBrainCanonicalEntitySummary) -> [String: Any] {
+        [
+            "ref": summary.ref,
+            "owner": ownerToDict(summary.owner),
+            "stableKey": summary.stableKey,
+            "displayName": summary.displayName,
+            "label": summary.displayName,
+            "aliases": summary.aliases,
+            "possibleTypes": summary.possibleTypes,
+            "kind": summary.possibleTypes.first ?? "object",
+            "truthState": "accepted_graph_truth",
+            "acceptedAsTruth": true,
+            "sourceEvidenceCount": summary.sourceEvidenceCount,
+            "acceptedRelationCount": summary.acceptedRelationCount,
+            "acceptedFactCount": summary.acceptedRelationCount,
+            "reviewableCandidateCount": summary.reviewableCandidateCount,
+            "reviewableMentionCount": summary.reviewableCandidateCount,
+            "safeInspectCommand": "cider-cli item entity inspect \(summary.ref) --json",
+            "safeNextCommands": ["cider-cli item entity inspect \(summary.ref) --json"],
+        ]
+    }
+
+    static func entityAcceptedCanonicalStateToDict(_ summary: SecondBrainCanonicalEntitySummary) -> [String: Any] {
+        [
+            "ref": summary.ref,
+            "owner": ownerToDict(summary.owner),
+            "stableKey": summary.stableKey,
+            "displayName": summary.displayName,
+            "aliases": summary.aliases,
+            "possibleTypes": summary.possibleTypes,
+            "acceptedAsTruth": true,
+            "truthState": "accepted_graph_truth",
+            "approvalSource": "explicit_command",
+            "reviewSafety": entityTruthBoundary(),
+            "acceptedCandidateRefs": summary.acceptedOutputs.map { "graph_candidate:\($0.id)" },
+        ]
+    }
+
+    static func entitySourceEvidenceToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        let candidate = try? SecondBrainGraphCandidateContract.validate(output)
+        let sourceOwner = output.owner
+        var sourceItem: [String: Any] = [
+            "owner": ownerToDict(sourceOwner),
+            "ref": sourceOwner.canonicalRef,
+        ]
+        if sourceOwner.ownerType == "note",
+           let uuid = UUID(uuidString: sourceOwner.ownerID),
+           let note = NotesStorage.shared.notes.first(where: { $0.id == uuid }) {
+            sourceItem["title"] = note.title
+            sourceItem["relativePath"] = note.relativePath
+            sourceItem["createdAt"] = ISO8601DateFormatter().string(from: note.createdAt)
+            sourceItem["updatedAt"] = ISO8601DateFormatter().string(from: note.modifiedAt)
+        }
+        return [
+            "candidateID": output.id,
+            "candidateRef": "graph_candidate:\(output.id)",
+            "sourceOwner": ownerToDict(sourceOwner),
+            "sourceItem": sourceItem,
+            "sourceItemRef": sourceOwner.canonicalRef,
+            "sourceQuote": candidate?.sourceQuote ?? output.evidence,
+            "mentionText": candidate?.mentionText ?? output.value,
+            "reviewState": output.reviewState,
+            "truthState": "accepted_graph_truth",
+            "confidence": output.confidence as Any,
+            "safeNextCommands": graphCandidateSafeCommands(for: output),
+        ]
+    }
+
+    static func entityReviewableCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        var dict = graphCandidateToDict(output)
+        dict["truthState"] = "reviewable_candidate_not_truth"
+        dict["acceptedAsTruth"] = false
+        dict["reviewSafety"] = ["reviewable_candidate_not_truth", "accept_requires_explicit_command", "no_silent_merge"]
+        return dict
+    }
+
+    static func entityInspectSafeCommands(
+        summary: SecondBrainCanonicalEntitySummary,
+        reviewableCandidates: [SecondBrainEnrichmentOutput]
+    ) -> [String] {
+        var commands = [
+            "cider-cli item entity list --json",
+            "cider-cli item related-owners \(summary.owner.ownerType) \(summary.owner.ownerID) --json",
+        ]
+        commands.append(contentsOf: summary.acceptedOutputs.map { "cider-cli item graph-candidate \($0.id) --json" })
+        commands.append(contentsOf: reviewableCandidates.map { "cider-cli item graph-candidate \($0.id) --json" })
+        commands.append("cider-cli capture review-queue --kind graph_candidate --json")
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func entityTruthBoundary() -> [String] {
+        [
+            "accepted_graph_truth_only_from_explicit_accept",
+            "reviewable_candidates_are_not_truth",
+            "no_silent_merge_or_inference",
+            "source_quotes_retained",
+        ]
+    }
+
+    static func handleGraphCandidateMutationCommand(
+        action: String,
+        args: [String],
+        store: SecondBrainStore
+    ) {
+        let positional = leadingPositionalArgs(from: args)
+        guard let candidateID = parseFlag("--id", from: args)
+            ?? parseFlag("--candidate", from: args)
+            ?? positional.first else {
+            printCLIError("Usage: cider-cli item \(action)-graph-candidate <candidate-id> [--json]")
+            return
+        }
+
+        do {
+            let payload: [String: Any]
+            switch action {
+            case "accept":
+                payload = try acceptGraphCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "reject":
+                payload = try rejectGraphCandidatePayload(candidateID: candidateID, args: args, store: store)
+            case "delegate":
+                payload = try delegateGraphCandidatePayload(candidateID: candidateID, args: args, store: store)
+            default:
+                printCLIError("Unsupported graph candidate action '\(action)'.")
+                return
+            }
+
+            if jsonOutput {
+                persistActionReceiptIfPresent(payload)
+                outputJSON(payload)
+            } else {
+                print("\(payload["action"] ?? action) graph candidate: \(candidateID)")
+                print("  State: \(payload["reviewState"] ?? "")")
+            }
+        } catch let error as GraphCandidateMutationCLIError {
+            printGraphCandidateMutationError(error)
+        } catch {
+            printGraphCandidateMutationError(
+                GraphCandidateMutationCLIError(
+                    command: "item.\(action)-graph-candidate",
+                    errorCode: graphCandidateMutationErrorCode(error, action: action),
+                    message: error.localizedDescription,
+                    candidateID: candidateID,
+                    safeNextCommands: graphCandidateMutationFallbackCommands(candidateID: candidateID)
+                )
+            )
+        }
+    }
+
+    static func acceptGraphCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try graphCandidateOutputForMutation(candidateID, action: "accept", service: service)
+        let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        try requireReviewableGraphCandidate(candidate, action: "accept")
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "graph_candidate.accept"
+        let relationType = parseFlag("--relation", from: args)
+            ?? candidate.relationGuesses.first?.rawValue
+            ?? SecondBrainGraphCandidateContract.RelationType.mentions.rawValue
+        let targetOwner = try graphCandidateAcceptedTargetOwnerForMutation(candidate: candidate, args: args)
+        let relationSourceOwner = candidate.subjectOwner ?? output.owner
+        let conflicts = graphObjectHubConflicts(candidate: candidate, output: output)
+        let allowConflicts = args.contains("--allow-conflicts") || args.contains("--approve-conflicts")
+        if !conflicts.isEmpty && !allowConflicts {
+            throw GraphCandidateMutationCLIError(
+                command: "item.accept-graph-candidate",
+                errorCode: "graph_candidate_conflicts_block_accept",
+                message: "Graph candidate '\(candidateID)' has object hub conflicts and needs explicit --allow-conflicts approval before acceptance.",
+                candidateID: candidateID,
+                blockingIssues: ["graph_object_conflict"],
+                conflicts: conflicts,
+                safeNextCommands: graphCandidateConflictSafeCommands(output: output)
+            )
+        }
+        let aliases = graphCandidateAcceptedAliases(candidate: candidate, output: output, args: args)
+
+        var accepted = output
+        accepted.reviewState = SecondBrainGraphCandidateContract.ReviewState.accepted.rawValue
+        accepted.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerType] = targetOwner.ownerType
+        accepted.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerID] = targetOwner.ownerID
+        accepted.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedRelationType] = relationType
+        accepted.metadata["reviewed_at"] = ISO8601DateFormatter().string(from: Date())
+        accepted.metadata["reviewed_by"] = actor
+        accepted.metadata["accepted_source_owner_ref"] = output.owner.canonicalRef
+        accepted.metadata["accepted_relation_source_owner_ref"] = relationSourceOwner.canonicalRef
+        accepted.metadata["canonical_stable_key"] = graphObjectStableKey(for: candidate.mentionText)
+        accepted.metadata["canonical_display_name"] = graphObjectDisplayName(for: candidate.mentionText)
+        accepted.metadata["canonical_owner_ref"] = targetOwner.canonicalRef
+        accepted.metadata["canonical_aliases"] = DatabaseHelpers.encode(aliases)
+        accepted.metadata["canonical_approval_source"] = "explicit_command"
+        accepted.metadata["canonical_conflict_count"] = String(conflicts.count)
+        accepted.metadata["canonical_conflict_policy"] = conflicts.isEmpty ? "accepted_no_conflicts" : "accepted_with_explicit_conflict_override"
+        accepted.updatedAt = Date()
+        _ = try SecondBrainGraphCandidateContract.validate(accepted)
+
+        var relationMetadata = graphCandidateRelationMetadata(output: output, candidate: candidate, targetOwner: targetOwner)
+        relationMetadata["canonical_stable_key"] = graphObjectStableKey(for: candidate.mentionText)
+        relationMetadata["canonical_display_name"] = graphObjectDisplayName(for: candidate.mentionText)
+        relationMetadata["canonical_aliases"] = DatabaseHelpers.encode(aliases)
+        relationMetadata["approval_source"] = "explicit_command"
+        relationMetadata["conflict_policy"] = accepted.metadata["canonical_conflict_policy"]
+
+        let relation = SecondBrainRelation(
+            sourceOwner: relationSourceOwner,
+            targetOwner: targetOwner,
+            relationType: relationType,
+            evidence: candidate.sourceQuote,
+            source: source,
+            actor: actor,
+            confidence: output.confidence,
+            metadata: relationMetadata
+        )
+        let aliasRelations = graphCandidateAliasRelations(
+            aliases: aliases,
+            canonicalOwner: targetOwner,
+            output: output,
+            candidate: candidate,
+            actor: actor,
+            source: "graph_candidate.accept.alias"
+        )
+        let action = SecondBrainAgentAction(
+            owner: output.owner,
+            itemID: output.owner.ownerType == "note" ? output.owner.ownerID : nil,
+            toolName: "item.accept-graph-candidate",
+            actionType: "graph_candidate.accept",
+            source: source,
+            status: "succeeded",
+            summary: "Accepted graph candidate \(candidate.mentionText) as \(relationType) -> \(targetOwner.canonicalRef).",
+            argumentsJSON: DatabaseHelpers.encodeJSON([
+                "candidateID": output.id,
+                "actor": actor,
+                "targetOwner": targetOwner.canonicalRef,
+                "relationType": relationType,
+                "aliases": DatabaseHelpers.encode(aliases),
+                "allowConflicts": String(allowConflicts),
+            ]),
+            resultJSON: DatabaseHelpers.encodeJSON([
+                "reviewState": accepted.reviewState,
+                "relationID": relation.id,
+                "aliasRelationIDs": DatabaseHelpers.encode(aliasRelations.map(\.id)),
+            ])
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try store.recordRelation(relation)
+            for aliasRelation in aliasRelations {
+                try store.recordRelation(aliasRelation)
+            }
+            try service.record(accepted)
+            try store.recordAgentAction(action)
+        }
+
+        let safeCommands = graphCandidatePostMutationSafeCommands(output: accepted, targetOwner: targetOwner)
+        let aliasDecisions = aliasRelations.map { graphCandidateAliasDecisionToDict($0, canonicalOwner: targetOwner) }
+        let canonicalEntity = graphAcceptedCanonicalEntity(
+            output: accepted,
+            candidate: candidate,
+            targetOwner: targetOwner,
+            actor: actor,
+            aliases: aliases,
+            conflicts: conflicts,
+            relationIDs: [relation.id] + aliasRelations.map(\.id),
+            aliasDecisions: aliasDecisions
+        )
+        return [
+            "ok": true,
+            "command": "item.accept-graph-candidate",
+            "action": "accept",
+            "readOnly": false,
+            "changed": true,
+            "candidateID": output.id,
+            "candidateRef": "graph_candidate:\(output.id)",
+            "reviewState": accepted.reviewState,
+            "candidate": graphCandidateToDict(accepted),
+            "relation": ownerRelationToDict(relation),
+            "canonicalEntity": canonicalEntity,
+            "aliasDecisions": aliasDecisions,
+            "agentAction": agentActionToDict(action),
+            "actionReceipt": actionReceiptForCandidateMutation(
+                command: "item.accept-graph-candidate",
+                action: "accept",
+                actor: actor,
+                output: accepted,
+                candidateRefPrefix: "graph_candidate",
+                safeVerificationCommands: ["cider-cli item action-ledger list --owner \(accepted.owner.canonicalRef) --json"],
+                safeNextCommands: safeCommands
+            ),
+            "targetOwner": ownerToDict(targetOwner),
+            "safeNextCommands": safeCommands,
+            "safeCommands": safeCommands,
+        ]
+    }
+
+    static func rejectGraphCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try graphCandidateOutputForMutation(candidateID, action: "reject", service: service)
+        let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        try requireReviewableGraphCandidate(candidate, action: "reject")
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "graph_candidate.reject"
+        let reason = parseFlag("--reason", from: args) ?? "Rejected from graph candidate review."
+
+        var rejected = output
+        rejected.reviewState = SecondBrainGraphCandidateContract.ReviewState.rejected.rawValue
+        rejected.metadata["reviewed_at"] = ISO8601DateFormatter().string(from: Date())
+        rejected.metadata["reviewed_by"] = actor
+        rejected.metadata["rejection_reason"] = reason
+        rejected.updatedAt = Date()
+        _ = try SecondBrainGraphCandidateContract.validate(rejected)
+
+        let action = SecondBrainAgentAction(
+            owner: output.owner,
+            itemID: output.owner.ownerType == "note" ? output.owner.ownerID : nil,
+            toolName: "item.reject-graph-candidate",
+            actionType: "graph_candidate.reject",
+            source: source,
+            status: "succeeded",
+            summary: "Rejected graph candidate \(candidate.mentionText).",
+            argumentsJSON: DatabaseHelpers.encodeJSON([
+                "candidateID": output.id,
+                "actor": actor,
+                "reason": reason,
+            ]),
+            resultJSON: DatabaseHelpers.encodeJSON([
+                "reviewState": rejected.reviewState,
+            ])
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(rejected)
+            try store.recordAgentAction(action)
+        }
+
+        let safeCommands = graphCandidatePostMutationSafeCommands(output: rejected)
+        return [
+            "ok": true,
+            "command": "item.reject-graph-candidate",
+            "action": "reject",
+            "readOnly": false,
+            "changed": true,
+            "candidateID": output.id,
+            "candidateRef": "graph_candidate:\(output.id)",
+            "reviewState": rejected.reviewState,
+            "candidate": graphCandidateToDict(rejected),
+            "agentAction": agentActionToDict(action),
+            "actionReceipt": actionReceiptForCandidateMutation(
+                command: "item.reject-graph-candidate",
+                action: "reject",
+                actor: actor,
+                output: rejected,
+                candidateRefPrefix: "graph_candidate",
+                safeVerificationCommands: ["cider-cli item action-ledger list --owner \(rejected.owner.canonicalRef) --json"],
+                safeNextCommands: safeCommands
+            ),
+            "safeNextCommands": safeCommands,
+            "safeCommands": safeCommands,
+        ]
+    }
+
+    static func delegateGraphCandidatePayload(
+        candidateID: String,
+        args: [String],
+        store: SecondBrainStore
+    ) throws -> [String: Any] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        let output = try graphCandidateOutputForMutation(candidateID, action: "delegate", service: service)
+        let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        try requireReviewableGraphCandidate(candidate, action: "delegate")
+
+        let actor = parseFlag("--actor", from: args) ?? "user"
+        let source = parseFlag("--source", from: args) ?? "graph_candidate.delegate"
+        let requestedTaskKind = parseFlag("--task-kind", from: args) ?? parseFlag("--task", from: args)
+        let task = graphCandidateDelegationTask(
+            for: candidate,
+            output: output,
+            requestedKind: requestedTaskKind,
+            customInstructions: parseFlag("--instructions", from: args)
+        )
+        let instructions = task.instructions
+
+        var delegated = output
+        delegated.reviewState = SecondBrainGraphCandidateContract.ReviewState.deferred.rawValue
+        delegated.metadata["reviewed_at"] = ISO8601DateFormatter().string(from: Date())
+        delegated.metadata["reviewed_by"] = actor
+        delegated.metadata["delegation_status"] = "requested"
+        delegated.metadata["delegation_task_kind"] = task.kind
+        delegated.metadata["delegation_instructions"] = instructions
+        delegated.metadata["delegation_result_policy"] = task.resultPolicy
+        delegated.updatedAt = Date()
+        _ = try SecondBrainGraphCandidateContract.validate(delegated)
+
+        let action = SecondBrainAgentAction(
+            owner: output.owner,
+            itemID: output.owner.ownerType == "note" ? output.owner.ownerID : nil,
+            toolName: "item.delegate-graph-candidate",
+            actionType: "graph_candidate.delegate_enrichment",
+            source: source,
+            status: "requested",
+            summary: "Requested bounded enrichment for graph candidate \(candidate.mentionText).",
+            argumentsJSON: DatabaseHelpers.encodeJSON([
+                "candidateID": output.id,
+                "actor": actor,
+                "taskKind": task.kind,
+                "instructions": instructions,
+                "mentionText": candidate.mentionText,
+                "objectTypeGuesses": DatabaseHelpers.encode(candidate.objectTypeGuesses.map(\.rawValue)),
+                "relationGuesses": DatabaseHelpers.encode(candidate.relationGuesses.map(\.rawValue)),
+                "sourceQuote": candidate.sourceQuote,
+                "allowedSources": DatabaseHelpers.encode(task.allowedSources),
+            ]),
+            resultJSON: DatabaseHelpers.encodeJSON([
+                "reviewState": delegated.reviewState,
+                "resultPolicy": task.resultPolicy,
+            ])
+        )
+
+        try CiderDatabase.shared.withTransaction {
+            try service.record(delegated)
+            try store.recordAgentAction(action)
+        }
+
+        let safeCommands = graphCandidatePostMutationSafeCommands(output: delegated)
+        return [
+            "ok": true,
+            "command": "item.delegate-graph-candidate",
+            "action": "delegate",
+            "readOnly": false,
+            "changed": true,
+            "candidateID": output.id,
+            "candidateRef": "graph_candidate:\(output.id)",
+            "reviewState": delegated.reviewState,
+            "candidate": graphCandidateToDict(delegated),
+            "agentAction": agentActionToDict(action),
+            "actionReceipt": actionReceiptForCandidateMutation(
+                command: "item.delegate-graph-candidate",
+                action: "delegate",
+                actor: actor,
+                status: "requested",
+                output: delegated,
+                candidateRefPrefix: "graph_candidate",
+                safeVerificationCommands: ["cider-cli item action-ledger list --owner \(delegated.owner.canonicalRef) --json"],
+                safeNextCommands: safeCommands
+            ),
+            "delegation": [
+                "status": "requested",
+                "task": graphCandidateDelegationTaskToDict(task, candidateID: output.id),
+                "taskKind": task.kind,
+                "instructions": instructions,
+                "allowedSources": task.allowedSources,
+                "resultPolicy": task.resultPolicy,
+            ],
+            "safeNextCommands": safeCommands,
+            "safeCommands": safeCommands,
+        ]
+    }
+
+    static func graphCandidateOutput(
+        _ candidateID: String,
+        service: SecondBrainEnrichmentOutputService
+    ) throws -> SecondBrainEnrichmentOutput {
+        let normalizedID = candidateID
+            .replacingOccurrences(of: "graph_candidate:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let output = try service.output(id: normalizedID),
+              output.kind == SecondBrainGraphCandidateContract.outputKind else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Graph candidate '\(candidateID)' was not found."]
+            )
+        }
+        return output
+    }
+
+    static func graphCandidateOutputForMutation(
+        _ candidateID: String,
+        action: String,
+        service: SecondBrainEnrichmentOutputService
+    ) throws -> SecondBrainEnrichmentOutput {
+        do {
+            return try graphCandidateOutput(candidateID, service: service)
+        } catch {
+            throw GraphCandidateMutationCLIError(
+                command: "item.\(action)-graph-candidate",
+                errorCode: "graph_candidate_not_found",
+                message: error.localizedDescription,
+                candidateID: candidateID,
+                safeNextCommands: graphCandidateMutationFallbackCommands(candidateID: candidateID)
+            )
+        }
+    }
+
+    static func requireReviewableGraphCandidate(_ candidate: SecondBrainGraphCandidateContract.Candidate, action: String) throws {
+        guard candidate.reviewState.isReviewable else {
+            throw GraphCandidateMutationCLIError(
+                command: "item.\(action)-graph-candidate",
+                errorCode: "graph_candidate_not_reviewable",
+                message: "Graph candidate '\(candidate.id)' is \(candidate.reviewState.rawValue) and cannot be mutated by this review command.",
+                candidateID: candidate.id,
+                blockingIssues: ["candidate_already_reviewed"],
+                safeNextCommands: graphCandidateMutationFallbackCommands(candidateID: candidate.id)
+            )
+        }
+    }
+
+    static func graphCandidateAcceptedTargetOwner(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        args: [String]
+    ) throws -> SecondBrainOwnerRef {
+        if let rawOwner = parseFlag("--target-owner", from: args) {
+            return try ownerRefFromCanonical(rawOwner)
+        }
+        if let type = parseFlag("--target-owner-type", from: args),
+           let id = parseFlag("--target-owner-id", from: args) {
+            return normalizedOwner(type: type, ref: id)
+        }
+        let objectType = candidate.objectTypeGuesses.first?.rawValue ?? "object"
+        return SecondBrainOwnerRef(
+            ownerType: "graph_object",
+            ownerID: "\(objectType)-\(slugForGraphObject(candidate.mentionText))"
+        )
+    }
+
+    static func graphCandidateAcceptedTargetOwnerForMutation(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        args: [String]
+    ) throws -> SecondBrainOwnerRef {
+        do {
+            return try graphCandidateAcceptedTargetOwner(candidate: candidate, args: args)
+        } catch {
+            throw GraphCandidateMutationCLIError(
+                command: "item.accept-graph-candidate",
+                errorCode: "malformed_target_owner",
+                message: error.localizedDescription,
+                candidateID: candidate.id,
+                safeNextCommands: graphCandidateMutationFallbackCommands(candidateID: candidate.id)
+            )
+        }
+    }
+
+    static func ownerRefFromCanonical(_ raw: String) throws -> SecondBrainOwnerRef {
+        let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2,
+              !parts[0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !parts[1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Owner references must be '<owner-type>:<owner-id>'."]
+            )
+        }
+        return normalizedOwner(type: parts[0], ref: parts[1])
+    }
+
+    static func parseLinkedOwnerRefs(from args: [String]) throws -> [SecondBrainOwnerRef] {
+        try parseFlagAll("--linked-owner", from: args).map { raw in
+            do {
+                return try ownerRefFromCanonical(raw)
+            } catch {
+                throw NSError(
+                    domain: "CiderCLI",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "--linked-owner must be '<owner-type>:<owner-id>'; got '\(raw)'."]
+                )
+            }
+        }
+    }
+
+    static func slugForGraphObject(_ value: String) -> String {
+        let slug = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        return slug.isEmpty ? "object" : String(slug.prefix(80))
+    }
+
+    static func graphCandidateRelationMetadata(
+        output: SecondBrainEnrichmentOutput,
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        targetOwner: SecondBrainOwnerRef
+    ) -> [String: String] {
+        var metadata: [String: String] = [
+            "candidate_id": output.id,
+            "candidate_ref": "graph_candidate:\(output.id)",
+            "candidate_kind": candidate.kind.rawValue,
+            "mention_text": candidate.mentionText,
+            "source_quote": candidate.sourceQuote,
+            "source_owner_ref": output.owner.canonicalRef,
+            "target_owner_ref": targetOwner.canonicalRef,
+        ]
+        if let sourceKind = candidate.sourceKind {
+            metadata["source_kind"] = sourceKind
+        }
+        if let subjectText = candidate.subjectText {
+            metadata["subject_text"] = subjectText
+        }
+        if let confidenceReason = candidate.confidenceReason {
+            metadata["confidence_reason"] = confidenceReason
+        }
+        metadata["object_type_guesses"] = DatabaseHelpers.encode(candidate.objectTypeGuesses.map(\.rawValue))
+        metadata["relation_guesses"] = DatabaseHelpers.encode(candidate.relationGuesses.map(\.rawValue))
+        metadata["action_guesses"] = DatabaseHelpers.encode(candidate.actionGuesses)
+        return metadata
+    }
+
+    static func graphCandidateAcceptedAliases(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput,
+        args: [String]
+    ) -> [String] {
+        let explicitAliases = parseFlagAll("--alias", from: args)
+        let existingAliases = graphObjectAliases(from: [output] + graphObjectHubRelatedOutputs(stableKey: graphObjectStableKey(for: candidate.mentionText), currentOutput: output))
+        var seen = Set<String>()
+        return (existingAliases + explicitAliases).compactMap { raw in
+            let alias = graphObjectDisplayName(for: raw)
+            return seen.insert(alias.lowercased()).inserted ? alias : nil
+        }
+    }
+
+    static func graphObjectHubConflicts(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput
+    ) -> [[String: Any]] {
+        guard candidate.kind == .object || candidate.kind == .objectRelation else { return [] }
+        let stableKey = graphObjectStableKey(for: candidate.mentionText)
+        let currentTypes = candidate.objectTypeGuesses.map(\.rawValue)
+        return graphObjectHubRelatedOutputs(stableKey: stableKey, currentOutput: output).compactMap { relatedOutput -> [String: Any]? in
+            guard let relatedCandidate = try? SecondBrainGraphCandidateContract.validate(relatedOutput) else { return nil }
+            let relatedTypes = relatedCandidate.objectTypeGuesses.map(\.rawValue)
+            guard relatedTypes != currentTypes else { return nil }
+            return [
+                "candidateID": relatedOutput.id,
+                "candidateRef": "graph_candidate:\(relatedOutput.id)",
+                "stableKey": stableKey,
+                "displayName": graphObjectDisplayName(for: relatedCandidate.mentionText),
+                "possibleTypes": relatedTypes,
+                "reviewState": relatedCandidate.reviewState.rawValue,
+                "sourceOwner": ownerToDict(relatedOutput.owner),
+                "sourceQuote": relatedCandidate.sourceQuote,
+                "conflictReason": "same_stable_key_different_type_guesses",
+                "safeNextCommands": graphCandidateSafeCommands(for: relatedOutput),
+            ]
+        }
+    }
+
+    static func graphCandidateConflictSafeCommands(output: SecondBrainEnrichmentOutput) -> [String] {
+        var commands = graphCandidateSafeCommands(for: output)
+        commands.append("cider-cli item delegate-graph-candidate \(output.id) --task-kind find_object_evidence --json")
+        commands.append("cider-cli item reject-graph-candidate \(output.id) --reason \"conflicting object hub candidate\" --json")
+        commands.append("cider-cli item accept-graph-candidate \(output.id) --allow-conflicts --json")
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func graphCandidateAliasRelations(
+        aliases: [String],
+        canonicalOwner: SecondBrainOwnerRef,
+        output: SecondBrainEnrichmentOutput,
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        actor: String,
+        source: String
+    ) -> [SecondBrainRelation] {
+        aliases.filter { $0.caseInsensitiveCompare(graphObjectDisplayName(for: candidate.mentionText)) != .orderedSame }.map { alias in
+            let aliasOwner = SecondBrainOwnerRef(ownerType: "graph_alias", ownerID: slugForGraphObject(alias))
+            return SecondBrainRelation(
+                sourceOwner: aliasOwner,
+                targetOwner: canonicalOwner,
+                relationType: "alias_of",
+                evidence: candidate.sourceQuote,
+                source: source,
+                actor: actor,
+                confidence: output.confidence,
+                metadata: [
+                    "alias": alias,
+                    "canonical_owner_ref": canonicalOwner.canonicalRef,
+                    "candidate_id": output.id,
+                    "candidate_ref": "graph_candidate:\(output.id)",
+                    "source_quote": candidate.sourceQuote,
+                    "source_owner_ref": output.owner.canonicalRef,
+                    "approval_source": "explicit_command",
+                ]
+            )
+        }
+    }
+
+    static func graphCandidateAliasDecisionToDict(
+        _ relation: SecondBrainRelation,
+        canonicalOwner: SecondBrainOwnerRef
+    ) -> [String: Any] {
+        [
+            "id": relation.id,
+            "alias": relation.metadata["alias"] ?? relation.sourceOwner.ownerID,
+            "aliasOwner": ownerToDict(relation.sourceOwner),
+            "canonicalOwner": ownerToDict(canonicalOwner),
+            "relationType": relation.relationType,
+            "sourceQuote": relation.metadata["source_quote"] ?? relation.evidence,
+            "candidateRef": relation.metadata["candidate_ref"] ?? "",
+            "approvalSource": relation.metadata["approval_source"] ?? "explicit_command",
+            "safeNextCommands": [
+                "cider-cli item related-owners \(canonicalOwner.ownerType) \(canonicalOwner.ownerID) --json",
+                "cider-cli item graph-candidate \(relation.metadata["candidate_id"] ?? "") --json",
+            ],
+        ]
+    }
+
+    static func graphAcceptedCanonicalEntity(
+        output: SecondBrainEnrichmentOutput,
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        targetOwner: SecondBrainOwnerRef,
+        actor: String,
+        aliases: [String],
+        conflicts: [[String: Any]],
+        relationIDs: [String],
+        aliasDecisions: [[String: Any]]
+    ) -> [String: Any] {
+        let conflictPolicy = conflicts.isEmpty ? "accepted_no_conflicts" : "accepted_with_explicit_conflict_override"
+        var dict: [String: Any] = [
+            "stableKey": graphObjectStableKey(for: candidate.mentionText),
+            "displayName": graphObjectDisplayName(for: candidate.mentionText),
+            "owner": ownerToDict(targetOwner),
+            "canonicalOwner": ownerToDict(targetOwner),
+            "aliases": aliases,
+            "possibleTypes": candidate.objectTypeGuesses.map(\.rawValue),
+            "acceptedAsTruth": output.reviewState == SecondBrainGraphCandidateContract.ReviewState.accepted.rawValue,
+            "acceptedCandidateRef": "graph_candidate:\(output.id)",
+            "approvalSource": "explicit_command",
+            "acceptedBy": actor,
+            "sourceEvidence": graphObjectSourceEvidence(from: [output]),
+            "conflictCount": conflicts.count,
+            "conflicts": conflicts,
+            "conflictPolicy": conflictPolicy,
+            "blockingIssues": conflicts.isEmpty ? [] : ["conflicts_reviewed_by_explicit_override"],
+            "createdRelationRefs": relationIDs,
+            "aliasDecisions": aliasDecisions,
+            "reviewSafety": [
+                "accepted_by_explicit_command",
+                "source_citations_retained",
+                "no_silent_auto_merge",
+            ],
+            "safeNextCommands": graphCandidatePostMutationSafeCommands(output: output, targetOwner: targetOwner),
+        ]
+        if let confidence = output.confidence { dict["confidence"] = confidence }
+        if let confidenceReason = candidate.confidenceReason { dict["confidenceReason"] = confidenceReason }
+        return dict
+    }
+
+    struct GraphCandidateDelegationTask {
+        var kind: String
+        var label: String
+        var instructions: String
+        var allowedSources: [String]
+        var resultPolicy: String = "return_reviewable_evidence_not_truth"
+    }
+
+    static func graphCandidateDelegationTask(
+        for candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput,
+        requestedKind: String?,
+        customInstructions: String?
+    ) -> GraphCandidateDelegationTask {
+        let templates = graphCandidateDelegationTasks(for: candidate, output: output)
+        let normalizedRequestedKind: String?
+        if let requestedKind {
+            let trimmed = requestedKind.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalizedRequestedKind = trimmed.isEmpty ? nil : trimmed
+        } else {
+            normalizedRequestedKind = nil
+        }
+        if let customInstructions = customInstructions?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !customInstructions.isEmpty {
+            return GraphCandidateDelegationTask(
+                kind: normalizedRequestedKind ?? "custom_enrichment",
+                label: "Custom enrichment",
+                instructions: customInstructions,
+                allowedSources: graphCandidateDelegationAllowedSources(candidate: candidate, output: output)
+            )
+        }
+
+        if let requestedKind = normalizedRequestedKind {
+            if let task = templates.first(where: { $0.kind.caseInsensitiveCompare(requestedKind) == .orderedSame }) {
+                return task
+            }
+            return GraphCandidateDelegationTask(
+                kind: "custom_enrichment",
+                label: "Custom enrichment",
+                instructions: requestedKind,
+                allowedSources: graphCandidateDelegationAllowedSources(candidate: candidate, output: output)
+            )
+        }
+
+        return templates.first ?? GraphCandidateDelegationTask(
+            kind: "find_object_evidence",
+            label: "Find object evidence",
+            instructions: defaultGraphCandidateDelegationInstructions(candidate),
+            allowedSources: graphCandidateDelegationAllowedSources(candidate: candidate, output: output)
+        )
+    }
+
+    static func graphCandidateDelegationTasks(
+        for candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput
+    ) -> [GraphCandidateDelegationTask] {
+        let types = Set(candidate.objectTypeGuesses.map(\.rawValue))
+        let allowedSources = graphCandidateDelegationAllowedSources(candidate: candidate, output: output)
+        let mention = candidate.mentionText
+        let quote = candidate.sourceQuote
+        var tasks: [GraphCandidateDelegationTask] = []
+
+        if !types.isDisjoint(with: ["movie", "show", "media", "video"]) {
+            tasks.append(GraphCandidateDelegationTask(
+                kind: "find_media_match",
+                label: "Find media match",
+                instructions: "Find likely media matches for '\(mention)' using the source quote. Prefer IMDb, TMDb, Letterboxd, or YouTube identifiers when relevant. Return candidate matches with URLs, IDs, confidence, and evidence only; do not create accepted facts.",
+                allowedSources: allowedSources + ["IMDb", "TMDb", "Letterboxd", "YouTube"]
+            ))
+        }
+
+        if !types.isDisjoint(with: ["restaurant", "place", "trip"]) {
+            tasks.append(GraphCandidateDelegationTask(
+                kind: "find_place_match",
+                label: "Find place match",
+                instructions: "Find likely place or restaurant matches for '\(mention)' using the source quote. Return official site, map/listing URLs, location hints, confidence, and evidence only; do not create accepted facts.",
+                allowedSources: allowedSources + ["official site", "maps", "Yelp", "OpenTable", "Tripadvisor"]
+            ))
+        }
+
+        if !types.isDisjoint(with: ["recipe", "food", "drink"]) {
+            tasks.append(GraphCandidateDelegationTask(
+                kind: "find_recipe_or_menu_evidence",
+                label: "Find recipe or menu evidence",
+                instructions: "Find likely recipe, menu, food, or drink evidence for '\(mention)' using the source quote. Return candidate sources, confidence, and evidence only; do not create accepted facts.",
+                allowedSources: allowedSources + ["recipe sites", "restaurant menus", "source bookmark"]
+            ))
+        }
+
+        if types.contains("product") {
+            tasks.append(GraphCandidateDelegationTask(
+                kind: "find_product_match",
+                label: "Find product match",
+                instructions: "Find likely product matches for '\(mention)' using the source quote. Return product URLs, maker/store hints, confidence, and evidence only; do not create accepted facts.",
+                allowedSources: allowedSources + ["official product pages", "store pages", "source bookmark"]
+            ))
+        }
+
+        if types.contains("project") {
+            tasks.append(GraphCandidateDelegationTask(
+                kind: "inspect_project_source",
+                label: "Inspect project source",
+                instructions: "Inspect likely project sources for '\(mention)' using the source quote. Return repository/site URLs, owner/name hints, confidence, and evidence only; do not create accepted facts.",
+                allowedSources: allowedSources + ["GitHub", "project site", "source bookmark"]
+            ))
+        }
+
+        tasks.append(GraphCandidateDelegationTask(
+            kind: "find_object_evidence",
+            label: "Find object evidence",
+            instructions: defaultGraphCandidateDelegationInstructions(candidate) + " Source quote: \(quote)",
+            allowedSources: allowedSources
+        ))
+        return tasks
+    }
+
+    static func graphCandidateDelegationAllowedSources(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput
+    ) -> [String] {
+        var sources = [
+            "source owner \(output.owner.canonicalRef)",
+            "source quote",
+        ]
+        if let sourceKind = candidate.sourceKind {
+            sources.append("source kind \(sourceKind)")
+        }
+        if let url = output.metadata["url"] {
+            sources.append("captured URL \(url)")
+        }
+        var seen = Set<String>()
+        return sources.filter { seen.insert($0).inserted }
+    }
+
+    static func graphCandidateDelegationTaskToDict(
+        _ task: GraphCandidateDelegationTask,
+        candidateID: String
+    ) -> [String: Any] {
+        [
+            "kind": task.kind,
+            "label": task.label,
+            "instructions": task.instructions,
+            "allowedSources": task.allowedSources,
+            "resultPolicy": task.resultPolicy,
+            "command": "cider-cli item delegate-graph-candidate \(candidateID) --task-kind \(task.kind) --json",
+            "readOnly": false,
+            "status": "available",
+        ] as [String: Any]
+    }
+
+    static func defaultGraphCandidateDelegationInstructions(
+        _ candidate: SecondBrainGraphCandidateContract.Candidate
+    ) -> String {
+        let typeHint = candidate.objectTypeGuesses.map(\.rawValue).joined(separator: ", ")
+        let relationHint = candidate.relationGuesses.map(\.rawValue).joined(separator: ", ")
+        return "Find bounded supporting evidence or likely matches for '\(candidate.mentionText)'"
+            + (typeHint.isEmpty ? "" : " as \(typeHint)")
+            + (relationHint.isEmpty ? "" : " with relation \(relationHint)")
+            + ". Return candidates/evidence for review; do not create accepted facts."
+    }
+
+    static func graphCandidatePostMutationSafeCommands(
+        output: SecondBrainEnrichmentOutput,
+        targetOwner: SecondBrainOwnerRef? = nil
+    ) -> [String] {
+        var commands = graphCandidateSafeCommands(for: output, includeSelfInspect: true)
+        commands.append("cider-cli item graph-candidates \(output.owner.ownerType) \(output.owner.ownerID) --include-reviewed --json")
+        if let targetOwner {
+            commands.append("cider-cli item related-owners \(targetOwner.ownerType) \(targetOwner.ownerID) --json")
+        }
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func boundedGraphCandidateLimit(from args: [String]) -> Int {
+        let rawLimit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+        return min(max(rawLimit, 0), 100)
+    }
+
+    static func printGraphCandidateNotFound(_ candidateID: String) {
+        processExitCode = 1
+        let payload: [String: Any] = [
+            "ok": false,
+            "command": "item.graph-candidate",
+            "readOnly": true,
+            "changed": false,
+            "exists": false,
+            "candidateID": candidateID,
+            "error": "Graph candidate '\(candidateID)' was not found.",
+            "safeNextCommands": [
+                "cider-cli item graph-candidates --json",
+            ],
+        ]
+        if jsonOutput {
+            outputJSON(payload)
+        } else {
+            print("Graph candidate not found: \(candidateID)")
+        }
+    }
+
+    static func printGraphCandidateInspect(_ output: SecondBrainEnrichmentOutput) {
+        let safeCommands = graphCandidateSafeCommands(for: output, includeSelfInspect: false)
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "command": "item.graph-candidate",
+                "readOnly": true,
+                "changed": false,
+                "exists": true,
+                "candidate": graphCandidateToDict(output),
+                "safeNextCommands": safeCommands,
+                "safeCommands": safeCommands,
+            ])
+            return
+        }
+
+        let candidate = try? SecondBrainGraphCandidateContract.validate(output)
+        print("Graph candidate: \(output.id)")
+        print("  Owner: \(output.owner.canonicalRef)")
+        print("  State: \(output.reviewState)")
+        print("  Mention: \(candidate?.mentionText ?? output.value)")
+        print("  Quote: \(candidate?.sourceQuote ?? output.evidence)")
+        if !safeCommands.isEmpty {
+            print("  Safe commands:")
+            safeCommands.forEach { print("    \($0)") }
+        }
+    }
+
+    static func printGraphCandidateList(
+        _ outputs: [SecondBrainEnrichmentOutput],
+        owner: SecondBrainOwnerRef?,
+        includeReviewed: Bool,
+        limit: Int
+    ) {
+        let safeCommands = graphCandidateListSafeCommands(owner: owner)
+        if jsonOutput {
+            var payload: [String: Any] = [
+                "ok": true,
+                "command": "item.graph-candidates",
+                "readOnly": true,
+                "changed": false,
+                "count": outputs.count,
+                "limit": limit,
+                "includeReviewed": includeReviewed,
+                "candidates": outputs.map(graphCandidateToDict),
+                "safeNextCommands": safeCommands,
+                "safeCommands": safeCommands,
+            ]
+            if let owner {
+                payload["owner"] = ownerToDict(owner)
+            }
+            outputJSON(payload)
+            return
+        }
+
+        if outputs.isEmpty {
+            if let owner {
+                print("No graph candidates for \(owner.canonicalRef).")
+            } else {
+                print("No graph candidates.")
+            }
+            return
+        }
+        print("Graph candidates (\(outputs.count)):")
+        for output in outputs {
+            let candidate = try? SecondBrainGraphCandidateContract.validate(output)
+            print("  [\(output.id)] \(output.reviewState) \(candidate?.mentionText ?? output.value) - \(output.owner.canonicalRef)")
+        }
+    }
+
+    static func graphCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": output.id,
+            "ref": "graph_candidate:\(output.id)",
+            "owner": ownerToDict(output.owner),
+            "sourceOwner": ownerToDict(output.owner),
+            "kind": output.kind,
+            "mentionText": output.value,
+            "sourceQuote": output.evidence,
+            "label": output.label,
+            "source": output.source,
+            "reviewState": output.reviewState,
+            "metadata": output.metadata,
+            "createdAt": ISO8601DateFormatter().string(from: output.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: output.updatedAt),
+            "safeNextCommands": graphCandidateSafeCommands(for: output),
+            "reviewActionCommands": graphCandidateReviewActionCommands(for: output),
+        ]
+        if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
+        if let confidence = output.confidence { dict["confidence"] = confidence }
+        if let evidenceRecord = sourceEvidenceRecordToDict(for: output) { dict["sourceEvidenceRecord"] = evidenceRecord }
+        let lifecycle = lifecycleHistoryToDict(for: output)
+        if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
+
+        do {
+            let candidate = try SecondBrainGraphCandidateContract.validate(output)
+            dict["contractValid"] = true
+            dict["candidateKind"] = candidate.kind.rawValue
+            dict["mentionText"] = candidate.mentionText
+            dict["sourceQuote"] = candidate.sourceQuote
+            dict["reviewable"] = candidate.reviewState.isReviewable
+            dict["objectTypeGuesses"] = candidate.objectTypeGuesses.map(\.rawValue)
+            dict["relationGuesses"] = candidate.relationGuesses.map(\.rawValue)
+            dict["actionGuesses"] = candidate.actionGuesses
+            dict["safeActions"] = candidate.safeActions.map(\.rawValue)
+            dict["delegatedEnrichmentActions"] = graphCandidateDelegationTasks(for: candidate, output: output)
+                .map { graphCandidateDelegationTaskToDict($0, candidateID: output.id) }
+            if let sourceKind = candidate.sourceKind { dict["sourceKind"] = sourceKind }
+            if let confidenceReason = candidate.confidenceReason { dict["confidenceReason"] = confidenceReason }
+            let quality = CiderReviewQueueService.candidateQualitySignal(mentionText: candidate.mentionText, sourceQuote: candidate.sourceQuote)
+            dict["reviewFamily"] = "graph_candidate"
+            dict["truthState"] = candidate.reviewState == .accepted ? "accepted_graph_truth" : "reviewable_candidate_not_truth"
+            dict["extractionReason"] = "Cider extracted '\(candidate.mentionText)' from the exact source quote and inferred a reviewable graph candidate; it is not graph truth until explicitly accepted."
+            dict["proposedChange"] = [
+                "changeType": "graph_relation_candidate",
+                "mentionText": candidate.mentionText,
+                "relationType": candidate.relationGuesses.first?.rawValue ?? "mentions",
+                "targetKind": candidate.objectTypeGuesses.first?.rawValue ?? "object",
+                "truthState": candidate.reviewState == .accepted ? "accepted_graph_truth" : "reviewable_candidate_not_truth",
+            ]
+            dict["storage"] = [
+                "table": "enrichment_outputs",
+                "service": "SecondBrainEnrichmentOutputService",
+                "kind": SecondBrainGraphCandidateContract.outputKind,
+                "readModels": "CiderReviewQueueService.graphCandidateReviewItems; cider-cli item graph-candidate; cider-cli capture review-queue",
+            ]
+            dict["acceptEffect"] = "Accepting records an explicit cited graph relation/canonical object decision; extraction alone never writes graph truth."
+            dict["rejectEffect"] = "Rejecting marks this candidate rejected while preserving the source quote and audit trail."
+            dict["quality"] = [
+                "level": quality.level,
+                "codes": quality.codes,
+                "explanation": quality.explanation,
+            ] as [String: Any]
+            dict["qualityFlags"] = quality.codes
+            if let subjectText = candidate.subjectText { dict["subjectText"] = subjectText }
+            if let subjectOwner = candidate.subjectOwner { dict["subjectOwner"] = ownerToDict(subjectOwner) }
+            if let acceptedTargetOwner = candidate.acceptedTargetOwner { dict["acceptedTargetOwner"] = ownerToDict(acceptedTargetOwner) }
+            if let acceptedRelationType = candidate.acceptedRelationType { dict["acceptedRelationType"] = acceptedRelationType.rawValue }
+            if let objectHubCandidate = graphObjectHubCandidateToDict(candidate: candidate, output: output) {
+                dict["objectHubCandidate"] = objectHubCandidate
+            }
+        } catch {
+            dict["contractValid"] = false
+            dict["contractError"] = error.localizedDescription
+            dict["reviewable"] = ["suggested", "needs_review", "deferred"].contains(output.reviewState)
+            dict["objectTypeGuesses"] = DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses])
+            dict["relationGuesses"] = DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses])
+            dict["actionGuesses"] = DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.actionGuesses])
+            dict["safeActions"] = DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.safeActions])
+        }
+
+        return dict
+    }
+
+    static func graphObjectHubCandidateToDict(
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        output: SecondBrainEnrichmentOutput
+    ) -> [String: Any]? {
+        guard candidate.kind == .object || candidate.kind == .objectRelation else { return nil }
+        let stableKey = graphObjectStableKey(for: candidate.mentionText)
+        let relatedOutputs = graphObjectHubRelatedOutputs(stableKey: stableKey, currentOutput: output)
+        let aliases = graphObjectAliases(from: [output] + relatedOutputs)
+        let sourceEvidence = graphObjectSourceEvidence(from: [output] + relatedOutputs)
+        let conflicts = graphObjectHubConflicts(candidate: candidate, output: output)
+        var dict: [String: Any] = [
+            "stableKey": stableKey,
+            "displayName": graphObjectDisplayName(for: candidate.mentionText),
+            "aliases": aliases,
+            "possibleTypes": candidate.objectTypeGuesses.map(\.rawValue),
+            "reviewState": candidate.reviewState.rawValue,
+            "acceptedAsTruth": candidate.reviewState == .accepted,
+            "sourceEvidence": sourceEvidence,
+            "conflictCount": conflicts.count,
+            "conflicts": conflicts,
+            "reviewSafety": [
+                "reviewable_candidate_not_truth",
+                "accept_requires_explicit_command",
+                "no_auto_merge",
+            ],
+            "safeNextCommands": graphCandidateSafeCommands(for: output),
+        ]
+        if let confidence = candidate.confidence { dict["confidence"] = confidence }
+        if let confidenceReason = candidate.confidenceReason { dict["confidenceReason"] = confidenceReason }
+        if let subjectText = candidate.subjectText { dict["subjectText"] = subjectText }
+        if let subjectOwner = candidate.subjectOwner { dict["subjectOwner"] = ownerToDict(subjectOwner) }
+        if candidate.reviewState == .accepted,
+           let acceptedOwner = candidate.acceptedTargetOwner {
+            let acceptedAliases = DatabaseHelpers.decodeStringArray(output.metadata["canonical_aliases"])
+            dict["canonicalEntity"] = graphAcceptedCanonicalEntity(
+                output: output,
+                candidate: candidate,
+                targetOwner: acceptedOwner,
+                actor: output.metadata["reviewed_by"] ?? "unknown",
+                aliases: acceptedAliases.isEmpty ? aliases : acceptedAliases,
+                conflicts: conflicts,
+                relationIDs: [],
+                aliasDecisions: []
+            )
+        }
+        return dict
+    }
+
+    static func graphObjectHubRelatedOutputs(
+        stableKey: String,
+        currentOutput: SecondBrainEnrichmentOutput
+    ) -> [SecondBrainEnrichmentOutput] {
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        guard let outputs = try? service.outputs(
+            kind: SecondBrainGraphCandidateContract.outputKind,
+            reviewStates: nil,
+            limit: 500
+        ) else { return [] }
+        return outputs.filter { output in
+            output.id != currentOutput.id
+                && graphObjectStableKey(for: output.metadata[SecondBrainGraphCandidateContract.MetadataKey.mentionText] ?? output.value) == stableKey
+                && ((try? SecondBrainGraphCandidateContract.validate(output)).map { $0.kind == .object || $0.kind == .objectRelation } ?? false)
+        }
+    }
+
+    static func graphObjectAliases(from outputs: [SecondBrainEnrichmentOutput]) -> [String] {
+        var seen = Set<String>()
+        return outputs.compactMap { output in
+            let alias = graphObjectDisplayName(for: output.metadata[SecondBrainGraphCandidateContract.MetadataKey.mentionText] ?? output.value)
+            return seen.insert(alias.lowercased()).inserted ? alias : nil
+        }
+    }
+
+    static func graphObjectSourceEvidence(from outputs: [SecondBrainEnrichmentOutput]) -> [[String: Any]] {
+        outputs.compactMap { output in
+            guard let candidate = try? SecondBrainGraphCandidateContract.validate(output) else { return nil }
+            return [
+                "candidateID": output.id,
+                "candidateRef": "graph_candidate:\(output.id)",
+                "sourceOwner": ownerToDict(output.owner),
+                "sourceQuote": candidate.sourceQuote,
+                "mentionText": candidate.mentionText,
+                "reviewState": candidate.reviewState.rawValue,
+                "possibleTypes": candidate.objectTypeGuesses.map(\.rawValue),
+            ]
+        }
+    }
+
+    static func graphObjectStableKey(for mentionText: String) -> String {
+        let slug = mentionText
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return "graph_object:\(slug.isEmpty ? "unknown" : slug)"
+    }
+
+    static func graphObjectDisplayName(for mentionText: String) -> String {
+        let normalized = mentionText
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return "Unknown Object" }
+        return normalized.split(separator: " ").map { word in
+            let lower = word.lowercased()
+            return lower.prefix(1).uppercased() + lower.dropFirst()
+        }.joined(separator: " ")
+    }
+
+    static func graphCandidateSafeCommands(
+        for output: SecondBrainEnrichmentOutput,
+        includeSelfInspect: Bool = true
+    ) -> [String] {
+        var commands: [String] = []
+        if includeSelfInspect {
+            commands.append("cider-cli item graph-candidate \(output.id) --json")
+        }
+        commands.append(contextCommand(for: output.owner))
+        commands.append("cider-cli item graph-candidates \(output.owner.ownerType) \(output.owner.ownerID) --json")
+        commands.append("cider-cli capture review-queue --json")
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func graphCandidateListSafeCommands(owner: SecondBrainOwnerRef?) -> [String] {
+        var commands = ["cider-cli item graph-candidates --json"]
+        if let owner {
+            commands.insert(contextCommand(for: owner), at: 0)
+        }
+        commands.append("cider-cli capture review-queue --json")
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    static func graphCandidateReviewActionCommands(for output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
+        [
+            [
+                "action": "accept",
+                "command": "cider-cli item accept-graph-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": "available",
+            ],
+            [
+                "action": "reject",
+                "command": "cider-cli item reject-graph-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": "available",
+            ],
+            [
+                "action": "delegate",
+                "command": "cider-cli item delegate-graph-candidate \(output.id) --json",
+                "readOnly": false,
+                "status": "available",
+            ],
+        ]
+    }
+
+    static func contextCommand(for owner: SecondBrainOwnerRef) -> String {
+        switch owner.ownerType {
+        case "bookmark", "note", "dateCard", "contact", "todo", "vaultFile":
+            return "cider-cli item context \(owner.ownerType) \(owner.ownerID) --json"
+        case "kanban_card":
+            return "cider-cli item context card \(owner.ownerID) --json"
+        case "project":
+            return "cider-cli item project-context \(owner.ownerID) --json"
+        default:
+            return "cider-cli item owner-get \(owner.ownerType) \(owner.ownerID) --json"
+        }
     }
 
     static func handleItemDelete(
@@ -15326,23 +20937,122 @@ struct CiderCLI {
     static func similarityCandidateToDict(_ candidate: SecondBrainSimilarityCandidate) -> [String: Any] {
         var dict: [String: Any] = [
             "id": candidate.id,
+            "candidateRef": "similarity_candidate:\(candidate.id)",
             "sourceOwner": ownerToDict(candidate.sourceOwner),
             "targetOwner": ownerToDict(candidate.targetOwner),
             "candidateType": candidate.candidateType,
             "signal": candidate.signal,
             "score": candidate.score,
             "reason": candidate.reason,
+            "reasonCodes": candidate.metadata["reason_codes"]?.split(separator: ",").map(String.init) ?? [candidate.signal],
             "evidence": candidate.evidence,
             "source": candidate.source,
             "reviewState": candidate.reviewState,
+            "truthBoundary": candidate.reviewState == "accepted" ? "accepted_relation" : "reviewable_candidate_not_truth",
             "metadata": candidate.metadata,
+            "safeNextCommands": [
+                "cider-cli item similarity \(candidate.sourceOwner.ownerType) \(candidate.sourceOwner.ownerID) --json",
+                "cider-cli item accept-similarity \(candidate.id) --json",
+                "cider-cli item context \(candidate.sourceOwner.ownerType) \(candidate.sourceOwner.ownerID) --json",
+            ],
             "createdAt": ISO8601DateFormatter().string(from: candidate.createdAt),
             "updatedAt": ISO8601DateFormatter().string(from: candidate.updatedAt),
         ]
+        if let evidence = try? SecondBrainSourceEvidenceService(database: .shared).record(
+            derivedOwner: SecondBrainOwnerRef(ownerType: "similarity_candidate", ownerID: candidate.id)
+        ) {
+            dict["sourceEvidenceRecord"] = sourceEvidenceRecordToDict(evidence)
+        }
+        if let lifecycle = try? SecondBrainSimilarityCandidateService(database: .shared).lifecycleHistory(for: candidate), !lifecycle.isEmpty {
+            dict["lifecycleHistory"] = lifecycle.map(reviewLifecycleEventToDict)
+        }
         if let reviewedAt = candidate.reviewedAt {
             dict["reviewedAt"] = ISO8601DateFormatter().string(from: reviewedAt)
         }
         return dict
+    }
+
+    static func similarityRunToDict(_ run: SecondBrainSimilarityReconciliationRun) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": run.id,
+            "trigger": run.trigger,
+            "scope": run.scope,
+            "threshold": run.threshold,
+            "candidateLimit": run.candidateLimit,
+            "selectedCount": run.selectedCount,
+            "createdCount": run.createdCount,
+            "updatedCount": run.updatedCount,
+            "unchangedCount": run.unchangedCount,
+            "staleCount": run.staleCount,
+            "unseededCount": run.unseededCount,
+            "candidateFamilies": run.candidateFamilies,
+            "metadata": run.metadata,
+            "startedAt": ISO8601DateFormatter().string(from: run.startedAt),
+            "finishedAt": ISO8601DateFormatter().string(from: run.finishedAt),
+        ]
+        if let owner = run.owner { dict["owner"] = ownerToDict(owner) }
+        return dict
+    }
+
+    static func similarityHealthToDict(_ report: SecondBrainSimilarityHealthReport) -> [String: Any] {
+        var dict: [String: Any] = [
+            "totalCandidates": report.totalCandidates,
+            "staleCount": report.staleCount,
+            "unseededCount": report.unseededCount,
+            "candidateFamilies": report.candidateFamilies,
+            "safeRepairCommands": report.safeRepairCommands,
+            "checkedAt": ISO8601DateFormatter().string(from: report.checkedAt),
+        ]
+        if let owner = report.owner { dict["owner"] = ownerToDict(owner) }
+        if let lastRun = report.lastRun { dict["lastRun"] = similarityRunToDict(lastRun) }
+        return dict
+    }
+
+    static func printSimilarityHealth(_ report: SecondBrainSimilarityHealthReport, command: String) {
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "command": command,
+                "readOnly": true,
+                "changed": false,
+                "health": similarityHealthToDict(report),
+                "totalCandidates": report.totalCandidates,
+                "staleCount": report.staleCount,
+                "unseededCount": report.unseededCount,
+                "candidateFamilies": report.candidateFamilies,
+                "safeRepairCommands": report.safeRepairCommands,
+            ])
+        } else {
+            print("Similarity health: \(report.totalCandidates) candidates, \(report.unseededCount) unseeded, \(report.staleCount) stale")
+        }
+    }
+
+    static func printSimilarityReconcileResult(_ result: SecondBrainSimilarityReconcileResult, command: String) {
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "command": command,
+                "readOnly": false,
+                "changed": result.changed,
+                "truthBoundary": result.truthBoundary,
+                "owner": ownerToDict(result.owner),
+                "selectedCount": result.selectedCount,
+                "createdOrUpdatedCount": result.createdOrUpdatedCount,
+                "unchangedCount": result.unchangedCount,
+                "candidateCount": result.candidates.count,
+                "candidates": result.candidates.map(similarityCandidateToDict),
+                "health": similarityHealthToDict(result.health),
+                "run": similarityRunToDict(result.run),
+                "safeNextCommands": result.health.safeRepairCommands,
+                "safetyBoundary": [
+                    "similarity_candidates_are_reviewable_not_truth",
+                    "accept_requires_explicit_command",
+                    "no_silent_link_or_relation_promotion",
+                ],
+            ])
+        } else {
+            print("Reconciled similarity for \(result.owner.canonicalRef): \(result.candidates.count) candidates")
+        }
     }
 
     static func intelligenceDogfoodOwnerResultToDict(_ result: SecondBrainIntelligenceDogfoodOwnerResult) -> [String: Any] {
@@ -15375,6 +21085,140 @@ struct CiderCLI {
         payload["safeNextCommands"] = safeNextCommands
         payload["safeNextActions"] = safeNextCommands.map(intelligenceDogfoodSafeNextAction)
         return payload
+    }
+
+    static func journalBackfillOwnerResultToDict(_ result: SecondBrainJournalBackfillOwnerResult) -> [String: Any] {
+        var dict: [String: Any] = [
+            "owner": ownerToDict(result.owner),
+            "title": result.title,
+            "chunkCount": result.chunkCount,
+            "referenceCount": result.referenceCount,
+            "enrichmentOutputCount": result.enrichmentOutputCount,
+            "enrichmentKindCounts": result.enrichmentKindCounts,
+            "enrichmentReviewStates": result.enrichmentReviewStates,
+            "similarityCandidateCount": result.similarityCandidateCount,
+            "similarityReviewStates": result.similarityReviewStates,
+            "graphCandidateCount": result.graphCandidateCount,
+            "memoryCandidateCount": result.memoryCandidateCount,
+            "graphCandidates": result.graphCandidates.prefix(10).map(graphCandidateToDict),
+            "memoryCandidates": result.memoryCandidates.prefix(10).map(memoryCandidateToDict),
+        ]
+        if let date = result.date {
+            dict["date"] = date
+        }
+        return dict
+    }
+
+    static func journalBackfillResultToDict(_ result: SecondBrainJournalBackfillResult) -> [String: Any] {
+        let safeNextCommands = journalBackfillSafeNextCommands(for: result)
+        var payload: [String: Any] = [
+            "ok": true,
+            "command": "item.backfill-journals",
+            "changed": result.ownerCount > 0 && !result.dryRun,
+            "readOnly": result.dryRun,
+            "scope": result.scope,
+            "dryRun": result.dryRun,
+            "selectedCount": result.selectedCount,
+            "skippedCount": result.skippedCount,
+            "ownerCount": result.ownerCount,
+            "errorCount": result.errorCount,
+            "errors": result.errors.map(journalBackfillErrorToDict),
+            "limit": result.limit,
+            "threshold": result.threshold,
+            "candidateLimit": result.candidateLimit,
+            "chunkCount": result.chunkCount,
+            "referenceCount": result.referenceCount,
+            "enrichmentOutputCount": result.enrichmentOutputCount,
+            "similarityCandidateCount": result.similarityCandidateCount,
+            "graphCandidateCount": result.graphCandidateCount,
+            "memoryCandidateCount": result.memoryCandidateCount,
+            "reviewRequired": result.reviewRequired,
+            "owners": result.owners.map(journalBackfillOwnerResultToDict),
+            "safetyRule": result.dryRun
+                ? "Dry run only reports which Daily Journal notes would be reprocessed; it does not rebuild chunks, references, enrichment outputs, similarity candidates, graph candidates, or memory candidates."
+                : "Backfill reprocesses existing Daily Journal notes into chunks, references, enrichment outputs, similarity candidates, and reviewable graph/memory candidates; it does not create a new journal or silently accept graph/memory truth.",
+        ]
+        if let date = result.date {
+            payload["date"] = date
+        }
+        payload["safeNextCommands"] = safeNextCommands
+        payload["safeNextActions"] = safeNextCommands.map(journalBackfillSafeNextAction)
+        return payload
+    }
+
+    static func journalBackfillErrorToDict(_ error: SecondBrainJournalBackfillError) -> [String: Any] {
+        var dict: [String: Any] = [
+            "owner": ownerToDict(error.owner),
+            "title": error.title,
+            "message": error.message,
+        ]
+        if let date = error.date {
+            dict["date"] = date
+        }
+        return dict
+    }
+
+    static func journalBackfillSafeNextCommands(for result: SecondBrainJournalBackfillResult) -> [String] {
+        var commands: [String] = [
+            "cider-cli item graph-health --json",
+        ]
+        if result.reviewRequired {
+            commands.insert("cider-cli capture review-queue --limit 20 --json", at: 0)
+        }
+        for owner in result.owners.prefix(5) {
+            commands.append("cider-cli item context \(owner.owner.ownerType) \(owner.owner.ownerID) --json")
+            if owner.graphCandidateCount > 0 {
+                commands.append("cider-cli item graph-candidates \(owner.owner.ownerType) \(owner.owner.ownerID) --json")
+            }
+        }
+        return Array(NSOrderedSet(array: commands).compactMap { $0 as? String })
+    }
+
+    static func journalBackfillSafeNextAction(for command: String) -> [String: Any] {
+        let reason: String
+        if command.contains(" capture review-queue ") {
+            reason = "review_backfilled_journal_candidates"
+        } else if command.contains(" graph-health ") {
+            reason = "verify_graph_intelligence_counts"
+        } else if command.contains(" graph-candidates ") {
+            reason = "inspect_backfilled_graph_candidates"
+        } else if command.contains(" item context ") {
+            reason = "inspect_backfilled_journal_context"
+        } else {
+            reason = "inspect_backfilled_journal_intelligence"
+        }
+        return [
+            "command": command,
+            "readOnly": true,
+            "requiresApproval": false,
+            "reason": reason,
+        ]
+    }
+
+    static func printJournalBackfillResult(_ result: SecondBrainJournalBackfillResult) {
+        if jsonOutput {
+            outputJSON(journalBackfillResultToDict(result))
+            return
+        }
+
+        let mode = result.dryRun ? "Would backfill" : "Backfilled"
+        let dateSuffix = result.date.map { " for \($0)" } ?? ""
+        print("\(mode) \(result.ownerCount) Daily Journal note(s)\(dateSuffix).")
+        print("  Selected: \(result.selectedCount)")
+        print("  Skipped: \(result.skippedCount)")
+        print("  Errors: \(result.errorCount)")
+        print("  Chunks: \(result.chunkCount)")
+        print("  References: \(result.referenceCount)")
+        print("  Enrichment outputs: \(result.enrichmentOutputCount)")
+        print("  Similarity candidates: \(result.similarityCandidateCount)")
+        print("  Graph candidates: \(result.graphCandidateCount)")
+        print("  Memory candidates: \(result.memoryCandidateCount)")
+        if result.reviewRequired {
+            print("  Review required before applying generated graph or memory suggestions.")
+        }
+        for owner in result.owners {
+            print("  \(owner.owner.canonicalRef): \(owner.chunkCount) chunk(s), \(owner.graphCandidateCount) graph candidate(s), \(owner.memoryCandidateCount) memory candidate(s)")
+        }
     }
 
     static func intelligenceDogfoodSafeNextCommands(for result: SecondBrainIntelligenceDogfoodResult) -> [String] {
@@ -15436,6 +21280,8 @@ struct CiderCLI {
             var payload: [String: Any] = [
                 "ok": true,
                 "command": command,
+                "readOnly": true,
+                "changed": false,
                 "owner": ownerToDict(owner),
                 "candidates": candidates.map(similarityCandidateToDict),
             ]
@@ -15484,6 +21330,13 @@ struct CiderCLI {
             "ownerRelations": packet.ownerRelations.map(ownerRelationToDict),
             "relationCandidates": packet.relationCandidates.map(similarityCandidateToDict),
             "backlinks": packet.backlinks.map(ownerRelationToDict),
+            "sourceEvidence": sourceEvidenceToDict(
+                owner: packet.owner,
+                ownerRelations: packet.ownerRelations,
+                backlinks: packet.backlinks,
+                relationCandidates: packet.relationCandidates
+            ),
+            "memoryCandidates": packet.memoryCandidates.map(memoryCandidateToDict),
             "captureProvenance": packet.captureProvenance.map(captureProvenanceToDict),
             "surfacing": surfacingExplanationToDict(packet.surfacing),
             "recentHistory": packet.recentHistory.map(itemAgentContextHistoryToDict),
@@ -15508,7 +21361,10 @@ struct CiderCLI {
         let hasSuggestedRelationCandidates = packet.relationCandidates.contains {
             $0.reviewState == "suggested" || $0.reviewState == "needs_review"
         }
-        let needsReview = reviewStatus == "needs_review" || hasSuggestedRelationCandidates
+        let hasSuggestedMemoryCandidates = packet.memoryCandidates.contains {
+            $0.reviewState == "suggested" || $0.reviewState == "needs_review"
+        }
+        let needsReview = reviewStatus == "needs_review" || hasSuggestedRelationCandidates || hasSuggestedMemoryCandidates
         let needsRouting = reviewStatus == "needs_review" || packet.review?.targetPath != nil
         var blockingIssues: [String] = []
         if reviewStatus == "needs_review" {
@@ -15517,6 +21373,9 @@ struct CiderCLI {
         if hasSuggestedRelationCandidates {
             blockingIssues.append("relation_candidates_need_review")
         }
+        if hasSuggestedMemoryCandidates {
+            blockingIssues.append("memory_candidates_need_review")
+        }
         return CiderAgentDecisionContract.dictionary(
             saved: true,
             needsReview: needsReview,
@@ -15524,7 +21383,7 @@ struct CiderCLI {
             needsRouting: needsRouting,
             confidence: packet.review?.confidence,
             blockingIssues: blockingIssues,
-            recommendedNextAction: reviewStatus == "needs_review" ? "review_route" : (hasSuggestedRelationCandidates ? "review_relation_candidates" : packet.surfacing.suggestedAction),
+            recommendedNextAction: reviewStatus == "needs_review" ? "review_route" : (hasSuggestedRelationCandidates ? "review_relation_candidates" : (hasSuggestedMemoryCandidates ? "review_memory_candidates" : packet.surfacing.suggestedAction)),
             safeNextCommands: packet.safeCommands
         )
     }
@@ -15588,7 +21447,7 @@ struct CiderCLI {
     }
 
     static func itemAgentContextHistoryToDict(_ entry: CiderItemAgentContextHistoryEntry) -> [String: Any] {
-        [
+        var dict: [String: Any] = [
             "id": entry.id,
             "kind": entry.kind,
             "summary": entry.summary,
@@ -15596,6 +21455,14 @@ struct CiderCLI {
             "status": entry.status,
             "createdAt": ISO8601DateFormatter().string(from: entry.createdAt),
         ]
+        if let command = entry.command { dict["command"] = command }
+        if let action = entry.action { dict["action"] = action }
+        if let readOnly = entry.readOnly { dict["readOnly"] = readOnly }
+        if let changed = entry.changed { dict["changed"] = changed }
+        if !entry.sourceRefs.isEmpty { dict["sourceRefs"] = entry.sourceRefs }
+        if !entry.evidenceRefs.isEmpty { dict["evidenceRefs"] = entry.evidenceRefs }
+        if !entry.safeVerificationCommands.isEmpty { dict["safeVerificationCommands"] = entry.safeVerificationCommands }
+        return dict
     }
 
     static func itemSearchResultToDict(_ result: CiderItemSearchResult) -> [String: Any] {
@@ -16661,12 +22528,41 @@ struct CiderCLI {
         target: LibraryEntityRef,
         service: ItemLinkService
     ) {
+        let command = action == "linked" ? "link.add" : "link.remove"
+        let receiptAction = action == "linked" ? "link" : "unlink"
+        let sourceRef = ownerRefString(for: source)
+        let targetRef = ownerRefString(for: target)
+        let receipt = agentActionReceiptToDict(
+            command: command,
+            action: receiptAction,
+            actor: "cider-cli",
+            owner: SecondBrainOwnerRef(ownerType: source.type.rawValue, ownerID: source.entityID.uuidString),
+            sourceRefs: [sourceRef, targetRef],
+            evidenceRefs: [targetRef],
+            readOnly: false,
+            changed: true,
+            safeVerificationCommands: [
+                "cider-cli link related \(source.type.rawValue) \(source.entityID.uuidString) --json",
+                "cider-cli item action-ledger list --owner \(sourceRef) --json",
+            ],
+            safeNextCommands: [
+                "cider-cli item context \(source.type.rawValue) \(source.entityID.uuidString) --json",
+                "cider-cli item context \(target.type.rawValue) \(target.entityID.uuidString) --json",
+            ]
+        )
+        let payload: [String: Any] = [
+            "ok": true,
+            "command": command,
+            "action": receiptAction,
+            "readOnly": false,
+            "changed": true,
+            "source": linkRefToDict(source, service: service),
+            "target": linkRefToDict(target, service: service),
+            "actionReceipt": receipt,
+        ]
+        persistActionReceiptIfPresent(payload)
         if jsonOutput {
-            outputJSON([
-                "action": action,
-                "source": linkRefToDict(source, service: service),
-                "target": linkRefToDict(target, service: service)
-            ])
+            outputJSON(payload)
         } else {
             let sourceTitle = service.summary(for: source)?.title ?? source.entityID.uuidString
             let targetTitle = service.summary(for: target)?.title ?? target.entityID.uuidString
@@ -16956,6 +22852,7 @@ struct CiderCLI {
           cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
           cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
           cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
+          cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
           cider-cli item sync-project <project-id-or-name> [--json]
 
         DOCTOR

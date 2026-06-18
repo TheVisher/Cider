@@ -64,6 +64,37 @@ struct CiderBookmarkDateSuggestionServiceTests {
         #expect(results.isEmpty)
     }
 
+    @Test("bookmark thumbnail OCR does not create date suggestions")
+    func bookmarkThumbnailOCRDoesNotCreateDateSuggestions() {
+        var bookmark = Bookmark(
+            title: "Remindio reminder app inspiration",
+            urlString: "https://example.com/remindio",
+            notes: "Saved as product inspiration; screenshots are examples, not user reminders."
+        )
+        bookmark.ocrText = "Example reminders: Appointment June 12, 2026; Event July 4, 2026; Deadline August 1, 2026"
+
+        let suggestions = CiderBookmarkDateSuggestionService().suggestions(for: bookmark)
+
+        #expect(suggestions.isEmpty)
+    }
+
+    @Test("bookmark page text still creates date suggestions")
+    func bookmarkPageTextStillCreatesDateSuggestions() throws {
+        var bookmark = Bookmark(
+            id: UUID(uuidString: "55555555-5555-5555-5555-555555555555")!,
+            title: "Forza Horizon 6",
+            urlString: "https://example.com/forza-horizon-6",
+            notes: ""
+        )
+        bookmark.aiSummary = "Official page says the game releases October 23, 2026."
+
+        let suggestions = CiderBookmarkDateSuggestionService().suggestions(for: bookmark)
+
+        let suggestion = try #require(suggestions.first)
+        #expect(suggestion.kind == "release_date")
+        #expect(suggestion.sourceField == "aiSummary")
+    }
+
     @Test("date suggestion JSON exposes agent safe fields")
     func dateSuggestionJSONExposesAgentSafeFields() throws {
         let suggestion = CiderBookmarkDateSuggestion(

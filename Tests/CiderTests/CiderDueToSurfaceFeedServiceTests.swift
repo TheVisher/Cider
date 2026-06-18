@@ -1,0 +1,107 @@
+import XCTest
+@testable import Cider
+
+final class CiderDueToSurfaceFeedServiceTests: XCTestCase {
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+
+    private func date(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 9) -> Date {
+        calendar.date(from: DateComponents(timeZone: calendar.timeZone, year: year, month: month, day: day, hour: hour))!
+    }
+
+    func testDueToSurfaceFeedCombinesAgendaReviewStaleCaptureAndLinkedContextWithEvidence() throws {
+        let now = date(2026, 6, 15)
+        let dueTodo = TodoCard(title: "Pay rent", dueDate: now, priority: .high, actionURLString: "https://rent.example.com")
+        let completedTodo = TodoCard(title: "Pay insurance", dueDate: now, isCompleted: true, completedAt: now)
+        let dueDateCard = DateCard(title: "Dinner with Jami", startAt: now)
+        let staleNote = CiderDueToSurfaceStaleCapture(
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: "stale-note"),
+            title: "Inbox capture about Pine House",
+            itemType: "note",
+            relativePath: "Inbox/Notes/Pine House.md",
+            createdAt: date(2026, 6, 10),
+            updatedAt: date(2026, 6, 10),
+            reasonCodes: ["inbox_unfiled", "stale_capture"]
+        )
+        let staleNoteID = UUID()
+        let reviewItem = CiderReviewQueueItem(
+            id: "review-1",
+            kind: "graph_candidate",
+            source: "enrichment_outputs",
+            itemID: staleNoteID,
+            itemType: "note",
+            title: "Pine House graph candidate",
+            relativePath: nil,
+            reason: "review graph candidate",
+            reasonCodes: ["graph_candidate", "reviewable_candidate"],
+            suggestedAction: "review_graph_candidate",
+            reviewState: "suggested",
+            createdAt: now,
+            safeActions: ["inspect"],
+            candidateID: "gc-1",
+            candidateRef: "graph_candidate:gc-1",
+            sourceQuote: "We went to Pine House.",
+            safeNextCommands: ["cider-cli item graph-candidate gc-1 --json"],
+            reviewFamily: "graph_candidate"
+        )
+        let linked = CiderDueToSurfaceLinkedContext(
+            id: "sim-1",
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: "stale-note"),
+            targetOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: "other-note"),
+            title: "Potential Pine House context link",
+            reason: "Similarity candidate can connect this capture to related context.",
+            reasonCodes: ["similarity_candidate", "chunk_overlap"],
+            confidence: 0.72,
+            reviewState: "suggested",
+            evidenceRef: "source_evidence:e1",
+            safeNextCommands: ["cider-cli item similarity note stale-note --json"]
+        )
+
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [dueTodo, completedTodo], dateCards: [dueDateCard], now: now, calendar: calendar),
+            reviewItems: [reviewItem],
+            staleCaptures: [staleNote],
+            linkedContext: [linked],
+            now: now,
+            limit: 20
+        )
+
+        XCTAssertEqual(feed.command, "item.due-to-surface")
+        XCTAssertFalse(feed.changed)
+        XCTAssertEqual(feed.candidates.count, 5)
+        XCTAssertTrue(feed.candidates.contains { $0.family == .agenda && $0.owner.ownerID == dueTodo.id.uuidString })
+        let dateCardCandidate = try XCTUnwrap(feed.candidates.first { $0.family == .agenda && $0.owner.ownerID == dueDateCard.id.uuidString })
+        XCTAssertEqual(dateCardCandidate.owner.ownerType, "dateCard")
+        XCTAssertTrue(dateCardCandidate.sourceRefs.contains("dateCard:\(dueDateCard.id.uuidString)"))
+        XCTAssertTrue(dateCardCandidate.safeNextCommands.contains("cider-cli item why-surfaced dateCard \(dueDateCard.id.uuidString) --json"))
+        XCTAssertFalse(dateCardCandidate.safeNextCommands.contains { $0.contains("date_card") })
+        XCTAssertFalse(feed.candidates.contains { $0.title == "Pay insurance" })
+        XCTAssertTrue(feed.candidates.contains { $0.family == .reviewItem && $0.reasonCodes.contains("reviewable_candidate") && $0.truthBoundary == "reviewable_candidate_not_truth" })
+        XCTAssertTrue(feed.candidates.contains { $0.family == .staleCapture && $0.reasonCodes.contains("stale_capture") })
+        XCTAssertTrue(feed.candidates.contains { $0.family == .linkedContext && $0.citedEvidence.contains { $0.ref == "source_evidence:e1" } })
+        XCTAssertTrue(feed.safeNextCommands.contains("cider-cli item due-to-surface --json"))
+    }
+
+    func testDueToSurfaceFeedOrdersByUrgencyScoreAndKeepsReviewStateSuggested() {
+        let now = date(2026, 6, 15)
+        let overdue = TodoCard(title: "Overdue task", dueDate: date(2026, 6, 14))
+        let upcoming = TodoCard(title: "Upcoming task", dueDate: date(2026, 6, 18))
+
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [upcoming, overdue], dateCards: [], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+
+        XCTAssertEqual(feed.candidates.map(\.title).prefix(2), ["Overdue task", "Upcoming task"])
+        XCTAssertTrue(feed.candidates.allSatisfy { $0.truthBoundary == "reviewable_candidate_not_truth" || $0.truthBoundary == "agenda_read_model_not_mutation" })
+        XCTAssertEqual(feed.candidates.first?.urgency, "overdue")
+        XCTAssertEqual(feed.candidates.first?.reviewState, "overdue")
+    }
+}

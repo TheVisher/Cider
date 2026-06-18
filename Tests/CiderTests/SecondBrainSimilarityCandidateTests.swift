@@ -94,6 +94,90 @@ struct SecondBrainSimilarityCandidateTests {
         #expect(relations[0].metadata["candidate_id"] == candidate.id)
     }
 
+    @Test("similarity health reports unseeded owners and safe repair commands")
+    func similarityHealthReportsUnseededOwnersAndSafeRepairCommands() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let near = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        try insertNoteItem(owner: owner, title: "Launch graph", into: db)
+        try insertNoteItem(owner: near, title: "Launch roadmap", into: db)
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: owner, chunks: [
+            chunk(owner: owner, body: "Cider graph launch roadmap agent context Apple Park")
+        ])
+        try store.replaceChunks(owner: near, chunks: [
+            chunk(owner: near, body: "Apple Park product launch roadmap for Cider agent context")
+        ])
+
+        let service = SecondBrainSimilarityCandidateService(database: db, store: store)
+        let initialHealth = try service.health(owner: owner, staleAfter: 60)
+
+        #expect(initialHealth.totalCandidates == 0)
+        #expect(initialHealth.unseededCount == 1)
+        #expect(initialHealth.staleCount == 0)
+        #expect(initialHealth.candidateFamilies["chunk_overlap"] == 0)
+        #expect(initialHealth.safeRepairCommands.contains { $0.contains("item similarity-health note \(owner.ownerID)") })
+        #expect(initialHealth.safeRepairCommands.contains { $0.contains("item reconcile-similarity note \(owner.ownerID)") })
+
+        let result = try service.reconcile(owner: owner, threshold: 0.35, limit: 10, actor: "test")
+        let seededHealth = try service.health(owner: owner, staleAfter: 60)
+
+        #expect(result.changed == true)
+        #expect(result.createdOrUpdatedCount == 1)
+        #expect(seededHealth.totalCandidates == 1)
+        #expect(seededHealth.unseededCount == 0)
+        #expect(seededHealth.candidateFamilies["chunk_overlap"] == 1)
+        #expect(seededHealth.lastRun?.trigger == "manual_reconcile")
+        #expect(seededHealth.lastRun?.owner == owner)
+    }
+
+    @Test("similarity reconciliation seeds reviewable candidates with evidence lifecycle and is idempotent")
+    func similarityReconciliationSeedsReviewableEvidenceLifecycleCandidatesIdempotently() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let near = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        try insertNoteItem(owner: owner, title: "Launch graph", into: db)
+        try insertNoteItem(owner: near, title: "Launch roadmap", into: db)
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: owner, chunks: [
+            chunk(owner: owner, body: "Cider graph launch roadmap agent context Apple Park")
+        ])
+        try store.replaceChunks(owner: near, chunks: [
+            chunk(owner: near, body: "Apple Park product launch roadmap for Cider agent context")
+        ])
+
+        let service = SecondBrainSimilarityCandidateService(database: db, store: store)
+        let first = try service.reconcile(owner: owner, threshold: 0.35, limit: 10, actor: "test")
+        let candidates = try service.candidates(for: owner)
+        let candidate = try #require(candidates.first)
+        let evidence = try #require(try service.sourceEvidenceRecord(for: candidate))
+        let lifecycle = try service.lifecycleHistory(for: candidate)
+        let relations = try store.outgoingRelations(for: owner)
+
+        #expect(first.createdOrUpdatedCount == 1)
+        #expect(candidate.reviewState == "suggested")
+        #expect(candidate.metadata["truth_boundary"] == "reviewable_candidate_not_truth")
+        #expect(candidate.metadata["reason_codes"]?.contains("chunk_overlap") == true)
+        #expect(evidence.derivedOwner == SecondBrainOwnerRef(ownerType: "similarity_candidate", ownerID: candidate.id))
+        #expect(evidence.candidateRef == "similarity_candidate:\(candidate.id)")
+        #expect(evidence.sourceOwner == owner)
+        #expect(evidence.sourceQuote == candidate.evidence)
+        #expect(lifecycle.map(\.eventKind).contains("suggested"))
+        #expect(lifecycle.last?.metadata["truth_boundary"] == "reviewable_candidate_not_truth")
+        #expect(relations.isEmpty)
+
+        let second = try service.reconcile(owner: owner, threshold: 0.35, limit: 10, actor: "test")
+        let candidatesAfterSecondRun = try service.candidates(for: owner)
+
+        #expect(second.changed == false)
+        #expect(candidatesAfterSecondRun.count == 1)
+        #expect(candidatesAfterSecondRun.first?.id == candidate.id)
+    }
+
     @Test("entity enrichment creates reviewable contact relation candidates")
     func entityEnrichmentCreatesReviewableContactRelationCandidates() throws {
         let (db, url) = try makeTestDB()

@@ -194,7 +194,7 @@ extension AppDelegate {
         CiderSoundEffect.clipboardReview.play()
         stopBookmarkClipboardReviewTimer()
         bookmarkClipboardReviewIsHovering = false
-        bookmarkClipboardReviewRemaining = BookmarksToastDesign.reviewAutoHideDuration
+        bookmarkClipboardReviewTimerState.start(now: Date())
         bookmarkClipboardReviewToastModel.progress = 1
         bookmarkCaptureToastHideWorkItem?.cancel()
         bookmarkCaptureToastHideWorkItem = nil
@@ -262,7 +262,7 @@ extension AppDelegate {
         CiderSoundEffect.clipboardReview.play()
         stopBookmarkClipboardReviewTimer()
         bookmarkClipboardReviewIsHovering = false
-        bookmarkClipboardReviewRemaining = BookmarksToastDesign.reviewAutoHideDuration
+        bookmarkClipboardReviewTimerState.start(now: Date())
         bookmarkClipboardReviewToastModel.progress = 1
         bookmarkCaptureToastHideWorkItem?.cancel()
         bookmarkCaptureToastHideWorkItem = nil
@@ -311,6 +311,9 @@ extension AppDelegate {
     func dismissBookmarkCaptureToast() {
         stopBookmarkClipboardReviewTimer()
         bookmarkClipboardReviewIsHovering = false
+        bookmarkClipboardReviewTimerState = BookmarkToastProgressTimerState(
+            duration: BookmarksToastDesign.reviewAutoHideDuration
+        )
         bookmarkClipboardReviewToastModel.progress = 1
         bookmarkCaptureToastHideWorkItem?.cancel()
         bookmarkCaptureToastHideWorkItem = nil
@@ -322,11 +325,10 @@ extension AppDelegate {
         bookmarkClipboardReviewIsHovering = hovering
 
         if hovering {
-            bookmarkClipboardReviewRemaining = BookmarksToastDesign.reviewAutoHideDuration
-            bookmarkClipboardReviewToastModel.progress = 1
+            bookmarkClipboardReviewTimerState.pause()
             stopBookmarkClipboardReviewTimer()
         } else {
-            startBookmarkClipboardReviewTimer(resetToFull: true)
+            startBookmarkClipboardReviewTimer(resetToFull: false)
         }
     }
 
@@ -334,10 +336,12 @@ extension AppDelegate {
         stopBookmarkClipboardReviewTimer()
 
         if resetToFull {
-            bookmarkClipboardReviewRemaining = BookmarksToastDesign.reviewAutoHideDuration
+            bookmarkClipboardReviewTimerState.start(now: Date())
             bookmarkClipboardReviewToastModel.progress = 1
+        } else {
+            bookmarkClipboardReviewTimerState.resume(now: Date())
+            bookmarkClipboardReviewToastModel.progress = CGFloat(bookmarkClipboardReviewTimerState.progress)
         }
-        bookmarkClipboardReviewLastTick = Date()
 
         let timer = Timer(timeInterval: BookmarksToastDesign.reviewProgressTickInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -351,32 +355,26 @@ extension AppDelegate {
     func stopBookmarkClipboardReviewTimer() {
         bookmarkClipboardReviewTimer?.invalidate()
         bookmarkClipboardReviewTimer = nil
-        bookmarkClipboardReviewLastTick = nil
     }
 
     func bookmarkClipboardReviewTimerTick() {
         guard !bookmarkClipboardReviewIsHovering else { return }
-        guard let lastTick = bookmarkClipboardReviewLastTick else {
-            bookmarkClipboardReviewLastTick = Date()
-            return
-        }
-
         let now = Date()
-        let elapsed = now.timeIntervalSince(lastTick)
-        bookmarkClipboardReviewLastTick = now
-        guard elapsed.isFinite, elapsed > 0 else { return }
-
-        bookmarkClipboardReviewRemaining -= elapsed
-        let duration = max(BookmarksToastDesign.reviewAutoHideDuration, 0.01)
-
-        if bookmarkClipboardReviewRemaining <= 0 {
+        if bookmarkClipboardReviewTimerState.tick(now: now) {
             bookmarkClipboardReviewToastModel.progress = 0
             BookmarksClipboardMonitor.shared.suspendFor(seconds: 3)
             dismissBookmarkCaptureToast()
             return
         }
 
-        bookmarkClipboardReviewToastModel.progress = max(0, min(1, bookmarkClipboardReviewRemaining / duration))
+        bookmarkClipboardReviewToastModel.progress = CGFloat(bookmarkClipboardReviewTimerState.progress)
+    }
+
+    func dismissStaleBookmarkCaptureToastOnActivation(now: Date = Date()) {
+        guard bookmarkCaptureToastPanel?.isVisible == true else { return }
+        guard bookmarkClipboardReviewTimerState.shouldExpireOnActivation(now: now) else { return }
+        BookmarksClipboardMonitor.shared.suspendFor(seconds: 3)
+        dismissBookmarkCaptureToast()
     }
 
     func resolveBookmarkCaptureToastPanel() -> BookmarkCaptureToastPanel {

@@ -49,6 +49,51 @@ final class SecondBrainEnrichmentOutputService {
         return outputs
     }
 
+    func outputs(
+        kind: String,
+        reviewStates: Set<String>? = nil,
+        limit: Int? = nil
+    ) throws -> [SecondBrainEnrichmentOutput] {
+        let normalizedKind = kind.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stmt = try database.prepare("""
+            SELECT id, owner_type, owner_id, chunk_id, kind, value, normalized_value, label, evidence,
+                   source, confidence, review_state, metadata, created_at, updated_at
+            FROM enrichment_outputs
+            WHERE kind = ?
+            ORDER BY updated_at DESC, confidence DESC, value COLLATE NOCASE ASC;
+            """)
+        stmt.bind(normalizedKind, at: 1)
+
+        let normalizedStates = reviewStates.map { Set($0.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }) }
+        let maxCount = limit.map { max(0, $0) }
+        guard maxCount != 0 else { return [] }
+        var outputs: [SecondBrainEnrichmentOutput] = []
+        while try stmt.step() {
+            let output = outputWithOwner(from: stmt)
+            if let normalizedStates, !normalizedStates.contains(output.reviewState.lowercased()) {
+                continue
+            }
+            outputs.append(output)
+            if let maxCount, outputs.count >= maxCount {
+                break
+            }
+        }
+        return outputs
+    }
+
+    func output(id: String) throws -> SecondBrainEnrichmentOutput? {
+        let stmt = try database.prepare("""
+            SELECT id, owner_type, owner_id, chunk_id, kind, value, normalized_value, label, evidence,
+                   source, confidence, review_state, metadata, created_at, updated_at
+            FROM enrichment_outputs
+            WHERE id = ?
+            LIMIT 1;
+            """)
+        stmt.bind(id, at: 1)
+        guard try stmt.step() else { return nil }
+        return outputWithOwner(from: stmt)
+    }
+
     func rebuildFromChunks(owner: SecondBrainOwnerRef) throws -> SecondBrainEnrichmentRebuildResult {
         let chunks = try chunks(for: owner)
         var outputs: [SecondBrainEnrichmentOutput] = []
@@ -92,6 +137,16 @@ final class SecondBrainEnrichmentOutputService {
     }
 
     func record(_ output: SecondBrainEnrichmentOutput) throws {
+        let previous = try self.output(id: output.id)
+        var output = output
+        let evidenceRecord = SecondBrainSourceEvidenceService.recordFromOutput(output)
+        if let evidenceRecord {
+            output.metadata["source_evidence_id"] = evidenceRecord.id
+            output.metadata["source_evidence_ref"] = "source_evidence:\(evidenceRecord.id)"
+            output.metadata["source_evidence_kind"] = evidenceRecord.evidenceKind
+            output.metadata["source_owner_ref"] = evidenceRecord.sourceOwnerRef
+            output.metadata["derived_owner_ref"] = evidenceRecord.derivedOwnerRef
+        }
         let now = Date()
         let createdAt = DatabaseHelpers.encode(output.createdAt)
         let updatedAt = DatabaseHelpers.encode(output.updatedAt > output.createdAt ? output.updatedAt : now)
@@ -128,6 +183,21 @@ final class SecondBrainEnrichmentOutputService {
             .bind(createdAt, at: 14)
             .bind(updatedAt, at: 15)
         try stmt.step()
+        if let evidenceRecord {
+            let evidenceService = SecondBrainSourceEvidenceService(database: database)
+            try evidenceService.record(evidenceRecord)
+            let storedEvidence = try evidenceService.record(derivedOwner: evidenceRecord.derivedOwner, evidenceKind: evidenceRecord.evidenceKind) ?? evidenceRecord
+            _ = try SecondBrainReviewLifecycleService(database: database).recordEnrichmentLifecycle(
+                previous: previous,
+                current: output,
+                sourceEvidence: storedEvidence
+            )
+        } else {
+            _ = try SecondBrainReviewLifecycleService(database: database).recordEnrichmentLifecycle(
+                previous: previous,
+                current: output
+            )
+        }
     }
 
     private struct ChunkSource {
@@ -257,7 +327,12 @@ final class SecondBrainEnrichmentOutputService {
             source: "chunk_enrichment.\(chunk.source)",
             confidence: confidence,
             reviewState: "suggested",
-            metadata: ["chunk_title": chunk.title]
+            metadata: [
+                "chunk_title": chunk.title,
+                "source_span_start": String(evidenceRange.location),
+                "source_span_end": String(evidenceRange.location + evidenceRange.length),
+                "source_evidence_kind": "source_span",
+            ]
         )
     }
 
@@ -303,6 +378,25 @@ final class SecondBrainEnrichmentOutputService {
             metadata: DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 10)) ?? [:],
             createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 11)),
             updatedAt: DatabaseHelpers.decodeDate(stmt.double(at: 12))
+        )
+    }
+
+    private func outputWithOwner(from stmt: SQLStatement) -> SecondBrainEnrichmentOutput {
+        SecondBrainEnrichmentOutput(
+            id: stmt.string(at: 0),
+            owner: SecondBrainOwnerRef(ownerType: stmt.string(at: 1), ownerID: stmt.string(at: 2)),
+            chunkID: stmt.optionalString(at: 3),
+            kind: stmt.string(at: 4),
+            value: stmt.string(at: 5),
+            normalizedValue: stmt.string(at: 6),
+            label: stmt.string(at: 7),
+            evidence: stmt.string(at: 8),
+            source: stmt.string(at: 9),
+            confidence: stmt.optionalDouble(at: 10),
+            reviewState: stmt.string(at: 11),
+            metadata: DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 12)) ?? [:],
+            createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 13)),
+            updatedAt: DatabaseHelpers.decodeDate(stmt.double(at: 14))
         )
     }
 }

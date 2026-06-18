@@ -55,6 +55,7 @@ struct CiderItemContextBundle: Equatable {
     var spaceMemberships: [CiderSpaceMembership]
     var routingDecisions: [SecondBrainRoutingDecision]
     var agentActions: [SecondBrainAgentAction]
+    var actionReceipts: [SecondBrainActionReceiptRecord]
     var enrichmentOutputs: [SecondBrainEnrichmentOutput]
     var relationCandidates: [SecondBrainSimilarityCandidate]
     var captureProvenance: [CiderItemCaptureProvenance]
@@ -95,6 +96,13 @@ struct CiderItemAgentContextHistoryEntry: Identifiable, Equatable {
     var source: String
     var status: String
     var createdAt: Date
+    var command: String? = nil
+    var action: String? = nil
+    var readOnly: Bool? = nil
+    var changed: Bool? = nil
+    var sourceRefs: [String] = []
+    var evidenceRefs: [String] = []
+    var safeVerificationCommands: [String] = []
 }
 
 struct CiderItemAgentContextPacket: Equatable {
@@ -108,6 +116,7 @@ struct CiderItemAgentContextPacket: Equatable {
     var ownerRelations: [SecondBrainRelation]
     var relationCandidates: [SecondBrainSimilarityCandidate]
     var backlinks: [SecondBrainRelation]
+    var memoryCandidates: [SecondBrainEnrichmentOutput]
     var captureProvenance: [CiderItemCaptureProvenance]
     var review: CiderItemAgentReviewState?
     var surfacing: CiderSurfacingExplanation
@@ -307,6 +316,7 @@ final class CiderItemContextService {
             spaceMemberships: try spaceMembershipStore.memberships(for: ref),
             routingDecisions: try secondBrainStore.routingDecisions(for: owner),
             agentActions: try secondBrainStore.agentActions(for: owner),
+            actionReceipts: try SecondBrainActionReceiptLedgerService(database: database).list(filter: .init(owner: owner, limit: 20)),
             enrichmentOutputs: try SecondBrainEnrichmentOutputService(database: database).outputs(for: owner),
             relationCandidates: try SecondBrainSimilarityCandidateService(database: database, store: secondBrainStore).candidates(for: owner),
             captureProvenance: try captureProvenance(from: backlinks)
@@ -330,6 +340,11 @@ final class CiderItemContextService {
             ownerRelations: Array(bundle.ownerRelations.prefix(normalizedLimits.maxRelated)),
             relationCandidates: Array(bundle.relationCandidates.prefix(normalizedLimits.maxRelated)),
             backlinks: Array(bundle.backlinks.prefix(normalizedLimits.maxRelated)),
+            memoryCandidates: Array(
+                bundle.enrichmentOutputs
+                    .filter { $0.kind == "memory_candidate" }
+                    .prefix(normalizedLimits.maxRelated)
+            ),
             captureProvenance: Array(bundle.captureProvenance.prefix(normalizedLimits.maxHistory)),
             review: reviewState(for: bundle),
             surfacing: surfacingExplanation(for: bundle),
@@ -1835,7 +1850,24 @@ final class CiderItemContextService {
                 createdAt: action.createdAt
             )
         }
-        return Array((routing + actions)
+        let receipts = bundle.actionReceipts.map { receipt in
+            CiderItemAgentContextHistoryEntry(
+                id: "action-receipt-\(receipt.id)",
+                kind: "action_receipt",
+                summary: "\(receipt.command) \(receipt.status) (changed=\(receipt.changed))",
+                source: receipt.actor,
+                status: receipt.status,
+                createdAt: receipt.createdAt,
+                command: receipt.command,
+                action: receipt.action,
+                readOnly: receipt.readOnly,
+                changed: receipt.changed,
+                sourceRefs: receipt.sourceRefs,
+                evidenceRefs: receipt.evidenceRefs,
+                safeVerificationCommands: receipt.safeVerificationCommands
+            )
+        }
+        return Array((routing + actions + receipts)
             .sorted { lhs, rhs in
                 if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
                 return lhs.id < rhs.id

@@ -87,6 +87,7 @@ struct CiderDatabaseTests {
             "item_labels", "dismissed_labels", "tags", "item_tags",
             "item_links", "owner_relations", "projects", "capture_events",
             "capture_attachments", "enrichment_outputs", "similarity_candidates",
+            "similarity_reconciliation_runs", "action_receipts",
             "trash", "mutation_audit", "folder_sync_decisions",
             "schema_version", "schema_migrations",
         ]
@@ -694,6 +695,13 @@ struct CiderDatabaseTests {
     func nilJsonDecodesToEmpty() {
         #expect(DatabaseHelpers.decodeStringArray(nil).isEmpty)
         #expect(DatabaseHelpers.decodeUUIDArray(nil).isEmpty)
+    }
+
+    @Test("Malformed array JSON decodes to empty arrays")
+    func malformedArrayJsonDecodesToEmpty() {
+        #expect(DatabaseHelpers.decodeStringArray("not-json").isEmpty)
+        #expect(DatabaseHelpers.decodeStringArray("{\"value\":\"not an array\"}").isEmpty)
+        #expect(DatabaseHelpers.decodeUUIDArray("[\"not-a-uuid\"]").isEmpty)
     }
 
     @Test("Codable round-trips through JSON encode/decode")

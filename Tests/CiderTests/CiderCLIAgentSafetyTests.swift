@@ -6,6 +6,1377 @@ import Testing
 @Suite("Cider CLI Agent Safety Tests", .serialized)
 @MainActor
 struct CiderCLIAgentSafetyTests {
+    @Test("reminder mutation result exposes shared action receipt")
+    func reminderMutationResultExposesSharedActionReceipt() throws {
+        let id = UUID()
+        let result = CiderReminderActionResult(
+            itemType: .todo,
+            id: id,
+            title: "Pay utilities",
+            action: .complete,
+            completed: true,
+            snoozedUntil: nil,
+            surfacing: nil
+        )
+
+        let dict = reminderActionResultToDict(result)
+
+        #expect(dict["command"] as? String == "reminder.complete")
+        #expect(dict["readOnly"] as? Bool == false)
+        #expect(dict["changed"] as? Bool == true)
+        let receipt = try #require(dict["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "reminder.complete")
+        #expect(receipt["action"] as? String == "complete")
+        #expect(receipt["actor"] as? String == "cider-cli")
+        #expect(receipt["readOnly"] as? Bool == false)
+        #expect(receipt["changed"] as? Bool == true)
+        let owner = try #require(receipt["owner"] as? [String: Any])
+        #expect(owner["ownerType"] as? String == "todo")
+        #expect(owner["ownerID"] as? String == id.uuidString)
+        #expect((receipt["safeVerificationCommands"] as? [String])?.contains("cider-cli item why-surfaced todo \(id.uuidString) --json") == true)
+        #expect((receipt["safeNextCommands"] as? [String])?.contains("cider-cli item due-to-surface --json") == true)
+    }
+
+    @Test("link mutation persists action receipt and appears in item context")
+    func linkMutationPersistsActionReceiptAndAppearsInItemContext() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-link-action-ledger-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceID = try createNote(title: "Ledger Link Source", content: "Source", vault: vault)
+        let targetID = try createNote(title: "Ledger Link Target", content: "Target", vault: vault)
+
+        let link = try parseJSONObject(try runCLI(args: ["item", "link", "note", sourceID, "note", targetID, "--json"], vault: vault).stdout)
+        #expect(link["command"] as? String == "link.add")
+        #expect(link["readOnly"] as? Bool == false)
+        #expect(link["changed"] as? Bool == true)
+        let receipt = try #require(link["actionReceipt"] as? [String: Any])
+        #expect(receipt["action"] as? String == "link")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("note:\(sourceID)") == true)
+        #expect((receipt["evidenceRefs"] as? [String])?.contains("note:\(targetID)") == true)
+
+        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(sourceID)", "--action", "link", "--json"], vault: vault).stdout)
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "link.add"
+                && entry["status"] as? String == "succeeded"
+                && entry["changed"] as? Bool == true
+                && (entry["evidenceRefs"] as? [String])?.contains("note:\(targetID)") == true
+        })
+
+        let context = try parseJSONObject(try runCLI(args: ["item", "context", "note", sourceID, "--max-history", "10", "--json"], vault: vault).stdout)
+        let recentHistory = try #require(context["recentHistory"] as? [[String: Any]])
+        #expect(recentHistory.contains { entry in
+            entry["kind"] as? String == "action_receipt"
+                && entry["command"] as? String == "link.add"
+                && entry["action"] as? String == "link"
+                && entry["changed"] as? Bool == true
+        })
+    }
+
+    @Test("action ledger CLI lists and inspects recorded receipts")
+    func actionLedgerCLIListsAndInspectsRecordedReceipts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-action-ledger-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let capture = try assertStrictProcessJSON(
+            runCLI(args: [
+                "capture", "add", "--kind", "event",
+                "--title", "Ledger smoke dinner",
+                "--date", "2026-06-16",
+                "--json",
+            ], vault: vault),
+            command: "capture.add"
+        )
+        let item = try #require(capture["item"] as? [String: Any])
+        let id = try #require(item["id"] as? String)
+
+        let why = try assertStrictProcessJSON(
+            runCLI(args: ["item", "why-surfaced", "dateCard", id, "--json"], vault: vault),
+            command: "item.why-surfaced"
+        )
+        #expect((why["actionReceipt"] as? [String: Any])?["changed"] as? Bool == false)
+
+        let list = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--owner", "dateCard:\(id)", "--action", "inspect_surfacing", "--limit", "5", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        #expect(list["readOnly"] as? Bool == true)
+        #expect(list["changed"] as? Bool == false)
+        let entries = try #require(list["entries"] as? [[String: Any]])
+        let entry = try #require(entries.first)
+        #expect(entry["command"] as? String == "item.why-surfaced")
+        #expect(entry["action"] as? String == "inspect_surfacing")
+        #expect(entry["status"] as? String == "succeeded")
+        #expect(entry["changed"] as? Bool == false)
+        let entryID = try #require(entry["id"] as? String)
+
+        let inspect = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "inspect", entryID, "--json"], vault: vault),
+            command: "item.action-ledger.inspect"
+        )
+        let inspected = try #require(inspect["entry"] as? [String: Any])
+        #expect(inspected["id"] as? String == entryID)
+        #expect((inspected["safeVerificationCommands"] as? [String])?.contains("cider-cli item why-surfaced dateCard \(id) --json") == true)
+    }
+
+    @Test("action ledger CLI filters by command refs and time windows")
+    func actionLedgerCLIFiltersByCommandRefsAndTimeWindows() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-action-ledger-filter-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceID = try createNote(title: "Ledger Filter Source", content: "Source", vault: vault)
+        let targetID = try createNote(title: "Ledger Filter Target", content: "Target", vault: vault)
+        let beforeMutation = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-60))
+        _ = try parseJSONObject(try runCLI(args: ["item", "link", "note", sourceID, "note", targetID, "--json"], vault: vault).stdout)
+        let afterMutation = ISO8601DateFormatter().string(from: Date().addingTimeInterval(60))
+        _ = try parseJSONObject(try runCLI(args: ["item", "why-surfaced", "note", sourceID, "--json"], vault: vault).stdout)
+
+        let byCommand = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(sourceID)", "--command", "link.add", "--limit", "10", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let commandEntries = try #require(byCommand["entries"] as? [[String: Any]])
+        #expect(commandEntries.map { $0["command"] as? String } == ["link.add"])
+        #expect((byCommand["filters"] as? [String: Any])?["command"] as? String == "link.add")
+
+        let byEvidence = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--evidence-ref", "note:\(targetID)", "--since", beforeMutation, "--before", afterMutation, "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let evidenceEntries = try #require(byEvidence["entries"] as? [[String: Any]])
+        #expect(evidenceEntries.contains { entry in
+            entry["command"] as? String == "link.add"
+                && (entry["evidenceRefs"] as? [String])?.contains("note:\(targetID)") == true
+        })
+        let filters = try #require(byEvidence["filters"] as? [String: Any])
+        #expect(filters["evidenceRef"] as? String == "note:\(targetID)")
+        #expect(filters["since"] as? String == beforeMutation)
+        #expect(filters["before"] as? String == afterMutation)
+    }
+
+    @Test("fact validity inspect not found returns and persists structured failure receipt")
+    func factValidityInspectNotFoundReturnsAndPersistsStructuredFailureReceipt() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-fact-validity-failure-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missingID = "missing-cid-531"
+        let result = try runCLI(args: ["item", "fact-validity", "inspect", missingID, "--json"], vault: vault)
+        #expect(result.status != 0)
+        let payload = try parseJSONObject(result.stdout)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == "item.fact-validity.inspect")
+        #expect(payload["errorCode"] as? String == "fact_validity_candidate_not_found")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        let receipt = try #require(payload["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.fact-validity.inspect")
+        #expect(receipt["action"] as? String == "inspect")
+        #expect(receipt["status"] as? String == "failed")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        #expect(receipt["errorCode"] as? String == "fact_validity_candidate_not_found")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("fact_validity_candidate:\(missingID)") == true)
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--command", "item.fact-validity.inspect", "--status", "failed", "--limit", "5", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["errorCode"] as? String == "fact_validity_candidate_not_found"
+                && (entry["sourceRefs"] as? [String])?.contains("fact_validity_candidate:\(missingID)") == true
+        })
+    }
+
+    @Test("entity resolution inspect persists receipt and appears in item context history")
+    func entityResolutionInspectPersistsReceiptAndAppearsInItemContextHistory() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-entity-resolution-inspect-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Entity Resolution Inspect Source",
+            content: "We went to Cactus for dinner.",
+            vault: vault
+        )
+        let targetID = try createNote(title: "Cactus Restaurant", content: "Saved place entity.", vault: vault)
+        let sourceOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let sourceEntity = SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "cactus-inspect")
+        let targetEntity = SecondBrainOwnerRef(ownerType: "note", ownerID: targetID)
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let candidate = try SecondBrainEntityResolutionService(database: db, store: SecondBrainStore(database: db)).suggest(
+            candidateType: "place_alias",
+            sourceEntity: sourceEntity,
+            sourceLabel: "Cactus",
+            inputMention: "Cactus",
+            targetEntity: targetEntity,
+            targetLabel: "Cactus Restaurant",
+            sourceOwner: sourceOwner,
+            sourceQuote: "We went to Cactus for dinner.",
+            confidence: 0.91,
+            confidenceReasons: ["exact_alias", "place_visit_context"],
+            actor: "test-agent",
+            source: "entity_resolution.test"
+        )
+        db.close()
+
+        let inspect = try assertStrictProcessJSON(
+            runCLI(args: ["item", "entity-resolution", "inspect", candidate.id, "--json"], vault: vault),
+            command: "item.entity-resolution.inspect"
+        )
+        #expect(inspect["readOnly"] as? Bool == true)
+        #expect(inspect["changed"] as? Bool == false)
+        let receipt = try #require(inspect["actionReceipt"] as? [String: Any])
+        #expect(receipt["action"] as? String == "inspect")
+        #expect(receipt["ownerRef"] as? String == "note:\(noteID)")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("entity_resolution_candidate:\(candidate.id)") == true)
+
+        let context = try assertStrictProcessJSON(
+            runCLI(args: ["item", "context", "note", noteID, "--max-history", "10", "--json"], vault: vault),
+            command: "item.context"
+        )
+        let history = try #require(context["recentHistory"] as? [[String: Any]])
+        #expect(history.contains { entry in
+            entry["kind"] as? String == "action_receipt"
+                && entry["command"] as? String == "item.entity-resolution.inspect"
+                && entry["action"] as? String == "inspect"
+                && entry["changed"] as? Bool == false
+        })
+    }
+
+    @Test("action ledger inspect missing returns and persists structured failure receipt")
+    func actionLedgerInspectMissingReturnsAndPersistsStructuredFailureReceipt() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-action-ledger-missing-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missingID = "missing-action-receipt-cid532"
+        let result = try runCLI(args: ["item", "action-ledger", "inspect", missingID, "--json"], vault: vault)
+        #expect(result.status != 0)
+        let payload = try parseJSONObject(result.stdout)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == "item.action-ledger.inspect")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["errorCode"] as? String == "action_receipt_not_found")
+        let receipt = try #require(payload["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.action-ledger.inspect")
+        #expect(receipt["action"] as? String == "inspect")
+        #expect(receipt["status"] as? String == "failed")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        #expect(receipt["errorCode"] as? String == "action_receipt_not_found")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("action_receipt:\(missingID)") == true)
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--command", "item.action-ledger.inspect", "--status", "failed", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["errorCode"] as? String == "action_receipt_not_found"
+                && (entry["sourceRefs"] as? [String])?.contains("action_receipt:\(missingID)") == true
+        })
+    }
+
+    @Test("entity resolution inspect missing returns and persists structured failure receipt")
+    func entityResolutionInspectMissingReturnsAndPersistsStructuredFailureReceipt() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-entity-resolution-missing-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missingID = "missing-entity-resolution-cid532"
+        let result = try runCLI(args: ["item", "entity-resolution", "inspect", missingID, "--json"], vault: vault)
+        #expect(result.status != 0)
+        let payload = try parseJSONObject(result.stdout)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == "item.entity-resolution.inspect")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["errorCode"] as? String == "entity_resolution_candidate_not_found")
+        let receipt = try #require(payload["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.entity-resolution.inspect")
+        #expect(receipt["status"] as? String == "failed")
+        #expect(receipt["errorCode"] as? String == "entity_resolution_candidate_not_found")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("entity_resolution_candidate:\(missingID)") == true)
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--command", "item.entity-resolution.inspect", "--status", "failed", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in entry["errorCode"] as? String == "entity_resolution_candidate_not_found" })
+    }
+
+    @Test("fact validity missing and duplicate defer return structured failure or no-op receipts")
+    func factValidityMissingAndDuplicateDeferReturnStructuredReceipts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-fact-validity-noop-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missingID = "missing-fact-validity-cid532"
+        let missing = try runCLI(args: ["item", "fact-validity", "reject", missingID, "--reason", "Missing candidate.", "--json"], vault: vault)
+        #expect(missing.status != 0)
+        let missingPayload = try parseJSONObject(missing.stdout)
+        #expect(missingPayload["command"] as? String == "item.fact-validity.reject")
+        #expect(missingPayload["errorCode"] as? String == "fact_validity_candidate_not_found")
+        #expect(missingPayload["readOnly"] as? Bool == false)
+        #expect(missingPayload["changed"] as? Bool == false)
+        let missingReceipt = try #require(missingPayload["actionReceipt"] as? [String: Any])
+        #expect(missingReceipt["status"] as? String == "failed")
+        #expect(missingReceipt["errorCode"] as? String == "fact_validity_candidate_not_found")
+        #expect((missingReceipt["sourceRefs"] as? [String])?.contains("fact_validity_candidate:\(missingID)") == true)
+
+        let noteID = try createNote(title: "Fact Validity No-op Source", content: "Newer evidence exists.", vault: vault)
+        let propose = try runCLI(
+            args: [
+                "item", "fact-validity", "propose",
+                "--target-ref", "owner_relation:cid532-target",
+                "--state", "superseded",
+                "--source-owner", "note:\(noteID)",
+                "--quote", "Newer evidence exists.",
+                "--reason", "Testing no-op defer.",
+                "--json",
+            ],
+            vault: vault
+        )
+        let proposed = try parseJSONObject(propose.stdout)
+        let candidate = try #require(proposed["candidate"] as? [String: Any])
+        let candidateID = try #require(candidate["id"] as? String)
+
+        let firstDefer = try runCLI(args: ["item", "fact-validity", "defer", candidateID, "--reason", "Later.", "--json"], vault: vault)
+        #expect(firstDefer.status == 0)
+        let duplicateDefer = try runCLI(args: ["item", "fact-validity", "defer", candidateID, "--reason", "Still later.", "--json"], vault: vault)
+        let duplicatePayload = try parseJSONObject(duplicateDefer.stdout)
+        #expect(duplicateDefer.status == 0)
+        #expect(duplicatePayload["changed"] as? Bool == false)
+        #expect(duplicatePayload["errorCode"] as? String == "fact_validity_already_deferred")
+        let duplicateReceipt = try #require(duplicatePayload["actionReceipt"] as? [String: Any])
+        #expect(duplicateReceipt["status"] as? String == "no_op")
+        #expect(duplicateReceipt["changed"] as? Bool == false)
+        #expect(duplicateReceipt["errorCode"] as? String == "fact_validity_already_deferred")
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--source-ref", "fact_validity_candidate:\(candidateID)", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { $0["errorCode"] as? String == "fact_validity_already_deferred" && $0["status"] as? String == "no_op" })
+    }
+
+    @Test("legacy item read failures return structured agent-safe JSON")
+    func legacyItemReadFailuresReturnStructuredAgentSafeJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-structured-read-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let unsupportedContext = try assertStrictFailureJSON(
+            runCLI(args: ["item", "context", "badtype", "missing-cid533", "--json"], vault: vault),
+            command: "item.context",
+            errorCode: "unsupported_item_type"
+        )
+        #expect(unsupportedContext["readOnly"] as? Bool == true)
+        #expect(unsupportedContext["changed"] as? Bool == false)
+        #expect((unsupportedContext["supportedTypes"] as? [String])?.contains("note") == true)
+
+        let missingContext = try assertStrictFailureJSON(
+            runCLI(args: ["item", "context", "note", "missing-cid533", "--json"], vault: vault),
+            command: "item.context",
+            errorCode: "item_not_found"
+        )
+        #expect(missingContext["readOnly"] as? Bool == true)
+        #expect(missingContext["changed"] as? Bool == false)
+        let sourceRef = try #require(missingContext["sourceRef"] as? [String: Any])
+        #expect(sourceRef["type"] as? String == "note")
+        #expect(sourceRef["ref"] as? String == "missing-cid533")
+
+        let missingGet = try assertStrictFailureJSON(
+            runCLI(args: ["item", "get", "note", "missing-cid533", "--json"], vault: vault),
+            command: "item.get",
+            errorCode: "item_not_found"
+        )
+        #expect(missingGet["readOnly"] as? Bool == true)
+        #expect(missingGet["changed"] as? Bool == false)
+
+        let missingWhy = try assertStrictFailureJSON(
+            runCLI(args: ["item", "why-surfaced", "note", "missing-cid533", "--json"], vault: vault),
+            command: "item.why-surfaced",
+            errorCode: "item_not_found"
+        )
+        #expect(missingWhy["readOnly"] as? Bool == true)
+        #expect(missingWhy["changed"] as? Bool == false)
+        let whyReceipt = try #require(missingWhy["actionReceipt"] as? [String: Any])
+        #expect(whyReceipt["status"] as? String == "failed")
+        #expect(whyReceipt["changed"] as? Bool == false)
+    }
+
+    @Test("feed filter failures distinguish invalid selectors from valid empty reads")
+    func feedFilterFailuresDistinguishInvalidSelectorsFromValidEmptyReads() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-feed-filter-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let invalidCaptureKind = try assertStrictFailureJSON(
+            runCLI(args: ["capture", "review-queue", "--kind", "not_a_review_kind", "--json"], vault: vault),
+            command: "capture.review-queue",
+            errorCode: "unsupported_review_filter_value"
+        )
+        #expect(invalidCaptureKind["readOnly"] as? Bool == true)
+        #expect(invalidCaptureKind["changed"] as? Bool == false)
+        let captureFilter = try #require(invalidCaptureKind["filter"] as? [String: Any])
+        #expect(captureFilter["name"] as? String == "kind")
+        #expect(captureFilter["value"] as? String == "not_a_review_kind")
+        #expect((invalidCaptureKind["supportedValues"] as? [String])?.contains("graph_candidate") == true)
+
+        let invalidReviewState = try assertStrictFailureJSON(
+            runCLI(args: ["review", "list", "--state", "not_a_state", "--json"], vault: vault),
+            command: "review.list",
+            errorCode: "unsupported_review_filter_value"
+        )
+        let reviewFilter = try #require(invalidReviewState["filter"] as? [String: Any])
+        #expect(reviewFilter["name"] as? String == "state")
+        #expect((invalidReviewState["supportedValues"] as? [String])?.contains("needs_review") == true)
+
+        let malformedResurfaceLimit = try assertStrictFailureJSON(
+            runCLI(args: ["item", "due-to-surface", "--limit", "not-a-number", "--json"], vault: vault),
+            command: "item.due-to-surface",
+            errorCode: "malformed_numeric_filter"
+        )
+        let resurfaceFilter = try #require(malformedResurfaceLimit["filter"] as? [String: Any])
+        #expect(resurfaceFilter["name"] as? String == "limit")
+        #expect(resurfaceFilter["value"] as? String == "not-a-number")
+        #expect(malformedResurfaceLimit["readOnly"] as? Bool == true)
+        #expect(malformedResurfaceLimit["changed"] as? Bool == false)
+    }
+
+    @Test("valid zero-result owner relation reads stay successful and read-only")
+    func validZeroResultOwnerRelationReadsStaySuccessfulAndReadOnly() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-owner-zero-results-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Unlinked Owner", content: "No owner relations yet.", vault: vault)
+
+        let ownerGet = try assertStrictProcessJSON(
+            runCLI(args: ["item", "owner-get", "note", noteID, "--json"], vault: vault),
+            command: "item.owner-get"
+        )
+        #expect(ownerGet["ok"] as? Bool == true)
+        #expect(ownerGet["readOnly"] as? Bool == true)
+        #expect(ownerGet["changed"] as? Bool == false)
+        #expect(ownerGet["relationCount"] as? Int == 0)
+        #expect(ownerGet["ownerResolved"] as? Bool == true)
+
+        let relations = try assertStrictProcessJSON(
+            runCLI(args: ["item", "relations", "note", noteID, "--json"], vault: vault),
+            command: "item.relations"
+        )
+        #expect(relations["ok"] as? Bool == true)
+        #expect(relations["readOnly"] as? Bool == true)
+        #expect(relations["changed"] as? Bool == false)
+        #expect(relations["relationCount"] as? Int == 0)
+        let relationRows = try #require(relations["relations"] as? [[String: Any]])
+        #expect(relationRows.isEmpty)
+    }
+
+    @Test("review drilldown selector failures are structured and do not default to empty feeds")
+    func reviewDrilldownSelectorFailuresAreStructuredAndDoNotDefaultToEmptyFeeds() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-review-drilldown-selector-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let malformed = try assertStrictFailureJSON(
+            runCLI(args: ["review", "drilldown", "bad-group", "--json"], vault: vault),
+            command: "review.drilldown",
+            errorCode: "malformed_review_drilldown_group_id"
+        )
+        #expect(malformed["readOnly"] as? Bool == true)
+        #expect(malformed["changed"] as? Bool == false)
+        let malformedSelector = try #require(malformed["selector"] as? [String: Any])
+        #expect(malformedSelector["name"] as? String == "groupID")
+        #expect(malformedSelector["value"] as? String == "bad-group")
+        #expect(malformed["expectedFormat"] as? String == "kind:reviewState:requiredSafeAction:itemType")
+
+        let unknownKind = try assertStrictFailureJSON(
+            runCLI(args: ["review", "drilldown", "unknown_kind:needs_review:accept:note", "--json"], vault: vault),
+            command: "review.drilldown",
+            errorCode: "unsupported_review_drilldown_group_value"
+        )
+        let unknownSelector = try #require(unknownKind["selector"] as? [String: Any])
+        #expect(unknownSelector["name"] as? String == "kind")
+        #expect(unknownSelector["value"] as? String == "unknown_kind")
+        #expect((unknownKind["supportedValues"] as? [String])?.contains("graph_candidate") == true)
+
+        let malformedLimit = try assertStrictFailureJSON(
+            runCLI(args: ["review", "drilldown", "graph_candidate:needs_review:accept:note", "--limit", "not-a-number", "--json"], vault: vault),
+            command: "review.drilldown",
+            errorCode: "malformed_numeric_filter"
+        )
+        let limitFilter = try #require(malformedLimit["filter"] as? [String: Any])
+        #expect(limitFilter["name"] as? String == "limit")
+        #expect(limitFilter["value"] as? String == "not-a-number")
+    }
+
+    @Test("unsupported owner selector policy fails while valid empty graph owner reads stay read-only")
+    func unsupportedOwnerSelectorPolicyFailsWhileValidEmptyGraphOwnerReadsStayReadOnly() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-owner-selector-policy-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let unsupportedRelations = try assertStrictFailureJSON(
+            runCLI(args: ["item", "relations", "made_up_owner", "ref", "--json"], vault: vault),
+            command: "item.relations",
+            errorCode: "unsupported_owner_type"
+        )
+        #expect(unsupportedRelations["readOnly"] as? Bool == true)
+        #expect(unsupportedRelations["changed"] as? Bool == false)
+        let relationSelector = try #require(unsupportedRelations["selector"] as? [String: Any])
+        #expect(relationSelector["type"] as? String == "made_up_owner")
+        #expect(relationSelector["ref"] as? String == "ref")
+        #expect((unsupportedRelations["supportedTypes"] as? [String])?.contains("graph_object") == true)
+
+        let unsupportedOwnerGet = try assertStrictFailureJSON(
+            runCLI(args: ["item", "owner-get", "made_up_owner", "ref", "--json"], vault: vault),
+            command: "item.owner-get",
+            errorCode: "unsupported_owner_type"
+        )
+        #expect(unsupportedOwnerGet["readOnly"] as? Bool == true)
+        #expect(unsupportedOwnerGet["changed"] as? Bool == false)
+
+        let validGraphRelations = try assertStrictProcessJSON(
+            runCLI(args: ["item", "relations", "graph_object", "cid536-empty-owner", "--json"], vault: vault),
+            command: "item.relations"
+        )
+        #expect(validGraphRelations["ok"] as? Bool == true)
+        #expect(validGraphRelations["readOnly"] as? Bool == true)
+        #expect(validGraphRelations["changed"] as? Bool == false)
+        #expect(validGraphRelations["relationCount"] as? Int == 0)
+        let graphRows = try #require(validGraphRelations["relations"] as? [[String: Any]])
+        #expect(graphRows.isEmpty)
+    }
+
+    @Test("accepted memory facts list inspect and recall stay separate from reviewable candidates")
+    func acceptedMemoryFactsListInspectAndRecallStaySeparateFromReviewableCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-accepted-memory-facts-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Memory Source", content: "Erik prefers espresso in the morning.", vault: vault)
+        let acceptedCandidate = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "preference",
+                "--value", "Erik prefers espresso in the morning",
+                "--evidence", "Erik prefers espresso in the morning.",
+                "--memory-key", "erik.morning.coffee",
+                "--confidence", "0.93",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let acceptedCandidateDict = try #require(acceptedCandidate["candidate"] as? [String: Any])
+        let acceptedCandidateID = try #require(acceptedCandidateDict["id"] as? String)
+
+        let suggestedCandidate = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "pattern",
+                "--value", "Erik sometimes mentions afternoon walks",
+                "--evidence", "Maybe afternoon walks are useful.",
+                "--memory-key", "erik.afternoon.walks",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let suggestedCandidateDict = try #require(suggestedCandidate["candidate"] as? [String: Any])
+        let suggestedCandidateID = try #require(suggestedCandidateDict["id"] as? String)
+
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedCandidateID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+
+        let list = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "list", "--json"], vault: vault),
+            command: "item.memory-facts.list"
+        )
+        #expect(list["readOnly"] as? Bool == true)
+        #expect(list["changed"] as? Bool == false)
+        let facts = try #require(list["facts"] as? [[String: Any]])
+        #expect(facts.count == 1)
+        #expect(facts.first?["candidateID"] as? String == acceptedCandidateID)
+        #expect(facts.first?["truthBoundary"] as? String == "accepted_memory_fact")
+        #expect(facts.first?["truthState"] as? String == "accepted")
+        #expect(facts.first?["reviewState"] as? String == "accepted")
+        #expect(facts.first?["sourceEvidenceRecord"] != nil)
+        #expect(facts.first?["actionHistory"] != nil)
+        #expect(facts.first?["reviewActionCommands"] == nil)
+        #expect(facts.contains { $0["candidateID"] as? String == suggestedCandidateID } == false)
+
+        let inspect = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "inspect", acceptedCandidateID, "--json"], vault: vault),
+            command: "item.memory-facts.inspect"
+        )
+        let inspectedFact = try #require(inspect["fact"] as? [String: Any])
+        #expect(inspectedFact["candidateRef"] as? String == "memory_candidate:\(acceptedCandidateID)")
+        #expect(inspectedFact["sourceQuote"] as? String == "Erik prefers espresso in the morning.")
+        #expect((inspectedFact["safeVerificationCommands"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedCandidateID) --json") == true)
+
+        let recall = try assertStrictProcessJSON(
+            runCLI(args: ["item", "recall-context", "--item", "note", noteID, "--json"], vault: vault),
+            command: "item.recall-context"
+        )
+        let acceptedFacts = try #require(recall["acceptedFacts"] as? [[String: Any]])
+        #expect(acceptedFacts.contains { fact in
+            fact["kind"] as? String == "accepted_memory_fact"
+                && fact["candidateID"] as? String == acceptedCandidateID
+                && fact["truthBoundary"] as? String == "accepted_memory_fact"
+        })
+        let reviewable = try #require(recall["reviewableCandidates"] as? [[String: Any]])
+        #expect(reviewable.contains { candidate in
+            candidate["id"] as? String == suggestedCandidateID
+                && candidate["truthState"] as? String == "reviewable_candidate_not_truth"
+        })
+        #expect(reviewable.contains { $0["id"] as? String == acceptedCandidateID } == false)
+    }
+
+    @Test("accepted memory fact selectors return structured failures")
+    func acceptedMemoryFactSelectorsReturnStructuredFailures() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-accepted-memory-fact-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missing = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "inspect", "missing-memory-fact", "--json"], vault: vault),
+            command: "item.memory-facts.inspect",
+            errorCode: "accepted_memory_fact_not_found"
+        )
+        #expect(missing["readOnly"] as? Bool == true)
+        #expect(missing["changed"] as? Bool == false)
+        let selector = try #require(missing["selector"] as? [String: Any])
+        #expect(selector["candidateID"] as? String == "missing-memory-fact")
+
+        let noteID = try createNote(title: "Unaccepted Memory Source", content: "Candidate only.", vault: vault)
+        let candidatePayload = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "preference",
+                "--value", "Candidate only memory",
+                "--evidence", "Candidate only.",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let candidate = try #require(candidatePayload["candidate"] as? [String: Any])
+        let candidateID = try #require(candidate["id"] as? String)
+        let unaccepted = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "inspect", candidateID, "--json"], vault: vault),
+            command: "item.memory-facts.inspect",
+            errorCode: "memory_candidate_not_accepted"
+        )
+        #expect(unaccepted["reviewState"] as? String == "suggested")
+        #expect((unaccepted["safeNextCommands"] as? [String])?.contains("cider-cli capture review-queue --kind memory_candidate --json") == true)
+    }
+
+    @Test("accepted memory fact resurfacing surfaces accepted truth and excludes reviewable candidates")
+    func acceptedMemoryFactResurfacingSurfacesAcceptedTruthAndExcludesReviewableCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-accepted-memory-resurface-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Memory Resurface Source", content: "Erik wants follow-up hooks for accepted memory facts.", vault: vault)
+        let acceptedPayload = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Accepted memory facts need follow-up hooks",
+                "--evidence", "Erik wants follow-up hooks for accepted memory facts.",
+                "--memory-key", "cid507.accepted-memory.resurface",
+                "--confidence", "0.94",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let acceptedCandidate = try #require(acceptedPayload["candidate"] as? [String: Any])
+        let acceptedID = try #require(acceptedCandidate["id"] as? String)
+        let reviewablePayload = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "pattern",
+                "--value", "Reviewable memory should not resurface as truth",
+                "--evidence", "Still only a suggestion.",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let reviewableCandidate = try #require(reviewablePayload["candidate"] as? [String: Any])
+        let reviewableID = try #require(reviewableCandidate["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+
+        let relevance = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "resurface", "--json"], vault: vault),
+            command: "item.memory-facts.resurface"
+        )
+        #expect(relevance["readOnly"] as? Bool == true)
+        #expect(relevance["changed"] as? Bool == false)
+        let candidates = try #require(relevance["candidates"] as? [[String: Any]])
+        #expect(candidates.contains { candidate in
+            candidate["family"] as? String == "accepted_memory_fact"
+                && candidate["factRef"] as? String == "accepted_memory_fact:\(acceptedID)"
+                && candidate["truthBoundary"] as? String == "accepted_memory_fact"
+                && candidate["candidateBoundary"] as? String == "reviewable_memory_candidates_excluded"
+                && (candidate["reasonCodes"] as? [String])?.contains("follow_up_relevance") == true
+        })
+        #expect(candidates.contains { $0["candidateRef"] as? String == "memory_candidate:\(reviewableID)" } == false)
+        let surfaced = try #require(candidates.first { $0["factRef"] as? String == "accepted_memory_fact:\(acceptedID)" })
+        #expect(surfaced["sourceCitation"] != nil)
+        #expect((surfaced["citedEvidence"] as? [[String: Any]])?.isEmpty == false)
+        #expect((surfaced["safeVerificationCommands"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedID) --json") == true)
+
+        let due = try assertStrictProcessJSON(
+            runCLI(args: ["item", "due-to-surface", "--limit", "10", "--stale-after-days", "999", "--json"], vault: vault),
+            command: "item.due-to-surface"
+        )
+        let dueCandidates = try #require(due["candidates"] as? [[String: Any]])
+        #expect(dueCandidates.contains { $0["family"] as? String == "accepted_memory_fact" && $0["factRef"] as? String == "accepted_memory_fact:\(acceptedID)" })
+        #expect(dueCandidates.contains { $0["candidateRef"] as? String == "memory_candidate:\(reviewableID)" && $0["family"] as? String == "accepted_memory_fact" } == false)
+    }
+
+    @Test("accepted memory fact resurfacing selectors return structured failures")
+    func acceptedMemoryFactResurfacingSelectorsReturnStructuredFailures() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-accepted-memory-resurface-failure-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missing = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "resurface", "--fact", "missing-resurface-fact", "--json"], vault: vault),
+            command: "item.memory-facts.resurface",
+            errorCode: "accepted_memory_fact_not_found"
+        )
+        #expect(missing["readOnly"] as? Bool == true)
+        #expect(missing["changed"] as? Bool == false)
+
+        let badLimit = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "resurface", "--limit", "not-a-number", "--json"], vault: vault),
+            command: "item.memory-facts.resurface",
+            errorCode: "malformed_numeric_filter"
+        )
+        let filter = try #require(badLimit["filter"] as? [String: Any])
+        #expect(filter["name"] as? String == "limit")
+    }
+
+    @Test("accepted memory fact action intents are read-only and referenced by resurfacing")
+    func acceptedMemoryFactActionIntentsAreReadOnlyAndReferencedByResurfacing() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-accepted-memory-intents-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Memory Intent Source", content: "Accepted memory facts should suggest safe next actions.", vault: vault)
+        let suggested = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Accepted memory facts should suggest safe next actions",
+                "--evidence", "Accepted memory facts should suggest safe next actions.",
+                "--memory-key", "cid507.accepted-memory.action-intent",
+                "--confidence", "0.96",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let candidate = try #require(suggested["candidate"] as? [String: Any])
+        let acceptedID = try #require(candidate["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+
+        let intentsPayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "intents", "--fact", acceptedID, "--json"], vault: vault),
+            command: "item.memory-facts.intents"
+        )
+        #expect(intentsPayload["readOnly"] as? Bool == true)
+        #expect(intentsPayload["changed"] as? Bool == false)
+        #expect(intentsPayload["truthBoundary"] as? String == "accepted_memory_fact")
+        #expect(intentsPayload["candidateBoundary"] as? String == "reviewable_memory_candidates_excluded")
+        let receipt = try #require(intentsPayload["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.memory-facts.intents")
+        #expect(receipt["action"] as? String == "propose_action_intents")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        let intents = try #require(intentsPayload["intents"] as? [[String: Any]])
+        let intent = try #require(intents.first)
+        #expect(intent["factRef"] as? String == "accepted_memory_fact:\(acceptedID)")
+        #expect(intent["candidateRef"] as? String == "memory_candidate:\(acceptedID)")
+        #expect(intent["intentType"] as? String == "follow_up_review")
+        #expect(intent["sourceCitation"] != nil)
+        #expect(intent["reason"] != nil)
+        #expect(intent["proposedCommandFamily"] as? String == "recall_context")
+        #expect(intent["requiresConfirmation"] as? Bool == true)
+        #expect(intent["mutationBoundary"] as? String == "read_only_intent_no_mutation")
+        #expect((intent["safeVerificationCommands"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedID) --json") == true)
+
+        let due = try assertStrictProcessJSON(
+            runCLI(args: ["item", "due-to-surface", "--limit", "10", "--stale-after-days", "999", "--json"], vault: vault),
+            command: "item.due-to-surface"
+        )
+        let dueCandidates = try #require(due["candidates"] as? [[String: Any]])
+        let surfaced = try #require(dueCandidates.first { $0["factRef"] as? String == "accepted_memory_fact:\(acceptedID)" })
+        let intentRefs = try #require(surfaced["actionIntentRefs"] as? [String])
+        #expect(intentRefs.contains("accepted_memory_fact_action_intent:\(acceptedID):follow_up_review"))
+    }
+
+    @Test("accepted memory fact action intent selectors return structured no-op and failures")
+    func acceptedMemoryFactActionIntentSelectorsReturnStructuredNoOpAndFailures() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-accepted-memory-intents-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let empty = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "intents", "--json"], vault: vault),
+            command: "item.memory-facts.intents"
+        )
+        #expect(empty["status"] as? String == "no_op")
+        #expect(empty["errorCode"] as? String == "no_action_intents")
+        #expect(empty["readOnly"] as? Bool == true)
+        #expect(empty["changed"] as? Bool == false)
+
+        let missing = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "intents", "--fact", "missing-intent-fact", "--json"], vault: vault),
+            command: "item.memory-facts.intents",
+            errorCode: "accepted_memory_fact_not_found"
+        )
+        #expect(missing["readOnly"] as? Bool == true)
+        #expect(missing["changed"] as? Bool == false)
+
+        let badLimit = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "intents", "--limit", "nope", "--json"], vault: vault),
+            command: "item.memory-facts.intents",
+            errorCode: "malformed_numeric_filter"
+        )
+        let filter = try #require(badLimit["filter"] as? [String: Any])
+        #expect(filter["name"] as? String == "limit")
+    }
+
+    @Test("accepted memory follow-up proposals create list inspect and lifecycle without side effects")
+    func acceptedMemoryFollowUpProposalsCreateListInspectAndLifecycleWithoutSideEffects() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-follow-up-proposals-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Proposal Source", content: "Accepted memory follow-up proposals must stay reviewable.", vault: vault)
+        let suggested = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Accepted memory follow-up proposals must stay reviewable",
+                "--evidence", "Accepted memory follow-up proposals must stay reviewable.",
+                "--memory-key", "cid507.follow-up.proposals",
+                "--confidence", "0.97",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let candidate = try #require(suggested["candidate"] as? [String: Any])
+        let acceptedID = try #require(candidate["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+
+        let created = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "create", "--fact", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.create"
+        )
+        #expect(created["readOnly"] as? Bool == false)
+        #expect(created["changed"] as? Bool == true)
+        #expect(created["mutationBoundary"] as? String == "proposal_record_only_no_external_mutation")
+        let proposal = try #require(created["proposal"] as? [String: Any])
+        let proposalID = try #require(proposal["proposalID"] as? String)
+        #expect(proposal["status"] as? String == "suggested")
+        #expect(proposal["truthBoundary"] as? String == "reviewable_follow_up_proposal_not_truth")
+        #expect(proposal["factRef"] as? String == "accepted_memory_fact:\(acceptedID)")
+        #expect(proposal["createsReminder"] as? Bool == false)
+        #expect(proposal["createsTodo"] as? Bool == false)
+        #expect(proposal["createsLink"] as? Bool == false)
+        #expect(proposal["createsNag"] as? Bool == false)
+        let receipt = try #require(created["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.memory-facts.proposals.create")
+        #expect(receipt["action"] as? String == "create_follow_up_proposal")
+        #expect(receipt["truthBoundary"] as? String == "action_receipt_not_fact_truth")
+
+        let listed = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "list", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.list"
+        )
+        let proposals = try #require(listed["proposals"] as? [[String: Any]])
+        #expect(proposals.contains { $0["proposalID"] as? String == proposalID })
+
+        let inspected = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "inspect", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.inspect"
+        )
+        #expect((inspected["proposal"] as? [String: Any])?["proposalRef"] as? String == "follow_up_proposal:\(proposalID)")
+
+        let due = try assertStrictProcessJSON(
+            runCLI(args: ["item", "due-to-surface", "--limit", "20", "--stale-after-days", "999", "--json"], vault: vault),
+            command: "item.due-to-surface"
+        )
+        let dueCandidates = try #require(due["candidates"] as? [[String: Any]])
+        let dueProposal = try #require(dueCandidates.first { $0["family"] as? String == "review_item" && ($0["sourceRefs"] as? [String])?.contains("follow_up_proposal:\(proposalID)") == true })
+        #expect((dueProposal["safeNextCommands"] as? [String])?.contains("cider-cli item memory-facts proposals preview \(proposalID) --json") == true)
+
+        let accepted = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "accept", proposalID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.accept"
+        )
+        let acceptedProposal = try #require(accepted["proposal"] as? [String: Any])
+        #expect(acceptedProposal["status"] as? String == "accepted")
+        #expect(acceptedProposal["createsReminder"] as? Bool == false)
+        #expect(acceptedProposal["createsTodo"] as? Bool == false)
+        #expect(acceptedProposal["createsLink"] as? Bool == false)
+        #expect(acceptedProposal["createsNag"] as? Bool == false)
+    }
+
+    @Test("accepted memory follow-up proposal execution preview is dry run and non mutating")
+    func acceptedMemoryFollowUpProposalExecutionPreviewIsDryRunAndNonMutating() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-follow-up-preview-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Preview Source", content: "Accepted proposals need preview before acting.", vault: vault)
+        let suggested = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Accepted proposals need preview before acting",
+                "--evidence", "Accepted proposals need preview before acting.",
+                "--memory-key", "cid541.preview",
+                "--confidence", "0.97",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let candidate = try #require(suggested["candidate"] as? [String: Any])
+        let acceptedID = try #require(candidate["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+        let created = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "create", "--fact", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.create"
+        )
+        let createdProposal = try #require(created["proposal"] as? [String: Any])
+        let proposalID = try #require(createdProposal["proposalID"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "accept", proposalID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.accept"
+        )
+
+        let preview = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "preview", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.preview"
+        )
+        #expect(preview["readOnly"] as? Bool == true)
+        #expect(preview["changed"] as? Bool == false)
+        #expect(preview["truthBoundary"] as? String == "execution_preview_not_truth")
+        #expect(preview["executionBoundary"] as? String == "dry_run_preview_not_execution")
+        let previewBody = try #require(preview["executionPreview"] as? [String: Any])
+        #expect(previewBody["proposalRef"] as? String == "follow_up_proposal:\(proposalID)")
+        #expect(previewBody["mappedCommandFamily"] as? String == "recall_context")
+        #expect(previewBody["mappedCommand"] as? String == "cider-cli item recall-context --item note \(noteID) --json")
+        #expect(previewBody["dryRun"] as? Bool == true)
+        #expect(previewBody["wouldExecute"] as? Bool == false)
+        #expect(previewBody["requiresConfirmation"] as? Bool == true)
+        #expect(previewBody["predictedMutationType"] as? String == "none_read_only_context_review")
+        #expect(previewBody["createsReminder"] as? Bool == false)
+        #expect(previewBody["createsTodo"] as? Bool == false)
+        #expect(previewBody["createsLink"] as? Bool == false)
+        #expect(previewBody["createsNag"] as? Bool == false)
+        let receipt = try #require(preview["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.memory-facts.proposals.preview")
+        #expect(receipt["action"] as? String == "preview_follow_up_proposal_execution")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        #expect(receipt["truthBoundary"] as? String == "action_receipt_not_fact_truth")
+
+        let inspected = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "inspect", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.inspect"
+        )
+        let inspectedProposal = try #require(inspected["proposal"] as? [String: Any])
+        #expect(inspectedProposal["status"] as? String == "accepted")
+        #expect(inspectedProposal["createsReminder"] as? Bool == false)
+        #expect(inspectedProposal["createsTodo"] as? Bool == false)
+        #expect(inspectedProposal["createsLink"] as? Bool == false)
+        #expect(inspectedProposal["createsNag"] as? Bool == false)
+    }
+
+    @Test("accepted memory follow-up proposal execution requires confirmation before running safe command")
+    func acceptedMemoryFollowUpProposalExecutionRequiresConfirmationBeforeRunningSafeCommand() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-follow-up-execution-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Execution Source", content: "Confirmed execution should run only after explicit token.", vault: vault)
+        let suggested = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Confirmed execution should run only after explicit token",
+                "--evidence", "Confirmed execution should run only after explicit token.",
+                "--memory-key", "cid542.execute",
+                "--confidence", "0.97",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let candidate = try #require(suggested["candidate"] as? [String: Any])
+        let acceptedID = try #require(candidate["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+        let created = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "create", "--fact", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.create"
+        )
+        let proposalID = try #require((created["proposal"] as? [String: Any])?["proposalID"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "accept", proposalID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.accept"
+        )
+
+        let refused = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "execute", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.execute",
+            errorCode: "follow_up_execution_confirmation_required"
+        )
+        #expect(refused["readOnly"] as? Bool == true)
+        #expect(refused["changed"] as? Bool == false)
+        let refusedDetails = try #require(refused["details"] as? [String: Any])
+        #expect(refusedDetails["executionBoundary"] as? String == "dry_run_preview_not_execution")
+        let refusedPreview = try #require(refusedDetails["executionPreview"] as? [String: Any])
+        #expect(refusedPreview["dryRun"] as? Bool == true)
+        #expect(refusedPreview["wouldExecute"] as? Bool == false)
+        #expect(refusedPreview["createsReminder"] as? Bool == false)
+        #expect(refusedPreview["createsTodo"] as? Bool == false)
+        #expect(refusedPreview["createsLink"] as? Bool == false)
+        #expect(refusedPreview["createsNag"] as? Bool == false)
+
+        let executed = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-facts", "proposals", "execute", proposalID,
+                "--confirm-execution",
+                "--confirmation-token", "execute:\(proposalID)",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-facts.proposals.execute"
+        )
+        #expect(executed["readOnly"] as? Bool == true)
+        #expect(executed["changed"] as? Bool == false)
+        #expect(executed["executionBoundary"] as? String == "confirmed_existing_safe_command_execution")
+        #expect(executed["mutationBoundary"] as? String == "existing_safe_command_read_only_execution")
+        #expect(executed["truthBoundary"] as? String == "execution_result_not_memory_truth")
+        let executionResult = try #require(executed["executionResult"] as? [String: Any])
+        #expect(executionResult["mappedCommandFamily"] as? String == "recall_context")
+        #expect(executionResult["mappedCommand"] as? String == "cider-cli item recall-context --item note \(noteID) --json")
+        #expect(executionResult["readOnly"] as? Bool == true)
+        #expect(executionResult["changed"] as? Bool == false)
+        #expect((executionResult["result"] as? [String: Any])?["command"] as? String == "item.recall-context")
+        #expect(executionResult["createsReminder"] as? Bool == false)
+        #expect(executionResult["createsTodo"] as? Bool == false)
+        #expect(executionResult["createsLink"] as? Bool == false)
+        #expect(executionResult["createsNag"] as? Bool == false)
+        let receipt = try #require(executed["actionReceipt"] as? [String: Any])
+        #expect(receipt["action"] as? String == "execute_follow_up_proposal")
+        #expect(receipt["truthBoundary"] as? String == "action_receipt_not_fact_truth")
+        #expect(receipt["outcomeBoundary"] as? String == "command_outcome_not_memory_truth")
+    }
+
+    @Test("accepted memory follow-up proposal execution failures are structured")
+    func acceptedMemoryFollowUpProposalExecutionFailuresAreStructured() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-follow-up-execution-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let empty = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "executions", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.executions"
+        )
+        #expect(empty["status"] as? String == "no_op")
+        #expect(empty["readOnly"] as? Bool == true)
+        #expect(empty["changed"] as? Bool == false)
+        #expect(empty["count"] as? Int == 0)
+
+        let missing = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "execute", "missing-execution", "--confirm-execution", "--confirmation-token", "execute:missing-execution", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.execute",
+            errorCode: "follow_up_proposal_not_found"
+        )
+        #expect(missing["readOnly"] as? Bool == true)
+        #expect(missing["changed"] as? Bool == false)
+
+        let noteID = try createNote(title: "Execution Failure Source", content: "Unaccepted execution must fail.", vault: vault)
+        let suggested = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Unaccepted execution must fail",
+                "--evidence", "Unaccepted execution must fail.",
+                "--memory-key", "cid542.execute.unaccepted",
+                "--confidence", "0.97",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let acceptedID = try #require((suggested["candidate"] as? [String: Any])?["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+        let created = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "create", "--fact", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.create"
+        )
+        let proposalID = try #require((created["proposal"] as? [String: Any])?["proposalID"] as? String)
+        let unaccepted = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "execute", proposalID, "--confirm-execution", "--confirmation-token", "execute:\(proposalID)", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.execute",
+            errorCode: "follow_up_proposal_not_accepted"
+        )
+        #expect(unaccepted["readOnly"] as? Bool == true)
+        #expect(unaccepted["changed"] as? Bool == false)
+
+        var unsupportedOutput = SecondBrainEnrichmentOutput(
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: noteID),
+            kind: SecondBrainFollowUpProposalService.outputKind,
+            value: "Unsupported execution mapping",
+            normalizedValue: "unsupported-execution-mapping",
+            label: "Follow-up proposal",
+            evidence: "Unsupported execution mapping.",
+            source: "test",
+            confidence: 0.5,
+            reviewState: "accepted",
+            metadata: [
+                "proposed_command_family": "unsupported_family",
+                "proposed_command": "cider-cli unsupported command --json",
+                "confirmation_policy": "explicit_existing_command_required",
+                "requires_confirmation": "true",
+            ]
+        )
+        unsupportedOutput.id = "unsupported-execution-proposal"
+        let unsupportedProposal = SecondBrainFollowUpProposal(output: unsupportedOutput)
+        let unsupportedPreview = SecondBrainFollowUpProposalService.preview(for: unsupportedProposal)
+        #expect(throws: SecondBrainFollowUpProposalService.FollowUpProposalError.self) {
+            _ = try SecondBrainFollowUpProposalService.executionResult(for: unsupportedPreview, confirmed: true, confirmationToken: "execute:unsupported-execution-proposal")
+        }
+    }
+
+    @Test("accepted memory follow-up proposal execution preview failures and no op reads are structured")
+    func acceptedMemoryFollowUpProposalExecutionPreviewFailuresAndNoOpReadsAreStructured() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-follow-up-preview-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let empty = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "previews", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.previews"
+        )
+        #expect(empty["status"] as? String == "no_op")
+        #expect(empty["readOnly"] as? Bool == true)
+        #expect(empty["changed"] as? Bool == false)
+        #expect(empty["count"] as? Int == 0)
+
+        let missing = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "preview", "missing-preview", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.preview",
+            errorCode: "follow_up_proposal_not_found"
+        )
+        #expect(missing["readOnly"] as? Bool == true)
+        #expect(missing["changed"] as? Bool == false)
+
+        let noteID = try createNote(title: "Unaccepted Preview Source", content: "Unaccepted proposals must not preview as executable.", vault: vault)
+        let suggested = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Unaccepted proposals must not preview as executable",
+                "--evidence", "Unaccepted proposals must not preview as executable.",
+                "--memory-key", "cid541.preview.unaccepted",
+                "--confidence", "0.97",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let candidate = try #require(suggested["candidate"] as? [String: Any])
+        let acceptedID = try #require(candidate["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+        let created = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "create", "--fact", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.create"
+        )
+        let proposalID = try #require((created["proposal"] as? [String: Any])?["proposalID"] as? String)
+        let unaccepted = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "preview", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.preview",
+            errorCode: "follow_up_proposal_not_accepted"
+        )
+        #expect(unaccepted["readOnly"] as? Bool == true)
+        #expect(unaccepted["changed"] as? Bool == false)
+        #expect((unaccepted["safeNextCommands"] as? [String])?.contains("cider-cli item memory-facts proposals accept \(proposalID) --json") == true)
+
+        let unsupported = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "bogus-action", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals",
+            errorCode: "unsupported_follow_up_proposal_action"
+        )
+        let unsupportedDetails = try #require(unsupported["details"] as? [String: Any])
+        #expect((unsupportedDetails["supportedActions"] as? [String])?.contains("preview") == true)
+    }
+
+    @Test("accepted memory follow-up proposal failures and empty reads are structured")
+    func acceptedMemoryFollowUpProposalFailuresAndEmptyReadsAreStructured() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-follow-up-proposals-empty-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let empty = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "list", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.list"
+        )
+        #expect(empty["readOnly"] as? Bool == true)
+        #expect(empty["changed"] as? Bool == false)
+        #expect(empty["count"] as? Int == 0)
+
+        let missingInspect = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "inspect", "missing-proposal", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.inspect",
+            errorCode: "follow_up_proposal_not_found"
+        )
+        #expect(missingInspect["readOnly"] as? Bool == true)
+        #expect(missingInspect["changed"] as? Bool == false)
+
+        let missingFact = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "create", "--fact", "missing-fact", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.create",
+            errorCode: "accepted_memory_fact_not_found"
+        )
+        #expect(missingFact["readOnly"] as? Bool == false)
+        #expect(missingFact["changed"] as? Bool == false)
+    }
+
+    @Test("link helper failures return structured receipts without mutation")
+    func linkHelperFailuresReturnStructuredReceiptsWithoutMutation() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-structured-link-failures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let unsupported = try assertStrictFailureJSON(
+            runCLI(args: ["item", "link", "badtype", "source", "note", "target", "--json"], vault: vault),
+            command: "link.add",
+            errorCode: "unsupported_item_type"
+        )
+        #expect(unsupported["readOnly"] as? Bool == false)
+        #expect(unsupported["changed"] as? Bool == false)
+        #expect((unsupported["supportedTypes"] as? [String])?.contains("note") == true)
+        let unsupportedReceipt = try #require(unsupported["actionReceipt"] as? [String: Any])
+        #expect(unsupportedReceipt["status"] as? String == "failed")
+        #expect(unsupportedReceipt["readOnly"] as? Bool == false)
+        #expect(unsupportedReceipt["changed"] as? Bool == false)
+
+        let missing = try assertStrictFailureJSON(
+            runCLI(args: ["item", "link", "note", "missing-source", "note", "missing-target", "--json"], vault: vault),
+            command: "link.add",
+            errorCode: "item_not_found"
+        )
+        #expect(missing["readOnly"] as? Bool == false)
+        #expect(missing["changed"] as? Bool == false)
+        let missingReceipt = try #require(missing["actionReceipt"] as? [String: Any])
+        #expect((missingReceipt["sourceRefs"] as? [String])?.contains("note:missing-source") == true)
+    }
+
+    @Test("recall context action history supports filters windows and selector echo")
+    func recallContextActionHistorySupportsFiltersWindowsAndSelectorEcho() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-recall-history-filter-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceID = try createNote(title: "Recall History Source", content: "Source", vault: vault)
+        let targetID = try createNote(title: "Recall History Target", content: "Target", vault: vault)
+        let since = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-60))
+        _ = try parseJSONObject(try runCLI(args: ["item", "link", "note", sourceID, "note", targetID, "--json"], vault: vault).stdout)
+        _ = try parseJSONObject(try runCLI(args: ["item", "why-surfaced", "note", sourceID, "--json"], vault: vault).stdout)
+        let before = ISO8601DateFormatter().string(from: Date().addingTimeInterval(60))
+
+        let recall = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "recall-context", "--item", "note", sourceID,
+                "--history-command", "link.add",
+                "--history-status", "succeeded",
+                "--history-evidence-ref", "note:\(targetID)",
+                "--history-since", since,
+                "--history-before", before,
+                "--history-limit", "1",
+                "--json",
+            ], vault: vault),
+            command: "item.recall-context"
+        )
+        let filters = try #require(recall["actionHistoryFilters"] as? [String: Any])
+        #expect(filters["command"] as? String == "link.add")
+        #expect(filters["status"] as? String == "succeeded")
+        #expect(filters["evidenceRef"] as? String == "note:\(targetID)")
+        #expect(filters["since"] as? String == since)
+        #expect(filters["before"] as? String == before)
+        #expect(filters["limit"] as? Int == 1)
+        let history = try #require(recall["actionHistory"] as? [[String: Any]])
+        #expect(history.count == 1)
+        #expect(history.first?["command"] as? String == "link.add")
+        #expect(history.first?["status"] as? String == "succeeded")
+        #expect((history.first?["evidenceRefs"] as? [String])?.contains("note:\(targetID)") == true)
+        #expect(history.first?["truthBoundary"] as? String == "action_receipt_not_fact_truth")
+    }
+
     @Test("note JSON exposes project artifact metadata")
     func noteJSONExposesProjectArtifactMetadata() throws {
         let note = Note(
@@ -184,7 +1555,14 @@ struct CiderCLIAgentSafetyTests {
             source: "test",
             actor: "agent",
             confidence: 1,
-            metadata: ["artifactType": "note"]
+            metadata: [
+                "artifactType": "note",
+                "candidate_id": "candidate-123",
+                "candidate_ref": "graph_candidate:candidate-123",
+                "mention_text": "Cider Project Note",
+                "source_kind": "journal",
+                "source_quote": "Project note belongs to Cider.",
+            ]
         )
         let bundle = CiderItemContextBundle(
             item: item,
@@ -197,6 +1575,7 @@ struct CiderCLIAgentSafetyTests {
             spaceMemberships: [],
             routingDecisions: [],
             agentActions: [],
+            actionReceipts: [],
             enrichmentOutputs: [],
             relationCandidates: [],
             captureProvenance: []
@@ -208,6 +1587,23 @@ struct CiderCLIAgentSafetyTests {
         #expect(itemDict["isProjectArtifact"] as? Bool == true)
         #expect(itemDict["projectID"] as? String == "cider")
         #expect(itemDict["artifactType"] as? String == "note")
+
+        let sourceEvidence = try #require(dict["sourceEvidence"] as? [String: Any])
+        #expect(sourceEvidence["count"] as? Int == 1)
+        #expect(sourceEvidence["acceptedRelationCount"] as? Int == 1)
+        let facts = try #require(sourceEvidence["facts"] as? [[String: Any]])
+        let fact = try #require(facts.first)
+        #expect(fact["direction"] as? String == "outgoing")
+        #expect(fact["currentOwnerRole"] as? String == "source")
+        #expect(fact["relationType"] as? String == "artifact_of")
+        #expect(fact["sourceQuote"] as? String == "Project note belongs to Cider.")
+        #expect(fact["candidateRef"] as? String == "graph_candidate:candidate-123")
+        #expect(fact["mentionText"] as? String == "Cider Project Note")
+        #expect(fact["sourceKind"] as? String == "journal")
+        let safeNextCommands = try #require(fact["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item graph-candidate candidate-123 --json"))
+        #expect(safeNextCommands.contains("cider-cli item context note \(noteID.uuidString) --json"))
+        #expect(safeNextCommands.contains("cider-cli item project-context cider --json"))
     }
 
     @Test("reminder validation errors honor json output")
@@ -1322,6 +2718,18 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("Unknown command") == true)
     }
 
+    @Test("board help aliases print usage instead of unknown command")
+    func boardHelpAliasesPrintUsageInsteadOfUnknownCommand() throws {
+        for alias in ["--help", "-h", "help"] {
+            let result = try runCLI(args: ["board", alias])
+
+            #expect(result.status == 0, "Expected cider-cli board \(alias) to exit successfully")
+            #expect(result.stdout.contains("BOARD WORKFLOW"))
+            #expect(result.stdout.contains("cider-cli board add-card"))
+            #expect(!result.stdout.contains("Unknown board command"))
+        }
+    }
+
     @Test("remaining command families fail closed with json errors")
     func remainingCommandFamiliesFailClosedWithJSONErrors() throws {
         let cases: [(args: [String], expectedError: String)] = [
@@ -1774,6 +3182,245 @@ struct CiderCLIAgentSafetyTests {
         })
     }
 
+    @Test("item backfill journals reprocesses only Daily Journal notes into reviewable candidates")
+    func itemBackfillJournalsReprocessesOnlyDailyJournalNotesIntoReviewableCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-backfill-journals-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-01",
+            content: "Jami loved pineapple coconut drink. First weekend overtime in five years; hourly wages motivation helped.",
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Regular Project Note",
+            content: "I gave Jami that pineapple coconut drink and she loved it.",
+            vault: vault
+        )
+
+        let result = try runCLI(args: ["item", "backfill-journals", "--limit", "5", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.backfill-journals")
+        #expect(payload["changed"] as? Bool == true)
+        #expect(payload["scope"] as? String == "daily_journal")
+        #expect(payload["selectedCount"] as? Int == 1)
+        #expect(payload["ownerCount"] as? Int == 1)
+        #expect(payload["reviewRequired"] as? Bool == true)
+        #expect((payload["chunkCount"] as? Int ?? 0) > 0)
+        #expect((payload["enrichmentOutputCount"] as? Int ?? 0) > 0)
+        #expect((payload["similarityCandidateCount"] as? Int ?? 0) >= 0)
+        #expect((payload["graphCandidateCount"] as? Int ?? 0) > 0)
+        #expect((payload["memoryCandidateCount"] as? Int ?? 0) > 0)
+
+        let owners = try #require(payload["owners"] as? [[String: Any]])
+        let owner = try #require(owners.first)
+        let ownerRef = try #require(owner["owner"] as? [String: Any])
+        #expect(ownerRef["ownerType"] as? String == "note")
+        #expect(ownerRef["ownerID"] as? String == journalID)
+        #expect(owner["title"] as? String == "Daily Journal 2026-06-01")
+        #expect((owner["graphCandidateCount"] as? Int ?? 0) > 0)
+        #expect((owner["memoryCandidateCount"] as? Int ?? 0) > 0)
+        let graphCandidates = try #require(owner["graphCandidates"] as? [[String: Any]])
+        #expect(graphCandidates.contains { candidate in
+            candidate["reviewState"] as? String == "suggested"
+                && (candidate["mentionText"] as? String)?.localizedCaseInsensitiveContains("pineapple coconut drink") == true
+        })
+
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli capture review-queue --limit 20 --json"))
+        #expect(safeNextCommands.contains("cider-cli item graph-candidates note \(journalID) --json"))
+        #expect(safeNextCommands.contains("cider-cli item context note \(journalID) --json"))
+
+        let reviewResult = try runCLI(args: ["capture", "review-queue", "--limit", "20", "--json"], vault: vault)
+        let review = try parseJSONObject(reviewResult.stdout)
+        let reviewItems = try #require(review["items"] as? [[String: Any]])
+        #expect(reviewItems.contains { item in
+            item["kind"] as? String == "graph_candidate"
+                || item["kind"] as? String == "memory_candidate"
+        })
+    }
+
+    @Test("review queue candidate rows explain source storage proposed change and quality")
+    func reviewQueueCandidateRowsExplainSourceStorageProposedChangeAndQuality() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-explain-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-08",
+            content: "He usually wants really expensive stuff like an e-bike, but I am not buying that for this birthday. Later it moved closer and Ryker to have one became a confusing fragment. Jami loved pineapple coconut drink.",
+            vault: vault
+        )
+        _ = try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-08", "--limit", "5", "--json"], vault: vault)
+
+        let reviewResult = try runCLI(args: ["capture", "review-queue", "--kind", "graph_candidate", "--limit", "20", "--json"], vault: vault)
+        let review = try parseJSONObject(reviewResult.stdout)
+        let items = try #require(review["items"] as? [[String: Any]])
+        let graphItem = try #require(items.first { $0["kind"] as? String == "graph_candidate" })
+
+        #expect(graphItem["reviewFamily"] as? String == "graph_candidate")
+        #expect(graphItem["sourceItemRef"] as? String == "note:\(journalID)")
+        #expect(graphItem["sourceItemTitle"] as? String == "Daily Journal 2026-06-08")
+        #expect(graphItem["sourceItemDate"] as? String == "2026-06-08")
+        #expect((graphItem["sourceQuote"] as? String)?.contains("e-bike") == true
+            || (graphItem["sourceQuote"] as? String)?.contains("pineapple coconut") == true)
+        #expect((graphItem["extractionReason"] as? String)?.contains("not accepted graph truth") == true
+            || (graphItem["extractionReason"] as? String)?.contains("not truth") == true)
+        #expect(graphItem["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((graphItem["safeNextCommands"] as? [String])?.contains { $0.contains("item graph-candidate") } == true)
+
+        let proposedChange = try #require(graphItem["proposedChange"] as? [String: Any])
+        #expect(proposedChange["changeType"] as? String == "graph_relation_candidate")
+        #expect(proposedChange["truthState"] as? String == "reviewable_candidate_not_truth")
+        let storage = try #require(graphItem["storage"] as? [String: Any])
+        #expect(storage["table"] as? String == "enrichment_outputs")
+        #expect(storage["service"] as? String == "SecondBrainEnrichmentOutputService")
+        let quality = try #require(graphItem["quality"] as? [String: Any])
+        #expect(quality["level"] as? String != nil)
+
+        let lowQuality = CiderReviewQueueService.candidateQualitySignal(
+            mentionText: "it moved closer",
+            sourceQuote: "Later it moved closer."
+        )
+        #expect(lowQuality.level == "low")
+        #expect(lowQuality.codes.contains("event_clause_not_object"))
+    }
+
+    @Test("review queue memory candidate filter exposes visible rows and explanation fields")
+    func reviewQueueMemoryCandidateFilterExposesVisibleRowsAndExplanationFields() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-memory-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-09",
+            content: "Jami loved pineapple coconut drink. First weekend overtime in five years; hourly wages motivation helped. Jami wants Thai food next Friday.",
+            vault: vault
+        )
+        _ = try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-09", "--limit", "5", "--json"], vault: vault)
+
+        let summaryResult = try runCLI(args: ["review", "summary", "--json"], vault: vault)
+        let summary = try parseJSONObject(summaryResult.stdout)
+        let countsByKind = try #require(summary["countsByKind"] as? [String: Any])
+        let memoryCount = countsByKind["memory_candidate"] as? Int ?? 0
+        #expect(memoryCount > 0)
+
+        let memoryResult = try runCLI(args: ["capture", "review-queue", "--kind", "memory_candidate", "--limit", "20", "--json"], vault: vault)
+        let memory = try parseJSONObject(memoryResult.stdout)
+        let visibleMemoryItems = try #require(memory["items"] as? [[String: Any]])
+        #expect(visibleMemoryItems.count == memoryCount)
+        let item = try #require(visibleMemoryItems.first)
+        #expect(item["kind"] as? String == "memory_candidate")
+        #expect(item["reviewFamily"] as? String == "memory_candidate")
+        #expect(item["sourceItemRef"] as? String == "note:\(journalID)")
+        #expect(item["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((item["extractionReason"] as? String)?.contains("not promoted until accepted") == true)
+        #expect((item["acceptEffect"] as? String)?.contains("never writes user-owned memory truth") == true)
+        let proposedChange = try #require(item["proposedChange"] as? [String: Any])
+        #expect(proposedChange["changeType"] as? String == "memory_candidate")
+        let storage = try #require(item["storage"] as? [String: Any])
+        #expect(storage["kind"] as? String == "memory_candidate")
+
+        let candidateID = try #require(item["candidateID"] as? String)
+        let acceptResult = try runCLI(args: ["item", "accept-memory-candidate", candidateID, "--actor", "codex-test", "--json"], vault: vault)
+        let accept = try parseJSONObject(acceptResult.stdout)
+        #expect(acceptResult.status == 0)
+        #expect(accept["command"] as? String == "item.accept-memory-candidate")
+        let receipt = try #require(accept["actionReceipt"] as? [String: Any])
+        #expect(receipt["action"] as? String == "accept")
+        #expect(receipt["actor"] as? String == "codex-test")
+        #expect(receipt["changed"] as? Bool == true)
+        #expect((receipt["sourceRefs"] as? [String])?.contains("memory_candidate:\(candidateID)") == true)
+
+        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(journalID)", "--action", "accept", "--json"], vault: vault).stdout)
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "item.accept-memory-candidate"
+                && entry["status"] as? String == "succeeded"
+                && entry["changed"] as? Bool == true
+                && (entry["sourceRefs"] as? [String])?.contains("memory_candidate:\(candidateID)") == true
+        })
+    }
+
+    @Test("item backfill journals supports dry run date selector and repeated runs stay bounded")
+    func itemBackfillJournalsSupportsDryRunDateSelectorAndRepeatedRunsStayBounded() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-backfill-journals-selectors-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let selectedJournalID = try createNote(
+            title: "Daily Journal 2026-06-01",
+            content: "Jami loved pineapple coconut drink. First weekend overtime in five years; hourly wages motivation helped.",
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Daily Journal 2026-06-02",
+            content: "Alex prefers late coffee catch-ups.",
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Regular Project Note",
+            content: "Jami loved pineapple coconut drink.",
+            vault: vault
+        )
+
+        let dryRunResult = try runCLI(args: [
+            "item", "backfill-journals",
+            "--date", "2026-06-01",
+            "--limit", "5",
+            "--dry-run",
+            "--json",
+        ], vault: vault)
+        let dryRun = try parseJSONObject(dryRunResult.stdout)
+        #expect(dryRun["ok"] as? Bool == true)
+        #expect(dryRun["dryRun"] as? Bool == true)
+        #expect(dryRun["changed"] as? Bool == false)
+        #expect(dryRun["readOnly"] as? Bool == true)
+        #expect(dryRun["selectedCount"] as? Int == 1)
+        #expect(dryRun["skippedCount"] as? Int == 1)
+        #expect(dryRun["errorCount"] as? Int == 0)
+        #expect(dryRun["graphCandidateCount"] as? Int == 0)
+        #expect(dryRun["memoryCandidateCount"] as? Int == 0)
+        let dryRunOwners = try #require(dryRun["owners"] as? [[String: Any]])
+        let dryRunOwner = try #require(dryRunOwners.first)
+        #expect(dryRunOwner["date"] as? String == "2026-06-01")
+        let dryRunOwnerRef = try #require(dryRunOwner["owner"] as? [String: Any])
+        #expect(dryRunOwnerRef["ownerID"] as? String == selectedJournalID)
+
+        let firstRunResult = try runCLI(args: [
+            "item", "backfill-journals",
+            "--date", "2026-06-01",
+            "--limit", "5",
+            "--json",
+        ], vault: vault)
+        let firstRun = try parseJSONObject(firstRunResult.stdout)
+        #expect(firstRun["dryRun"] as? Bool == false)
+        #expect(firstRun["selectedCount"] as? Int == 1)
+        #expect(firstRun["skippedCount"] as? Int == 1)
+        #expect((firstRun["graphCandidateCount"] as? Int ?? 0) > 0)
+        #expect((firstRun["memoryCandidateCount"] as? Int ?? 0) > 0)
+
+        let secondRunResult = try runCLI(args: [
+            "item", "backfill-journals",
+            "--date", "2026-06-01",
+            "--limit", "5",
+            "--json",
+        ], vault: vault)
+        let secondRun = try parseJSONObject(secondRunResult.stdout)
+        #expect(secondRun["selectedCount"] as? Int == 1)
+        #expect(secondRun["skippedCount"] as? Int == 1)
+        #expect(secondRun["graphCandidateCount"] as? Int == firstRun["graphCandidateCount"] as? Int)
+        #expect(secondRun["memoryCandidateCount"] as? Int == firstRun["memoryCandidateCount"] as? Int)
+        #expect(secondRun["enrichmentOutputCount"] as? Int == firstRun["enrichmentOutputCount"] as? Int)
+    }
+
     @Test("item dogfood intelligence exposes entity relation candidates through similarity JSON")
     func itemDogfoodIntelligenceExposesEntityRelationCandidatesThroughSimilarityJSON() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -1818,7 +3465,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(metadata["matched_entity"] as? String == "Avery Stone")
         #expect(metadata["target_type"] as? String == "contact")
 
-        let contextResult = try runCLI(args: ["item", "context", "note", noteID, "--json"], vault: vault)
+        let contextResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
         let context = try parseJSONObject(contextResult.stdout)
         let contextCandidates = try #require(context["relationCandidates"] as? [[String: Any]])
         #expect(contextCandidates.contains { relationCandidate in
@@ -1829,6 +3476,996 @@ struct CiderCLIAgentSafetyTests {
         let blockingIssues = try #require(context["blockingIssues"] as? [String])
         #expect(context["needsReview"] as? Bool == true)
         #expect(blockingIssues.contains("relation_candidates_need_review"))
+    }
+
+    @Test("item graph candidates exposes read-only list and inspect JSON")
+    func itemGraphCandidatesExposesReadOnlyListAndInspectJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-graph-candidates-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Graph Candidate Source",
+            content: "I gave Jami that pineapple coconut drink and she loved it.",
+            vault: vault
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "pineapple coconut drink",
+            sourceQuote: "I gave Jami that pineapple coconut drink and she loved it.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            relationGuesses: [.likesDrink],
+            actionGuesses: ["liked"],
+            safeActions: [.inspectSource, .accept, .correct, .reject, .delegateEnrichment],
+            confidence: 0.88,
+            confidenceReason: "Sentence explicitly says Jami loved the drink.",
+            subjectText: "Jami",
+            source: "graph_candidate.test"
+        )
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+        db.close()
+
+        let listResult = try runCLI(args: ["item", "graph-candidates", "--json"], vault: vault)
+        let list = try parseJSONObject(listResult.stdout)
+        #expect(listResult.status == 0)
+        #expect(list["ok"] as? Bool == true)
+        #expect(list["command"] as? String == "item.graph-candidates")
+        #expect(list["readOnly"] as? Bool == true)
+        #expect(list["changed"] as? Bool == false)
+        #expect(list["count"] as? Int == 1)
+        #expect(list["limit"] as? Int == 20)
+
+        let candidates = try #require(list["candidates"] as? [[String: Any]])
+        let candidate = try #require(candidates.first)
+        #expect(candidate["id"] as? String == output.id)
+        #expect(candidate["ref"] as? String == "graph_candidate:\(output.id)")
+        #expect(candidate["contractValid"] as? Bool == true)
+        #expect(candidate["candidateKind"] as? String == "object_relation")
+        #expect(candidate["mentionText"] as? String == "pineapple coconut drink")
+        #expect(candidate["sourceQuote"] as? String == "I gave Jami that pineapple coconut drink and she loved it.")
+        #expect(candidate["sourceKind"] as? String == "journal")
+        #expect(candidate["reviewState"] as? String == "suggested")
+        #expect(candidate["reviewable"] as? Bool == true)
+        #expect(candidate["objectTypeGuesses"] as? [String] == ["drink"])
+        #expect(candidate["relationGuesses"] as? [String] == ["likes_drink"])
+        #expect(candidate["actionGuesses"] as? [String] == ["liked"])
+        #expect(candidate["safeActions"] as? [String] == ["inspect_source", "accept", "correct", "reject", "delegate_enrichment"])
+        let delegatedEnrichmentActions = try #require(candidate["delegatedEnrichmentActions"] as? [[String: Any]])
+        #expect(delegatedEnrichmentActions.contains { action in
+            action["kind"] as? String == "find_recipe_or_menu_evidence"
+                && action["resultPolicy"] as? String == "return_reviewable_evidence_not_truth"
+                && (action["command"] as? String)?.contains("delegate-graph-candidate \(output.id) --task-kind find_recipe_or_menu_evidence") == true
+        })
+        #expect(candidate["subjectText"] as? String == "Jami")
+        #expect(candidate["confidenceReason"] as? String == "Sentence explicitly says Jami loved the drink.")
+
+        let safeNextCommands = try #require(candidate["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item graph-candidate \(output.id) --json"))
+        #expect(safeNextCommands.contains("cider-cli item context note \(noteID) --json"))
+        #expect(safeNextCommands.contains("cider-cli item graph-candidates note \(noteID) --json"))
+        #expect(!safeNextCommands.contains { $0.contains("accept-graph-candidate") })
+
+        let reviewActionCommands = try #require(candidate["reviewActionCommands"] as? [[String: Any]])
+        #expect(reviewActionCommands.contains { action in
+            action["action"] as? String == "accept"
+                && action["readOnly"] as? Bool == false
+                && action["status"] as? String == "available"
+        })
+
+        let reviewQueueResult = try runCLI(args: ["capture", "review-queue", "--kind", "graph_candidate", "--json"], vault: vault)
+        let reviewQueue = try parseJSONObject(reviewQueueResult.stdout)
+        #expect(reviewQueueResult.status == 0)
+        #expect(reviewQueue["command"] as? String == "capture.review-queue")
+        #expect(reviewQueue["readOnly"] as? Bool == true)
+        #expect(reviewQueue["changed"] as? Bool == false)
+        let reviewItems = try #require(reviewQueue["items"] as? [[String: Any]])
+        #expect(reviewItems.allSatisfy { $0["kind"] as? String == "graph_candidate" })
+        let reviewItem = try #require(reviewItems.first { $0["candidateID"] as? String == output.id })
+        #expect(reviewItem["kind"] as? String == "graph_candidate")
+        #expect(reviewItem["reviewState"] as? String == "suggested")
+        #expect(reviewItem["sourceQuote"] as? String == "I gave Jami that pineapple coconut drink and she loved it.")
+        #expect(reviewItem["possibleTypes"] as? [String] == ["drink"])
+        #expect(reviewItem["recommendedNextAction"] as? String == "review_graph_candidate")
+        let reviewSafeNext = try #require(reviewItem["safeNextCommands"] as? [String])
+        #expect(reviewSafeNext.contains("cider-cli item graph-candidate \(output.id) --json"))
+        #expect(!reviewSafeNext.contains { $0.contains("accept-graph-candidate") })
+
+        let ownerListResult = try runCLI(args: ["item", "graph-candidates", "note", noteID, "--json"], vault: vault)
+        let ownerList = try parseJSONObject(ownerListResult.stdout)
+        #expect(ownerListResult.status == 0)
+        #expect(ownerList["readOnly"] as? Bool == true)
+        #expect(ownerList["changed"] as? Bool == false)
+        #expect(ownerList["count"] as? Int == 1)
+        let ownerPayload = try #require(ownerList["owner"] as? [String: Any])
+        #expect(ownerPayload["ownerType"] as? String == "note")
+        #expect(ownerPayload["ownerID"] as? String == noteID)
+
+        let cappedListResult = try runCLI(args: ["item", "graph-candidates", "--limit", "0", "--json"], vault: vault)
+        let cappedList = try parseJSONObject(cappedListResult.stdout)
+        #expect(cappedListResult.status == 0)
+        #expect(cappedList["count"] as? Int == 0)
+        #expect(cappedList["limit"] as? Int == 0)
+        let cappedCandidates = try #require(cappedList["candidates"] as? [[String: Any]])
+        #expect(cappedCandidates.isEmpty)
+
+        let inspectResult = try runCLI(args: ["item", "graph-candidate", output.id, "--json"], vault: vault)
+        let inspect = try parseJSONObject(inspectResult.stdout)
+        #expect(inspectResult.status == 0)
+        #expect(inspect["ok"] as? Bool == true)
+        #expect(inspect["command"] as? String == "item.graph-candidate")
+        #expect(inspect["readOnly"] as? Bool == true)
+        #expect(inspect["changed"] as? Bool == false)
+        let inspected = try #require(inspect["candidate"] as? [String: Any])
+        #expect(inspected["id"] as? String == output.id)
+        let inspectSafeCommands = try #require(inspect["safeNextCommands"] as? [String])
+        #expect(!inspectSafeCommands.contains("cider-cli item graph-candidate \(output.id) --json"))
+        #expect(inspectSafeCommands.contains("cider-cli item context note \(noteID) --json"))
+    }
+
+    @Test("recall context bundle cites accepted graph evidence and reviewable candidates")
+    func recallContextBundleCitesAcceptedGraphEvidenceAndReviewableCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-recall-context-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-14",
+            content: "Jami loved the pineapple coconut drink. Avery Stone mentioned Pine House after the graph conversation.",
+            vault: vault
+        )
+        let relatedNoteID = try createNote(
+            title: "Pine House dinner notes",
+            content: "Pine House looked like a possible restaurant to review later.",
+            vault: vault
+        )
+        let journalRef = LibraryEntityRef(type: .note, entityID: UUID(uuidString: journalID)!)
+        let relatedRef = LibraryEntityRef(type: .note, entityID: UUID(uuidString: relatedNoteID)!)
+        let journalOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: journalID)
+        let drinkOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: journalOwner,
+            candidateKind: .object,
+            mentionText: "pineapple coconut drink",
+            sourceQuote: "Jami loved the pineapple coconut drink.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            safeActions: [.inspectSource, .createObject, .reject],
+            confidence: 0.82,
+            source: "recall_context.test"
+        )
+        let placeOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: journalOwner,
+            candidateKind: .objectRelation,
+            mentionText: "Pine House",
+            sourceQuote: "Avery Stone mentioned Pine House after the graph conversation.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.restaurant, .place],
+            relationGuesses: [.mentions],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.7,
+            source: "recall_context.test"
+        )
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let store = SecondBrainStore(database: db)
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(drinkOutput)
+        try outputService.record(placeOutput)
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: journalOwner,
+            targetOwner: SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "drink-pineapple-coconut-drink"),
+            relationType: "liked",
+            evidence: "Jami loved the pineapple coconut drink.",
+            source: "graph_candidate.accept",
+            actor: "codex-test",
+            confidence: 0.82,
+            metadata: [
+                "candidate_id": drinkOutput.id,
+                "candidate_ref": "graph_candidate:\(drinkOutput.id)",
+                "mention_text": "pineapple coconut drink",
+                "source_quote": "Jami loved the pineapple coconut drink.",
+            ]
+        ))
+        try ItemLinkService(database: db).addDirectLink(from: journalRef, to: relatedRef)
+        try store.upsertSection(SecondBrainSection(
+            owner: journalOwner,
+            itemID: journalID,
+            sectionKey: "summary",
+            title: "Summary",
+            body: "Journal mentions Jami's pineapple coconut drink and Pine House.",
+            source: "test",
+            sortOrder: 0
+        ))
+        try store.replaceChunks(owner: journalOwner, chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: journalID,
+                source: "note-body",
+                title: "Journal body",
+                body: "Jami loved the pineapple coconut drink. Avery Stone mentioned Pine House after the graph conversation.",
+                chunkIndex: 0
+            )
+        ])
+        db.close()
+
+        let result = try runCLI(args: ["item", "recall-context", "--item", "note", journalID, "--query", "Pine House", "--json"], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+        #expect(result.status == 0)
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.recall-context")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["safetyBoundary"] as? [String] == [
+            "accepted_facts_are_cited",
+            "reviewable_candidates_are_not_truth",
+            "accept_requires_explicit_command",
+            "no_silent_memory_or_graph_promotion",
+        ])
+        let anchors = try #require(payload["anchors"] as? [[String: Any]])
+        let anchor = try #require(anchors.first { ($0["owner"] as? [String: Any])?["ownerID"] as? String == journalID })
+        let anchorReasons = try #require(anchor["scoreReasons"] as? [[String: Any]])
+        #expect(anchorReasons.contains { $0["kind"] as? String == "explicit_item_anchor" })
+        #expect(anchorReasons.contains { $0["kind"] as? String == "query_match" })
+        #expect(anchor["recallScore"] as? Double != nil)
+        let contentBlocks = try #require(payload["contentBlocks"] as? [[String: Any]])
+        let citedContent = try #require(contentBlocks.first { ($0["citation"] as? [String: Any])?["ownerID"] as? String == journalID })
+        let contentReasons = try #require(citedContent["scoreReasons"] as? [[String: Any]])
+        #expect(contentReasons.contains { $0["kind"] as? String == "source_chunk" || $0["kind"] as? String == "source_section" })
+        let relatedItems = try #require(payload["relatedItems"] as? [[String: Any]])
+        let related = try #require(relatedItems.first { ($0["id"] as? String) == relatedNoteID })
+        let relatedReasons = try #require(related["scoreReasons"] as? [[String: Any]])
+        #expect(relatedReasons.contains { $0["kind"] as? String == "related_item_link" })
+        let acceptedFacts = try #require(payload["acceptedFacts"] as? [[String: Any]])
+        let accepted = try #require(acceptedFacts.first { $0["candidateRef"] as? String == "graph_candidate:\(drinkOutput.id)" })
+        #expect(accepted["truthState"] as? String == "accepted")
+        #expect(accepted["sourceQuote"] as? String == "Jami loved the pineapple coconut drink.")
+        #expect((accepted["citation"] as? [String: Any])?["ownerID"] as? String == journalID)
+        let acceptedReasons = try #require(accepted["scoreReasons"] as? [[String: Any]])
+        #expect(acceptedReasons.contains { $0["kind"] as? String == "accepted_graph_fact" })
+        #expect(acceptedReasons.contains { $0["kind"] as? String == "source_evidence" })
+        let acceptedEvidence = try #require(accepted["sourceEvidenceRecord"] as? [String: Any])
+        #expect(acceptedEvidence["sourceOwnerRef"] as? String == "note:\(journalID)")
+        #expect(acceptedEvidence["sourceQuote"] as? String == "Jami loved the pineapple coconut drink.")
+        #expect(acceptedEvidence["derivedOwnerRef"] as? String == "owner_relation:\(accepted["id"] as? String ?? "")")
+        #expect(acceptedEvidence["candidateRef"] as? String == "graph_candidate:\(drinkOutput.id)")
+        #expect(acceptedEvidence["extractionSource"] as? String == "graph_candidate.accept")
+        let acceptedLifecycle = try #require(accepted["lifecycleHistory"] as? [[String: Any]])
+        #expect(acceptedLifecycle.contains { $0["eventKind"] as? String == "suggested" })
+        #expect(acceptedLifecycle.contains { $0["eventKind"] as? String == "accepted_truth_recorded" })
+        #expect(acceptedLifecycle.last?["truthBoundary"] as? String == "accepted_truth_requires_explicit_event")
+        let candidates = try #require(payload["reviewableCandidates"] as? [[String: Any]])
+        let candidate = try #require(candidates.first { $0["id"] as? String == placeOutput.id })
+        #expect(candidate["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect(candidate["sourceQuote"] as? String == "Avery Stone mentioned Pine House after the graph conversation.")
+        #expect((candidate["citation"] as? [String: Any])?["ownerID"] as? String == journalID)
+        let candidateEvidence = try #require(candidate["sourceEvidenceRecord"] as? [String: Any])
+        #expect(candidateEvidence["sourceOwnerRef"] as? String == "note:\(journalID)")
+        #expect(candidateEvidence["sourceQuote"] as? String == "Avery Stone mentioned Pine House after the graph conversation.")
+        #expect(candidateEvidence["derivedOwnerRef"] as? String == "enrichment_output:\(placeOutput.id)")
+        #expect(candidateEvidence["candidateRef"] as? String == "graph_candidate:\(placeOutput.id)")
+        #expect(candidateEvidence["extractionSource"] as? String == "recall_context.test")
+        let candidateReasons = try #require(candidate["scoreReasons"] as? [[String: Any]])
+        #expect(candidateReasons.contains { $0["kind"] as? String == "reviewable_candidate" })
+        #expect(candidateReasons.contains { $0["kind"] as? String == "source_evidence" })
+        #expect(candidateReasons.contains { $0["kind"] as? String == "lifecycle_state" })
+        let candidateLifecycle = try #require(candidate["lifecycleHistory"] as? [[String: Any]])
+        #expect(candidateLifecycle.map { $0["eventKind"] as? String }.contains("suggested"))
+        #expect(candidateLifecycle.last?["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        let review = try #require(payload["reviewStatus"] as? [String: Any])
+        #expect(review["needsReview"] as? Bool == true)
+        #expect((review["blockingIssues"] as? [String])?.contains("graph_candidates_need_review") == true)
+        let commands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(commands.contains("cider-cli item context note \(journalID) --json"))
+        #expect(commands.contains("cider-cli item graph-candidates note \(journalID) --json"))
+        let accessLog = try #require(payload["accessLog"] as? [String: Any])
+        #expect(accessLog["recorded"] as? Bool == true)
+        #expect(accessLog["queryHash"] as? String != nil)
+        #expect(accessLog["queryTextStored"] as? Bool == false)
+        #expect(String(describing: accessLog).contains("Pine House") == false)
+
+        let logResult = try runCLI(args: ["item", "recall-access-log", "--limit", "1", "--json"], vault: vault)
+        let logPayload = try parseJSONObject(logResult.stdout)
+        #expect(logResult.status == 0)
+        #expect(logPayload["ok"] as? Bool == true)
+        let events = try #require(logPayload["events"] as? [[String: Any]])
+        let event = try #require(events.first)
+        #expect(event["queryHash"] as? String == accessLog["queryHash"] as? String)
+        #expect(event["queryText"] == nil)
+        #expect(String(describing: event).contains("Pine House") == false)
+    }
+
+    @Test("recall context demotes accepted facts after accepted validity supersession")
+    func recallContextDemotesAcceptedFactsAfterAcceptedValiditySupersession() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-fact-validity-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Daily Journal Fact Validity",
+            content: "Jami's favorite restaurant was Pine House. Jami now says Lotus Garden is her favorite.",
+            vault: vault
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let relation = SecondBrainRelation(
+            sourceOwner: owner,
+            targetOwner: SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "pine-house"),
+            relationType: "favorite_restaurant",
+            evidence: "Jami's favorite restaurant was Pine House.",
+            source: "graph_candidate.accept",
+            actor: "test",
+            confidence: 0.88,
+            metadata: [
+                "candidate_ref": "graph_candidate:favorite-pine-house",
+                "candidate_id": "favorite-pine-house",
+                "source_quote": "Jami's favorite restaurant was Pine House.",
+                "mention_text": "Pine House",
+            ]
+        )
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        try SecondBrainStore(database: db).recordRelation(relation)
+        try SecondBrainStore(database: db).replaceChunks(owner: owner, chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: noteID,
+                source: "note-body",
+                title: "Journal body",
+                body: "Jami's favorite restaurant was Pine House. Jami now says Lotus Garden is her favorite.",
+                chunkIndex: 0
+            )
+        ])
+        db.close()
+
+        let propose = try runCLI(
+            args: [
+                "item", "fact-validity", "propose",
+                "--target-ref", "owner_relation:\(relation.id)",
+                "--state", "superseded",
+                "--source-owner", "note:\(noteID)",
+                "--quote", "Jami now says Lotus Garden is her favorite.",
+                "--reason", "Newer journal evidence supersedes the prior favorite restaurant fact.",
+                "--superseded-by-ref", "owner_relation:favorite-lotus-garden",
+                "--json",
+            ],
+            vault: vault
+        )
+        let proposedPayload = try parseJSONObject(propose.stdout)
+        #expect(propose.status == 0)
+        let proposeReceipt = try #require(proposedPayload["actionReceipt"] as? [String: Any])
+        #expect(proposeReceipt["command"] as? String == "item.fact-validity.propose")
+        #expect(proposeReceipt["action"] as? String == "propose")
+        #expect(proposeReceipt["actor"] as? String == "cider-cli")
+        #expect(proposeReceipt["changed"] as? Bool == true)
+        #expect((proposeReceipt["sourceRefs"] as? [String])?.contains("owner_relation:\(relation.id)") == true)
+        let proposed = try #require(proposedPayload["candidate"] as? [String: Any])
+        #expect(proposed["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        let candidateID = try #require(proposed["id"] as? String)
+
+        let accept = try runCLI(
+            args: ["item", "fact-validity", "accept", candidateID, "--reason", "Confirmed newer evidence.", "--json"],
+            vault: vault
+        )
+        let acceptedPayload = try parseJSONObject(accept.stdout)
+        #expect(accept.status == 0)
+        let acceptReceipt = try #require(acceptedPayload["actionReceipt"] as? [String: Any])
+        #expect(acceptReceipt["command"] as? String == "item.fact-validity.accept")
+        #expect(acceptReceipt["action"] as? String == "accept")
+        #expect(acceptReceipt["changed"] as? Bool == true)
+        #expect((acceptReceipt["sourceRefs"] as? [String])?.contains("fact_validity_candidate:\(candidateID)") == true)
+        let acceptedCandidate = try #require(acceptedPayload["candidate"] as? [String: Any])
+        #expect(acceptedCandidate["truthBoundary"] as? String == "accepted_fact_validity")
+        let acceptedState = try #require(acceptedPayload["factValidity"] as? [String: Any])
+        #expect(acceptedState["currentState"] as? String == "superseded")
+        #expect(acceptedState["isCurrent"] as? Bool == false)
+        #expect(acceptedState["sourceEvidenceRecord"] as? [String: Any] != nil)
+
+        let duplicateAccept = try runCLI(
+            args: ["item", "fact-validity", "accept", candidateID, "--reason", "Already accepted.", "--json"],
+            vault: vault
+        )
+        let duplicatePayload = try parseJSONObject(duplicateAccept.stdout)
+        #expect(duplicateAccept.status == 0)
+        #expect(duplicatePayload["changed"] as? Bool == false)
+        #expect(duplicatePayload["errorCode"] as? String == "fact_validity_already_accepted")
+        let duplicateReceipt = try #require(duplicatePayload["actionReceipt"] as? [String: Any])
+        #expect(duplicateReceipt["status"] as? String == "no_op")
+        #expect(duplicateReceipt["changed"] as? Bool == false)
+        #expect(duplicateReceipt["errorCode"] as? String == "fact_validity_already_accepted")
+
+        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(noteID)", "--limit", "20", "--json"], vault: vault).stdout)
+        let ledgerEntries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(ledgerEntries.contains { entry in
+            entry["command"] as? String == "item.fact-validity.accept"
+                && entry["action"] as? String == "accept"
+                && entry["changed"] as? Bool == true
+                && (entry["sourceRefs"] as? [String])?.contains("fact_validity_candidate:\(candidateID)") == true
+        })
+        #expect(ledgerEntries.contains { entry in
+            entry["command"] as? String == "item.fact-validity.accept"
+                && entry["status"] as? String == "no_op"
+                && entry["errorCode"] as? String == "fact_validity_already_accepted"
+        })
+
+        let recallResult = try runCLI(args: ["item", "recall-context", "--item", "note", noteID, "--query", "Pine House", "--json"], vault: vault)
+        let recall = try parseJSONObject(recallResult.stdout)
+        #expect(recallResult.status == 0)
+        let facts = try #require(recall["acceptedFacts"] as? [[String: Any]])
+        let fact = try #require(facts.first { $0["id"] as? String == relation.id })
+        #expect(fact["truthState"] as? String == "stale_or_superseded_truth")
+        #expect(fact["isCurrentTruth"] as? Bool == false)
+        let factValidity = try #require(fact["factValidity"] as? [String: Any])
+        #expect(factValidity["currentState"] as? String == "superseded")
+        #expect(factValidity["supersededByRef"] as? String == "owner_relation:favorite-lotus-garden")
+        #expect(factValidity["sourceEvidenceRecord"] as? [String: Any] != nil)
+        let actionHistory = try #require(recall["actionHistory"] as? [[String: Any]])
+        #expect(actionHistory.contains { entry in
+            entry["kind"] as? String == "action_receipt"
+                && entry["command"] as? String == "item.fact-validity.accept"
+                && entry["action"] as? String == "accept"
+                && entry["truthBoundary"] as? String == "action_receipt_not_fact_truth"
+        })
+    }
+
+    @Test("entity resolution merge persists action receipt and recall action history")
+    func entityResolutionMergePersistsActionReceiptAndRecallActionHistory() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-entity-resolution-receipt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Daily Journal Entity Resolution",
+            content: "We went to Cactus for dinner and it should resolve to the saved Cactus place.",
+            vault: vault
+        )
+        let targetID = try createNote(
+            title: "Cactus Restaurant",
+            content: "Saved restaurant entity for Cactus.",
+            vault: vault
+        )
+        let sourceOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let sourceEntity = SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "cactus-mention")
+        let targetEntity = SecondBrainOwnerRef(ownerType: "note", ownerID: targetID)
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let candidate = try SecondBrainEntityResolutionService(database: db, store: SecondBrainStore(database: db)).suggest(
+            candidateType: "place_alias",
+            sourceEntity: sourceEntity,
+            sourceLabel: "Cactus",
+            inputMention: "Cactus",
+            targetEntity: targetEntity,
+            targetLabel: "Cactus Restaurant",
+            sourceOwner: sourceOwner,
+            sourceQuote: "We went to Cactus for dinner.",
+            confidence: 0.91,
+            confidenceReasons: ["exact_alias", "place_visit_context"],
+            actor: "test-agent",
+            source: "entity_resolution.test"
+        )
+        db.close()
+
+        let mergeResult = try runCLI(args: ["item", "entity-resolution", "merge", candidate.id, "--actor", "codex-test", "--reason", "Confirmed Cactus place entity.", "--json"], vault: vault)
+        let merge = try parseJSONObject(mergeResult.stdout)
+        #expect(mergeResult.status == 0)
+        #expect(merge["command"] as? String == "item.entity-resolution.merge")
+        #expect(merge["changed"] as? Bool == true)
+        let receipt = try #require(merge["actionReceipt"] as? [String: Any])
+        #expect(receipt["action"] as? String == "merge")
+        #expect(receipt["actor"] as? String == "codex-test")
+        #expect(receipt["ownerRef"] as? String == "note:\(noteID)")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("entity_resolution_candidate:\(candidate.id)") == true)
+        #expect((receipt["sourceRefs"] as? [String])?.contains("graph_object:cactus-mention") == true)
+        #expect((receipt["evidenceRefs"] as? [String])?.contains("note:\(noteID)") == true)
+
+        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(noteID)", "--action", "merge", "--json"], vault: vault).stdout)
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "item.entity-resolution.merge"
+                && entry["status"] as? String == "succeeded"
+                && entry["changed"] as? Bool == true
+                && (entry["sourceRefs"] as? [String])?.contains("entity_resolution_candidate:\(candidate.id)") == true
+        })
+
+        let recallResult = try runCLI(args: ["item", "recall-context", "--item", "note", noteID, "--query", "Cactus", "--json"], vault: vault)
+        let recall = try parseJSONObject(recallResult.stdout)
+        #expect(recallResult.status == 0)
+        let actionHistory = try #require(recall["actionHistory"] as? [[String: Any]])
+        #expect(actionHistory.contains { entry in
+            entry["kind"] as? String == "action_receipt"
+                && entry["command"] as? String == "item.entity-resolution.merge"
+                && entry["action"] as? String == "merge"
+                && entry["truthBoundary"] as? String == "action_receipt_not_fact_truth"
+        })
+    }
+
+    @Test("recall context bundle returns structured selector failures")
+    func recallContextBundleReturnsStructuredSelectorFailures() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-recall-context-errors-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let malformedResult = try runCLI(args: ["item", "recall-context", "--item", "note", "not-a-uuid", "--json"], vault: vault)
+        let malformed = try parseJSONObject(malformedResult.stdout)
+        #expect(malformedResult.status != 0)
+        #expect(malformed["ok"] as? Bool == false)
+        #expect(malformed["errorCode"] as? String == "malformed_or_unresolved_selector")
+        #expect(malformed["readOnly"] as? Bool == true)
+        #expect(malformed["changed"] as? Bool == false)
+
+        let noMatchResult = try runCLI(args: ["item", "recall-context", "--query", "zzzz no such topic", "--json"], vault: vault)
+        let noMatch = try parseJSONObject(noMatchResult.stdout)
+        #expect(noMatchResult.status != 0)
+        #expect(noMatch["ok"] as? Bool == false)
+        #expect(noMatch["errorCode"] as? String == "no_recall_matches")
+        #expect(noMatch["warnings"] as? [[String: Any]] != nil)
+        let commands = try #require(noMatch["safeNextCommands"] as? [String])
+        #expect(commands.contains("cider-cli item search \"zzzz no such topic\" --json"))
+    }
+
+    @Test("graph object candidates expose stable hub identity and conflicts")
+    func graphObjectCandidatesExposeStableHubIdentityAndConflicts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-graph-object-hub-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let firstNoteID = try createNote(
+            title: "Daily Journal 2026-06-14",
+            content: "Avery Stone mentioned Pine House after the Cider graph hub conversation.",
+            vault: vault
+        )
+        let secondNoteID = try createNote(
+            title: "Daily Journal 2026-06-15",
+            content: "Avery Stone said Pine House might be a restaurant or a project codename.",
+            vault: vault
+        )
+        let firstOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: firstNoteID)
+        let secondOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: secondNoteID)
+        let firstOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: firstOwner,
+            candidateKind: .objectRelation,
+            mentionText: "Pine House",
+            sourceQuote: "Avery Stone mentioned Pine House after the Cider graph hub conversation.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.place, .restaurant],
+            relationGuesses: [.mentions],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.71,
+            subjectText: "Avery Stone",
+            source: "graph_candidate.test"
+        )
+        let conflictingOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: secondOwner,
+            candidateKind: .object,
+            mentionText: "Pine House",
+            sourceQuote: "Avery Stone said Pine House might be a restaurant or a project codename.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.project, .restaurant],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.66,
+            source: "graph_candidate.test"
+        )
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let service = SecondBrainEnrichmentOutputService(database: db)
+        try service.record(firstOutput)
+        try service.record(conflictingOutput)
+        db.close()
+
+        let listResult = try runCLI(args: ["item", "graph-candidates", "--json"], vault: vault)
+        let list = try parseJSONObject(listResult.stdout)
+        #expect(listResult.status == 0)
+        let candidates = try #require(list["candidates"] as? [[String: Any]])
+        let firstCandidate = try #require(candidates.first { $0["id"] as? String == firstOutput.id })
+        let hub = try #require(firstCandidate["objectHubCandidate"] as? [String: Any])
+        #expect(hub["stableKey"] as? String == "graph_object:pine-house")
+        #expect(hub["displayName"] as? String == "Pine House")
+        #expect(hub["aliases"] as? [String] == ["Pine House"])
+        #expect(hub["possibleTypes"] as? [String] == ["place", "restaurant"])
+        #expect(hub["reviewState"] as? String == "suggested")
+        #expect(hub["acceptedAsTruth"] as? Bool == false)
+        #expect(hub["reviewSafety"] as? [String] == [
+            "reviewable_candidate_not_truth",
+            "accept_requires_explicit_command",
+            "no_auto_merge",
+        ])
+
+        let sourceEvidence = try #require(hub["sourceEvidence"] as? [[String: Any]])
+        #expect(sourceEvidence.contains { evidence in
+            evidence["candidateID"] as? String == firstOutput.id
+                && evidence["sourceQuote"] as? String == "Avery Stone mentioned Pine House after the Cider graph hub conversation."
+                && (evidence["sourceOwner"] as? [String: Any])?["ownerID"] as? String == firstNoteID
+        })
+        #expect(hub["conflictCount"] as? Int == 1)
+        let conflicts = try #require(hub["conflicts"] as? [[String: Any]])
+        #expect(conflicts.contains { conflict in
+            conflict["candidateID"] as? String == conflictingOutput.id
+                && conflict["stableKey"] as? String == "graph_object:pine-house"
+                && conflict["conflictReason"] as? String == "same_stable_key_different_type_guesses"
+                && conflict["possibleTypes"] as? [String] == ["project", "restaurant"]
+        })
+
+        let inspectResult = try runCLI(args: ["item", "graph-candidate", firstOutput.id, "--json"], vault: vault)
+        let inspect = try parseJSONObject(inspectResult.stdout)
+        let inspected = try #require(inspect["candidate"] as? [String: Any])
+        #expect(inspected["objectHubCandidate"] as? [String: Any] != nil)
+    }
+
+    @Test("item graph candidate mutations accept reject and delegate explicitly")
+    func itemGraphCandidateMutationsAcceptRejectAndDelegateExplicitly() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-graph-candidate-mutations-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Graph Candidate Mutation Source",
+            content: "Watched The Way Way Back. Jami loved that pineapple coconut drink. We stopped at Cactus.",
+            vault: vault
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let acceptOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "The Way Way Back",
+            sourceQuote: "Watched The Way Way Back.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched],
+            actionGuesses: ["watched"],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.78,
+            source: "graph_candidate.test"
+        )
+        let rejectOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "pineapple coconut drink",
+            sourceQuote: "Jami loved that pineapple coconut drink.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            relationGuesses: [.likesDrink],
+            actionGuesses: ["liked"],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.72,
+            subjectText: "Jami",
+            source: "graph_candidate.test"
+        )
+        let delegateOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Cactus",
+            sourceQuote: "We stopped at Cactus.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.restaurant, .place],
+            relationGuesses: [.visited],
+            actionGuesses: ["visited"],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.74,
+            source: "graph_candidate.test"
+        )
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let service = SecondBrainEnrichmentOutputService(database: db)
+        try service.record(acceptOutput)
+        try service.record(rejectOutput)
+        try service.record(delegateOutput)
+        db.close()
+
+        let acceptResult = try runCLI(args: [
+            "item", "accept-graph-candidate", acceptOutput.id,
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let accept = try parseJSONObject(acceptResult.stdout)
+        #expect(acceptResult.status == 0)
+        #expect(accept["ok"] as? Bool == true)
+        #expect(accept["command"] as? String == "item.accept-graph-candidate")
+        #expect(accept["readOnly"] as? Bool == false)
+        #expect(accept["changed"] as? Bool == true)
+        #expect(accept["reviewState"] as? String == "accepted")
+        let relation = try #require(accept["relation"] as? [String: Any])
+        #expect(relation["sourceOwner"] as? [String: Any] != nil)
+        #expect(relation["relationType"] as? String == "watched")
+        let targetOwner = try #require(accept["targetOwner"] as? [String: Any])
+        #expect(targetOwner["ownerType"] as? String == "graph_object")
+        #expect(targetOwner["ownerID"] as? String == "movie-the-way-way-back")
+
+        let rejectResult = try runCLI(args: [
+            "item", "reject-graph-candidate", rejectOutput.id,
+            "--reason", "Not useful",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let reject = try parseJSONObject(rejectResult.stdout)
+        #expect(rejectResult.status == 0)
+        #expect(reject["command"] as? String == "item.reject-graph-candidate")
+        #expect(reject["reviewState"] as? String == "rejected")
+        #expect(reject["relation"] == nil)
+
+        let delegateResult = try runCLI(args: [
+            "item", "delegate-graph-candidate", delegateOutput.id,
+            "--task-kind", "find_place_match",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let delegate = try parseJSONObject(delegateResult.stdout)
+        #expect(delegateResult.status == 0)
+        #expect(delegate["command"] as? String == "item.delegate-graph-candidate")
+        #expect(delegate["reviewState"] as? String == "deferred")
+        let delegation = try #require(delegate["delegation"] as? [String: Any])
+        #expect(delegation["taskKind"] as? String == "find_place_match")
+        #expect((delegation["instructions"] as? String)?.contains("place or restaurant matches") == true)
+        #expect(delegation["resultPolicy"] as? String == "return_reviewable_evidence_not_truth")
+        let delegatedTask = try #require(delegation["task"] as? [String: Any])
+        #expect(delegatedTask["kind"] as? String == "find_place_match")
+        #expect(delegatedTask["status"] as? String == "available")
+
+        let contextResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
+        let context = try parseJSONObject(contextResult.stdout)
+        let ownerRelations = try #require(context["ownerRelations"] as? [[String: Any]])
+        #expect(ownerRelations.count == 1)
+        #expect(ownerRelations.first?["relationType"] as? String == "watched")
+        let sourceEvidence = try #require(context["sourceEvidence"] as? [String: Any])
+        #expect((sourceEvidence["count"] as? Int ?? 0) >= 1)
+        let facts = try #require(sourceEvidence["facts"] as? [[String: Any]])
+        let fact = try #require(facts.first { $0["candidateRef"] as? String == "graph_candidate:\(acceptOutput.id)" })
+        #expect(fact["relationType"] as? String == "watched")
+        #expect(fact["sourceQuote"] as? String == "Watched The Way Way Back.")
+        #expect(fact["candidateRef"] as? String == "graph_candidate:\(acceptOutput.id)")
+        #expect(fact["mentionText"] as? String == "The Way Way Back")
+        let factCommands = try #require(fact["safeNextCommands"] as? [String])
+        #expect(factCommands.contains("cider-cli item graph-candidate \(acceptOutput.id) --json"))
+
+        let relatedResult = try runCLI(args: ["item", "related-owners", "note", noteID, "--json"], vault: vault)
+        let related = try parseJSONObject(relatedResult.stdout)
+        #expect(related["command"] as? String == "item.related-owners")
+        #expect(related["readOnly"] as? Bool == true)
+        #expect(related["changed"] as? Bool == false)
+        #expect((related["relationCount"] as? Int ?? 0) >= 1)
+        let relatedEvidence = try #require(related["sourceEvidence"] as? [String: Any])
+        let relatedFacts = try #require(relatedEvidence["facts"] as? [[String: Any]])
+        let relatedFact = try #require(relatedFacts.first { $0["candidateRef"] as? String == "graph_candidate:\(acceptOutput.id)" })
+        #expect(relatedFact["sourceQuote"] as? String == "Watched The Way Way Back.")
+        #expect(relatedFact["mentionText"] as? String == "The Way Way Back")
+        let relatedCommands = try #require(related["safeNextCommands"] as? [String])
+        #expect(relatedCommands.contains("cider-cli item context note \(noteID) --json"))
+
+        let agentActions = try #require(context["agentActions"] as? [[String: Any]])
+        #expect(agentActions.contains { $0["actionType"] as? String == "graph_candidate.accept" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "graph_candidate.reject" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "graph_candidate.delegate_enrichment" })
+
+        let acceptReceipt = try #require(accept["actionReceipt"] as? [String: Any])
+        #expect(acceptReceipt["command"] as? String == "item.accept-graph-candidate")
+        #expect(acceptReceipt["action"] as? String == "accept")
+        #expect(acceptReceipt["actor"] as? String == "codex-test")
+        #expect(acceptReceipt["changed"] as? Bool == true)
+        #expect((acceptReceipt["sourceRefs"] as? [String])?.contains("graph_candidate:\(acceptOutput.id)") == true)
+        #expect((acceptReceipt["evidenceRefs"] as? [String])?.contains("note:\(noteID)") == true)
+
+        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(noteID)", "--action", "accept", "--json"], vault: vault).stdout)
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "item.accept-graph-candidate"
+                && entry["status"] as? String == "succeeded"
+                && entry["changed"] as? Bool == true
+                && (entry["sourceRefs"] as? [String])?.contains("graph_candidate:\(acceptOutput.id)") == true
+        })
+
+        let agentContextResult = try runCLI(args: ["item", "context", "note", noteID, "--max-history", "10", "--json"], vault: vault)
+        let agentContext = try parseJSONObject(agentContextResult.stdout)
+        let recentHistory = try #require(agentContext["recentHistory"] as? [[String: Any]])
+        #expect(recentHistory.contains { entry in
+            entry["kind"] as? String == "action_receipt"
+                && entry["command"] as? String == "item.accept-graph-candidate"
+                && entry["action"] as? String == "accept"
+                && entry["status"] as? String == "succeeded"
+                && entry["changed"] as? Bool == true
+        })
+
+        let defaultList = try parseJSONObject(try runCLI(args: ["item", "graph-candidates", "note", noteID, "--json"], vault: vault).stdout)
+        #expect(defaultList["count"] as? Int == 1)
+        let reviewedList = try parseJSONObject(try runCLI(args: ["item", "graph-candidates", "note", noteID, "--include-reviewed", "--json"], vault: vault).stdout)
+        #expect(reviewedList["count"] as? Int == 3)
+    }
+
+    @Test("graph object candidate accept creates cited canonical entity and blocks conflicts without approval")
+    func graphObjectCandidateAcceptCreatesCitedCanonicalEntityAndBlocksConflictsWithoutApproval() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-canonical-entity-accept-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceNoteID = try createNote(
+            title: "Daily Journal 2026-06-16",
+            content: "Jami wants to try Pine House again. Pinehouse is how the group typed it later.",
+            vault: vault
+        )
+        let conflictNoteID = try createNote(
+            title: "Daily Journal 2026-06-17",
+            content: "Pine House might be the project codename, not the restaurant.",
+            vault: vault
+        )
+        let sourceOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: sourceNoteID)
+        let conflictOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: conflictNoteID)
+        let acceptOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: sourceOwner,
+            candidateKind: .objectRelation,
+            mentionText: "Pine House",
+            sourceQuote: "Jami wants to try Pine House again.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.restaurant, .place],
+            relationGuesses: [.wants],
+            actionGuesses: ["wants_to_try"],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.77,
+            subjectText: "Jami",
+            source: "graph_candidate.test"
+        )
+        let conflictOutput = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: conflictOwner,
+            candidateKind: .object,
+            mentionText: "Pine House",
+            sourceQuote: "Pine House might be the project codename, not the restaurant.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.project],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.65,
+            source: "graph_candidate.test"
+        )
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let service = SecondBrainEnrichmentOutputService(database: db)
+        try service.record(acceptOutput)
+        try service.record(conflictOutput)
+        db.close()
+
+        let blockedResult = try runCLI(args: [
+            "item", "accept-graph-candidate", acceptOutput.id,
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let blocked = try parseJSONObject(blockedResult.stdout)
+        #expect(blockedResult.status != 0)
+        #expect(blocked["ok"] as? Bool == false)
+        #expect(blocked["command"] as? String == "item.accept-graph-candidate")
+        #expect(blocked["changed"] as? Bool == false)
+        #expect(blocked["errorCode"] as? String == "graph_candidate_conflicts_block_accept")
+        #expect((blocked["blockingIssues"] as? [String])?.contains("graph_object_conflict") == true)
+        #expect(((blocked["conflicts"] as? [[String: Any]]) ?? []).contains { $0["candidateID"] as? String == conflictOutput.id })
+        #expect(((blocked["safeNextCommands"] as? [String]) ?? []).contains("cider-cli item delegate-graph-candidate \(acceptOutput.id) --task-kind find_object_evidence --json"))
+        let blockedReceipt = try #require(blocked["actionReceipt"] as? [String: Any])
+        #expect(blockedReceipt["status"] as? String == "failed")
+        #expect(blockedReceipt["errorCode"] as? String == "graph_candidate_conflicts_block_accept")
+        #expect((blockedReceipt["sourceRefs"] as? [String])?.contains("graph_candidate:\(acceptOutput.id)") == true)
+        let failedLedger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--status", "failed", "--action", "accept", "--json"], vault: vault).stdout)
+        let failedEntries = try #require(failedLedger["entries"] as? [[String: Any]])
+        #expect(failedEntries.contains { entry in
+            entry["command"] as? String == "item.accept-graph-candidate"
+                && entry["errorCode"] as? String == "graph_candidate_conflicts_block_accept"
+                && entry["changed"] as? Bool == false
+        })
+
+        let acceptResult = try runCLI(args: [
+            "item", "accept-graph-candidate", acceptOutput.id,
+            "--actor", "codex-test",
+            "--allow-conflicts",
+            "--alias", "Pinehouse",
+            "--json",
+        ], vault: vault)
+        let accept = try parseJSONObject(acceptResult.stdout)
+        #expect(acceptResult.status == 0)
+        #expect(accept["command"] as? String == "item.accept-graph-candidate")
+        #expect(accept["changed"] as? Bool == true)
+        #expect(accept["reviewState"] as? String == "accepted")
+        let canonicalEntity = try #require(accept["canonicalEntity"] as? [String: Any])
+        #expect(canonicalEntity["stableKey"] as? String == "graph_object:pine-house")
+        #expect(canonicalEntity["displayName"] as? String == "Pine House")
+        #expect(canonicalEntity["owner"] as? [String: Any] != nil)
+        #expect((canonicalEntity["aliases"] as? [String])?.contains("Pinehouse") == true)
+        #expect(canonicalEntity["acceptedAsTruth"] as? Bool == true)
+        #expect(canonicalEntity["approvalSource"] as? String == "explicit_command")
+        #expect(canonicalEntity["acceptedCandidateRef"] as? String == "graph_candidate:\(acceptOutput.id)")
+        #expect(canonicalEntity["conflictPolicy"] as? String == "accepted_with_explicit_conflict_override")
+        #expect((canonicalEntity["blockingIssues"] as? [String])?.contains("conflicts_reviewed_by_explicit_override") == true)
+        let sourceEvidence = try #require(canonicalEntity["sourceEvidence"] as? [[String: Any]])
+        #expect(sourceEvidence.contains { evidence in
+            evidence["candidateRef"] as? String == "graph_candidate:\(acceptOutput.id)"
+                && evidence["sourceQuote"] as? String == "Jami wants to try Pine House again."
+        })
+        let aliasDecisions = try #require(accept["aliasDecisions"] as? [[String: Any]])
+        #expect(aliasDecisions.contains { decision in
+            decision["alias"] as? String == "Pinehouse"
+                && decision["relationType"] as? String == "alias_of"
+                && decision["approvalSource"] as? String == "explicit_command"
+        })
+        let candidate = try #require(accept["candidate"] as? [String: Any])
+        let acceptedHub = try #require(candidate["objectHubCandidate"] as? [String: Any])
+        #expect(acceptedHub["acceptedAsTruth"] as? Bool == true)
+        #expect(acceptedHub["canonicalEntity"] as? [String: Any] != nil)
+
+        let recall = try parseJSONObject(try runCLI(args: ["item", "recall-context", "--item", "note", sourceNoteID, "--json"], vault: vault).stdout)
+        let acceptedFacts = try #require(recall["acceptedFacts"] as? [[String: Any]])
+        #expect(acceptedFacts.contains { fact in
+            fact["candidateRef"] as? String == "graph_candidate:\(acceptOutput.id)"
+                && fact["truthState"] as? String == "accepted"
+                && fact["sourceQuote"] as? String == "Jami wants to try Pine House again."
+        })
+        let defaultCandidates = try parseJSONObject(try runCLI(args: ["item", "graph-candidates", "--json"], vault: vault).stdout)
+        let reviewableCandidates = try #require(defaultCandidates["candidates"] as? [[String: Any]])
+        #expect(!reviewableCandidates.contains { $0["id"] as? String == acceptOutput.id })
+        #expect(reviewableCandidates.contains { $0["id"] as? String == conflictOutput.id })
+
+        let secondAcceptResult = try runCLI(args: [
+            "item", "accept-graph-candidate", acceptOutput.id,
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let secondAccept = try parseJSONObject(secondAcceptResult.stdout)
+        #expect(secondAcceptResult.status != 0)
+        #expect(secondAccept["ok"] as? Bool == false)
+        #expect(secondAccept["errorCode"] as? String == "graph_candidate_not_reviewable")
+        #expect(secondAccept["changed"] as? Bool == false)
+    }
+
+    @Test("graph object candidate accept returns structured errors for malformed and missing refs")
+    func graphObjectCandidateAcceptReturnsStructuredErrorsForMalformedAndMissingRefs() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-canonical-entity-errors-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let missing = try parseJSONObject(try runCLI(args: [
+            "item", "accept-graph-candidate", "missing-candidate-id", "--json",
+        ], vault: vault).stdout)
+        #expect(missing["ok"] as? Bool == false)
+        #expect(missing["command"] as? String == "item.accept-graph-candidate")
+        #expect(missing["errorCode"] as? String == "graph_candidate_not_found")
+        #expect(missing["changed"] as? Bool == false)
+
+        let noteID = try createNote(title: "Daily Journal 2026-06-18", content: "Try Cactus later.", vault: vault)
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .object,
+            mentionText: "Cactus",
+            sourceQuote: "Try Cactus later.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.restaurant],
+            safeActions: [.inspectSource, .createObject, .reject],
+            confidence: 0.7,
+            source: "graph_candidate.test"
+        )
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+        db.close()
+
+        let malformedResult = try runCLI(args: [
+            "item", "accept-graph-candidate", output.id,
+            "--target-owner", "not-a-canonical-ref",
+            "--json",
+        ], vault: vault)
+        let malformed = try parseJSONObject(malformedResult.stdout)
+        #expect(malformedResult.status != 0)
+        #expect(malformed["ok"] as? Bool == false)
+        #expect(malformed["command"] as? String == "item.accept-graph-candidate")
+        #expect(malformed["errorCode"] as? String == "malformed_target_owner")
+        #expect(malformed["changed"] as? Bool == false)
     }
 
     @Test("read-only folder filters do not adopt untracked disk folders")
@@ -2823,6 +5460,214 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeCommands.contains("cider-cli capture review-queue --json"))
     }
 
+    @Test("memory suggest stores linked owner metadata and appears in item context JSON")
+    func memorySuggestStoresLinkedOwnerMetadataAndAppearsInItemContextJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-memory-suggest-linked-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let createResult = try runCLI(
+            args: ["note", "create", "Alex context", "--content", "Alex prefers late coffee catch-ups.", "--json"],
+            vault: vault
+        )
+        let created = try parseJSONObject(createResult.stdout)
+        let noteID = try #require(created["id"] as? String)
+
+        let result = try runCLI(args: [
+            "item", "memory-suggest", "note", noteID,
+            "--kind", "relationship_context",
+            "--value", "Alex prefers late coffee catch-ups.",
+            "--evidence", "Journal note says Alex prefers late coffee catch-ups.",
+            "--linked-owner", "contact:alex",
+            "--linked-owner", "project:cider",
+            "--observed-date", "2026-06-10",
+            "--memory-key", "alex-coffee-catchups",
+            "--memory-status", "current",
+            "--source", "codex",
+            "--confidence", "0.83",
+            "--json",
+        ], vault: vault)
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["command"] as? String == "item.memory-suggest")
+        let candidate = try #require(payload["candidate"] as? [String: Any])
+        #expect(candidate["memoryKind"] as? String == "relationship_context")
+        #expect(candidate["observedDate"] as? String == "2026-06-10")
+        #expect(candidate["memoryKey"] as? String == "alex-coffee-catchups")
+        #expect(candidate["memoryStatus"] as? String == "current")
+        #expect(candidate["linkedOwnerRefs"] as? [String] == ["contact:alex", "project:cider"])
+
+        let contextResult = try runCLI(args: ["item", "context", "note", noteID, "--json"], vault: vault)
+        let context = try parseJSONObject(contextResult.stdout)
+        let memoryCandidates = try #require(context["memoryCandidates"] as? [[String: Any]])
+        let contextCandidate = try #require(memoryCandidates.first)
+        #expect(contextCandidate["id"] as? String == candidate["id"] as? String)
+        #expect(contextCandidate["linkedOwnerRefs"] as? [String] == ["contact:alex", "project:cider"])
+        #expect(context["needsReview"] as? Bool == true)
+        let blockingIssues = try #require(context["blockingIssues"] as? [String])
+        #expect(blockingIssues.contains("memory_candidates_need_review"))
+
+        let reviewQueueResult = try runCLI(args: ["capture", "review-queue", "--kind", "memory_candidate", "--json"], vault: vault)
+        let reviewQueue = try parseJSONObject(reviewQueueResult.stdout)
+        #expect(reviewQueueResult.status == 0)
+        #expect(reviewQueue["command"] as? String == "capture.review-queue")
+        #expect(reviewQueue["readOnly"] as? Bool == true)
+        #expect(reviewQueue["changed"] as? Bool == false)
+        let reviewItems = try #require(reviewQueue["items"] as? [[String: Any]])
+        #expect(reviewItems.allSatisfy { $0["kind"] as? String == "memory_candidate" })
+        let reviewItem = try #require(reviewItems.first { $0["candidateID"] as? String == candidate["id"] as? String })
+        #expect(reviewItem["sourceQuote"] as? String == "Journal note says Alex prefers late coffee catch-ups.")
+        #expect(reviewItem["memoryKind"] as? String == "relationship_context")
+        #expect(reviewItem["linkedOwnerRefs"] as? [String] == ["contact:alex", "project:cider"])
+        #expect(reviewItem["recommendedNextAction"] as? String == "review_memory_candidate")
+        let reviewSafeNext = try #require(reviewItem["safeNextCommands"] as? [String])
+        #expect(reviewSafeNext.contains("cider-cli item context note \(noteID) --json"))
+        #expect(!reviewSafeNext.contains { $0.contains("accept") || $0.contains("promote") })
+    }
+
+    @Test("memory candidate review actions are explicit and audited")
+    func memoryCandidateReviewActionsAreExplicitAndAudited() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-memory-actions-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let createResult = try runCLI(
+            args: ["note", "create", "Memory action context", "--content", "Alex likes coffee. Jami likes pineapple drinks.", "--json"],
+            vault: vault
+        )
+        let created = try parseJSONObject(createResult.stdout)
+        let noteID = try #require(created["id"] as? String)
+
+        func suggest(_ value: String) throws -> String {
+            let result = try runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "relationship_context",
+                "--value", value,
+                "--evidence", "Source says: \(value)",
+                "--linked-owner", "contact:alex",
+                "--source", "codex-test",
+                "--confidence", "0.8",
+                "--json",
+            ], vault: vault)
+            let payload = try parseJSONObject(result.stdout)
+            let candidate = try #require(payload["candidate"] as? [String: Any])
+            return try #require(candidate["id"] as? String)
+        }
+
+        let acceptID = try suggest("Alex likes coffee.")
+        let rejectID = try suggest("Alex dislikes all warm drinks.")
+        let deferID = try suggest("Alex may like evening tea.")
+        let correctID = try suggest("Jami likes pineapple drinks.")
+        let delegateID = try suggest("Alex mentioned a favorite cafe.")
+
+        let acceptResult = try runCLI(args: [
+            "item", "accept-memory-candidate", acceptID,
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let accept = try parseJSONObject(acceptResult.stdout)
+        #expect(acceptResult.status == 0)
+        #expect(accept["command"] as? String == "item.accept-memory-candidate")
+        #expect(accept["readOnly"] as? Bool == false)
+        #expect(accept["changed"] as? Bool == true)
+        #expect(accept["reviewState"] as? String == "accepted")
+        let acceptedCandidate = try #require(accept["candidate"] as? [String: Any])
+        let acceptedMetadata = try #require(acceptedCandidate["metadata"] as? [String: String])
+        #expect(acceptedMetadata["reviewed_by"] == "codex-test")
+        #expect(acceptedMetadata["accepted_value"] == "Alex likes coffee.")
+
+        let rejectResult = try runCLI(args: [
+            "item", "reject-memory-candidate", rejectID,
+            "--reason", "Contradicted by source.",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let reject = try parseJSONObject(rejectResult.stdout)
+        #expect(rejectResult.status == 0)
+        #expect(reject["command"] as? String == "item.reject-memory-candidate")
+        #expect(reject["reviewState"] as? String == "rejected")
+        let rejectedCandidate = try #require(reject["candidate"] as? [String: Any])
+        let rejectedMetadata = try #require(rejectedCandidate["metadata"] as? [String: String])
+        #expect(rejectedMetadata["rejection_reason"] == "Contradicted by source.")
+
+        let deferResult = try runCLI(args: [
+            "item", "defer-memory-candidate", deferID,
+            "--reason", "Needs user confirmation.",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let deferPayload = try parseJSONObject(deferResult.stdout)
+        #expect(deferResult.status == 0)
+        #expect(deferPayload["command"] as? String == "item.defer-memory-candidate")
+        #expect(deferPayload["reviewState"] as? String == "deferred")
+        let deferredCandidate = try #require(deferPayload["candidate"] as? [String: Any])
+        let deferredMetadata = try #require(deferredCandidate["metadata"] as? [String: String])
+        #expect(deferredMetadata["deferral_reason"] == "Needs user confirmation.")
+
+        let correctResult = try runCLI(args: [
+            "item", "correct-memory-candidate", correctID,
+            "--value", "Jami likes pineapple coconut drinks.",
+            "--evidence", "Corrected source says Jami likes pineapple coconut drinks.",
+            "--linked-owner", "contact:jami",
+            "--memory-key", "jami-pineapple-coconut-drinks",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let correct = try parseJSONObject(correctResult.stdout)
+        #expect(correctResult.status == 0)
+        #expect(correct["command"] as? String == "item.correct-memory-candidate")
+        #expect(correct["reviewState"] as? String == "needs_review")
+        #expect(correct["changedFields"] as? [String] == ["value", "evidence", "linked_owner_refs", "memory_key"])
+        let correctedCandidate = try #require(correct["candidate"] as? [String: Any])
+        #expect(correctedCandidate["value"] as? String == "Jami likes pineapple coconut drinks.")
+        #expect(correctedCandidate["linkedOwnerRefs"] as? [String] == ["contact:jami"])
+
+        let delegateResult = try runCLI(args: [
+            "item", "delegate-memory-candidate", delegateID,
+            "--task-kind", "confirm_person_preference",
+            "--instructions", "Ask for source-backed confirmation only.",
+            "--actor", "codex-test",
+            "--json",
+        ], vault: vault)
+        let delegate = try parseJSONObject(delegateResult.stdout)
+        #expect(delegateResult.status == 0)
+        #expect(delegate["command"] as? String == "item.delegate-memory-candidate")
+        #expect(delegate["reviewState"] as? String == "deferred")
+        let delegation = try #require(delegate["delegation"] as? [String: Any])
+        #expect(delegation["taskKind"] as? String == "confirm_person_preference")
+        #expect(delegation["resultPolicy"] as? String == "return_reviewable_evidence_not_truth")
+
+        let rejectedAgain = try runCLI(args: [
+            "item", "reject-memory-candidate", acceptID,
+            "--reason", "Too late",
+            "--json",
+        ], vault: vault)
+        #expect(rejectedAgain.status != 0)
+        let rejectedAgainPayload = try parseJSONObject(rejectedAgain.stdout)
+        #expect((rejectedAgainPayload["error"] as? String)?.contains("accepted") == true)
+
+        let queueResult = try runCLI(args: ["capture", "review-queue", "--kind", "memory_candidate", "--json"], vault: vault)
+        let queue = try parseJSONObject(queueResult.stdout)
+        let queueItems = try #require(queue["items"] as? [[String: Any]])
+        #expect(!queueItems.contains { $0["candidateID"] as? String == acceptID })
+        #expect(!queueItems.contains { $0["candidateID"] as? String == rejectID })
+        #expect(!queueItems.contains { $0["candidateID"] as? String == deferID })
+        #expect(!queueItems.contains { $0["candidateID"] as? String == delegateID })
+        #expect(queueItems.contains { $0["candidateID"] as? String == correctID && $0["reviewState"] as? String == "needs_review" })
+
+        let getResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
+        let get = try parseJSONObject(getResult.stdout)
+        let agentActions = try #require(get["agentActions"] as? [[String: Any]])
+        #expect(agentActions.contains { $0["actionType"] as? String == "memory_candidate.accept" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "memory_candidate.reject" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "memory_candidate.defer" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "memory_candidate.correct" })
+        #expect(agentActions.contains { $0["actionType"] as? String == "memory_candidate.delegate_enrichment" })
+    }
+
     @Test("media identify json separates read-only review from mutating apply")
     func mediaIdentifyJSONSeparatesReadOnlyReviewFromMutatingApply() throws {
         let dryRunReport = MediaBackfillReport(
@@ -3366,6 +6211,22 @@ struct CiderCLIAgentSafetyTests {
         #expect(result.stdout.first == "{", "Expected \(command) JSON to start at byte 0")
         let payload = try parseJSONObject(result.stdout)
         #expect(payload["command"] as? String == command)
+        #expect(payload["legacyRemoved"] == nil)
+        return payload
+    }
+
+    private func assertStrictFailureJSON(
+        _ result: (stdout: String, stderr: String, status: Int32),
+        command: String,
+        errorCode: String
+    ) throws -> [String: Any] {
+        #expect(result.status != 0, "Expected \(command) to fail")
+        #expect(result.stdout.first == "{", "Expected \(command) JSON failure to start at byte 0; stdout: \(result.stdout)")
+        let payload = try parseJSONObject(result.stdout)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["command"] as? String == command)
+        #expect(payload["errorCode"] as? String == errorCode)
+        #expect(payload["changed"] as? Bool == false)
         #expect(payload["legacyRemoved"] == nil)
         return payload
     }

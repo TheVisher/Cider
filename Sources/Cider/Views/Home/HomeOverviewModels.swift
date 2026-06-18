@@ -151,6 +151,61 @@ struct HomeReviewCockpitDateSuggestionApproval: Equatable {
     let destination: LibraryEntityType
 }
 
+enum HomeReviewCockpitAction: String, Equatable, Identifiable {
+    case accept
+    case reject
+    case deferReview = "defer"
+    case openSource
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .accept: return "checkmark.circle"
+        case .reject: return "xmark.circle"
+        case .deferReview: return "clock"
+        case .openSource: return "arrow.up.right.square"
+        }
+    }
+
+    func buttonTitle(for item: HomeReviewCockpitItem) -> String {
+        switch self {
+        case .accept:
+            return item.kindLabel == "Graph Candidate" ? "Accept relation" : "Accept"
+        case .reject:
+            return "Reject"
+        case .deferReview:
+            return "Defer"
+        case .openSource:
+            if item.kindLabel == "Graph Candidate", item.canApprove == false {
+                return "Resolve target"
+            }
+            return "Open source"
+        }
+    }
+
+    func helpLabel(for item: HomeReviewCockpitItem) -> String {
+        switch self {
+        case .accept:
+            if item.kindLabel == "Memory Candidate" { return "Accept memory" }
+            if item.kindLabel == "Graph Candidate" { return "Accept graph candidate" }
+            if let approval = item.dateSuggestionApproval {
+                return approval.destination == .todo ? "Approve Todo due date" : "Approve Date Card"
+            }
+            return "Approve review"
+        case .reject:
+            return "Reject suggestion"
+        case .deferReview:
+            return "Defer for later"
+        case .openSource:
+            if item.kindLabel == "Memory Candidate" || item.kindLabel == "Graph Candidate" {
+                return "Open source evidence"
+            }
+            return item.dateSuggestionApproval == nil ? "Open source item" : "Open bookmark details"
+        }
+    }
+}
+
 struct HomeReviewCockpitItem: Equatable, Identifiable {
     let id: String
     let sourceReviewID: String
@@ -170,6 +225,234 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
     let canDefer: Bool
     let safeActions: [String]
     let dateSuggestionApproval: HomeReviewCockpitDateSuggestionApproval?
+    let reviewActions: [HomeReviewCockpitAction]
+    let candidateID: String?
+    let candidateRef: String?
+    let sourceQuote: String?
+    let sourceProvenanceLabel: String?
+    let memoryKind: String?
+    let linkedOwnerRefs: [String]
+    let possibleTypeLabels: [String]
+    let possibleRelationLabels: [String]
+    let candidateActionLabels: [String]
+    let confidenceReason: String?
+    let truthState: String?
+    let extractionReason: String?
+    let proposedChangeLabel: String?
+    let storageLabel: String?
+    let candidateQualityLevel: String?
+    let candidateQualityFlags: [String]
+    let candidateQualityExplanation: String?
+
+    init(
+        id: String,
+        sourceReviewID: String,
+        itemID: UUID,
+        itemType: String,
+        item: LibraryItemV2?,
+        title: String,
+        kindLabel: String,
+        reason: String,
+        suggestedAction: String,
+        reviewStateLabel: String,
+        confidenceLabel: String?,
+        targetLabel: String?,
+        sourceLabel: String,
+        canApprove: Bool,
+        canCorrect: Bool,
+        canDefer: Bool,
+        safeActions: [String],
+        dateSuggestionApproval: HomeReviewCockpitDateSuggestionApproval?,
+        reviewActions: [HomeReviewCockpitAction] = [],
+        candidateID: String? = nil,
+        candidateRef: String? = nil,
+        sourceQuote: String? = nil,
+        sourceProvenanceLabel: String? = nil,
+        memoryKind: String? = nil,
+        linkedOwnerRefs: [String] = [],
+        possibleTypeLabels: [String] = [],
+        possibleRelationLabels: [String] = [],
+        candidateActionLabels: [String] = [],
+        confidenceReason: String? = nil,
+        truthState: String? = nil,
+        extractionReason: String? = nil,
+        proposedChangeLabel: String? = nil,
+        storageLabel: String? = nil,
+        candidateQualityLevel: String? = nil,
+        candidateQualityFlags: [String] = [],
+        candidateQualityExplanation: String? = nil
+    ) {
+        self.id = id
+        self.sourceReviewID = sourceReviewID
+        self.itemID = itemID
+        self.itemType = itemType
+        self.item = item
+        self.title = title
+        self.kindLabel = kindLabel
+        self.reason = reason
+        self.suggestedAction = suggestedAction
+        self.reviewStateLabel = reviewStateLabel
+        self.confidenceLabel = confidenceLabel
+        self.targetLabel = targetLabel
+        self.sourceLabel = sourceLabel
+        self.canApprove = canApprove
+        self.canCorrect = canCorrect
+        self.canDefer = canDefer
+        self.safeActions = safeActions
+        self.dateSuggestionApproval = dateSuggestionApproval
+        self.reviewActions = reviewActions
+        self.candidateID = candidateID
+        self.candidateRef = candidateRef
+        self.sourceQuote = sourceQuote
+        self.sourceProvenanceLabel = sourceProvenanceLabel
+        self.memoryKind = memoryKind
+        self.linkedOwnerRefs = linkedOwnerRefs
+        self.possibleTypeLabels = possibleTypeLabels
+        self.possibleRelationLabels = possibleRelationLabels
+        self.candidateActionLabels = candidateActionLabels
+        self.confidenceReason = confidenceReason
+        self.truthState = truthState
+        self.extractionReason = extractionReason
+        self.proposedChangeLabel = proposedChangeLabel
+        self.storageLabel = storageLabel
+        self.candidateQualityLevel = candidateQualityLevel
+        self.candidateQualityFlags = candidateQualityFlags
+        self.candidateQualityExplanation = candidateQualityExplanation
+    }
+}
+
+extension HomeReviewCockpitItem {
+    var sourceEvidenceFindQuery: String? {
+        sourceEvidenceFindQueries.first
+    }
+
+    var sourceEvidenceFindQueries: [String] {
+        guard let sourceQuote else { return [] }
+        var normalized = sourceQuote
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let evidencePreambles = [
+            #"(?i)^daily\s+journal\s+source\s+says\s+"#,
+            #"(?i)^journal\s+source\s+says\s+"#,
+            #"(?i)^journal\s+note\s+says\s+"#,
+            #"(?i)^source\s+says\s+"#,
+        ]
+        for preamble in evidencePreambles {
+            normalized = normalized.replacingOccurrences(
+                of: preamble,
+                with: "",
+                options: .regularExpression
+            )
+        }
+        normalized = Self.stripMarkdownLinePrefix(from: normalized)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+
+        var queries: [String] = []
+        Self.appendUnique(normalized, to: &queries)
+
+        let quotedPhrasePattern = #"[“”"]([^“”"]{3,})[“”"]"#
+        if let regex = try? NSRegularExpression(pattern: quotedPhrasePattern) {
+            let nsNormalized = normalized as NSString
+            let range = NSRange(location: 0, length: nsNormalized.length)
+            for match in regex.matches(in: normalized, range: range) {
+                guard match.numberOfRanges > 1 else { continue }
+                let phrase = nsNormalized.substring(with: match.range(at: 1))
+                    .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+                Self.appendUnique(phrase, to: &queries)
+            }
+        }
+
+        let titleCandidate = Self.stripMarkdownLinePrefix(from: title)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        if titleCandidate.count >= 4 {
+            Self.appendUnique(titleCandidate, to: &queries)
+        }
+
+        return queries
+    }
+
+    func bestSourceEvidenceFindQuery(in sourceText: String) -> String? {
+        let normalizedSource = Self.normalizedComparableText(sourceText)
+        return sourceEvidenceFindQueries.first { query in
+            normalizedSource.localizedCaseInsensitiveContains(Self.normalizedComparableText(query))
+        } ?? sourceEvidenceFindQuery
+    }
+
+    private static func stripMarkdownLinePrefix(from value: String) -> String {
+        value.replacingOccurrences(
+            of: #"^\s*(?:[-+*]|\d+[.)])\s+"#,
+            with: "",
+            options: .regularExpression
+        )
+    }
+
+    private static func normalizedComparableText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func appendUnique(_ value: String, to queries: inout [String]) {
+        let normalized = value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.isEmpty == false else { return }
+        guard queries.contains(where: { $0.caseInsensitiveCompare(normalized) == .orderedSame }) == false else { return }
+        queries.append(normalized)
+    }
+
+    var detailExtractedValueLabel: String {
+        if let proposedChangeLabel { return proposedChangeLabel }
+        if kindLabel == "Graph Candidate" {
+            let relation = possibleRelationLabels.first ?? "mentions"
+            let typeSuffix = possibleTypeLabels.isEmpty ? "" : " (\(possibleTypeLabels.joined(separator: ", ")))"
+            return "Proposes \(relation) → \(title)\(typeSuffix)"
+        }
+        return targetLabel ?? reason
+    }
+
+    var acceptanceEffectLabel: String? {
+        switch kindLabel {
+        case "Graph Candidate":
+            let relation = possibleRelationLabels.first ?? "mentions"
+            if canApprove {
+                return "Accepting will add a \(relation) relation from this source note to the resolved graph target."
+            }
+            return "Resolve or create the target object before accepting; then Cider will add a \(relation) relation from this source note to that object."
+        case "Memory Candidate":
+            return "Accepting will mark this source-backed memory candidate as approved for promotion."
+        default:
+            return nil
+        }
+    }
+
+    var detailOwnerRefsLabel: String? {
+        guard linkedOwnerRefs.isEmpty == false else { return nil }
+        return linkedOwnerRefs.joined(separator: ", ")
+    }
+
+    var detailCorrectionActionLabel: String? {
+        switch kindLabel {
+        case "Memory Candidate":
+            return "Edit value"
+        case "Graph Candidate":
+            return canApprove ? "Inspect relation" : "Resolve / correct target"
+        default:
+            return canCorrect ? "Correct source" : nil
+        }
+    }
+
+    var detailCorrectionHelp: String? {
+        guard let actionLabel = detailCorrectionActionLabel else { return nil }
+        switch kindLabel {
+        case "Memory Candidate":
+            return "\(actionLabel) from the source evidence"
+        case "Graph Candidate":
+            return "\(actionLabel) before accepting this graph relation"
+        default:
+            return "\(actionLabel) for this review item"
+        }
+    }
 }
 
 struct HomeReviewCockpitBadge: Equatable, Identifiable {

@@ -20,6 +20,8 @@ struct CiderConfigBackwardCompatTests {
         #expect(config.hideCardFooters == false)
         #expect(config.showCardDetailsOnHover == true)
         #expect(config.enableNotesHotkey == true)
+        #expect(config.notesEditorTextSize == .normal)
+        #expect(config.noteEditorMode == .default)
         #expect(config.enableBookmarksHotkey == true)
         #expect(config.enableBookmarksCaptureHotkey == true)
         #expect(config.autoCaptureCopiedURLs == false)
@@ -168,6 +170,7 @@ struct CiderConfigBackwardCompatTests {
         #expect(config.dateCardSurfacingDays == 7)
         #expect(config.enableDateCardNotifications == false)
         #expect(config.dateCardDefaultNotificationMinutes == 30)
+        #expect(config.enableAgentReminders == false)
     }
 
     @Test("Optional fields survive round-trip as nil")

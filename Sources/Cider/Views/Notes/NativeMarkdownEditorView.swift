@@ -75,12 +75,14 @@ struct NativeMarkdownEditorView: NSViewRepresentable {
             }
             context.coordinator.isApplyingTextChange = false
         }
+        context.coordinator.applyFindSelectionIfNeeded(in: textView)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var viewModel: NotesViewModel
         weak var textView: NSTextView?
         var isApplyingTextChange = false
+        private var lastAppliedFindQuery: String?
 
         init(viewModel: NotesViewModel) {
             self.viewModel = viewModel
@@ -90,6 +92,45 @@ struct NativeMarkdownEditorView: NSViewRepresentable {
             guard !isApplyingTextChange,
                   let textView = notification.object as? NSTextView else { return }
             viewModel.sourceContentChanged(textView.string)
+        }
+
+        @MainActor
+        func applyFindSelectionIfNeeded(in textView: NSTextView) {
+            let query = viewModel.findQuery
+                .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard viewModel.isFindBarVisible, !query.isEmpty else {
+                lastAppliedFindQuery = nil
+                return
+            }
+
+            let nsText = textView.string as NSString
+            let range = nsText.range(
+                of: query,
+                options: [.caseInsensitive, .diacriticInsensitive]
+            )
+            guard range.location != NSNotFound else {
+                lastAppliedFindQuery = nil
+                DispatchQueue.main.async { [weak viewModel] in
+                    guard viewModel?.findQuery == query else { return }
+                    viewModel?.findMatchCount = 0
+                    viewModel?.findMatchIndex = 0
+                }
+                return
+            }
+
+            if lastAppliedFindQuery != query || textView.selectedRange() != range {
+                textView.setSelectedRange(range)
+                textView.scrollRangeToVisible(range)
+                textView.window?.makeFirstResponder(textView)
+                lastAppliedFindQuery = query
+            }
+
+            DispatchQueue.main.async { [weak viewModel] in
+                guard viewModel?.findQuery == query else { return }
+                viewModel?.findMatchCount = 1
+                viewModel?.findMatchIndex = 1
+            }
         }
     }
 }

@@ -23,8 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let bookmarkClipboardReviewToastModel = BookmarkClipboardReviewToastModel()
     var bookmarkClipboardReviewTimer: Timer?
     var bookmarkClipboardReviewIsHovering = false
-    var bookmarkClipboardReviewRemaining: TimeInterval = BookmarksToastDesign.reviewAutoHideDuration
-    var bookmarkClipboardReviewLastTick: Date?
+    var bookmarkClipboardReviewTimerState = BookmarkToastProgressTimerState(
+        duration: BookmarksToastDesign.reviewAutoHideDuration
+    )
 
     // Main Cider window
     var ciderMainWindow: CiderMainWindow?
@@ -290,7 +291,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         flushNotesDraftIfNeeded()
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        dismissStaleBookmarkCaptureToastOnActivation()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        dismissStaleBookmarkCaptureToastOnActivation()
         transitionToCiderMainWindow()
         return true
     }

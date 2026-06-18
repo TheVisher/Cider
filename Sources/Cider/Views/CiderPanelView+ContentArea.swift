@@ -534,15 +534,13 @@ extension CiderPanelView {
                 surfacingDays: CiderConfig.load().dateCardSurfacingDays
             ),
             onOpenItem: { item in openDashboardItem(item) },
+            onOpenReviewSource: { reviewItem in openDashboardReviewSource(reviewItem) },
             onOpenTarget: { target in openDashboardTarget(target) },
             onOpenKanbanCard: { boardID, cardID in
                 openKanbanCardDetail(boardID: boardID, cardID: cardID)
             },
-            onApproveReview: { reviewItem in
-                approveHomeReviewItem(reviewItem)
-            },
-            onDeferReview: { reviewItem in
-                deferHomeReviewItem(reviewItem)
+            onPerformReviewAction: { reviewItem, action in
+                performHomeReviewAction(reviewItem, action: action)
             },
             onEnrichReviewBatch: {
                 enrichHomeReviewBatch()
@@ -581,11 +579,9 @@ extension CiderPanelView {
             items: snapshot.reviewCockpitItems,
             summary: snapshot.reviewCockpitSummary,
             onOpenItem: { item in openDashboardItem(item) },
-            onApproveReview: { reviewItem in
-                approveHomeReviewItem(reviewItem)
-            },
-            onDeferReview: { reviewItem in
-                deferHomeReviewItem(reviewItem)
+            onOpenReviewSource: { reviewItem in openDashboardReviewSource(reviewItem) },
+            onPerformReviewAction: { reviewItem, action in
+                performHomeReviewAction(reviewItem, action: action)
             },
             onEnrichReviewBatch: {
                 enrichHomeReviewBatch()
@@ -610,6 +606,22 @@ extension CiderPanelView {
         }
     }
 
+    private func performHomeReviewAction(
+        _ reviewItem: HomeReviewCockpitItem,
+        action: HomeReviewCockpitAction
+    ) -> Bool {
+        switch action {
+        case .accept:
+            return approveHomeReviewItem(reviewItem)
+        case .reject:
+            return rejectHomeReviewItem(reviewItem)
+        case .deferReview:
+            return deferHomeReviewItem(reviewItem)
+        case .openSource:
+            return openDashboardReviewSource(reviewItem)
+        }
+    }
+
     private func approveHomeReviewItem(_ reviewItem: HomeReviewCockpitItem) -> Bool {
         do {
             if let approval = reviewItem.dateSuggestionApproval {
@@ -617,6 +629,10 @@ extension CiderPanelView {
                     bookmarkID: approval.bookmarkID,
                     suggestionKey: approval.suggestionKey
                 )
+            } else if reviewItem.kindLabel == "Memory Candidate" {
+                _ = try CiderReviewCandidateActionService().acceptMemoryCandidate(reviewItem.candidateID ?? reviewItem.candidateRef)
+            } else if reviewItem.kindLabel == "Graph Candidate" {
+                _ = try CiderReviewCandidateActionService().acceptGraphCandidateIfResolved(reviewItem.candidateID ?? reviewItem.candidateRef)
             } else {
                 _ = try CiderReviewQueueService().approve(itemID: reviewItem.itemID, actor: "user")
             }
@@ -627,13 +643,42 @@ extension CiderPanelView {
         }
     }
 
+    private func rejectHomeReviewItem(_ reviewItem: HomeReviewCockpitItem) -> Bool {
+        do {
+            if reviewItem.kindLabel == "Memory Candidate" {
+                _ = try CiderReviewCandidateActionService().rejectMemoryCandidate(
+                    reviewItem.candidateID ?? reviewItem.candidateRef,
+                    reason: "Rejected from Home Review Queue."
+                )
+            } else if reviewItem.kindLabel == "Graph Candidate" {
+                _ = try CiderReviewCandidateActionService().rejectGraphCandidate(
+                    reviewItem.candidateID ?? reviewItem.candidateRef,
+                    reason: "Rejected from Home Review Queue."
+                )
+            } else {
+                return false
+            }
+            return true
+        } catch {
+            print("Failed to reject Home review item: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     private func deferHomeReviewItem(_ reviewItem: HomeReviewCockpitItem) -> Bool {
         do {
-            _ = try CiderReviewQueueService().deferReview(
-                itemID: reviewItem.itemID,
-                reason: "Deferred from Home dashboard.",
-                actor: "user"
-            )
+            if reviewItem.kindLabel == "Memory Candidate" {
+                _ = try CiderReviewCandidateActionService().deferMemoryCandidate(
+                    reviewItem.candidateID ?? reviewItem.candidateRef,
+                    reason: "Deferred from Home Review Queue."
+                )
+            } else {
+                _ = try CiderReviewQueueService().deferReview(
+                    itemID: reviewItem.itemID,
+                    reason: "Deferred from Home dashboard.",
+                    actor: "user"
+                )
+            }
             return true
         } catch {
             print("Failed to defer Home review item: \(error.localizedDescription)")
@@ -689,6 +734,22 @@ extension CiderPanelView {
         case .vaultFile(let file):
             openVaultFileDetail(file)
         }
+    }
+
+    @discardableResult
+    func openDashboardReviewSource(_ reviewItem: HomeReviewCockpitItem) -> Bool {
+        guard let item = reviewItem.item else { return false }
+        switch item {
+        case .note(let note):
+            let sourceContent = NotesStorage.shared.loadContent(for: note)
+            openNoteDetail(
+                note,
+                sourceEvidenceFindQuery: reviewItem.bestSourceEvidenceFindQuery(in: sourceContent)
+            )
+        default:
+            openDashboardItem(item)
+        }
+        return true
     }
 
     func openDashboardTarget(_ target: HomeOverviewActionTarget) {

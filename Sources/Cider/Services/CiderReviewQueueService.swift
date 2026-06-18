@@ -45,6 +45,92 @@ struct CiderCaptureReviewWorklistResult: Equatable {
     }
 }
 
+struct CiderReviewQueueSourceEvidenceRecord: Equatable {
+    var id: String
+    var evidenceKind: String
+    var sourceOwnerRef: String
+    var sourceQuote: String
+    var spanStart: Int? = nil
+    var spanEnd: Int? = nil
+    var extractionSource: String
+    var derivedOwnerRef: String
+    var derivedKind: String
+    var candidateRef: String? = nil
+
+    init(record: SecondBrainSourceEvidenceRecord) {
+        id = record.id
+        evidenceKind = record.evidenceKind
+        sourceOwnerRef = record.sourceOwnerRef
+        sourceQuote = record.sourceQuote
+        spanStart = record.spanStart
+        spanEnd = record.spanEnd
+        extractionSource = record.extractionSource
+        derivedOwnerRef = record.derivedOwnerRef
+        derivedKind = record.derivedKind
+        candidateRef = record.candidateRef
+    }
+
+    func toDictionary() -> [String: Any] {
+        var dictionary: [String: Any] = [
+            "id": id,
+            "ref": "source_evidence:\(id)",
+            "evidenceKind": evidenceKind,
+            "sourceOwnerRef": sourceOwnerRef,
+            "sourceQuote": sourceQuote,
+            "extractionSource": extractionSource,
+            "derivedOwnerRef": derivedOwnerRef,
+            "derivedKind": derivedKind,
+        ]
+        if let spanStart { dictionary["spanStart"] = spanStart }
+        if let spanEnd { dictionary["spanEnd"] = spanEnd }
+        if let candidateRef { dictionary["candidateRef"] = candidateRef }
+        return dictionary
+    }
+}
+
+struct CiderReviewQueueLifecycleEventRecord: Equatable {
+    var id: String
+    var candidateRef: String?
+    var lifecycleState: String
+    var eventKind: String
+    var actor: String
+    var source: String
+    var toolName: String?
+    var reason: String?
+    var sourceEvidenceRef: String?
+    var createdAt: Date
+
+    init(_ event: SecondBrainReviewLifecycleEvent) {
+        self.id = event.id
+        self.candidateRef = event.candidateRef
+        self.lifecycleState = event.lifecycleState
+        self.eventKind = event.eventKind
+        self.actor = event.actor
+        self.source = event.source
+        self.toolName = event.toolName
+        self.reason = event.reason
+        self.sourceEvidenceRef = event.sourceEvidenceRef
+        self.createdAt = event.createdAt
+    }
+
+    func toDictionary() -> [String: Any] {
+        var dictionary: [String: Any] = [
+            "id": id,
+            "lifecycleState": lifecycleState,
+            "eventKind": eventKind,
+            "actor": actor,
+            "source": source,
+            "createdAt": ISO8601DateFormatter().string(from: createdAt),
+            "truthBoundary": lifecycleState == "accepted" ? "accepted_truth_requires_explicit_event" : "reviewable_candidate_not_truth",
+        ]
+        if let candidateRef { dictionary["candidateRef"] = candidateRef }
+        if let toolName { dictionary["toolName"] = toolName }
+        if let reason { dictionary["reason"] = reason }
+        if let sourceEvidenceRef { dictionary["sourceEvidenceRef"] = sourceEvidenceRef }
+        return dictionary
+    }
+}
+
 struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var id: String
     var kind: String
@@ -67,6 +153,33 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var attachmentSummary: [String: String]?
     var createdAt: Date
     var safeNextCommands: [String]
+    var confidence: Double? = nil
+    var candidateID: String? = nil
+    var candidateRef: String? = nil
+    var sourceQuote: String? = nil
+    var possibleTypes: [String] = []
+    var possibleRelations: [String] = []
+    var candidateActions: [String] = []
+    var memoryKind: String? = nil
+    var linkedOwnerRefs: [String] = []
+    var observedDate: String? = nil
+    var memoryKey: String? = nil
+    var memoryStatus: String? = nil
+    var reviewFamily: String? = nil
+    var sourceItemRef: String? = nil
+    var sourceItemTitle: String? = nil
+    var sourceItemDate: String? = nil
+    var extractionReason: String? = nil
+    var proposedChange: [String: String] = [:]
+    var storage: [String: String] = [:]
+    var truthState: String? = nil
+    var acceptEffect: String? = nil
+    var rejectEffect: String? = nil
+    var candidateQualityLevel: String? = nil
+    var candidateQualityCodes: [String] = []
+    var candidateQualityExplanation: String? = nil
+    var sourceEvidenceRecord: CiderReviewQueueSourceEvidenceRecord? = nil
+    var lifecycleHistory: [CiderReviewQueueLifecycleEventRecord] = []
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -108,6 +221,62 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
         if let attachmentSummary {
             dictionary["attachmentSummary"] = attachmentSummary
         }
+        if let confidence {
+            dictionary["confidence"] = confidence
+        }
+        if let candidateID {
+            dictionary["candidateID"] = candidateID
+        }
+        if let candidateRef {
+            dictionary["candidateRef"] = candidateRef
+        }
+        if let sourceQuote {
+            dictionary["sourceQuote"] = sourceQuote
+        }
+        if !possibleTypes.isEmpty {
+            dictionary["possibleTypes"] = possibleTypes
+        }
+        if !possibleRelations.isEmpty {
+            dictionary["possibleRelations"] = possibleRelations
+        }
+        if !candidateActions.isEmpty {
+            dictionary["candidateActions"] = candidateActions
+        }
+        if let memoryKind {
+            dictionary["memoryKind"] = memoryKind
+        }
+        if !linkedOwnerRefs.isEmpty {
+            dictionary["linkedOwnerRefs"] = linkedOwnerRefs
+        }
+        if let observedDate {
+            dictionary["observedDate"] = observedDate
+        }
+        if let memoryKey {
+            dictionary["memoryKey"] = memoryKey
+        }
+        if let memoryStatus {
+            dictionary["memoryStatus"] = memoryStatus
+        }
+        if let reviewFamily { dictionary["reviewFamily"] = reviewFamily }
+        if let sourceItemRef { dictionary["sourceItemRef"] = sourceItemRef }
+        if let sourceItemTitle { dictionary["sourceItemTitle"] = sourceItemTitle }
+        if let sourceItemDate { dictionary["sourceItemDate"] = sourceItemDate }
+        if let extractionReason { dictionary["extractionReason"] = extractionReason }
+        if !proposedChange.isEmpty { dictionary["proposedChange"] = proposedChange }
+        if !storage.isEmpty { dictionary["storage"] = storage }
+        if let sourceEvidenceRecord { dictionary["sourceEvidenceRecord"] = sourceEvidenceRecord.toDictionary() }
+        if !lifecycleHistory.isEmpty { dictionary["lifecycleHistory"] = lifecycleHistory.map { $0.toDictionary() } }
+        if let truthState { dictionary["truthState"] = truthState }
+        if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
+        if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
+        if candidateQualityLevel != nil || !candidateQualityCodes.isEmpty || candidateQualityExplanation != nil {
+            var quality: [String: Any] = [:]
+            if let candidateQualityLevel { quality["level"] = candidateQualityLevel }
+            if !candidateQualityCodes.isEmpty { quality["codes"] = candidateQualityCodes }
+            if let candidateQualityExplanation { quality["explanation"] = candidateQualityExplanation }
+            dictionary["quality"] = quality
+            dictionary["qualityFlags"] = candidateQualityCodes
+        }
         CiderAgentDecisionContract.merge(agentDecisionDictionary(), into: &dictionary)
         return dictionary
     }
@@ -121,15 +290,23 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     }
 
     private func agentDecisionDictionary() -> [String: Any] {
-        let needsReview = reviewState == "needs_review"
+        let needsReview = reviewState == "needs_review" || reviewState == "suggested"
         let needsRouting = kind == "low_confidence_routing"
             || reasonCodes.contains(where: { $0.hasPrefix("routing_") || $0 == "inbox_unrouted" })
             || routingState != nil
         let needsEnrichment = kind == "enrichment"
             || reasonCodes.contains(where: { $0.hasPrefix("enrichment_") })
             || enrichmentStatus == "needs_review"
-        let confidence = routingState?["confidence"].flatMap(Double.init)
-        let recommendedAction = needsReview ? "review_route" : "inspect_item"
+        let confidence = confidence ?? routingState?["confidence"].flatMap(Double.init)
+        let recommendedAction: String
+        switch kind {
+        case "graph_candidate":
+            recommendedAction = "review_graph_candidate"
+        case "memory_candidate":
+            recommendedAction = "review_memory_candidate"
+        default:
+            recommendedAction = needsReview ? "review_route" : "inspect_item"
+        }
         return CiderAgentDecisionContract.dictionary(
             saved: true,
             needsReview: needsReview,
@@ -507,10 +684,38 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var suggestedAction: String
     var reviewState: String
     var confidence: Double?
+    var confidenceReason: String? = nil
     var routingDecisionID: UUID?
     var target: CiderRoutingDecisionTarget?
     var createdAt: Date
     var safeActions: [String]
+    var candidateID: String? = nil
+    var candidateRef: String? = nil
+    var sourceQuote: String? = nil
+    var possibleTypes: [String] = []
+    var possibleRelations: [String] = []
+    var candidateActions: [String] = []
+    var memoryKind: String? = nil
+    var linkedOwnerRefs: [String] = []
+    var observedDate: String? = nil
+    var memoryKey: String? = nil
+    var memoryStatus: String? = nil
+    var safeNextCommands: [String] = []
+    var reviewFamily: String? = nil
+    var sourceItemRef: String? = nil
+    var sourceItemTitle: String? = nil
+    var sourceItemDate: String? = nil
+    var extractionReason: String? = nil
+    var proposedChange: [String: String] = [:]
+    var storage: [String: String] = [:]
+    var truthState: String? = nil
+    var acceptEffect: String? = nil
+    var rejectEffect: String? = nil
+    var candidateQualityLevel: String? = nil
+    var candidateQualityCodes: [String] = []
+    var candidateQualityExplanation: String? = nil
+    var sourceEvidenceRecord: CiderReviewQueueSourceEvidenceRecord? = nil
+    var lifecycleHistory: [CiderReviewQueueLifecycleEventRecord] = []
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -534,11 +739,70 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         if let confidence {
             dictionary["confidence"] = confidence
         }
+        if let confidenceReason {
+            dictionary["confidenceReason"] = confidenceReason
+        }
         if let routingDecisionID {
             dictionary["routingDecisionID"] = routingDecisionID.uuidString
         }
         if let target {
             dictionary["target"] = target.toDictionary()
+        }
+        if let candidateID {
+            dictionary["candidateID"] = candidateID
+        }
+        if let candidateRef {
+            dictionary["candidateRef"] = candidateRef
+        }
+        if let sourceQuote {
+            dictionary["sourceQuote"] = sourceQuote
+        }
+        if !possibleTypes.isEmpty {
+            dictionary["possibleTypes"] = possibleTypes
+        }
+        if !possibleRelations.isEmpty {
+            dictionary["possibleRelations"] = possibleRelations
+        }
+        if !candidateActions.isEmpty {
+            dictionary["candidateActions"] = candidateActions
+        }
+        if let memoryKind {
+            dictionary["memoryKind"] = memoryKind
+        }
+        if !linkedOwnerRefs.isEmpty {
+            dictionary["linkedOwnerRefs"] = linkedOwnerRefs
+        }
+        if let observedDate {
+            dictionary["observedDate"] = observedDate
+        }
+        if let memoryKey {
+            dictionary["memoryKey"] = memoryKey
+        }
+        if let memoryStatus {
+            dictionary["memoryStatus"] = memoryStatus
+        }
+        if let reviewFamily { dictionary["reviewFamily"] = reviewFamily }
+        if let sourceItemRef { dictionary["sourceItemRef"] = sourceItemRef }
+        if let sourceItemTitle { dictionary["sourceItemTitle"] = sourceItemTitle }
+        if let sourceItemDate { dictionary["sourceItemDate"] = sourceItemDate }
+        if let extractionReason { dictionary["extractionReason"] = extractionReason }
+        if !proposedChange.isEmpty { dictionary["proposedChange"] = proposedChange }
+        if !storage.isEmpty { dictionary["storage"] = storage }
+        if let sourceEvidenceRecord { dictionary["sourceEvidenceRecord"] = sourceEvidenceRecord.toDictionary() }
+        if !lifecycleHistory.isEmpty { dictionary["lifecycleHistory"] = lifecycleHistory.map { $0.toDictionary() } }
+        if let truthState { dictionary["truthState"] = truthState }
+        if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
+        if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
+        if candidateQualityLevel != nil || !candidateQualityCodes.isEmpty || candidateQualityExplanation != nil {
+            var quality: [String: Any] = [:]
+            if let candidateQualityLevel { quality["level"] = candidateQualityLevel }
+            if !candidateQualityCodes.isEmpty { quality["codes"] = candidateQualityCodes }
+            if let candidateQualityExplanation { quality["explanation"] = candidateQualityExplanation }
+            dictionary["quality"] = quality
+            dictionary["qualityFlags"] = candidateQualityCodes
+        }
+        if !safeNextCommands.isEmpty {
+            dictionary["safeNextCommands"] = safeNextCommands
         }
         return dictionary
     }
@@ -828,6 +1092,16 @@ final class CiderReviewQueueService {
         }
 
         reviewItems.append(contentsOf: duplicateReviewItems(now: now))
+        reviewItems.append(contentsOf: try graphCandidateReviewItems(
+            in: db,
+            itemsByID: itemsByID,
+            includeDeferred: includeDeferred
+        ))
+        reviewItems.append(contentsOf: try memoryCandidateReviewItems(
+            in: db,
+            itemsByID: itemsByID,
+            includeDeferred: includeDeferred
+        ))
 
         let filtered = reviewItems.filter { item in
             if let kind, item.kind != kind { return false }
@@ -882,14 +1156,30 @@ final class CiderReviewQueueService {
     func captureReviewWorklist(
         limit: Int = 50,
         includeDeferred: Bool = false,
+        kind: String? = nil,
+        itemType: String? = nil,
+        reviewState: String? = nil,
+        requiredSafeAction: String? = nil,
         now: Date = Date()
     ) throws -> CiderCaptureReviewWorklistResult {
         guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
         let cappedLimit = max(0, limit)
-        let reviewItems = try list(limit: Int.max, includeDeferred: includeDeferred, now: now).items
+        let reviewItems = try list(
+            limit: Int.max,
+            includeDeferred: includeDeferred,
+            kind: kind,
+            itemType: itemType,
+            reviewState: reviewState,
+            requiredSafeAction: requiredSafeAction,
+            now: now
+        ).items
             .map(captureWorklistItem(from:))
-        let captureItems = try unsupportedAttachmentWorklistItems(in: db, now: now)
-        let indexingItems = try indexingWorklistItems(in: db, now: now)
+        let includeCaptureDiagnostics = kind == nil
+            && itemType == nil
+            && reviewState == nil
+            && requiredSafeAction == nil
+        let captureItems = includeCaptureDiagnostics ? try unsupportedAttachmentWorklistItems(in: db, now: now) : []
+        let indexingItems = includeCaptureDiagnostics ? try indexingWorklistItems(in: db, now: now) : []
         let allItems = (reviewItems + captureItems + indexingItems).sorted { lhs, rhs in
             if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
             if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
@@ -1736,6 +2026,268 @@ final class CiderReviewQueueService {
         )
     }
 
+    static func candidateQualitySignal(mentionText: String, sourceQuote: String?) -> (level: String, codes: [String], explanation: String) {
+        let normalized = mentionText
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+            .lowercased()
+        var codes: [String] = []
+        let words = normalized.split(separator: " ").map(String.init)
+        let weakPronouns: Set<String> = ["it", "this", "that", "one", "thing", "stuff", "whatever", "something", "anything"]
+        if words.isEmpty {
+            codes.append("empty_mention")
+        }
+        if words.allSatisfy({ weakPronouns.contains($0) }) {
+            codes.append("pronoun_or_placeholder_only")
+        }
+        if words.count <= 3 && words.contains(where: { weakPronouns.contains($0) }) {
+            codes.append("vague_pronoun_fragment")
+        }
+        if normalized.hasPrefix("to ") || normalized.hasPrefix("about ") || normalized.hasPrefix("and ") || normalized.hasPrefix("but ") {
+            codes.append("clause_fragment")
+        }
+        if normalized.contains(" to have ") || normalized.contains(" to talk ") || normalized.contains(" moved closer") {
+            codes.append("event_clause_not_object")
+        }
+        if normalized.contains("whatever") || normalized.contains("stuff like") {
+            codes.append("contains_vague_modifier")
+        }
+        if words.count > 7 {
+            codes.append("long_phrase_maybe_not_canonical_object")
+        }
+        let level: String
+        let explanation: String
+        if codes.contains("pronoun_or_placeholder_only") || codes.contains("vague_pronoun_fragment") || codes.contains("event_clause_not_object") {
+            level = "low"
+            explanation = "Likely noisy: extracted phrase is vague, pronoun-heavy, or reads like a clause rather than a canonical object. Keep the source quote and reject/correct/delegate instead of accepting as truth."
+        } else if codes.isEmpty {
+            level = "good"
+            explanation = "Looks like a concrete source-backed candidate; still review before accepting because candidates are not truth."
+        } else {
+            level = "needs_review"
+            explanation = "Review carefully: candidate is source-backed but has wording that may need correction before becoming a canonical object."
+        }
+        return (level, codes, explanation)
+    }
+
+    private func reviewSourceItemDate(from item: CiderRoutingItemSummary) -> String? {
+        let pattern = #"\b\d{4}-\d{2}-\d{2}\b"#
+        if let relativePath = item.relativePath,
+           let range = relativePath.range(of: pattern, options: .regularExpression) {
+            return String(relativePath[range])
+        }
+        if let range = item.title.range(of: pattern, options: .regularExpression) {
+            return String(item.title[range])
+        }
+        return nil
+    }
+
+    private func graphCandidateReviewItems(
+        in db: CiderDatabase,
+        itemsByID: [UUID: CiderRoutingItemSummary],
+        includeDeferred: Bool
+    ) throws -> [CiderReviewQueueItem] {
+        let states: Set<String> = includeDeferred
+            ? ["suggested", "needs_review", "deferred"]
+            : ["suggested", "needs_review"]
+        let outputs = try SecondBrainEnrichmentOutputService(database: db).outputs(
+            kind: SecondBrainGraphCandidateContract.outputKind,
+            reviewStates: states
+        )
+
+        return outputs.compactMap { output in
+            guard let sourceItemID = UUID(uuidString: output.owner.ownerID),
+                  let item = itemsByID[sourceItemID],
+                  let candidate = try? SecondBrainGraphCandidateContract.validate(output) else {
+                return nil
+            }
+            let possibleTypes = candidate.objectTypeGuesses.map(\.rawValue)
+            let possibleRelations = candidate.relationGuesses.map(\.rawValue)
+            let candidateActions = candidate.safeActions.map(\.rawValue)
+            let typeLabel = possibleTypes.isEmpty ? "object" : possibleTypes.joined(separator: ", ")
+            let relationLabel = possibleRelations.isEmpty ? nil : possibleRelations.joined(separator: ", ")
+            let reason = relationLabel.map {
+                "Review extracted \(typeLabel) candidate from source quote; possible relation: \($0)."
+            } ?? "Review extracted \(typeLabel) candidate from source quote."
+            let quality = Self.candidateQualitySignal(mentionText: candidate.mentionText, sourceQuote: candidate.sourceQuote)
+            let sourceItemRef = "\(item.type):\(item.id.uuidString)"
+            let relation = possibleRelations.first ?? "mentions"
+
+            return CiderReviewQueueItem(
+                id: "review-graph-candidate-\(output.id)",
+                kind: "graph_candidate",
+                source: "graph_candidate",
+                itemID: sourceItemID,
+                itemType: item.type,
+                title: candidate.mentionText,
+                relativePath: item.relativePath,
+                reason: reason,
+                reasonCodes: ["graph_candidate_review"],
+                suggestedAction: "Review graph candidate",
+                reviewState: output.reviewState,
+                confidence: candidate.confidence,
+                confidenceReason: candidate.confidenceReason,
+                routingDecisionID: nil,
+                target: nil,
+                createdAt: output.createdAt,
+                safeActions: candidateActions.isEmpty
+                    ? ["inspect_source", "correct", "reject", "delegate_enrichment"]
+                    : candidateActions,
+                candidateID: output.id,
+                candidateRef: "graph_candidate:\(output.id)",
+                sourceQuote: candidate.sourceQuote,
+                possibleTypes: possibleTypes,
+                possibleRelations: possibleRelations,
+                candidateActions: candidate.actionGuesses,
+                safeNextCommands: graphCandidateSafeNextCommands(output: output, sourceItem: item),
+                reviewFamily: "graph_candidate",
+                sourceItemRef: sourceItemRef,
+                sourceItemTitle: item.title,
+                sourceItemDate: reviewSourceItemDate(from: item),
+                extractionReason: "Cider extracted '\(candidate.mentionText)' from the exact source quote and inferred a reviewable \(relation) graph candidate. This is not accepted graph truth until explicitly accepted.",
+                proposedChange: [
+                    "changeType": "graph_relation_candidate",
+                    "mentionText": candidate.mentionText,
+                    "relationType": relation,
+                    "targetKind": typeLabel,
+                    "truthState": "reviewable_candidate_not_truth",
+                ],
+                storage: [
+                    "table": "enrichment_outputs",
+                    "service": "SecondBrainEnrichmentOutputService",
+                    "kind": SecondBrainGraphCandidateContract.outputKind,
+                    "readModels": "CiderReviewQueueService.graphCandidateReviewItems; cider-cli item graph-candidate; cider-cli capture review-queue",
+                ],
+                truthState: candidate.reviewState == .accepted ? "accepted_graph_truth" : "reviewable_candidate_not_truth",
+                acceptEffect: "Accepting records an explicit cited graph relation/canonical object decision; it does not happen silently from extraction.",
+                rejectEffect: "Rejecting marks this candidate rejected while preserving the source quote and audit trail.",
+                candidateQualityLevel: quality.level,
+                candidateQualityCodes: quality.codes,
+                candidateQualityExplanation: quality.explanation,
+                sourceEvidenceRecord: SecondBrainSourceEvidenceService.recordFromOutput(output).map(CiderReviewQueueSourceEvidenceRecord.init),
+                lifecycleHistory: lifecycleHistoryRecords(for: output, in: db)
+            )
+        }
+    }
+
+    private func graphCandidateSafeNextCommands(
+        output: SecondBrainEnrichmentOutput,
+        sourceItem: CiderRoutingItemSummary
+    ) -> [String] {
+        orderedUnique([
+            "cider-cli item graph-candidate \(output.id) --json",
+            "cider-cli item graph-candidates \(output.owner.ownerType) \(output.owner.ownerID) --json",
+            "cider-cli item context \(sourceItem.type) \(sourceItem.id.uuidString) --json",
+            "cider-cli capture review-queue --json",
+        ])
+    }
+
+    private func memoryCandidateReviewItems(
+        in db: CiderDatabase,
+        itemsByID: [UUID: CiderRoutingItemSummary],
+        includeDeferred: Bool
+    ) throws -> [CiderReviewQueueItem] {
+        let states: Set<String> = includeDeferred
+            ? ["suggested", "needs_review", "deferred"]
+            : ["suggested", "needs_review"]
+        let outputs = try SecondBrainEnrichmentOutputService(database: db).outputs(
+            kind: "memory_candidate",
+            reviewStates: states
+        )
+
+        return outputs.compactMap { output in
+            guard let sourceItemID = UUID(uuidString: output.owner.ownerID),
+                  let item = itemsByID[sourceItemID] else {
+                return nil
+            }
+            let memoryKind = output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? "memory"
+            let linkedOwnerRefs = DatabaseHelpers.decodeStringArray(output.metadata["linked_owner_refs"])
+            let reason = "Review source-backed \(memoryKind.replacingOccurrences(of: "_", with: " ")) memory candidate before promotion."
+            let sourceItemRef = "\(item.type):\(item.id.uuidString)"
+
+            return CiderReviewQueueItem(
+                id: "review-memory-candidate-\(output.id)",
+                kind: "memory_candidate",
+                source: "memory_candidate",
+                itemID: sourceItemID,
+                itemType: item.type,
+                title: output.value,
+                relativePath: item.relativePath,
+                reason: reason,
+                reasonCodes: ["memory_candidate_review"],
+                suggestedAction: "Review memory candidate",
+                reviewState: output.reviewState,
+                confidence: output.confidence,
+                routingDecisionID: nil,
+                target: nil,
+                createdAt: output.createdAt,
+                safeActions: ["inspect_source", "accept", "reject", "defer", "correct"],
+                candidateID: output.id,
+                candidateRef: "memory_candidate:\(output.id)",
+                sourceQuote: output.evidence,
+                memoryKind: memoryKind,
+                linkedOwnerRefs: linkedOwnerRefs,
+                observedDate: output.metadata["observed_date"],
+                memoryKey: output.metadata["memory_key"],
+                memoryStatus: output.metadata["memory_status"],
+                safeNextCommands: memoryCandidateSafeNextCommands(output: output, sourceItem: item),
+                reviewFamily: "memory_candidate",
+                sourceItemRef: sourceItemRef,
+                sourceItemTitle: item.title,
+                sourceItemDate: reviewSourceItemDate(from: item),
+                extractionReason: "Cider extracted a source-backed memory candidate from the exact source quote; it remains reviewable and is not promoted until accepted.",
+                proposedChange: [
+                    "changeType": "memory_candidate",
+                    "memoryKind": memoryKind,
+                    "value": output.value,
+                    "truthState": "reviewable_candidate_not_truth",
+                ],
+                storage: [
+                    "table": "enrichment_outputs",
+                    "service": "SecondBrainEnrichmentOutputService",
+                    "kind": "memory_candidate",
+                    "readModels": "CiderReviewQueueService.memoryCandidateReviewItems; cider-cli item memory-candidate; cider-cli capture review-queue",
+                ],
+                truthState: output.reviewState == "accepted" ? "accepted_memory_candidate" : "reviewable_candidate_not_truth",
+                acceptEffect: "Accepting marks the source-backed memory candidate accepted for promotion; extraction alone never writes user-owned memory truth.",
+                rejectEffect: "Rejecting marks this memory candidate rejected while preserving source evidence and audit history.",
+                candidateQualityLevel: "needs_review",
+                candidateQualityCodes: ["requires_human_memory_review"],
+                candidateQualityExplanation: "Memory candidates are intentionally reviewable; inspect the source quote before accepting.",
+                sourceEvidenceRecord: SecondBrainSourceEvidenceService.recordFromOutput(output).map(CiderReviewQueueSourceEvidenceRecord.init),
+                lifecycleHistory: lifecycleHistoryRecords(for: output, in: db)
+            )
+        }
+    }
+
+    private func lifecycleHistoryRecords(for output: SecondBrainEnrichmentOutput, in db: CiderDatabase) -> [CiderReviewQueueLifecycleEventRecord] {
+        let service = SecondBrainReviewLifecycleService(database: db)
+        let owner = SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: output.id)
+        do {
+            var events = try service.events(owner: owner)
+            if let candidateRef = SecondBrainReviewLifecycleService.candidateRef(for: output) {
+                let byCandidate = try service.events(candidateRef: candidateRef)
+                var seen = Set(events.map(\.id))
+                events.append(contentsOf: byCandidate.filter { seen.insert($0.id).inserted })
+            }
+            return events.sorted { $0.createdAt < $1.createdAt }.map(CiderReviewQueueLifecycleEventRecord.init)
+        } catch {
+            return []
+        }
+    }
+
+    private func memoryCandidateSafeNextCommands(
+        output: SecondBrainEnrichmentOutput,
+        sourceItem: CiderRoutingItemSummary
+    ) -> [String] {
+        orderedUnique([
+            "cider-cli item context \(sourceItem.type) \(sourceItem.id.uuidString) --json",
+            "cider-cli item get \(sourceItem.type) \(sourceItem.id.uuidString) --json",
+            "cider-cli capture review-queue --kind memory_candidate --json",
+            "cider-cli capture review-queue --json",
+        ])
+    }
+
     private func enrichmentReasonCodes(status: String?, lastEnrichedAt: Date?) -> [String] {
         if status == "failed" || status == "error" {
             return ["enrichment_failed"]
@@ -1931,7 +2483,33 @@ final class CiderReviewQueueService {
                 routingDecisionID: nil,
                 target: nil,
                 createdAt: now,
-                safeActions: ["inspect_duplicates", "manual_review"]
+                safeActions: ["inspect_duplicates", "manual_review"],
+                candidateRef: "duplicate_candidate:\(finding.id)",
+                storage: [
+                    "service": "VaultDuplicateAuditor",
+                    "kind": "duplicate_candidate",
+                    "lifecycleExtensionPoint": "review_lifecycle_events can store duplicate_candidate:<id> decisions when duplicate mutation flows are added",
+                ],
+                truthState: "reviewable_candidate_not_truth",
+                lifecycleHistory: [
+                    CiderReviewQueueLifecycleEventRecord(SecondBrainReviewLifecycleEvent(
+                        id: "duplicate-candidate-suggested-\(finding.id)",
+                        owner: SecondBrainOwnerRef(ownerType: "duplicate_candidate", ownerID: finding.id),
+                        candidateRef: "duplicate_candidate:\(finding.id)",
+                        lifecycleState: "needs_review",
+                        eventKind: "suggested",
+                        actor: "system",
+                        source: "duplicate_auditor",
+                        toolName: "VaultDuplicateAuditor",
+                        reason: finding.detail,
+                        metadata: [
+                            "entity_type": finding.entityType.rawValue,
+                            "duplicate_kind": finding.kind.rawValue,
+                            "confidence": finding.confidence.rawValue,
+                        ],
+                        createdAt: now
+                    ))
+                ]
             )
         }
     }
@@ -1992,7 +2570,35 @@ final class CiderReviewQueueService {
             enrichmentStatus: item.kind == "enrichment" ? item.reviewState : nil,
             attachmentSummary: nil,
             createdAt: item.createdAt,
-            safeNextCommands: itemSafeInspectionCommands(type: item.itemType, id: item.itemID, title: item.title)
+            safeNextCommands: item.safeNextCommands.isEmpty
+                ? itemSafeInspectionCommands(type: item.itemType, id: item.itemID, title: item.title)
+                : item.safeNextCommands,
+            confidence: item.confidence,
+            candidateID: item.candidateID,
+            candidateRef: item.candidateRef,
+            sourceQuote: item.sourceQuote,
+            possibleTypes: item.possibleTypes,
+            possibleRelations: item.possibleRelations,
+            candidateActions: item.candidateActions,
+            memoryKind: item.memoryKind,
+            linkedOwnerRefs: item.linkedOwnerRefs,
+            observedDate: item.observedDate,
+            memoryKey: item.memoryKey,
+            memoryStatus: item.memoryStatus,
+            reviewFamily: item.reviewFamily,
+            sourceItemRef: item.sourceItemRef,
+            sourceItemTitle: item.sourceItemTitle,
+            sourceItemDate: item.sourceItemDate,
+            extractionReason: item.extractionReason,
+            proposedChange: item.proposedChange,
+            storage: item.storage,
+            truthState: item.truthState,
+            acceptEffect: item.acceptEffect,
+            rejectEffect: item.rejectEffect,
+            candidateQualityLevel: item.candidateQualityLevel,
+            candidateQualityCodes: item.candidateQualityCodes,
+            candidateQualityExplanation: item.candidateQualityExplanation,
+            sourceEvidenceRecord: item.sourceEvidenceRecord
         )
     }
 
@@ -2219,18 +2825,22 @@ final class CiderReviewQueueService {
 
     private func sortRank(_ item: CiderReviewQueueItem) -> Int {
         switch item.kind {
-        case "low_confidence_routing":
+        case "graph_candidate":
             return 0
-        case "enrichment":
+        case "memory_candidate":
             return 1
-        case "duplicate_candidate":
+        case "low_confidence_routing":
             return 2
-        case "inbox_backlog":
+        case "enrichment":
             return 3
-        case "deferred_routing":
+        case "duplicate_candidate":
             return 4
-        default:
+        case "inbox_backlog":
             return 5
+        case "deferred_routing":
+            return 6
+        default:
+            return 7
         }
     }
 
@@ -2320,6 +2930,10 @@ final class CiderReviewQueueService {
         switch item.kind {
         case "low_confidence_routing", "deferred_routing":
             return "routing_requires_explicit_approval"
+        case "graph_candidate":
+            return "graph_candidate_requires_review"
+        case "memory_candidate":
+            return "memory_candidate_requires_review"
         case "inbox_backlog":
             return "manual_routing_required"
         case "duplicate_candidate":
@@ -2333,7 +2947,7 @@ final class CiderReviewQueueService {
     }
 
     private func primarySafeAction(for item: CiderReviewQueueItem) -> String {
-        for action in ["enrich", "approve", "correct", "defer"] where item.safeActions.contains(action) {
+        for action in ["enrich", "approve", "inspect_source", "correct", "defer"] where item.safeActions.contains(action) {
             return action
         }
         return item.safeActions.first ?? "none"
@@ -2343,16 +2957,20 @@ final class CiderReviewQueueService {
         switch group.kind {
         case "low_confidence_routing":
             return 0
+        case "graph_candidate":
+            return 1
+        case "memory_candidate":
+            return 2
         case "enrichment":
-            return group.reviewState == "needs_review" ? 1 : 2
+            return group.reviewState == "needs_review" ? 3 : 4
         case "duplicate_candidate":
-            return 3
-        case "inbox_backlog":
-            return 4
-        case "deferred_routing":
             return 5
-        default:
+        case "inbox_backlog":
             return 6
+        case "deferred_routing":
+            return 7
+        default:
+            return 8
         }
     }
 
@@ -2538,6 +3156,28 @@ final class CiderReviewQueueService {
             ].filter { !$0.value.isEmpty },
             source: actor == "agent" ? .agent : nil
         )
+
+        if let db = resolvedDatabase {
+            try SecondBrainReviewLifecycleService(database: db).record(
+                SecondBrainReviewLifecycleEvent(
+                    owner: SecondBrainOwnerRef(ownerType: "routing_decision", ownerID: latest.id.uuidString),
+                    candidateRef: "routing_decision:\(latest.id.uuidString)",
+                    lifecycleState: latest.reviewState,
+                    eventKind: status,
+                    actor: actor,
+                    source: action,
+                    toolName: action,
+                    reason: latest.reason,
+                    supersedesRef: latest.supersedesDecisionID.map { "routing_decision:\($0.uuidString)" },
+                    metadata: [
+                        "item_ref": "\(after.item.type):\(after.item.id.uuidString)",
+                        "target_relative_path": latest.target.relativePath,
+                        "confidence": String(latest.confidence),
+                    ],
+                    createdAt: latest.createdAt
+                )
+            )
+        }
 
         return result
     }

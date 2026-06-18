@@ -344,6 +344,367 @@ struct CiderReviewQueueServiceTests {
         #expect(items.first { $0.itemID == inboxID }?.kind == "inbox_backlog")
     }
 
+    @Test("review queue surfaces graph candidates as source-backed triage items")
+    func reviewQueueSurfacesGraphCandidatesAsSourceBackedTriageItems() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Movie journal",
+            relativePath: "Journal/Movie journal.md"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "The Way Way Back",
+            sourceQuote: "Watched The Way Way Back tonight and loved the water park scene.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched],
+            actionGuesses: ["watched"],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.78,
+            confidenceReason: "The sentence explicitly says this was watched.",
+            source: "graph_candidate.test"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+
+        let queue = CiderReviewQueueService(database: db)
+        let result = try queue.list(kind: "graph_candidate")
+
+        #expect(result.command == "review.list")
+        #expect(result.items.count == 1)
+        let item = try #require(result.items.first)
+        #expect(item.kind == "graph_candidate")
+        #expect(item.source == "graph_candidate")
+        #expect(item.itemID == noteID)
+        #expect(item.itemType == "note")
+        #expect(item.title == "The Way Way Back")
+        #expect(item.reviewState == "suggested")
+        #expect(item.confidence == 0.78)
+        #expect(item.confidenceReason == "The sentence explicitly says this was watched.")
+        #expect(item.candidateID == output.id)
+        #expect(item.candidateRef == "graph_candidate:\(output.id)")
+        #expect(item.sourceQuote == "Watched The Way Way Back tonight and loved the water park scene.")
+        #expect(item.possibleTypes == ["movie", "media"])
+        #expect(item.possibleRelations == ["watched"])
+        #expect(item.candidateActions == ["watched"])
+        #expect(item.safeActions == ["inspect_source", "link_existing", "create_object", "correct", "reject", "delegate_enrichment"])
+        #expect(item.safeNextCommands.contains("cider-cli item graph-candidate \(output.id) --json"))
+        #expect(item.safeNextCommands.contains("cider-cli item context note \(noteID.uuidString) --json"))
+
+        let dictionary = item.toDictionary()
+        #expect(dictionary["candidateID"] as? String == output.id)
+        #expect(dictionary["sourceQuote"] as? String == output.evidence)
+        #expect(dictionary["possibleTypes"] as? [String] == ["movie", "media"])
+        #expect(dictionary["confidenceReason"] as? String == "The sentence explicitly says this was watched.")
+        #expect(dictionary["safeNextCommands"] as? [String] == item.safeNextCommands)
+
+        let summary = try queue.summary()
+        #expect(summary.countsByKind["graph_candidate"] == 1)
+        #expect(summary.countsBySafeAction["inspect_source"] == 1)
+        #expect(summary.groups.first?.id == "graph_candidate:suggested:inspect_source:note")
+
+        let worklist = try queue.captureReviewWorklist(limit: 10)
+        let worklistItem = try #require(worklist.items.first { $0.candidateID == output.id })
+        #expect(worklistItem.kind == "graph_candidate")
+        #expect(worklistItem.ownerType == "note")
+        #expect(worklistItem.ownerID == noteID.uuidString)
+        #expect(worklistItem.sourceQuote == output.evidence)
+        #expect(worklistItem.possibleTypes == ["movie", "media"])
+        #expect(worklistItem.confidence == 0.78)
+        #expect(worklistItem.safeNextCommands.contains("cider-cli item graph-candidate \(output.id) --json"))
+        let worklistDictionary = worklistItem.toDictionary()
+        #expect(worklistDictionary["needsReview"] as? Bool == true)
+        #expect(worklistDictionary["recommendedNextAction"] as? String == "review_graph_candidate")
+        #expect(worklistDictionary["candidateRef"] as? String == "graph_candidate:\(output.id)")
+        #expect(worklistDictionary["confidence"] as? Double == 0.78)
+    }
+
+    @Test("review list limit does not hide source-backed candidates behind routing rows")
+    func reviewListLimitDoesNotHideSourceBackedCandidatesBehindRoutingRows() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let routing = CiderRoutingDecisionService(database: db)
+        for index in 0..<5 {
+            let itemID = try insertBookmark(
+                db,
+                title: "Routing review \(index)",
+                url: "https://example.com/routing-\(index)",
+                relativePath: "Inbox/Bookmarks/Routing review \(index).webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: Date()
+            )
+            _ = try routing.recordDecision(
+                itemID: itemID,
+                itemType: "bookmark",
+                target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+                confidence: 0,
+                reason: "No deterministic route was supplied.",
+                actor: "agent",
+                source: "capture.add",
+                reviewState: "needs_review"
+            )
+        }
+
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Movie journal",
+            relativePath: "Journal/Movie journal.md"
+        )
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString),
+            candidateKind: .objectRelation,
+            mentionText: "The Way Way Back",
+            sourceQuote: "Watched The Way Way Back tonight.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie],
+            relationGuesses: [.watched],
+            actionGuesses: ["watched"],
+            safeActions: [.inspectSource, .reject],
+            confidence: 0.78,
+            confidenceReason: "The source sentence explicitly names the movie.",
+            source: "graph_candidate.test"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+
+        let queue = CiderReviewQueueService(database: db, routingDecisionService: routing)
+        let result = try queue.list(limit: 1)
+
+        #expect(result.items.map(\.kind) == ["graph_candidate"])
+        #expect(result.items.first?.candidateID == output.id)
+    }
+
+    @Test("review queue surfaces memory candidates as source-backed triage items")
+    func reviewQueueSurfacesMemoryCandidatesAsSourceBackedTriageItems() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Alex context",
+            relativePath: "Daily/2026-06-10.md"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let result = try SecondBrainMemoryCandidateService(database: db).suggest(
+            owner: owner,
+            requestedOwnerType: "note",
+            requestedOwnerRef: noteID.uuidString,
+            kind: "relationship_context",
+            value: "Alex prefers late coffee catch-ups.",
+            evidence: "Journal note says Alex prefers late coffee catch-ups.",
+            source: "test",
+            confidence: 0.83,
+            linkedOwners: [
+                SecondBrainOwnerRef(ownerType: "contact", ownerID: "alex"),
+                SecondBrainOwnerRef(ownerType: "project", ownerID: "cider"),
+            ],
+            observedDate: "2026-06-10",
+            memoryKey: "alex-coffee-catchups",
+            memoryStatus: "current"
+        )
+
+        let queue = CiderReviewQueueService(database: db)
+        let resultList = try queue.list(kind: "memory_candidate")
+
+        #expect(resultList.command == "review.list")
+        #expect(resultList.items.count == 1)
+        let item = try #require(resultList.items.first)
+        #expect(item.kind == "memory_candidate")
+        #expect(item.source == "memory_candidate")
+        #expect(item.itemID == noteID)
+        #expect(item.itemType == "note")
+        #expect(item.title == "Alex prefers late coffee catch-ups.")
+        #expect(item.reviewState == "suggested")
+        #expect(item.confidence == 0.83)
+        #expect(item.candidateID == result.candidate.id)
+        #expect(item.candidateRef == "memory_candidate:\(result.candidate.id)")
+        #expect(item.sourceQuote == "Journal note says Alex prefers late coffee catch-ups.")
+        #expect(item.memoryKind == "relationship_context")
+        #expect(item.linkedOwnerRefs == ["contact:alex", "project:cider"])
+        #expect(item.observedDate == "2026-06-10")
+        #expect(item.memoryKey == "alex-coffee-catchups")
+        #expect(item.memoryStatus == "current")
+        #expect(item.safeActions == ["inspect_source", "accept", "reject", "defer", "correct"])
+        #expect(item.safeNextCommands.contains("cider-cli item context note \(noteID.uuidString) --json"))
+        #expect(!item.safeNextCommands.contains { $0.contains("accept") || $0.contains("promote") })
+
+        let dictionary = item.toDictionary()
+        #expect(dictionary["candidateRef"] as? String == "memory_candidate:\(result.candidate.id)")
+        #expect(dictionary["memoryKind"] as? String == "relationship_context")
+        #expect(dictionary["linkedOwnerRefs"] as? [String] == ["contact:alex", "project:cider"])
+        #expect(dictionary["sourceQuote"] as? String == result.candidate.evidence)
+
+        let summary = try queue.summary()
+        #expect(summary.countsByKind["memory_candidate"] == 1)
+        #expect(summary.countsBySafeAction["inspect_source"] == 1)
+        #expect(summary.countsBySafeAction["accept"] == 1)
+        #expect(summary.countsBySafeAction["reject"] == 1)
+        #expect(summary.countsBySafeAction["defer"] == 1)
+        #expect(summary.groups.first?.id == "memory_candidate:suggested:inspect_source:note")
+
+        let worklist = try queue.captureReviewWorklist(limit: 10, kind: "memory_candidate")
+        let worklistItem = try #require(worklist.items.first { $0.candidateID == result.candidate.id })
+        #expect(worklistItem.kind == "memory_candidate")
+        #expect(worklistItem.ownerType == "note")
+        #expect(worklistItem.ownerID == noteID.uuidString)
+        #expect(worklistItem.sourceQuote == result.candidate.evidence)
+        #expect(worklistItem.memoryKind == "relationship_context")
+        #expect(worklistItem.linkedOwnerRefs == ["contact:alex", "project:cider"])
+        let worklistDictionary = worklistItem.toDictionary()
+        #expect(worklistDictionary["needsReview"] as? Bool == true)
+        #expect(worklistDictionary["recommendedNextAction"] as? String == "review_memory_candidate")
+        #expect(worklistDictionary["candidateRef"] as? String == "memory_candidate:\(result.candidate.id)")
+        #expect(worklistDictionary["linkedOwnerRefs"] as? [String] == ["contact:alex", "project:cider"])
+    }
+
+    @Test("candidate action service accepts rejects and defers memory candidates")
+    func candidateActionServiceMutatesMemoryCandidates() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Jami context",
+            relativePath: "Daily/2026-06-10.md"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let memoryService = SecondBrainMemoryCandidateService(database: db)
+        let acceptCandidate = try memoryService.suggest(
+            owner: owner,
+            requestedOwnerType: "note",
+            requestedOwnerRef: noteID.uuidString,
+            kind: "relationship_context",
+            value: "Jami likes pineapple coconut drinks.",
+            evidence: "Jami liked the pineapple coconut drink.",
+            source: "test.accept",
+            confidence: 0.91
+        ).candidate
+        let rejectCandidate = try memoryService.suggest(
+            owner: owner,
+            requestedOwnerType: "note",
+            requestedOwnerRef: noteID.uuidString,
+            kind: "relationship_context",
+            value: "Jami dislikes mango.",
+            evidence: "Ambiguous line about mango.",
+            source: "test.reject",
+            confidence: 0.41
+        ).candidate
+        let deferCandidate = try memoryService.suggest(
+            owner: owner,
+            requestedOwnerType: "note",
+            requestedOwnerRef: noteID.uuidString,
+            kind: "relationship_context",
+            value: "Jami may prefer late coffee.",
+            evidence: "Maybe late coffee worked better.",
+            source: "test.defer",
+            confidence: 0.55
+        ).candidate
+
+        let actionService = CiderReviewCandidateActionService(database: db)
+        let accept = try actionService.acceptMemoryCandidate(acceptCandidate.id, actor: "tester")
+        let reject = try actionService.rejectMemoryCandidate(rejectCandidate.id, reason: "Nope.", actor: "tester")
+        let deferred = try actionService.deferMemoryCandidate(deferCandidate.id, reason: "Later.", actor: "tester")
+
+        #expect(accept.reviewState == "accepted")
+        #expect(reject.reviewState == "rejected")
+        #expect(deferred.reviewState == "deferred")
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        #expect(try outputService.output(id: acceptCandidate.id)?.reviewState == "accepted")
+        #expect(try outputService.output(id: rejectCandidate.id)?.metadata["rejection_reason"] == "Nope.")
+        #expect(try outputService.output(id: deferCandidate.id)?.metadata["deferral_reason"] == "Later.")
+        let actions = try SecondBrainStore(database: db).agentActions(for: owner)
+        #expect(actions.map(\.actionType).contains("memory_candidate.accept"))
+        #expect(actions.map(\.actionType).contains("memory_candidate.reject"))
+        #expect(actions.map(\.actionType).contains("memory_candidate.defer"))
+
+        let lifecycle = SecondBrainReviewLifecycleService(database: db)
+        let acceptEvents = try lifecycle.events(candidateRef: "memory_candidate:\(acceptCandidate.id)")
+        #expect(acceptEvents.map(\.eventKind).contains("suggested"))
+        #expect(acceptEvents.map(\.eventKind).contains("accepted"))
+        #expect(acceptEvents.last?.actor == "tester")
+        #expect(acceptEvents.last?.sourceEvidenceRef?.hasPrefix("source_evidence:") == true)
+        let rejectEvents = try lifecycle.events(candidateRef: "memory_candidate:\(rejectCandidate.id)")
+        #expect(rejectEvents.map(\.eventKind).contains("rejected"))
+        #expect(rejectEvents.last?.reason == "Nope.")
+        let deferEvents = try lifecycle.events(candidateRef: "memory_candidate:\(deferCandidate.id)")
+        #expect(deferEvents.map(\.eventKind).contains("deferred"))
+        #expect(deferEvents.last?.reason == "Later.")
+    }
+
+    @Test("candidate action service rejects ambiguous graph accept but can reject candidate")
+    func candidateActionServiceRejectsAmbiguousGraphAccept() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Movie journal",
+            relativePath: "Daily/2026-06-10.md"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "The Way Way Back",
+            sourceQuote: "Watched The Way Way Back tonight.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .delegateEnrichment],
+            confidence: 0.78,
+            source: "test.graph.reject"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+
+        let actionService = CiderReviewCandidateActionService(database: db)
+        #expect(throws: CiderReviewCandidateActionService.ReviewCandidateActionError.graphAcceptNeedsResolvedTarget(output.id)) {
+            _ = try actionService.acceptGraphCandidateIfResolved(output.id, actor: "tester")
+        }
+
+        let reject = try actionService.rejectGraphCandidate(output.id, reason: "Wrong movie.", actor: "tester")
+        #expect(reject.reviewState == "rejected")
+        #expect(try SecondBrainEnrichmentOutputService(database: db).output(id: output.id)?.metadata["rejection_reason"] == "Wrong movie.")
+        #expect(try SecondBrainStore(database: db).outgoingRelations(for: owner).isEmpty)
+
+        let resolvedTarget = SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "movie-the-way-way-back")
+        let resolved = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "The Way Way Back",
+            sourceQuote: "Watched The Way Way Back tonight.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .accept, .reject],
+            confidence: 0.91,
+            acceptedTargetOwner: resolvedTarget,
+            acceptedRelationType: .watched,
+            source: "test.graph.accept"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(resolved)
+
+        let accept = try actionService.acceptGraphCandidateIfResolved(resolved.id, actor: "tester")
+        #expect(accept.reviewState == "accepted")
+        let relations = try SecondBrainStore(database: db).outgoingRelations(for: owner)
+        #expect(relations.count == 1)
+        #expect(relations.first?.targetOwner == resolvedTarget)
+        #expect(relations.first?.relationType == "watched")
+
+        let lifecycle = SecondBrainReviewLifecycleService(database: db)
+        let rejectedEvents = try lifecycle.events(candidateRef: "graph_candidate:\(output.id)")
+        #expect(rejectedEvents.map(\.eventKind).contains("suggested"))
+        #expect(rejectedEvents.map(\.eventKind).contains("rejected"))
+        #expect(rejectedEvents.last?.reason == "Wrong movie.")
+        let acceptedEvents = try lifecycle.events(candidateRef: "graph_candidate:\(resolved.id)")
+        #expect(acceptedEvents.map(\.eventKind).contains("accepted"))
+        #expect(acceptedEvents.contains { $0.eventKind == "accepted_truth_recorded" })
+        #expect(acceptedEvents.last?.sourceEvidenceRef?.hasPrefix("source_evidence:") == true)
+    }
+
     @Test("review queue filters by kind and required safe action")
     func reviewQueueFiltersByKindAndRequiredSafeAction() throws {
         let (db, url) = try makeTempDB()

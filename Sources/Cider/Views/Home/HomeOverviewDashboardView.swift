@@ -3,10 +3,10 @@ import SwiftUI
 struct HomeOverviewDashboardView: View {
     let snapshot: HomeOverviewSnapshot
     let onOpenItem: (LibraryItemV2) -> Void
+    let onOpenReviewSource: (HomeReviewCockpitItem) -> Void
     let onOpenTarget: (HomeOverviewActionTarget) -> Void
     let onOpenKanbanCard: (String, String) -> Void
-    let onApproveReview: (HomeReviewCockpitItem) -> Bool
-    let onDeferReview: (HomeReviewCockpitItem) -> Bool
+    let onPerformReviewAction: (HomeReviewCockpitItem, HomeReviewCockpitAction) -> Bool
     let onEnrichReviewBatch: () -> Bool
     let onOpenSettings: () -> Void
     let onSyncNow: () -> Void
@@ -537,35 +537,41 @@ struct HomeOverviewDashboardView: View {
             spacing: Spacing.xs
         ) {
             ForEach(snapshot.reviewCockpitSummary.visibleLanes) { lane in
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    HStack(spacing: Spacing.xs) {
-                        Text("\(lane.count)")
-                            .font(CiderFont.labelSemibold)
-                            .foregroundColor(CiderColors.primary)
-                            .monospacedDigit()
-                        Text(lane.title)
-                            .font(CiderFont.captionSemibold)
-                            .foregroundColor(CiderColors.secondary)
+                Button {
+                    onOpenTarget(.review)
+                } label: {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        HStack(spacing: Spacing.xs) {
+                            Text("\(lane.count)")
+                                .font(CiderFont.labelSemibold)
+                                .foregroundColor(CiderColors.primary)
+                                .monospacedDigit()
+                            Text(lane.title)
+                                .font(CiderFont.captionSemibold)
+                                .foregroundColor(CiderColors.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Text(lane.actionLabel)
+                            .font(CiderFont.caption)
+                            .foregroundColor(lane.keepsRoutingSeparate ? CiderColors.warning : CiderColors.quaternary)
                             .lineLimit(1)
                     }
-
-                    Text(lane.actionLabel)
-                        .font(CiderFont.caption)
-                        .foregroundColor(lane.keepsRoutingSeparate ? CiderColors.warning : CiderColors.quaternary)
-                        .lineLimit(1)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                    .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                            )
+                    )
                 }
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.surfaceInput)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                                .stroke(CiderColors.borderSubtle, lineWidth: 1)
-                        )
-                )
-                .accessibilityElement(children: .combine)
+                .buttonStyle(.plain)
+                .help("Open Review Queue")
+                .accessibilityLabel("Open \(lane.title) review items")
             }
         }
     }
@@ -633,9 +639,7 @@ struct HomeOverviewDashboardView: View {
     private func reviewQueueRow(_ reviewItem: HomeReviewCockpitItem) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Button {
-                if let item = reviewItem.item {
-                    onOpenItem(item)
-                }
+                openReviewSource(reviewItem)
             } label: {
                 HStack(alignment: .top, spacing: Spacing.sm) {
                     Image(systemName: reviewIcon(for: reviewItem))
@@ -654,11 +658,32 @@ struct HomeOverviewDashboardView: View {
                             .foregroundColor(CiderColors.tertiary)
                             .lineLimit(1)
 
+                        if let sourceQuote = reviewItem.sourceQuote, !sourceQuote.isEmpty {
+                            Text(sourceQuote)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.secondary)
+                                .lineLimit(2)
+                        }
+
+                        if let extractionReason = reviewItem.extractionReason {
+                            Text(extractionReason)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                                .lineLimit(2)
+                        }
+
                         HStack(spacing: Spacing.xs) {
                             Text(reviewItem.suggestedAction)
                                 .font(CiderFont.captionSemibold)
                                 .foregroundColor(CiderColors.secondary)
                                 .lineLimit(1)
+
+                            if let sourceProvenanceLabel = reviewItem.sourceProvenanceLabel {
+                                Text(sourceProvenanceLabel)
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(CiderColors.quaternary)
+                                    .lineLimit(1)
+                            }
 
                             Text(reviewItem.sourceLabel)
                                 .font(CiderFont.caption)
@@ -676,6 +701,13 @@ struct HomeOverviewDashboardView: View {
                                     .foregroundColor(CiderColors.quaternary)
                                     .lineLimit(1)
                             }
+
+                            if let quality = reviewItem.candidateQualityLevel {
+                                Text("Quality: \(quality)")
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(quality == "low" ? CiderColors.warning : CiderColors.quaternary)
+                                    .lineLimit(1)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -685,50 +717,49 @@ struct HomeOverviewDashboardView: View {
             .disabled(reviewItem.item == nil)
 
             HStack(spacing: Spacing.xxs) {
-                if reviewItem.canCorrect, let item = reviewItem.item {
-                    Button {
-                        onOpenItem(item)
-                    } label: {
-                        Image(systemName: "arrow.up.right.square")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help(reviewOpenHelp(for: reviewItem))
-                    .accessibilityLabel(reviewOpenHelp(for: reviewItem))
-                }
-
-                if reviewItem.canApprove {
-                    Button {
-                        if onApproveReview(reviewItem) {
-                            resolvedReviewIDs.insert(reviewItem.id)
-                        }
-                    } label: {
-                        Image(systemName: "checkmark.circle")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help(reviewApproveHelp(for: reviewItem))
-                    .accessibilityLabel(reviewApproveHelp(for: reviewItem))
-                }
-
-                if reviewItem.canDefer {
-                    Button {
-                        if onDeferReview(reviewItem) {
-                            resolvedReviewIDs.insert(reviewItem.id)
-                        }
-                    } label: {
-                        Image(systemName: "clock")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Defer review")
-                    .accessibilityLabel("Defer review")
+                ForEach(reviewItem.reviewActions) { action in
+                    reviewActionButton(action, for: reviewItem)
                 }
             }
             .font(CiderFont.captionSemibold)
             .foregroundColor(CiderColors.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func reviewActionButton(
+        _ action: HomeReviewCockpitAction,
+        for reviewItem: HomeReviewCockpitItem
+    ) -> some View {
+        switch action {
+        case .openSource:
+            if reviewItem.item != nil {
+                Button {
+                    openReviewSource(reviewItem)
+                } label: {
+                    Label(action.buttonTitle(for: reviewItem), systemImage: action.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .font(CiderFont.captionSemibold)
+                }
+                .buttonStyle(.plain)
+                .help(action.helpLabel(for: reviewItem))
+                .accessibilityLabel(action.helpLabel(for: reviewItem))
+            }
+        case .accept, .reject, .deferReview:
+            Button {
+                if onPerformReviewAction(reviewItem, action) {
+                    resolvedReviewIDs.insert(reviewItem.id)
+                }
+            } label: {
+                Label(action.buttonTitle(for: reviewItem), systemImage: action.systemImage)
+                    .labelStyle(.titleAndIcon)
+                    .font(CiderFont.captionSemibold)
+            }
+            .buttonStyle(.plain)
+            .help(action.helpLabel(for: reviewItem))
+            .accessibilityLabel(action.helpLabel(for: reviewItem))
+        }
     }
 
     private func reviewIcon(for item: HomeReviewCockpitItem) -> String {
@@ -753,15 +784,9 @@ struct HomeOverviewDashboardView: View {
         }
     }
 
-    private func reviewApproveHelp(for item: HomeReviewCockpitItem) -> String {
-        if let approval = item.dateSuggestionApproval {
-            return approval.destination == .todo ? "Approve Todo due date" : "Approve Date Card"
-        }
-        return "Approve suggested route"
-    }
-
-    private func reviewOpenHelp(for item: HomeReviewCockpitItem) -> String {
-        item.dateSuggestionApproval == nil ? "Open item to correct routing" : "Open bookmark details"
+    private func openReviewSource(_ reviewItem: HomeReviewCockpitItem) {
+        guard reviewItem.item != nil else { return }
+        onOpenReviewSource(reviewItem)
     }
 
     private func recentActivityPanel(fixedHeight: CGFloat? = nil) -> some View {

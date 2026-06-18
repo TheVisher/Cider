@@ -175,14 +175,98 @@ func surfacingExplanationToDict(_ explanation: CiderSurfacingExplanation) -> [St
     return dict
 }
 
+func secondBrainOwnerRefToDict(_ owner: SecondBrainOwnerRef) -> [String: Any] {
+    [
+        "ownerType": owner.ownerType,
+        "ownerID": owner.ownerID,
+        "ref": owner.canonicalRef,
+    ]
+}
+
+func agentActionReceiptToDict(
+    command: String,
+    action: String,
+    actor: String = "cider-cli",
+    owner: SecondBrainOwnerRef? = nil,
+    sourceRefs: [String] = [],
+    evidenceRefs: [String] = [],
+    readOnly: Bool,
+    changed: Bool,
+    status: String = "succeeded",
+    errorCode: String? = nil,
+    error: String? = nil,
+    supportedTypes: [String]? = nil,
+    before: [String: Any]? = nil,
+    after: [String: Any]? = nil,
+    safeVerificationCommands: [String] = [],
+    safeNextCommands: [String] = []
+) -> [String: Any] {
+    var dict: [String: Any] = [
+        "command": command,
+        "action": action,
+        "actor": actor,
+        "status": status,
+        "readOnly": readOnly,
+        "changed": changed,
+        "sourceRefs": sourceRefs,
+        "evidenceRefs": evidenceRefs,
+        "safeVerificationCommands": safeVerificationCommands,
+        "safeNextCommands": safeNextCommands,
+    ]
+    if let owner {
+        dict["owner"] = secondBrainOwnerRefToDict(owner)
+        dict["ownerRef"] = owner.canonicalRef
+    }
+    if let errorCode { dict["errorCode"] = errorCode }
+    if let error { dict["error"] = error }
+    if let supportedTypes { dict["supportedTypes"] = supportedTypes }
+    if let before { dict["before"] = before }
+    if let after { dict["after"] = after }
+    return dict
+}
+
+func actionReceiptRecordToDict(_ record: SecondBrainActionReceiptRecord) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": record.id,
+        "command": record.command,
+        "action": record.action,
+        "actor": record.actor,
+        "status": record.status,
+        "sourceRefs": record.sourceRefs,
+        "evidenceRefs": record.evidenceRefs,
+        "readOnly": record.readOnly,
+        "changed": record.changed,
+        "safeVerificationCommands": record.safeVerificationCommands,
+        "safeNextCommands": record.safeNextCommands,
+        "createdAt": ISO8601DateFormatter().string(from: record.createdAt),
+    ]
+    if let owner = record.owner {
+        dict["owner"] = secondBrainOwnerRefToDict(owner)
+        dict["ownerRef"] = owner.canonicalRef
+    }
+    if let beforeJSON = record.beforeJSON { dict["beforeJSON"] = beforeJSON }
+    if let afterJSON = record.afterJSON { dict["afterJSON"] = afterJSON }
+    if let errorCode = record.errorCode { dict["errorCode"] = errorCode }
+    if let correlationID = record.correlationID { dict["correlationID"] = correlationID }
+    if let receiptJSON = record.receiptJSON { dict["receiptJSON"] = receiptJSON }
+    return dict
+}
+
 func reminderActionResultToDict(_ result: CiderReminderActionResult) -> [String: Any] {
     let formatter = ISO8601DateFormatter()
+    let command = "reminder.\(result.action.rawValue)"
+    let owner = SecondBrainOwnerRef(ownerType: result.itemType.rawValue, ownerID: result.id.uuidString)
     var dict: [String: Any] = [
+        "ok": true,
+        "command": command,
+        "readOnly": false,
+        "changed": true,
         "itemType": result.itemType.rawValue,
         "id": result.id.uuidString,
         "title": result.title,
         "action": result.action.rawValue,
         "completed": result.completed,
+        "owner": secondBrainOwnerRefToDict(owner),
     ]
     if let snoozedUntil = result.snoozedUntil {
         dict["snoozedUntil"] = formatter.string(from: snoozedUntil)
@@ -200,6 +284,24 @@ func reminderActionResultToDict(_ result: CiderReminderActionResult) -> [String:
         }
         dict["surfacing"] = surfacingDict
     }
+    dict["actionReceipt"] = agentActionReceiptToDict(
+        command: command,
+        action: result.action.rawValue,
+        owner: owner,
+        sourceRefs: [owner.canonicalRef],
+        readOnly: false,
+        changed: true,
+        before: ["completed": !result.completed],
+        after: ["completed": result.completed],
+        safeVerificationCommands: [
+            "cider-cli item why-surfaced \(result.itemType.rawValue) \(result.id.uuidString) --json",
+            "cider-cli item context \(result.itemType.rawValue) \(result.id.uuidString) --json",
+        ],
+        safeNextCommands: [
+            "cider-cli item due-to-surface --json",
+            "cider-cli agenda --json",
+        ]
+    )
     return dict
 }
 
@@ -1189,4 +1291,80 @@ private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
         "trash": TrashStorage.shared.allTrashItems().count,
         "vaultRoot": StoragePaths.cachedVaultDirectoryURL.path,
     ]
+}
+
+func dueToSurfaceFeedToDict(_ feed: CiderDueToSurfaceFeed) -> [String: Any] {
+    let formatter = ISO8601DateFormatter()
+    return [
+        "ok": true,
+        "command": feed.command,
+        "generatedAt": formatter.string(from: feed.generatedAt),
+        "readOnly": feed.readOnly,
+        "changed": feed.changed,
+        "count": feed.candidates.count,
+        "countsByFamily": feed.countsByFamily,
+        "truthBoundary": "mixed_reviewable_and_accepted_truth_boundaries",
+        "candidates": feed.candidates.map { dueToSurfaceCandidateToDict($0, formatter: formatter) },
+        "safeNextCommands": feed.safeNextCommands,
+    ]
+}
+
+func dueToSurfaceCandidateToDict(_ candidate: CiderDueToSurfaceCandidate, formatter: ISO8601DateFormatter) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": candidate.id,
+        "family": candidate.family.rawValue,
+        "owner": [
+            "ownerType": candidate.owner.ownerType,
+            "ownerID": candidate.owner.ownerID,
+            "ref": candidate.owner.canonicalRef,
+        ],
+        "title": candidate.title,
+        "itemType": candidate.itemType,
+        "whyNow": candidate.whyNow,
+        "reasonCodes": candidate.reasonCodes,
+        "urgency": candidate.urgency,
+        "confidence": candidate.confidence,
+        "reviewState": candidate.reviewState,
+        "truthBoundary": candidate.truthBoundary,
+        "score": candidate.score,
+        "sourceRefs": candidate.sourceRefs,
+        "citedEvidence": candidate.citedEvidence.map(dueToSurfaceEvidenceToDict),
+        "safeNextCommands": candidate.safeNextCommands,
+        "window": dueToSurfaceWindowToDict(candidate.window, formatter: formatter),
+    ]
+    if let candidateBoundary = candidate.candidateBoundary { dict["candidateBoundary"] = candidateBoundary }
+    if let explanation = candidate.explanation { dict["explanation"] = explanation }
+    if let factRef = candidate.factRef { dict["factRef"] = factRef }
+    if let candidateRef = candidate.candidateRef { dict["candidateRef"] = candidateRef }
+    if let sourceCitation = candidate.sourceCitation { dict["sourceCitation"] = sourceCitation }
+    if !candidate.relatedRefs.isEmpty { dict["relatedRefs"] = candidate.relatedRefs }
+    if !candidate.actionIntentRefs.isEmpty { dict["actionIntentRefs"] = candidate.actionIntentRefs }
+    if !candidate.safeVerificationCommands.isEmpty { dict["safeVerificationCommands"] = candidate.safeVerificationCommands }
+    if candidate.truthBoundary == "reviewable_candidate_not_truth" {
+        dict["needsReview"] = true
+        dict["acceptedTruth"] = false
+    } else if candidate.truthBoundary == "accepted_memory_fact" {
+        dict["needsReview"] = false
+        dict["acceptedTruth"] = true
+    }
+    return dict
+}
+
+func dueToSurfaceWindowToDict(_ window: CiderDueToSurfaceWindow, formatter: ISO8601DateFormatter) -> [String: Any] {
+    var dict: [String: Any] = ["label": window.label]
+    if let startsAt = window.startsAt { dict["startsAt"] = formatter.string(from: startsAt) }
+    if let endsAt = window.endsAt { dict["endsAt"] = formatter.string(from: endsAt) }
+    return dict
+}
+
+func dueToSurfaceEvidenceToDict(_ evidence: CiderDueToSurfaceEvidence) -> [String: Any] {
+    var dict: [String: Any] = [
+        "ref": evidence.ref,
+        "kind": evidence.kind,
+        "summary": evidence.summary,
+        "metadata": evidence.metadata,
+    ]
+    if let sourceOwnerRef = evidence.sourceOwnerRef { dict["sourceOwnerRef"] = sourceOwnerRef }
+    if let candidateRef = evidence.candidateRef { dict["candidateRef"] = candidateRef }
+    return dict
 }

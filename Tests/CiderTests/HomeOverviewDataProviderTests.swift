@@ -663,6 +663,206 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.reviewCockpitSummary.totalCount, 2)
     }
 
+    func testReviewCockpitLabelsMemoryCandidatesWithSourceEvidence() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let noteID = UUID()
+        let note = Note(
+            id: noteID,
+            title: "Daily context",
+            createdAt: now,
+            modifiedAt: now,
+            relativePath: "Daily/2026-06-10.md"
+        )
+        let reviewItem = CiderReviewQueueItem(
+            id: "review-memory-candidate-\(UUID().uuidString)",
+            kind: "memory_candidate",
+            source: "memory_candidate",
+            itemID: noteID,
+            itemType: "note",
+            title: "Jami likes pineapple coconut drinks.",
+            relativePath: "Daily/2026-06-10.md",
+            reason: "Review source-backed relationship context memory candidate before promotion.",
+            suggestedAction: "Review memory candidate",
+            reviewState: "needs_review",
+            confidence: 0.83,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now,
+            safeActions: ["inspect_source", "manual_review"],
+            candidateID: "candidate-123",
+            candidateRef: "memory_candidate:candidate-123",
+            sourceQuote: "Corrected source says Jami likes pineapple coconut drinks.",
+            memoryKind: "relationship_context",
+            linkedOwnerRefs: ["contact:jami"]
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.note(note)],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: [reviewItem],
+            surfacingDays: 7,
+            now: now
+        )
+
+        let cockpitItem = try! XCTUnwrap(snapshot.reviewCockpitItems.first)
+        XCTAssertEqual(cockpitItem.kindLabel, "Memory Candidate")
+        XCTAssertEqual(cockpitItem.sourceLabel, "Memory Candidate")
+        XCTAssertEqual(cockpitItem.targetLabel, "Relationship Context • contact:jami")
+        XCTAssertEqual(cockpitItem.candidateRef, "memory_candidate:candidate-123")
+        XCTAssertEqual(cockpitItem.sourceQuote, "Corrected source says Jami likes pineapple coconut drinks.")
+        XCTAssertEqual(cockpitItem.memoryKind, "relationship_context")
+        XCTAssertEqual(cockpitItem.linkedOwnerRefs, ["contact:jami"])
+        XCTAssertEqual(cockpitItem.confidenceLabel, "83% confidence")
+        XCTAssertEqual(cockpitItem.reviewActions, [.openSource, .accept, .reject, .deferReview])
+        XCTAssertTrue(cockpitItem.canApprove)
+        XCTAssertTrue(cockpitItem.canCorrect)
+        XCTAssertTrue(cockpitItem.canDefer)
+    }
+
+    func testReviewCockpitKeepsMemoryCandidateVisibleWhenGraphCandidatesFillCap() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let noteID = UUID()
+        let note = Note(
+            id: noteID,
+            title: "Daily context",
+            createdAt: now,
+            modifiedAt: now,
+            relativePath: "Daily/2026-06-10.md"
+        )
+        let graphItems = (0..<7).map { index in
+            CiderReviewQueueItem(
+                id: "review-graph-candidate-\(index)",
+                kind: "graph_candidate",
+                source: "graph_candidate",
+                itemID: noteID,
+                itemType: "note",
+                title: "Graph candidate \(index)",
+                relativePath: "Daily/2026-06-10.md",
+                reason: "Review extracted object candidate from source quote.",
+                suggestedAction: "Review graph candidate",
+                reviewState: "suggested",
+                confidence: 0.7,
+                routingDecisionID: nil,
+                target: nil,
+                createdAt: now.addingTimeInterval(Double(index)),
+                safeActions: ["inspect_source", "reject"],
+                candidateID: "graph-\(index)",
+                candidateRef: "graph_candidate:graph-\(index)",
+                sourceQuote: "Graph source \(index)",
+                reviewFamily: "graph_candidate"
+            )
+        }
+        let memoryItem = CiderReviewQueueItem(
+            id: "review-memory-candidate-visible",
+            kind: "memory_candidate",
+            source: "memory_candidate",
+            itemID: noteID,
+            itemType: "note",
+            title: "Jami likes pineapple coconut drinks.",
+            relativePath: "Daily/2026-06-10.md",
+            reason: "Review source-backed relationship context memory candidate before promotion.",
+            suggestedAction: "Review memory candidate",
+            reviewState: "needs_review",
+            confidence: 0.83,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now.addingTimeInterval(-10),
+            safeActions: ["inspect_source", "accept", "reject", "defer"],
+            candidateID: "memory-123",
+            candidateRef: "memory_candidate:memory-123",
+            sourceQuote: "Corrected source says Jami likes pineapple coconut drinks.",
+            memoryKind: "relationship_context",
+            linkedOwnerRefs: ["contact:jami"],
+            reviewFamily: "memory_candidate"
+        )
+        let summary = CiderReviewQueueSummaryResult(
+            command: "review.summary",
+            generatedAt: now,
+            totalCount: 8,
+            countsByKind: ["graph_candidate": 7, "memory_candidate": 1],
+            countsByItemType: ["note": 8],
+            countsByReviewState: ["suggested": 7, "needs_review": 1],
+            countsBySafeAction: ["reject": 8, "accept": 1],
+            groups: [],
+            batchEnrichmentPreview: .empty
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.note(note)],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: graphItems + [memoryItem],
+            reviewQueueSummary: summary,
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.reviewCockpitSummary.badges.first { $0.label == "Memory Candidate" }?.value, 1)
+        XCTAssertTrue(snapshot.reviewCockpitItems.contains { $0.kindLabel == "Memory Candidate" })
+    }
+
+    func testReviewCockpitKeepsAmbiguousGraphCandidateAcceptUnavailable() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let noteID = UUID()
+        let note = Note(
+            id: noteID,
+            title: "Movie journal",
+            createdAt: now,
+            modifiedAt: now,
+            relativePath: "Daily/2026-06-10.md"
+        )
+        let reviewItem = CiderReviewQueueItem(
+            id: "review-graph-candidate-\(UUID().uuidString)",
+            kind: "graph_candidate",
+            source: "graph_candidate",
+            itemID: noteID,
+            itemType: "note",
+            title: "The Way Way Back",
+            relativePath: "Daily/2026-06-10.md",
+            reason: "Review extracted movie candidate from source quote; possible relation: watched.",
+            suggestedAction: "Review graph candidate",
+            reviewState: "suggested",
+            confidence: 0.78,
+            confidenceReason: "Journal sentence uses a watched verb for a media title.",
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now,
+            safeActions: ["inspect_source", "link_existing", "create_object", "correct", "reject", "delegate_enrichment"],
+            candidateID: "candidate-456",
+            candidateRef: "graph_candidate:candidate-456",
+            sourceQuote: "Watched The Way Way Back tonight.",
+            possibleTypes: ["movie", "media"],
+            possibleRelations: ["watched"]
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.note(note)],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: [reviewItem],
+            surfacingDays: 7,
+            now: now
+        )
+
+        let cockpitItem = try! XCTUnwrap(snapshot.reviewCockpitItems.first)
+        XCTAssertEqual(cockpitItem.kindLabel, "Graph Candidate")
+        XCTAssertEqual(cockpitItem.candidateID, "candidate-456")
+        XCTAssertEqual(cockpitItem.candidateRef, "graph_candidate:candidate-456")
+        XCTAssertEqual(cockpitItem.sourceQuote, "Watched The Way Way Back tonight.")
+        XCTAssertEqual(cockpitItem.targetLabel, "movie, media")
+        XCTAssertEqual(cockpitItem.possibleTypeLabels, ["movie", "media"])
+        XCTAssertEqual(cockpitItem.possibleRelationLabels, ["watched"])
+        XCTAssertEqual(cockpitItem.confidenceReason, "Journal sentence uses a watched verb for a media title.")
+        XCTAssertEqual(cockpitItem.detailExtractedValueLabel, "Proposes watched → The Way Way Back (movie, media)")
+        XCTAssertEqual(cockpitItem.acceptanceEffectLabel, "Resolve or create the target object before accepting; then Cider will add a watched relation from this source note to that object.")
+        XCTAssertEqual(cockpitItem.detailCorrectionActionLabel, "Resolve / correct target")
+        XCTAssertEqual(cockpitItem.reviewActions, [.openSource, .reject])
+        XCTAssertFalse(cockpitItem.canApprove)
+        XCTAssertTrue(cockpitItem.canCorrect)
+        XCTAssertFalse(cockpitItem.canDefer)
+    }
+
     func testReviewCockpitToleratesDuplicateLibraryItemUUIDs() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let bookmarkID = UUID()
@@ -1049,6 +1249,111 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertFalse(snapshot.reviewCockpitItems[1].canDefer)
     }
 
+    func testReviewCockpitCollapsesMultipleDateSuggestionsFromSameBookmark() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let bookmark = Bookmark(
+            id: UUID(),
+            title: "Remindio giveaway",
+            urlString: "https://example.com/remindio",
+            createdAt: now,
+            updatedAt: now,
+            folderID: nil
+        )
+        let lowConfidenceSuggestion = CiderBookmarkDateSuggestion(
+            bookmarkID: bookmark.id,
+            bookmarkTitle: bookmark.title,
+            sourceURL: bookmark.urlString,
+            kind: "event_date",
+            confidence: 0.58,
+            date: now.addingTimeInterval(60 * 60 * 24 * 4),
+            sourceField: "ocrText",
+            sourceSnippet: "Meeting tomorrow",
+            nextSafeAction: "review_date_suggestion"
+        )
+        let preferredSuggestion = CiderBookmarkDateSuggestion(
+            bookmarkID: bookmark.id,
+            bookmarkTitle: bookmark.title,
+            sourceURL: bookmark.urlString,
+            kind: "deadline",
+            confidence: 0.91,
+            date: now.addingTimeInterval(60 * 60 * 24 * 8),
+            sourceField: "ocrText",
+            sourceSnippet: "Save by June 12, 2026",
+            nextSafeAction: "review_date_suggestion"
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.bookmark(bookmark)],
+            recentItems: [],
+            folders: [],
+            bookmarkDateSuggestionResults: [
+                CiderBookmarkDateSuggestionResult(
+                    command: "bookmark.date-suggestions",
+                    bookmarkID: bookmark.id,
+                    bookmarkTitle: bookmark.title,
+                    sourceURL: bookmark.urlString,
+                    suggestions: [lowConfidenceSuggestion, preferredSuggestion]
+                )
+            ],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.reviewCockpitItems.map(\.title), ["Remindio giveaway"])
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.suggestionIndex, 1)
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.suggestionKey, preferredSuggestion.suggestionKey)
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].confidenceLabel, "91% confidence")
+    }
+
+    func testReviewCockpitBuildsFallbackNoteSourceForCandidateRows() throws {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let sourceNoteID = UUID()
+        let reviewItem = CiderReviewQueueItem(
+            id: "graph-candidate-cactus",
+            kind: "graph_candidate",
+            source: "second_brain",
+            itemID: sourceNoteID,
+            itemType: "note",
+            title: "Cactus",
+            relativePath: "Daily/2026-06-11.md",
+            reason: "Source-backed graph candidate",
+            suggestedAction: "Inspect Source",
+            reviewState: "needs_review",
+            confidence: 0.76,
+            routingDecisionID: nil,
+            target: nil,
+            createdAt: now,
+            safeActions: ["inspect_source", "reject"],
+            candidateID: "graph-candidate-cactus",
+            candidateRef: "graph_candidate:graph-candidate-cactus",
+            sourceQuote: "Journal source mentions Cactus."
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [],
+            recentItems: [],
+            folders: [],
+            reviewQueueItems: [reviewItem],
+            surfacingDays: 7,
+            now: now
+        )
+        let cockpitItem = try XCTUnwrap(snapshot.reviewCockpitItems.first)
+        let sourceItem = try XCTUnwrap(cockpitItem.item)
+
+        XCTAssertEqual(sourceItem.id, "note-\(sourceNoteID.uuidString)")
+        XCTAssertTrue(cockpitItem.reviewActions.contains(.openSource))
+        XCTAssertTrue(cockpitItem.reviewActions.contains(.reject))
+        XCTAssertEqual(cockpitItem.sourceQuote, "Journal source mentions Cactus.")
+        XCTAssertEqual(cockpitItem.sourceEvidenceFindQuery, "Journal source mentions Cactus")
+        XCTAssertEqual(cockpitItem.sourceProvenanceLabel, "Daily Journal 2026-06-11")
+        guard case .note(let note) = sourceItem else {
+            XCTFail("Expected fallback note source item")
+            return
+        }
+        XCTAssertEqual(note.relativePath, "Daily/2026-06-11.md")
+        XCTAssertEqual(note.title, "2026-06-11")
+    }
+
     func testReviewCockpitReservesSlotForDateSuggestionWhenQueueIsFull() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let reviewBookmarks = (0..<6).map { index in
@@ -1172,6 +1477,151 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         )
 
         XCTAssertTrue(snapshot.reviewCockpitItems.isEmpty)
+    }
+
+    func testReviewCandidateDetailPresentationLabelsCorrectionPaths() {
+        let itemID = UUID()
+        let memoryCandidate = HomeReviewCockpitItem(
+            id: "memory-candidate",
+            sourceReviewID: "review-memory",
+            itemID: itemID,
+            itemType: "note",
+            item: nil,
+            title: "Jami preference",
+            kindLabel: "Memory Candidate",
+            reason: "Candidate fact",
+            suggestedAction: "Review",
+            reviewStateLabel: "Needs review",
+            confidenceLabel: "83% confidence",
+            targetLabel: "Relationship Context • contact:jami",
+            sourceLabel: "Memory Candidate",
+            canApprove: true,
+            canCorrect: true,
+            canDefer: true,
+            safeActions: ["approve", "correct", "defer"],
+            dateSuggestionApproval: nil,
+            reviewActions: [.openSource, .accept, .reject, .deferReview],
+            candidateID: "candidate-123",
+            candidateRef: "memory_candidate:candidate-123",
+            sourceQuote: "Jami likes this.",
+            memoryKind: "relationship_context",
+            linkedOwnerRefs: ["contact:jami"]
+        )
+        let graphCandidate = HomeReviewCockpitItem(
+            id: "graph-candidate",
+            sourceReviewID: "review-graph",
+            itemID: itemID,
+            itemType: "note",
+            item: nil,
+            title: "Movie link",
+            kindLabel: "Graph Candidate",
+            reason: "Ambiguous relation",
+            suggestedAction: "Inspect",
+            reviewStateLabel: "Needs review",
+            confidenceLabel: nil,
+            targetLabel: "movie, media",
+            sourceLabel: "Graph Candidate",
+            canApprove: false,
+            canCorrect: true,
+            canDefer: false,
+            safeActions: ["correct"],
+            dateSuggestionApproval: nil,
+            reviewActions: [.openSource, .reject],
+            candidateID: "candidate-456",
+            candidateRef: "graph_candidate:candidate-456",
+            sourceQuote: "Watched The Way Way Back tonight.",
+            linkedOwnerRefs: []
+        )
+
+        XCTAssertEqual(memoryCandidate.detailExtractedValueLabel, "Relationship Context • contact:jami")
+        XCTAssertEqual(memoryCandidate.detailOwnerRefsLabel, "contact:jami")
+        XCTAssertEqual(memoryCandidate.detailCorrectionActionLabel, "Edit value")
+        XCTAssertEqual(memoryCandidate.detailCorrectionHelp, "Edit value from the source evidence")
+        XCTAssertEqual(memoryCandidate.sourceEvidenceFindQuery, "Jami likes this")
+        XCTAssertEqual(HomeReviewCockpitAction.openSource.helpLabel(for: memoryCandidate), "Open source evidence")
+        XCTAssertEqual(HomeReviewCockpitAction.accept.helpLabel(for: memoryCandidate), "Accept memory")
+        XCTAssertEqual(HomeReviewCockpitAction.reject.helpLabel(for: memoryCandidate), "Reject suggestion")
+        XCTAssertEqual(HomeReviewCockpitAction.deferReview.helpLabel(for: memoryCandidate), "Defer for later")
+
+        let memoryCandidateWithEvidencePreamble = HomeReviewCockpitItem(
+            id: "memory-candidate-preamble",
+            sourceReviewID: "review-memory-preamble",
+            itemID: itemID,
+            itemType: "note",
+            item: nil,
+            title: "Jami preference",
+            kindLabel: "Memory Candidate",
+            reason: "Candidate fact",
+            suggestedAction: "Review",
+            reviewStateLabel: "Needs review",
+            confidenceLabel: nil,
+            targetLabel: nil,
+            sourceLabel: "Memory Candidate",
+            canApprove: true,
+            canCorrect: true,
+            canDefer: true,
+            safeActions: ["approve", "correct", "defer"],
+            dateSuggestionApproval: nil,
+            reviewActions: [.openSource, .accept, .reject, .deferReview],
+            candidateID: "candidate-789",
+            candidateRef: "memory_candidate:candidate-789",
+            sourceQuote: "Daily journal source says Jami loved that pineapple coconut drink.",
+            memoryKind: "relationship_context",
+            linkedOwnerRefs: ["contact:jami"]
+        )
+        XCTAssertEqual(memoryCandidateWithEvidencePreamble.sourceEvidenceFindQuery, "Jami loved that pineapple coconut drink")
+
+        let bulletPrefixedGraphCandidate = HomeReviewCockpitItem(
+            id: "graph-candidate-bullet",
+            sourceReviewID: "review-graph-bullet",
+            itemID: itemID,
+            itemType: "note",
+            item: nil,
+            title: "\"saw blades\" or something similar and did not eat all of it",
+            kindLabel: "Graph Candidate",
+            reason: "Review extracted media candidate",
+            suggestedAction: "Review",
+            reviewStateLabel: "Needs review",
+            confidenceLabel: nil,
+            targetLabel: "movie, media",
+            sourceLabel: "Graph Candidate",
+            canApprove: false,
+            canCorrect: true,
+            canDefer: false,
+            safeActions: ["reject"],
+            dateSuggestionApproval: nil,
+            reviewActions: [.openSource, .reject],
+            candidateID: "candidate-bullet",
+            candidateRef: "graph_candidate:candidate-bullet",
+            sourceQuote: "- Ryker said his throat felt like \"saw blades\" or something similar and did not eat all of it",
+            memoryKind: nil,
+            linkedOwnerRefs: []
+        )
+        XCTAssertEqual(
+            bulletPrefixedGraphCandidate.sourceEvidenceFindQuery,
+            "Ryker said his throat felt like \"saw blades\" or something similar and did not eat all of it"
+        )
+        XCTAssertTrue(bulletPrefixedGraphCandidate.sourceEvidenceFindQueries.contains("saw blades"))
+        XCTAssertEqual(
+            bulletPrefixedGraphCandidate.bestSourceEvidenceFindQuery(
+                in: "- Ryker said his throat felt like \"saw blades\" or something similar and did not eat all of it"
+            ),
+            "Ryker said his throat felt like \"saw blades\" or something similar and did not eat all of it"
+        )
+        XCTAssertEqual(
+            bulletPrefixedGraphCandidate.bestSourceEvidenceFindQuery(
+                in: "- Ryker said his throat felt like “saw blades” or something similar and did not eat all of it"
+            ),
+            "saw blades"
+        )
+
+        XCTAssertEqual(graphCandidate.detailExtractedValueLabel, "movie, media")
+        XCTAssertNil(graphCandidate.detailOwnerRefsLabel)
+        XCTAssertEqual(graphCandidate.detailCorrectionActionLabel, "Delegate / inspect")
+        XCTAssertEqual(graphCandidate.detailCorrectionHelp, "Delegate / inspect before accepting this graph relation")
+        XCTAssertEqual(graphCandidate.sourceEvidenceFindQuery, "Watched The Way Way Back tonight")
+        XCTAssertEqual(HomeReviewCockpitAction.openSource.helpLabel(for: graphCandidate), "Open source evidence")
+        XCTAssertEqual(HomeReviewCockpitAction.accept.helpLabel(for: graphCandidate), "Accept graph candidate")
     }
 
 }

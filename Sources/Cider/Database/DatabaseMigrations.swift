@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 20
+    static let latestVersion: Int = 27
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -107,7 +107,157 @@ enum DatabaseMigrations {
         }
         if currentVersion < 20 {
             try migrateToV20(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 21 {
+            try migrateToV21(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 22 {
+            try migrateToV22(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 23 {
+            try migrateToV23(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 24 {
+            try migrateToV24(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 25 {
+            try migrateToV25(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 26 {
+            try migrateToV26(db)
+            currentVersion = try readVersion(db)
+        }
+        if currentVersion < 27 {
+            try migrateToV27(db)
+        }
+    }
+
+    // MARK: - V26 -> V27: Durable action receipt ledger
+
+    private static func migrateToV27(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 27...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createActionReceipts)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_action_receipts_created ON action_receipts(created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_action_receipts_owner ON action_receipts(owner_type, owner_id, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_action_receipts_action ON action_receipts(action, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_action_receipts_actor ON action_receipts(actor, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_action_receipts_status ON action_receipts(status, created_at);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (27);")
+        }
+
+        logger.info("Migration to v27 complete")
+    }
+
+    // MARK: - V25 -> V26: Similarity reconciliation runs
+
+    private static func migrateToV26(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 26...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createSimilarityReconciliationRuns)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_similarity_reconciliation_owner ON similarity_reconciliation_runs(owner_type, owner_id, started_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_similarity_reconciliation_trigger ON similarity_reconciliation_runs(trigger, started_at);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (26);")
+        }
+
+        logger.info("Migration to v26 complete")
+    }
+
+    // MARK: - V24 -> V25: Fact validity candidates
+
+    private static func migrateToV25(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 25...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createFactValidityCandidates)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_fact_validity_target ON fact_validity_candidates(target_ref, review_state, updated_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_fact_validity_review ON fact_validity_candidates(review_state, updated_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_fact_validity_evidence ON fact_validity_candidates(source_evidence_id) WHERE source_evidence_id IS NOT NULL;")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (25);")
+        }
+
+        logger.info("Migration to v25 complete")
+    }
+
+    // MARK: - V23 -> V24: Recall access explanations
+
+    private static func migrateToV24(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 24...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createRecallAccessEvents)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_recall_access_created ON recall_access_events(created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_recall_access_surface ON recall_access_events(surface, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_recall_access_query ON recall_access_events(query_hash, created_at) WHERE query_hash IS NOT NULL;")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (24);")
+        }
+
+        logger.info("Migration to v24 complete")
+    }
+
+    // MARK: - V22 -> V23: Entity-resolution review candidates
+
+    private static func migrateToV23(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 23...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createEntityResolutionCandidates)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_entity_resolution_review ON entity_resolution_candidates(review_state, updated_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_entity_resolution_source ON entity_resolution_candidates(source_entity_type, source_entity_id, review_state);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_entity_resolution_target ON entity_resolution_candidates(target_entity_type, target_entity_id, review_state);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_entity_resolution_evidence ON entity_resolution_candidates(source_evidence_id) WHERE source_evidence_id IS NOT NULL;")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (23);")
+        }
+
+        logger.info("Migration to v23 complete")
+    }
+
+    // MARK: - V21 -> V22: Review lifecycle events
+
+    private static func migrateToV22(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 22...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createReviewLifecycleEvents)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_owner ON review_lifecycle_events(owner_type, owner_id, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_candidate ON review_lifecycle_events(candidate_ref, created_at) WHERE candidate_ref IS NOT NULL;")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_evidence ON review_lifecycle_events(source_evidence_id, created_at) WHERE source_evidence_id IS NOT NULL;")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_state ON review_lifecycle_events(lifecycle_state, event_kind, created_at);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (22);")
+        }
+
+        logger.info("Migration to v22 complete")
+    }
+
+    // MARK: - V20 -> V21: Shared source evidence spans
+
+    private static func migrateToV21(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 21...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createSourceEvidence)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_source_evidence_source ON source_evidence(source_owner_type, source_owner_id, evidence_kind, updated_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_source_evidence_derived ON source_evidence(derived_owner_type, derived_owner_id, evidence_kind);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_source_evidence_candidate ON source_evidence(candidate_ref) WHERE candidate_ref IS NOT NULL;")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (21);")
+        }
+
+        logger.info("Migration to v21 complete")
     }
 
     // MARK: - V19 -> V20: Capture attachment provenance

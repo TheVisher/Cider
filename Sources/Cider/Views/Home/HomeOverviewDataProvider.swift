@@ -520,9 +520,15 @@ enum HomeOverviewDataProvider {
         }, uniquingKeysWith: { first, _ in first })
 
         let queueItems = reviewItems.map { reviewItem in
-            let linkedItem = itemsByUUID[reviewItem.itemID]
+            let linkedItem = itemsByUUID[reviewItem.itemID] ?? fallbackSourceItem(for: reviewItem)
             let safeActions = Set(reviewItem.safeActions.map { $0.lowercased() })
             let hasRoutingDecision = reviewItem.routingDecisionID != nil
+            let reviewActions = reviewActions(
+                for: reviewItem,
+                linkedItem: linkedItem,
+                safeActions: safeActions,
+                hasRoutingDecision: hasRoutingDecision
+            )
 
             return HomeReviewCockpitItem(
                 id: "review-cockpit-\(reviewItem.id)",
@@ -538,34 +544,150 @@ enum HomeOverviewDataProvider {
                 confidenceLabel: reviewItem.confidence.map(confidenceLabel),
                 targetLabel: reviewTargetLabel(for: reviewItem),
                 sourceLabel: reviewSourceLabel(reviewItem.source),
-                canApprove: hasRoutingDecision && safeActions.contains("approve"),
-                canCorrect: linkedItem != nil && safeActions.contains("correct"),
-                canDefer: hasRoutingDecision && safeActions.contains("defer"),
+                canApprove: reviewActions.contains(.accept),
+                canCorrect: reviewActions.contains(.openSource),
+                canDefer: reviewActions.contains(.deferReview),
                 safeActions: reviewItem.safeActions,
-                dateSuggestionApproval: nil
+                dateSuggestionApproval: nil,
+                reviewActions: reviewActions,
+                candidateID: reviewItem.candidateID,
+                candidateRef: reviewItem.candidateRef,
+                sourceQuote: reviewItem.sourceQuote,
+                sourceProvenanceLabel: reviewSourceProvenanceLabel(linkedItem: linkedItem, reviewItem: reviewItem),
+                memoryKind: reviewItem.memoryKind,
+                linkedOwnerRefs: reviewItem.linkedOwnerRefs,
+                possibleTypeLabels: reviewItem.possibleTypes,
+                possibleRelationLabels: reviewItem.possibleRelations,
+                candidateActionLabels: reviewItem.candidateActions,
+                confidenceReason: reviewItem.confidenceReason,
+                truthState: reviewItem.truthState,
+                extractionReason: reviewItem.extractionReason,
+                proposedChangeLabel: reviewProposedChangeLabel(reviewItem.proposedChange),
+                storageLabel: reviewStorageLabel(reviewItem.storage),
+                candidateQualityLevel: reviewItem.candidateQualityLevel,
+                candidateQualityFlags: reviewItem.candidateQualityCodes,
+                candidateQualityExplanation: reviewItem.candidateQualityExplanation
             )
         }
 
-        let suggestionItems: [HomeReviewCockpitItem] = bookmarkDateSuggestionResults.flatMap { result in
-            result.suggestions.enumerated().compactMap { index, suggestion in
+        let suggestionItems: [HomeReviewCockpitItem] = bookmarkDateSuggestionResults.compactMap { result in
+            var preferredSuggestion: (index: Int, suggestion: CiderBookmarkDateSuggestion)?
+            for (index, suggestion) in result.suggestions.enumerated() {
                 guard approvedDateSuggestionExists(
                     bookmarkID: result.bookmarkID,
                     suggestion: suggestion,
                     libraryItems: libraryItems
                 ) == false else {
-                    return nil
+                    continue
                 }
 
-                return dateSuggestionReviewItem(
-                    result: result,
-                    suggestion: suggestion,
-                    suggestionIndex: index,
-                    linkedItem: itemsByUUID[result.bookmarkID]
-                )
+                if preferredSuggestion == nil || suggestion.confidence > preferredSuggestion!.suggestion.confidence {
+                    preferredSuggestion = (index, suggestion)
+                }
             }
+
+            guard let preferredSuggestion else { return nil }
+            return dateSuggestionReviewItem(
+                result: result,
+                suggestion: preferredSuggestion.suggestion,
+                suggestionIndex: preferredSuggestion.index,
+                linkedItem: itemsByUUID[result.bookmarkID]
+            )
         }
 
         return cappedReviewCockpitItems(queueItems: queueItems, suggestionItems: suggestionItems)
+    }
+
+    private static func reviewProposedChangeLabel(_ proposedChange: [String: String]) -> String? {
+        guard let changeType = proposedChange["changeType"] else { return nil }
+        switch changeType {
+        case "graph_relation_candidate":
+            let relation = proposedChange["relationType"] ?? "mentions"
+            let mention = proposedChange["mentionText"] ?? "candidate"
+            let target = proposedChange["targetKind"] ?? "object"
+            return "Proposes \(relation) → \(mention) (\(target)); still reviewable, not truth."
+        case "memory_candidate":
+            let kind = proposedChange["memoryKind"] ?? "memory"
+            let value = proposedChange["value"] ?? "candidate"
+            return "Proposes \(kind.replacingOccurrences(of: "_", with: " ")) memory: \(value); still reviewable, not truth."
+        default:
+            return proposedChange.values.joined(separator: " • ")
+        }
+    }
+
+    private static func reviewStorageLabel(_ storage: [String: String]) -> String? {
+        guard let table = storage["table"], let service = storage["service"] else { return nil }
+        let kind = storage["kind"].map { " kind=\($0)" } ?? ""
+        return "Stored in \(table) via \(service)\(kind)."
+    }
+
+    private static func fallbackSourceItem(for reviewItem: CiderReviewQueueItem) -> LibraryItemV2? {
+        guard isSourceBackedCandidate(reviewItem.kind),
+              reviewItem.itemType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "note" else {
+            return nil
+        }
+
+        let relativePath = reviewItem.relativePath ?? ""
+        let pathTitle = relativePath
+            .split(separator: "/")
+            .last
+            .map(String.init)?
+            .replacingOccurrences(of: ".md", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let title: String
+        if let pathTitle, pathTitle.isEmpty == false {
+            title = pathTitle
+        } else {
+            title = reviewItem.title
+        }
+
+        return .note(Note(
+            id: reviewItem.itemID,
+            title: title,
+            createdAt: reviewItem.createdAt,
+            modifiedAt: reviewItem.createdAt,
+            relativePath: relativePath
+        ))
+    }
+
+    private static func isSourceBackedCandidate(_ kind: String) -> Bool {
+        switch kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "memory_candidate", "graph_candidate":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func reviewSourceProvenanceLabel(
+        linkedItem: LibraryItemV2?,
+        reviewItem: CiderReviewQueueItem
+    ) -> String? {
+        guard isSourceBackedCandidate(reviewItem.kind) else { return nil }
+        if let relativePath = reviewItem.relativePath,
+           let dailyJournalDate = dailyJournalDateLabel(from: relativePath) {
+            return "Daily Journal \(dailyJournalDate)"
+        }
+
+        if let title = linkedItem?.title.trimmingCharacters(in: .whitespacesAndNewlines),
+           title.isEmpty == false {
+            return title
+        }
+
+        guard let relativePath = reviewItem.relativePath else { return nil }
+        let pathTitle = relativePath
+            .split(separator: "/")
+            .last
+            .map(String.init)?
+            .replacingOccurrences(of: ".md", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return pathTitle?.isEmpty == false ? pathTitle : nil
+    }
+
+    private static func dailyJournalDateLabel(from relativePath: String) -> String? {
+        let pattern = #"\b\d{4}-\d{2}-\d{2}\b"#
+        guard let range = relativePath.range(of: pattern, options: .regularExpression) else { return nil }
+        return String(relativePath[range])
     }
 
     private static func isVisibleReviewCockpitItem(_ item: CiderReviewQueueItem) -> Bool {
@@ -587,12 +709,27 @@ enum HomeOverviewDataProvider {
         limit: Int = 6
     ) -> [HomeReviewCockpitItem] {
         guard limit > 0 else { return [] }
-        guard !suggestionItems.isEmpty else { return Array(queueItems.prefix(limit)) }
-        guard queueItems.count >= limit else {
-            return Array((queueItems + suggestionItems).prefix(limit))
+        let baseLimit = suggestionItems.isEmpty ? limit : max(0, limit - 1)
+        var selected: [HomeReviewCockpitItem] = []
+        var selectedIDs = Set<String>()
+
+        // Keep count badges honest: when a lane such as Memory Candidate has nonzero
+        // items but Graph Candidate rows sort first, reserve a representative row per
+        // source-backed review family before filling the remaining slots.
+        for family in ["Memory Candidate", "Graph Candidate"] where selected.count < baseLimit {
+            if let item = queueItems.first(where: { $0.kindLabel == family }), selectedIDs.insert(item.id).inserted {
+                selected.append(item)
+            }
         }
 
-        return Array(queueItems.prefix(limit - 1)) + Array(suggestionItems.prefix(1))
+        for item in queueItems where selected.count < baseLimit {
+            if selectedIDs.insert(item.id).inserted {
+                selected.append(item)
+            }
+        }
+
+        let combined = selected + suggestionItems.prefix(max(0, limit - selected.count))
+        return Array(combined.prefix(limit))
     }
 
     private static func reviewCockpitSummary(
@@ -794,7 +931,8 @@ enum HomeOverviewDataProvider {
                 suggestionIndex: suggestionIndex,
                 suggestionKey: suggestion.suggestionKey,
                 destination: destination
-            )
+            ),
+            reviewActions: [.openSource, .accept]
         )
     }
 
@@ -859,6 +997,8 @@ enum HomeOverviewDataProvider {
 
     private static func reviewKindLabel(_ kind: String) -> String {
         let normalized = kind.lowercased()
+        if normalized.contains("graph_candidate") { return "Graph Candidate" }
+        if normalized.contains("memory_candidate") { return "Memory Candidate" }
         if normalized.contains("routing") { return "Routing" }
         if normalized.contains("enrichment") { return "Enrichment" }
         if normalized.contains("duplicate") { return "Duplicate" }
@@ -888,7 +1028,68 @@ enum HomeOverviewDataProvider {
         if let target = item.target {
             return target.relativePath.isEmpty ? target.name : target.relativePath
         }
+        if !item.possibleTypes.isEmpty {
+            return item.possibleTypes.joined(separator: ", ")
+        }
+        if item.kind == "memory_candidate" {
+            let memoryKind = item.memoryKind?
+                .split(separator: "_")
+                .map { word in word.prefix(1).uppercased() + word.dropFirst() }
+                .joined(separator: " ")
+            let owners = item.linkedOwnerRefs.isEmpty ? nil : item.linkedOwnerRefs.joined(separator: ", ")
+            if let memoryKind, let owners {
+                return "\(memoryKind) • \(owners)"
+            }
+            return memoryKind ?? owners
+        }
         return item.relativePath
+    }
+
+    private static func reviewActions(
+        for item: CiderReviewQueueItem,
+        linkedItem: LibraryItemV2?,
+        safeActions: Set<String>,
+        hasRoutingDecision: Bool
+    ) -> [HomeReviewCockpitAction] {
+        var actions: [HomeReviewCockpitAction] = []
+        let normalizedKind = item.kind.lowercased()
+        let reviewable = !["accepted", "rejected"].contains(item.reviewState.lowercased())
+        let hasCandidateID = item.candidateID != nil || item.candidateRef != nil
+
+        if linkedItem != nil,
+           safeActions.contains("correct")
+            || ["memory_candidate", "graph_candidate"].contains(normalizedKind) {
+            actions.append(.openSource)
+        }
+
+        switch normalizedKind {
+        case "memory_candidate":
+            guard reviewable, hasCandidateID else { break }
+            actions.append(.accept)
+            actions.append(.reject)
+            actions.append(.deferReview)
+
+        case "graph_candidate":
+            guard reviewable, hasCandidateID else { break }
+            if safeActions.contains("accept") {
+                actions.append(.accept)
+            }
+            actions.append(.reject)
+            if safeActions.contains("defer") {
+                actions.append(.deferReview)
+            }
+
+        default:
+            if hasRoutingDecision && safeActions.contains("approve") {
+                actions.append(.accept)
+            }
+            if hasRoutingDecision && safeActions.contains("defer") {
+                actions.append(.deferReview)
+            }
+        }
+
+        var seen = Set<HomeReviewCockpitAction>()
+        return actions.filter { seen.insert($0).inserted }
     }
 
     private static func triageItems(from items: [LibraryItemV2]) -> [HomeTriageItem] {

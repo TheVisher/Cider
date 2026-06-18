@@ -4,16 +4,27 @@ struct ReviewQueueDashboardView: View {
     let items: [HomeReviewCockpitItem]
     let summary: HomeReviewCockpitSummary
     let onOpenItem: (LibraryItemV2) -> Void
-    let onApproveReview: (HomeReviewCockpitItem) -> Bool
-    let onDeferReview: (HomeReviewCockpitItem) -> Bool
+    let onOpenReviewSource: (HomeReviewCockpitItem) -> Void
+    let onPerformReviewAction: (HomeReviewCockpitItem, HomeReviewCockpitAction) -> Bool
     let onEnrichReviewBatch: () -> Bool
 
     @State private var resolvedReviewIDs: Set<String> = []
     @State private var batchEnrichmentIsConfirming = false
     @State private var scheduledBatchEnrichmentCount: Int?
+    @State private var selectedLaneLabel: String?
+    @State private var selectedDetailItemID: String?
 
     private var visibleItems: [HomeReviewCockpitItem] {
-        items.filter { !resolvedReviewIDs.contains($0.id) }
+        items.filter { item in
+            guard resolvedReviewIDs.contains(item.id) == false else { return false }
+            guard let selectedLaneLabel else { return true }
+            return item.kindLabel == selectedLaneLabel
+        }
+    }
+
+    private var selectedDetailItem: HomeReviewCockpitItem? {
+        guard let selectedDetailItemID else { return nil }
+        return visibleItems.first { $0.id == selectedDetailItemID }
     }
 
     var body: some View {
@@ -45,7 +56,7 @@ struct ReviewQueueDashboardView: View {
                     .foregroundColor(CiderColors.secondary)
             }
 
-            Text("Routing, enrichment, duplicate, inbox, and date-suggestion decisions that need explicit review.")
+            Text("Routing, enrichment, duplicate, inbox, date-suggestion, and source-backed memory/graph candidates that need explicit review.")
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
 
@@ -101,35 +112,52 @@ struct ReviewQueueDashboardView: View {
                     spacing: Spacing.sm
                 ) {
                     ForEach(lanes) { lane in
-                        VStack(alignment: .leading, spacing: Spacing.xxs) {
-                            HStack {
-                                Text(lane.title)
-                                    .font(CiderFont.labelSemibold)
-                                    .foregroundColor(CiderColors.primary)
-                                Spacer()
-                                Text("\(lane.count)")
-                                    .font(CiderFont.monospacedBody)
-                                    .foregroundColor(CiderColors.secondary)
-                            }
-                            Text(lane.actionLabel)
-                                .font(CiderFont.captionSemibold)
-                                .foregroundColor(CiderColors.secondary)
-                            ForEach(lane.sampleTitles.prefix(3), id: \.self) { title in
-                                Text(title)
-                                    .font(CiderFont.caption)
-                                    .foregroundColor(CiderColors.tertiary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        .padding(Spacing.sm)
-                        .background(
-                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                                .fill(CiderColors.surfaceInput)
-                        )
+                        laneCard(lane)
                     }
                 }
             }
         }
+    }
+
+    private func laneCard(_ lane: HomeReviewCockpitLane) -> some View {
+        let isSelected = selectedLaneLabel == lane.title
+        return Button {
+            selectedLaneLabel = isSelected ? nil : lane.title
+        } label: {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                HStack {
+                    Text(lane.title)
+                        .font(CiderFont.labelSemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Spacer()
+                    Text("\(lane.count)")
+                        .font(CiderFont.monospacedBody)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                Text(lane.actionLabel)
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.secondary)
+                ForEach(lane.sampleTitles.prefix(3), id: \.self) { title in
+                    Text(title)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isSelected ? CiderColors.surfaceElevated : CiderColors.surfaceInput)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .stroke(isSelected ? CiderColors.controlAccent : CiderColors.borderSubtle, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .help(isSelected ? "Show all review items" : "Show \(lane.title) items")
+        .accessibilityLabel(isSelected ? "Show all review items" : "Show \(lane.title) items")
     }
 
     @ViewBuilder
@@ -173,13 +201,18 @@ struct ReviewQueueDashboardView: View {
     }
 
     private var itemsBand: some View {
-        HomeOverviewPanel(title: "Items") {
+        HomeOverviewPanel(title: selectedLaneLabel.map { "Items: \($0)" } ?? "Items") {
             if visibleItems.isEmpty {
                 Text("Nothing is waiting in the visible review queue.")
                     .font(CiderFont.body)
                     .foregroundColor(CiderColors.tertiary)
             } else {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
+                    if let selectedDetailItem {
+                        candidateDetailPanel(selectedDetailItem)
+                        Divider()
+                            .background(CiderColors.separator)
+                    }
                     ForEach(visibleItems) { item in
                         reviewRow(item)
                         if item.id != visibleItems.last?.id {
@@ -192,12 +225,92 @@ struct ReviewQueueDashboardView: View {
         }
     }
 
+    private func candidateDetailPanel(_ reviewItem: HomeReviewCockpitItem) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text("Candidate Detail")
+                        .font(CiderFont.labelSemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Text("\(reviewItem.kindLabel) • \(reviewItem.sourceProvenanceLabel ?? reviewItem.sourceLabel)")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                Spacer()
+                Button {
+                    selectedDetailItemID = nil
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .help("Close candidate detail")
+                .accessibilityLabel("Close candidate detail")
+            }
+
+            detailLine(title: "Extracted value / relation", value: reviewItem.detailExtractedValueLabel)
+            if let acceptanceEffectLabel = reviewItem.acceptanceEffectLabel {
+                detailLine(title: "What accepting will do", value: acceptanceEffectLabel)
+            }
+            if let sourceProvenanceLabel = reviewItem.sourceProvenanceLabel {
+                detailLine(title: "Source", value: sourceProvenanceLabel)
+            }
+            if let sourceQuote = reviewItem.sourceQuote, sourceQuote.isEmpty == false {
+                detailLine(title: "Source quote", value: sourceQuote)
+            }
+            if let ownerRefs = reviewItem.detailOwnerRefsLabel {
+                detailLine(title: "Linked owner refs", value: ownerRefs)
+            }
+            if let confidenceLabel = reviewItem.confidenceLabel {
+                detailLine(title: "Confidence", value: [confidenceLabel, reviewItem.confidenceReason].compactMap { $0 }.joined(separator: " — "))
+            }
+            if let candidateRef = reviewItem.candidateRef {
+                detailLine(title: "Candidate ref", value: candidateRef)
+            }
+
+            HStack(spacing: Spacing.xs) {
+                ForEach(reviewItem.reviewActions) { action in
+                    reviewActionButton(action, for: reviewItem)
+                }
+                if let correctionLabel = reviewItem.detailCorrectionActionLabel,
+                   reviewItem.item != nil {
+                    Button(correctionLabel) {
+                        openReviewSource(reviewItem)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(reviewItem.detailCorrectionHelp ?? correctionLabel)
+                    .accessibilityLabel(correctionLabel)
+                }
+            }
+        }
+        .padding(Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.surfaceElevated)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .stroke(CiderColors.controlAccent.opacity(0.45), lineWidth: 1)
+                )
+        )
+    }
+
+    private func detailLine(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            Text(title)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.secondary)
+            Text(value)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.primary)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func reviewRow(_ reviewItem: HomeReviewCockpitItem) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Button {
-                if let item = reviewItem.item {
-                    onOpenItem(item)
-                }
+                openReviewSource(reviewItem)
             } label: {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     Text(reviewItem.title)
@@ -208,7 +321,13 @@ struct ReviewQueueDashboardView: View {
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
                         .lineLimit(1)
-                    Text("\(reviewItem.suggestedAction) • \(reviewItem.sourceLabel) • \(reviewItem.targetLabel ?? reviewItem.reviewStateLabel)")
+                    if let sourceQuote = reviewItem.sourceQuote, !sourceQuote.isEmpty {
+                        Text(sourceQuote)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(2)
+                    }
+                    Text(reviewMetadataLine(for: reviewItem))
                         .font(CiderFont.captionSemibold)
                         .foregroundColor(CiderColors.secondary)
                         .lineLimit(1)
@@ -219,48 +338,76 @@ struct ReviewQueueDashboardView: View {
             .disabled(reviewItem.item == nil)
 
             HStack(spacing: Spacing.xxs) {
-                if reviewItem.canCorrect, let item = reviewItem.item {
-                    Button {
-                        onOpenItem(item)
-                    } label: {
-                        Image(systemName: "arrow.up.right.square")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Open item")
-                    .accessibilityLabel("Open item")
+                Button {
+                    selectedDetailItemID = reviewItem.id
+                } label: {
+                    Image(systemName: "info.circle")
+                        .frame(width: 20, height: 20)
                 }
+                .buttonStyle(.plain)
+                .help("Inspect candidate details")
+                .accessibilityLabel("Inspect candidate details")
 
-                if reviewItem.canApprove {
-                    Button {
-                        if onApproveReview(reviewItem) {
-                            resolvedReviewIDs.insert(reviewItem.id)
-                        }
-                    } label: {
-                        Image(systemName: "checkmark.circle")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Approve review")
-                    .accessibilityLabel("Approve review")
-                }
-
-                if reviewItem.canDefer {
-                    Button {
-                        if onDeferReview(reviewItem) {
-                            resolvedReviewIDs.insert(reviewItem.id)
-                        }
-                    } label: {
-                        Image(systemName: "clock")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Defer review")
-                    .accessibilityLabel("Defer review")
+                ForEach(reviewItem.reviewActions) { action in
+                    reviewActionButton(action, for: reviewItem)
                 }
             }
             .font(CiderFont.captionSemibold)
             .foregroundColor(CiderColors.secondary)
         }
+    }
+
+    @ViewBuilder
+    private func reviewActionButton(
+        _ action: HomeReviewCockpitAction,
+        for reviewItem: HomeReviewCockpitItem
+    ) -> some View {
+        switch action {
+        case .openSource:
+            if reviewItem.item != nil {
+                Button {
+                    openReviewSource(reviewItem)
+                } label: {
+                    Label(action.buttonTitle(for: reviewItem), systemImage: action.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .font(CiderFont.captionSemibold)
+                }
+                .buttonStyle(.plain)
+                .help(action.helpLabel(for: reviewItem))
+                .accessibilityLabel(action.helpLabel(for: reviewItem))
+            }
+        case .accept, .reject, .deferReview:
+            Button {
+                if onPerformReviewAction(reviewItem, action) {
+                    resolvedReviewIDs.insert(reviewItem.id)
+                }
+            } label: {
+                Label(action.buttonTitle(for: reviewItem), systemImage: action.systemImage)
+                    .labelStyle(.titleAndIcon)
+                    .font(CiderFont.captionSemibold)
+            }
+            .buttonStyle(.plain)
+            .help(action.helpLabel(for: reviewItem))
+            .accessibilityLabel(action.helpLabel(for: reviewItem))
+        }
+    }
+
+    private func reviewMetadataLine(for item: HomeReviewCockpitItem) -> String {
+        [
+            item.suggestedAction,
+            item.sourceProvenanceLabel,
+            item.sourceLabel,
+            item.targetLabel ?? item.reviewStateLabel
+        ]
+        .compactMap { value in
+            guard let value, value.isEmpty == false else { return nil }
+            return value
+        }
+        .joined(separator: " • ")
+    }
+
+    private func openReviewSource(_ reviewItem: HomeReviewCockpitItem) {
+        guard reviewItem.item != nil else { return }
+        onOpenReviewSource(reviewItem)
     }
 }

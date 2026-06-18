@@ -37,12 +37,19 @@ Current second-brain foundation tables include:
 - `content_chunks_fts`: FTS5 exact-search index over chunk title/body.
 - `routing_decisions`: durable record of where an item was routed, why, by whom, and with what confidence.
 - `agent_actions`: durable record of agent/CLI/tool actions against an item or projected owner.
+- `action_receipts`: durable agent-safe command receipt ledger for representative read-only and mutation-style actions, including owner refs, source/evidence refs, safety semantics, verification/follow-up commands, and structured failures.
 - `owner_relations`: typed graph edges between universal owners such as items, Kanban cards, projects, capture events, capture attachments, docs, and future owner types.
 - `projects`: backend project graph rows used by project context, project-scoped artifacts, board/card relations, and agent-safe project inspection.
 - `capture_events`: canonical capture provenance records with source surface/channel/message/sender context and produced-item relations.
 - `capture_attachments`: per-attachment capture provenance with source filename, local/remote reference, MIME type, byte size when available, and owner relations to capture events/items.
 - `enrichment_outputs`: structured AI/enrichment outputs such as entities, topics, dates, links, summaries, and review state.
+- `source_evidence`: shared provenance/source-span records connecting source owners, quotes/spans, extraction runs, candidates, accepted facts, and recall citations.
+- `review_lifecycle_events`: append-only lifecycle events for reviewable candidates and accepted truth records.
+- `entity_resolution_candidates`: reviewable entity/alias/merge suggestions with explicit accept/reject/merge semantics.
+- `fact_validity_candidates`: reviewable invalidation/supersession/expiration assertions for accepted facts and owner relations; accepted rows mark current vs stale/superseded truth without deleting provenance.
 - `similarity_candidates`: reviewable grouping/linking suggestions that can be accepted into typed owner relations.
+- `similarity_reconciliation_runs`: bounded live-seeding/repair job metadata for similarity/link candidates, including candidate families and stale/unseeded counts.
+- `recall_access_events`: local retrieval/access audit rows for recall/context explanations; they store selector/query hashes and surfaced refs/reason kinds, not raw private query text.
 
 Vectors and embeddings may augment retrieval later, but they are not the source of truth. Hybrid retrieval should layer structured filters, FTS5, links/graph expansion, optional embeddings, and reranking.
 
@@ -59,11 +66,34 @@ The accepted backend graph foundation is operational enough for documentation, d
 - `content_chunks` and `content_chunks_fts` are rebuildable retrieval projections for notes, cards, captures, imported content, docs/artifacts, and other item content.
 - Typed item deletion cleans the deleted owner's second-brain footprint: owner projections, owner relations in either direction, routing decisions, agent actions, enrichment outputs, and similarity candidates. This keeps graph provenance from pointing at missing item owners after trash/delete flows.
 - `enrichment_outputs` stores structured, reviewable enrichment data. Generated enrichment must not overwrite user-owned fields without explicit review/approval.
+- `enrichment_outputs(kind: graph_candidate)` is the universal reviewable object/relation candidate contract. The row owner is the raw source owner, `value` is the mention text, `evidence` is the source quote/snippet, `confidence` is optional, `review_state` is one of `suggested`, `needs_review`, `deferred`, `accepted`, or `rejected`, and `metadata` carries the candidate kind, object type guesses, relation guesses, safe actions, source owner ref, and accepted target/relation fields when promoted.
 - `similarity_candidates` stores explainable suggestions. Accepting a candidate may create typed owner relations, but candidate generation itself must not silently reorganize user knowledge.
 - `item graph-health --json` is the preferred readiness command before raw SQLite inspection. Empty/rebuild-needed components are findings for sync/rebuild/dogfood, not automatic acceptance failures.
 - Graph-heavy commands should report counts, bounded samples where practical, and safe next commands so agents can continue without dumping unbounded context.
 
 Durable docs should describe the contract; Kanban cards should hold implementation history, QA evidence, dogfood notes, and follow-up friction.
+
+## Graph Candidate Contract
+
+Graph candidates are source-backed suggestions, not graph truth. They let journals, bookmarks, notes, files, chats, contacts, media, places, reminders, and future sources speak one shared language before domain-specific extractors or UI surfaces exist.
+
+Contract roles:
+
+- Raw source item: the source owner recorded by the `enrichment_outputs` row owner fields, such as a note, bookmark, capture event, Kanban card, file, contact, or projected external owner.
+- Object candidate: a reviewable possible object such as contact/person, place/restaurant, media/movie, recipe, food/drink, product, project, trip, reminder, event, note, file, URL, topic, or generic object.
+- Relation candidate: a reviewable possible edge such as `mentions`, `represents`, `source_for`, `watched`, `visited`, `likes`, `likes_drink`, `likes_food`, `dislikes`, `includes`, `reminder_from`, `gifted`, `wants`, `owns`, `bought`, `cooked`, `ate`, `drank`, or `related_to`.
+- Accepted object: an explicit object owner created or linked by a review/accept path. Candidate generation alone must not create permanent object truth.
+- Accepted relation: an `owner_relations` edge created by a review/accept path. It must preserve source evidence with candidate/source metadata.
+
+Required metadata keys for `graph_candidate` rows are defined in `SecondBrainGraphCandidateContract`. Core keys include `candidate_kind`, `source_owner_ref`, `source_quote`, `mention_text`, `object_type_guesses`, `relation_guesses`, `action_guesses`, and `safe_actions`. Accepted rows also carry `accepted_target_owner_type`, `accepted_target_owner_id`, and, for relation candidates, `accepted_relation_type`.
+
+Examples:
+
+- Journal quote "I gave Jami that pineapple coconut drink and she loved it." can produce an `object_relation` candidate with object type `drink`, relation `likes_drink`, subject "Jami", and the journal quote as evidence.
+- Journal quote "I watched The Way Way Back last night." can produce an unresolved `object_relation` candidate with object types `movie`/`media` and relation `watched`.
+- IMDb, restaurant, recipe, product, YouTube, and GitHub bookmarks can produce `object_relation` candidates with `represents` or `source_for` relation guesses.
+- Ambiguous text such as "We went to Cactus" can produce a `needs_review` object candidate with possible object types such as `restaurant`, `place`, `topic`, or `object`.
+- A journal-sourced reminder can produce a `reminder` object candidate and a `reminder_from` relation candidate back to the source entry.
 
 ## Kanban Projection Lifecycle
 

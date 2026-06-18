@@ -303,6 +303,134 @@ enum CiderSchema {
         );
         """
 
+    static let createSourceEvidence = """
+        CREATE TABLE IF NOT EXISTS source_evidence (
+            id                  TEXT PRIMARY KEY,
+            evidence_kind       TEXT NOT NULL DEFAULT 'source_span',
+            source_owner_type   TEXT NOT NULL,
+            source_owner_id     TEXT NOT NULL,
+            source_kind         TEXT,
+            source_quote        TEXT NOT NULL DEFAULT '',
+            span_start          INTEGER,
+            span_end            INTEGER,
+            observed_at         REAL,
+            captured_at         REAL,
+            extracted_at        REAL,
+            extraction_source   TEXT NOT NULL,
+            extraction_run_id   TEXT,
+            extraction_provider TEXT,
+            extraction_model    TEXT,
+            derived_owner_type  TEXT NOT NULL,
+            derived_owner_id    TEXT NOT NULL,
+            derived_kind        TEXT NOT NULL,
+            candidate_ref       TEXT,
+            metadata            TEXT NOT NULL DEFAULT '{}',
+            created_at          REAL NOT NULL,
+            updated_at          REAL NOT NULL,
+            UNIQUE(derived_owner_type, derived_owner_id, evidence_kind)
+        );
+        """
+
+    static let createReviewLifecycleEvents = """
+        CREATE TABLE IF NOT EXISTS review_lifecycle_events (
+            id                  TEXT PRIMARY KEY,
+            owner_type          TEXT NOT NULL,
+            owner_id            TEXT NOT NULL,
+            candidate_ref       TEXT,
+            lifecycle_state     TEXT NOT NULL,
+            event_kind          TEXT NOT NULL,
+            actor               TEXT NOT NULL,
+            source              TEXT NOT NULL,
+            tool_name           TEXT,
+            reason              TEXT,
+            decision_note       TEXT,
+            source_evidence_id  TEXT,
+            source_evidence_ref TEXT,
+            supersedes_ref      TEXT,
+            invalidates_ref     TEXT,
+            corrects_ref        TEXT,
+            metadata            TEXT,
+            created_at          REAL NOT NULL,
+            FOREIGN KEY (source_evidence_id) REFERENCES source_evidence(id) ON DELETE SET NULL
+        );
+        """
+
+    static let createRecallAccessEvents = """
+        CREATE TABLE IF NOT EXISTS recall_access_events (
+            id                TEXT PRIMARY KEY,
+            surface           TEXT NOT NULL,
+            selector_kind     TEXT NOT NULL,
+            query_hash        TEXT,
+            query_length      INTEGER,
+            query_token_count INTEGER,
+            anchor_refs       TEXT NOT NULL DEFAULT '[]',
+            surfaced_refs     TEXT NOT NULL DEFAULT '[]',
+            reason_kinds      TEXT NOT NULL DEFAULT '[]',
+            metadata          TEXT NOT NULL DEFAULT '{}',
+            created_at        REAL NOT NULL
+        );
+        """
+
+    static let createFactValidityCandidates = """
+        CREATE TABLE IF NOT EXISTS fact_validity_candidates (
+            id                  TEXT PRIMARY KEY,
+            target_ref          TEXT NOT NULL,
+            proposed_state      TEXT NOT NULL,
+            valid_at            REAL,
+            invalid_at          REAL,
+            expired_at          REAL,
+            supersedes_ref      TEXT,
+            superseded_by_ref   TEXT,
+            source_owner_type   TEXT NOT NULL,
+            source_owner_id     TEXT NOT NULL,
+            source_quote        TEXT NOT NULL DEFAULT '',
+            reason              TEXT NOT NULL DEFAULT '',
+            review_state        TEXT NOT NULL DEFAULT 'suggested',
+            source              TEXT NOT NULL,
+            actor               TEXT NOT NULL,
+            source_evidence_id  TEXT,
+            source_evidence_ref TEXT,
+            decision_note       TEXT,
+            metadata            TEXT NOT NULL DEFAULT '{}',
+            created_at          REAL NOT NULL,
+            updated_at          REAL NOT NULL,
+            reviewed_at         REAL,
+            FOREIGN KEY (source_evidence_id) REFERENCES source_evidence(id) ON DELETE SET NULL
+        );
+        """
+
+    static let createEntityResolutionCandidates = """
+        CREATE TABLE IF NOT EXISTS entity_resolution_candidates (
+            id                       TEXT PRIMARY KEY,
+            candidate_type           TEXT NOT NULL,
+            source_entity_type       TEXT NOT NULL,
+            source_entity_id         TEXT NOT NULL,
+            source_label             TEXT NOT NULL,
+            input_mention            TEXT NOT NULL,
+            target_entity_type       TEXT NOT NULL,
+            target_entity_id         TEXT NOT NULL,
+            target_label             TEXT NOT NULL,
+            source_owner_type        TEXT NOT NULL,
+            source_owner_id          TEXT NOT NULL,
+            source_quote             TEXT NOT NULL DEFAULT '',
+            confidence               REAL,
+            confidence_reasons       TEXT NOT NULL DEFAULT '[]',
+            conflicts_json           TEXT NOT NULL DEFAULT '[]',
+            review_state             TEXT NOT NULL DEFAULT 'suggested',
+            source                   TEXT NOT NULL,
+            actor                    TEXT NOT NULL,
+            source_evidence_id       TEXT,
+            source_evidence_ref      TEXT,
+            accepted_relation_id     TEXT,
+            decision_note            TEXT,
+            metadata                 TEXT NOT NULL DEFAULT '{}',
+            created_at               REAL NOT NULL,
+            updated_at               REAL NOT NULL,
+            reviewed_at              REAL,
+            UNIQUE(candidate_type, source_entity_type, source_entity_id, target_entity_type, target_entity_id, source)
+        );
+        """
+
     static let createSimilarityCandidates = """
         CREATE TABLE IF NOT EXISTS similarity_candidates (
             id                 TEXT PRIMARY KEY,
@@ -322,6 +450,28 @@ enum CiderSchema {
             updated_at         REAL NOT NULL,
             reviewed_at        REAL,
             UNIQUE(source_owner_type, source_owner_id, target_owner_type, target_owner_id, candidate_type, signal, source)
+        );
+        """
+
+    static let createSimilarityReconciliationRuns = """
+        CREATE TABLE IF NOT EXISTS similarity_reconciliation_runs (
+            id                 TEXT PRIMARY KEY,
+            owner_type         TEXT,
+            owner_id           TEXT,
+            trigger            TEXT NOT NULL,
+            scope              TEXT NOT NULL,
+            threshold          REAL NOT NULL,
+            candidate_limit    INTEGER NOT NULL,
+            selected_count     INTEGER NOT NULL,
+            created_count      INTEGER NOT NULL,
+            updated_count      INTEGER NOT NULL,
+            unchanged_count    INTEGER NOT NULL,
+            stale_count        INTEGER NOT NULL,
+            unseeded_count     INTEGER NOT NULL,
+            candidate_families TEXT NOT NULL DEFAULT '{}',
+            metadata           TEXT NOT NULL DEFAULT '{}',
+            started_at         REAL NOT NULL,
+            finished_at        REAL NOT NULL
         );
         """
 
@@ -435,6 +585,30 @@ enum CiderSchema {
         );
         """
 
+    static let createActionReceipts = """
+        CREATE TABLE IF NOT EXISTS action_receipts (
+            id                         TEXT PRIMARY KEY,
+            command                    TEXT NOT NULL,
+            action                     TEXT NOT NULL,
+            actor                      TEXT NOT NULL,
+            status                     TEXT NOT NULL,
+            owner_type                 TEXT,
+            owner_id                   TEXT,
+            source_refs_json           TEXT NOT NULL DEFAULT '[]',
+            evidence_refs_json         TEXT NOT NULL DEFAULT '[]',
+            read_only                  INTEGER NOT NULL,
+            changed                    INTEGER NOT NULL,
+            before_json                TEXT,
+            after_json                 TEXT,
+            error_code                 TEXT,
+            safe_verification_commands TEXT NOT NULL DEFAULT '[]',
+            safe_next_commands         TEXT NOT NULL DEFAULT '[]',
+            correlation_id             TEXT,
+            receipt_json               TEXT NOT NULL DEFAULT '{}',
+            created_at                 REAL NOT NULL
+        );
+        """
+
     // MARK: - Trash
 
     static let createTrash = """
@@ -538,9 +712,28 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_capture_attachments_source ON capture_attachments(source_attachment_id) WHERE source_attachment_id IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_owner ON enrichment_outputs(owner_type, owner_id, kind, review_state);",
         "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_kind ON enrichment_outputs(kind, normalized_value);",
+        "CREATE INDEX IF NOT EXISTS idx_source_evidence_source ON source_evidence(source_owner_type, source_owner_id, evidence_kind, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_source_evidence_derived ON source_evidence(derived_owner_type, derived_owner_id, evidence_kind);",
+        "CREATE INDEX IF NOT EXISTS idx_source_evidence_candidate ON source_evidence(candidate_ref) WHERE candidate_ref IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_owner ON review_lifecycle_events(owner_type, owner_id, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_candidate ON review_lifecycle_events(candidate_ref, created_at) WHERE candidate_ref IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_evidence ON review_lifecycle_events(source_evidence_id, created_at) WHERE source_evidence_id IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_review_lifecycle_state ON review_lifecycle_events(lifecycle_state, event_kind, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_recall_access_created ON recall_access_events(created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_recall_access_surface ON recall_access_events(surface, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_recall_access_query ON recall_access_events(query_hash, created_at) WHERE query_hash IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_fact_validity_target ON fact_validity_candidates(target_ref, review_state, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_fact_validity_review ON fact_validity_candidates(review_state, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_fact_validity_evidence ON fact_validity_candidates(source_evidence_id) WHERE source_evidence_id IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_entity_resolution_review ON entity_resolution_candidates(review_state, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_entity_resolution_source ON entity_resolution_candidates(source_entity_type, source_entity_id, review_state);",
+        "CREATE INDEX IF NOT EXISTS idx_entity_resolution_target ON entity_resolution_candidates(target_entity_type, target_entity_id, review_state);",
+        "CREATE INDEX IF NOT EXISTS idx_entity_resolution_evidence ON entity_resolution_candidates(source_evidence_id) WHERE source_evidence_id IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_source ON similarity_candidates(source_owner_type, source_owner_id, review_state, score);",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_target ON similarity_candidates(target_owner_type, target_owner_id, review_state, score);",
         "CREATE INDEX IF NOT EXISTS idx_similarity_candidates_review ON similarity_candidates(review_state, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_similarity_reconciliation_owner ON similarity_reconciliation_runs(owner_type, owner_id, started_at);",
+        "CREATE INDEX IF NOT EXISTS idx_similarity_reconciliation_trigger ON similarity_reconciliation_runs(trigger, started_at);",
         "CREATE INDEX IF NOT EXISTS idx_space_memberships_item ON space_memberships(item_id, item_type);",
         "CREATE INDEX IF NOT EXISTS idx_space_memberships_space ON space_memberships(space_id, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_item_sections_owner ON item_sections(owner_type, owner_id, sort_order);",
@@ -549,6 +742,11 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_content_chunks_section ON content_chunks(section_id) WHERE section_id IS NOT NULL;",
         "CREATE INDEX IF NOT EXISTS idx_agent_actions_owner ON agent_actions(owner_type, owner_id, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_agent_actions_tool ON agent_actions(tool_name, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_action_receipts_created ON action_receipts(created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_action_receipts_owner ON action_receipts(owner_type, owner_id, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_action_receipts_action ON action_receipts(action, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_action_receipts_actor ON action_receipts(actor, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_action_receipts_status ON action_receipts(status, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_owner ON second_brain_routing_decisions(owner_type, owner_id, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_status ON second_brain_routing_decisions(status, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_bookmarks_url     ON bookmarks(url);",
@@ -587,7 +785,13 @@ enum CiderSchema {
         createCaptureEvents,
         createCaptureAttachments,
         createEnrichmentOutputs,
+        createSourceEvidence,
+        createReviewLifecycleEvents,
+        createRecallAccessEvents,
+        createFactValidityCandidates,
+        createEntityResolutionCandidates,
         createSimilarityCandidates,
+        createSimilarityReconciliationRuns,
         createSpaceMemberships,
         createItemSections,
         createContentChunks,
@@ -598,6 +802,7 @@ enum CiderSchema {
         createRoutingDecisions,
         createSecondBrainRoutingDecisions,
         createAgentActions,
+        createActionReceipts,
         createTrash,
         createMutationAudit,
         createFolderSyncDecisions,
