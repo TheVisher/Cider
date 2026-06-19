@@ -17751,6 +17751,24 @@ struct CiderCLI {
         ]
         if let confidence = output.confidence { dict["confidence"] = confidence }
         if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
+        if let factType = output.metadata["fact_type"] { dict["factType"] = factType }
+        if let spendingCategory = output.metadata["spending_category"] { dict["spendingCategory"] = spendingCategory }
+        if let amount = output.metadata["amount"] { dict["amount"] = amount }
+        if let currency = output.metadata["currency"] { dict["currency"] = currency }
+        if let amountQualifier = output.metadata["amount_qualifier"] { dict["amountQualifier"] = amountQualifier }
+        if let quantity = output.metadata["quantity"] { dict["quantity"] = quantity }
+        if let quantityUnit = output.metadata["quantity_unit"] { dict["quantityUnit"] = quantityUnit }
+        if let unitPrice = output.metadata["unit_price"] { dict["unitPrice"] = unitPrice }
+        if let unitPriceUnit = output.metadata["unit_price_unit"] { dict["unitPriceUnit"] = unitPriceUnit }
+        if let merchant = output.metadata["merchant"] { dict["merchant"] = merchant }
+        if let fuelGrade = output.metadata["fuel_grade"] { dict["fuelGrade"] = fuelGrade }
+        if let relatedEntities = output.metadata["related_entities"] { dict["relatedEntities"] = DatabaseHelpers.decodeStringArray(relatedEntities) }
+        if let linkedEntityNames = output.metadata["linked_entity_names"] { dict["linkedEntityNames"] = linkedEntityNames.components(separatedBy: "|").filter { !$0.isEmpty } }
+        if let dateContext = output.metadata["date_context"] { dict["dateContext"] = dateContext }
+        if let timeContext = output.metadata["time_context"] { dict["timeContext"] = timeContext }
+        if let sourceOwnerRef = output.metadata["source_owner_ref"] { dict["sourceOwnerRef"] = sourceOwnerRef }
+        if let sourceSpanStart = output.metadata["source_span_start"] { dict["sourceSpanStart"] = Int(sourceSpanStart) ?? sourceSpanStart }
+        if let sourceSpanEnd = output.metadata["source_span_end"] { dict["sourceSpanEnd"] = Int(sourceSpanEnd) ?? sourceSpanEnd }
         if let observedDate = output.metadata["observed_date"] { dict["observedDate"] = observedDate }
         if let memoryKey = output.metadata["memory_key"] { dict["memoryKey"] = memoryKey }
         if let memoryStatus = output.metadata["memory_status"] { dict["memoryStatus"] = memoryStatus }
@@ -17958,6 +17976,28 @@ struct CiderCLI {
 
         try CiderDatabase.shared.withTransaction {
             try service.record(accepted)
+            if let sourceEvidence = sourceEvidenceRecord(for: accepted) {
+                try SecondBrainReviewLifecycleService(database: .shared).record(SecondBrainReviewLifecycleEvent(
+                    owner: SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: accepted.id),
+                    candidateRef: "memory_candidate:\(accepted.id)",
+                    lifecycleState: "accepted",
+                    eventKind: "accepted_truth_recorded",
+                    actor: actor,
+                    source: source,
+                    toolName: "item.accept-memory-candidate",
+                    reason: "Accepted reviewable memory candidate as Cider truth.",
+                    sourceEvidenceID: sourceEvidence.id,
+                    sourceEvidenceRef: "source_evidence:\(sourceEvidence.id)",
+                    metadata: [
+                        "owner_ref": accepted.owner.canonicalRef,
+                        "output_kind": accepted.kind,
+                        "review_state": accepted.reviewState,
+                        "fact_ref": "accepted_memory_fact:\(accepted.id)",
+                        "candidate_ref": "memory_candidate:\(accepted.id)",
+                    ],
+                    createdAt: accepted.updatedAt
+                ))
+            }
             try store.recordAgentAction(action)
         }
 
@@ -18246,7 +18286,7 @@ struct CiderCLI {
     ) -> [String: Any] {
         let safeCommands = memoryCandidatePostMutationSafeCommands(output: candidate)
         let actor = candidate.metadata["reviewed_by"] ?? "user"
-        return [
+        var result: [String: Any] = [
             "ok": true,
             "command": command,
             "action": action,
@@ -18269,6 +18309,11 @@ struct CiderCLI {
             "safeNextCommands": safeCommands,
             "safeCommands": safeCommands,
         ]
+        if candidate.reviewState == "accepted" {
+            result["acceptedFact"] = acceptedMemoryFactToDict(SecondBrainAcceptedMemoryFact(candidate: candidate))
+            result["truthBoundary"] = "accepted_memory_fact"
+        }
+        return result
     }
 
     static func memoryCandidateOutput(

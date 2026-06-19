@@ -420,6 +420,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
         )
         let normalizedDate = date.flatMap(trimmedNonEmpty)
         let normalizedTime = time.flatMap(trimmedNonEmpty)
+            ?? firstCapture(pattern: #"\b([0-2]?\d:[0-5]\d)\b"#, in: quote)
         let fillContext = lower.contains("morning") ? "morning " : ""
         let datePhrase = normalizedDate.map { " on \($0)" } ?? ""
         let tripPhrase = quote.range(of: #"(?i)\bDuvall\b"#, options: .regularExpression) != nil ? " after Duvall" : ""

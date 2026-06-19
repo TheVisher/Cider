@@ -3619,7 +3619,7 @@ struct CiderCLIAgentSafetyTests {
         let journalID = try createNote(
             title: "Daily Journal 2026-06-11",
             content: """
-            Retroactive recovered journal entry — 2026-06-11 morning gas fill-up / commute
+            - 03:50 - Retroactive recovered journal entry — 2026-06-11 morning gas fill-up / commute
 
             Recovered from Hermes Discord session search after Visher clarified this was the later morning fill-up after the Duvall trip.
 
@@ -3708,6 +3708,146 @@ struct CiderCLIAgentSafetyTests {
             #expect(candidate["truthState"] as? String == "reviewable_candidate_not_truth")
             #expect((candidate["sourceEvidenceRecord"] as? [String: Any])?["sourceOwnerRef"] as? String == "note:\(journalID)")
         }
+    }
+
+    @Test("journal spending memory candidates can be accepted and recalled as cited truth")
+    func journalSpendingMemoryCandidatesCanBeAcceptedAndRecalledAsCitedTruth() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-accept-journal-spending-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-11",
+            content: """
+            - 03:50 - Retroactive recovered journal entry — 2026-06-11 morning gas fill-up / commute
+
+            Recovered from Hermes Discord session search after Visher clarified this was the later morning fill-up after the Duvall trip.
+
+            Gas/fuel spending:
+            - Filled up while driving to work in the morning.
+            - Total: $81.07.
+            - Fuel amount: 12.87 gallons.
+            - Effective price: about $6.30/gallon.
+            - Fuel grade: mid-grade / 89 octane.
+            - Vehicle context: Visher said he should be getting premium because of the turbo in his Mazda CX-5, but premium would be even more expensive, so he has been using mid-grade.
+            - Reaction: gas was "fricking ridiculous" / "too fucking expensive."
+            """,
+            vault: vault
+        )
+
+        let backfill = try parseJSONObject(try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-11", "--json"], vault: vault).stdout)
+        let owners = try #require(backfill["owners"] as? [[String: Any]])
+        let owner = try #require(owners.first)
+        let memoryCandidates = try #require(owner["memoryCandidates"] as? [[String: Any]])
+        let gasCandidate = try #require(memoryCandidates.first { ($0["metadata"] as? [String: String])?["memory_key"] == "spending-gas-fill-up-2026-06-11-81.07" })
+        let candidateID = try #require(gasCandidate["id"] as? String)
+
+        let accept = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", candidateID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+        #expect(accept["changed"] as? Bool == true)
+        #expect(accept["reviewState"] as? String == "accepted")
+        let acceptedFact = try #require(accept["acceptedFact"] as? [String: Any])
+        #expect(acceptedFact["truthBoundary"] as? String == "accepted_memory_fact")
+        #expect(acceptedFact["truthState"] as? String == "accepted")
+        #expect(acceptedFact["amount"] as? String == "81.07")
+        #expect(acceptedFact["currency"] as? String == "USD")
+        #expect(acceptedFact["quantity"] as? String == "12.87")
+        #expect(acceptedFact["quantityUnit"] as? String == "gallons")
+        #expect(acceptedFact["unitPrice"] as? String == "6.30")
+        #expect(acceptedFact["unitPriceUnit"] as? String == "USD_per_gallon")
+        #expect(acceptedFact["factType"] as? String == "fuel_purchase")
+        #expect(acceptedFact["spendingCategory"] as? String == "gas")
+        #expect(acceptedFact["dateContext"] as? String == "2026-06-11")
+        #expect(acceptedFact["timeContext"] as? String == "03:50")
+        #expect((acceptedFact["sourceEvidenceRecord"] as? [String: Any])?["sourceOwnerRef"] as? String == "note:\(journalID)")
+        #expect((acceptedFact["sourceEvidenceRecord"] as? [String: Any])?["sourceQuote"] as? String != nil)
+        #expect((acceptedFact["lifecycleHistory"] as? [[String: Any]])?.contains { $0["eventKind"] as? String == "accepted_truth_recorded" } == true)
+        #expect(accept["actionReceipt"] != nil)
+
+        let inspect = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "inspect", candidateID, "--json"], vault: vault),
+            command: "item.memory-facts.inspect"
+        )
+        let inspectedFact = try #require(inspect["fact"] as? [String: Any])
+        #expect(inspectedFact["amount"] as? String == "81.07")
+        #expect(inspectedFact["sourceQuote"] as? String != nil)
+
+        let recall = try assertStrictProcessJSON(
+            runCLI(args: ["item", "recall-context", "--query", "what did I spend on gas", "--limit", "1", "--json"], vault: vault),
+            command: "item.recall-context"
+        )
+        let acceptedFacts = try #require(recall["acceptedFacts"] as? [[String: Any]])
+        #expect(acceptedFacts.contains { fact in
+            fact["candidateID"] as? String == candidateID
+                && fact["truthState"] as? String == "accepted"
+                && fact["truthBoundary"] as? String == "accepted_memory_fact"
+                && fact["amount"] as? String == "81.07"
+        })
+        let reviewable = try #require(recall["reviewableCandidates"] as? [[String: Any]])
+        #expect(!reviewable.contains { $0["id"] as? String == candidateID })
+        let contentBlocks = try #require(recall["contentBlocks"] as? [[String: Any]])
+        #expect(contentBlocks.contains { ($0["citation"] as? [String: Any])?["ownerID"] as? String == journalID })
+    }
+
+    @Test("accepted and reviewable prose spending facts stay distinct in recall")
+    func acceptedAndReviewableProseSpendingFactsStayDistinctInRecall() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-accept-prose-spending-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-13",
+            content: """
+            Lunch and errand spending:
+            Visher grabbed Panda Express for lunch and spent $17.42 on orange chicken and chow mein.
+            At the gas station, he also bought a Monster and a protein bar for about $9.58.
+            """,
+            vault: vault
+        )
+
+        let backfill = try parseJSONObject(try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-13", "--json"], vault: vault).stdout)
+        let owners = try #require(backfill["owners"] as? [[String: Any]])
+        let owner = try #require(owners.first)
+        let memoryCandidates = try #require(owner["memoryCandidates"] as? [[String: Any]])
+        let foodCandidate = try #require(memoryCandidates.first { ($0["metadata"] as? [String: String])?["memory_key"] == "spending-food-2026-06-13-17.42" })
+        let gasStationCandidate = try #require(memoryCandidates.first { ($0["metadata"] as? [String: String])?["memory_key"] == "spending-gas-station-2026-06-13-9.58" })
+        let foodID = try #require(foodCandidate["id"] as? String)
+        let gasStationID = try #require(gasStationCandidate["id"] as? String)
+
+        let accept = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", foodID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+        let acceptedFact = try #require(accept["acceptedFact"] as? [String: Any])
+        #expect(acceptedFact["amount"] as? String == "17.42")
+        #expect(acceptedFact["merchant"] as? String == "Panda Express")
+        #expect(acceptedFact["factType"] as? String == "food_purchase")
+        #expect((acceptedFact["sourceEvidenceRecord"] as? [String: Any])?["spanStart"] != nil)
+        #expect((acceptedFact["sourceEvidenceRecord"] as? [String: Any])?["spanEnd"] != nil)
+
+        let recall = try assertStrictProcessJSON(
+            runCLI(args: ["item", "recall-context", "--query", "Panda Express lunch gas station Monster protein bar", "--limit", "1", "--json"], vault: vault),
+            command: "item.recall-context"
+        )
+        let acceptedFacts = try #require(recall["acceptedFacts"] as? [[String: Any]])
+        #expect(acceptedFacts.contains { fact in
+            fact["candidateID"] as? String == foodID
+                && fact["truthState"] as? String == "accepted"
+                && fact["merchant"] as? String == "Panda Express"
+        })
+        let reviewable = try #require(recall["reviewableCandidates"] as? [[String: Any]])
+        #expect(reviewable.contains { candidate in
+            candidate["id"] as? String == gasStationID
+                && candidate["truthState"] as? String == "reviewable_candidate_not_truth"
+                && (candidate["metadata"] as? [String: String])?["amount"] == "9.58"
+        })
+        #expect(!reviewable.contains { $0["id"] as? String == foodID })
+        let contentBlocks = try #require(recall["contentBlocks"] as? [[String: Any]])
+        #expect(contentBlocks.contains { ($0["citation"] as? [String: Any])?["ownerID"] as? String == journalID })
     }
 
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")
