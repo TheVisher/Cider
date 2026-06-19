@@ -227,7 +227,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
         date: String?,
         time: String?
     ) -> [SecondBrainEnrichmentOutput] {
-        spendingBlocks(in: rawContent).compactMap { block in
+        let blockCandidates = spendingBlocks(in: rawContent).compactMap { block in
             makeGasSpendingMemoryCandidate(
                 sourceOwner: sourceOwner,
                 block: block,
@@ -235,6 +235,13 @@ struct SecondBrainJournalGraphCandidateExtractor {
                 time: time
             )
         }
+        let proseCandidates = proseSpendingFactCandidates(
+            sourceOwner: sourceOwner,
+            rawContent: rawContent,
+            date: date,
+            time: time
+        )
+        return blockCandidates + proseCandidates
     }
 
     private func spendingBlocks(in text: String) -> [JournalSpendingBlock] {
@@ -283,6 +290,107 @@ struct SecondBrainJournalGraphCandidateExtractor {
             index = max(cursor, index + 1)
         }
         return blocks
+    }
+
+    private func proseSpendingFactCandidates(
+        sourceOwner: SecondBrainOwnerRef,
+        rawContent: String,
+        date: String?,
+        time: String?
+    ) -> [SecondBrainEnrichmentOutput] {
+        candidateSentences(from: rawContent).compactMap { sentence in
+            makeProseSpendingMemoryCandidate(
+                sourceOwner: sourceOwner,
+                sentence: sentence,
+                rawContent: rawContent,
+                date: date,
+                time: time
+            )
+        }
+    }
+
+    private func makeProseSpendingMemoryCandidate(
+        sourceOwner: SecondBrainOwnerRef,
+        sentence: String,
+        rawContent: String,
+        date: String?,
+        time: String?
+    ) -> SecondBrainEnrichmentOutput? {
+        let lower = sentence.lowercased()
+        guard let amount = firstCapture(pattern: #"\$\s*([0-9]+(?:\.[0-9]{1,2})?)"#, in: sentence) else { return nil }
+        let spendingMarkers = ["spent", "paid", "bought", "grabbed", "picked up", "cost", "total"]
+        guard spendingMarkers.contains(where: { lower.contains($0) }) else { return nil }
+        guard !lower.contains("fuel amount") && !lower.contains("effective price") else { return nil }
+
+        guard let category = proseSpendingCategory(for: sentence) else { return nil }
+        let normalizedDate = date.flatMap(trimmedNonEmpty)
+        let normalizedTime = time.flatMap(trimmedNonEmpty)
+        let amountQualifier = lower.range(of: #"\b(about|around|roughly|approximately)\s*\$"#, options: .regularExpression).map { String(sentence[$0]).components(separatedBy: "$").first?.trimmingCharacters(in: .whitespacesAndNewlines) } ?? nil
+        let merchant = merchantName(in: sentence, category: category.key)
+        let datePhrase = normalizedDate.map { " on \($0)" } ?? ""
+        let qualifierPhrase = amountQualifier == nil ? "" : "\(amountQualifier!) "
+        let value: String
+        if let merchant {
+            value = "Visher spent \(qualifierPhrase)$\(amount) on \(category.displayName) at \(merchant)\(datePhrase)."
+        } else if category.key == "gas_station" {
+            value = "Visher spent \(qualifierPhrase)$\(amount) at a gas station\(datePhrase)."
+        } else {
+            value = "Visher spent \(qualifierPhrase)$\(amount) on \(category.displayName)\(datePhrase)."
+        }
+
+        let span = sourceSpan(for: sentence, in: rawContent)
+        let categorySlug = category.key.replacingOccurrences(of: "_", with: "-")
+        var output = SecondBrainEnrichmentOutput(
+            owner: sourceOwner,
+            chunkID: nil,
+            kind: "memory_candidate",
+            value: value,
+            normalizedValue: normalizedValue(value),
+            label: "Memory candidate: spending fact",
+            evidence: sentence,
+            source: "memory_candidate.journal_spending_extraction",
+            confidence: proseSpendingConfidence(sentence: sentence, category: category.key, merchant: merchant),
+            reviewState: "suggested",
+            metadata: [
+                "memory_kind": "spending_fact",
+                "candidate_kind": "spending_fact",
+                "fact_type": category.factType,
+                "spending_category": category.key,
+                "amount": amount,
+                "currency": "USD",
+                "requires_review": "true",
+                "memory_status": "current",
+                "memory_key": "spending-\(categorySlug)-\(normalizedDate ?? "unknown-date")-\(amount)",
+                "requested_owner_type": sourceOwner.ownerType,
+                "requested_owner_ref": sourceOwner.ownerID,
+                "source_owner_ref": sourceOwner.canonicalRef,
+                "source_kind": "journal",
+                "source_quote": sentence,
+                "source_span_start": String(span.start),
+                "source_span_end": String(span.end),
+                "review_query_terms": proseReviewQueryTerms(category: category.key, amount: amount, merchant: merchant),
+            ]
+        )
+        output.metadata["candidate_ref"] = "memory_candidate:\(output.id)"
+        if let merchant { output.metadata["merchant"] = merchant }
+        if let normalizedDate {
+            output.metadata["journal_date"] = normalizedDate
+            output.metadata["date_context"] = normalizedDate
+            output.metadata["observed_date"] = normalizedDate
+        }
+        if let normalizedTime {
+            output.metadata["journal_time"] = normalizedTime
+            output.metadata["time_context"] = normalizedTime
+        }
+        if let amountQualifier {
+            output.metadata["amount_qualifier"] = amountQualifier
+        }
+        let entities = relatedEntities(in: sentence)
+        if !entities.isEmpty {
+            output.metadata["related_entities"] = encodeJSONStringArray(entities)
+            output.metadata["linked_entity_names"] = entities.joined(separator: "|")
+        }
+        return output
     }
 
     private func makeGasSpendingMemoryCandidate(
@@ -378,6 +486,61 @@ struct SecondBrainJournalGraphCandidateExtractor {
         return output
     }
 
+    private struct ProseSpendingCategory {
+        var key: String
+        var factType: String
+        var displayName: String
+    }
+
+    private func proseSpendingCategory(for sentence: String) -> ProseSpendingCategory? {
+        let lower = sentence.lowercased()
+        if lower.contains("gas station") {
+            return ProseSpendingCategory(key: "gas_station", factType: "gas_station_purchase", displayName: "gas station items")
+        }
+        let foodMarkers = ["lunch", "dinner", "breakfast", "food", "panda express", "orange chicken", "chow mein", "burger", "taco", "coffee", "drink"]
+        if foodMarkers.contains(where: { lower.contains($0) }) {
+            return ProseSpendingCategory(key: "food", factType: "food_purchase", displayName: "food")
+        }
+        return nil
+    }
+
+    private func merchantName(in sentence: String, category: String?) -> String? {
+        let knownMerchants = ["Panda Express", "Starbucks", "McDonald's", "Costco", "Safeway", "Target"]
+        for merchant in knownMerchants where sentence.range(of: merchant, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
+            return merchant
+        }
+        return nil
+    }
+
+    private func proseSpendingConfidence(sentence: String, category: String?, merchant: String?) -> Double {
+        var confidence = 0.72
+        if category != nil { confidence += 0.06 }
+        if merchant != nil { confidence += 0.06 }
+        if sentence.range(of: #"\b(spent|paid|bought)\b"#, options: [.regularExpression, .caseInsensitive]) != nil { confidence += 0.04 }
+        return min(confidence, 0.88)
+    }
+
+    private func proseReviewQueryTerms(category: String, amount: String, merchant: String?) -> String {
+        var terms = ["$\(amount)", "what did I spend"]
+        if category == "food" {
+            terms += ["what did I spend on food", "food spending", "lunch spending"]
+        } else if category == "gas_station" {
+            terms += ["gas station spending", "gas station treats", "what did I spend at the gas station"]
+        }
+        if let merchant { terms.append(merchant) }
+        var seen = Set<String>()
+        return terms.filter { seen.insert($0).inserted }.joined(separator: "|")
+    }
+
+    private func sourceSpan(for sentence: String, in rawContent: String) -> (start: Int, end: Int) {
+        if let range = rawContent.range(of: sentence) {
+            let start = rawContent.distance(from: rawContent.startIndex, to: range.lowerBound)
+            let end = rawContent.distance(from: rawContent.startIndex, to: range.upperBound)
+            return (start, end)
+        }
+        return (0, sentence.count)
+    }
+
     private func gasSpendingConfidence(quantity: String?, unitPrice: String?, fuelGrade: String?) -> Double {
         var confidence = 0.72
         if quantity != nil { confidence += 0.06 }
@@ -388,7 +551,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
 
     private func relatedEntities(in text: String) -> [String] {
         var entities: [String] = []
-        let knownEntities = ["Duvall", "Mazda CX-5", "Mazda CX5", "Boeing", "ERT"]
+        let knownEntities = ["Duvall", "Mazda CX-5", "Mazda CX5", "Boeing", "ERT", "Monster", "protein bar"]
         for entity in knownEntities where text.range(of: entity, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
             let canonical = entity == "Mazda CX5" ? "Mazda CX-5" : entity
             if !entities.contains(canonical) { entities.append(canonical) }

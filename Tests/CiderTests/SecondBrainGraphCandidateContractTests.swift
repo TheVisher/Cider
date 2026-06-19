@@ -366,6 +366,48 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(gasFact.metadata["review_query_terms"]?.contains("last time I filled up") == true)
     }
 
+    @Test("journal extractor proposes structured prose spending memory candidates")
+    func journalExtractorProposesStructuredProseSpendingMemoryCandidates() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: """
+            Lunch and errand spending:
+            Visher grabbed Panda Express for lunch and spent $17.42 on orange chicken and chow mein.
+            At the gas station, he also bought a Monster and a protein bar for about $9.58.
+            """,
+            date: "2026-06-13",
+            time: "12:25"
+        )
+
+        let memoryOutputs = result.outputs.filter { $0.kind == "memory_candidate" }
+        let lunch = try #require(memoryOutputs.first { $0.metadata["memory_key"] == "spending-food-2026-06-13-17.42" })
+        #expect(lunch.reviewState == "suggested")
+        #expect(lunch.value == "Visher spent $17.42 on food at Panda Express on 2026-06-13.")
+        #expect(lunch.evidence == "Visher grabbed Panda Express for lunch and spent $17.42 on orange chicken and chow mein")
+        #expect(lunch.metadata["memory_kind"] == "spending_fact")
+        #expect(lunch.metadata["fact_type"] == "food_purchase")
+        #expect(lunch.metadata["spending_category"] == "food")
+        #expect(lunch.metadata["merchant"] == "Panda Express")
+        #expect(lunch.metadata["amount"] == "17.42")
+        #expect(lunch.metadata["currency"] == "USD")
+        #expect(lunch.metadata["date_context"] == "2026-06-13")
+        #expect(lunch.metadata["time_context"] == "12:25")
+        #expect(lunch.metadata["source_owner_ref"] == owner.canonicalRef)
+        #expect(lunch.metadata["source_quote"] == lunch.evidence)
+        #expect(lunch.metadata["source_span_start"].flatMap(Int.init) != nil)
+        #expect(lunch.metadata["source_span_end"].flatMap(Int.init) != nil)
+        #expect(lunch.metadata["review_query_terms"]?.contains("what did I spend on food") == true)
+
+        let gasStation = try #require(memoryOutputs.first { $0.metadata["memory_key"] == "spending-gas-station-2026-06-13-9.58" })
+        #expect(gasStation.value == "Visher spent about $9.58 at a gas station on 2026-06-13.")
+        #expect(gasStation.metadata["fact_type"] == "gas_station_purchase")
+        #expect(gasStation.metadata["spending_category"] == "gas_station")
+        #expect(gasStation.metadata["amount_qualifier"] == "about")
+        #expect(gasStation.metadata["related_entities"]?.contains("Monster") == true)
+        #expect(gasStation.metadata["related_entities"]?.contains("protein bar") == true)
+    }
+
     @Test("graph candidate persists through enrichment outputs table")
     func graphCandidatePersistsThroughEnrichmentOutputsTable() throws {
         let (db, url) = try makeTestDB()

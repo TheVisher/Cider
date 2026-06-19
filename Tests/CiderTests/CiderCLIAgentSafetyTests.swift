@@ -3666,6 +3666,50 @@ struct CiderCLIAgentSafetyTests {
         }
     }
 
+    @Test("recall context finds prose journal spending candidates")
+    func recallContextFindsProseJournalSpendingCandidates() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-recall-prose-spending-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-13",
+            content: """
+            Lunch and errand spending:
+            Visher grabbed Panda Express for lunch and spent $17.42 on orange chicken and chow mein.
+            At the gas station, he also bought a Monster and a protein bar for about $9.58.
+            """,
+            vault: vault
+        )
+        let _ = try createNote(
+            title: "Panda movie list",
+            content: "A distracting note about panda documentaries and gas station scenery, but no spending facts.",
+            vault: vault
+        )
+
+        let backfill = try parseJSONObject(try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-13", "--json"], vault: vault).stdout)
+        #expect(backfill["ok"] as? Bool == true)
+        #expect(backfill["memoryCandidateCount"] as? Int == 2)
+
+        for (query, key) in [
+            ("what did I spend on food", "spending-food-2026-06-13-17.42"),
+            ("Panda Express $17.42", "spending-food-2026-06-13-17.42"),
+            ("gas station treats", "spending-gas-station-2026-06-13-9.58"),
+        ] {
+            let result = try runCLI(args: ["item", "recall-context", "--query", query, "--limit", "1", "--json"], vault: vault)
+            let payload = try parseJSONObject(result.stdout)
+            #expect(result.status == 0, "query should succeed: \(query)")
+            #expect(payload["ok"] as? Bool == true, "query should return ok=true: \(query)")
+            let anchors = try #require(payload["anchors"] as? [[String: Any]])
+            #expect(anchors.contains { (($0["item"] as? [String: Any])?["id"] as? String) == journalID }, "query should anchor the spending journal: \(query)")
+            let candidates = try #require(payload["reviewableCandidates"] as? [[String: Any]])
+            let candidate = try #require(candidates.first { ($0["metadata"] as? [String: String])?["memory_key"] == key })
+            #expect(candidate["truthState"] as? String == "reviewable_candidate_not_truth")
+            #expect((candidate["sourceEvidenceRecord"] as? [String: Any])?["sourceOwnerRef"] as? String == "note:\(journalID)")
+        }
+    }
+
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")
     func recallContextBundleCitesAcceptedGraphEvidenceAndReviewableCandidates() throws {
         let vault = FileManager.default.temporaryDirectory
