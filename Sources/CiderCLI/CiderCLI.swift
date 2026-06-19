@@ -10881,6 +10881,21 @@ struct CiderCLI {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
+    static func looksLikeJournalTextFilePath(_ value: String) -> Bool {
+        let expanded = NSString(string: value).expandingTildeInPath
+        guard FileManager.default.fileExists(atPath: expanded) else { return false }
+        let url = URL(fileURLWithPath: expanded)
+        let ext = url.pathExtension.lowercased()
+        guard ["md", "markdown", "txt"].contains(ext) else { return false }
+        let name = url.deletingPathExtension().lastPathComponent.lowercased()
+        let compact = name.replacingOccurrences(of: "-", with: "_")
+        return compact.contains("journal")
+            || compact.contains("daily_journal")
+            || compact.contains("driving_voice")
+            || compact.contains("voice_journal")
+            || compact.hasPrefix("cider_driving")
+    }
+
     static func resolveCaptureAddSource(from args: [String]) throws -> CaptureAddSource {
         let kind = parseFlag("--kind", from: args)?.lowercased()
         let rawText = try rawCaptureText(from: args)
@@ -10893,10 +10908,20 @@ struct CiderCLI {
         switch kind {
         case nil:
             if let url { return .inferred(url) }
-            if let path { return .inferred(path) }
+            if let path {
+                if looksLikeJournalTextFilePath(path) {
+                    throw CaptureAddArgumentError.message("Journal-like text files must be captured explicitly as journal/note text, not inferred file imports. Use `cider-cli capture add --kind journal --text-file <path> --json` for daily journals, `--kind note --text-file <path> --json` for note text, or `--kind file --path <path> --json` if this is intentionally a file artifact.")
+                }
+                return .inferred(path)
+            }
             if let rawText { return .note(rawText) }
             if let positionalText {
-                if positionalArgs.count == 1 { return .inferred(positionalText) }
+                if positionalArgs.count == 1 {
+                    if looksLikeJournalTextFilePath(positionalText) {
+                        throw CaptureAddArgumentError.message("Journal-like text files must be captured explicitly as journal/note text, not inferred file imports. Use `cider-cli capture add --kind journal --text-file <path> --json` for daily journals, `--kind note --text-file <path> --json` for note text, or `--kind file --path <path> --json` if this is intentionally a file artifact.")
+                    }
+                    return .inferred(positionalText)
+                }
                 return .note(positionalText)
             }
         case "note":

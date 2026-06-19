@@ -37,7 +37,7 @@ Every card must include `created: 'YYYY-MM-DD'`.
 
 ## Second Brain v1 Agent CLI Surface
 
-`cider-cli capture add` is the canonical agent capture API. Agents should use it for new notes, todos, bookmarks, files, events, contacts, and journal entries, and should include `--json` for verification.
+`cider-cli capture add` is the canonical agent capture API. Agents should use it for new notes, todos, bookmarks, files, events, contacts, and journal entries, and should include `--json` for verification. Use `--kind journal --stdin` or `--kind journal --text-file <utf8-text-file>` for journal text. Do not import staged journal Markdown/text files as file captures; reserve `--kind file --path <source-file-path>` for genuine user file artifacts.
 
 Core capture flags:
 

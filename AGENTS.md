@@ -53,11 +53,12 @@ When the user sends a bare URL, do not stop after creating the bookmark. Use the
 
 When the user asks to journal, log, or save a voice-derived driving reflection, use the capture-first journal path:
 
-1. Capture through `cider-cli capture add --kind journal --date today --stdin --json`.
+1. Capture through `cider-cli capture add --kind journal --date today --stdin --json` or `cider-cli capture add --kind journal --text-file <utf8-text-file> --date today --json`.
 2. Inspect the capture JSON for item identity, provenance, indexing, `nextSafeAction`, and `safeNextCommands`.
 3. Re-read through `cider-cli item get note <id> --json` or `cider-cli item context note <id> --json` when an item ID is available.
-4. Do not edit daily journal Markdown directly, and do not send successful journal captures into folder-route review chores.
-5. Report the verified daily journal title/date and any caveat.
+4. Do not edit daily journal Markdown directly, and do not capture staged `/tmp/*journal*.md` or `.txt` files as file imports. Use `--kind journal --text-file` for journal text; reserve `--kind file --path` for genuine user file artifacts.
+5. do not send successful journal captures into folder-route review chores.
+6. Report the verified daily journal title/date and any caveat.
 
 Active board files:
 
