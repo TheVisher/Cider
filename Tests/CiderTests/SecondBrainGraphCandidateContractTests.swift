@@ -311,6 +311,61 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(memoryOutputs.map { $0.metadata["memory_kind"] } == ["pattern", "pattern", "pattern", "pattern"])
     }
 
+    @Test("journal extractor proposes structured gas spending memory candidates")
+    func journalExtractorProposesStructuredGasSpendingMemoryCandidates() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: "47A5C67B-5D99-4A75-A2FC-D88034661FE1")
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: """
+            Retroactive recovered journal entry — 2026-06-11 morning gas fill-up / commute
+
+            Recovered from Hermes Discord session search after Visher clarified this was the later morning fill-up after the Duvall trip.
+
+            Gas/fuel spending:
+            - Filled up while driving to work in the morning.
+            - Total: $81.07.
+            - Fuel amount: 12.87 gallons.
+            - Effective price: about $6.30/gallon.
+            - Fuel grade: mid-grade / 89 octane.
+            - Vehicle context: Visher said he should be getting premium because of the turbo in his Mazda CX-5, but premium would be even more expensive, so he has been using mid-grade.
+            - Reaction: gas was "fricking ridiculous" / "too fucking expensive."
+            """,
+            date: "2026-06-11",
+            time: "03:50"
+        )
+
+        let memoryOutputs = result.outputs.filter { $0.kind == "memory_candidate" }
+        let gasFact = try #require(memoryOutputs.first { $0.metadata["memory_key"] == "spending-gas-fill-up-2026-06-11-81.07" })
+        #expect(gasFact.reviewState == "suggested")
+        #expect(gasFact.value.contains("$81.07"))
+        #expect(gasFact.value.contains("12.87 gallons"))
+        #expect(gasFact.value.contains("$6.30/gal"))
+        #expect(gasFact.value.contains("mid-grade / 89 octane"))
+        #expect(gasFact.evidence.contains("Gas/fuel spending:"))
+        #expect(gasFact.evidence.contains("Total: $81.07"))
+        #expect(gasFact.metadata["memory_kind"] == "spending_fact")
+        #expect(gasFact.metadata["fact_type"] == "fuel_purchase")
+        #expect(gasFact.metadata["spending_category"] == "gas")
+        #expect(gasFact.metadata["amount"] == "81.07")
+        #expect(gasFact.metadata["currency"] == "USD")
+        #expect(gasFact.metadata["quantity"] == "12.87")
+        #expect(gasFact.metadata["quantity_unit"] == "gallons")
+        #expect(gasFact.metadata["unit_price"] == "6.30")
+        #expect(gasFact.metadata["unit_price_unit"] == "USD_per_gallon")
+        #expect(gasFact.metadata["fuel_grade"] == "mid-grade / 89 octane")
+        #expect(gasFact.metadata["date_context"] == "2026-06-11")
+        #expect(gasFact.metadata["time_context"] == "03:50")
+        #expect(gasFact.metadata["source_owner_ref"] == owner.canonicalRef)
+        #expect(gasFact.metadata["candidate_ref"] == "memory_candidate:\(gasFact.id)")
+        #expect(gasFact.metadata["source_kind"] == "journal")
+        #expect(gasFact.metadata["source_quote"]?.contains("Gas/fuel spending:") == true)
+        #expect(gasFact.metadata["source_span_start"].flatMap(Int.init) != nil)
+        #expect(gasFact.metadata["source_span_end"].flatMap(Int.init) != nil)
+        #expect(gasFact.metadata["related_entities"]?.contains("Duvall") == true)
+        #expect(gasFact.metadata["related_entities"]?.contains("Mazda CX-5") == true)
+        #expect(gasFact.metadata["review_query_terms"]?.contains("last time I filled up") == true)
+    }
+
     @Test("graph candidate persists through enrichment outputs table")
     func graphCandidatePersistsThroughEnrichmentOutputsTable() throws {
         let (db, url) = try makeTestDB()

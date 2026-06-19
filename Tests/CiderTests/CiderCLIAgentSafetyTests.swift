@@ -3609,6 +3609,63 @@ struct CiderCLIAgentSafetyTests {
         #expect(inspectSafeCommands.contains("cider-cli item context note \(noteID) --json"))
     }
 
+    @Test("recall context finds journal gas spending facts from natural fill up query")
+    func recallContextFindsJournalGasSpendingFactsFromNaturalFillUpQuery() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-recall-gas-spending-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-11",
+            content: """
+            Retroactive recovered journal entry — 2026-06-11 morning gas fill-up / commute
+
+            Recovered from Hermes Discord session search after Visher clarified this was the later morning fill-up after the Duvall trip.
+
+            Gas/fuel spending:
+            - Filled up while driving to work in the morning.
+            - Total: $81.07.
+            - Fuel amount: 12.87 gallons.
+            - Effective price: about $6.30/gallon.
+            - Fuel grade: mid-grade / 89 octane.
+            - Vehicle context: Visher said he should be getting premium because of the turbo in his Mazda CX-5, but premium would be even more expensive, so he has been using mid-grade.
+            - Reaction: gas was "fricking ridiculous" / "too fucking expensive."
+            """,
+            vault: vault
+        )
+
+        let backfill = try parseJSONObject(try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-11", "--json"], vault: vault).stdout)
+        #expect(backfill["ok"] as? Bool == true)
+        #expect(backfill["memoryCandidateCount"] as? Int == 1)
+
+        let _ = try createNote(
+            title: "Last Harbor on Steam",
+            content: "A game page saved last time; unrelated to fuel spending.",
+            vault: vault
+        )
+
+        for query in ["last time I filled up", "what did I spend on gas", "that expensive morning fill-up", "$81.07", "12.87 gallons"] {
+            let result = try runCLI(args: ["item", "recall-context", "--query", query, "--limit", "1", "--json"], vault: vault)
+            let payload = try parseJSONObject(result.stdout)
+            #expect(result.status == 0, "query should succeed: \(query)")
+            #expect(payload["ok"] as? Bool == true, "query should return ok=true: \(query)")
+            let anchors = try #require(payload["anchors"] as? [[String: Any]])
+            #expect(anchors.contains { (($0["item"] as? [String: Any])?["id"] as? String) == journalID }, "query should anchor the gas journal: \(query)")
+            let candidates = try #require(payload["reviewableCandidates"] as? [[String: Any]])
+            let gasCandidate = try #require(candidates.first { ($0["metadata"] as? [String: String])?["memory_key"] == "spending-gas-fill-up-2026-06-11-81.07" })
+            #expect(gasCandidate["truthState"] as? String == "reviewable_candidate_not_truth")
+            #expect(gasCandidate["sourceQuote"] as? String != nil)
+            #expect((gasCandidate["metadata"] as? [String: String])?["amount"] == "81.07")
+            #expect((gasCandidate["metadata"] as? [String: String])?["quantity"] == "12.87")
+            #expect((gasCandidate["metadata"] as? [String: String])?["unit_price"] == "6.30")
+            #expect((gasCandidate["sourceEvidenceRecord"] as? [String: Any])?["sourceOwnerRef"] as? String == "note:\(journalID)")
+            let review = try #require(payload["reviewStatus"] as? [String: Any])
+            #expect(review["needsReview"] as? Bool == true)
+            #expect((review["blockingIssues"] as? [String])?.contains("memory_candidates_need_review") == true)
+        }
+    }
+
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")
     func recallContextBundleCitesAcceptedGraphEvidenceAndReviewableCandidates() throws {
         let vault = FileManager.default.temporaryDirectory

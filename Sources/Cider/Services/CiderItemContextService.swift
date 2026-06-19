@@ -636,6 +636,62 @@ final class CiderItemContextService {
         return results
     }
 
+    private func searchEnrichmentOutputs(
+        _ query: String,
+        limit: Int,
+        spaceRefs: Set<LibraryEntityRef>? = nil
+    ) throws -> [CiderItemSearchResult] {
+        let stmt = try database.prepare("""
+            SELECT id, owner_type, owner_id, kind, value, evidence, metadata, confidence, review_state
+            FROM enrichment_outputs
+            WHERE value LIKE ? ESCAPE '\\'
+               OR normalized_value LIKE ? ESCAPE '\\'
+               OR evidence LIKE ? ESCAPE '\\'
+               OR metadata LIKE ? ESCAPE '\\'
+            ORDER BY
+                CASE WHEN kind = 'memory_candidate' THEN 0 ELSE 1 END,
+                confidence DESC,
+                updated_at DESC
+            LIMIT ?;
+            """)
+        let pattern = "%\(escapedLikePattern(query))%"
+        stmt.bind(pattern, at: 1)
+            .bind(pattern, at: 2)
+            .bind(pattern, at: 3)
+            .bind(pattern, at: 4)
+            .bind(max(1, limit), at: 5)
+
+        var results: [CiderItemSearchResult] = []
+        while try stmt.step() {
+            let owner = SecondBrainOwnerRef(ownerType: stmt.string(at: 1), ownerID: stmt.string(at: 2))
+            guard let item = try? itemSummary(owner: owner) else { continue }
+            if let spaceRefs {
+                let ref = LibraryEntityRef(type: item.type, entityID: item.id)
+                guard spaceRefs.contains(ref) else { continue }
+            }
+            let kind = stmt.string(at: 3)
+            let value = stmt.string(at: 4)
+            let evidence = stmt.string(at: 5)
+            let metadata = stmt.optionalString(at: 6) ?? ""
+            let reviewState = stmt.optionalString(at: 8) ?? "suggested"
+            let title = kind == "memory_candidate" ? "Memory candidate: \(item.title)" : "Enrichment: \(item.title)"
+            let snippet = [value, evidence, metadata]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            results.append(CiderItemSearchResult(
+                id: "enrichment-output-\(stmt.string(at: 0))",
+                kind: .chunk,
+                owner: owner,
+                item: item,
+                title: title,
+                snippet: snippet,
+                rank: kind == "memory_candidate" ? 260 : 180,
+                rankFactors: ["enrichment_output_match", "enrichment_kind:\(kind)", "review_state:\(reviewState)"]
+            ))
+        }
+        return results
+    }
+
     private func diagnosticResult(
         _ result: CiderItemSearchResult,
         matches stage: RecallQueryStage
@@ -730,6 +786,15 @@ final class CiderItemContextService {
             "lead": ["team lead", "team leader", "TL"],
             "work": ["work", "team leader", "TL"],
             "hub": ["hub", "work hub", "team leader"],
+            "fill": ["fill-up", "fill up", "filled up", "filled", "gas", "fuel"],
+            "filled": ["filled up", "fill-up", "fill up", "gas", "fuel", "gallons"],
+            "gas": ["gas", "fuel", "gas/fuel spending", "filled up", "gallons"],
+            "fuel": ["fuel", "gas", "gas/fuel spending", "filled up", "gallons"],
+            "spend": ["spend", "spent", "spending", "total", "cost"],
+            "spent": ["spent", "spending", "total", "cost"],
+            "spending": ["spending", "spent", "total", "cost"],
+            "gallon": ["gallon", "gallons", "fuel", "gas"],
+            "gallons": ["gallons", "gallon", "fuel", "gas"],
         ]
         for token in tokens {
             guard !isLowSignalRecallExpansion(token) else { continue }
@@ -761,9 +826,9 @@ final class CiderItemContextService {
         let normalized = normalizedRecallToken(token)
         let lowSignal: Set<String> = [
             "a", "an", "and", "are", "as", "at", "be", "but", "by",
-            "for", "forgot", "from", "i", "in", "into", "is", "it",
-            "me", "of", "on", "or", "that", "the", "this", "title",
-            "to", "using", "with",
+            "for", "forgot", "from", "i", "in", "into", "is", "it", "last",
+            "me", "of", "on", "or", "that", "the", "this", "time", "title",
+            "to", "up", "using", "what", "when", "where", "with",
         ]
         return lowSignal.contains(normalized)
     }
@@ -902,6 +967,44 @@ final class CiderItemContextService {
                 let evidence = try recallRankEvidence(
                     result: result,
                     chunk: matchedChunk,
+                    originalQuery: originalQuery,
+                    matchedQuery: stage.query,
+                    stage: stage
+                )
+                result.rank = recallRank(
+                    result: result,
+                    originalQuery: originalQuery,
+                    matchedQuery: stage.query,
+                    stageIndex: stageIndex,
+                    scope: scope,
+                    evidence: evidence
+                )
+                result.rankFactors = recallRankFactors(
+                    result: result,
+                    originalQuery: originalQuery,
+                    matchedQuery: stage.query,
+                    stage: stage,
+                    stageIndex: stageIndex,
+                    scope: scope,
+                    evidence: evidence
+                )
+                mergeRecallResult(result, into: &bestByOwner)
+            }
+
+            let enrichmentMatches = try searchEnrichmentOutputs(stage.query, limit: stageLimit, spaceRefs: spaceRefs)
+            for match in enrichmentMatches {
+                if tagFilter.hasFilters {
+                    guard let item = match.item,
+                          try self.item(item, matches: tagFilter) != nil else {
+                        continue
+                    }
+                }
+                var result = match
+                result.stage = stage.name
+                result.matchedQuery = stage.query
+                let evidence = try recallRankEvidence(
+                    result: result,
+                    chunk: nil,
                     originalQuery: originalQuery,
                     matchedQuery: stage.query,
                     stage: stage
@@ -1199,6 +1302,14 @@ final class CiderItemContextService {
 
         var contribution: Double = 0
         var factors: [String] = []
+        if combined.range(of: originalQuery, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
+            contribution += 220
+            factors.append("exact_query_text_match")
+        }
+        if result.rankFactors.contains("enrichment_output_match") {
+            contribution += result.rank
+            factors.append("enrichment_output_match")
+        }
         var matchedDistinctive: [String] = []
         let fieldMatches: [(name: String, text: String, weight: Double)] = [
             ("item_title", title, 50),
@@ -1264,6 +1375,7 @@ final class CiderItemContextService {
             "and", "the", "for", "with", "from", "this", "that",
             "capture", "saved", "item", "social", "video", "media",
             "file", "document", "doc", "pdf", "movie", "game", "games",
+            "last", "time", "what", "when", "where", "did", "was", "were", "you",
             "tiktok", "imdb", "steam", "rottentomatoes", "rotten", "tomatoes",
         ]
         return !generic.contains(token)

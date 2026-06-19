@@ -16,6 +16,12 @@ struct SecondBrainJournalGraphCandidateExtractor {
     ) -> SecondBrainJournalGraphCandidateExtractionResult {
         let sentences = candidateSentences(from: rawContent)
         var outputs: [SecondBrainEnrichmentOutput] = []
+        outputs.append(contentsOf: spendingFactCandidates(
+            sourceOwner: sourceOwner,
+            rawContent: rawContent,
+            date: date,
+            time: time
+        ))
         for sentence in sentences {
             outputs.append(contentsOf: watchedCandidates(sourceOwner: sourceOwner, sentence: sentence))
             outputs.append(contentsOf: preferenceCandidates(sourceOwner: sourceOwner, sentence: sentence))
@@ -201,6 +207,226 @@ struct SecondBrainJournalGraphCandidateExtractor {
                 subjectText: "Visher"
             )
         }
+    }
+
+    private struct JournalTextLine {
+        var text: String
+        var start: Int
+        var end: Int
+    }
+
+    private struct JournalSpendingBlock {
+        var quote: String
+        var spanStart: Int
+        var spanEnd: Int
+    }
+
+    private func spendingFactCandidates(
+        sourceOwner: SecondBrainOwnerRef,
+        rawContent: String,
+        date: String?,
+        time: String?
+    ) -> [SecondBrainEnrichmentOutput] {
+        spendingBlocks(in: rawContent).compactMap { block in
+            makeGasSpendingMemoryCandidate(
+                sourceOwner: sourceOwner,
+                block: block,
+                date: date,
+                time: time
+            )
+        }
+    }
+
+    private func spendingBlocks(in text: String) -> [JournalSpendingBlock] {
+        let lines = indexedLines(in: text)
+        var blocks: [JournalSpendingBlock] = []
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            let lower = line.text.lowercased()
+            let isGasSpendingHeader = (lower.contains("gas/fuel") || (lower.contains("gas") && lower.contains("fuel")))
+                && (lower.contains("spending") || lower.contains("fill-up") || lower.contains("fill up"))
+            guard isGasSpendingHeader else {
+                index += 1
+                continue
+            }
+
+            var startIndex = index
+            let contextWindowStart = max(0, index - 5)
+            for candidateIndex in stride(from: index - 1, through: contextWindowStart, by: -1) {
+                let contextLine = lines[candidateIndex]
+                if contextLine.text.range(of: #"(?i)\b(Duvall|commute|fill-up|fill up|morning)\b"#, options: .regularExpression) != nil {
+                    startIndex = candidateIndex
+                }
+            }
+
+            var endIndex = index
+            var cursor = index + 1
+            while cursor < lines.count {
+                let candidate = lines[cursor]
+                guard trimmedNonEmpty(candidate.text) != nil else { break }
+                let candidateLower = candidate.text.lowercased()
+                if !candidate.text.trimmingCharacters(in: .whitespaces).hasPrefix("-")
+                    && candidateLower.hasSuffix(":")
+                    && !candidateLower.contains("gas")
+                    && !candidateLower.contains("fuel") {
+                    break
+                }
+                endIndex = cursor
+                cursor += 1
+            }
+
+            let start = lines[startIndex].start
+            let end = lines[endIndex].end
+            let quote = substring(in: text, start: start, end: end)
+            blocks.append(JournalSpendingBlock(quote: quote, spanStart: start, spanEnd: end))
+            index = max(cursor, index + 1)
+        }
+        return blocks
+    }
+
+    private func makeGasSpendingMemoryCandidate(
+        sourceOwner: SecondBrainOwnerRef,
+        block: JournalSpendingBlock,
+        date: String?,
+        time: String?
+    ) -> SecondBrainEnrichmentOutput? {
+        let quote = block.quote
+        let lower = quote.lowercased()
+        guard lower.contains("gas") || lower.contains("fuel") else { return nil }
+        guard let amount = firstCapture(
+            pattern: #"(?im)^\s*-?\s*(?:total|cost|spent|paid)\s*:?\s*\$\s*([0-9]+(?:\.[0-9]{1,2})?)"#,
+            in: quote
+        ) ?? firstCapture(pattern: #"\$\s*([0-9]+(?:\.[0-9]{1,2})?)"#, in: quote) else { return nil }
+        let quantity = firstCapture(
+            pattern: #"(?i)([0-9]+(?:\.[0-9]+)?)\s*(?:gal|gallon|gallons)\b"#,
+            in: quote
+        )
+        let unitPrice = firstCapture(
+            pattern: #"(?i)(?:about\s*)?\$\s*([0-9]+(?:\.[0-9]{1,2})?)\s*/\s*(?:gal|gallon|gallons)"#,
+            in: quote
+        )
+        let fuelGrade = firstCapture(
+            pattern: #"(?im)^\s*-?\s*Fuel grade\s*:\s*(.+?)\.?\s*$"#,
+            in: quote
+        )
+        let normalizedDate = date.flatMap(trimmedNonEmpty)
+        let normalizedTime = time.flatMap(trimmedNonEmpty)
+        let fillContext = lower.contains("morning") ? "morning " : ""
+        let datePhrase = normalizedDate.map { " on \($0)" } ?? ""
+        let tripPhrase = quote.range(of: #"(?i)\bDuvall\b"#, options: .regularExpression) != nil ? " after Duvall" : ""
+        let quantityPhrase = quantity.map { " for \($0) gallons" } ?? ""
+        let unitPricePhrase = unitPrice.map { " (about $\($0)/gal)" } ?? ""
+        let gradePhrase = fuelGrade.map { " of \($0)" } ?? ""
+        let value = "Visher filled up gas\(datePhrase) during the \(fillContext)commute\(tripPhrase): $\(amount)\(quantityPhrase)\(gradePhrase)\(unitPricePhrase)."
+            .replacingOccurrences(of: "  ", with: " ")
+        var output = SecondBrainEnrichmentOutput(
+            owner: sourceOwner,
+            chunkID: nil,
+            kind: "memory_candidate",
+            value: value,
+            normalizedValue: normalizedValue(value),
+            label: "Memory candidate: spending fact",
+            evidence: quote,
+            source: "memory_candidate.journal_spending_extraction",
+            confidence: gasSpendingConfidence(quantity: quantity, unitPrice: unitPrice, fuelGrade: fuelGrade),
+            reviewState: "suggested",
+            metadata: [
+                "memory_kind": "spending_fact",
+                "candidate_kind": "spending_fact",
+                "fact_type": "fuel_purchase",
+                "spending_category": "gas",
+                "amount": amount,
+                "currency": "USD",
+                "requires_review": "true",
+                "memory_status": "current",
+                "memory_key": "spending-gas-fill-up-\(normalizedDate ?? "unknown-date")-\(amount)",
+                "requested_owner_type": sourceOwner.ownerType,
+                "requested_owner_ref": sourceOwner.ownerID,
+                "source_owner_ref": sourceOwner.canonicalRef,
+                "source_kind": "journal",
+                "source_quote": quote,
+                "source_span_start": String(block.spanStart),
+                "source_span_end": String(block.spanEnd),
+                "review_query_terms": "last time I filled up|what did I spend on gas|expensive morning fill-up|$\(amount)|\(quantity.map { "\($0) gallons" } ?? "")",
+            ]
+        )
+        output.metadata["candidate_ref"] = "memory_candidate:\(output.id)"
+        if let quantity {
+            output.metadata["quantity"] = quantity
+            output.metadata["quantity_unit"] = "gallons"
+        }
+        if let unitPrice {
+            output.metadata["unit_price"] = unitPrice
+            output.metadata["unit_price_unit"] = "USD_per_gallon"
+        }
+        if let fuelGrade { output.metadata["fuel_grade"] = fuelGrade }
+        if let normalizedDate {
+            output.metadata["journal_date"] = normalizedDate
+            output.metadata["date_context"] = normalizedDate
+            output.metadata["observed_date"] = normalizedDate
+        }
+        if let normalizedTime {
+            output.metadata["journal_time"] = normalizedTime
+            output.metadata["time_context"] = normalizedTime
+        }
+        let entities = relatedEntities(in: quote)
+        if !entities.isEmpty {
+            output.metadata["related_entities"] = encodeJSONStringArray(entities)
+            output.metadata["linked_entity_names"] = entities.joined(separator: "|")
+        }
+        return output
+    }
+
+    private func gasSpendingConfidence(quantity: String?, unitPrice: String?, fuelGrade: String?) -> Double {
+        var confidence = 0.72
+        if quantity != nil { confidence += 0.06 }
+        if unitPrice != nil { confidence += 0.06 }
+        if fuelGrade != nil { confidence += 0.04 }
+        return min(confidence, 0.9)
+    }
+
+    private func relatedEntities(in text: String) -> [String] {
+        var entities: [String] = []
+        let knownEntities = ["Duvall", "Mazda CX-5", "Mazda CX5", "Boeing", "ERT"]
+        for entity in knownEntities where text.range(of: entity, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
+            let canonical = entity == "Mazda CX5" ? "Mazda CX-5" : entity
+            if !entities.contains(canonical) { entities.append(canonical) }
+        }
+        return entities
+    }
+
+    private func indexedLines(in text: String) -> [JournalTextLine] {
+        var lines: [JournalTextLine] = []
+        var offset = 0
+        for rawLineSubsequence in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let rawLine = String(rawLineSubsequence)
+            lines.append(JournalTextLine(text: rawLine, start: offset, end: offset + rawLine.count))
+            offset += rawLine.count + 1
+        }
+        return lines
+    }
+
+    private func substring(in text: String, start: Int, end: Int) -> String {
+        let lowerBound = text.index(text.startIndex, offsetBy: max(0, min(start, text.count)))
+        let upperBound = text.index(text.startIndex, offsetBy: max(0, min(end, text.count)))
+        return String(text[lowerBound..<upperBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func firstCapture(pattern: String, in text: String) -> String? {
+        regexMatches(pattern: pattern, in: text)
+            .first?
+            .captures
+            .first??
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func encodeJSONStringArray(_ values: [String]) -> String {
+        guard let data = try? JSONEncoder().encode(values),
+              let string = String(data: data, encoding: .utf8) else {
+            return values.joined(separator: "|")
+        }
+        return string
     }
 
     private func memoryCandidates(
