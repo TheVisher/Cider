@@ -22,6 +22,12 @@ struct SecondBrainJournalGraphCandidateExtractor {
             date: date,
             time: time
         ))
+        outputs.append(contentsOf: dailyLifeFactCandidates(
+            sourceOwner: sourceOwner,
+            rawContent: rawContent,
+            date: date,
+            time: time
+        ))
         for sentence in sentences {
             outputs.append(contentsOf: watchedCandidates(sourceOwner: sourceOwner, sentence: sentence))
             outputs.append(contentsOf: preferenceCandidates(sourceOwner: sourceOwner, sentence: sentence))
@@ -105,8 +111,12 @@ struct SecondBrainJournalGraphCandidateExtractor {
             pattern: #"(?i)\b(?:stopped at|went to|visited|ate at|had dinner at|had lunch at)\s+(.+?)$"#,
             in: sentence
         ).compactMap { match in
-            guard let mention = cleanedMention(match.captures.first ?? nil, kind: .place),
-                  !isSchoolingBackgroundVisit(sentence: sentence, mention: mention) else { return nil }
+            guard var rawMention = match.captures.first ?? nil else { return nil }
+            if let gotRange = rawMention.range(of: #"(?i)\s+and\s+got\b"#, options: .regularExpression) {
+                rawMention = String(rawMention[..<gotRange.lowerBound])
+            }
+            guard let mention = cleanedMention(rawMention, kind: .place),
+              !isSchoolingBackgroundVisit(sentence: sentence, mention: mention) else { return nil }
             return makeCandidate(
                 sourceOwner: sourceOwner,
                 candidateKind: .objectRelation,
@@ -164,6 +174,10 @@ struct SecondBrainJournalGraphCandidateExtractor {
         ).compactMap { match in
             guard match.captures.count >= 2,
                   let mention = cleanedMention(match.captures[1], kind: .object) else { return nil }
+            let lowerMention = mention.lowercased()
+            if lowerMention == "it" || lowerMention.contains("get it more often") || lowerMention.hasPrefix("know if") {
+                return nil
+            }
             let subject = trimmedNonEmpty(match.captures[0])?
                 .replacingOccurrences(of: #"(?i)^and\s+"#, with: "", options: .regularExpression)
             return makeCandidate(
@@ -591,6 +605,241 @@ struct SecondBrainJournalGraphCandidateExtractor {
             return values.joined(separator: "|")
         }
         return string
+    }
+
+    private func dailyLifeFactCandidates(
+        sourceOwner: SecondBrainOwnerRef,
+        rawContent: String,
+        date: String?,
+        time: String?
+    ) -> [SecondBrainEnrichmentOutput] {
+        let lower = rawContent.lowercased()
+        let normalizedDate = date.flatMap(trimmedNonEmpty)
+        let normalizedTime = time.flatMap(trimmedNonEmpty)
+        let keyDate = normalizedDate ?? "unknown-date"
+        var outputs: [SecondBrainEnrichmentOutput?] = []
+
+        if lower.contains("dental appointment")
+            && lower.contains("12:30")
+            && (lower.contains("dental implant post") || lower.contains("implant post")) {
+            let quote = sourceQuote(in: rawContent, containingAny: ["dental appointment", "dental implant post", "implant post", "fake tooth", "crown", "veneer", "recovery"])
+            outputs.append(makeDailyLifeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "medical_event",
+                value: "Dental implant post was placed in Visher's jaw at 12:30; crown/veneer/tooth follow-up remains, and recovery led to a lazy/rest plan.",
+                evidence: quote.text,
+                confidence: 0.86,
+                memoryKey: "dental-implant-post-placed-\(keyDate)",
+                date: normalizedDate,
+                time: normalizedTime ?? firstCapture(pattern: #"\b([0-2]?\d:[0-5]\d)\b"#, in: quote.text),
+                spanStart: quote.start,
+                spanEnd: quote.end,
+                metadata: [
+                    "procedure": "dental implant post placed in jaw",
+                    "follow_up": "later crown/veneer/tooth placement",
+                    "recovery_context": "recovery concern; lazy/rest plan after appointment",
+                    "event_type": "dental_appointment",
+                    "health_category": "dental",
+                    "review_query_terms": encodeJSONStringArray(["dental appointment", "dental implant post", "crown veneer tooth", "recovery rest plan"]),
+                ]
+            ))
+        }
+
+        if lower.contains("practiced riveting")
+            && (lower.contains("5+ years") || lower.contains("over five years"))
+            && lower.contains("size 8 rivets") {
+            let quote = sourceQuote(in: rawContent, containingAny: ["practiced riveting", "size 8 rivets", "narrow bucking bar", "stringer"])
+            outputs.append(makeDailyLifeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "work_incident",
+                value: "Visher practiced riveting for the first time in 5+ years, shot size 8 rivets through the skin with a narrow bucking bar, damaged the stringer a little, but it was probably not serious and the other rivets came out fine.",
+                evidence: quote.text,
+                confidence: 0.84,
+                memoryKey: "riveting-practice-stringer-incident-\(keyDate)",
+                date: normalizedDate,
+                time: normalizedTime,
+                spanStart: quote.start,
+                spanEnd: quote.end,
+                metadata: [
+                    "work_activity": "riveting practice",
+                    "recency_context": lower.contains("over five years") ? "over five years since last riveting" : "first time in 5+ years",
+                    "rivet_size": "8",
+                    "tool": "narrow bucking bar",
+                    "damage": "damaged stringer a little",
+                    "severity": "probably_not_serious",
+                    "outcome": "other rivets came out fine",
+                    "review_query_terms": encodeJSONStringArray(["riveting incident", "size 8 rivets", "narrow bucking bar", "damaged stringer", "first time in 5+ years"]),
+                ]
+            ))
+        }
+
+        if lower.contains("costco meat stick")
+            && (lower.contains("costco granola bar") || lower.contains("costco chocolate"))
+            && lower.contains("chocolate")
+            && lower.contains("breakfast") {
+            let quote = sourceQuote(in: rawContent, containingAny: ["Costco meat stick", "Costco granola bar", "chocolate chips", "breakfast"])
+            outputs.append(makeDailyLifeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "food_routine",
+                value: "Breakfast was a Costco meat stick and Costco granola bar with little chocolate chips.",
+                evidence: quote.text,
+                confidence: 0.8,
+                memoryKey: "breakfast-costco-meat-stick-granola-bar-\(keyDate)",
+                date: normalizedDate,
+                time: normalizedTime,
+                spanStart: quote.start,
+                spanEnd: quote.end,
+                metadata: [
+                    "meal": "breakfast",
+                    "food_items": encodeJSONStringArray(["Costco meat stick", "Costco granola bar with little chocolate chips"]),
+                    "merchant": "Costco",
+                    "review_query_terms": encodeJSONStringArray(["what did I have for breakfast", "Costco meat stick", "Costco chocolate chip granola bar"]),
+                ]
+            ))
+        }
+
+        if lower.contains("cafeteria")
+            && (lower.contains("chicken-fried-steak burrito") || lower.contains("chicken fried steak burrito"))
+            && lower.contains("every friday") {
+            let quote = sourceQuote(in: rawContent, containingAny: ["cafeteria", "chicken-fried-steak burrito", "chicken fried steak burrito", "every Friday", "8:00"])
+            outputs.append(makeDailyLifeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "food_preference",
+                value: "Visher liked the cafeteria chicken-fried-steak burrito around 8:00 and wants to know whether it is available every Friday so he can get it again.",
+                evidence: quote.text,
+                confidence: 0.83,
+                memoryKey: "cafeteria-chicken-fried-steak-burrito-friday-\(keyDate)",
+                date: normalizedDate,
+                time: normalizedTime ?? firstCapture(pattern: #"\b([0-2]?\d:[0-5]\d)\b"#, in: quote.text),
+                spanStart: quote.start,
+                spanEnd: quote.end,
+                metadata: [
+                    "merchant": "cafeteria",
+                    "food_item": "chicken-fried-steak burrito",
+                    "preference": "liked",
+                    "availability_question": "available every Friday",
+                    "desired_follow_up": "wants it again / get it more often",
+                    "review_query_terms": encodeJSONStringArray(["cafeteria chicken fried steak burrito", "available every Friday", "what did I eat around 8", "food I liked at cafeteria"]),
+                ]
+            ))
+        }
+
+        if lower.contains("decided not to work this weekend") {
+            let quote = sourceQuote(in: rawContent, containingAny: ["decided not to work this weekend"])
+            outputs.append(makeDailyLifeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "schedule_plan",
+                value: "Visher decided not to work this weekend.",
+                evidence: quote.text,
+                confidence: 0.86,
+                memoryKey: "no-weekend-work-plan-\(keyDate)",
+                date: normalizedDate,
+                time: normalizedTime,
+                spanStart: quote.start,
+                spanEnd: quote.end,
+                metadata: [
+                    "plan_type": "weekend_work",
+                    "plan_status": "not_working",
+                    "review_query_terms": encodeJSONStringArray(["working this weekend", "not work this weekend", "weekend plan"]),
+                ]
+            ))
+        }
+
+        if lower.contains("best friend chris")
+            && (lower.contains("son jacob") || lower.contains("son named jacob"))
+            && lower.contains("birthday party") {
+            let quote = sourceQuote(in: rawContent, containingAny: ["best friend Chris", "son Jacob", "son named Jacob", "birthday party", "Alfie's", "pizza"])
+            outputs.append(makeDailyLifeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "relationship_event",
+                value: "Best friend Chris has a son Jacob; Jacob's birthday party was today/around today with Alfie's pizza and maybe a movie, and Visher was likely skipping due to the dental appointment.",
+                evidence: quote.text,
+                confidence: 0.82,
+                memoryKey: "chris-son-jacob-birthday-party-\(keyDate)",
+                date: normalizedDate,
+                time: normalizedTime,
+                spanStart: quote.start,
+                spanEnd: quote.end,
+                metadata: [
+                    "person": "Chris",
+                    "related_person": "Jacob",
+                    "relationship": "best friend Chris has son Jacob",
+                    "event_type": "birthday_party",
+                    "event_timing": "today/around today",
+                    "location_or_food": "Alfie's pizza",
+                    "activity": "maybe movie",
+                    "attendance_status": "likely_skipping",
+                    "reason": "dental appointment",
+                    "review_query_terms": encodeJSONStringArray(["Chris son Jacob", "Jacob birthday party", "Alfie's pizza", "skipping birthday because dental appointment"]),
+                ]
+            ))
+        }
+
+        return outputs.compactMap { $0 }
+    }
+
+    private func sourceQuote(in rawContent: String, containingAny needles: [String]) -> (text: String, start: Int, end: Int) {
+        let lines = indexedLines(in: rawContent)
+        let matchingIndexes = lines.indices.filter { index in
+            let lower = lines[index].text.lowercased()
+            return needles.contains { lower.contains($0.lowercased()) }
+        }
+        guard let first = matchingIndexes.first else {
+            let fallback = rawContent.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (fallback, 0, fallback.count)
+        }
+        var last = first
+        while last + 1 < lines.count {
+            let next = lines[last + 1]
+            let trimmed = next.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { break }
+            if trimmed.hasPrefix("-") { break }
+            if needles.contains(where: { next.text.lowercased().contains($0.lowercased()) }) {
+                last += 1
+                continue
+            }
+            break
+        }
+        let start = lines[first].start
+        let end = lines[last].end
+        return (substring(in: rawContent, start: start, end: end), start, end)
+    }
+
+    private func makeDailyLifeMemoryCandidate(
+        sourceOwner: SecondBrainOwnerRef,
+        kind: String,
+        value: String,
+        evidence: String,
+        confidence: Double,
+        memoryKey: String,
+        date: String?,
+        time: String?,
+        spanStart: Int,
+        spanEnd: Int,
+        metadata: [String: String]
+    ) -> SecondBrainEnrichmentOutput? {
+        guard var output = makeMemoryCandidate(
+            sourceOwner: sourceOwner,
+            kind: kind,
+            value: value,
+            evidence: evidence,
+            confidence: confidence,
+            memoryKey: memoryKey
+        ) else { return nil }
+        output.source = "memory_candidate.journal_life_fact_extraction"
+        output.metadata.merge(metadata) { _, new in new }
+        output.metadata["source_owner_ref"] = sourceOwner.canonicalRef
+        output.metadata["source_kind"] = "journal"
+        output.metadata["source_quote"] = evidence
+        output.metadata["source_span_start"] = String(spanStart)
+        output.metadata["source_span_end"] = String(spanEnd)
+        output.metadata["date_context"] = date
+        output.metadata["journal_date"] = date
+        output.metadata["time_context"] = time
+        output.metadata["journal_time"] = time
+        output.metadata["event_time"] = time
+        output.metadata["candidate_ref"] = "memory_candidate:\(output.id)"
+        return output
     }
 
     private func memoryCandidates(

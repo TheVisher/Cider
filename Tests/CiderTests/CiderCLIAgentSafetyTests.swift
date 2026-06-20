@@ -3850,6 +3850,59 @@ struct CiderCLIAgentSafetyTests {
         #expect(contentBlocks.contains { ($0["citation"] as? [String: Any])?["ownerID"] as? String == journalID })
     }
 
+    @Test("drive home journal backfill recalls daily life candidates as source backed reviewables")
+    func driveHomeJournalBackfillRecallsDailyLifeCandidatesAsSourceBackedReviewables() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-drive-home-life-facts-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-19",
+            content: """
+            Drive-home journal, 2026-06-19.
+            I had my dental appointment at 12:30 today where they placed the dental implant post in my jaw. Later I need the crown or veneer or tooth put on, and I was a little worried about recovery, so I decided to be lazy and rest after.
+            At work I practiced riveting for the first time in 5+ years. I shot size 8 rivets through the skin with a narrow bucking bar, damaged the stringer a little, but it is probably not serious and the other rivets came out fine.
+            For breakfast I had a Costco meat stick and a Costco chocolate-chip granola bar. Around 8:00 I got the cafeteria chicken-fried-steak burrito, liked it, and want to know if they have it every Friday so I can get it more often.
+            I decided not to work this weekend.
+            My best friend Chris has a son Jacob and Jacob's birthday party is today with Alfie's pizza and maybe a movie, but I will probably skip it because of the dental appointment.
+            """,
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Dental tools reference",
+            content: "Raw searchable distractor about dental implants, movies, pizza, and weekends.",
+            vault: vault
+        )
+
+        let backfillResult = try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-19"], vault: vault)
+        #expect(backfillResult.status == 0)
+        let reviewQueue = try parseJSONObject(try runCLI(args: ["capture", "review-queue", "--kind", "memory_candidate", "--limit", "20", "--json"], vault: vault).stdout)
+        let candidates = try #require(reviewQueue["items"] as? [[String: Any]])
+        let keys = Set(candidates.compactMap { $0["memoryKey"] as? String })
+        #expect(keys.contains("dental-implant-post-placed-2026-06-19"))
+        #expect(keys.contains("riveting-practice-stringer-incident-2026-06-19"))
+        #expect(keys.contains("breakfast-costco-meat-stick-granola-bar-2026-06-19"))
+        #expect(keys.contains("cafeteria-chicken-fried-steak-burrito-friday-2026-06-19"))
+        #expect(keys.contains("no-weekend-work-plan-2026-06-19"))
+        #expect(keys.contains("chris-son-jacob-birthday-party-2026-06-19"))
+
+        for key in [
+            "dental-implant-post-placed-2026-06-19",
+            "riveting-practice-stringer-incident-2026-06-19",
+            "breakfast-costco-meat-stick-granola-bar-2026-06-19",
+            "cafeteria-chicken-fried-steak-burrito-friday-2026-06-19",
+            "no-weekend-work-plan-2026-06-19",
+            "chris-son-jacob-birthday-party-2026-06-19",
+        ] {
+            let candidate = try #require(candidates.first { $0["memoryKey"] as? String == key })
+            #expect(candidate["truthState"] as? String == "reviewable_candidate_not_truth")
+            #expect((candidate["sourceEvidenceRecord"] as? [String: Any])?["sourceOwnerRef"] as? String == "note:\(journalID)")
+            #expect((candidate["sourceEvidenceRecord"] as? [String: Any])?["spanStart"] != nil)
+            #expect((candidate["sourceEvidenceRecord"] as? [String: Any])?["sourceQuote"] as? String != nil)
+        }
+    }
+
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")
     func recallContextBundleCitesAcceptedGraphEvidenceAndReviewableCandidates() throws {
         let vault = FileManager.default.temporaryDirectory

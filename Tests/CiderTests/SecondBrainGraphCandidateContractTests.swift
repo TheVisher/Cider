@@ -208,6 +208,80 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(!graphOutputs.contains { $0.value.localizedCaseInsensitiveContains("saw blades") })
     }
 
+    @Test("journal extractor creates drive home daily life memory candidates")
+    func journalExtractorCreatesDriveHomeDailyLifeMemoryCandidates() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: "4D9CEEB1-3182-4699-822D-FEEF626B2417")
+        let rawContent = """
+        Drive-home journal, 2026-06-19.
+        I had my dental appointment at 12:30 today where they placed the dental implant post in my jaw. Later I need the crown or veneer or tooth put on, and I was a little worried about recovery, so I decided to be lazy and rest after.
+        At work I practiced riveting for the first time in 5+ years. I shot size 8 rivets through the skin with a narrow bucking bar, damaged the stringer a little, but it is probably not serious and the other rivets came out fine.
+        For breakfast I had a Costco meat stick and a Costco chocolate-chip granola bar. Around 8:00 I got the cafeteria chicken-fried-steak burrito, liked it, and want to know if they have it every Friday so I can get it more often.
+        I decided not to work this weekend.
+        My best friend Chris has a son Jacob and Jacob's birthday party is today with Alfie's pizza and maybe a movie, but I will probably skip it because of the dental appointment.
+        """
+
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: rawContent,
+            date: "2026-06-19"
+        )
+        let memoryOutputs = result.outputs.filter { $0.kind == "memory_candidate" }
+        func candidate(_ key: String) throws -> SecondBrainEnrichmentOutput {
+            try #require(memoryOutputs.first { $0.metadata["memory_key"] == key })
+        }
+
+        let dental = try candidate("dental-implant-post-placed-2026-06-19")
+        #expect(dental.metadata["memory_kind"] == "medical_event")
+        #expect(dental.metadata["event_time"] == "12:30")
+        #expect(dental.metadata["date_context"] == "2026-06-19")
+        #expect(dental.metadata["procedure"] == "dental implant post placed in jaw")
+        #expect(dental.metadata["follow_up"]?.contains("crown") == true)
+        #expect(dental.metadata["recovery_context"]?.contains("rest") == true)
+        #expect(dental.metadata["source_owner_ref"] == owner.canonicalRef)
+        #expect(dental.metadata["source_span_start"].flatMap(Int.init) != nil)
+        #expect(dental.metadata["source_span_end"].flatMap(Int.init) != nil)
+        #expect(dental.evidence.contains("12:30"))
+
+        let riveting = try candidate("riveting-practice-stringer-incident-2026-06-19")
+        #expect(riveting.metadata["memory_kind"] == "work_incident")
+        #expect(riveting.metadata["rivet_size"] == "8")
+        #expect(riveting.metadata["tool"] == "narrow bucking bar")
+        #expect(riveting.metadata["damage"]?.contains("stringer") == true)
+        #expect(riveting.metadata["severity"] == "probably_not_serious")
+        #expect(riveting.metadata["recency_context"] == "first time in 5+ years")
+
+        let breakfast = try candidate("breakfast-costco-meat-stick-granola-bar-2026-06-19")
+        #expect(breakfast.metadata["memory_kind"] == "food_routine")
+        #expect(breakfast.metadata["meal"] == "breakfast")
+        #expect(breakfast.metadata["food_items"]?.contains("Costco") == true)
+        #expect(breakfast.metadata["food_items"]?.contains("chocolate") == true)
+
+        let burrito = try candidate("cafeteria-chicken-fried-steak-burrito-friday-2026-06-19")
+        #expect(burrito.metadata["memory_kind"] == "food_preference")
+        #expect(burrito.metadata["event_time"] == "8:00")
+        #expect(burrito.metadata["merchant"] == "cafeteria")
+        #expect(burrito.metadata["food_item"] == "chicken-fried-steak burrito")
+        #expect(burrito.metadata["preference"] == "liked")
+        #expect(burrito.metadata["availability_question"]?.contains("every Friday") == true)
+        #expect(!burrito.value.localizedCaseInsensitiveContains("to get it more often"))
+
+        let weekend = try candidate("no-weekend-work-plan-2026-06-19")
+        #expect(weekend.metadata["memory_kind"] == "schedule_plan")
+        #expect(weekend.metadata["plan_status"] == "not_working")
+        #expect(weekend.metadata["date_context"] == "2026-06-19")
+
+        let birthday = try candidate("chris-son-jacob-birthday-party-2026-06-19")
+        #expect(birthday.metadata["memory_kind"] == "relationship_event")
+        #expect(birthday.metadata["person"] == "Chris")
+        #expect(birthday.metadata["related_person"] == "Jacob")
+        #expect(birthday.metadata["relationship"] == "best friend Chris has son Jacob")
+        #expect(birthday.metadata["event_type"] == "birthday_party")
+        #expect(birthday.metadata["attendance_status"] == "likely_skipping")
+        #expect(birthday.metadata["reason"]?.contains("dental appointment") == true)
+
+        #expect(!result.outputs.contains { $0.value == "to get it more often" })
+    }
+
     @Test("journal extractor suppresses schooling background as place visits")
     func journalExtractorSuppressesSchoolingBackgroundAsPlaceVisits() throws {
         let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
