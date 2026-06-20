@@ -16,6 +16,12 @@ struct SecondBrainJournalGraphCandidateExtractor {
     ) -> SecondBrainJournalGraphCandidateExtractionResult {
         let sentences = candidateSentences(from: rawContent)
         var outputs: [SecondBrainEnrichmentOutput] = []
+        outputs.append(contentsOf: payrollRateFactCandidates(
+            sourceOwner: sourceOwner,
+            rawContent: rawContent,
+            date: date,
+            time: time
+        ))
         outputs.append(contentsOf: spendingFactCandidates(
             sourceOwner: sourceOwner,
             rawContent: rawContent,
@@ -256,6 +262,223 @@ struct SecondBrainJournalGraphCandidateExtractor {
             time: time
         )
         return blockCandidates + proseCandidates
+    }
+
+    private struct PayrollRateContext {
+        var employer: String?
+        var unionOrGrade: String?
+        var sourceContext: String?
+    }
+
+    private struct PayrollRateKind {
+        var key: String
+        var displayName: String
+        var multiplier: String
+        var queryTerms: [String]
+    }
+
+    private struct PayrollRateMatch {
+        var rate: String
+        var range: Range<String.Index>
+    }
+
+    private func payrollRateFactCandidates(
+        sourceOwner: SecondBrainOwnerRef,
+        rawContent: String,
+        date: String?,
+        time: String?
+    ) -> [SecondBrainEnrichmentOutput] {
+        let context = payrollRateContext(in: rawContent)
+        return candidateSentences(from: rawContent).flatMap { sentence in
+            payrollRateMatches(in: sentence).compactMap { match in
+                guard let kind = payrollRateKind(for: sentence, rateRange: match.range) else { return nil }
+                return makePayrollRateMemoryCandidate(
+                    sourceOwner: sourceOwner,
+                    sentence: sentence,
+                    rawContent: rawContent,
+                    date: date,
+                    time: time,
+                    context: context,
+                    rate: match.rate,
+                    kind: kind
+                )
+            }
+        }
+    }
+
+    private func payrollRateMatches(in sentence: String) -> [PayrollRateMatch] {
+        guard let regex = try? NSRegularExpression(pattern: #"\$\s*([0-9]+(?:\.[0-9]{1,2})?)\s*/?\s*(?:hr|hour)\b"#, options: [.caseInsensitive]) else {
+            return []
+        }
+        let nsSentence = sentence as NSString
+        return regex.matches(in: sentence, range: NSRange(location: 0, length: nsSentence.length)).compactMap { match in
+            guard match.numberOfRanges > 1,
+                  let fullRange = Range(match.range(at: 0), in: sentence),
+                  match.range(at: 1).location != NSNotFound else { return nil }
+            let prefixStart = sentence.index(fullRange.lowerBound, offsetBy: -min(8, sentence.distance(from: sentence.startIndex, to: fullRange.lowerBound)))
+            let prefix = String(sentence[prefixStart..<fullRange.lowerBound]).lowercased()
+            guard !prefix.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("over") else { return nil }
+            let rate = nsSentence.substring(with: match.range(at: 1))
+            return PayrollRateMatch(rate: rate, range: fullRange)
+        }
+    }
+
+    private func makePayrollRateMemoryCandidate(
+        sourceOwner: SecondBrainOwnerRef,
+        sentence: String,
+        rawContent: String,
+        date: String?,
+        time: String?,
+        context: PayrollRateContext,
+        rate: String,
+        kind: PayrollRateKind
+    ) -> SecondBrainEnrichmentOutput? {
+        let normalizedDate = date.flatMap(trimmedNonEmpty)
+        let normalizedTime = time.flatMap(trimmedNonEmpty)
+        let span = sourceSpan(for: sentence, in: rawContent)
+        let value = "Visher's \(kind.displayName) rate is $\(rate)/hr."
+        var reviewTerms = kind.queryTerms + ["$\(rate)", "pay rate", "wage rate", "hourly wage", "gross pay"]
+        if kind.key == "straight_time" { reviewTerms.append("what is my hourly rate") }
+        var metadata: [String: String] = [
+            "memory_kind": "payroll_rate_fact",
+            "candidate_kind": "payroll_rate_fact",
+            "fact_type": "pay_rate",
+            "rate_kind": kind.key,
+            "rate_multiplier": kind.multiplier,
+            "hourly_rate": rate,
+            "currency": "USD",
+            "rate_unit": "hour",
+            "requires_review": "true",
+            "memory_status": "current",
+            "memory_key": "payroll-rate-\(kind.key.replacingOccurrences(of: "_", with: "-"))-\(normalizedDate ?? "unknown-date")-\(rate)",
+            "requested_owner_type": sourceOwner.ownerType,
+            "requested_owner_ref": sourceOwner.ownerID,
+            "source_owner_ref": sourceOwner.canonicalRef,
+            "source_kind": "journal",
+            "source_quote": sentence,
+            "source_span_start": String(span.start),
+            "source_span_end": String(span.end),
+            "review_query_terms": orderedUnique(reviewTerms).joined(separator: "|"),
+        ]
+        if let normalizedDate {
+            metadata["journal_date"] = normalizedDate
+            metadata["date_context"] = normalizedDate
+            metadata["observed_date"] = normalizedDate
+        }
+        if let normalizedTime {
+            metadata["journal_time"] = normalizedTime
+            metadata["time_context"] = normalizedTime
+        }
+        if let employer = context.employer { metadata["employer"] = employer }
+        if let unionOrGrade = context.unionOrGrade { metadata["union_or_grade"] = unionOrGrade }
+        if let sourceContext = context.sourceContext { metadata["payroll_source_context"] = sourceContext }
+
+        var output = SecondBrainEnrichmentOutput(
+            owner: sourceOwner,
+            chunkID: nil,
+            kind: "memory_candidate",
+            value: value,
+            normalizedValue: normalizedValue(value),
+            label: "Memory candidate: payroll rate fact",
+            evidence: sentence,
+            source: "memory_candidate.journal_payroll_rate_extraction",
+            confidence: payrollRateConfidence(sentence: sentence, context: context),
+            reviewState: "suggested",
+            metadata: metadata
+        )
+        output.metadata["candidate_ref"] = "memory_candidate:\(output.id)"
+        let entities = relatedEntities(in: rawContent)
+        if !entities.isEmpty {
+            output.metadata["related_entities"] = encodeJSONStringArray(entities)
+            output.metadata["linked_entity_names"] = entities.joined(separator: "|")
+        }
+        return output
+    }
+
+    private func payrollRateKind(for sentence: String, rateRange: Range<String.Index>) -> PayrollRateKind? {
+        let lower = sentence.lowercased()
+        let prefix = localPayrollContext(in: sentence, around: rateRange, before: 36, after: 12).lowercased()
+        let local = localPayrollContext(in: sentence, around: rateRange, before: 90, after: 90).lowercased()
+        guard local.contains("rate") || local.contains("/hr") || local.contains("/hour") else { return nil }
+        if prefix.contains("today is") && lower.contains("overtime") {
+            return PayrollRateKind(
+                key: "time_and_a_half",
+                displayName: "time-and-a-half overtime",
+                multiplier: "1.5",
+                queryTerms: ["time and a half rate", "time-and-a-half rate", "overtime rate", "1.5x rate"]
+            )
+        }
+        if prefix.contains("sunday")
+            || local.contains("double-time")
+            || local.contains("double time")
+            || local.contains("2x") {
+            return PayrollRateKind(
+                key: "double_time",
+                displayName: "double-time overtime",
+                multiplier: "2.0",
+                queryTerms: ["double time rate", "double-time rate", "Sunday overtime rate", "2x rate"]
+            )
+        }
+        if local.contains("straight-time")
+            || local.contains("straight time")
+            || local.contains("straight hours")
+            || local.contains("base rate")
+            || local.contains("base hourly")
+            || local.contains("hourly rate")
+            || local.contains("grade 5 max rate")
+            || local.contains("hourly wage ") {
+            return PayrollRateKind(
+                key: "straight_time",
+                displayName: "straight-time hourly",
+                multiplier: "1.0",
+                queryTerms: ["hourly rate", "base rate", "straight time rate", "straight-time rate"]
+            )
+        }
+        if local.contains("time-and-a-half")
+            || local.contains("time and a half")
+            || local.contains("1.5x") {
+            return PayrollRateKind(
+                key: "time_and_a_half",
+                displayName: "time-and-a-half overtime",
+                multiplier: "1.5",
+                queryTerms: ["time and a half rate", "time-and-a-half rate", "overtime rate", "1.5x rate"]
+            )
+        }
+        return nil
+    }
+
+    private func localPayrollContext(
+        in sentence: String,
+        around range: Range<String.Index>,
+        before: Int,
+        after: Int
+    ) -> String {
+        let lowerBound = sentence.index(range.lowerBound, offsetBy: -min(before, sentence.distance(from: sentence.startIndex, to: range.lowerBound)))
+        let upperDistance = sentence.distance(from: range.upperBound, to: sentence.endIndex)
+        let upperBound = sentence.index(range.upperBound, offsetBy: min(after, upperDistance))
+        return String(sentence[lowerBound..<upperBound])
+    }
+
+    private func payrollRateContext(in rawContent: String) -> PayrollRateContext {
+        let employer = rawContent.range(of: "Boeing", options: [.caseInsensitive, .diacriticInsensitive]) == nil ? nil : "Boeing"
+        let unionOrGrade = firstCapture(pattern: #"\b(IAM\s+Grade\s+\d+\s+max)\b"#, in: rawContent)
+        let sourceContext: String?
+        if rawContent.range(of: "wage card", options: [.caseInsensitive, .diacriticInsensitive]) != nil {
+            sourceContext = "wage card"
+        } else {
+            sourceContext = nil
+        }
+        return PayrollRateContext(employer: employer, unionOrGrade: unionOrGrade, sourceContext: sourceContext)
+    }
+
+    private func payrollRateConfidence(sentence: String, context: PayrollRateContext) -> Double {
+        var confidence = 0.78
+        if context.employer != nil { confidence += 0.03 }
+        if context.unionOrGrade != nil { confidence += 0.04 }
+        if sentence.range(of: #"\$\s*[0-9]+(?:\.[0-9]{1,2})?\s*/?\s*(?:hr|hour)\b"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            confidence += 0.04
+        }
+        return min(confidence, 0.9)
     }
 
     private func spendingBlocks(in text: String) -> [JournalSpendingBlock] {
@@ -605,6 +828,11 @@ struct SecondBrainJournalGraphCandidateExtractor {
             return values.joined(separator: "|")
         }
         return string
+    }
+
+    private func orderedUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter { seen.insert($0.lowercased()).inserted }
     }
 
     private func dailyLifeFactCandidates(

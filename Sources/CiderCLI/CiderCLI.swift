@@ -16475,16 +16475,25 @@ struct CiderCLI {
         if let query, !query.isEmpty {
             let results = try contextService.search(query, limit: limit)
             let refs = results.compactMap(\.item).map { LibraryEntityRef(type: $0.type, entityID: $0.id) }
-            if refs.isEmpty && anchorRefs.isEmpty {
+            let payrollRefs: [LibraryEntityRef]
+            if payrollHoursBreakdown(in: query) != nil {
+                payrollRefs = try contextService.search("pay_rate", limit: max(limit, 3))
+                    .compactMap(\.item)
+                    .map { LibraryEntityRef(type: $0.type, entityID: $0.id) }
+            } else {
+                payrollRefs = []
+            }
+            if refs.isEmpty && payrollRefs.isEmpty && anchorRefs.isEmpty {
                 throw RecallContextCLIError.noRecallMatches(query)
             }
-            if refs.count > 1 {
+            if refs.count + payrollRefs.count > 1 {
                 warnings.append([
                     "kind": "ambiguous_selector",
-                    "message": "Query matched \(refs.count) possible anchors; returning a bounded bundle instead of choosing one silently.",
+                    "message": "Query matched \(refs.count + payrollRefs.count) possible anchors; returning a bounded bundle instead of choosing one silently.",
                     "query": query,
                 ])
             }
+            anchorRefs.append(contentsOf: payrollRefs)
             anchorRefs.append(contentsOf: refs)
         }
         anchorRefs = orderedUniqueLibraryRefs(anchorRefs)
@@ -16506,6 +16515,7 @@ struct CiderCLI {
         var blockingIssues: [String] = []
         var surfacedRefs: [String] = []
         var reasonKinds: [String] = []
+        let derivedCalculations = recallDerivedCalculations(query: query, bundles: bundles)
 
         for bundle in bundles {
             let citation = recallCitation(owner: bundle.owner)
@@ -16635,6 +16645,7 @@ struct CiderCLI {
             "relatedItems": orderedUniqueDictionaries(relatedItems, key: "id"),
             "acceptedFacts": orderedUniqueDictionaries(acceptedFacts, key: "id"),
             "reviewableCandidates": orderedUniqueDictionaries(reviewableCandidates, key: "id"),
+            "derivedCalculations": derivedCalculations,
             "actionHistory": orderedUniqueDictionaries(actionHistory, key: "id"),
             "actionHistoryFilters": actionHistoryFilters,
             "reviewStatus": [
@@ -16831,6 +16842,187 @@ struct CiderCLI {
         dict["scoreReasons"] = scoreReasonsToDict(reasons)
         if dict["candidateRef"] == nil { dict["candidateRef"] = "memory_candidate:\(output.id)" }
         return dict
+    }
+
+    private struct PayrollHoursBreakdown {
+        var straight: (text: String, value: Decimal)
+        var timeAndAHalf: (text: String, value: Decimal)
+        var doubleTime: (text: String, value: Decimal)
+    }
+
+    private struct PayrollRateSource {
+        var rateKind: String
+        var hourlyRateText: String
+        var hourlyRate: Decimal
+        var output: SecondBrainEnrichmentOutput
+
+        var truthState: String {
+            output.reviewState == "accepted" ? "accepted" : "reviewable_candidate_not_truth"
+        }
+
+        var truthBoundary: String {
+            output.reviewState == "accepted" ? "accepted_memory_fact" : "reviewable_memory_candidate"
+        }
+    }
+
+    static func recallDerivedCalculations(query: String?, bundles: [CiderItemContextBundle]) -> [[String: Any]] {
+        guard let query,
+              let hours = payrollHoursBreakdown(in: query) else { return [] }
+        let rates = payrollRateSources(in: bundles)
+        guard let straightRate = rates["straight_time"],
+              let overtimeRate = rates["time_and_a_half"],
+              let doubleTimeRate = rates["double_time"] else { return [] }
+
+        let components: [(kind: String, hoursText: String, hours: Decimal, source: PayrollRateSource)] = [
+            ("straight_time", hours.straight.text, hours.straight.value, straightRate),
+            ("time_and_a_half", hours.timeAndAHalf.text, hours.timeAndAHalf.value, overtimeRate),
+            ("double_time", hours.doubleTime.text, hours.doubleTime.value, doubleTimeRate),
+        ]
+        let unroundedProducts = components.map { $0.hours * $0.source.hourlyRate }
+        let roundedComponents = zip(components, unroundedProducts).map { component, product -> [String: Any] in
+            let roundedAmount = roundedCurrency(product)
+            return [
+                "rateKind": component.kind,
+                "hours": component.hoursText,
+                "rate": component.source.hourlyRateText,
+                "expression": "\(component.hoursText) * \(component.source.hourlyRateText)",
+                "amount": fixedCurrencyDecimalString(roundedAmount),
+                "currency": component.source.output.metadata["currency"] ?? "USD",
+                "candidateID": component.source.output.id,
+                "candidateRef": "memory_candidate:\(component.source.output.id)",
+                "factRef": "memory_fact:\(component.source.output.id)",
+                "truthState": component.source.truthState,
+                "truthBoundary": component.source.truthBoundary,
+                "sourceOwnerRef": component.source.output.owner.canonicalRef,
+            ]
+        }
+        let exactTotal = unroundedProducts.reduce(Decimal(0), +)
+        let roundedTotal = roundedCurrency(exactTotal)
+        let formula = components
+            .map { "\($0.hoursText) * \($0.source.hourlyRateText)" }
+            .joined(separator: " + ")
+        let sourceFacts = components.map { component -> [String: Any] in
+            var dict: [String: Any] = [
+                "rateKind": component.kind,
+                "hourlyRate": component.source.hourlyRateText,
+                "currency": component.source.output.metadata["currency"] ?? "USD",
+                "candidateID": component.source.output.id,
+                "candidateRef": "memory_candidate:\(component.source.output.id)",
+                "truthState": component.source.truthState,
+                "truthBoundary": component.source.truthBoundary,
+                "owner": ownerToDict(component.source.output.owner),
+                "ownerRef": component.source.output.owner.canonicalRef,
+                "citation": recallCitation(owner: component.source.output.owner),
+            ]
+            if component.source.output.reviewState == "accepted" {
+                dict["factRef"] = "memory_fact:\(component.source.output.id)"
+            }
+            if let evidenceRecord = sourceEvidenceRecordToDict(for: component.source.output) {
+                dict["sourceEvidenceRef"] = evidenceRecord["ref"]
+                dict["sourceOwnerRef"] = evidenceRecord["sourceOwnerRef"]
+                dict["sourceQuote"] = evidenceRecord["sourceQuote"]
+            }
+            return dict
+        }
+        let sourceTruthStates = orderedUniqueStrings(sourceFacts.compactMap { $0["truthState"] as? String })
+        let reviewRequired = sourceTruthStates.contains("reviewable_candidate_not_truth")
+        return [[
+            "kind": "gross_pay",
+            "mathBoundary": "deterministic_decimal",
+            "truthBoundary": "derived_from_source_backed_memory_facts",
+            "reviewRequired": reviewRequired,
+            "formula": formula,
+            "components": roundedComponents,
+            "total": fixedCurrencyDecimalString(roundedTotal),
+            "formattedTotal": formattedUSCurrency(roundedTotal),
+            "currency": "USD",
+            "rounding": [
+                "componentScale": 2,
+                "totalScale": 2,
+                "mode": "plain",
+                "totalUsesUnroundedComponents": true,
+            ],
+            "sourceTruthStates": sourceTruthStates,
+            "sourceFacts": sourceFacts,
+            "safetyBoundary": [
+                "derived_answer_not_stored_truth",
+                "calculation_uses_source_backed_rates_only",
+                "reviewable_rate_candidates_are_not_truth",
+                "accepted_rates_require_explicit_accept",
+            ],
+        ]]
+    }
+
+    private static func payrollRateSources(in bundles: [CiderItemContextBundle]) -> [String: PayrollRateSource] {
+        var best: [String: PayrollRateSource] = [:]
+        for output in bundles.flatMap(\.enrichmentOutputs) {
+            guard output.kind == "memory_candidate",
+                  output.metadata["fact_type"] == "pay_rate",
+                  let rateKind = output.metadata["rate_kind"],
+                  let hourlyRateText = output.metadata["hourly_rate"],
+                  let hourlyRate = decimalValue(hourlyRateText),
+                  ["accepted", "suggested", "needs_review", "deferred"].contains(output.reviewState) else {
+                continue
+            }
+            let source = PayrollRateSource(rateKind: rateKind, hourlyRateText: hourlyRateText, hourlyRate: hourlyRate, output: output)
+            if let existing = best[rateKind], existing.output.reviewState == "accepted" {
+                continue
+            }
+            if best[rateKind] == nil || source.output.reviewState == "accepted" {
+                best[rateKind] = source
+            }
+        }
+        return best
+    }
+
+    private static func payrollHoursBreakdown(in query: String) -> PayrollHoursBreakdown? {
+        guard query.range(of: #"(?i)\b(gross|pay|paycheck|wage|overtime|straight|double)\b"#, options: .regularExpression) != nil else { return nil }
+        guard let straight = firstDecimalCapture(pattern: #"(?i)([0-9]+(?:\.[0-9]+)?)\s*(?:hours?\s*)?(?:straight|straight-time|straight time)\b"#, in: query),
+              let timeAndAHalf = firstDecimalCapture(pattern: #"(?i)([0-9]+(?:\.[0-9]+)?)\s*(?:hours?\s*)?(?:time\s*(?:and|&)\s*a\s*half|time-and-a-half|1\.5x)\b"#, in: query),
+              let doubleTime = firstDecimalCapture(pattern: #"(?i)([0-9]+(?:\.[0-9]+)?)\s*(?:hours?\s*)?(?:double\s*time|double-time|2x)\b"#, in: query) else {
+            return nil
+        }
+        return PayrollHoursBreakdown(straight: straight, timeAndAHalf: timeAndAHalf, doubleTime: doubleTime)
+    }
+
+    private static func firstDecimalCapture(pattern: String, in text: String) -> (text: String, value: Decimal)? {
+        guard let match = try? NSRegularExpression(pattern: pattern).firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              match.numberOfRanges > 1,
+              let range = Range(match.range(at: 1), in: text) else { return nil }
+        let raw = String(text[range])
+        guard let value = decimalValue(raw) else { return nil }
+        return (raw, value)
+    }
+
+    private static func decimalValue(_ text: String) -> Decimal? {
+        Decimal(string: text, locale: Locale(identifier: "en_US_POSIX"))
+    }
+
+    private static func roundedCurrency(_ value: Decimal) -> Decimal {
+        var input = value
+        var output = Decimal()
+        NSDecimalRound(&output, &input, 2, .plain)
+        return output
+    }
+
+    private static func fixedCurrencyDecimalString(_ value: Decimal) -> String {
+        String(format: "%.2f", NSDecimalNumber(decimal: value).doubleValue)
+    }
+
+    private static func formattedUSCurrency(_ value: Decimal) -> String {
+        let fixed = fixedCurrencyDecimalString(value)
+        let parts = fixed.split(separator: ".", omittingEmptySubsequences: false)
+        var whole = String(parts.first ?? "0")
+        let cents = String(parts.dropFirst().first ?? "00")
+        let negative = whole.hasPrefix("-")
+        if negative { whole.removeFirst() }
+        var grouped = ""
+        for (index, character) in whole.reversed().enumerated() {
+            if index > 0 && index % 3 == 0 { grouped.append(",") }
+            grouped.append(character)
+        }
+        let prefix = negative ? "-$" : "$"
+        return "\(prefix)\(String(grouped.reversed())).\(cents)"
     }
 
     static func printRecallContextError(_ error: RecallContextCLIError, args: [String]) {
@@ -17753,6 +17945,13 @@ struct CiderCLI {
         if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
         if let factType = output.metadata["fact_type"] { dict["factType"] = factType }
         if let spendingCategory = output.metadata["spending_category"] { dict["spendingCategory"] = spendingCategory }
+        if let rateKind = output.metadata["rate_kind"] { dict["rateKind"] = rateKind }
+        if let hourlyRate = output.metadata["hourly_rate"] { dict["hourlyRate"] = hourlyRate }
+        if let rateMultiplier = output.metadata["rate_multiplier"] { dict["rateMultiplier"] = rateMultiplier }
+        if let rateUnit = output.metadata["rate_unit"] { dict["rateUnit"] = rateUnit }
+        if let employer = output.metadata["employer"] { dict["employer"] = employer }
+        if let unionOrGrade = output.metadata["union_or_grade"] { dict["unionOrGrade"] = unionOrGrade }
+        if let payrollSourceContext = output.metadata["payroll_source_context"] { dict["payrollSourceContext"] = payrollSourceContext }
         if let amount = output.metadata["amount"] { dict["amount"] = amount }
         if let currency = output.metadata["currency"] { dict["currency"] = currency }
         if let amountQualifier = output.metadata["amount_qualifier"] { dict["amountQualifier"] = amountQualifier }

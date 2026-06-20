@@ -373,16 +373,103 @@ struct SecondBrainGraphCandidateContractTests {
 
         let memoryOutputs = result.outputs.filter { $0.kind == "memory_candidate" }
         #expect(memoryOutputs.map(\.value) == [
+            "Visher's time-and-a-half overtime rate is $82.26/hr.",
+            "Visher's double-time overtime rate is $109.68/hr.",
             "Visher has returned to weekend overtime after five years or more.",
             "Overtime pay calculations help Visher motivate himself to get up for early weekend overtime.",
             "Visher's budget normally depends on one full paycheck for bills and one full paycheck for rent.",
             "Consider an overnight oats reminder on nights before early weekend overtime.",
         ])
         #expect(memoryOutputs.allSatisfy { $0.reviewState == "suggested" })
+        #expect(memoryOutputs.first { $0.metadata["memory_key"] == "payroll-rate-time-and-a-half-2026-06-13-82.26" }?.metadata["rate_kind"] == "time_and_a_half")
+        #expect(memoryOutputs.first { $0.metadata["memory_key"] == "payroll-rate-double-time-2026-06-13-109.68" }?.metadata["rate_kind"] == "double_time")
         #expect(memoryOutputs.first { $0.metadata["memory_key"] == "overtime-pay-motivation" }?.evidence.contains("$109.68/hr") == true)
         #expect(memoryOutputs.allSatisfy { $0.metadata["requires_review"] == "true" })
         #expect(memoryOutputs.allSatisfy { $0.metadata["journal_date"] == "2026-06-13" })
-        #expect(memoryOutputs.map { $0.metadata["memory_kind"] } == ["pattern", "pattern", "pattern", "pattern"])
+        #expect(memoryOutputs.map { $0.metadata["memory_kind"] } == ["payroll_rate_fact", "payroll_rate_fact", "pattern", "pattern", "pattern", "pattern"])
+    }
+
+    @Test("journal extractor proposes structured payroll rate memory candidates")
+    func journalExtractorProposesStructuredPayrollRateMemoryCandidates() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: """
+            Current Wage Card note:
+            IAM Grade 5 max at Boeing has straight-time hourly rate $54.84/hr.
+            Time-and-a-half overtime rate is $82.26/hr.
+            Double-time Sunday rate is $109.68/hr.
+            """,
+            date: "2026-06-13",
+            time: "03:16"
+        )
+
+        let memoryOutputs = result.outputs.filter { $0.kind == "memory_candidate" }
+        let straight = try #require(memoryOutputs.first { $0.metadata["memory_key"] == "payroll-rate-straight-time-2026-06-13-54.84" })
+        #expect(straight.reviewState == "suggested")
+        #expect(straight.value == "Visher's straight-time hourly rate is $54.84/hr.")
+        #expect(straight.evidence == "IAM Grade 5 max at Boeing has straight-time hourly rate $54.84/hr")
+        #expect(straight.metadata["memory_kind"] == "payroll_rate_fact")
+        #expect(straight.metadata["fact_type"] == "pay_rate")
+        #expect(straight.metadata["rate_kind"] == "straight_time")
+        #expect(straight.metadata["rate_multiplier"] == "1.0")
+        #expect(straight.metadata["hourly_rate"] == "54.84")
+        #expect(straight.metadata["currency"] == "USD")
+        #expect(straight.metadata["rate_unit"] == "hour")
+        #expect(straight.metadata["employer"] == "Boeing")
+        #expect(straight.metadata["union_or_grade"] == "IAM Grade 5 max")
+        #expect(straight.metadata["date_context"] == "2026-06-13")
+        #expect(straight.metadata["time_context"] == "03:16")
+        #expect(straight.metadata["source_owner_ref"] == owner.canonicalRef)
+        #expect(straight.metadata["review_query_terms"]?.contains("what is my hourly rate") == true)
+
+        let overtime = try #require(memoryOutputs.first { $0.metadata["memory_key"] == "payroll-rate-time-and-a-half-2026-06-13-82.26" })
+        #expect(overtime.value == "Visher's time-and-a-half overtime rate is $82.26/hr.")
+        #expect(overtime.metadata["rate_kind"] == "time_and_a_half")
+        #expect(overtime.metadata["rate_multiplier"] == "1.5")
+        #expect(overtime.metadata["hourly_rate"] == "82.26")
+        #expect(overtime.metadata["review_query_terms"]?.contains("time and a half rate") == true)
+
+        let doubleTime = try #require(memoryOutputs.first { $0.metadata["memory_key"] == "payroll-rate-double-time-2026-06-13-109.68" })
+        #expect(doubleTime.value == "Visher's double-time overtime rate is $109.68/hr.")
+        #expect(doubleTime.metadata["rate_kind"] == "double_time")
+        #expect(doubleTime.metadata["rate_multiplier"] == "2.0")
+        #expect(doubleTime.metadata["hourly_rate"] == "109.68")
+        #expect(doubleTime.metadata["review_query_terms"]?.contains("double time rate") == true)
+    }
+
+    @Test("journal extractor pairs live payroll rates with the right overtime kind")
+    func journalExtractorPairsLivePayrollRatesWithTheRightOvertimeKind() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: """
+            The reason he asked about hourly wages was motivation: knowing today is about $82.26/hr and Sunday is about $109.68/hr makes it easier to get up and do the overtime.
+            Visher said it is hard to justify sleeping longer when Sunday overtime is over $100/hr.
+            At the saved Grade 5 max rate ($54.84/hr): 40 straight hours = $2,193.60; 16 total time-and-a-half hours = $1,316.16; 8 double-time hours = $877.44; total gross = $4,387.20 before taxes/deductions.
+            """,
+            date: "2026-06-13",
+            time: "03:45"
+        )
+
+        let memoryOutputs = result.outputs.filter { $0.kind == "memory_candidate" }
+        let straight = try #require(memoryOutputs.first { $0.metadata["memory_key"] == "payroll-rate-straight-time-2026-06-13-54.84" })
+        #expect(straight.metadata["rate_kind"] == "straight_time")
+        #expect(straight.metadata["hourly_rate"] == "54.84")
+        #expect(straight.evidence.contains("saved Grade 5 max rate") == true)
+
+        let overtime = try #require(memoryOutputs.first { $0.metadata["memory_key"] == "payroll-rate-time-and-a-half-2026-06-13-82.26" })
+        #expect(overtime.metadata["rate_kind"] == "time_and_a_half")
+        #expect(overtime.metadata["hourly_rate"] == "82.26")
+        #expect(overtime.evidence.contains("today is about $82.26/hr") == true)
+
+        let doubleTime = try #require(memoryOutputs.first { $0.metadata["memory_key"] == "payroll-rate-double-time-2026-06-13-109.68" })
+        #expect(doubleTime.metadata["rate_kind"] == "double_time")
+        #expect(doubleTime.metadata["hourly_rate"] == "109.68")
+        #expect(doubleTime.evidence.contains("Sunday is about $109.68/hr") == true)
+
+        #expect(memoryOutputs.first { $0.metadata["memory_key"] == "payroll-rate-time-and-a-half-2026-06-13-54.84" } == nil)
+        #expect(memoryOutputs.first { $0.metadata["memory_key"] == "payroll-rate-double-time-2026-06-13-100" } == nil)
     }
 
     @Test("journal extractor proposes structured gas spending memory candidates")

@@ -3850,6 +3850,91 @@ struct CiderCLIAgentSafetyTests {
         #expect(contentBlocks.contains { ($0["citation"] as? [String: Any])?["ownerID"] as? String == journalID })
     }
 
+    @Test("payroll rate facts recall and gross pay calculation stay source backed")
+    func payrollRateFactsRecallAndGrossPayCalculationStaySourceBacked() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-payroll-rate-recall-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-13",
+            content: """
+            Current Wage Card note:
+            IAM Grade 5 max at Boeing has straight-time hourly rate $54.84/hr.
+            Time-and-a-half overtime rate is $82.26/hr.
+            Double-time Sunday rate is $109.68/hr.
+            """,
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Gross Pay Worksheet",
+            content: "A distracting note about 40 straight hours, 16.2 overtime hours, and 8.3 double-time hours without source-backed rates.",
+            vault: vault
+        )
+
+        let backfill = try parseJSONObject(try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-13", "--json"], vault: vault).stdout)
+        #expect(backfill["ok"] as? Bool == true)
+        #expect(backfill["memoryCandidateCount"] as? Int == 3)
+
+        let reviewableRecall = try assertStrictProcessJSON(
+            runCLI(args: ["item", "recall-context", "--query", "what is my hourly rate?", "--limit", "1", "--json"], vault: vault),
+            command: "item.recall-context"
+        )
+        let reviewableCandidates = try #require(reviewableRecall["reviewableCandidates"] as? [[String: Any]])
+        let straightReviewable = try #require(reviewableCandidates.first { ($0["metadata"] as? [String: String])?["rate_kind"] == "straight_time" })
+        #expect(straightReviewable["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((straightReviewable["metadata"] as? [String: String])?["hourly_rate"] == "54.84")
+        #expect((straightReviewable["sourceEvidenceRecord"] as? [String: Any])?["sourceOwnerRef"] as? String == "note:\(journalID)")
+        #expect((reviewableRecall["acceptedFacts"] as? [[String: Any]])?.isEmpty == true)
+
+        let owners = try #require(backfill["owners"] as? [[String: Any]])
+        let owner = try #require(owners.first)
+        let memoryCandidates = try #require(owner["memoryCandidates"] as? [[String: Any]])
+        let straight = try #require(memoryCandidates.first { ($0["metadata"] as? [String: String])?["rate_kind"] == "straight_time" })
+        let overtime = try #require(memoryCandidates.first { ($0["metadata"] as? [String: String])?["rate_kind"] == "time_and_a_half" })
+        let doubleTime = try #require(memoryCandidates.first { ($0["metadata"] as? [String: String])?["rate_kind"] == "double_time" })
+        let straightID = try #require(straight["id"] as? String)
+        let overtimeID = try #require(overtime["id"] as? String)
+        let doubleTimeID = try #require(doubleTime["id"] as? String)
+
+        for candidateID in [straightID, overtimeID, doubleTimeID] {
+            let accept = try assertStrictProcessJSON(
+                runCLI(args: ["item", "accept-memory-candidate", candidateID, "--actor", "codex-test", "--json"], vault: vault),
+                command: "item.accept-memory-candidate"
+            )
+            let acceptedFact = try #require(accept["acceptedFact"] as? [String: Any])
+            #expect(acceptedFact["truthBoundary"] as? String == "accepted_memory_fact")
+            #expect(acceptedFact["factType"] as? String == "pay_rate")
+            #expect((acceptedFact["sourceEvidenceRecord"] as? [String: Any])?["sourceOwnerRef"] as? String == "note:\(journalID)")
+        }
+
+        let grossRecall = try assertStrictProcessJSON(
+            runCLI(args: ["item", "recall-context", "--query", "how much gross pay for 40 straight, 16.2 time and a half, and 8.3 double time?", "--limit", "1", "--json"], vault: vault),
+            command: "item.recall-context"
+        )
+        let acceptedFacts = try #require(grossRecall["acceptedFacts"] as? [[String: Any]])
+        #expect(acceptedFacts.contains { ($0["candidateID"] as? String) == straightID && ($0["hourlyRate"] as? String) == "54.84" && ($0["rateKind"] as? String) == "straight_time" })
+        #expect(acceptedFacts.contains { ($0["candidateID"] as? String) == overtimeID && ($0["hourlyRate"] as? String) == "82.26" && ($0["rateKind"] as? String) == "time_and_a_half" })
+        #expect(acceptedFacts.contains { ($0["candidateID"] as? String) == doubleTimeID && ($0["hourlyRate"] as? String) == "109.68" && ($0["rateKind"] as? String) == "double_time" })
+        #expect((grossRecall["reviewableCandidates"] as? [[String: Any]])?.isEmpty == true)
+
+        let calculations = try #require(grossRecall["derivedCalculations"] as? [[String: Any]])
+        let grossPay = try #require(calculations.first { $0["kind"] as? String == "gross_pay" })
+        #expect(grossPay["mathBoundary"] as? String == "deterministic_decimal")
+        #expect(grossPay["truthBoundary"] as? String == "derived_from_source_backed_memory_facts")
+        #expect(grossPay["reviewRequired"] as? Bool == false)
+        #expect(grossPay["formattedTotal"] as? String == "$4,436.56")
+        #expect(grossPay["total"] as? String == "4436.56")
+        #expect(grossPay["formula"] as? String == "40 * 54.84 + 16.2 * 82.26 + 8.3 * 109.68")
+        let components = try #require(grossPay["components"] as? [[String: Any]])
+        #expect(components.contains { $0["rateKind"] as? String == "straight_time" && $0["expression"] as? String == "40 * 54.84" && $0["amount"] as? String == "2193.60" && $0["truthState"] as? String == "accepted" })
+        #expect(components.contains { $0["rateKind"] as? String == "time_and_a_half" && $0["expression"] as? String == "16.2 * 82.26" && $0["amount"] as? String == "1332.61" && $0["truthState"] as? String == "accepted" })
+        #expect(components.contains { $0["rateKind"] as? String == "double_time" && $0["expression"] as? String == "8.3 * 109.68" && $0["amount"] as? String == "910.34" && $0["truthState"] as? String == "accepted" })
+        let contentBlocks = try #require(grossRecall["contentBlocks"] as? [[String: Any]])
+        #expect(contentBlocks.contains { ($0["citation"] as? [String: Any])?["ownerID"] as? String == journalID })
+    }
+
     @Test("drive home journal backfill recalls daily life candidates as source backed reviewables")
     func driveHomeJournalBackfillRecallsDailyLifeCandidatesAsSourceBackedReviewables() throws {
         let vault = FileManager.default.temporaryDirectory

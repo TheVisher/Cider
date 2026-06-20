@@ -795,6 +795,17 @@ final class CiderItemContextService {
             "spending": ["spending", "spent", "total", "cost"],
             "gallon": ["gallon", "gallons", "fuel", "gas"],
             "gallons": ["gallons", "gallon", "fuel", "gas"],
+            "hourly": ["hourly rate", "hourly wage", "straight-time hourly", "pay_rate"],
+            "rate": ["rate", "hourly rate", "pay rate", "wage rate", "pay_rate"],
+            "wage": ["wage", "wage card", "hourly rate", "pay_rate"],
+            "wages": ["wages", "wage card", "hourly rate", "pay_rate"],
+            "pay": ["pay", "gross pay", "pay rate", "pay_rate"],
+            "paycheck": ["paycheck", "gross pay", "pay_rate"],
+            "gross": ["gross pay", "pay rate", "pay_rate", "straight-time", "time-and-a-half", "double-time"],
+            "straight": ["straight-time", "straight time", "straight-time hourly", "hourly rate"],
+            "half": ["time-and-a-half", "time and a half", "1.5x", "overtime rate"],
+            "overtime": ["overtime", "overtime rate", "time-and-a-half", "double-time"],
+            "double": ["double-time", "double time", "2x", "Sunday overtime rate"],
         ]
         for token in tokens {
             guard !isLowSignalRecallExpansion(token) else { continue }
