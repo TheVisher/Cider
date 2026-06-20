@@ -62,6 +62,8 @@ Canonical examples:
 ```bash
 printf '%s' "$RAW_NOTE" | cider-cli capture add --kind note --stdin --json
 cider-cli capture add --kind note --folder "Inbox/Notes" "Quick note" --json
+printf '%s' "$APPEND_TEXT" | cider-cli item update note <note-id> --append --stdin --json
+cider-cli item update note <note-id> --title "New Title" --content "Replacement body" --json
 printf '%s' "$RAW_TODO" | cider-cli capture add --kind todo --stdin --json
 cider-cli capture add --kind bookmark --url "https://example.com?a=1&b=two" --json
 cider-cli capture add --kind file --path "/path/with spaces.txt" --json
@@ -75,6 +77,8 @@ The capture JSON contract reports `command: capture.add`, source text/source met
 Hidden or removed legacy commands return `legacyRemoved: true` with a canonical replacement. Legacy type-specific commands such as `bookmark`, `note`, `todo`, `event`, `contact`, `file`, `folder`, `tag`, `label`, `dashboard`, `media`, `recall`, and top-level `search/query/recent/status/snapshot` are not part of the visible agent API.
 
 `bookmark add`, `note create`, `todo create`, and `file import` are temporary compatibility wrappers. They should remain hidden from top-level help, call the capture backend, and return `compatibilityWrapper: true`, `backendCommand: capture.add`, and nested `capture.command: capture.add`.
+
+`item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] --json` is the blessed agent-safe mutation path for existing note edits. It writes through `NotesStorage`, updating the Markdown artifact, SQLite `items` / `notes`, note search chunks, and app-facing note read model together. Agents must use this path for ordinary note append/replace/rename work instead of editing `.md` files directly.
 
 `capture add --kind journal [--date YYYY-MM-DD|today] [--time HH:mm] (--stdin|--text-file <path>|--content <text>|<journal text>) --json` is the blessed agent journal capture path. It appends to the daily journal note through the same storage behavior as `note daily append --kind journal`, returns `command: capture.add`, and reports `nextSafeAction: inspect_item` with `safeNextCommands` for `item get` / `item context` verification. Agents must not edit daily journal Markdown directly, and successful journal captures should not be routed into folder-review correction chores.
 
@@ -95,7 +99,7 @@ After capture, agents should verify and continue through backend-backed item/rev
 Keep command details in CLI help and tests, not sprawling docs. The core command areas agents rely on are:
 
 - capture: `capture add --kind ... --json` for all new user material, plus `capture review-queue --json` for read-only capture worklists
-- item: get/search/query/recent/context/relations/backlinks/graph-health/project-context/doctor, plus backend-backed move/unfile/route/link
+- item: get/search/query/recent/context/relations/backlinks/graph-health/project-context/doctor, plus backend-backed update/move/unfile/route/link
 - export: bounded folder/item/card/project export in JSON or Markdown; no unbounded whole-vault dumps
 - review: list/summary/drilldown/approve/correct/defer/enrich/enrich-batch/jobs
 - storage: audit/active-duplicate-invariants/restart-duplicate-regression/doctor-plan/doctor-apply/repair-schema

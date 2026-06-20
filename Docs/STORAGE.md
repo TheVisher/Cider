@@ -146,6 +146,8 @@ Bookmark `.webloc` files are durable artifacts. SQLite stores canonical bookmark
 
 Notes are Markdown files with Cider metadata in SQLite. Rich editor details should round-trip to durable Markdown as safely as possible. The app should guard against overwriting externally modified notes.
 
+For ordinary app or agent edits, the blessed mutation path is `cider-cli item update note <id-or-ref> ... --json` or the equivalent `NotesStorage` service path. It updates the Markdown artifact, SQLite note/item rows, search chunks, and app-facing note read model together. When a note Markdown file is edited externally and Cider performs a note rescan, disk is the source of truth for that rescan and is reconciled back into SQLite and chunks.
+
 ## Todos And Dates
 
 Todos and date cards use `.ics` files with VTODO or VEVENT content, mirrored into SQLite for fast loading and queries.

@@ -482,6 +482,16 @@ final class NotesStorage: ObservableObject {
             logger.error("Failed to sync rescan to SQLite: \(error.localizedDescription, privacy: .public)")
             contentCache.removeAll()
             loadNotesFromDatabase(db)
+            return
+        }
+
+        let indexer = SecondBrainItemContentIndexingService(database: db)
+        for note in notes {
+            do {
+                _ = try indexer.rebuild(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString))
+            } catch {
+                logger.error("Failed to refresh note chunks after rescan for \(note.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 

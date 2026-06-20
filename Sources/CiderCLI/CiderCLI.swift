@@ -4977,6 +4977,7 @@ struct CiderCLI {
               cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
               cider-cli item sync-project <project-id-or-name> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
+              cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]
               cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
                 Do not pass artifact filenames such as Example.webloc to item move --path.
               cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
@@ -6024,6 +6025,9 @@ struct CiderCLI {
         case "link":
             handleLink(subcommand: "add", args: args)
 
+        case "update", "edit":
+            handleItemUpdate(args: args, contextService: contextService)
+
         case "batch-plan":
             handleItemBatchPlan(args: args)
 
@@ -6417,6 +6421,161 @@ struct CiderCLI {
             if let error { dict["error"] = error }
             return dict
         }
+    }
+
+    static func handleItemUpdate(args: [String], contextService: CiderItemContextService) {
+        let positional = leadingPositionalArgs(from: args)
+        guard positional.count >= 2 else {
+            printCLIError("Usage: cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]")
+            return
+        }
+        guard positional[0].trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase == "note" else {
+            printCLIError("item update currently supports note items. Usage: cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]")
+            return
+        }
+        guard let note = findNote(positional[1], in: NotesStorage.shared) else { return }
+
+        let append = args.contains("--append")
+        let newTitle = parseFlag("--title", from: args)
+        let contentInput: String?
+        do {
+            contentInput = try itemUpdateContentInput(from: args)
+        } catch {
+            printCLIError(error.localizedDescription)
+            return
+        }
+
+        guard !append || contentInput != nil else {
+            printCLIError("--append requires --content, --stdin, or --text-file.")
+            return
+        }
+        guard newTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false || contentInput != nil else {
+            if jsonOutput {
+                outputJSON([
+                    "ok": true,
+                    "command": "item.update",
+                    "readOnly": false,
+                    "changed": false,
+                    "action": "noop",
+                    "item": ["type": "note", "id": note.id.uuidString],
+                    "safeNextCommands": itemUpdateSafeNextCommands(noteID: note.id),
+                ])
+            } else {
+                print("No note changes specified. Use --title, --content, --stdin, or --text-file.")
+            }
+            return
+        }
+
+        do {
+            let ref = LibraryEntityRef(type: .note, entityID: note.id)
+            let before = try contextService.context(for: ref).item
+            let beforeNote = NotesStorage.shared.notes.first(where: { $0.id == note.id }) ?? note
+
+            if let newTitle, !newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                NotesStorage.shared.rename(note: beforeNote, to: newTitle)
+            }
+
+            var current = NotesStorage.shared.notes.first(where: { $0.id == note.id }) ?? beforeNote
+            var contentChanged = false
+            if let contentInput {
+                let newContent = append
+                    ? noteContentByAppending(contentInput, to: NotesStorage.shared.loadContent(for: current))
+                    : contentInput
+                if current.content != newContent {
+                    current.content = newContent
+                    guard NotesStorage.shared.save(note: current) else {
+                        printCLIError("Failed to save note content for \(current.title).")
+                        return
+                    }
+                    contentChanged = true
+                }
+            }
+
+            current = NotesStorage.shared.notes.first(where: { $0.id == note.id }) ?? current
+            let after = try contextService.context(for: ref).item
+            let changed = before.title != after.title
+                || before.relativePath != after.relativePath
+                || contentChanged
+            let action = append && newTitle == nil ? "append_note_content" : "update_note"
+            let auditEntry = changed ? MutationAuditService.shared.record(
+                action: action,
+                itemType: "note",
+                itemID: note.id,
+                before: MutationAuditSnapshots.note(beforeNote),
+                after: MutationAuditSnapshots.note(current),
+                metadata: [
+                    "command": "item.update",
+                    "append": append ? "true" : "false",
+                    "contentSource": itemUpdateContentSource(from: args),
+                ],
+                source: .cli
+            ) : nil
+
+            var payload: [String: Any] = [
+                "ok": true,
+                "command": "item.update",
+                "readOnly": false,
+                "changed": changed,
+                "action": action,
+                "item": [
+                    "type": "note",
+                    "id": note.id.uuidString,
+                ],
+                "before": CiderItemMutationService.itemSummaryDictionary(before),
+                "after": CiderItemMutationService.itemSummaryDictionary(after),
+                "safeNextCommands": itemUpdateSafeNextCommands(noteID: note.id),
+                "partialFailures": [],
+            ]
+            if let auditEntry {
+                payload["mutationAuditEntryID"] = auditEntry.id.uuidString
+            }
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("\(append ? "Appended note" : "Updated note"): \(after.title)")
+                print("  ID: \(note.id.uuidString)")
+                if let relativePath = after.relativePath {
+                    print("  Path: \(relativePath)")
+                }
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func itemUpdateContentInput(from args: [String]) throws -> String? {
+        let inline = parseFlag("--content", from: args)
+        let rawSource = try rawCaptureText(from: args)
+        if inline != nil, rawSource != nil {
+            throw CaptureAddArgumentError.message("Use only one note content source: --content, --stdin, or --text-file.")
+        }
+        if let inline {
+            return inline
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\t", with: "\t")
+        }
+        return rawSource
+    }
+
+    static func itemUpdateContentSource(from args: [String]) -> String {
+        if parseFlag("--content", from: args) != nil { return "content_flag" }
+        if args.contains("--stdin") { return "stdin" }
+        if parseFlag("--text-file", from: args) != nil { return "text_file" }
+        return "none"
+    }
+
+    static func noteContentByAppending(_ addition: String, to existing: String) -> String {
+        let trimmedExisting = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedExisting.isEmpty else { return addition }
+        return "\(trimmedExisting)\n\n\(addition)"
+    }
+
+    static func itemUpdateSafeNextCommands(noteID: UUID) -> [String] {
+        [
+            "cider-cli item get note \(noteID.uuidString) --json",
+            "cider-cli item context note \(noteID.uuidString) --json",
+            "cider-cli item search \(noteID.uuidString) --json",
+        ]
     }
 
     static func handleItemBatchPlan(args: [String]) {

@@ -58,6 +58,7 @@ Agents should be conservative operators over real Cider data:
 
 - Use `cider-cli` or Cider services for current facts whenever possible.
 - New agent capture must use `cider-cli capture add --kind ... --json`.
+- Existing note edits must use `cider-cli item update note <id-or-ref> ... --json`; do not edit Cider note Markdown files directly for ordinary app/agent mutations.
 - Journal, voice-derived, and driving reflection intake must use `cider-cli capture add --kind journal --date today --stdin --json`; do not edit daily journal Markdown directly.
 - Do not call hidden type-specific legacy commands such as `bookmark`, `note`, `todo`, `event`, `contact`, `file`, `folder`, `tag`, `label`, or `dashboard` as alternate APIs.
 - Do not treat memory as more current than the Cider store, CLI, vault, or active Kanban card.

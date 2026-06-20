@@ -5,6 +5,7 @@ enum AgentRoutingInstructions {
     Second-brain tool rules:
     - Treat Cider's item/capture/review/storage APIs as the source of truth. Do not infer truth by scraping folders, YAML, Markdown, or legacy command output.
     - For new user material, use the capture door first: capture add. Let Cider create, enrich, route, and mark review state before adding AI-owned enrichment.
+    - For existing note edits or appends, use `cider-cli item update note <id-or-ref> ... --json` so Markdown, SQLite, chunks, and note read models stay coherent.
     - For journal, voice-derived, or driving reflection intake, use `cider-cli capture add --kind journal --date today --stdin --json`. Do not edit daily journal Markdown directly or turn successful journal captures into folder-routing review chores.
     - For existing material, inspect through item get, item search, item context, item related, and item why-surfaced before acting.
     - For uncertain non-journal placement, use review/routing flows and leave a reviewable reason. Do not guess a folder just to finish.
