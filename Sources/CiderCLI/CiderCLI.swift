@@ -16476,7 +16476,7 @@ struct CiderCLI {
             let results = try contextService.search(query, limit: limit)
             let refs = results.compactMap(\.item).map { LibraryEntityRef(type: $0.type, entityID: $0.id) }
             let payrollRefs: [LibraryEntityRef]
-            if payrollHoursBreakdown(in: query) != nil {
+            if payrollHoursBreakdown(in: query) != nil || isPayrollRateRecallQuery(query) {
                 payrollRefs = try contextService.search("pay_rate", limit: max(limit, 3))
                     .compactMap(\.item)
                     .map { LibraryEntityRef(type: $0.type, entityID: $0.id) }
@@ -16626,7 +16626,7 @@ struct CiderCLI {
             ]
         )
 
-        return [
+        var payload: [String: Any] = [
             "ok": true,
             "command": "item.recall-context",
             "readOnly": true,
@@ -16656,6 +16656,10 @@ struct CiderCLI {
             "warnings": warnings,
             "safeNextCommands": orderedUniqueStrings(safeCommands),
         ]
+        if let answer = recallAnswer(query: query, bundles: bundles, derivedCalculations: derivedCalculations) {
+            payload["answer"] = answer
+        }
+        return payload
     }
 
     static func boundedRecallActionHistoryLimit(from args: [String]) -> Int {
@@ -16951,6 +16955,138 @@ struct CiderCLI {
                 "accepted_rates_require_explicit_accept",
             ],
         ]]
+    }
+
+    static func recallAnswer(
+        query: String?,
+        bundles: [CiderItemContextBundle],
+        derivedCalculations: [[String: Any]]
+    ) -> [String: Any]? {
+        guard let query else { return nil }
+        let ratesByKind = payrollRateSources(in: bundles)
+        let orderedRates = payrollAnswerRateKinds.compactMap { ratesByKind[$0] }
+        guard orderedRates.count == payrollAnswerRateKinds.count else { return nil }
+
+        if payrollHoursBreakdown(in: query) != nil,
+           var grossPay = derivedCalculations.first(where: { $0["kind"] as? String == "gross_pay" }) {
+            let boundary = payrollAnswerBoundary(for: orderedRates)
+            grossPay["kind"] = "gross_pay"
+            grossPay["rates"] = payrollAnswerRateDicts(from: orderedRates)
+            grossPay["truthBoundary"] = boundary.truthBoundary
+            grossPay["acceptedTruthAvailable"] = boundary.acceptedTruthAvailable
+            grossPay["reviewRequired"] = boundary.reviewRequired
+            grossPay["sourceEvidenceState"] = boundary.sourceEvidenceState
+            if let formattedTotal = grossPay["formattedTotal"] as? String,
+               let components = grossPay["components"] as? [[String: Any]] {
+                grossPay["summary"] = "\(boundary.summaryPrefix): \(payrollComponentSummary(components)); total \(formattedTotal)."
+            }
+            return grossPay
+        }
+
+        guard isPayrollRateRecallQuery(query) else { return nil }
+        let boundary = payrollAnswerBoundary(for: orderedRates)
+        let rates = payrollAnswerRateDicts(from: orderedRates)
+        return [
+            "kind": "payroll_rates",
+            "summary": "\(boundary.summaryPrefix): \(payrollRateSummary(rates)).",
+            "truthBoundary": boundary.truthBoundary,
+            "acceptedTruthAvailable": boundary.acceptedTruthAvailable,
+            "reviewRequired": boundary.reviewRequired,
+            "sourceEvidenceState": boundary.sourceEvidenceState,
+            "rates": rates,
+            "sourceTruthStates": orderedUniqueStrings(rates.compactMap { $0["truthState"] as? String }),
+            "safetyBoundary": [
+                "derived_answer_not_stored_truth",
+                "reviewable_rate_candidates_are_not_truth",
+                "accepted_rates_require_explicit_accept",
+                "source_quote_and_citation_required",
+            ],
+        ]
+    }
+
+    private static let payrollAnswerRateKinds = ["straight_time", "time_and_a_half", "double_time"]
+
+    private static func isPayrollRateRecallQuery(_ query: String) -> Bool {
+        let hasPayrollTerm = query.range(of: #"(?i)\b(hourly|rate|wage|pay|payroll|overtime|time\s*(?:and|&)\s*a\s*half|double\s*time)\b"#, options: .regularExpression) != nil
+        let hasRateIntent = query.range(of: #"(?i)\b(rate|hourly|wage|time\s*(?:and|&)\s*a\s*half|double\s*time)\b"#, options: .regularExpression) != nil
+        return hasPayrollTerm && hasRateIntent
+    }
+
+    private static func payrollAnswerBoundary(for rates: [PayrollRateSource]) -> (
+        truthBoundary: String,
+        acceptedTruthAvailable: Bool,
+        reviewRequired: Bool,
+        sourceEvidenceState: String,
+        summaryPrefix: String
+    ) {
+        let reviewRequired = rates.contains { $0.output.reviewState != "accepted" }
+        if reviewRequired {
+            return (
+                "derived_from_reviewable_source_backed_evidence_not_accepted_truth",
+                false,
+                true,
+                "reviewable_source_backed_candidates",
+                "Derived from reviewable source-backed payroll rate candidates, not accepted memory truth"
+            )
+        }
+        return (
+            "derived_from_accepted_memory_truth",
+            true,
+            false,
+            "accepted_memory_facts",
+            "Derived from accepted payroll memory facts"
+        )
+    }
+
+    private static func payrollAnswerRateDicts(from rates: [PayrollRateSource]) -> [[String: Any]] {
+        rates.map { source in
+            var dict: [String: Any] = [
+                "rateKind": source.rateKind,
+                "label": payrollRateLabel(source.rateKind),
+                "hourlyRate": source.hourlyRateText,
+                "formattedHourlyRate": "$\(source.hourlyRateText)/hr",
+                "currency": source.output.metadata["currency"] ?? "USD",
+                "candidateID": source.output.id,
+                "candidateRef": "memory_candidate:\(source.output.id)",
+                "truthState": source.truthState,
+                "truthBoundary": source.truthBoundary,
+                "sourceOwnerRef": source.output.owner.canonicalRef,
+            ]
+            if source.output.reviewState == "accepted" {
+                dict["factRef"] = "memory_fact:\(source.output.id)"
+            }
+            if let evidenceRecord = sourceEvidenceRecordToDict(for: source.output) {
+                dict["sourceEvidenceRef"] = evidenceRecord["ref"]
+            }
+            return dict
+        }
+    }
+
+    private static func payrollRateLabel(_ rateKind: String) -> String {
+        switch rateKind {
+        case "straight_time": return "straight-time hourly rate"
+        case "time_and_a_half": return "time-and-a-half"
+        case "double_time": return "double-time"
+        default: return rateKind
+        }
+    }
+
+    private static func payrollRateSummary(_ rates: [[String: Any]]) -> String {
+        rates.compactMap { rate in
+            guard let label = rate["label"] as? String,
+                  let formatted = rate["formattedHourlyRate"] as? String else { return nil }
+            return "\(label) \(formatted)"
+        }
+        .joined(separator: "; ")
+    }
+
+    private static func payrollComponentSummary(_ components: [[String: Any]]) -> String {
+        components.compactMap { component in
+            guard let expression = component["expression"] as? String,
+                  let amount = component["amount"] as? String else { return nil }
+            return "\(expression) = $\(amount)"
+        }
+        .joined(separator: "; ")
     }
 
     private static func payrollRateSources(in bundles: [CiderItemContextBundle]) -> [String: PayrollRateSource] {

@@ -3878,7 +3878,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(backfill["memoryCandidateCount"] as? Int == 3)
 
         let reviewableRecall = try assertStrictProcessJSON(
-            runCLI(args: ["item", "recall-context", "--query", "what is my hourly rate?", "--limit", "1", "--json"], vault: vault),
+            runCLI(args: ["item", "recall-context", "--query", "what is my hourly rate, time and a half, and double time rate?", "--limit", "1", "--json"], vault: vault),
             command: "item.recall-context"
         )
         let reviewableCandidates = try #require(reviewableRecall["reviewableCandidates"] as? [[String: Any]])
@@ -3887,51 +3887,46 @@ struct CiderCLIAgentSafetyTests {
         #expect((straightReviewable["metadata"] as? [String: String])?["hourly_rate"] == "54.84")
         #expect((straightReviewable["sourceEvidenceRecord"] as? [String: Any])?["sourceOwnerRef"] as? String == "note:\(journalID)")
         #expect((reviewableRecall["acceptedFacts"] as? [[String: Any]])?.isEmpty == true)
+        let reviewableAnswer = try #require(reviewableRecall["answer"] as? [String: Any])
+        #expect(reviewableAnswer["kind"] as? String == "payroll_rates")
+        #expect(reviewableAnswer["acceptedTruthAvailable"] as? Bool == false)
+        #expect(reviewableAnswer["reviewRequired"] as? Bool == true)
+        #expect(reviewableAnswer["truthBoundary"] as? String == "derived_from_reviewable_source_backed_evidence_not_accepted_truth")
+        #expect((reviewableAnswer["summary"] as? String)?.contains("reviewable source-backed payroll rate candidates, not accepted memory truth") == true)
+        let reviewableRates = try #require(reviewableAnswer["rates"] as? [[String: Any]])
+        #expect(reviewableRates.contains { $0["rateKind"] as? String == "straight_time" && $0["label"] as? String == "straight-time hourly rate" && $0["formattedHourlyRate"] as? String == "$54.84/hr" && $0["truthState"] as? String == "reviewable_candidate_not_truth" })
+        #expect(reviewableRates.contains { $0["rateKind"] as? String == "time_and_a_half" && $0["label"] as? String == "time-and-a-half" && $0["formattedHourlyRate"] as? String == "$82.26/hr" && $0["truthState"] as? String == "reviewable_candidate_not_truth" })
+        #expect(reviewableRates.contains { $0["rateKind"] as? String == "double_time" && $0["label"] as? String == "double-time" && $0["formattedHourlyRate"] as? String == "$109.68/hr" && $0["truthState"] as? String == "reviewable_candidate_not_truth" })
 
-        let owners = try #require(backfill["owners"] as? [[String: Any]])
-        let owner = try #require(owners.first)
-        let memoryCandidates = try #require(owner["memoryCandidates"] as? [[String: Any]])
-        let straight = try #require(memoryCandidates.first { ($0["metadata"] as? [String: String])?["rate_kind"] == "straight_time" })
-        let overtime = try #require(memoryCandidates.first { ($0["metadata"] as? [String: String])?["rate_kind"] == "time_and_a_half" })
-        let doubleTime = try #require(memoryCandidates.first { ($0["metadata"] as? [String: String])?["rate_kind"] == "double_time" })
-        let straightID = try #require(straight["id"] as? String)
-        let overtimeID = try #require(overtime["id"] as? String)
-        let doubleTimeID = try #require(doubleTime["id"] as? String)
-
-        for candidateID in [straightID, overtimeID, doubleTimeID] {
-            let accept = try assertStrictProcessJSON(
-                runCLI(args: ["item", "accept-memory-candidate", candidateID, "--actor", "codex-test", "--json"], vault: vault),
-                command: "item.accept-memory-candidate"
-            )
-            let acceptedFact = try #require(accept["acceptedFact"] as? [String: Any])
-            #expect(acceptedFact["truthBoundary"] as? String == "accepted_memory_fact")
-            #expect(acceptedFact["factType"] as? String == "pay_rate")
-            #expect((acceptedFact["sourceEvidenceRecord"] as? [String: Any])?["sourceOwnerRef"] as? String == "note:\(journalID)")
-        }
-
-        let grossRecall = try assertStrictProcessJSON(
+        let reviewableGrossRecall = try assertStrictProcessJSON(
             runCLI(args: ["item", "recall-context", "--query", "how much gross pay for 40 straight, 16.2 time and a half, and 8.3 double time?", "--limit", "1", "--json"], vault: vault),
             command: "item.recall-context"
         )
-        let acceptedFacts = try #require(grossRecall["acceptedFacts"] as? [[String: Any]])
-        #expect(acceptedFacts.contains { ($0["candidateID"] as? String) == straightID && ($0["hourlyRate"] as? String) == "54.84" && ($0["rateKind"] as? String) == "straight_time" })
-        #expect(acceptedFacts.contains { ($0["candidateID"] as? String) == overtimeID && ($0["hourlyRate"] as? String) == "82.26" && ($0["rateKind"] as? String) == "time_and_a_half" })
-        #expect(acceptedFacts.contains { ($0["candidateID"] as? String) == doubleTimeID && ($0["hourlyRate"] as? String) == "109.68" && ($0["rateKind"] as? String) == "double_time" })
-        #expect((grossRecall["reviewableCandidates"] as? [[String: Any]])?.isEmpty == true)
-
-        let calculations = try #require(grossRecall["derivedCalculations"] as? [[String: Any]])
+        #expect((reviewableGrossRecall["acceptedFacts"] as? [[String: Any]])?.isEmpty == true)
+        let reviewableGrossAnswer = try #require(reviewableGrossRecall["answer"] as? [String: Any])
+        #expect(reviewableGrossAnswer["kind"] as? String == "gross_pay")
+        #expect(reviewableGrossAnswer["acceptedTruthAvailable"] as? Bool == false)
+        #expect(reviewableGrossAnswer["reviewRequired"] as? Bool == true)
+        #expect(reviewableGrossAnswer["formattedTotal"] as? String == "$4,436.56")
+        #expect(reviewableGrossAnswer["truthBoundary"] as? String == "derived_from_reviewable_source_backed_evidence_not_accepted_truth")
+        #expect((reviewableGrossAnswer["summary"] as? String)?.contains("reviewable source-backed payroll rate candidates, not accepted memory truth") == true)
+        let reviewableGrossComponents = try #require(reviewableGrossAnswer["components"] as? [[String: Any]])
+        #expect(reviewableGrossComponents.contains { $0["rateKind"] as? String == "straight_time" && $0["expression"] as? String == "40 * 54.84" && $0["amount"] as? String == "2193.60" && $0["truthState"] as? String == "reviewable_candidate_not_truth" })
+        #expect(reviewableGrossComponents.contains { $0["rateKind"] as? String == "time_and_a_half" && $0["expression"] as? String == "16.2 * 82.26" && $0["amount"] as? String == "1332.61" && $0["truthState"] as? String == "reviewable_candidate_not_truth" })
+        #expect(reviewableGrossComponents.contains { $0["rateKind"] as? String == "double_time" && $0["expression"] as? String == "8.3 * 109.68" && $0["amount"] as? String == "910.34" && $0["truthState"] as? String == "reviewable_candidate_not_truth" })
+        let calculations = try #require(reviewableGrossRecall["derivedCalculations"] as? [[String: Any]])
         let grossPay = try #require(calculations.first { $0["kind"] as? String == "gross_pay" })
         #expect(grossPay["mathBoundary"] as? String == "deterministic_decimal")
         #expect(grossPay["truthBoundary"] as? String == "derived_from_source_backed_memory_facts")
-        #expect(grossPay["reviewRequired"] as? Bool == false)
+        #expect(grossPay["reviewRequired"] as? Bool == true)
         #expect(grossPay["formattedTotal"] as? String == "$4,436.56")
         #expect(grossPay["total"] as? String == "4436.56")
         #expect(grossPay["formula"] as? String == "40 * 54.84 + 16.2 * 82.26 + 8.3 * 109.68")
         let components = try #require(grossPay["components"] as? [[String: Any]])
-        #expect(components.contains { $0["rateKind"] as? String == "straight_time" && $0["expression"] as? String == "40 * 54.84" && $0["amount"] as? String == "2193.60" && $0["truthState"] as? String == "accepted" })
-        #expect(components.contains { $0["rateKind"] as? String == "time_and_a_half" && $0["expression"] as? String == "16.2 * 82.26" && $0["amount"] as? String == "1332.61" && $0["truthState"] as? String == "accepted" })
-        #expect(components.contains { $0["rateKind"] as? String == "double_time" && $0["expression"] as? String == "8.3 * 109.68" && $0["amount"] as? String == "910.34" && $0["truthState"] as? String == "accepted" })
-        let contentBlocks = try #require(grossRecall["contentBlocks"] as? [[String: Any]])
+        #expect(components.contains { $0["rateKind"] as? String == "straight_time" && $0["expression"] as? String == "40 * 54.84" && $0["amount"] as? String == "2193.60" && $0["truthState"] as? String == "reviewable_candidate_not_truth" })
+        #expect(components.contains { $0["rateKind"] as? String == "time_and_a_half" && $0["expression"] as? String == "16.2 * 82.26" && $0["amount"] as? String == "1332.61" && $0["truthState"] as? String == "reviewable_candidate_not_truth" })
+        #expect(components.contains { $0["rateKind"] as? String == "double_time" && $0["expression"] as? String == "8.3 * 109.68" && $0["amount"] as? String == "910.34" && $0["truthState"] as? String == "reviewable_candidate_not_truth" })
+        let contentBlocks = try #require(reviewableGrossRecall["contentBlocks"] as? [[String: Any]])
         #expect(contentBlocks.contains { ($0["citation"] as? [String: Any])?["ownerID"] as? String == journalID })
     }
 
