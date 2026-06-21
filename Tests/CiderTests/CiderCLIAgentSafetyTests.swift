@@ -4487,6 +4487,39 @@ struct CiderCLIAgentSafetyTests {
         #expect(newestRollups.first?["spendingRowCount"] as? Int == 1)
         #expect(newestRollups.first?["reviewableRowCount"] as? Int == 1)
         #expect(newestRollups.first?["acceptedRowCount"] as? Int == 0)
+
+        for query in ["latest gas spend", "most recent gas purchase", "what did gas cost"] {
+            let synonymPayload = try assertStrictProcessJSON(
+                runCLI(args: ["item", "daily-tracker", "--query", query, "--sort", "newest", "--limit", "1", "--json"], vault: vault),
+                command: "item.daily-tracker"
+            )
+            #expect(synonymPayload["readOnly"] as? Bool == true, "query should stay read-only: \(query)")
+            #expect(synonymPayload["changed"] as? Bool == false, "query should not mutate state: \(query)")
+            #expect(synonymPayload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+            #expect((synonymPayload["filters"] as? [String: Any])?["query"] as? String == query)
+            #expect((synonymPayload["filters"] as? [String: Any])?["limit"] as? Int == 1)
+            #expect((synonymPayload["filters"] as? [String: Any])?["sort"] as? String == "newest")
+
+            let synonymRows = try #require(synonymPayload["rows"] as? [[String: Any]], "query should return rows: \(query)")
+            #expect(synonymRows.count == 1, "query should return only the newest gas row: \(query)")
+            let synonymGas = try #require(synonymRows.first, "query should include the newest gas row: \(query)")
+            #expect(synonymGas["date"] as? String == "2026-06-19")
+            #expect(synonymGas["signalType"] as? String == "spending")
+            #expect(synonymGas["value"] as? String == "gas")
+            #expect(synonymGas["amount"] as? String == "48.32")
+            #expect(synonymGas["reviewState"] as? String == "suggested")
+            #expect(synonymGas["truthState"] as? String == "reviewable_candidate_not_truth")
+            #expect((synonymGas["sourceRefs"] as? [String])?.contains("note:\(newerJournalID)") == true)
+            #expect((synonymGas["citation"] as? [String: Any])?["ownerID"] as? String == newerJournalID)
+
+            let synonymRollups = try #require(synonymPayload["rollups"] as? [[String: Any]])
+            #expect(synonymRollups.count == 1)
+            #expect(synonymRollups.first?["date"] as? String == "2026-06-19")
+            #expect(synonymRollups.first?["spendingAmount"] as? String == "48.32")
+            #expect(synonymRollups.first?["spendingRowCount"] as? Int == 1)
+            #expect(synonymRollups.first?["reviewableRowCount"] as? Int == 1)
+            #expect(synonymRollups.first?["acceptedRowCount"] as? Int == 0)
+        }
     }
 
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")
