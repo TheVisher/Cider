@@ -4122,6 +4122,17 @@ struct CiderCLIAgentSafetyTests {
         let secondRollup = try #require(rollups.first { $0["date"] as? String == "2026-06-19" })
         #expect(secondRollup["foodRowCount"] as? Int == 2)
         #expect(secondRollup["routineRowCount"] as? Int == 1)
+
+        let limitedPayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--from", "2026-06-13", "--to", "2026-06-19", "--limit", "2", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        #expect((limitedPayload["filters"] as? [String: Any])?["limit"] as? Int == 2)
+        let limitedRows = try #require(limitedPayload["rows"] as? [[String: Any]])
+        #expect(limitedRows.count == 2)
+        let limitedRollups = try #require(limitedPayload["rollups"] as? [[String: Any]])
+        let limitedRollupRowCount = limitedRollups.compactMap { $0["rowCount"] as? Int }.reduce(0, +)
+        #expect(limitedRollupRowCount == limitedRows.count)
     }
 
     @Test("daily tracker backfill surfaces natural journal prose as source backed reviewables")
@@ -4297,6 +4308,71 @@ struct CiderCLIAgentSafetyTests {
         #expect(workoutRollups.count == 1)
         #expect(workoutRollups.first?["routineRowCount"] as? Int == 1)
         #expect(workoutRollups.first?["spendingRowCount"] as? Int == 0)
+    }
+
+    @Test("daily tracker query matches natural gas fill up phrasing without accepting reviewables")
+    func dailyTrackerQueryMatchesNaturalGasFillUpPhrasingWithoutAcceptingReviewables() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-daily-tracker-gas-query-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-06-11",
+            content: """
+            - 03:50 - Retroactive recovered journal entry — 2026-06-11 morning gas fill-up / commute
+
+            Recovered from Hermes Discord session search after Visher clarified this was the later morning fill-up after the Duvall trip.
+
+            Gas/fuel spending:
+            - Filled up while driving to work in the morning.
+            - Total: $81.07.
+            - Fuel amount: 12.87 gallons.
+            - Effective price: about $6.30/gallon.
+            - Fuel grade: mid-grade / 89 octane.
+            - Vehicle context: Visher said he should be getting premium because of the turbo in his Mazda CX-5, but premium would be even more expensive, so he has been using mid-grade.
+            - Reaction: gas was "fricking ridiculous" / "too fucking expensive."
+            """,
+            vault: vault
+        )
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "backfill-journals", "--date", "2026-06-11", "--json"], vault: vault),
+            command: "item.backfill-journals"
+        )
+
+        for query in ["that expensive morning fill-up", "last expensive gas fillup", "$81.07", "12.87 gallons"] {
+            let payload = try assertStrictProcessJSON(
+                runCLI(args: ["item", "daily-tracker", "--from", "2026-06-11", "--to", "2026-06-11", "--query", query, "--json"], vault: vault),
+                command: "item.daily-tracker"
+            )
+            #expect(payload["readOnly"] as? Bool == true, "query should stay read-only: \(query)")
+            #expect(payload["changed"] as? Bool == false, "query should not mutate state: \(query)")
+            #expect(payload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+            #expect((payload["filters"] as? [String: Any])?["query"] as? String == query)
+
+            let rows = try #require(payload["rows"] as? [[String: Any]], "query should return rows: \(query)")
+            #expect(rows.count == 1, "query should return only the gas row: \(query)")
+            let gas = try #require(rows.first, "query should include the gas row: \(query)")
+            #expect(gas["date"] as? String == "2026-06-11")
+            #expect(gas["signalType"] as? String == "spending")
+            #expect(gas["value"] as? String == "gas")
+            #expect(gas["amount"] as? String == "81.07")
+            #expect(gas["currency"] as? String == "USD")
+            #expect(gas["reviewState"] as? String == "suggested")
+            #expect(gas["truthState"] as? String == "reviewable_candidate_not_truth")
+            #expect((gas["sourceRefs"] as? [String])?.contains("note:\(journalID)") == true)
+            #expect((gas["citation"] as? [String: Any])?["ownerID"] as? String == journalID)
+            #expect((gas["metadata"] as? [String: String])?["quantity"] == "12.87")
+            #expect((gas["metadata"] as? [String: String])?["review_query_terms"]?.contains("expensive morning fill-up") == true)
+
+            let rollups = try #require(payload["rollups"] as? [[String: Any]])
+            #expect(rollups.count == 1)
+            #expect(rollups.first?["date"] as? String == "2026-06-11")
+            #expect(rollups.first?["spendingAmount"] as? String == "81.07")
+            #expect(rollups.first?["spendingRowCount"] as? Int == 1)
+            #expect(rollups.first?["reviewableRowCount"] as? Int == 1)
+            #expect(rollups.first?["acceptedRowCount"] as? Int == 0)
+        }
     }
 
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")

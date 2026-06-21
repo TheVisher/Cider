@@ -68,7 +68,7 @@ final class CiderDailyTrackerReadModelService {
             }
             .filter { row in
                 guard let normalizedQuery else { return true }
-                return searchableText(for: row).contains(normalizedQuery)
+                return queryMatches(row: row, rawQuery: query ?? "", normalizedQuery: normalizedQuery)
             }
             .sorted { lhs, rhs in
                 if lhs.date != rhs.date { return lhs.date < rhs.date }
@@ -209,6 +209,60 @@ final class CiderDailyTrackerReadModelService {
             parts.append(value)
         }
         return normalizedSearchText(parts.joined(separator: " ")) ?? ""
+    }
+
+    private func queryMatches(row: CiderDailyTrackerSignalRow, rawQuery: String, normalizedQuery: String) -> Bool {
+        let searchable = searchableText(for: row)
+        if searchable.contains(normalizedQuery) {
+            return true
+        }
+
+        let queryTokens = searchTokens(rawQuery, droppingStopwords: true)
+        guard !queryTokens.isEmpty else { return false }
+        let rowTokens = Set(searchTokens(searchable, droppingStopwords: false))
+        return queryTokens.allSatisfy { queryTokenMatches($0, rowTokens: rowTokens) }
+    }
+
+    private func queryTokenMatches(_ token: String, rowTokens: Set<String>) -> Bool {
+        if rowTokens.contains(token) {
+            return true
+        }
+        if token == "fillup" {
+            return rowTokens.contains("gas")
+                || rowTokens.contains("fuel")
+                || (rowTokens.contains("fill") && rowTokens.contains("up"))
+                || rowTokens.contains("filled")
+        }
+        if token == "fill" {
+            return rowTokens.contains("fill")
+                || rowTokens.contains("filled")
+                || rowTokens.contains("fillup")
+                || rowTokens.contains("gas")
+                || rowTokens.contains("fuel")
+        }
+        if token == "gas" {
+            return rowTokens.contains("gas") || rowTokens.contains("fuel")
+        }
+        if token == "fuel" {
+            return rowTokens.contains("fuel") || rowTokens.contains("gas")
+        }
+        return false
+    }
+
+    private func searchTokens(_ value: String, droppingStopwords: Bool) -> [String] {
+        let normalized = normalizedSearchText(value) ?? ""
+        let tokenText = normalized
+            .replacingOccurrences(of: #"(?<=[A-Za-z])-(?=[A-Za-z])"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"[^a-z0-9.]+"#, with: " ", options: .regularExpression)
+        let stopwords: Set<String> = [
+            "a", "an", "and", "did", "do", "for", "i", "last", "me", "my", "of",
+            "on", "the", "that", "time", "to", "was", "what", "when",
+        ]
+        return tokenText
+            .split(separator: " ")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+            .filter { !droppingStopwords || !stopwords.contains($0) }
     }
 
     private func normalizedSearchText(_ value: String?) -> String? {
