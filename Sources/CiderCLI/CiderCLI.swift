@@ -213,11 +213,18 @@ struct CiderCLI {
             Use one scope value at a time; do not combine scope names.
             Example: cider-cli item search "event" --scope personalMemory --json
           cider-cli item get <type> <id-or-ref> [--json]
+          cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
+            Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
           cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
           cider-cli item graph-health [--json]
           cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
           cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
             Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
+
+        Read-only traversal commands:
+          cider-cli item related <type> <id-or-ref> [--json]
+          cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
+          cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
           cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
             Do not pass artifact filenames such as Example.webloc to item move --path.
           cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]
@@ -236,6 +243,14 @@ struct CiderCLI {
 
     static func itemSubcommandUsage(for subcommand: String?) -> String? {
         switch subcommand {
+        case "owner-get", "owner-inspect":
+            return "cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]"
+        case "related":
+            return "cider-cli item related <type> <id-or-ref> [--json]"
+        case "relations":
+            return "cider-cli item relations <owner-type> <owner-id-or-ref> [--json]"
+        case "backlinks":
+            return "cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]"
         case "backfill-kanban":
             return "cider-cli item backfill-kanban [--board <name-or-id>] [--json]"
         case "rebuild-references", "reference-rebuild", "references-rebuild":

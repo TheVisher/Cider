@@ -1995,6 +1995,10 @@ struct SecondBrainFoundationTests {
         let itemHelp = try runCLI(["item", "--help"], vaultURL: vaultURL)
         #expect(itemHelp.contains("item get <type> <id-or-ref>"))
         #expect(itemHelp.contains("item owner-get <owner-type> <owner-id-or-ref>"))
+        #expect(itemHelp.contains("item related <type> <id-or-ref>"))
+        #expect(itemHelp.contains("item relations <owner-type> <owner-id-or-ref>"))
+        #expect(itemHelp.contains("item backlinks <owner-type> <owner-id-or-ref>"))
+        #expect(itemHelp.contains("Read-only traversal commands"))
 
         _ = try runCLI(["board", "create", "Agent Workflow Smoke"], vaultURL: vaultURL)
         let addOutput = try runCLI([

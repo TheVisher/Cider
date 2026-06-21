@@ -465,8 +465,8 @@ struct CiderCLIAgentSafetyTests {
         #expect(malformedResurfaceLimit["changed"] as? Bool == false)
     }
 
-    @Test("valid zero-result owner relation reads stay successful and read-only")
-    func validZeroResultOwnerRelationReadsStaySuccessfulAndReadOnly() throws {
+    @Test("valid owner relation reads stay successful and read-only")
+    func validOwnerRelationReadsStaySuccessfulAndReadOnly() throws {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-owner-zero-results-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
@@ -494,6 +494,25 @@ struct CiderCLIAgentSafetyTests {
         #expect(relations["relationCount"] as? Int == 0)
         let relationRows = try #require(relations["relations"] as? [[String: Any]])
         #expect(relationRows.isEmpty)
+
+        let backlinks = try assertStrictProcessJSON(
+            runCLI(args: ["item", "backlinks", "note", noteID, "--json"], vault: vault),
+            command: "item.backlinks"
+        )
+        #expect(backlinks["ok"] as? Bool == true)
+        #expect(backlinks["readOnly"] as? Bool == true)
+        #expect(backlinks["changed"] as? Bool == false)
+        #expect((backlinks["relationCount"] as? Int ?? 0) >= 1)
+        let backlinkRows = try #require(backlinks["relations"] as? [[String: Any]])
+        #expect(backlinkRows.contains {
+            $0["relationType"] as? String == "produced_item"
+                && (($0["sourceOwner"] as? [String: Any])?["ownerType"] as? String) == "capture_event"
+        })
+
+        let relatedResult = try runCLI(args: ["item", "related", "note", noteID, "--json"], vault: vault)
+        #expect(relatedResult.status == 0)
+        let related = try parseJSONArray(relatedResult.stdout)
+        #expect(related.isEmpty)
     }
 
     @Test("review drilldown selector failures are structured and do not default to empty feeds")
@@ -2635,6 +2654,11 @@ struct CiderCLIAgentSafetyTests {
         #expect(captureHelp.stdout.contains("Example destination: --folder \"Inbox/Notes\""))
         #expect(itemHelp.stdout.contains("--path <target-folder-path>"))
         #expect(itemHelp.stdout.contains("Do not pass artifact filenames such as Example.webloc to item move --path."))
+        #expect(itemHelp.stdout.contains("Read-only traversal commands"))
+        #expect(itemHelp.stdout.contains("cider-cli item related <type> <id-or-ref> [--json]"))
+        #expect(itemHelp.stdout.contains("cider-cli item relations <owner-type> <owner-id-or-ref> [--json]"))
+        #expect(itemHelp.stdout.contains("cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]"))
+        #expect(itemHelp.stdout.contains("cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]"))
         #expect(topHelp.stdout.contains("--path <source-file-path>"))
         #expect(topHelp.stdout.contains("--path <target-folder-path>"))
     }
