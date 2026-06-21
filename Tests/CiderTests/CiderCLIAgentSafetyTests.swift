@@ -4489,12 +4489,16 @@ struct CiderCLIAgentSafetyTests {
         #expect(newestRollups.first?["acceptedRowCount"] as? Int == 0)
 
         for query in [
+            "last time I filled up",
             "latest gas spend",
             "most recent gas purchase",
             "what did gas cost",
             "how much did I spend on gas",
             "how much was gas",
             "how much did I pay for gas",
+            "when did I last buy gas",
+            "where did I get gas",
+            "how many gallons of gas",
         ] {
             let synonymPayload = try assertStrictProcessJSON(
                 runCLI(args: ["item", "daily-tracker", "--query", query, "--sort", "newest", "--limit", "1", "--json"], vault: vault),
@@ -4537,6 +4541,16 @@ struct CiderCLIAgentSafetyTests {
         #expect(genericQuestionPayload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
         #expect((genericQuestionPayload["rows"] as? [[String: Any]])?.isEmpty == true)
         #expect((genericQuestionPayload["rollups"] as? [[String: Any]])?.isEmpty == true)
+
+        let genericWherePayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--query", "where did I get", "--sort", "newest", "--limit", "1", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        #expect(genericWherePayload["readOnly"] as? Bool == true)
+        #expect(genericWherePayload["changed"] as? Bool == false)
+        #expect(genericWherePayload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+        #expect((genericWherePayload["rows"] as? [[String: Any]])?.isEmpty == true)
+        #expect((genericWherePayload["rollups"] as? [[String: Any]])?.isEmpty == true)
     }
 
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")

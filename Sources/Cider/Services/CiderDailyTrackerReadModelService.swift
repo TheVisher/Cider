@@ -259,6 +259,9 @@ final class CiderDailyTrackerReadModelService {
         if token == "fuel" {
             return rowTokens.contains("fuel") || rowTokens.contains("gas")
         }
+        if token == "gallon" || token == "gallons" {
+            return rowTokens.contains("gallon") || rowTokens.contains("gallons")
+        }
         if spendingQueryTokens.contains(token) {
             return rowTokens.contains("spending")
         }
@@ -275,8 +278,9 @@ final class CiderDailyTrackerReadModelService {
             .replacingOccurrences(of: #"(?<=[A-Za-z])-(?=[A-Za-z])"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"[^a-z0-9.]+"#, with: " ", options: .regularExpression)
         let stopwords: Set<String> = [
-            "a", "an", "and", "did", "do", "for", "how", "i", "last", "latest", "me", "most", "much", "my",
-            "of", "on", "recent", "the", "that", "time", "to", "was", "what", "when",
+            "a", "an", "and", "buy", "did", "do", "for", "get", "how", "i", "last", "latest", "many", "me",
+            "most", "much", "my", "of", "on", "recent", "the", "that", "time", "to", "was", "what", "when",
+            "where",
         ]
         return tokenText
             .split(separator: " ")
