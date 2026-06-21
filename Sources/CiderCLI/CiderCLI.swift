@@ -213,6 +213,8 @@ struct CiderCLI {
           cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
           cider-cli item graph-health [--json]
           cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
+          cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
+            Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
           cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
           cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]
 
@@ -246,6 +248,8 @@ struct CiderCLI {
             return "cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]"
         case "sync-project", "project-sync":
             return "cider-cli item sync-project <project-id-or-name> [--json]"
+        case "daily-tracker", "tracker-daily", "daily-signals":
+            return "cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]\nDefault sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows."
         default:
             return nil
         }
