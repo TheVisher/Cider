@@ -175,6 +175,82 @@ struct CiderCLI {
         }
     }
 
+    static func handleEarlyHelpRequest(command rawCommand: String, subcommand rawSubcommand: String?, args: [String]) -> Bool {
+        let command = rawCommand.lowercased()
+        let subcommand = rawSubcommand?.lowercased()
+
+        if command == "help" || command == "--help" || command == "-h" {
+            printUsage()
+            return true
+        }
+
+        guard command == "item" else {
+            return false
+        }
+
+        if subcommand == nil || subcommand == "help" || subcommand == "--help" || subcommand == "-h" {
+            printItemEarlyHelp()
+            return true
+        }
+
+        guard hasHelpArg(args) else {
+            return false
+        }
+
+        if let usage = itemSubcommandUsage(for: subcommand) {
+            print("Usage: \(usage)")
+        } else {
+            printItemEarlyHelp()
+        }
+        return true
+    }
+
+    static func printItemEarlyHelp() {
+        print("""
+        Item graph commands:
+          cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--space <space-id|name>] [--limit <n>] [--json]
+          cider-cli item get <type> <id-or-ref> [--json]
+          cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
+          cider-cli item graph-health [--json]
+          cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
+          cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
+          cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]
+
+        Migration/backfill commands:
+          cider-cli item backfill-kanban [--board <name-or-id>] [--json]
+          cider-cli item rebuild-references <note|card|board> <id-or-ref> [--json]
+          cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]
+          cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
+          cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
+          cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
+          cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
+          cider-cli item sync-project <project-id-or-name> [--json]
+        """)
+    }
+
+    static func itemSubcommandUsage(for subcommand: String?) -> String? {
+        switch subcommand {
+        case "backfill-kanban":
+            return "cider-cli item backfill-kanban [--board <name-or-id>] [--json]"
+        case "rebuild-references", "reference-rebuild", "references-rebuild":
+            return "cider-cli item rebuild-references <note|card|board> <id-or-ref> [--json]"
+        case "rebuild-chunks", "rebuild-content", "content-rebuild":
+            return "cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]"
+        case "rebuild-enrichment", "enrichment-rebuild":
+            return "cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]"
+        case "rebuild-similarity", "similarity-rebuild", "reconcile-similarity", "similarity-reconcile":
+            return "cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]"
+        case "dogfood-intelligence", "intelligence-dogfood":
+            return "cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]"
+        case "backfill-journals", "journal-backfill", "backfill-daily-journals":
+            return "cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]"
+        case "sync-project", "project-sync":
+            return "cider-cli item sync-project <project-id-or-name> [--json]"
+        default:
+            return nil
+        }
+    }
+
     static func main() async {
         processExitCode = 0
         defer {
@@ -216,6 +292,9 @@ struct CiderCLI {
                 replacement: removed.replacement,
                 reason: removed.reason
             )
+            return
+        }
+        if handleEarlyHelpRequest(command: command, subcommand: subcommand, args: remaining) {
             return
         }
 

@@ -3244,6 +3244,55 @@ struct CiderCLIAgentSafetyTests {
         })
     }
 
+    @Test("item backfill journals help is side effect free")
+    func itemBackfillJournalsHelpIsSideEffectFree() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-backfill-journals-help-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try createNote(
+            title: "Daily Journal 2026-06-20",
+            content: "Help requests must not backfill this journal into graph or memory review candidates.",
+            vault: vault
+        )
+        let beforeCounts = try generatedSecondBrainRowCounts(vault: vault)
+
+        let result = try runCLI(args: ["item", "backfill-journals", "--help"], vault: vault)
+
+        #expect(result.status == 0)
+        #expect(result.stdout.contains("cider-cli item backfill-journals"))
+        #expect(result.stdout.localizedCaseInsensitiveContains("Backfilled") == false)
+        #expect(try generatedSecondBrainRowCounts(vault: vault) == beforeCounts)
+    }
+
+    @Test("adjacent item migration help exits before vault access")
+    func adjacentItemMigrationHelpExitsBeforeVaultAccess() throws {
+        let commands: [[String]] = [
+            ["item", "backfill-kanban", "--help"],
+            ["item", "rebuild-references", "--help"],
+            ["item", "rebuild-chunks", "--help"],
+            ["item", "rebuild-enrichment", "--help"],
+            ["item", "rebuild-similarity", "--help"],
+            ["item", "dogfood-intelligence", "--help"],
+            ["item", "backfill-journals", "--help"],
+            ["item", "sync-project", "--help"],
+        ]
+
+        for args in commands {
+            let vault = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cider-cli-migration-help-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: vault) }
+
+            let result = try runCLI(args: args, vault: vault)
+
+            #expect(result.status == 0, "Expected \(args.joined(separator: " ")) help to exit 0")
+            #expect(result.stdout.contains("Usage: cider-cli \(args[0]) \(args[1])"))
+            #expect(FileManager.default.fileExists(atPath: vault.path) == false)
+            #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent(".cider").path) == false)
+        }
+    }
+
     @Test("review queue candidate rows explain source storage proposed change and quality")
     func reviewQueueCandidateRowsExplainSourceStorageProposedChangeAndQuality() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -6809,6 +6858,34 @@ struct CiderCLIAgentSafetyTests {
             .bind(timestamp, at: 3)
             .bind(timestamp, at: 4)
         try stmt.step()
+    }
+
+    private func tableRowCount(_ table: String, vault: URL) throws -> Int {
+        let allowedTables: Set<String> = [
+            "content_chunks",
+            "enrichment_outputs",
+            "similarity_candidates",
+            "owner_relations",
+        ]
+        precondition(allowedTables.contains(table))
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { db.close() }
+
+        let stmt = try db.prepare("SELECT count(*) FROM \(table);")
+        guard try stmt.step() else {
+            return 0
+        }
+        return stmt.int(at: 0)
+    }
+
+    private func generatedSecondBrainRowCounts(vault: URL) throws -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for table in ["content_chunks", "enrichment_outputs", "similarity_candidates", "owner_relations"] {
+            counts[table] = try tableRowCount(table, vault: vault)
+        }
+        return counts
     }
 
     private func runCLI(args: [String], stdin: String? = nil) throws -> (stdout: String, stderr: String, status: Int32) {
