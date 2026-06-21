@@ -209,6 +209,9 @@ struct CiderCLI {
         print("""
         Item graph commands:
           cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--space <space-id|name>] [--limit <n>] [--json]
+            Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files.
+            Use one scope value at a time; do not combine scope names.
+            Example: cider-cli item search "event" --scope personalMemory --json
           cider-cli item get <type> <id-or-ref> [--json]
           cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
           cider-cli item graph-health [--json]
@@ -216,6 +219,7 @@ struct CiderCLI {
           cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
             Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
           cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
+            Do not pass artifact filenames such as Example.webloc to item move --path.
           cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]
 
         Migration/backfill commands:
