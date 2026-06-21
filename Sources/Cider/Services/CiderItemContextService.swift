@@ -138,6 +138,12 @@ enum CiderItemSearchScope: String, Codable, CaseIterable, Equatable {
     case files
 }
 
+enum CiderItemSearchSort: String, Codable, CaseIterable, Equatable {
+    case relevance
+    case newest
+    case oldest
+}
+
 struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var id: String
     var kind: CiderItemSearchResultKind
@@ -400,7 +406,8 @@ final class CiderItemContextService {
         _ query: String,
         limit: Int = 20,
         inSpaceID spaceID: String? = nil,
-        scope: CiderItemSearchScope = .all
+        scope: CiderItemSearchScope = .all,
+        sort: CiderItemSearchSort = .relevance
     ) throws -> [CiderItemSearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -411,7 +418,8 @@ final class CiderItemContextService {
             queryPlan: plan,
             limit: limit,
             spaceRefs: spaceRefs,
-            scope: scope
+            scope: scope,
+            sort: sort
         )
     }
 
@@ -870,7 +878,8 @@ final class CiderItemContextService {
         queryPlan: [RecallQueryStage],
         limit: Int,
         spaceRefs: Set<LibraryEntityRef>? = nil,
-        scope: CiderItemSearchScope = .all
+        scope: CiderItemSearchScope = .all,
+        sort: CiderItemSearchSort = .relevance
     ) throws -> [CiderItemSearchResult] {
         let boundedLimit = max(1, limit)
         var bestByOwner: [String: CiderItemSearchResult] = [:]
@@ -1057,19 +1066,56 @@ final class CiderItemContextService {
                 && searchResult(result, isIncludedIn: scope)
         }
 
-        return Array(candidates)
+        let scopedCandidates = Array(candidates).map { result in
+            var scoped = result
+            scoped.searchScope = scope
+            scoped.captureProvenance = captureProvenance(for: result.owner)
+            return scoped
+        }
+
+        return scopedCandidates
             .sorted { lhs, rhs in
-                if lhs.rank != rhs.rank { return lhs.rank > rhs.rank }
-                if (lhs.item != nil) != (rhs.item != nil) { return lhs.item != nil }
-                return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+                searchResult(lhs, shouldSortBefore: rhs, sort: sort)
             }
             .prefix(boundedLimit)
-            .map { result in
-                var scoped = result
-                scoped.searchScope = scope
-                scoped.captureProvenance = captureProvenance(for: result.owner)
-                return scoped
-            }
+            .map { $0 }
+    }
+
+    private func searchResult(
+        _ lhs: CiderItemSearchResult,
+        shouldSortBefore rhs: CiderItemSearchResult,
+        sort: CiderItemSearchSort
+    ) -> Bool {
+        switch sort {
+        case .relevance:
+            return relevanceSorted(lhs, before: rhs)
+        case .newest:
+            let lhsDate = searchTemporalDate(for: lhs)
+            let rhsDate = searchTemporalDate(for: rhs)
+            if lhsDate != rhsDate { return lhsDate > rhsDate }
+            return relevanceSorted(lhs, before: rhs)
+        case .oldest:
+            let lhsDate = searchTemporalDate(for: lhs)
+            let rhsDate = searchTemporalDate(for: rhs)
+            if lhsDate != rhsDate { return lhsDate < rhsDate }
+            return relevanceSorted(lhs, before: rhs)
+        }
+    }
+
+    private func relevanceSorted(_ lhs: CiderItemSearchResult, before rhs: CiderItemSearchResult) -> Bool {
+        if lhs.rank != rhs.rank { return lhs.rank > rhs.rank }
+        if (lhs.item != nil) != (rhs.item != nil) { return lhs.item != nil }
+        return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+    }
+
+    private func searchTemporalDate(for result: CiderItemSearchResult) -> Date {
+        if let captureDate = result.captureProvenance.map(\.createdAt).max() {
+            return captureDate
+        }
+        if let item = result.item {
+            return max(item.updatedAt, item.createdAt)
+        }
+        return .distantPast
     }
 
     private func captureProvenance(for owner: SecondBrainOwnerRef) -> [CiderItemCaptureProvenance] {

@@ -161,7 +161,7 @@ For Cider development work with a Kanban card, agents should use the structured 
 14. Move the card to `Done` only after verification and commit traceability are recorded, or explicitly record that the work is verified but unlanded and keep it out of `Done`.
 15. Before stopping, refresh `Agent Handoff` with the current status, exact commands the next agent should run, known gaps, and merge/push constraints.
 
-Use `cider-cli item get card <id> --json` when an agent only needs projected sections/provenance, and `cider-cli item search <query> --json` when it needs retrieval across projected chunks. Use one supported `item search --scope` value at a time: `personalMemory` for life memory/date/event/contact recall, `projectKanban` for board/card work, `qaArtifacts` for QA reports, `files` for vault files, and `all` for broad recall. Raw Markdown or YAML inspection is for parser/storage debugging, not normal handoff.
+Use `cider-cli item get card <id> --json` when an agent only needs projected sections/provenance, and `cider-cli item search <query> --json` when it needs retrieval across projected chunks. Use one supported `item search --scope` value at a time: `personalMemory` for life memory/date/event/contact recall, `projectKanban` for board/card work, `qaArtifacts` for QA reports, `files` for vault files, and `all` for broad recall. Default item search order is `relevance`; use supported `item search --sort newest|oldest` only when recall is explicitly recency-oriented or when auditing/debugging temporal metadata. Raw Markdown or YAML inspection is for parser/storage debugging, not normal handoff.
 
 ## Accepted Graph Workflow
 

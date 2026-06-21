@@ -208,10 +208,13 @@ struct CiderCLI {
     static func printItemEarlyHelp() {
         print("""
         Item graph commands:
-          cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--space <space-id|name>] [--limit <n>] [--json]
+          cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--sort relevance|newest|oldest] [--space <space-id|name>] [--limit <n>] [--json]
             Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files.
             Use one scope value at a time; do not combine scope names.
+            Valid --sort values: relevance, newest, oldest. Default is relevance; newest/oldest use capture provenance timestamps when present, otherwise item updated/created timestamps.
+            Use newest/oldest only for recency-oriented recall or audit/debug.
             Example: cider-cli item search "event" --scope personalMemory --json
+            Example: cider-cli item search "Panda Express" --sort newest --limit 5 --json
           cider-cli item get <type> <id-or-ref> [--json]
           cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
             Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
@@ -5027,9 +5030,11 @@ struct CiderCLI {
         case nil, "help", "--help", "-h":
             print("""
             Item graph commands:
-              cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--space <space-id|name>] [--limit <n>] [--json]
+              cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--sort relevance|newest|oldest] [--space <space-id|name>] [--limit <n>] [--json]
                 Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files.
                 Use one scope value at a time; do not combine scope names.
+                Valid --sort values: relevance, newest, oldest. Default is relevance; newest/oldest use capture provenance timestamps when present, otherwise item updated/created timestamps.
+                Use newest/oldest only for recency-oriented recall or audit/debug.
               cider-cli item search-debug <query> [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
@@ -5108,7 +5113,8 @@ struct CiderCLI {
                 let space = resolveOptionalSpaceFlag(from: args)
                 if parseFlag("--space", from: args) != nil, space == nil { return }
                 guard let scope = parseItemSearchScope(from: args) else { return }
-                let results = try contextService.search(query, limit: limit, inSpaceID: space?.id, scope: scope)
+                guard let sort = parseItemSearchSort(from: args) else { return }
+                let results = try contextService.search(query, limit: limit, inSpaceID: space?.id, scope: scope, sort: sort)
                 if jsonOutput {
                     if let space {
                         outputJSON([
@@ -10889,16 +10895,33 @@ struct CiderCLI {
         return nil
     }
 
+    static func parseItemSearchSort(from args: [String]) -> CiderItemSearchSort? {
+        guard let rawSort = parseFlag("--sort", from: args) else { return .relevance }
+        if let sort = CiderItemSearchSort(rawValue: rawSort) {
+            return sort
+        }
+        printCLIError("Unsupported item search sort '\(rawSort)'. \(itemSearchSortGuidance)")
+        return nil
+    }
+
     static var itemSearchScopeValues: String {
         CiderItemSearchScope.allCases.map(\.rawValue).joined(separator: ", ")
     }
 
+    static var itemSearchSortValues: String {
+        CiderItemSearchSort.allCases.map(\.rawValue).joined(separator: ", ")
+    }
+
     static var itemSearchUsageLine: String {
-        "Usage: cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--space <space-id|name>] [--limit <n>] [--json]"
+        "Usage: cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--sort relevance|newest|oldest] [--space <space-id|name>] [--limit <n>] [--json]"
     }
 
     static var itemSearchScopeGuidance: String {
         "Valid --scope values: \(itemSearchScopeValues). Use one scope value at a time; do not combine scope names."
+    }
+
+    static var itemSearchSortGuidance: String {
+        "Valid --sort values: \(itemSearchSortValues). Default is relevance; newest/oldest use capture provenance timestamps when present, otherwise item updated/created timestamps."
     }
 
     static var itemSearchHelpText: String {
@@ -10906,6 +10929,7 @@ struct CiderCLI {
         \(itemSearchUsageLine)
 
         \(itemSearchScopeGuidance)
+        \(itemSearchSortGuidance)
 
         Scope meanings:
           all             Search all projected item/chunk content.
@@ -10917,6 +10941,7 @@ struct CiderCLI {
         Examples:
           cider-cli item search "event" --scope personalMemory --json
           cider-cli item search "event" --scope all --json
+          cider-cli item search "Panda Express" --sort newest --limit 5 --json
         """
     }
 
@@ -23779,8 +23804,9 @@ struct CiderCLI {
           cider-cli test-run cleanup <run-id> --approve <token> --execute [--json]
 
         ITEM
-          cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--space <space-id|name>] [--limit <n>] [--json]
+          cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--sort relevance|newest|oldest] [--space <space-id|name>] [--limit <n>] [--json]
             Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files. Use one scope value at a time.
+            Valid --sort values: relevance, newest, oldest. Default is relevance; newest/oldest use capture provenance timestamps when present, otherwise item updated/created timestamps.
           cider-cli item search-debug <query> [--limit <n>] [--json]
           cider-cli item get <type> <id-or-ref> [--json]
           cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]

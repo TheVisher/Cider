@@ -1120,6 +1120,106 @@ struct CiderItemContextServiceTests {
         }
     }
 
+    @Test("item search recency sort preserves relevance default and orders by capture provenance then item timestamps")
+    func itemSearchRecencySortPreservesRelevanceDefaultAndOrdersByTemporalMetadata() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let olderExact = LibraryEntityRef(type: .note, entityID: UUID())
+        let newerSourceBacked = LibraryEntityRef(type: .note, entityID: UUID())
+        let oldest = LibraryEntityRef(type: .note, entityID: UUID())
+        let olderDate = Date(timeIntervalSince1970: 1_748_450_000)
+        let newerItemDate = Date(timeIntervalSince1970: 1_748_520_000)
+        let newerCaptureDate = Date(timeIntervalSince1970: 1_750_000_000)
+        let oldestDate = Date(timeIntervalSince1970: 1_740_000_000)
+
+        try insertItem(
+            olderExact,
+            title: "Panda Express lunch",
+            relativePath: "Inbox/Notes/Panda Express lunch.md",
+            into: db,
+            createdAt: olderDate,
+            updatedAt: olderDate
+        )
+        try insertItem(
+            newerSourceBacked,
+            title: "Daily Journal 2026-06-13",
+            relativePath: "Journal/Daily Journal 2026-06-13.md",
+            into: db,
+            createdAt: newerItemDate,
+            updatedAt: newerItemDate
+        )
+        try insertItem(
+            oldest,
+            title: "Panda Express archive",
+            relativePath: "Inbox/Notes/Panda Express archive.md",
+            into: db,
+            createdAt: oldestDate,
+            updatedAt: oldestDate
+        )
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: newerSourceBacked.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(sectionID: nil, itemID: newerSourceBacked.entityID.uuidString, source: "journal-enrichment", title: "Panda Express journal mention", body: "Dinner included Panda Express.", chunkIndex: 0)
+        ])
+
+        let eventID = UUID()
+        let insertEvent = try db.prepare("""
+            INSERT INTO capture_events (
+                id, source_kind, surface, channel, channel_id, thread_id, message_id,
+                sender_id, sender_name, source_url, source_file, source_text,
+                attachment_count, metadata, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """)
+        insertEvent.bind(eventID.uuidString, at: 1)
+            .bind("journal", at: 2)
+            .bind("cli", at: 3)
+            .bind("local", at: 4)
+            .bind(String?.none, at: 5)
+            .bind(String?.none, at: 6)
+            .bind("daily-2026-06-13", at: 7)
+            .bind("codex", at: 8)
+            .bind("Codex", at: 9)
+            .bind(String?.none, at: 10)
+            .bind(String?.none, at: 11)
+            .bind("Panda Express journal capture", at: 12)
+            .bind(0, at: 13)
+            .bind("{}", at: 14)
+            .bind(DatabaseHelpers.encode(newerCaptureDate), at: 15)
+        try insertEvent.step()
+
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString),
+            targetOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: newerSourceBacked.entityID.uuidString),
+            relationType: "produced_item",
+            evidence: "Capture produced newer Panda Express journal item.",
+            source: "capture.add",
+            actor: "system",
+            confidence: 1,
+            metadata: [:]
+        ))
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let defaultResults = try service.search("Panda Express", limit: 10)
+        let explicitRelevanceResults = try service.search("Panda Express", limit: 10, sort: .relevance)
+        #expect(defaultResults.map(\.id) == explicitRelevanceResults.map(\.id))
+
+        let newestResults = try service.search("Panda Express", limit: 10, sort: .newest)
+        #expect(newestResults.map(\.item?.id).prefix(3) == [
+            newerSourceBacked.entityID,
+            olderExact.entityID,
+            oldest.entityID,
+        ])
+        #expect(newestResults.first?.captureProvenance.first?.createdAt == newerCaptureDate)
+
+        let oldestResults = try service.search("Panda Express", limit: 10, sort: .oldest)
+        #expect(oldestResults.map(\.item?.id).prefix(3) == [
+            oldest.entityID,
+            olderExact.entityID,
+            newerSourceBacked.entityID,
+        ])
+    }
+
     @Test("tag facet recall intersects broad type and focused topic tags")
     func tagFacetRecallIntersectsBroadTypeAndFocusedTopicTags() throws {
         let (db, url) = try makeTestDB()

@@ -157,6 +157,8 @@ struct FileBackedDomainContractsTests {
             "Valid `item search --scope` values are `all`, `personalMemory`, `projectKanban`, `qaArtifacts`, and `files`.",
             "Use one scope value per search; do not combine scope names such as `personalMemory/all`.",
             "cider-cli item search \"event\" --scope personalMemory --json",
+            "Valid `item search --sort` values are `relevance`, `newest`, and `oldest`.",
+            "cider-cli item search \"Panda Express\" --sort newest --limit 5 --json",
         ] {
             #expect(cliSource.contains(snippet), "Docs/CLI.md missing item search scope snippet: \(snippet)")
         }
@@ -165,6 +167,7 @@ struct FileBackedDomainContractsTests {
             "Use one supported `item search --scope` value at a time",
             "`personalMemory` for life memory/date/event/contact recall",
             "`all` for broad recall",
+            "Default item search order is `relevance`; use supported `item search --sort newest|oldest` only when recall is explicitly recency-oriented",
         ] {
             #expect(agentSource.contains(snippet), "Docs/AGENT.md missing item search scope snippet: \(snippet)")
         }

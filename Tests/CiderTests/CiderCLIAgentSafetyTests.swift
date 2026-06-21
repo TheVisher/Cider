@@ -2663,15 +2663,22 @@ struct CiderCLIAgentSafetyTests {
         #expect(topHelp.stdout.contains("--path <target-folder-path>"))
     }
 
-    @Test("item search help and scope validation are agent safe")
-    func itemSearchHelpAndScopeValidationAreAgentSafe() throws {
+    @Test("item search help scope and sort validation are agent safe")
+    func itemSearchHelpScopeAndSortValidationAreAgentSafe() throws {
         let help = try runCLI(args: ["item", "search", "--help"])
+        let itemHelp = try runCLI(args: ["item", "help"])
+        let topHelp = try runCLI(args: ["help"])
 
         #expect(help.status == 0)
         #expect(help.stdout.contains("Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files"))
         #expect(help.stdout.contains("Use one scope value at a time; do not combine scope names"))
+        #expect(help.stdout.contains("Valid --sort values: relevance, newest, oldest"))
+        #expect(help.stdout.contains("Default is relevance; newest/oldest use capture provenance timestamps when present"))
         #expect(help.stdout.contains("cider-cli item search \"event\" --scope personalMemory --json"))
+        #expect(help.stdout.contains("cider-cli item search \"Panda Express\" --sort newest --limit 5 --json"))
         #expect(!help.stdout.contains("personalMemory/all"))
+        #expect(itemHelp.stdout.contains("[--sort relevance|newest|oldest]"))
+        #expect(topHelp.stdout.contains("[--sort relevance|newest|oldest]"))
 
         let invalid = try runCLI(args: [
             "item", "search", "event",
@@ -2686,6 +2693,19 @@ struct CiderCLIAgentSafetyTests {
         #expect(error.contains("Unsupported item search scope 'personalMemory/all'"))
         #expect(error.contains("Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files"))
         #expect(error.contains("Use --scope personalMemory or --scope all"))
+
+        let invalidSort = try runCLI(args: [
+            "item", "search", "event",
+            "--sort", "recent",
+            "--json",
+        ])
+        let sortPayload = try parseJSONObject(invalidSort.stdout)
+        let sortError = try #require(sortPayload["error"] as? String)
+
+        #expect(invalidSort.status != 0)
+        #expect(sortPayload["ok"] as? Bool == false)
+        #expect(sortError.contains("Unsupported item search sort 'recent'"))
+        #expect(sortError.contains("Valid --sort values: relevance, newest, oldest"))
     }
 
     @Test("capture add event and contact reject missing required fields")
