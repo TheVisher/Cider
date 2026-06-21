@@ -17324,7 +17324,12 @@ struct CiderCLI {
         let query = (resolvedQuery.originalQuery ?? resolvedQuery.query ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return nil }
-        let command = "cider-cli item search \(shellQuoted(query)) --json"
+        var commandParts = ["cider-cli", "item", "search", shellQuoted(query)]
+        if dailyTrackerFallbackQueryHasRecencyIntent(resolvedQuery) {
+            commandParts.append(contentsOf: ["--sort", "newest"])
+        }
+        commandParts.append("--json")
+        let command = commandParts.joined(separator: " ")
         return [
             "kind": "broaderItemSearch",
             "readOnly": true,
@@ -17334,6 +17339,24 @@ struct CiderCLI {
             "note": "Daily tracker found no rows; use this read-only broader item search to look for possible source items without treating them as tracker truth.",
             "safeNextCommands": [command],
         ]
+    }
+
+    static func dailyTrackerFallbackQueryHasRecencyIntent(_ resolvedQuery: CiderDailyTrackerResolvedQuery) -> Bool {
+        let query = (resolvedQuery.originalQuery ?? resolvedQuery.query ?? "")
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .lowercased()
+        let tokens = Set(
+            query
+                .replacingOccurrences(of: #"(?<=[A-Za-z])-(?=[A-Za-z])"#, with: " ", options: .regularExpression)
+                .replacingOccurrences(of: #"[^a-z0-9.]+"#, with: " ", options: .regularExpression)
+                .split(separator: " ")
+                .map(String.init)
+        )
+        return tokens.contains("last")
+            || tokens.contains("latest")
+            || tokens.contains("newest")
+            || tokens.contains("recent")
+            || (tokens.contains("most") && tokens.contains("recent"))
     }
 
     static func dailyTrackerQueryReplayCommand(

@@ -4918,8 +4918,39 @@ struct CiderCLIAgentSafetyTests {
         #expect(fallback["candidateBoundary"] as? String == "not_a_reviewable_candidate")
         #expect(fallback["note"] as? String == "Daily tracker found no rows; use this read-only broader item search to look for possible source items without treating them as tracker truth.")
         let fallbackCommands = try #require(fallback["safeNextCommands"] as? [String])
-        #expect(fallbackCommands == ["cider-cli item search 'last Panda Express' --json"])
-        #expect(payload["relatedSearchCommands"] as? [String] == ["cider-cli item search 'last Panda Express' --json"])
+        #expect(fallbackCommands == ["cider-cli item search 'last Panda Express' --sort newest --json"])
+        #expect(payload["relatedSearchCommands"] as? [String] == ["cider-cli item search 'last Panda Express' --sort newest --json"])
+    }
+
+    @Test("daily tracker zero-result non-recency query keeps broader item search relevance order")
+    func dailyTrackerZeroResultNonRecencyQueryKeepsBroaderItemSearchRelevanceOrder() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-daily-tracker-zero-result-non-recency-fallback-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let payload = try assertStrictProcessJSON(
+            runCLI(
+                args: [
+                    "item", "daily-tracker",
+                    "--query", "Panda Express",
+                    "--json",
+                ],
+                vault: vault
+            ),
+            command: "item.daily-tracker"
+        )
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+        #expect(payload["rowCount"] as? Int == 0)
+
+        let fallbacks = try #require(payload["recallFallbacks"] as? [[String: Any]])
+        let fallback = try #require(fallbacks.first)
+        #expect(fallback["truthBoundary"] as? String == "broader_search_possible_source_lookup_not_daily_tracker_truth")
+        let fallbackCommands = try #require(fallback["safeNextCommands"] as? [String])
+        #expect(fallbackCommands == ["cider-cli item search 'Panda Express' --json"])
+        #expect(payload["relatedSearchCommands"] as? [String] == ["cider-cli item search 'Panda Express' --json"])
     }
 
     @Test("daily tracker query replay command shell quotes apostrophes")
