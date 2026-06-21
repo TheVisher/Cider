@@ -4075,6 +4075,93 @@ struct CiderCLIAgentSafetyTests {
         #expect(secondRollup["routineRowCount"] as? Int == 1)
     }
 
+    @Test("daily tracker backfill surfaces natural journal prose as source backed reviewables")
+    func dailyTrackerBackfillSurfacesNaturalJournalProseAsSourceBackedReviewables() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-daily-tracker-natural-prose-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let firstJournalID = try createNote(
+            title: "Daily Journal 2026-06-13",
+            content: """
+            Breakfast was overnight oats at home. Lunch was Panda Express, orange chicken and fried rice, cost $11.91. Took a shower after work.
+            """,
+            vault: vault
+        )
+        let secondJournalID = try createNote(
+            title: "Daily Journal 2026-06-14",
+            content: """
+            Dinner was chicken casserole at home. Everyone liked the chicken casserole. Stopped for gas and paid $27.00. No workout today, just a family routine night.
+            """,
+            vault: vault
+        )
+
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "backfill-journals", "--date", "2026-06-13", "--json"], vault: vault),
+            command: "item.backfill-journals"
+        )
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "backfill-journals", "--date", "2026-06-14", "--json"], vault: vault),
+            command: "item.backfill-journals"
+        )
+
+        let payload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--from", "2026-06-13", "--to", "2026-06-14", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+
+        let rows = try #require(payload["rows"] as? [[String: Any]])
+        #expect(rows.count >= 7)
+        #expect(rows.allSatisfy { $0["reviewState"] as? String == "suggested" })
+        #expect(rows.allSatisfy { $0["truthState"] as? String == "reviewable_candidate_not_truth" })
+
+        let breakfast = try #require(rows.first { $0["date"] as? String == "2026-06-13" && $0["signalType"] as? String == "food" && $0["value"] as? String == "breakfast" })
+        #expect((breakfast["metadata"] as? [String: String])?["food_item"] == "overnight oats")
+        #expect((breakfast["sourceRefs"] as? [String])?.contains("note:\(firstJournalID)") == true)
+        #expect((breakfast["citation"] as? [String: Any])?["ownerID"] as? String == firstJournalID)
+        #expect((breakfast["safeNextCommands"] as? [String])?.contains("cider-cli item context note \(firstJournalID) --json") == true)
+
+        let panda = try #require(rows.first { $0["date"] as? String == "2026-06-13" && $0["amount"] as? String == "11.91" })
+        #expect(panda["signalType"] as? String == "spending")
+        #expect(panda["value"] as? String == "food")
+        #expect((panda["metadata"] as? [String: String])?["merchant"] == "Panda Express")
+
+        let shower = try #require(rows.first { $0["date"] as? String == "2026-06-13" && $0["signalType"] as? String == "routine" && $0["value"] as? String == "shower" })
+        #expect((shower["sourceRefs"] as? [String])?.contains("note:\(firstJournalID)") == true)
+
+        let dinner = try #require(rows.first { $0["date"] as? String == "2026-06-14" && $0["signalType"] as? String == "food" && $0["value"] as? String == "dinner" })
+        #expect((dinner["metadata"] as? [String: String])?["food_item"] == "chicken casserole")
+        #expect((dinner["sourceRefs"] as? [String])?.contains("note:\(secondJournalID)") == true)
+
+        let familyPreference = try #require(rows.first { $0["date"] as? String == "2026-06-14" && $0["signalType"] as? String == "food" && ($0["metadata"] as? [String: String])?["preference_subject"] == "family" })
+        #expect(familyPreference["value"] as? String == "chicken casserole")
+
+        let gas = try #require(rows.first { $0["date"] as? String == "2026-06-14" && $0["amount"] as? String == "27.00" })
+        #expect(gas["signalType"] as? String == "spending")
+        #expect(gas["value"] as? String == "gas")
+
+        let noWorkout = try #require(rows.first { $0["date"] as? String == "2026-06-14" && $0["signalType"] as? String == "routine" && $0["value"] as? String == "workout" })
+        #expect((noWorkout["metadata"] as? [String: String])?["routine_status"] == "skipped")
+
+        let rollups = try #require(payload["rollups"] as? [[String: Any]])
+        let firstRollup = try #require(rollups.first { $0["date"] as? String == "2026-06-13" })
+        #expect(firstRollup["foodRowCount"] as? Int == 1)
+        #expect(firstRollup["spendingRowCount"] as? Int == 1)
+        #expect(firstRollup["routineRowCount"] as? Int == 1)
+        #expect(firstRollup["spendingAmount"] as? String == "11.91")
+        #expect(firstRollup["reviewableRowCount"] as? Int == 3)
+        let secondRollup = try #require(rollups.first { $0["date"] as? String == "2026-06-14" })
+        #expect(secondRollup["foodRowCount"] as? Int == 2)
+        #expect(secondRollup["spendingRowCount"] as? Int == 1)
+        #expect(secondRollup["routineRowCount"] as? Int == 1)
+        #expect(secondRollup["spendingAmount"] as? String == "27.00")
+        #expect(secondRollup["reviewableRowCount"] as? Int == 4)
+    }
+
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")
     func recallContextBundleCitesAcceptedGraphEvidenceAndReviewableCandidates() throws {
         let vault = FileManager.default.temporaryDirectory

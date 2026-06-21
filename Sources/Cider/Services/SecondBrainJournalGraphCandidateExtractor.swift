@@ -735,6 +735,9 @@ struct SecondBrainJournalGraphCandidateExtractor {
         if lower.contains("gas station") {
             return ProseSpendingCategory(key: "gas_station", factType: "gas_station_purchase", displayName: "gas station items")
         }
+        if lower.range(of: #"\b(gas|fuel)\b"#, options: .regularExpression) != nil {
+            return ProseSpendingCategory(key: "gas", factType: "fuel_purchase", displayName: "gas")
+        }
         let foodMarkers = ["lunch", "dinner", "breakfast", "food", "panda express", "orange chicken", "chow mein", "burger", "taco", "coffee", "drink"]
         if foodMarkers.contains(where: { lower.contains($0) }) {
             return ProseSpendingCategory(key: "food", factType: "food_purchase", displayName: "food")
@@ -764,6 +767,8 @@ struct SecondBrainJournalGraphCandidateExtractor {
             terms += ["what did I spend on food", "food spending", "lunch spending"]
         } else if category == "gas_station" {
             terms += ["gas station spending", "gas station treats", "what did I spend at the gas station"]
+        } else if category == "gas" {
+            terms += ["gas spending", "fuel spending", "what did I spend on gas"]
         }
         if let merchant { terms.append(merchant) }
         var seen = Set<String>()
@@ -1003,7 +1008,179 @@ struct SecondBrainJournalGraphCandidateExtractor {
             ))
         }
 
+        for sentence in candidateSentences(from: rawContent) {
+            let span = sourceSpan(for: sentence, in: rawContent)
+            outputs.append(genericHomeMealCandidate(
+                sourceOwner: sourceOwner,
+                sentence: sentence,
+                date: normalizedDate,
+                time: normalizedTime,
+                keyDate: keyDate,
+                spanStart: span.start,
+                spanEnd: span.end
+            ))
+            outputs.append(familyFoodPreferenceCandidate(
+                sourceOwner: sourceOwner,
+                sentence: sentence,
+                date: normalizedDate,
+                time: normalizedTime,
+                keyDate: keyDate,
+                spanStart: span.start,
+                spanEnd: span.end
+            ))
+            outputs.append(routineSignalCandidate(
+                sourceOwner: sourceOwner,
+                sentence: sentence,
+                date: normalizedDate,
+                time: normalizedTime,
+                keyDate: keyDate,
+                spanStart: span.start,
+                spanEnd: span.end
+            ))
+        }
+
         return outputs.compactMap { $0 }
+    }
+
+    private func genericHomeMealCandidate(
+        sourceOwner: SecondBrainOwnerRef,
+        sentence: String,
+        date: String?,
+        time: String?,
+        keyDate: String,
+        spanStart: Int,
+        spanEnd: Int
+    ) -> SecondBrainEnrichmentOutput? {
+        guard let match = regexMatches(
+            pattern: #"(?i)^\s*(breakfast|lunch|dinner|brunch)\s+was\s+(.+?)\s+at\s+home\s*$"#,
+            in: sentence
+        ).first,
+              match.captures.count >= 2,
+              let meal = trimmedNonEmpty(match.captures[0])?.lowercased(),
+              let foodItem = cleanedFoodItem(match.captures[1]) else {
+            return nil
+        }
+        return makeDailyLifeMemoryCandidate(
+            sourceOwner: sourceOwner,
+            kind: "food_routine",
+            value: "\(meal.capitalized) was \(foodItem) at home.",
+            evidence: sentence,
+            confidence: 0.78,
+            memoryKey: "\(meal)-home-\(foodItem.slugComponent)-\(keyDate)",
+            date: date,
+            time: time,
+            spanStart: spanStart,
+            spanEnd: spanEnd,
+            metadata: [
+                "meal": meal,
+                "food_item": foodItem,
+                "location_context": "home",
+                "review_query_terms": encodeJSONStringArray(["what did I have for \(meal)", foodItem, "\(meal) at home"]),
+            ]
+        )
+    }
+
+    private func familyFoodPreferenceCandidate(
+        sourceOwner: SecondBrainOwnerRef,
+        sentence: String,
+        date: String?,
+        time: String?,
+        keyDate: String,
+        spanStart: Int,
+        spanEnd: Int
+    ) -> SecondBrainEnrichmentOutput? {
+        guard let match = regexMatches(
+            pattern: #"(?i)^\s*(?:everyone|family|the family|we all)\s+(liked|loved|enjoyed)\s+(?:the\s+)?(.+?)\s*$"#,
+            in: sentence
+        ).first,
+              match.captures.count >= 2,
+              let preference = trimmedNonEmpty(match.captures[0])?.lowercased(),
+              let foodItem = cleanedFoodItem(match.captures[1]) else {
+            return nil
+        }
+        return makeDailyLifeMemoryCandidate(
+            sourceOwner: sourceOwner,
+            kind: "food_preference",
+            value: "The family \(preference) \(foodItem).",
+            evidence: sentence,
+            confidence: 0.76,
+            memoryKey: "family-\(preference)-\(foodItem.slugComponent)-\(keyDate)",
+            date: date,
+            time: time,
+            spanStart: spanStart,
+            spanEnd: spanEnd,
+            metadata: [
+                "food_item": foodItem,
+                "preference": preference,
+                "preference_subject": "family",
+                "review_query_terms": encodeJSONStringArray(["family food preference", foodItem, "\(preference) \(foodItem)"]),
+            ]
+        )
+    }
+
+    private func routineSignalCandidate(
+        sourceOwner: SecondBrainOwnerRef,
+        sentence: String,
+        date: String?,
+        time: String?,
+        keyDate: String,
+        spanStart: Int,
+        spanEnd: Int
+    ) -> SecondBrainEnrichmentOutput? {
+        let lower = sentence.lowercased()
+        if lower.range(of: #"\btook\s+a\s+shower\b"#, options: .regularExpression) != nil {
+            return makeDailyLifeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "routine_signal",
+                value: "Visher took a shower after work.",
+                evidence: sentence,
+                confidence: 0.78,
+                memoryKey: "shower-after-work-\(keyDate)",
+                date: date,
+                time: time,
+                spanStart: spanStart,
+                spanEnd: spanEnd,
+                metadata: [
+                    "routine_type": "shower",
+                    "routine_status": "completed",
+                    "context": lower.contains("after work") ? "after_work" : "daily_routine",
+                    "review_query_terms": encodeJSONStringArray(["shower after work", "daily routine", "personal care routine"]),
+                ]
+            )
+        }
+
+        if lower.range(of: #"\bno\s+workout\s+today\b"#, options: .regularExpression) != nil {
+            return makeDailyLifeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "routine_signal",
+                value: "Visher did not work out today.",
+                evidence: sentence,
+                confidence: 0.78,
+                memoryKey: "no-workout-\(keyDate)",
+                date: date,
+                time: time,
+                spanStart: spanStart,
+                spanEnd: spanEnd,
+                metadata: [
+                    "routine_type": "workout",
+                    "routine_status": "skipped",
+                    "context": lower.contains("family") ? "family_routine_night" : "daily_routine",
+                    "review_query_terms": encodeJSONStringArray(["no workout today", "workout skipped", "family routine night"]),
+                ]
+            )
+        }
+
+        return nil
+    }
+
+    private func cleanedFoodItem(_ raw: String?) -> String? {
+        guard var value = trimmedNonEmpty(raw) else { return nil }
+        value = value
+            .replacingOccurrences(of: #"(?i)^(a|an|the|some)\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\s+(today|tonight)$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        guard let cleaned = trimmedNonEmpty(value), cleaned.count >= 3 else { return nil }
+        return cleaned.lowercased()
     }
 
     private func sourceQuote(in rawContent: String, containingAny needles: [String]) -> (text: String, start: Int, end: Int) {
@@ -1500,5 +1677,14 @@ struct SecondBrainJournalGraphCandidateExtractor {
             result.append(output)
         }
         return result
+    }
+}
+
+private extension String {
+    var slugComponent: String {
+        let slug = lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return slug.isEmpty ? "item" : String(slug.prefix(80))
     }
 }

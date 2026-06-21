@@ -127,6 +127,8 @@ final class CiderDailyTrackerReadModelService {
             return ("food", output.metadata["meal"] ?? output.metadata["food_item"] ?? output.metadata["merchant"] ?? memoryKind ?? "food")
         case "schedule_plan":
             return ("routine", output.metadata["plan_type"] ?? output.metadata["plan_status"] ?? "schedule_plan")
+        case "routine_signal":
+            return ("routine", output.metadata["routine_type"] ?? output.metadata["routine_status"] ?? "routine")
         default:
             return nil
         }
