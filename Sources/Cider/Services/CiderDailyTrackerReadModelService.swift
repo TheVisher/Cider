@@ -47,6 +47,13 @@ struct CiderDailyTrackerResolvedQuery: Equatable {
     var to: String?
     var query: String?
     var appliedRelativeDate: String?
+    var originalQuery: String?
+    var interpretationType: String
+    var dateRangeSource: String
+    var recognizedQueryDateType: String?
+    var recognizedQueryDateText: String?
+    var recognizedQueryDate: String?
+    var normalizedMatchingQuery: String?
 }
 
 enum CiderDailyTrackerSortOrder: String, Codable, Equatable {
@@ -122,49 +129,110 @@ final class CiderDailyTrackerReadModelService {
         calendar: Calendar = CiderDailyTrackerReadModelService.localCalendar()
     ) -> CiderDailyTrackerResolvedQuery {
         guard let query else {
-            return CiderDailyTrackerResolvedQuery(from: startDate, to: endDate, query: normalizedRawQuery(query), appliedRelativeDate: nil)
+            let dateRangeSource = startDate != nil || endDate != nil ? "explicitDateFlags" : "none"
+            return CiderDailyTrackerResolvedQuery(
+                from: startDate,
+                to: endDate,
+                query: nil,
+                appliedRelativeDate: nil,
+                originalQuery: nil,
+                interpretationType: dateRangeSource == "explicitDateFlags" ? "explicitDateFlags" : "none",
+                dateRangeSource: dateRangeSource,
+                recognizedQueryDateType: nil,
+                recognizedQueryDateText: nil,
+                recognizedQueryDate: nil,
+                normalizedMatchingQuery: nil
+            )
         }
+
+        let originalQuery = normalizedRawQuery(query)
+        let explicitDateFlagsProvided = startDate != nil || endDate != nil
 
         if searchTokens(query, droppingStopwords: false).contains("yesterday") {
             let yesterday = calendar.date(byAdding: .day, value: -1, to: referenceDate) ?? referenceDate
             let yesterdayString = localDateString(yesterday, calendar: calendar)
             let remainingQuery = stripRelativeDateTokens(from: query)
+            let matchingQuery = normalizedRawQuery(remainingQuery)
             return CiderDailyTrackerResolvedQuery(
                 from: startDate ?? yesterdayString,
                 to: endDate ?? yesterdayString,
-                query: normalizedRawQuery(remainingQuery),
-                appliedRelativeDate: yesterdayString
+                query: matchingQuery,
+                appliedRelativeDate: yesterdayString,
+                originalQuery: originalQuery,
+                interpretationType: explicitDateFlagsProvided ? "explicitDateFlags" : "relativeYesterday",
+                dateRangeSource: explicitDateFlagsProvided ? "explicitDateFlags" : "query",
+                recognizedQueryDateType: "relativeYesterday",
+                recognizedQueryDateText: "yesterday",
+                recognizedQueryDate: yesterdayString,
+                normalizedMatchingQuery: normalizedSearchText(matchingQuery)
             )
         }
 
         if let literal = monthDayDateLiteral(in: query, referenceDate: referenceDate, calendar: calendar) {
+            let matchingQuery = normalizedRawQuery(literal.remainingQuery)
             return CiderDailyTrackerResolvedQuery(
                 from: startDate ?? literal.dateString,
                 to: endDate ?? literal.dateString,
-                query: normalizedRawQuery(literal.remainingQuery),
-                appliedRelativeDate: literal.dateString
+                query: matchingQuery,
+                appliedRelativeDate: literal.dateString,
+                originalQuery: originalQuery,
+                interpretationType: explicitDateFlagsProvided ? "explicitDateFlags" : "monthDayLiteral",
+                dateRangeSource: explicitDateFlagsProvided ? "explicitDateFlags" : "query",
+                recognizedQueryDateType: "monthDayLiteral",
+                recognizedQueryDateText: literal.recognizedText,
+                recognizedQueryDate: literal.dateString,
+                normalizedMatchingQuery: normalizedSearchText(matchingQuery)
             )
         }
 
         if let literal = dayMonthDateLiteral(in: query, referenceDate: referenceDate, calendar: calendar) {
+            let matchingQuery = normalizedRawQuery(literal.remainingQuery)
             return CiderDailyTrackerResolvedQuery(
                 from: startDate ?? literal.dateString,
                 to: endDate ?? literal.dateString,
-                query: normalizedRawQuery(literal.remainingQuery),
-                appliedRelativeDate: literal.dateString
+                query: matchingQuery,
+                appliedRelativeDate: literal.dateString,
+                originalQuery: originalQuery,
+                interpretationType: explicitDateFlagsProvided ? "explicitDateFlags" : "dayMonthLiteral",
+                dateRangeSource: explicitDateFlagsProvided ? "explicitDateFlags" : "query",
+                recognizedQueryDateType: "dayMonthLiteral",
+                recognizedQueryDateText: literal.recognizedText,
+                recognizedQueryDate: literal.dateString,
+                normalizedMatchingQuery: normalizedSearchText(matchingQuery)
             )
         }
 
         if let literal = numericDateLiteral(in: query, referenceDate: referenceDate, calendar: calendar) {
+            let matchingQuery = normalizedRawQuery(literal.remainingQuery)
             return CiderDailyTrackerResolvedQuery(
                 from: startDate ?? literal.dateString,
                 to: endDate ?? literal.dateString,
-                query: normalizedRawQuery(literal.remainingQuery),
-                appliedRelativeDate: literal.dateString
+                query: matchingQuery,
+                appliedRelativeDate: literal.dateString,
+                originalQuery: originalQuery,
+                interpretationType: explicitDateFlagsProvided ? "explicitDateFlags" : "numericDateLiteral",
+                dateRangeSource: explicitDateFlagsProvided ? "explicitDateFlags" : "query",
+                recognizedQueryDateType: "numericDateLiteral",
+                recognizedQueryDateText: literal.recognizedText,
+                recognizedQueryDate: literal.dateString,
+                normalizedMatchingQuery: normalizedSearchText(matchingQuery)
             )
         }
 
-        return CiderDailyTrackerResolvedQuery(from: startDate, to: endDate, query: normalizedRawQuery(query), appliedRelativeDate: nil)
+        let matchingQuery = normalizedRawQuery(query)
+        return CiderDailyTrackerResolvedQuery(
+            from: startDate,
+            to: endDate,
+            query: matchingQuery,
+            appliedRelativeDate: nil,
+            originalQuery: originalQuery,
+            interpretationType: explicitDateFlagsProvided ? "explicitDateFlags" : "keywordOnly",
+            dateRangeSource: explicitDateFlagsProvided ? "explicitDateFlags" : "none",
+            recognizedQueryDateType: nil,
+            recognizedQueryDateText: nil,
+            recognizedQueryDate: nil,
+            normalizedMatchingQuery: normalizedSearchText(matchingQuery)
+        )
     }
 
     private func row(for output: SecondBrainEnrichmentOutput) -> CiderDailyTrackerSignalRow? {
@@ -401,7 +469,7 @@ final class CiderDailyTrackerReadModelService {
         in query: String,
         referenceDate: Date,
         calendar: Calendar
-    ) -> (dateString: String, remainingQuery: String)? {
+    ) -> (dateString: String, remainingQuery: String, recognizedText: String)? {
         let pattern = #"\b(january|jan\.?|february|feb\.?|march|mar\.?|april|apr\.?|may|june|jun\.?|july|jul\.?|august|aug\.?|september|sept\.?|sep\.?|october|oct\.?|november|nov\.?|december|dec\.?)\s+([0-9]{1,2})(?:st|nd|rd|th)?(?:,?\s+([0-9]{4}))?\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return nil
@@ -443,18 +511,19 @@ final class CiderDailyTrackerReadModelService {
             return nil
         }
 
+        let recognizedText = String(query[literalRange])
         let remaining = query
             .replacingCharacters(in: literalRange, with: " ")
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (localDateString(date, calendar: calendar), remaining)
+        return (localDateString(date, calendar: calendar), remaining, recognizedText)
     }
 
     private static func dayMonthDateLiteral(
         in query: String,
         referenceDate: Date,
         calendar: Calendar
-    ) -> (dateString: String, remainingQuery: String)? {
+    ) -> (dateString: String, remainingQuery: String, recognizedText: String)? {
         let pattern = #"\b([0-9]{1,2})(?:st|nd|rd|th)?\s+(january|jan\.?|february|feb\.?|march|mar\.?|april|apr\.?|may|june|jun\.?|july|jul\.?|august|aug\.?|september|sept\.?|sep\.?|october|oct\.?|november|nov\.?|december|dec\.?)(?:,?\s+([0-9]{4}))?\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return nil
@@ -496,11 +565,12 @@ final class CiderDailyTrackerReadModelService {
             return nil
         }
 
+        let recognizedText = String(query[literalRange])
         let remaining = query
             .replacingCharacters(in: literalRange, with: " ")
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (localDateString(date, calendar: calendar), remaining)
+        return (localDateString(date, calendar: calendar), remaining, recognizedText)
     }
 
     private static func monthNumber(_ value: String) -> Int? {
@@ -525,7 +595,7 @@ final class CiderDailyTrackerReadModelService {
         in query: String,
         referenceDate: Date,
         calendar: Calendar
-    ) -> (dateString: String, remainingQuery: String)? {
+    ) -> (dateString: String, remainingQuery: String, recognizedText: String)? {
         let pattern = #"(?<![A-Za-z0-9])([0-9]{1,2})([/-])([0-9]{1,2})(?:\2([0-9]{4}))?(?![A-Za-z0-9])"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return nil
@@ -567,11 +637,12 @@ final class CiderDailyTrackerReadModelService {
             return nil
         }
 
+        let recognizedText = String(query[literalRange])
         let remaining = query
             .replacingCharacters(in: literalRange, with: " ")
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (localDateString(date, calendar: calendar), remaining)
+        return (localDateString(date, calendar: calendar), remaining, recognizedText)
     }
 
     private static func localCalendar() -> Calendar {

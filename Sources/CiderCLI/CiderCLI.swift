@@ -5358,7 +5358,8 @@ struct CiderCLI {
                 )
                 let payload = dailyTrackerReadModelResultToDict(
                     result,
-                    filters: filters
+                    filters: filters,
+                    resolvedQuery: query == nil ? nil : resolvedQuery
                 )
                 if jsonOutput {
                     outputJSON(payload)
@@ -17227,9 +17228,10 @@ struct CiderCLI {
 
     static func dailyTrackerReadModelResultToDict(
         _ result: CiderDailyTrackerReadModelResult,
-        filters: [String: Any]
+        filters: [String: Any],
+        resolvedQuery: CiderDailyTrackerResolvedQuery? = nil
     ) -> [String: Any] {
-        [
+        var dict: [String: Any] = [
             "ok": true,
             "command": "item.daily-tracker",
             "readOnly": true,
@@ -17250,6 +17252,42 @@ struct CiderCLI {
                 "cider-cli capture review-queue --kind memory_candidate --json",
             ],
         ]
+        if let resolvedQuery {
+            dict["queryInterpretation"] = dailyTrackerQueryInterpretationToDict(resolvedQuery)
+        }
+        return dict
+    }
+
+    static func dailyTrackerQueryInterpretationToDict(_ resolvedQuery: CiderDailyTrackerResolvedQuery) -> [String: Any] {
+        var dict: [String: Any] = [
+            "interpretationType": resolvedQuery.interpretationType,
+            "dateRangeSource": resolvedQuery.dateRangeSource,
+        ]
+        if let originalQuery = resolvedQuery.originalQuery {
+            dict["originalQuery"] = originalQuery
+        }
+        if let remainingQuery = resolvedQuery.query {
+            dict["remainingQuery"] = remainingQuery
+        }
+        if let normalizedMatchingQuery = resolvedQuery.normalizedMatchingQuery {
+            dict["normalizedMatchingQuery"] = normalizedMatchingQuery
+        }
+        if let recognizedQueryDateType = resolvedQuery.recognizedQueryDateType {
+            dict["recognizedQueryDateType"] = recognizedQueryDateType
+        }
+        if let recognizedQueryDateText = resolvedQuery.recognizedQueryDateText {
+            dict["recognizedQueryDateText"] = recognizedQueryDateText
+        }
+        if let recognizedQueryDate = resolvedQuery.recognizedQueryDate {
+            dict["recognizedQueryDate"] = recognizedQueryDate
+        }
+        var resolvedDateRange: [String: Any] = [:]
+        if let from = resolvedQuery.from { resolvedDateRange["from"] = from }
+        if let to = resolvedQuery.to { resolvedDateRange["to"] = to }
+        if !resolvedDateRange.isEmpty {
+            dict["resolvedDateRange"] = resolvedDateRange
+        }
+        return dict
     }
 
     static func dailyTrackerSignalRowToDict(_ row: CiderDailyTrackerSignalRow) -> [String: Any] {
