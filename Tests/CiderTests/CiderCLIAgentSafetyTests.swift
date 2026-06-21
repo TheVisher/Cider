@@ -3992,7 +3992,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(reviewableRates.contains { $0["rateKind"] as? String == "double_time" && $0["label"] as? String == "double-time" && $0["formattedHourlyRate"] as? String == "$109.68/hr" && $0["truthState"] as? String == "reviewable_candidate_not_truth" })
 
         let reviewableGrossRecall = try assertStrictProcessJSON(
-            runCLI(args: ["item", "recall-context", "--query", "how much gross pay for 40 straight, 16.2 time and a half, and 8.3 double time?", "--limit", "1", "--json"], vault: vault),
+            runCLI(args: ["item", "recall-context", "--query", "gross pay for 40 straight + 16.2 OT + 8.3 DT", "--limit", "1", "--json"], vault: vault),
             command: "item.recall-context"
         )
         #expect((reviewableGrossRecall["acceptedFacts"] as? [[String: Any]])?.isEmpty == true)

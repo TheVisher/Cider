@@ -17758,8 +17758,8 @@ struct CiderCLI {
     private static func payrollHoursBreakdown(in query: String) -> PayrollHoursBreakdown? {
         guard query.range(of: #"(?i)\b(gross|pay|paycheck|wage|overtime|straight|double)\b"#, options: .regularExpression) != nil else { return nil }
         guard let straight = firstDecimalCapture(pattern: #"(?i)([0-9]+(?:\.[0-9]+)?)\s*(?:hours?\s*)?(?:straight|straight-time|straight time)\b"#, in: query),
-              let timeAndAHalf = firstDecimalCapture(pattern: #"(?i)([0-9]+(?:\.[0-9]+)?)\s*(?:hours?\s*)?(?:time\s*(?:and|&)\s*a\s*half|time-and-a-half|1\.5x)\b"#, in: query),
-              let doubleTime = firstDecimalCapture(pattern: #"(?i)([0-9]+(?:\.[0-9]+)?)\s*(?:hours?\s*)?(?:double\s*time|double-time|2x)\b"#, in: query) else {
+              let timeAndAHalf = firstDecimalCapture(pattern: #"(?i)([0-9]+(?:\.[0-9]+)?)\s*(?:hours?\s*)?(?:time\s*(?:and|&)\s*a\s*half|time-and-a-half|overtime|ot|1\.5x)\b"#, in: query),
+              let doubleTime = firstDecimalCapture(pattern: #"(?i)([0-9]+(?:\.[0-9]+)?)\s*(?:hours?\s*)?(?:double\s*time|double-time|dt|2x)\b"#, in: query) else {
             return nil
         }
         return PayrollHoursBreakdown(straight: straight, timeAndAHalf: timeAndAHalf, doubleTime: doubleTime)
