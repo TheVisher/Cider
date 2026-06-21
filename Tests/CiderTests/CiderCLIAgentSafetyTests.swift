@@ -4629,7 +4629,7 @@ struct CiderCLIAgentSafetyTests {
         ))
 
         let environment = ["CIDER_DAILY_TRACKER_REFERENCE_DATE": "2026-06-20"]
-        for query in ["June 19 breakfast", "June 19 2026 breakfast"] {
+        for query in ["June 19 breakfast", "June 19 2026 breakfast", "6/19 breakfast", "6-19 breakfast", "6/19/2026 breakfast", "6-19-2026 breakfast"] {
             let payload = try assertStrictProcessJSON(
                 runCLI(
                     args: ["item", "daily-tracker", "--query", query, "--sort", "newest", "--limit", "5", "--json"],
@@ -4734,7 +4734,7 @@ struct CiderCLIAgentSafetyTests {
                     "item", "daily-tracker",
                     "--from", "2026-06-18",
                     "--to", "2026-06-18",
-                    "--query", "June 19 breakfast",
+                    "--query", "6/19 breakfast",
                     "--sort", "newest",
                     "--limit", "5",
                     "--json",
@@ -4747,7 +4747,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(payload["readOnly"] as? Bool == true)
         #expect(payload["changed"] as? Bool == false)
         #expect(payload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
-        #expect((payload["filters"] as? [String: Any])?["query"] as? String == "June 19 breakfast")
+        #expect((payload["filters"] as? [String: Any])?["query"] as? String == "6/19 breakfast")
         #expect((payload["filters"] as? [String: Any])?["from"] as? String == "2026-06-18")
         #expect((payload["filters"] as? [String: Any])?["to"] as? String == "2026-06-18")
 
