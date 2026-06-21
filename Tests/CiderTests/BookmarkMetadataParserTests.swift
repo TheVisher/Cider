@@ -270,7 +270,40 @@ struct BookmarkMetadataParserTests {
         #expect(result?.thumbnailURL == nil)
     }
 
+    @Test("Generic article keeps real og image instead of icon fallback")
+    func genericArticleKeepsRealOGImage() {
+        let articleURL = URL(string: "https://example.com/articles/native-bookmark-capture")!
+        let html = """
+        <html><head>
+        <meta property="og:title" content="Native Bookmark Capture">
+        <meta property="og:image" content="https://cdn.example.com/articles/native-bookmark-capture/hero.jpg">
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+        </head></html>
+        """
+        let result = BookmarkMetadataParser.parse(html: html, pageURL: articleURL)
+        #expect(result?.title == "Native Bookmark Capture")
+        #expect(result?.thumbnailURL?.absoluteString == "https://cdn.example.com/articles/native-bookmark-capture/hero.jpg")
+    }
+
     // MARK: - Site-Specific Behavior
+
+    @Test("TikTok: rejects access denied and provider icon thumbnails")
+    func tiktokRejectsDeniedAndProviderIconThumbnails() {
+        let tiktokURL = URL(string: "https://www.tiktok.com/@chef/video/123")!
+        let html = """
+        <html><head>
+        <meta property="og:title" content="Chef on TikTok">
+        <meta property="og:image" content="https://www.tiktok.com/favicon.ico">
+        <meta name="twitter:image" content="https://p16-sign-va.tiktokcdn.com/tos-maliva/access-denied-placeholder.jpeg">
+        <script type="application/ld+json">
+        {"@type":"VideoObject","name":"Chef on TikTok","thumbnailUrl":"https://sf16-website-login.neutral.ttwstatic.com/obj/tiktok_web_static/tiktok-logo.png"}
+        </script>
+        </head></html>
+        """
+        let result = BookmarkMetadataParser.parse(html: html, pageURL: tiktokURL)
+        #expect(result?.title == "Chef on TikTok")
+        #expect(result?.thumbnailURL == nil)
+    }
 
     @Test("Reddit: skips placeholder images")
     func redditPlaceholder() {
@@ -283,6 +316,23 @@ struct BookmarkMetadataParserTests {
         """
         let result = BookmarkMetadataParser.parse(html: html, pageURL: redditURL)
         // Should have title but skip the placeholder image
+        #expect(result?.title == "Reddit Post")
+        #expect(result?.thumbnailURL == nil)
+    }
+
+    @Test("Reddit: rejects provider icons and avatar placeholders")
+    func redditRejectsProviderIconsAndAvatarPlaceholders() {
+        let redditURL = URL(string: "https://www.reddit.com/r/swift/comments/abc123/test")!
+        let html = """
+        <html><head>
+        <meta property="og:title" content="Reddit Post">
+        <meta property="og:image" content="https://www.redditstatic.com/desktop2x/img/favicon/apple-icon-180x180.png">
+        <script type="application/ld+json">
+        {"@type":"SocialMediaPosting","headline":"Reddit Post","image":"https://styles.redditmedia.com/t5_swift/communityIcon_placeholder.png"}
+        </script>
+        </head></html>
+        """
+        let result = BookmarkMetadataParser.parse(html: html, pageURL: redditURL)
         #expect(result?.title == "Reddit Post")
         #expect(result?.thumbnailURL == nil)
     }
@@ -364,6 +414,23 @@ struct BookmarkMetadataParserTests {
         """
         let result = BookmarkMetadataParser.parse(html: html, pageURL: xURL)
         #expect(result?.thumbnailURL?.host == "pbs.twimg.com")
+    }
+
+    @Test("X/Twitter: rejects provider logo thumbnail")
+    func xRejectsProviderLogoThumbnail() {
+        let xURL = URL(string: "https://x.com/user/status/123")!
+        let html = """
+        <html><head>
+        <meta property="og:title" content="Tweet">
+        <meta property="og:image" content="https://abs.twimg.com/icons/apple-touch-icon-192x192.png">
+        <script type="application/ld+json">
+        {"@type":"SocialMediaPosting","headline":"Tweet","image":"https://abs.twimg.com/responsive-web/client-web/icon-ios.8ea219d.png"}
+        </script>
+        </head></html>
+        """
+        let result = BookmarkMetadataParser.parse(html: html, pageURL: xURL)
+        #expect(result?.title == "Tweet")
+        #expect(result?.thumbnailURL == nil)
     }
 
     // MARK: - HTML Entity Decoding

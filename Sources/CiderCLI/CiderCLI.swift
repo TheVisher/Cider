@@ -12459,6 +12459,12 @@ struct CiderCLI {
         reviewResolved: Bool
     ) {
         let status = waitResult.timedOut ? "timed_out" : "completed"
+        let reason = reviewEnrichmentLifecycleReason(
+            status: status,
+            before: before,
+            after: after,
+            reviewResolved: reviewResolved
+        )
         let changedFields = changedBookmarkMetadataFields(before: before, after: after)
         let safeActions = reviewEnrichmentLifecycleSafeActions(
             itemID: scheduledResult.itemID,
@@ -12474,8 +12480,10 @@ struct CiderCLI {
                 "title": after?.title ?? scheduledResult.title,
                 "actor": scheduledResult.actor,
                 "status": status,
+                "reason": reason,
                 "message": reviewEnrichmentLifecycleMessage(
                     status: status,
+                    reason: reason,
                     changedFields: changedFields,
                     reviewResolved: reviewResolved
                 ),
@@ -12496,14 +12504,29 @@ struct CiderCLI {
         print("  Type: \(scheduledResult.itemType)")
         print("  Actor: \(scheduledResult.actor)")
         print("  Waited: \(String(format: "%.1f", waitResult.elapsedSeconds))s / \(String(format: "%.1f", waitResult.timeoutSeconds))s")
+        print("  Reason: \(reason)")
         print("  Changed: \(changedFields.isEmpty ? "none" : changedFields.joined(separator: ", "))")
         print("  Review resolved: \(reviewResolved ? "yes" : "no")")
-        print("  Message: \(reviewEnrichmentLifecycleMessage(status: status, changedFields: changedFields, reviewResolved: reviewResolved))")
+        print("  Message: \(reviewEnrichmentLifecycleMessage(status: status, reason: reason, changedFields: changedFields, reviewResolved: reviewResolved))")
         print("  Safe actions: \(safeActions.joined(separator: ", "))")
+    }
+
+    static func reviewEnrichmentLifecycleReason(
+        status: String,
+        before: Bookmark?,
+        after: Bookmark?,
+        reviewResolved: Bool
+    ) -> String {
+        if status == "timed_out" { return "timeout" }
+        if after == nil { return "bookmark_missing" }
+        if !reviewResolved { return "review_pending" }
+        let changedFields = changedBookmarkMetadataFields(before: before, after: after)
+        return changedFields.isEmpty ? "no_visible_metadata_changes" : "metadata_updated"
     }
 
     static func reviewEnrichmentLifecycleMessage(
         status: String,
+        reason: String,
         changedFields: [String],
         reviewResolved: Bool
     ) -> String {
@@ -12516,7 +12539,7 @@ struct CiderCLI {
             }
             return "Bookmark enrichment completed, but the review item still needs attention."
         case "timed_out":
-            return "Bookmark enrichment was scheduled, but did not reach a final complete state before the timeout."
+            return "Bookmark enrichment was scheduled, but did not reach a final complete state before the timeout (\(reason))."
         default:
             return "Bookmark enrichment finished with status \(status)."
         }

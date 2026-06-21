@@ -446,7 +446,9 @@ enum BookmarkMetadataParser {
     }
 
     private static func isThumbnailCandidateAcceptable(_ url: URL, for pageURL: URL) -> Bool {
-        if isLikelyIconURL(url) || isMalformedImageFragment(url) {
+        if isLikelyIconURL(url)
+            || isLikelyProviderPlaceholderURL(url)
+            || isMalformedImageFragment(url) {
             return false
         }
 
@@ -474,9 +476,42 @@ enum BookmarkMetadataParser {
             "mask-icon",
             "/site-icon",
             "/app-icon",
+            "/icon-",
+            "provider-icon",
+            "communityicon",
+            "community-icon",
         ]
 
         return iconFragments.contains { fingerprint.contains($0) }
+    }
+
+    private static func isLikelyProviderPlaceholderURL(_ url: URL) -> Bool {
+        let fingerprint = [
+            url.host ?? "",
+            url.path,
+            url.query ?? "",
+        ]
+            .joined(separator: " ")
+            .lowercased()
+
+        let blockedFragments = [
+            "access-denied",
+            "access_denied",
+            "denied-placeholder",
+            "placeholder",
+            "provider-logo",
+            "provider_logo",
+            "site-logo",
+            "site_logo",
+            "tiktok-logo",
+            "tiktok_logo",
+            "tiktok_web_static",
+            "redditstatic.com",
+            "styles.redditmedia.com",
+            "abs.twimg.com",
+        ]
+
+        return blockedFragments.contains { fingerprint.contains($0) }
     }
 
     private static func isMalformedImageFragment(_ url: URL) -> Bool {

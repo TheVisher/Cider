@@ -2416,6 +2416,7 @@ struct CiderCLIAgentSafetyTests {
 
         #expect(payload["action"] as? String == "review.enrich")
         #expect(payload["status"] as? String == "timed_out")
+        #expect(payload["reason"] as? String == "timeout")
         #expect(payload["waited"] as? Bool == true)
         #expect(payload["elapsedSeconds"] as? Double != nil)
         #expect(payload["before"] as? [String: Any] != nil)
