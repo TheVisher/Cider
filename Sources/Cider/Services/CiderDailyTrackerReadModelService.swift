@@ -266,7 +266,7 @@ final class CiderDailyTrackerReadModelService {
     }
 
     private let spendingQueryTokens: Set<String> = [
-        "bought", "cost", "paid", "price", "purchase", "purchased", "spend", "spending", "spent",
+        "bought", "cost", "paid", "pay", "price", "purchase", "purchased", "spend", "spending", "spent",
     ]
 
     private func searchTokens(_ value: String, droppingStopwords: Bool) -> [String] {
@@ -275,7 +275,7 @@ final class CiderDailyTrackerReadModelService {
             .replacingOccurrences(of: #"(?<=[A-Za-z])-(?=[A-Za-z])"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"[^a-z0-9.]+"#, with: " ", options: .regularExpression)
         let stopwords: Set<String> = [
-            "a", "an", "and", "did", "do", "for", "i", "last", "latest", "me", "most", "my",
+            "a", "an", "and", "did", "do", "for", "how", "i", "last", "latest", "me", "most", "much", "my",
             "of", "on", "recent", "the", "that", "time", "to", "was", "what", "when",
         ]
         return tokenText
