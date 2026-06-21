@@ -5027,7 +5027,8 @@ struct CiderCLI {
               cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
               cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
               cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
-              cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--limit <n>] [--json]
+              cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
+                Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
               cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
               cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
               cider-cli item graph-candidate <candidate-id> [--json]
@@ -5312,18 +5313,36 @@ struct CiderCLI {
         case "daily-tracker", "tracker-daily", "daily-signals":
             do {
                 let limit = parseFlag("--limit", from: args).flatMap(Int.init)
+                let sort: CiderDailyTrackerSortOrder
+                if let rawSort = parseFlag("--sort", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+                    guard let parsedSort = CiderDailyTrackerSortOrder(rawValue: rawSort) else {
+                        printCLIError("Unsupported daily-tracker sort '\(rawSort)'. Use --sort oldest or --sort newest.", details: [
+                            "command": "item.daily-tracker",
+                            "readOnly": true,
+                            "changed": false,
+                            "errorCode": "unsupported_sort",
+                            "supportedValues": ["oldest", "newest"],
+                        ])
+                        return
+                    }
+                    sort = parsedSort
+                } else {
+                    sort = .oldest
+                }
                 var filters: [String: Any] = [:]
                 if let from = parseFlag("--from", from: args) { filters["from"] = from }
                 if let to = parseFlag("--to", from: args) { filters["to"] = to }
                 if let query = parseFlag("--query", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty {
                     filters["query"] = query
                 }
+                if parseFlag("--sort", from: args) != nil { filters["sort"] = sort.rawValue }
                 if let limit { filters["limit"] = limit }
                 let result = try CiderDailyTrackerReadModelService(database: .shared).dailySignals(
                     from: filters["from"] as? String,
                     to: filters["to"] as? String,
                     query: filters["query"] as? String,
-                    limit: limit
+                    limit: limit,
+                    sort: sort
                 )
                 let payload = dailyTrackerReadModelResultToDict(
                     result,

@@ -4375,6 +4375,120 @@ struct CiderCLIAgentSafetyTests {
         }
     }
 
+    @Test("daily tracker newest sort returns latest matching query row without changing default limit order")
+    func dailyTrackerNewestSortReturnsLatestMatchingQueryRowWithoutChangingDefaultLimitOrder() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-daily-tracker-newest-sort-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let olderJournalID = try createNote(
+            title: "Daily Journal 2026-06-11",
+            content: "Morning gas fill-up on the commute. Filled up with 12.87 gallons, 89 octane, and paid $81.07.",
+            vault: vault
+        )
+        let newerJournalID = try createNote(
+            title: "Daily Journal 2026-06-19",
+            content: "Latest gas stop after work. Filled up with 9.12 gallons of fuel and paid $48.32.",
+            vault: vault
+        )
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { db.close() }
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(SecondBrainEnrichmentOutput(
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: olderJournalID),
+            kind: "memory_candidate",
+            value: "gas",
+            normalizedValue: "cid-554-gas-older",
+            label: "Gas spending",
+            evidence: "Morning gas fill-up on the commute. Filled up with 12.87 gallons, 89 octane, and paid $81.07.",
+            source: "daily_tracker_sort.test",
+            confidence: 0.92,
+            reviewState: "suggested",
+            metadata: [
+                "memory_kind": "spending_fact",
+                "candidate_kind": "spending_fact",
+                "spending_category": "gas",
+                "amount": "81.07",
+                "currency": "USD",
+                "journal_date": "2026-06-11",
+                "source_owner_ref": "note:\(olderJournalID)",
+                "source_quote": "Morning gas fill-up on the commute. Filled up with 12.87 gallons, 89 octane, and paid $81.07.",
+            ]
+        ))
+        try outputService.record(SecondBrainEnrichmentOutput(
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: newerJournalID),
+            kind: "memory_candidate",
+            value: "gas",
+            normalizedValue: "cid-554-gas-newer",
+            label: "Gas spending",
+            evidence: "Latest gas stop after work. Filled up with 9.12 gallons of fuel and paid $48.32.",
+            source: "daily_tracker_sort.test",
+            confidence: 0.92,
+            reviewState: "suggested",
+            metadata: [
+                "memory_kind": "spending_fact",
+                "candidate_kind": "spending_fact",
+                "spending_category": "gas",
+                "amount": "48.32",
+                "currency": "USD",
+                "journal_date": "2026-06-19",
+                "source_owner_ref": "note:\(newerJournalID)",
+                "source_quote": "Latest gas stop after work. Filled up with 9.12 gallons of fuel and paid $48.32.",
+            ]
+        ))
+
+        let defaultPayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--query", "gas", "--limit", "1", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        #expect(defaultPayload["readOnly"] as? Bool == true)
+        #expect(defaultPayload["changed"] as? Bool == false)
+        #expect(defaultPayload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+        #expect((defaultPayload["filters"] as? [String: Any])?["query"] as? String == "gas")
+        #expect((defaultPayload["filters"] as? [String: Any])?["limit"] as? Int == 1)
+        #expect((defaultPayload["filters"] as? [String: Any])?["sort"] == nil)
+
+        let defaultRows = try #require(defaultPayload["rows"] as? [[String: Any]])
+        #expect(defaultRows.count == 1)
+        let defaultGas = try #require(defaultRows.first)
+        #expect(defaultGas["date"] as? String == "2026-06-11")
+        #expect(defaultGas["amount"] as? String == "81.07")
+        #expect(defaultGas["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((defaultGas["sourceRefs"] as? [String])?.contains("note:\(olderJournalID)") == true)
+
+        let newestPayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--query", "gas", "--sort", "newest", "--limit", "1", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        #expect(newestPayload["readOnly"] as? Bool == true)
+        #expect(newestPayload["changed"] as? Bool == false)
+        #expect(newestPayload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+        #expect((newestPayload["filters"] as? [String: Any])?["query"] as? String == "gas")
+        #expect((newestPayload["filters"] as? [String: Any])?["limit"] as? Int == 1)
+        #expect((newestPayload["filters"] as? [String: Any])?["sort"] as? String == "newest")
+
+        let newestRows = try #require(newestPayload["rows"] as? [[String: Any]])
+        #expect(newestRows.count == 1)
+        let newestGas = try #require(newestRows.first)
+        #expect(newestGas["date"] as? String == "2026-06-19")
+        #expect(newestGas["amount"] as? String == "48.32")
+        #expect(newestGas["reviewState"] as? String == "suggested")
+        #expect(newestGas["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((newestGas["sourceRefs"] as? [String])?.contains("note:\(newerJournalID)") == true)
+        #expect((newestGas["citation"] as? [String: Any])?["ownerID"] as? String == newerJournalID)
+
+        let newestRollups = try #require(newestPayload["rollups"] as? [[String: Any]])
+        #expect(newestRollups.count == 1)
+        #expect(newestRollups.first?["date"] as? String == "2026-06-19")
+        #expect(newestRollups.first?["spendingAmount"] as? String == "48.32")
+        #expect(newestRollups.first?["spendingRowCount"] as? Int == 1)
+        #expect(newestRollups.first?["reviewableRowCount"] as? Int == 1)
+        #expect(newestRollups.first?["acceptedRowCount"] as? Int == 0)
+    }
+
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")
     func recallContextBundleCitesAcceptedGraphEvidenceAndReviewableCandidates() throws {
         let vault = FileManager.default.temporaryDirectory

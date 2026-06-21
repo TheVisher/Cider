@@ -42,6 +42,11 @@ struct CiderDailyTrackerReadModelResult: Codable, Equatable {
     var rollups: [CiderDailyTrackerRollup]
 }
 
+enum CiderDailyTrackerSortOrder: String, Codable, Equatable {
+    case oldest
+    case newest
+}
+
 @MainActor
 final class CiderDailyTrackerReadModelService {
     private let outputService: SecondBrainEnrichmentOutputService
@@ -52,7 +57,13 @@ final class CiderDailyTrackerReadModelService {
         self.evidenceService = SecondBrainSourceEvidenceService(database: database)
     }
 
-    func dailySignals(from startDate: String? = nil, to endDate: String? = nil, query: String? = nil, limit: Int? = nil) throws -> CiderDailyTrackerReadModelResult {
+    func dailySignals(
+        from startDate: String? = nil,
+        to endDate: String? = nil,
+        query: String? = nil,
+        limit: Int? = nil,
+        sort: CiderDailyTrackerSortOrder = .oldest
+    ) throws -> CiderDailyTrackerReadModelResult {
         let outputs = try outputService.outputs(kind: "memory_candidate", limit: nil)
         let maxRows = limit.map { max(0, $0) }
         let normalizedQuery = normalizedSearchText(query)
@@ -71,7 +82,9 @@ final class CiderDailyTrackerReadModelService {
                 return queryMatches(row: row, rawQuery: query ?? "", normalizedQuery: normalizedQuery)
             }
             .sorted { lhs, rhs in
-                if lhs.date != rhs.date { return lhs.date < rhs.date }
+                if lhs.date != rhs.date {
+                    return sort == .newest ? lhs.date > rhs.date : lhs.date < rhs.date
+                }
                 if lhs.signalType != rhs.signalType { return lhs.signalType < rhs.signalType }
                 return lhs.value < rhs.value
             }
