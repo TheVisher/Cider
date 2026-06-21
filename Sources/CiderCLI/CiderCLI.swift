@@ -22450,6 +22450,12 @@ struct CiderCLI {
         ]
         if let item = result.item {
             dict["item"] = itemSummaryToDict(item)
+            dict["createdAt"] = ISO8601DateFormatter().string(from: item.createdAt)
+            dict["updatedAt"] = ISO8601DateFormatter().string(from: item.updatedAt)
+            dict["sourceRef"] = [
+                "type": item.type.rawValue,
+                "ref": item.id.uuidString,
+            ]
         } else if result.owner.ownerType == "kanban_card",
                   let detail = try? resolveKanbanCardDetail(ref: result.owner.ownerID) {
             dict["kanbanCard"] = kanbanCardItemToDict(
@@ -22466,6 +22472,9 @@ struct CiderCLI {
         }
         if !result.rankFactors.isEmpty {
             dict["rankFactors"] = result.rankFactors
+        }
+        if !result.captureProvenance.isEmpty {
+            dict["captureProvenance"] = result.captureProvenance.map(captureProvenanceToDict)
         }
         let safeNextCommands = itemSearchResultSafeNextCommands(result)
         if !safeNextCommands.isEmpty {

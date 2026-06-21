@@ -23,7 +23,7 @@ struct CiderItemChunk: Identifiable, Codable, Equatable {
     var updatedAt: Date
 }
 
-struct CiderItemCaptureProvenance: Identifiable, Equatable {
+struct CiderItemCaptureProvenance: Identifiable, Codable, Equatable {
     var id: String { eventID }
     var eventID: String
     var owner: SecondBrainOwnerRef
@@ -150,6 +150,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var matchedQuery: String?
     var rankFactors: [String]
     var searchScope: CiderItemSearchScope
+    var captureProvenance: [CiderItemCaptureProvenance]
 
     init(
         id: String,
@@ -162,7 +163,8 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         stage: String? = nil,
         matchedQuery: String? = nil,
         rankFactors: [String] = [],
-        searchScope: CiderItemSearchScope = .all
+        searchScope: CiderItemSearchScope = .all,
+        captureProvenance: [CiderItemCaptureProvenance] = []
     ) {
         self.id = id
         self.kind = kind
@@ -175,6 +177,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         self.matchedQuery = matchedQuery
         self.rankFactors = rankFactors
         self.searchScope = searchScope
+        self.captureProvenance = captureProvenance
     }
 }
 
@@ -1064,8 +1067,17 @@ final class CiderItemContextService {
             .map { result in
                 var scoped = result
                 scoped.searchScope = scope
+                scoped.captureProvenance = captureProvenance(for: result.owner)
                 return scoped
             }
+    }
+
+    private func captureProvenance(for owner: SecondBrainOwnerRef) -> [CiderItemCaptureProvenance] {
+        guard let backlinks = try? secondBrainStore.backlinks(for: owner),
+              let provenance = try? captureProvenance(from: backlinks) else {
+            return []
+        }
+        return provenance
     }
 
     private func searchResult(

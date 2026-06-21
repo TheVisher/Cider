@@ -250,12 +250,60 @@ struct CiderItemContextServiceTests {
         let (db, url) = try makeTestDB()
         defer { db.close(); cleanup(url) }
 
+        let noteCreatedAt = Date(timeIntervalSince1970: 1_747_000_000)
+        let noteUpdatedAt = Date(timeIntervalSince1970: 1_747_003_600)
         let dentist = LibraryEntityRef(type: .note, entityID: UUID())
         let renewal = LibraryEntityRef(type: .todo, entityID: UUID())
-        try insertItem(dentist, title: "Dentist follow-up", relativePath: "Inbox/Notes/Dentist follow-up.md", into: db)
+        try insertItem(
+            dentist,
+            title: "Dentist follow-up",
+            relativePath: "Inbox/Notes/Dentist follow-up.md",
+            into: db,
+            createdAt: noteCreatedAt,
+            updatedAt: noteUpdatedAt
+        )
         try insertItem(renewal, title: "Review home insurance", relativePath: "Inbox/Todos/Review home insurance.md", into: db)
 
         let store = SecondBrainStore(database: db)
+        let eventID = UUID()
+        let captureCreatedAt = Date(timeIntervalSince1970: 1_746_999_000)
+        let insertEvent = try db.prepare("""
+            INSERT INTO capture_events (
+                id, source_kind, surface, channel, channel_id, thread_id, message_id,
+                sender_id, sender_name, source_url, source_file, source_text,
+                attachment_count, metadata, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """)
+        insertEvent.bind(eventID.uuidString, at: 1)
+            .bind("text", at: 2)
+            .bind("codex_dogfood", at: 3)
+            .bind("cli", at: 4)
+            .bind("local", at: 5)
+            .bind("thread-42", at: 6)
+            .bind("capture-2026-05-11", at: 7)
+            .bind("codex", at: 8)
+            .bind("Codex", at: 9)
+            .bind(String?.none, at: 10)
+            .bind(String?.none, at: 11)
+            .bind("Dentist follow-up capture text", at: 12)
+            .bind(0, at: 13)
+            .bind("{}", at: 14)
+            .bind(DatabaseHelpers.encode(captureCreatedAt), at: 15)
+        try insertEvent.step()
+
+        let captureOwner = SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString)
+        let dentistOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: dentist.entityID.uuidString)
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: captureOwner,
+            targetOwner: dentistOwner,
+            relationType: "produced_item",
+            evidence: "Capture event produced note Dentist follow-up.",
+            source: "capture.add",
+            actor: "system",
+            confidence: 1,
+            metadata: ["command": "capture.add"]
+        ))
+
         let owner = SecondBrainOwnerRef(ownerType: "todo", ownerID: renewal.entityID.uuidString)
         try store.replaceChunks(owner: owner, chunks: [
             SecondBrainChunkDraft(
@@ -283,12 +331,22 @@ struct CiderItemContextServiceTests {
         #expect(noteResultDict["title"] as? String == "Dentist follow-up")
         #expect(noteResultDict["snippet"] as? String == "Inbox/Notes/Dentist follow-up.md")
         #expect(noteResultDict["rank"] as? Double != nil)
+        #expect(noteResultDict["createdAt"] as? String == ISO8601DateFormatter().string(from: noteCreatedAt))
+        #expect(noteResultDict["updatedAt"] as? String == ISO8601DateFormatter().string(from: noteUpdatedAt))
+        #expect(noteResultDict["sourceRef"] as? [String: String] == [
+            "type": "note",
+            "ref": dentist.entityID.uuidString,
+        ])
         #expect(noteResultDict["owner"] as? [String: String] == [
             "ownerType": "note",
             "ownerID": dentist.entityID.uuidString,
             "ref": "note:\(dentist.entityID.uuidString)",
         ])
         #expect((noteResultDict["item"] as? [String: Any])?["type"] as? String == "note")
+        let captureProvenance = try #require(noteResultDict["captureProvenance"] as? [[String: Any]])
+        #expect(captureProvenance.count == 1)
+        #expect(captureProvenance[0]["eventID"] as? String == eventID.uuidString)
+        #expect(captureProvenance[0]["createdAt"] as? String == ISO8601DateFormatter().string(from: captureCreatedAt))
         let safeNextCommands = try #require(noteResultDict["safeNextCommands"] as? [String])
         #expect(safeNextCommands == [
             "cider-cli item context note \(dentist.entityID.uuidString) --json"
