@@ -5333,18 +5333,26 @@ struct CiderCLI {
                 } else {
                     sort = .oldest
                 }
+                let rawFrom = parseFlag("--from", from: args)
+                let rawTo = parseFlag("--to", from: args)
+                let rawQuery = parseFlag("--query", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let query = rawQuery?.isEmpty == false ? rawQuery : nil
+                let resolvedQuery = CiderDailyTrackerReadModelService.resolveQuery(
+                    from: rawFrom,
+                    to: rawTo,
+                    query: query,
+                    referenceDate: dailyTrackerReferenceDate()
+                )
                 var filters: [String: Any] = [:]
-                if let from = parseFlag("--from", from: args) { filters["from"] = from }
-                if let to = parseFlag("--to", from: args) { filters["to"] = to }
-                if let query = parseFlag("--query", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty {
-                    filters["query"] = query
-                }
+                if let from = resolvedQuery.from { filters["from"] = from }
+                if let to = resolvedQuery.to { filters["to"] = to }
+                if let query { filters["query"] = query }
                 if parseFlag("--sort", from: args) != nil { filters["sort"] = sort.rawValue }
                 if let limit { filters["limit"] = limit }
                 let result = try CiderDailyTrackerReadModelService(database: .shared).dailySignals(
-                    from: filters["from"] as? String,
-                    to: filters["to"] as? String,
-                    query: filters["query"] as? String,
+                    from: resolvedQuery.from,
+                    to: resolvedQuery.to,
+                    query: resolvedQuery.query,
                     limit: limit,
                     sort: sort
                 )
@@ -10801,6 +10809,13 @@ struct CiderCLI {
         f.timeZone = .autoupdatingCurrent
         return f
     }()
+
+    static func dailyTrackerReferenceDate() -> Date {
+        let raw = ProcessInfo.processInfo.environment["CIDER_DAILY_TRACKER_REFERENCE_DATE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let raw, !raw.isEmpty else { return Date() }
+        return localDateFormatter.date(from: raw) ?? Date()
+    }
 
     static let localTimeFormatter: DateFormatter = {
         let f = DateFormatter()

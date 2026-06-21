@@ -42,6 +42,13 @@ struct CiderDailyTrackerReadModelResult: Codable, Equatable {
     var rollups: [CiderDailyTrackerRollup]
 }
 
+struct CiderDailyTrackerResolvedQuery: Equatable {
+    var from: String?
+    var to: String?
+    var query: String?
+    var appliedRelativeDate: String?
+}
+
 enum CiderDailyTrackerSortOrder: String, Codable, Equatable {
     case oldest
     case newest
@@ -51,10 +58,12 @@ enum CiderDailyTrackerSortOrder: String, Codable, Equatable {
 final class CiderDailyTrackerReadModelService {
     private let outputService: SecondBrainEnrichmentOutputService
     private let evidenceService: SecondBrainSourceEvidenceService
+    private let referenceDateProvider: () -> Date
 
-    init(database: CiderDatabase = .shared) {
+    init(database: CiderDatabase = .shared, referenceDateProvider: @escaping () -> Date = { Date() }) {
         self.outputService = SecondBrainEnrichmentOutputService(database: database)
         self.evidenceService = SecondBrainSourceEvidenceService(database: database)
+        self.referenceDateProvider = referenceDateProvider
     }
 
     func dailySignals(
@@ -66,20 +75,26 @@ final class CiderDailyTrackerReadModelService {
     ) throws -> CiderDailyTrackerReadModelResult {
         let outputs = try outputService.outputs(kind: "memory_candidate", limit: nil)
         let maxRows = limit.map { max(0, $0) }
-        let normalizedQuery = normalizedSearchText(query)
+        let resolvedQuery = Self.resolveQuery(
+            from: startDate,
+            to: endDate,
+            query: query,
+            referenceDate: referenceDateProvider()
+        )
+        let normalizedQuery = normalizedSearchText(resolvedQuery.query)
         guard maxRows != 0 else {
             return CiderDailyTrackerReadModelResult(rows: [], rollups: [])
         }
 
         var rows = outputs.compactMap(row)
             .filter { row in
-                if let startDate, row.date < startDate { return false }
-                if let endDate, row.date > endDate { return false }
+                if let startDate = resolvedQuery.from, row.date < startDate { return false }
+                if let endDate = resolvedQuery.to, row.date > endDate { return false }
                 return true
             }
             .filter { row in
                 guard let normalizedQuery else { return true }
-                return queryMatches(row: row, rawQuery: query ?? "", normalizedQuery: normalizedQuery)
+                return queryMatches(row: row, rawQuery: resolvedQuery.query ?? "", normalizedQuery: normalizedQuery)
             }
             .sorted { lhs, rhs in
                 if lhs.date != rhs.date {
@@ -96,6 +111,28 @@ final class CiderDailyTrackerReadModelService {
         return CiderDailyTrackerReadModelResult(
             rows: rows,
             rollups: rollups(for: rows)
+        )
+    }
+
+    static func resolveQuery(
+        from startDate: String?,
+        to endDate: String?,
+        query: String?,
+        referenceDate: Date = Date(),
+        calendar: Calendar = CiderDailyTrackerReadModelService.localCalendar()
+    ) -> CiderDailyTrackerResolvedQuery {
+        guard let query, searchTokens(query, droppingStopwords: false).contains("yesterday") else {
+            return CiderDailyTrackerResolvedQuery(from: startDate, to: endDate, query: normalizedRawQuery(query), appliedRelativeDate: nil)
+        }
+
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: referenceDate) ?? referenceDate
+        let yesterdayString = localDateString(yesterday, calendar: calendar)
+        let remainingQuery = stripRelativeDateTokens(from: query)
+        return CiderDailyTrackerResolvedQuery(
+            from: startDate ?? yesterdayString,
+            to: endDate ?? yesterdayString,
+            query: normalizedRawQuery(remainingQuery),
+            appliedRelativeDate: yesterdayString
         )
     }
 
@@ -241,6 +278,9 @@ final class CiderDailyTrackerReadModelService {
         if rowTokens.contains(token) {
             return true
         }
+        if foodQueryTokens.contains(token) {
+            return rowTokens.contains("food")
+        }
         if token == "fillup" {
             return rowTokens.contains("gas")
                 || rowTokens.contains("fuel")
@@ -273,11 +313,15 @@ final class CiderDailyTrackerReadModelService {
         "bought", "cost", "paid", "pay", "price", "purchase", "purchased", "spend", "spending", "spent",
     ]
 
+    private let foodQueryTokens: Set<String> = [
+        "ate", "eat", "eating", "had", "have",
+    ]
+
     private let queryContextTokens: Set<String> = [
         "context", "location", "locations", "place", "places",
     ]
 
-    private func searchTokens(_ value: String, droppingStopwords: Bool) -> [String] {
+    private static func searchTokens(_ value: String, droppingStopwords: Bool) -> [String] {
         let normalized = normalizedSearchText(value) ?? ""
         let tokenText = normalized
             .replacingOccurrences(of: #"(?<=[A-Za-z])-(?=[A-Za-z])"#, with: " ", options: .regularExpression)
@@ -294,11 +338,48 @@ final class CiderDailyTrackerReadModelService {
             .filter { !droppingStopwords || !stopwords.contains($0) }
     }
 
-    private func normalizedSearchText(_ value: String?) -> String? {
+    private func searchTokens(_ value: String, droppingStopwords: Bool) -> [String] {
+        Self.searchTokens(value, droppingStopwords: droppingStopwords)
+    }
+
+    private static func normalizedSearchText(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else { return nil }
         return trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
             .lowercased()
+    }
+
+    private func normalizedSearchText(_ value: String?) -> String? {
+        Self.normalizedSearchText(value)
+    }
+
+    private static func normalizedRawQuery(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    private static func stripRelativeDateTokens(from query: String) -> String {
+        query
+            .replacingOccurrences(of: #"\byesterday\b"#, with: " ", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func localCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_US_POSIX")
+        calendar.timeZone = .current
+        return calendar
+    }
+
+    private static func localDateString(_ date: Date, calendar: Calendar) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     private func decimalAmount(_ value: String?) -> Decimal? {
