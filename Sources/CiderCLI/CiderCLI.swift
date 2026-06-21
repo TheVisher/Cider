@@ -22448,7 +22448,22 @@ struct CiderCLI {
         if !result.rankFactors.isEmpty {
             dict["rankFactors"] = result.rankFactors
         }
+        let safeNextCommands = itemSearchResultSafeNextCommands(result)
+        if !safeNextCommands.isEmpty {
+            dict["safeNextCommands"] = safeNextCommands
+        }
         return dict
+    }
+
+    private static func itemSearchResultSafeNextCommands(_ result: CiderItemSearchResult) -> [String] {
+        guard let item = result.item,
+              LibraryEntityType.activeCases.contains(item.type),
+              result.owner.ownerType == item.type.rawValue,
+              result.owner.ownerID == item.id.uuidString
+        else {
+            return []
+        }
+        return ["cider-cli item context \(item.type.rawValue) \(item.id.uuidString) --json"]
     }
 
     static func itemSearchDiagnosticsReportToDict(_ report: CiderItemSearchDiagnosticsReport) -> [String: Any] {

@@ -274,6 +274,31 @@ struct CiderItemContextServiceTests {
         #expect(titleMatches.contains {
             $0.kind == .item && $0.item?.id == dentist.entityID && $0.title == "Dentist follow-up"
         })
+        let noteResult = try #require(titleMatches.first {
+            $0.kind == .item && $0.item?.id == dentist.entityID
+        })
+        let noteResultDict = CiderCLI.itemSearchResultToDict(noteResult)
+        #expect(noteResultDict["id"] as? String == "item-\(dentist.entityID.uuidString)")
+        #expect(noteResultDict["kind"] as? String == "item")
+        #expect(noteResultDict["title"] as? String == "Dentist follow-up")
+        #expect(noteResultDict["snippet"] as? String == "Inbox/Notes/Dentist follow-up.md")
+        #expect(noteResultDict["rank"] as? Double != nil)
+        #expect(noteResultDict["owner"] as? [String: String] == [
+            "ownerType": "note",
+            "ownerID": dentist.entityID.uuidString,
+            "ref": "note:\(dentist.entityID.uuidString)",
+        ])
+        #expect((noteResultDict["item"] as? [String: Any])?["type"] as? String == "note")
+        let safeNextCommands = try #require(noteResultDict["safeNextCommands"] as? [String])
+        #expect(safeNextCommands == [
+            "cider-cli item context note \(dentist.entityID.uuidString) --json"
+        ])
+        #expect(!safeNextCommands.contains { command in
+            command.contains(" delete ")
+                || command.contains(" move ")
+                || command.contains(" route ")
+                || command.contains(" review ")
+        })
 
         let chunkMatches = try service.search("renewal window", limit: 10)
         #expect(chunkMatches.contains {
