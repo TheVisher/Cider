@@ -17266,8 +17266,30 @@ struct CiderCLI {
         ]
         if let resolvedQuery {
             dict["queryInterpretation"] = dailyTrackerQueryInterpretationToDict(resolvedQuery)
+            if result.rows.isEmpty,
+               let recallFallback = dailyTrackerZeroResultRecallFallback(for: resolvedQuery) {
+                let commands = recallFallback["safeNextCommands"] as? [String] ?? []
+                dict["relatedSearchCommands"] = commands
+                dict["recallFallbacks"] = [recallFallback]
+            }
         }
         return dict
+    }
+
+    static func dailyTrackerZeroResultRecallFallback(for resolvedQuery: CiderDailyTrackerResolvedQuery) -> [String: Any]? {
+        let query = (resolvedQuery.originalQuery ?? resolvedQuery.query ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return nil }
+        let command = "cider-cli item search \(shellQuoted(query)) --json"
+        return [
+            "kind": "broaderItemSearch",
+            "readOnly": true,
+            "changed": false,
+            "truthBoundary": "broader_search_possible_source_lookup_not_daily_tracker_truth",
+            "candidateBoundary": "not_a_reviewable_candidate",
+            "note": "Daily tracker found no rows; use this read-only broader item search to look for possible source items without treating them as tracker truth.",
+            "safeNextCommands": [command],
+        ]
     }
 
     static func dailyTrackerQueryReplayCommand(

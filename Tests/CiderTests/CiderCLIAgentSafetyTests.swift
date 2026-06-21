@@ -4257,6 +4257,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(pandaPayload["changed"] as? Bool == false)
         #expect(pandaPayload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
         #expect((pandaPayload["filters"] as? [String: Any])?["query"] as? String == "Panda Express")
+        #expect(pandaPayload["recallFallbacks"] == nil)
         let pandaRows = try #require(pandaPayload["rows"] as? [[String: Any]])
         #expect(!pandaRows.isEmpty)
         #expect(pandaRows.allSatisfy { ($0["metadata"] as? [String: String])?["merchant"] == "Panda Express" || ($0["sourceQuote"] as? String)?.contains("Panda Express") == true })
@@ -4827,6 +4828,56 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeNextCommands.contains("cider-cli capture review-queue --kind memory_candidate --json"))
     }
 
+    @Test("daily tracker zero-result query emits broader item search fallback without making tracker truth")
+    func dailyTrackerZeroResultQueryEmitsBroaderItemSearchFallbackWithoutMakingTrackerTruth() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-daily-tracker-zero-result-fallback-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let payload = try assertStrictProcessJSON(
+            runCLI(
+                args: [
+                    "item", "daily-tracker",
+                    "--query", "last Panda Express",
+                    "--sort", "newest",
+                    "--limit", "3",
+                    "--json",
+                ],
+                vault: vault
+            ),
+            command: "item.daily-tracker"
+        )
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+        #expect(payload["rowCount"] as? Int == 0)
+        #expect((payload["rows"] as? [[String: Any]])?.isEmpty == true)
+        #expect((payload["rollups"] as? [[String: Any]])?.isEmpty == true)
+
+        let interpretation = try #require(payload["queryInterpretation"] as? [String: Any])
+        #expect(interpretation["originalQuery"] as? String == "last Panda Express")
+        #expect(interpretation["interpretationType"] as? String == "keywordOnly")
+
+        let safeVerificationCommands = try #require(payload["safeVerificationCommands"] as? [String])
+        #expect(safeVerificationCommands.contains("cider-cli item daily-tracker --query 'last Panda Express' --sort newest --limit 3 --json"))
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item daily-tracker --query 'last Panda Express' --sort newest --limit 3 --json"))
+
+        let fallbacks = try #require(payload["recallFallbacks"] as? [[String: Any]])
+        #expect(fallbacks.count == 1)
+        let fallback = try #require(fallbacks.first)
+        #expect(fallback["kind"] as? String == "broaderItemSearch")
+        #expect(fallback["readOnly"] as? Bool == true)
+        #expect(fallback["changed"] as? Bool == false)
+        #expect(fallback["truthBoundary"] as? String == "broader_search_possible_source_lookup_not_daily_tracker_truth")
+        #expect(fallback["candidateBoundary"] as? String == "not_a_reviewable_candidate")
+        #expect(fallback["note"] as? String == "Daily tracker found no rows; use this read-only broader item search to look for possible source items without treating them as tracker truth.")
+        let fallbackCommands = try #require(fallback["safeNextCommands"] as? [String])
+        #expect(fallbackCommands == ["cider-cli item search 'last Panda Express' --json"])
+        #expect(payload["relatedSearchCommands"] as? [String] == ["cider-cli item search 'last Panda Express' --json"])
+    }
+
     @Test("daily tracker query replay command shell quotes apostrophes")
     func dailyTrackerQueryReplayCommandShellQuotesApostrophes() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -4858,6 +4909,8 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeVerificationCommands.contains("cider-cli item daily-tracker --from 2026-06-18 --to 2026-06-19 --query '19 June Erik'\\''s gas' --sort newest --limit 3 --json"))
         let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
         #expect(safeNextCommands.contains("cider-cli item daily-tracker --from 2026-06-18 --to 2026-06-19 --query '19 June Erik'\\''s gas' --sort newest --limit 3 --json"))
+        let relatedSearchCommands = try #require(payload["relatedSearchCommands"] as? [String])
+        #expect(relatedSearchCommands == ["cider-cli item search '19 June Erik'\\''s gas' --json"])
     }
 
     @Test("daily tracker query matches natural gas fill up phrasing without accepting reviewables")
