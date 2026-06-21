@@ -52,9 +52,10 @@ final class CiderDailyTrackerReadModelService {
         self.evidenceService = SecondBrainSourceEvidenceService(database: database)
     }
 
-    func dailySignals(from startDate: String? = nil, to endDate: String? = nil, limit: Int? = nil) throws -> CiderDailyTrackerReadModelResult {
+    func dailySignals(from startDate: String? = nil, to endDate: String? = nil, query: String? = nil, limit: Int? = nil) throws -> CiderDailyTrackerReadModelResult {
         let outputs = try outputService.outputs(kind: "memory_candidate", limit: nil)
         let maxRows = limit.map { max(0, $0) }
+        let normalizedQuery = normalizedSearchText(query)
         guard maxRows != 0 else {
             return CiderDailyTrackerReadModelResult(rows: [], rollups: [])
         }
@@ -64,6 +65,10 @@ final class CiderDailyTrackerReadModelService {
                 if let startDate, row.date < startDate { return false }
                 if let endDate, row.date > endDate { return false }
                 return true
+            }
+            .filter { row in
+                guard let normalizedQuery else { return true }
+                return searchableText(for: row).contains(normalizedQuery)
             }
             .sorted { lhs, rhs in
                 if lhs.date != rhs.date { return lhs.date < rhs.date }
@@ -173,6 +178,44 @@ final class CiderDailyTrackerReadModelService {
         let parts = ref.split(separator: ":", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { return nil }
         return SecondBrainOwnerRef(ownerType: parts[0], ownerID: parts[1])
+    }
+
+    private func searchableText(for row: CiderDailyTrackerSignalRow) -> String {
+        var parts: [String] = [
+            row.id,
+            row.candidateRef,
+            row.date,
+            row.signalType,
+            row.value,
+            row.sourceQuote,
+            row.reviewState,
+            row.truthState,
+        ]
+        if let amount = row.amount { parts.append(amount) }
+        if let currency = row.currency { parts.append(currency) }
+        parts.append(contentsOf: row.sourceRefs)
+        parts.append(contentsOf: row.safeNextCommands)
+        if let citation = row.citation {
+            parts.append(contentsOf: [
+                citation.ownerType,
+                citation.ownerID,
+                citation.sourceQuote,
+            ])
+            if let spanStart = citation.spanStart { parts.append(String(spanStart)) }
+            if let spanEnd = citation.spanEnd { parts.append(String(spanEnd)) }
+        }
+        for (key, value) in row.metadata {
+            parts.append(key)
+            parts.append(value)
+        }
+        return normalizedSearchText(parts.joined(separator: " ")) ?? ""
+    }
+
+    private func normalizedSearchText(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .lowercased()
     }
 
     private func decimalAmount(_ value: String?) -> Decimal? {

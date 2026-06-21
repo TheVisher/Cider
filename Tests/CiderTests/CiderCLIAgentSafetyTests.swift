@@ -4211,6 +4211,94 @@ struct CiderCLIAgentSafetyTests {
         #expect(secondRollup["reviewableRowCount"] as? Int == 4)
     }
 
+    @Test("daily tracker query filters food spending amount gas and routine rows without crossing review boundary")
+    func dailyTrackerQueryFiltersFoodSpendingAmountGasAndRoutineRowsWithoutCrossingReviewBoundary() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-daily-tracker-query-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let firstJournalID = try createNote(
+            title: "Daily Journal 2026-06-13",
+            content: "Lunch was Panda Express, orange chicken and fried rice, cost $11.91. Took a shower after work.",
+            vault: vault
+        )
+        let secondJournalID = try createNote(
+            title: "Daily Journal 2026-06-14",
+            content: "Stopped for gas and paid $27.00. No workout today.",
+            vault: vault
+        )
+
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "backfill-journals", "--date", "2026-06-13", "--json"], vault: vault),
+            command: "item.backfill-journals"
+        )
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "backfill-journals", "--date", "2026-06-14", "--json"], vault: vault),
+            command: "item.backfill-journals"
+        )
+
+        let pandaPayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--from", "2026-06-13", "--to", "2026-06-14", "--query", "Panda Express", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        #expect(pandaPayload["readOnly"] as? Bool == true)
+        #expect(pandaPayload["changed"] as? Bool == false)
+        #expect(pandaPayload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+        #expect((pandaPayload["filters"] as? [String: Any])?["query"] as? String == "Panda Express")
+        let pandaRows = try #require(pandaPayload["rows"] as? [[String: Any]])
+        #expect(!pandaRows.isEmpty)
+        #expect(pandaRows.allSatisfy { ($0["metadata"] as? [String: String])?["merchant"] == "Panda Express" || ($0["sourceQuote"] as? String)?.contains("Panda Express") == true })
+        let panda = try #require(pandaRows.first { $0["amount"] as? String == "11.91" })
+        #expect(panda["signalType"] as? String == "spending")
+        #expect(panda["reviewState"] as? String == "suggested")
+        #expect(panda["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((panda["sourceRefs"] as? [String])?.contains("note:\(firstJournalID)") == true)
+        #expect((panda["citation"] as? [String: Any])?["ownerID"] as? String == firstJournalID)
+
+        let gasPayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--from", "2026-06-13", "--to", "2026-06-14", "--query", "gas", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        let gasRows = try #require(gasPayload["rows"] as? [[String: Any]])
+        #expect(gasRows.count == 1)
+        let gas = try #require(gasRows.first)
+        #expect(gas["date"] as? String == "2026-06-14")
+        #expect(gas["signalType"] as? String == "spending")
+        #expect(gas["value"] as? String == "gas")
+        #expect(gas["amount"] as? String == "27.00")
+        #expect((gas["sourceRefs"] as? [String])?.contains("note:\(secondJournalID)") == true)
+        #expect((gas["citation"] as? [String: Any])?["ownerID"] as? String == secondJournalID)
+
+        let amountPayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--query", "27.00", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        let amountRows = try #require(amountPayload["rows"] as? [[String: Any]])
+        #expect(amountRows.count == 1)
+        #expect(amountRows.first?["amount"] as? String == "27.00")
+        let amountRollups = try #require(amountPayload["rollups"] as? [[String: Any]])
+        #expect(amountRollups.count == 1)
+        #expect(amountRollups.first?["spendingAmount"] as? String == "27.00")
+        #expect(amountRollups.first?["spendingRowCount"] as? Int == 1)
+        #expect(amountRollups.first?["reviewableRowCount"] as? Int == 1)
+
+        let workoutPayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--from", "2026-06-13", "--to", "2026-06-14", "--query", "workout", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        let workoutRows = try #require(workoutPayload["rows"] as? [[String: Any]])
+        #expect(workoutRows.count == 1)
+        let workout = try #require(workoutRows.first)
+        #expect(workout["signalType"] as? String == "routine")
+        #expect(workout["value"] as? String == "workout")
+        #expect(workout["truthState"] as? String == "reviewable_candidate_not_truth")
+        let workoutRollups = try #require(workoutPayload["rollups"] as? [[String: Any]])
+        #expect(workoutRollups.count == 1)
+        #expect(workoutRollups.first?["routineRowCount"] as? Int == 1)
+        #expect(workoutRollups.first?["spendingRowCount"] as? Int == 0)
+    }
+
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")
     func recallContextBundleCitesAcceptedGraphEvidenceAndReviewableCandidates() throws {
         let vault = FileManager.default.temporaryDirectory

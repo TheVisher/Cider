@@ -5027,7 +5027,7 @@ struct CiderCLI {
               cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
               cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
               cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
-              cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--limit <n>] [--json]
+              cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--limit <n>] [--json]
               cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
               cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
               cider-cli item graph-candidate <candidate-id> [--json]
@@ -5315,10 +5315,14 @@ struct CiderCLI {
                 var filters: [String: Any] = [:]
                 if let from = parseFlag("--from", from: args) { filters["from"] = from }
                 if let to = parseFlag("--to", from: args) { filters["to"] = to }
+                if let query = parseFlag("--query", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty {
+                    filters["query"] = query
+                }
                 if let limit { filters["limit"] = limit }
                 let result = try CiderDailyTrackerReadModelService(database: .shared).dailySignals(
                     from: filters["from"] as? String,
                     to: filters["to"] as? String,
+                    query: filters["query"] as? String,
                     limit: limit
                 )
                 let payload = dailyTrackerReadModelResultToDict(
