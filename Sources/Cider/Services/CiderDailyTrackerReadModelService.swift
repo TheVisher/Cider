@@ -231,6 +231,7 @@ final class CiderDailyTrackerReadModelService {
         }
 
         let queryTokens = searchTokens(rawQuery, droppingStopwords: true)
+            .filter { !queryContextTokens.contains($0) }
         guard !queryTokens.isEmpty else { return false }
         let rowTokens = Set(searchTokens(searchable, droppingStopwords: false))
         return queryTokens.allSatisfy { queryTokenMatches($0, rowTokens: rowTokens) }
@@ -270,6 +271,10 @@ final class CiderDailyTrackerReadModelService {
 
     private let spendingQueryTokens: Set<String> = [
         "bought", "cost", "paid", "pay", "price", "purchase", "purchased", "spend", "spending", "spent",
+    ]
+
+    private let queryContextTokens: Set<String> = [
+        "context", "location", "locations", "place", "places",
     ]
 
     private func searchTokens(_ value: String, droppingStopwords: Bool) -> [String] {

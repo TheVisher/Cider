@@ -4373,6 +4373,49 @@ struct CiderCLIAgentSafetyTests {
             #expect(rollups.first?["reviewableRowCount"] as? Int == 1)
             #expect(rollups.first?["acceptedRowCount"] as? Int == 0)
         }
+
+        let locationPayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--query", "gas fill up location", "--sort", "newest", "--limit", "1", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        #expect(locationPayload["readOnly"] as? Bool == true)
+        #expect(locationPayload["changed"] as? Bool == false)
+        #expect(locationPayload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+        #expect((locationPayload["filters"] as? [String: Any])?["query"] as? String == "gas fill up location")
+        #expect((locationPayload["filters"] as? [String: Any])?["limit"] as? Int == 1)
+        #expect((locationPayload["filters"] as? [String: Any])?["sort"] as? String == "newest")
+
+        let locationRows = try #require(locationPayload["rows"] as? [[String: Any]])
+        #expect(locationRows.count == 1)
+        let locationGas = try #require(locationRows.first)
+        #expect(locationGas["date"] as? String == "2026-06-11")
+        #expect(locationGas["signalType"] as? String == "spending")
+        #expect(locationGas["value"] as? String == "gas")
+        #expect(locationGas["amount"] as? String == "81.07")
+        #expect(locationGas["reviewState"] as? String == "suggested")
+        #expect(locationGas["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((locationGas["sourceRefs"] as? [String])?.contains("note:\(journalID)") == true)
+        #expect((locationGas["citation"] as? [String: Any])?["ownerID"] as? String == journalID)
+        #expect((locationGas["metadata"] as? [String: String])?["related_entities"]?.contains("Duvall") == true)
+        #expect((locationGas["metadata"] as? [String: String])?["related_entities"]?.contains("Mazda CX-5") == true)
+
+        let locationRollups = try #require(locationPayload["rollups"] as? [[String: Any]])
+        #expect(locationRollups.count == 1)
+        #expect(locationRollups.first?["date"] as? String == "2026-06-11")
+        #expect(locationRollups.first?["spendingAmount"] as? String == "81.07")
+        #expect(locationRollups.first?["spendingRowCount"] as? Int == 1)
+        #expect(locationRollups.first?["reviewableRowCount"] as? Int == 1)
+        #expect(locationRollups.first?["acceptedRowCount"] as? Int == 0)
+
+        let genericLocationPayload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--query", "location", "--sort", "newest", "--limit", "1", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        #expect(genericLocationPayload["readOnly"] as? Bool == true)
+        #expect(genericLocationPayload["changed"] as? Bool == false)
+        #expect(genericLocationPayload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+        #expect((genericLocationPayload["rows"] as? [[String: Any]])?.isEmpty == true)
+        #expect((genericLocationPayload["rollups"] as? [[String: Any]])?.isEmpty == true)
     }
 
     @Test("daily tracker newest sort returns latest matching query row without changing default limit order")
