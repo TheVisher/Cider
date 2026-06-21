@@ -4006,6 +4006,75 @@ struct CiderCLIAgentSafetyTests {
         #expect(!graphItems.contains { $0["value"] as? String == "to get it more often" })
     }
 
+    @Test("daily tracker rows roll up journal food spending and routine candidates without making reviewables truth")
+    func dailyTrackerRowsRollUpJournalFoodSpendingAndRoutineCandidatesWithoutMakingReviewablesTruth() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-daily-tracker-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let firstJournalID = try createNote(
+            title: "Daily Journal 2026-06-13",
+            content: """
+            Lunch and errand spending:
+            Visher grabbed Panda Express for lunch and spent $17.42 on orange chicken and chow mein.
+            At the gas station, he also bought a Monster and a protein bar for about $9.58.
+            """,
+            vault: vault
+        )
+        let secondJournalID = try createNote(
+            title: "Daily Journal 2026-06-19",
+            content: """
+            For breakfast I had a Costco meat stick and a Costco chocolate-chip granola bar.
+            Around 8:00 I got the cafeteria chicken-fried-steak burrito, liked it, and want to know if they have it every Friday so I can get it more often.
+            I decided not to work this weekend.
+            """,
+            vault: vault
+        )
+
+        _ = try parseJSONObject(try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-13", "--json"], vault: vault).stdout)
+        _ = try parseJSONObject(try runCLI(args: ["item", "backfill-journals", "--date", "2026-06-19", "--json"], vault: vault).stdout)
+
+        let payload = try assertStrictProcessJSON(
+            runCLI(args: ["item", "daily-tracker", "--from", "2026-06-13", "--to", "2026-06-19", "--json"], vault: vault),
+            command: "item.daily-tracker"
+        )
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+        #expect(payload["truthBoundary"] as? String == "accepted_rows_are_user_reviewed_truth_only")
+
+        let rows = try #require(payload["rows"] as? [[String: Any]])
+        #expect(rows.count >= 5)
+        let panda = try #require(rows.first { $0["date"] as? String == "2026-06-13" && $0["amount"] as? String == "17.42" })
+        #expect(panda["signalType"] as? String == "spending")
+        #expect(panda["value"] as? String == "food")
+        #expect(panda["reviewState"] as? String == "suggested")
+        #expect(panda["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((panda["sourceRefs"] as? [String])?.contains("note:\(firstJournalID)") == true)
+        #expect((panda["citation"] as? [String: Any])?["ownerID"] as? String == firstJournalID)
+        #expect((panda["safeNextCommands"] as? [String])?.contains("cider-cli item context note \(firstJournalID) --json") == true)
+
+        let breakfast = try #require(rows.first { $0["date"] as? String == "2026-06-19" && $0["value"] as? String == "breakfast" })
+        #expect(breakfast["signalType"] as? String == "food")
+        #expect(breakfast["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((breakfast["sourceRefs"] as? [String])?.contains("note:\(secondJournalID)") == true)
+
+        let routine = try #require(rows.first { $0["date"] as? String == "2026-06-19" && $0["signalType"] as? String == "routine" })
+        #expect(routine["value"] as? String == "weekend_work")
+        #expect(routine["truthState"] as? String == "reviewable_candidate_not_truth")
+
+        let rollups = try #require(payload["rollups"] as? [[String: Any]])
+        let firstRollup = try #require(rollups.first { $0["date"] as? String == "2026-06-13" })
+        #expect(firstRollup["spendingAmount"] as? String == "27.00")
+        #expect(firstRollup["spendingRowCount"] as? Int == 2)
+        #expect(firstRollup["acceptedRowCount"] as? Int == 0)
+        #expect(firstRollup["reviewableRowCount"] as? Int == 2)
+        let secondRollup = try #require(rollups.first { $0["date"] as? String == "2026-06-19" })
+        #expect(secondRollup["foodRowCount"] as? Int == 2)
+        #expect(secondRollup["routineRowCount"] as? Int == 1)
+    }
+
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")
     func recallContextBundleCitesAcceptedGraphEvidenceAndReviewableCandidates() throws {
         let vault = FileManager.default.temporaryDirectory

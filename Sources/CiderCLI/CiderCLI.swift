@@ -4948,6 +4948,7 @@ struct CiderCLI {
               cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
               cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
               cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
+              cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--limit <n>] [--json]
               cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
               cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
               cider-cli item graph-candidate <candidate-id> [--json]
@@ -5225,6 +5226,35 @@ struct CiderCLI {
                     "events": events.map(recallAccessEventToDict),
                 ]
                 if jsonOutput { outputJSON(payload) } else { print("Recall access events: \(events.count)") }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "daily-tracker", "tracker-daily", "daily-signals":
+            do {
+                let limit = parseFlag("--limit", from: args).flatMap(Int.init)
+                var filters: [String: Any] = [:]
+                if let from = parseFlag("--from", from: args) { filters["from"] = from }
+                if let to = parseFlag("--to", from: args) { filters["to"] = to }
+                if let limit { filters["limit"] = limit }
+                let result = try CiderDailyTrackerReadModelService(database: .shared).dailySignals(
+                    from: filters["from"] as? String,
+                    to: filters["to"] as? String,
+                    limit: limit
+                )
+                let payload = dailyTrackerReadModelResultToDict(
+                    result,
+                    filters: filters
+                )
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Daily tracker: \(result.rows.count) row(s), \(result.rollups.count) day(s)")
+                    for rollup in result.rollups {
+                        let amount = rollup.spendingAmount.map { ", spending $\($0)" } ?? ""
+                        print("  \(rollup.date): \(rollup.rowCount) row(s)\(amount)")
+                    }
+                }
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -17071,6 +17101,81 @@ struct CiderCLI {
         dict["recallScore"] = scoringService.score(reasons)
         dict["scoreReasons"] = scoreReasonsToDict(reasons)
         if dict["candidateRef"] == nil { dict["candidateRef"] = "memory_candidate:\(output.id)" }
+        return dict
+    }
+
+    static func dailyTrackerReadModelResultToDict(
+        _ result: CiderDailyTrackerReadModelResult,
+        filters: [String: Any]
+    ) -> [String: Any] {
+        [
+            "ok": true,
+            "command": "item.daily-tracker",
+            "readOnly": true,
+            "changed": false,
+            "candidateBoundary": "reviewable_candidates_are_not_truth",
+            "truthBoundary": "accepted_rows_are_user_reviewed_truth_only",
+            "filters": filters,
+            "rowCount": result.rows.count,
+            "rollupCount": result.rollups.count,
+            "rows": result.rows.map(dailyTrackerSignalRowToDict),
+            "rollups": result.rollups.map(dailyTrackerRollupToDict),
+            "safeNextCommands": [
+                "cider-cli capture review-queue --kind memory_candidate --json",
+                "cider-cli item backfill-journals --json",
+            ],
+            "safeVerificationCommands": [
+                "cider-cli item daily-tracker --json",
+                "cider-cli capture review-queue --kind memory_candidate --json",
+            ],
+        ]
+    }
+
+    static func dailyTrackerSignalRowToDict(_ row: CiderDailyTrackerSignalRow) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": row.id,
+            "candidateRef": row.candidateRef,
+            "date": row.date,
+            "signalType": row.signalType,
+            "value": row.value,
+            "sourceRefs": row.sourceRefs,
+            "sourceQuote": row.sourceQuote,
+            "reviewState": row.reviewState,
+            "truthState": row.truthState,
+            "metadata": row.metadata,
+            "safeNextCommands": row.safeNextCommands,
+        ]
+        if let amount = row.amount { dict["amount"] = amount }
+        if let currency = row.currency { dict["currency"] = currency }
+        if let citation = row.citation {
+            dict["citation"] = dailyTrackerCitationToDict(citation)
+        }
+        return dict
+    }
+
+    static func dailyTrackerCitationToDict(_ citation: CiderDailyTrackerCitation) -> [String: Any] {
+        var dict: [String: Any] = [
+            "ownerType": citation.ownerType,
+            "ownerID": citation.ownerID,
+            "sourceQuote": citation.sourceQuote,
+        ]
+        if let spanStart = citation.spanStart { dict["spanStart"] = spanStart }
+        if let spanEnd = citation.spanEnd { dict["spanEnd"] = spanEnd }
+        return dict
+    }
+
+    static func dailyTrackerRollupToDict(_ rollup: CiderDailyTrackerRollup) -> [String: Any] {
+        var dict: [String: Any] = [
+            "date": rollup.date,
+            "rowCount": rollup.rowCount,
+            "foodRowCount": rollup.foodRowCount,
+            "spendingRowCount": rollup.spendingRowCount,
+            "routineRowCount": rollup.routineRowCount,
+            "acceptedRowCount": rollup.acceptedRowCount,
+            "reviewableRowCount": rollup.reviewableRowCount,
+        ]
+        if let spendingAmount = rollup.spendingAmount { dict["spendingAmount"] = spendingAmount }
+        if let currency = rollup.currency { dict["currency"] = currency }
         return dict
     }
 
