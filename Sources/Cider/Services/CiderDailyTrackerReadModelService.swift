@@ -121,19 +121,32 @@ final class CiderDailyTrackerReadModelService {
         referenceDate: Date = Date(),
         calendar: Calendar = CiderDailyTrackerReadModelService.localCalendar()
     ) -> CiderDailyTrackerResolvedQuery {
-        guard let query, searchTokens(query, droppingStopwords: false).contains("yesterday") else {
+        guard let query else {
             return CiderDailyTrackerResolvedQuery(from: startDate, to: endDate, query: normalizedRawQuery(query), appliedRelativeDate: nil)
         }
 
-        let yesterday = calendar.date(byAdding: .day, value: -1, to: referenceDate) ?? referenceDate
-        let yesterdayString = localDateString(yesterday, calendar: calendar)
-        let remainingQuery = stripRelativeDateTokens(from: query)
-        return CiderDailyTrackerResolvedQuery(
-            from: startDate ?? yesterdayString,
-            to: endDate ?? yesterdayString,
-            query: normalizedRawQuery(remainingQuery),
-            appliedRelativeDate: yesterdayString
-        )
+        if searchTokens(query, droppingStopwords: false).contains("yesterday") {
+            let yesterday = calendar.date(byAdding: .day, value: -1, to: referenceDate) ?? referenceDate
+            let yesterdayString = localDateString(yesterday, calendar: calendar)
+            let remainingQuery = stripRelativeDateTokens(from: query)
+            return CiderDailyTrackerResolvedQuery(
+                from: startDate ?? yesterdayString,
+                to: endDate ?? yesterdayString,
+                query: normalizedRawQuery(remainingQuery),
+                appliedRelativeDate: yesterdayString
+            )
+        }
+
+        if let literal = monthDayDateLiteral(in: query, referenceDate: referenceDate, calendar: calendar) {
+            return CiderDailyTrackerResolvedQuery(
+                from: startDate ?? literal.dateString,
+                to: endDate ?? literal.dateString,
+                query: normalizedRawQuery(literal.remainingQuery),
+                appliedRelativeDate: literal.dateString
+            )
+        }
+
+        return CiderDailyTrackerResolvedQuery(from: startDate, to: endDate, query: normalizedRawQuery(query), appliedRelativeDate: nil)
     }
 
     private func row(for output: SecondBrainEnrichmentOutput) -> CiderDailyTrackerSignalRow? {
@@ -364,6 +377,77 @@ final class CiderDailyTrackerReadModelService {
             .replacingOccurrences(of: #"\byesterday\b"#, with: " ", options: [.regularExpression, .caseInsensitive])
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func monthDayDateLiteral(
+        in query: String,
+        referenceDate: Date,
+        calendar: Calendar
+    ) -> (dateString: String, remainingQuery: String)? {
+        let pattern = #"\b(january|jan\.?|february|feb\.?|march|mar\.?|april|apr\.?|may|june|jun\.?|july|jul\.?|august|aug\.?|september|sept\.?|sep\.?|october|oct\.?|november|nov\.?|december|dec\.?)\s+([0-9]{1,2})(?:st|nd|rd|th)?(?:,?\s+([0-9]{4}))?\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let nsQuery = query as NSString
+        let fullRange = NSRange(location: 0, length: nsQuery.length)
+        guard let match = regex.firstMatch(in: query, range: fullRange),
+              match.numberOfRanges >= 3,
+              let monthRange = Range(match.range(at: 1), in: query),
+              let dayRange = Range(match.range(at: 2), in: query),
+              let month = monthNumber(String(query[monthRange])),
+              let day = Int(query[dayRange])
+        else {
+            return nil
+        }
+
+        let year: Int
+        if match.numberOfRanges >= 4,
+           match.range(at: 3).location != NSNotFound,
+           let yearRange = Range(match.range(at: 3), in: query),
+           let explicitYear = Int(query[yearRange]) {
+            year = explicitYear
+        } else {
+            year = calendar.component(.year, from: referenceDate)
+        }
+
+        var components = DateComponents()
+        components.calendar = calendar
+        components.timeZone = calendar.timeZone
+        components.year = year
+        components.month = month
+        components.day = day
+        guard let date = calendar.date(from: components),
+              calendar.component(.year, from: date) == year,
+              calendar.component(.month, from: date) == month,
+              calendar.component(.day, from: date) == day,
+              let literalRange = Range(match.range, in: query)
+        else {
+            return nil
+        }
+
+        let remaining = query
+            .replacingCharacters(in: literalRange, with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (localDateString(date, calendar: calendar), remaining)
+    }
+
+    private static func monthNumber(_ value: String) -> Int? {
+        switch value.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")) {
+        case "january", "jan": return 1
+        case "february", "feb": return 2
+        case "march", "mar": return 3
+        case "april", "apr": return 4
+        case "may": return 5
+        case "june", "jun": return 6
+        case "july", "jul": return 7
+        case "august", "aug": return 8
+        case "september", "sept", "sep": return 9
+        case "october", "oct": return 10
+        case "november", "nov": return 11
+        case "december", "dec": return 12
+        default: return nil
+        }
     }
 
     private static func localCalendar() -> Calendar {

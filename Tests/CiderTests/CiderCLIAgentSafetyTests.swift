@@ -4545,6 +4545,221 @@ struct CiderCLIAgentSafetyTests {
         #expect((breakfast["citation"] as? [String: Any])?["ownerID"] as? String == olderJournalID)
     }
 
+    @Test("daily tracker month day queries narrow date while preserving reviewable food boundary")
+    func dailyTrackerMonthDayQueriesNarrowDateWhilePreservingReviewableFoodBoundary() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-daily-tracker-month-day-query-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let olderJournalID = try createNote(
+            title: "Daily Journal 2026-06-18",
+            content: "Breakfast was yogurt and berries.",
+            vault: vault
+        )
+        let june19JournalID = try createNote(
+            title: "Daily Journal 2026-06-19",
+            content: "For breakfast I had a Costco meat stick and a Costco chocolate-chip granola bar. Lunch was a cafeteria burrito.",
+            vault: vault
+        )
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { db.close() }
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(SecondBrainEnrichmentOutput(
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: olderJournalID),
+            kind: "memory_candidate",
+            value: "breakfast",
+            normalizedValue: "cid-560-breakfast-older",
+            label: "Breakfast",
+            evidence: "Breakfast was yogurt and berries.",
+            source: "daily_tracker_month_day.test",
+            confidence: 0.9,
+            reviewState: "suggested",
+            metadata: [
+                "memory_kind": "food_routine",
+                "candidate_kind": "food_routine",
+                "meal": "breakfast",
+                "food_item": "yogurt and berries",
+                "journal_date": "2026-06-18",
+                "source_owner_ref": "note:\(olderJournalID)",
+                "source_quote": "Breakfast was yogurt and berries.",
+            ]
+        ))
+        try outputService.record(SecondBrainEnrichmentOutput(
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: june19JournalID),
+            kind: "memory_candidate",
+            value: "breakfast",
+            normalizedValue: "cid-560-breakfast-june-19",
+            label: "Breakfast",
+            evidence: "For breakfast I had a Costco meat stick and a Costco chocolate-chip granola bar.",
+            source: "daily_tracker_month_day.test",
+            confidence: 0.9,
+            reviewState: "suggested",
+            metadata: [
+                "memory_kind": "food_routine",
+                "candidate_kind": "food_routine",
+                "meal": "breakfast",
+                "food_item": "Costco meat stick and Costco chocolate-chip granola bar",
+                "journal_date": "2026-06-19",
+                "source_owner_ref": "note:\(june19JournalID)",
+                "source_quote": "For breakfast I had a Costco meat stick and a Costco chocolate-chip granola bar.",
+            ]
+        ))
+        try outputService.record(SecondBrainEnrichmentOutput(
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: june19JournalID),
+            kind: "memory_candidate",
+            value: "lunch",
+            normalizedValue: "cid-560-lunch-june-19",
+            label: "Lunch",
+            evidence: "Lunch was a cafeteria burrito.",
+            source: "daily_tracker_month_day.test",
+            confidence: 0.9,
+            reviewState: "suggested",
+            metadata: [
+                "memory_kind": "food_routine",
+                "candidate_kind": "food_routine",
+                "meal": "lunch",
+                "food_item": "cafeteria burrito",
+                "journal_date": "2026-06-19",
+                "source_owner_ref": "note:\(june19JournalID)",
+                "source_quote": "Lunch was a cafeteria burrito.",
+            ]
+        ))
+
+        let environment = ["CIDER_DAILY_TRACKER_REFERENCE_DATE": "2026-06-20"]
+        for query in ["June 19 breakfast", "June 19 2026 breakfast"] {
+            let payload = try assertStrictProcessJSON(
+                runCLI(
+                    args: ["item", "daily-tracker", "--query", query, "--sort", "newest", "--limit", "5", "--json"],
+                    vault: vault,
+                    environment: environment
+                ),
+                command: "item.daily-tracker"
+            )
+            #expect(payload["readOnly"] as? Bool == true)
+            #expect(payload["changed"] as? Bool == false)
+            #expect(payload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+            #expect((payload["filters"] as? [String: Any])?["query"] as? String == query)
+            #expect((payload["filters"] as? [String: Any])?["from"] as? String == "2026-06-19")
+            #expect((payload["filters"] as? [String: Any])?["to"] as? String == "2026-06-19")
+
+            let rows = try #require(payload["rows"] as? [[String: Any]])
+            #expect(rows.count == 1)
+            let breakfast = try #require(rows.first)
+            #expect(breakfast["date"] as? String == "2026-06-19")
+            #expect(breakfast["signalType"] as? String == "food")
+            #expect(breakfast["value"] as? String == "breakfast")
+            #expect(breakfast["reviewState"] as? String == "suggested")
+            #expect(breakfast["truthState"] as? String == "reviewable_candidate_not_truth")
+            #expect((breakfast["sourceRefs"] as? [String])?.contains("note:\(june19JournalID)") == true)
+            #expect((breakfast["citation"] as? [String: Any])?["ownerID"] as? String == june19JournalID)
+            #expect((breakfast["metadata"] as? [String: String])?["food_item"] == "Costco meat stick and Costco chocolate-chip granola bar")
+
+            let rollups = try #require(payload["rollups"] as? [[String: Any]])
+            #expect(rollups.count == 1)
+            #expect(rollups.first?["date"] as? String == "2026-06-19")
+            #expect(rollups.first?["foodRowCount"] as? Int == 1)
+            #expect(rollups.first?["reviewableRowCount"] as? Int == 1)
+        }
+    }
+
+    @Test("daily tracker explicit date flags win over month day query date normalization")
+    func dailyTrackerExplicitDateFlagsWinOverMonthDayQueryDateNormalization() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-daily-tracker-month-day-explicit-dates-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let olderJournalID = try createNote(
+            title: "Daily Journal 2026-06-18",
+            content: "Breakfast was yogurt and berries.",
+            vault: vault
+        )
+        let june19JournalID = try createNote(
+            title: "Daily Journal 2026-06-19",
+            content: "Breakfast was a Costco granola bar.",
+            vault: vault
+        )
+
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { db.close() }
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(SecondBrainEnrichmentOutput(
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: olderJournalID),
+            kind: "memory_candidate",
+            value: "breakfast",
+            normalizedValue: "cid-560-explicit-breakfast-older",
+            label: "Breakfast",
+            evidence: "Breakfast was yogurt and berries.",
+            source: "daily_tracker_month_day.test",
+            confidence: 0.9,
+            reviewState: "suggested",
+            metadata: [
+                "memory_kind": "food_routine",
+                "candidate_kind": "food_routine",
+                "meal": "breakfast",
+                "food_item": "yogurt and berries",
+                "journal_date": "2026-06-18",
+                "source_owner_ref": "note:\(olderJournalID)",
+                "source_quote": "Breakfast was yogurt and berries.",
+            ]
+        ))
+        try outputService.record(SecondBrainEnrichmentOutput(
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: june19JournalID),
+            kind: "memory_candidate",
+            value: "breakfast",
+            normalizedValue: "cid-560-explicit-breakfast-june-19",
+            label: "Breakfast",
+            evidence: "Breakfast was a Costco granola bar.",
+            source: "daily_tracker_month_day.test",
+            confidence: 0.9,
+            reviewState: "suggested",
+            metadata: [
+                "memory_kind": "food_routine",
+                "candidate_kind": "food_routine",
+                "meal": "breakfast",
+                "food_item": "Costco granola bar",
+                "journal_date": "2026-06-19",
+                "source_owner_ref": "note:\(june19JournalID)",
+                "source_quote": "Breakfast was a Costco granola bar.",
+            ]
+        ))
+
+        let payload = try assertStrictProcessJSON(
+            runCLI(
+                args: [
+                    "item", "daily-tracker",
+                    "--from", "2026-06-18",
+                    "--to", "2026-06-18",
+                    "--query", "June 19 breakfast",
+                    "--sort", "newest",
+                    "--limit", "5",
+                    "--json",
+                ],
+                vault: vault,
+                environment: ["CIDER_DAILY_TRACKER_REFERENCE_DATE": "2026-06-20"]
+            ),
+            command: "item.daily-tracker"
+        )
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+        #expect((payload["filters"] as? [String: Any])?["query"] as? String == "June 19 breakfast")
+        #expect((payload["filters"] as? [String: Any])?["from"] as? String == "2026-06-18")
+        #expect((payload["filters"] as? [String: Any])?["to"] as? String == "2026-06-18")
+
+        let rows = try #require(payload["rows"] as? [[String: Any]])
+        #expect(rows.count == 1)
+        let breakfast = try #require(rows.first)
+        #expect(breakfast["date"] as? String == "2026-06-18")
+        #expect((breakfast["metadata"] as? [String: String])?["food_item"] == "yogurt and berries")
+        #expect((breakfast["sourceRefs"] as? [String])?.contains("note:\(olderJournalID)") == true)
+        #expect((breakfast["citation"] as? [String: Any])?["ownerID"] as? String == olderJournalID)
+    }
+
     @Test("daily tracker query matches natural gas fill up phrasing without accepting reviewables")
     func dailyTrackerQueryMatchesNaturalGasFillUpPhrasingWithoutAcceptingReviewables() throws {
         let vault = FileManager.default.temporaryDirectory
