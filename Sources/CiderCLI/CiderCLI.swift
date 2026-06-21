@@ -17334,15 +17334,22 @@ struct CiderCLI {
         }
         commandParts.append("--json")
         let command = commandParts.joined(separator: " ")
-        return [
+        var fallback: [String: Any] = [
             "kind": "broaderItemSearch",
             "readOnly": true,
             "changed": false,
             "truthBoundary": "broader_search_possible_source_lookup_not_daily_tracker_truth",
             "candidateBoundary": "not_a_reviewable_candidate",
+            "originalQuery": query,
+            "searchQuery": fallbackQuery,
             "note": "Daily tracker found no rows; use this read-only broader item search to look for possible source items without treating them as tracker truth.",
             "safeNextCommands": [command],
         ]
+        if hasRecencyIntent {
+            fallback["sort"] = "newest"
+            fallback["queryTransform"] = "recency_operator_stripped"
+        }
+        return fallback
     }
 
     static func dailyTrackerFallbackSearchQueryRemovingRecencyOperators(from query: String) -> String {
