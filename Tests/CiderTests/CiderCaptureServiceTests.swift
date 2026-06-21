@@ -263,25 +263,28 @@ struct CiderCaptureServiceTests {
             #expect(result.item.relativePath?.hasPrefix("Inbox/Bookmarks/") == true)
             #expect(result.enrichment.status == "pending")
             #expect(result.duplicate.status == "new")
-            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.reviewNeeded == false)
             #expect(result.routing.candidateTarget?.relativePath == "Inbox/Bookmarks")
             #expect(result.routing.decisionID != nil)
             #expect(result.nextSafeAction == "enrich")
             let resultDict = result.toDictionary()
             #expect(resultDict["saved"] as? Bool == true)
             #expect(resultDict["useful"] as? Bool == false)
-            #expect(resultDict["needsReview"] as? Bool == true)
-            #expect(resultDict["requiresHumanReview"] as? Bool == true)
-            #expect(resultDict["needsRouting"] as? Bool == true)
+            #expect(resultDict["needsReview"] as? Bool == false)
+            #expect(resultDict["requiresHumanReview"] as? Bool == false)
+            #expect(resultDict["needsRouting"] as? Bool == false)
             #expect(resultDict["needsEnrichment"] as? Bool == true)
-            #expect(resultDict["agentMayRoute"] as? Bool == false)
-            #expect(resultDict["confidence"] as? Double == 0)
-            #expect(resultDict["recommendedNextAction"] as? String == "review_route")
-            #expect((resultDict["blockingIssues"] as? [String])?.contains("routing_needs_review") == true)
-            #expect(resultDict["humanQuestion"] as? String != nil)
+            #expect(resultDict["agentMayRoute"] as? Bool == true)
+            #expect(resultDict["confidence"] as? Double == 1)
+            #expect(resultDict["recommendedNextAction"] as? String == "enrich")
+            #expect((resultDict["blockingIssues"] as? [String])?.contains("routing_needs_review") == false)
+            #expect(resultDict["humanQuestion"] == nil)
+            #expect(resultDict["storedInInbox"] as? Bool == true)
+            #expect(resultDict["destinationUnassigned"] as? Bool == true)
+            #expect(resultDict["optionalClassification"] as? Bool == true)
             let nextActions = try #require(resultDict["nextActions"] as? [[String: Any]])
-            #expect(nextActions.first?["action"] as? String == "review_route")
-            #expect(nextActions.first?["readOnly"] as? Bool == true)
+            #expect(nextActions.first?["action"] as? String == "enrich")
+            #expect(nextActions.first?["readOnly"] as? Bool == false)
             #expect(nextActions.first?["requiresApproval"] as? Bool == true)
             try expectQuietCaptureSafeCommands(for: result)
 
@@ -304,7 +307,7 @@ struct CiderCaptureServiceTests {
             #expect(explanation.item.id == result.item.id)
             #expect(explanation.latestDecision?.id == result.routing.decisionID)
             #expect(explanation.latestDecision?.target.relativePath == "Inbox/Bookmarks")
-            #expect(explanation.latestDecision?.reviewState == "needs_review")
+            #expect(explanation.latestDecision?.reviewState == "accepted")
             #expect(explanation.latestDecision?.actor == "agent")
             #expect(explanation.latestDecision?.source == "capture.add")
         }
@@ -318,8 +321,7 @@ struct CiderCaptureServiceTests {
                 notesStorage: notes,
                 todoStorage: todos,
                 vaultFileStorage: files,
-                database: db,
-                routingDecisionService: CiderRoutingDecisionService(database: db)
+                database: db
             )
 
             let rottenTomatoes = try service.addBookmarkCapture(
@@ -335,7 +337,7 @@ struct CiderCaptureServiceTests {
             #expect(rottenIntent["wouldRouteWithoutReview"] as? Bool == false)
             let rottenRouting = try #require(rottenTomatoes["routing"] as? [String: Any])
             #expect((rottenRouting["candidateTarget"] as? [String: Any])?["relativePath"] as? String == "Inbox/Bookmarks")
-            #expect(rottenRouting["reviewNeeded"] as? Bool == true)
+            #expect(rottenRouting["reviewNeeded"] as? Bool == false)
 
             let steam = try service.addBookmarkCapture(
                 urlString: "https://store.steampowered.com/app/1118520/Paralives/",
@@ -360,7 +362,14 @@ struct CiderCaptureServiceTests {
             #expect(staging["status"] as? String == "staged")
             #expect(staging["reviewNeeded"] as? Bool == true)
             #expect(projectReference["needsIntentApproval"] as? Bool == true)
+            #expect(projectReference["needsReview"] as? Bool == true)
+            #expect(projectReference["requiresHumanReview"] as? Bool == true)
+            #expect(projectReference["needsRouting"] as? Bool == false)
             #expect(projectReference["recommendedNextAction"] as? String == "review_intent")
+            let projectBlockingIssues = try #require(projectReference["blockingIssues"] as? [String])
+            #expect(projectBlockingIssues.contains("intent_approval_needed"))
+            #expect(!projectBlockingIssues.contains("routing_needs_review"))
+            #expect(projectReference["humanQuestion"] as? String != "Which destination should this item be routed to?")
             let projectItem = try #require(projectReference["item"] as? [String: Any])
             let projectItemID = try #require(projectItem["id"] as? String)
             let projectCommands = try #require(projectReference["safeNextCommands"] as? [String])
@@ -386,8 +395,7 @@ struct CiderCaptureServiceTests {
                 notesStorage: notes,
                 todoStorage: todos,
                 vaultFileStorage: files,
-                database: db,
-                routingDecisionService: CiderRoutingDecisionService(database: db)
+                database: db
             )
 
             let result = try service.add("https://example.com/immediate-bookmark-index-token")
@@ -418,7 +426,7 @@ struct CiderCaptureServiceTests {
             #expect(second.item.id == first.item.id)
             #expect(second.duplicate.status == "duplicate")
             #expect(second.duplicate.existingItemID == first.item.id)
-            #expect(second.routing.reviewNeeded == true)
+            #expect(second.routing.reviewNeeded == false)
             #expect(second.nextSafeAction == "inspect_existing_item")
             try expectDuplicateInspectionCommand(for: second, existingItemID: first.item.id)
 
@@ -520,7 +528,8 @@ struct CiderCaptureServiceTests {
                 notesStorage: notes,
                 todoStorage: todos,
                 vaultFileStorage: files,
-                database: db
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
             )
 
             let result = try service.add(
@@ -559,7 +568,13 @@ struct CiderCaptureServiceTests {
 
             #expect(dict["needsEnrichment"] as? Bool == false)
             #expect(dict["needsIntentApproval"] as? Bool == true)
+            #expect(dict["needsReview"] as? Bool == true)
+            #expect(dict["requiresHumanReview"] as? Bool == true)
+            #expect(dict["needsRouting"] as? Bool == false)
             #expect(dict["recommendedNextAction"] as? String == "review_intent")
+            let blockingIssues = try #require(dict["blockingIssues"] as? [String])
+            #expect(blockingIssues == ["intent_approval_needed"])
+            #expect(dict["humanQuestion"] as? String != "Which destination should this item be routed to?")
             #expect(chunks.first?["title"] as? String == "3D printed modular shelf for Anycubic Kobra")
             #expect(chunks.allSatisfy { $0["title"] as? String != "Tiktok.Com" })
             #expect(safeNextCommands.contains("cider-cli item apply-intent bookmark \(result.item.id.uuidString) --intent space --json"))
@@ -574,7 +589,8 @@ struct CiderCaptureServiceTests {
                 notesStorage: notes,
                 todoStorage: todos,
                 vaultFileStorage: files,
-                database: db
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
             )
 
             let result = try service.add("https://github.com/nodes-app/swift-markdown-engine")
@@ -604,6 +620,15 @@ struct CiderCaptureServiceTests {
             #expect(degradedQuality["visibleCardCurrent"] as? Bool == false)
             #expect(degradedReasons.contains("title_generic"))
             #expect(degradedReasons.contains("card_image_missing"))
+            #expect(degradedDict["needsReview"] as? Bool == true)
+            #expect(degradedDict["requiresHumanReview"] as? Bool == true)
+            #expect(degradedDict["needsRouting"] as? Bool == false)
+            #expect(degradedDict["recommendedNextAction"] as? String == "repair_or_refetch_metadata")
+            let degradedBlockingIssues = try #require(degradedDict["blockingIssues"] as? [String])
+            #expect(degradedBlockingIssues.contains("title_generic"))
+            #expect(degradedBlockingIssues.contains("card_image_missing"))
+            #expect(!degradedBlockingIssues.contains("routing_needs_review"))
+            #expect(degradedDict["humanQuestion"] as? String != "Which destination should this item be routed to?")
             #expect(degradedSafeNextCommands.contains("cider-cli review enrich \(result.item.id.uuidString) --actor agent --timeout 20 --json"))
             #expect(degradedSafeNextCommands.contains("cider-cli item rebuild-chunks bookmark \(result.item.id.uuidString) --json"))
 
@@ -742,6 +767,17 @@ struct CiderCaptureServiceTests {
             #expect(richQuality["pathStatus"] as? String == "current")
             #expect(richQuality["visibleCardCurrent"] as? Bool == true)
             #expect(richReasons.isEmpty)
+            #expect(richDict["saved"] as? Bool == true)
+            #expect(richDict["useful"] as? Bool == true)
+            #expect(richDict["needsReview"] as? Bool == false)
+            #expect(richDict["requiresHumanReview"] as? Bool == false)
+            #expect(richDict["needsRouting"] as? Bool == false)
+            #expect(richDict["recommendedNextAction"] as? String == "inspect_visible_card")
+            #expect((richDict["blockingIssues"] as? [String])?.isEmpty == true)
+            #expect(richDict["humanQuestion"] == nil)
+            #expect(richDict["storedInInbox"] as? Bool == true)
+            #expect(richDict["destinationUnassigned"] as? Bool == true)
+            #expect(richDict["optionalClassification"] as? Bool == true)
         }
     }
 
@@ -1292,6 +1328,13 @@ struct CiderCaptureServiceTests {
             #expect(result.routing.reviewNeeded == true)
             #expect(result.routing.reviewState == "needs_review")
             #expect(result.nextSafeAction == "review_route")
+            #expect(dict["needsReview"] as? Bool == true)
+            #expect(dict["requiresHumanReview"] as? Bool == true)
+            #expect(dict["needsRouting"] as? Bool == true)
+            #expect(dict["recommendedNextAction"] as? String == "review_route")
+            let blockingIssues = try #require(dict["blockingIssues"] as? [String])
+            #expect(blockingIssues.contains("routing_needs_review"))
+            #expect(dict["humanQuestion"] as? String == "Which destination should this item be routed to?")
             #expect(partialSuccess["status"] as? String == "assignment_failed")
             #expect(partialSuccess["requestedFolderID"] as? String == requestedFolderID.uuidString)
             #expect(partialSuccess["actualFolderID"] == nil)

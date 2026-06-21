@@ -362,11 +362,16 @@ struct CiderCaptureResult {
 
     private func agentDecisionDictionary() -> [String: Any] {
         let safeCommands = safeNextCommands()
-        let needsReview = routing.reviewNeeded || routing.reviewState == "needs_review" || routing.needsAgentRouteReview
-        let needsRouting = needsReview || routing.candidateTarget != nil || item.relativePath?.hasPrefix("Inbox/") == true
         let qualityNeedsEnrichment = captureQuality?["needsEnrichment"] as? Bool ?? false
         let qualityBlockingIssues = captureQuality?["degradedReasons"] as? [String] ?? []
         let qualityRecommendedAction = captureQuality?["safeNextAction"] as? String
+        let routingNeedsReview = routing.reviewNeeded
+            || routing.reviewState == "needs_review"
+            || routing.needsAgentRouteReview
+        let needsIntentApproval = !stagedIntents.isEmpty
+        let qualityNeedsReview = !qualityBlockingIssues.isEmpty
+        let needsReview = routingNeedsReview || needsIntentApproval || qualityNeedsReview
+        let needsRouting = routingNeedsReview
         let enrichmentComplete = !enrichment.isEnriching
             && ["complete", "metadata_complete", "not_applicable"].contains(enrichment.status)
         let nativeNeedsEnrichment = enrichment.isEnriching
@@ -374,9 +379,8 @@ struct CiderCaptureResult {
             || enrichment.status == "failed"
             || (nextSafeAction == "enrich" && !enrichmentComplete)
         let needsEnrichment = nativeNeedsEnrichment || qualityNeedsEnrichment
-        let needsIntentApproval = !stagedIntents.isEmpty && needsReview
         var blockingIssues: [String] = []
-        if needsReview {
+        if routingNeedsReview {
             blockingIssues.append("routing_needs_review")
         }
         if needsIntentApproval {
@@ -393,7 +397,7 @@ struct CiderCaptureResult {
         blockingIssues.append(contentsOf: qualityBlockingIssues)
         let recommendedNextAction = needsIntentApproval
             ? "review_intent"
-            : (qualityRecommendedAction ?? (needsReview ? "review_route" : nextSafeAction))
+            : (qualityRecommendedAction ?? (routingNeedsReview ? "review_route" : nextSafeAction))
         var dict = CiderAgentDecisionContract.dictionary(
             saved: true,
             needsReview: needsReview,
@@ -405,6 +409,11 @@ struct CiderCaptureResult {
             safeNextCommands: safeCommands
         )
         dict["needsIntentApproval"] = needsIntentApproval
+        if item.folderID == nil, item.relativePath?.hasPrefix("Inbox/") == true {
+            dict["storedInInbox"] = true
+            dict["destinationUnassigned"] = true
+            dict["optionalClassification"] = true
+        }
         return dict
     }
 
@@ -1100,11 +1109,16 @@ final class CiderCaptureService {
         let bookmark = bookmarkService.bookmarks.first(where: { $0.id == captured.id }) ?? captured
         let isDuplicate = existingIDs.contains(bookmark.id)
         let target = routingTarget(for: bookmark)
-        let reviewNeeded = bookmark.folderID == nil
+        let reviewNeeded = folderID != nil && bookmark.folderID == nil
         let reviewState = reviewNeeded ? "needs_review" : "accepted"
-        let reason = reviewNeeded
-            ? "No deterministic route was supplied, so Cider kept the capture in Inbox/Bookmarks for review."
-            : "Capture used the supplied deterministic target."
+        let reason: String
+        if reviewNeeded {
+            reason = "The requested deterministic bookmark destination could not be applied, so Cider kept the capture in Inbox/Bookmarks for review."
+        } else if bookmark.folderID == nil {
+            reason = "No deterministic destination was supplied; Cider stored the bookmark in Inbox/Bookmarks as neutral staging."
+        } else {
+            reason = "Capture used the supplied deterministic target."
+        }
         let routingStatus = recordRoutingDecisionStatus(
             itemID: bookmark.id,
             itemType: "bookmark",

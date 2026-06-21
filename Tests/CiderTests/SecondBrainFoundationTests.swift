@@ -131,8 +131,8 @@ struct SecondBrainFoundationTests {
         }
     }
 
-    @Test("bookmark add records unified capture routing review metadata")
-    func bookmarkAddRecordsUnifiedCaptureRoutingReviewMetadata() throws {
+    @Test("bookmark add records unified neutral Inbox staging metadata")
+    func bookmarkAddRecordsUnifiedNeutralInboxStagingMetadata() throws {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-bookmark-add-cutover-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
@@ -153,7 +153,8 @@ struct SecondBrainFoundationTests {
         defer { db.close() }
 
         let explanation = try CiderRoutingDecisionService(database: db).explain(itemID: itemID)
-        #expect(explanation.latestDecision?.reviewState == "needs_review")
+        #expect(explanation.latestDecision?.reviewState == "accepted")
+        #expect(explanation.latestDecision?.confidence == 1)
         #expect(explanation.latestDecision?.source == "capture.add")
         #expect(explanation.latestDecision?.actor == "agent")
         #expect(explanation.latestDecision?.target.relativePath == "Inbox/Bookmarks")
@@ -762,14 +763,13 @@ struct SecondBrainFoundationTests {
         #expect(contextPayload["readOnly"] as? Bool == true)
         #expect(contextPayload["changed"] as? Bool == false)
         #expect(contextPayload["saved"] as? Bool == true)
-        #expect(contextPayload["needsReview"] as? Bool == true)
-        #expect(contextPayload["requiresHumanReview"] as? Bool == true)
-        #expect(contextPayload["agentMayRoute"] as? Bool == false)
-        #expect(contextPayload["recommendedNextAction"] as? String == "review_route")
+        #expect(contextPayload["needsReview"] as? Bool == false)
+        #expect(contextPayload["requiresHumanReview"] as? Bool == false)
+        #expect(contextPayload["agentMayRoute"] as? Bool == true)
+        #expect(contextPayload["recommendedNextAction"] as? String == "Open")
         let contextNextActions = try #require(contextPayload["nextActions"] as? [[String: Any]])
-        #expect(contextNextActions.first?["action"] as? String == "review_route")
-        #expect(contextNextActions.first?["readOnly"] as? Bool == true)
-        #expect(contextNextActions.first?["requiresApproval"] as? Bool == true)
+        #expect(contextNextActions.first?["action"] as? String == "Open")
+        #expect(contextNextActions.first?["action"] as? String != "review_route")
 
         let whyPayload = try jsonObject(from: runCLI([
             "item", "why-surfaced", "bookmark", bookmarkID,
@@ -790,11 +790,11 @@ struct SecondBrainFoundationTests {
         #expect(whyReceiptOwner["ownerID"] as? String == bookmarkID)
         let whyVerification = try #require(whyReceipt["safeVerificationCommands"] as? [String])
         #expect(whyVerification.contains("cider-cli item why-surfaced bookmark \(bookmarkID) --json"))
-        #expect(whyPayload["needsReview"] as? Bool == true)
-        #expect(whyPayload["recommendedNextAction"] as? String == "review_route")
+        #expect(whyPayload["needsReview"] as? Bool == false)
+        #expect(whyPayload["recommendedNextAction"] as? String == "Open")
         let whyNextActions = try #require(whyPayload["nextActions"] as? [[String: Any]])
-        #expect(whyNextActions.first?["action"] as? String == "review_route")
-        #expect(whyNextActions.first?["requiresApproval"] as? Bool == true)
+        #expect(whyNextActions.first?["action"] as? String == "Open")
+        #expect(whyNextActions.first?["action"] as? String != "review_route")
 
         let unsupportedWhyResult = try runCLIResult([
             "item", "why-surfaced", "date_card", bookmarkID,
@@ -817,12 +817,12 @@ struct SecondBrainFoundationTests {
         #expect(explainPayload["command"] as? String == "routing.explain")
         #expect(explainPayload["readOnly"] as? Bool == true)
         #expect(explainPayload["changed"] as? Bool == false)
-        #expect(explainPayload["needsReview"] as? Bool == true)
-        #expect(explainPayload["confidence"] as? Double == 0)
-        #expect(explainPayload["recommendedNextAction"] as? String == "review_route")
+        #expect(explainPayload["needsReview"] as? Bool == false)
+        #expect(explainPayload["confidence"] as? Double == 1)
+        #expect(explainPayload["recommendedNextAction"] as? String == "inspect_item")
         let explainNextActions = try #require(explainPayload["nextActions"] as? [[String: Any]])
-        #expect(explainNextActions.first?["action"] as? String == "review_route")
-        #expect(explainNextActions.first?["requiresApproval"] as? Bool == true)
+        #expect(explainNextActions.first?["action"] as? String == "inspect_item")
+        #expect(explainNextActions.first?["requiresApproval"] as? Bool == false)
 
         let sourceURL = vault.appendingPathComponent("path with spaces.txt")
         try "file body".write(to: sourceURL, atomically: true, encoding: .utf8)
