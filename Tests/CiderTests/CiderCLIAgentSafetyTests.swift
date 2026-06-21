@@ -3981,6 +3981,29 @@ struct CiderCLIAgentSafetyTests {
             #expect((candidate["sourceEvidenceRecord"] as? [String: Any])?["spanStart"] != nil)
             #expect((candidate["sourceEvidenceRecord"] as? [String: Any])?["sourceQuote"] as? String != nil)
         }
+
+        let recall = try assertStrictProcessJSON(
+            runCLI(args: ["item", "recall-context", "--query", "what was the dental implant recovery plan?", "--limit", "1", "--json"], vault: vault),
+            command: "item.recall-context"
+        )
+        #expect(recall["readOnly"] as? Bool == true)
+        #expect(recall["changed"] as? Bool == false)
+        let recallCandidates = try #require(recall["reviewableCandidates"] as? [[String: Any]])
+        let recallCandidate = try #require(recallCandidates.first {
+            $0["reviewFamily"] as? String == "memory_candidate"
+                && $0["memoryKey"] as? String == "dental-implant-post-placed-2026-06-19"
+        })
+        #expect((recallCandidate["candidateRef"] as? String)?.hasPrefix("memory_candidate:") == true)
+        #expect(recallCandidate["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((recallCandidate["extractionReason"] as? String)?.contains("not user-owned memory truth until accepted") == true)
+        #expect((recallCandidate["sourceEvidenceRecord"] as? [String: Any])?["sourceOwnerRef"] as? String == "note:\(journalID)")
+        #expect((recallCandidate["sourceEvidenceRecord"] as? [String: Any])?["sourceQuote"] as? String != nil)
+        #expect(recallCandidate["citation"] as? [String: Any] != nil)
+        #expect((recallCandidate["safeNextCommands"] as? [String])?.contains("cider-cli item context note \(journalID) --json") == true)
+
+        let graphQueue = try parseJSONObject(try runCLI(args: ["capture", "review-queue", "--kind", "graph_candidate", "--limit", "20", "--json"], vault: vault).stdout)
+        let graphItems = try #require(graphQueue["items"] as? [[String: Any]])
+        #expect(!graphItems.contains { $0["value"] as? String == "to get it more often" })
     }
 
     @Test("recall context bundle cites accepted graph evidence and reviewable candidates")

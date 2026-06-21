@@ -16745,16 +16745,18 @@ struct CiderCLI {
             let candidateOutputs = bundle.enrichmentOutputs.filter {
                 $0.kind == SecondBrainGraphCandidateContract.outputKind && ["suggested", "needs_review", "deferred"].contains($0.reviewState)
             }
-            if !candidateOutputs.isEmpty { blockingIssues.append("graph_candidates_need_review") }
-            let graphCandidates = candidateOutputs.map { recallGraphCandidateToDict($0, scoringService: scoringService) }
+            let relevantCandidateOutputs = recallRelevantCandidateOutputs(candidateOutputs, query: query)
+            if !relevantCandidateOutputs.isEmpty { blockingIssues.append("graph_candidates_need_review") }
+            let graphCandidates = relevantCandidateOutputs.map { recallGraphCandidateToDict($0, scoringService: scoringService) }
             reasonKinds.append(contentsOf: graphCandidates.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
             surfacedRefs.append(contentsOf: graphCandidates.compactMap { $0["candidateRef"] as? String })
             reviewableCandidates.append(contentsOf: graphCandidates)
             let memoryOutputs = bundle.enrichmentOutputs.filter {
                 $0.kind == "memory_candidate" && ["suggested", "needs_review", "deferred"].contains($0.reviewState)
             }
-            if !memoryOutputs.isEmpty { blockingIssues.append("memory_candidates_need_review") }
-            let memoryCandidates = memoryOutputs.map { recallMemoryCandidateToDict($0, scoringService: scoringService) }
+            let relevantMemoryOutputs = recallRelevantCandidateOutputs(memoryOutputs, query: query)
+            if !relevantMemoryOutputs.isEmpty { blockingIssues.append("memory_candidates_need_review") }
+            let memoryCandidates = relevantMemoryOutputs.map { recallMemoryCandidateToDict($0, scoringService: scoringService) }
             reasonKinds.append(contentsOf: memoryCandidates.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
             surfacedRefs.append(contentsOf: memoryCandidates.compactMap { $0["candidateRef"] as? String ?? ($0["id"] as? String).map { "memory_candidate:\($0)" } })
             reviewableCandidates.append(contentsOf: memoryCandidates)
@@ -16819,6 +16821,71 @@ struct CiderCLI {
             payload["answer"] = answer
         }
         return payload
+    }
+
+    static func recallRelevantCandidateOutputs(
+        _ outputs: [SecondBrainEnrichmentOutput],
+        query: String?
+    ) -> [SecondBrainEnrichmentOutput] {
+        guard let query = query?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty else {
+            return outputs
+        }
+        let queryTokens = recallCandidateTokens(in: query)
+        guard !queryTokens.isEmpty else { return outputs }
+        return outputs.filter { output in
+            let searchable = recallCandidateSearchableText(for: output)
+            let candidateTokens = recallCandidateTokens(in: searchable)
+            let overlap = queryTokens.filter { candidateTokens.contains($0) }.count
+            if overlap >= min(2, queryTokens.count) { return true }
+            return recallCandidateReviewPhrases(for: output).contains { phrase in
+                let phraseTokens = recallCandidateTokens(in: phrase)
+                return queryTokens.filter { phraseTokens.contains($0) }.count >= min(2, queryTokens.count)
+            }
+        }
+    }
+
+    static func recallCandidateSearchableText(for output: SecondBrainEnrichmentOutput) -> String {
+        var parts = [output.value, output.normalizedValue, output.label, output.evidence]
+        for key in [
+            "memory_key",
+            "memory_kind",
+            "candidate_kind",
+            "review_query_terms",
+            "mention_text",
+            "source_quote",
+            "relation_guesses",
+            "object_type_guesses",
+            "action_guesses",
+        ] {
+            if let value = output.metadata[key] {
+                parts.append(value)
+            }
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    static func recallCandidateReviewPhrases(for output: SecondBrainEnrichmentOutput) -> [String] {
+        guard let terms = output.metadata["review_query_terms"] else { return [] }
+        let decoded = DatabaseHelpers.decodeStringArray(terms)
+        return decoded.isEmpty ? [terms] : decoded
+    }
+
+    static func recallCandidateTokens(in text: String) -> Set<String> {
+        let stopwords: Set<String> = [
+            "about", "after", "again", "around", "because", "from", "have", "happened", "what", "when",
+            "where", "which", "while", "with", "would", "could", "should", "this", "that", "they", "them",
+            "their", "there", "then", "today", "tonight", "were", "was", "will", "work", "plan",
+        ]
+        let pattern = #"[a-z0-9][a-z0-9'_-]*"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let lower = text.lowercased()
+        let range = NSRange(lower.startIndex..., in: lower)
+        return Set(regex.matches(in: lower, range: range).compactMap { match in
+            guard let tokenRange = Range(match.range, in: lower) else { return nil }
+            let token = String(lower[tokenRange]).trimmingCharacters(in: CharacterSet(charactersIn: "'_-"))
+            guard token.count >= 3, !stopwords.contains(token) else { return nil }
+            return token
+        })
     }
 
     static func boundedRecallActionHistoryLimit(from args: [String]) -> Int {
