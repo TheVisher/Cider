@@ -4713,6 +4713,15 @@ struct CiderCLIAgentSafetyTests {
             #expect(rollups.first?["date"] as? String == "2026-06-19")
             #expect(rollups.first?["foodRowCount"] as? Int == 1)
             #expect(rollups.first?["reviewableRowCount"] as? Int == 1)
+
+            if query == "19 June breakfast" {
+                let safeVerificationCommands = try #require(payload["safeVerificationCommands"] as? [String])
+                #expect(safeVerificationCommands.contains("cider-cli item daily-tracker --query '19 June breakfast' --sort newest --limit 5 --json"))
+                #expect(safeVerificationCommands.contains("cider-cli item daily-tracker --json"))
+                let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+                #expect(safeNextCommands.contains("cider-cli item daily-tracker --query '19 June breakfast' --sort newest --limit 5 --json"))
+                #expect(safeNextCommands.contains("cider-cli capture review-queue --kind memory_candidate --json"))
+            }
         }
     }
 
@@ -4809,6 +4818,46 @@ struct CiderCLIAgentSafetyTests {
         #expect((breakfast["metadata"] as? [String: String])?["food_item"] == "yogurt and berries")
         #expect((breakfast["sourceRefs"] as? [String])?.contains("note:\(olderJournalID)") == true)
         #expect((breakfast["citation"] as? [String: Any])?["ownerID"] as? String == olderJournalID)
+
+        let safeVerificationCommands = try #require(payload["safeVerificationCommands"] as? [String])
+        #expect(safeVerificationCommands.contains("cider-cli item daily-tracker --from 2026-06-18 --to 2026-06-18 --query '19 June breakfast' --sort newest --limit 5 --json"))
+        #expect(safeVerificationCommands.contains("cider-cli item daily-tracker --json"))
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item daily-tracker --from 2026-06-18 --to 2026-06-18 --query '19 June breakfast' --sort newest --limit 5 --json"))
+        #expect(safeNextCommands.contains("cider-cli capture review-queue --kind memory_candidate --json"))
+    }
+
+    @Test("daily tracker query replay command shell quotes apostrophes")
+    func dailyTrackerQueryReplayCommandShellQuotesApostrophes() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-daily-tracker-query-replay-quoting-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let payload = try assertStrictProcessJSON(
+            runCLI(
+                args: [
+                    "item", "daily-tracker",
+                    "--from", "2026-06-18",
+                    "--to", "2026-06-19",
+                    "--query", "19 June Erik's gas",
+                    "--sort", "newest",
+                    "--limit", "3",
+                    "--json",
+                ],
+                vault: vault,
+                environment: ["CIDER_DAILY_TRACKER_REFERENCE_DATE": "2026-06-20"]
+            ),
+            command: "item.daily-tracker"
+        )
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["candidateBoundary"] as? String == "reviewable_candidates_are_not_truth")
+
+        let safeVerificationCommands = try #require(payload["safeVerificationCommands"] as? [String])
+        #expect(safeVerificationCommands.contains("cider-cli item daily-tracker --from 2026-06-18 --to 2026-06-19 --query '19 June Erik'\\''s gas' --sort newest --limit 3 --json"))
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item daily-tracker --from 2026-06-18 --to 2026-06-19 --query '19 June Erik'\\''s gas' --sort newest --limit 3 --json"))
     }
 
     @Test("daily tracker query matches natural gas fill up phrasing without accepting reviewables")

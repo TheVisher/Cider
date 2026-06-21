@@ -5359,7 +5359,16 @@ struct CiderCLI {
                 let payload = dailyTrackerReadModelResultToDict(
                     result,
                     filters: filters,
-                    resolvedQuery: query == nil ? nil : resolvedQuery
+                    resolvedQuery: query == nil ? nil : resolvedQuery,
+                    queryReplayCommand: query.map {
+                        dailyTrackerQueryReplayCommand(
+                            query: $0,
+                            from: rawFrom,
+                            to: rawTo,
+                            sort: parseFlag("--sort", from: args) == nil ? nil : sort,
+                            limit: limit
+                        )
+                    }
                 )
                 if jsonOutput {
                     outputJSON(payload)
@@ -17229,8 +17238,17 @@ struct CiderCLI {
     static func dailyTrackerReadModelResultToDict(
         _ result: CiderDailyTrackerReadModelResult,
         filters: [String: Any],
-        resolvedQuery: CiderDailyTrackerResolvedQuery? = nil
+        resolvedQuery: CiderDailyTrackerResolvedQuery? = nil,
+        queryReplayCommand: String? = nil
     ) -> [String: Any] {
+        let genericSafeNextCommands = [
+            "cider-cli capture review-queue --kind memory_candidate --json",
+            "cider-cli item backfill-journals --json",
+        ]
+        let genericSafeVerificationCommands = [
+            "cider-cli item daily-tracker --json",
+            "cider-cli capture review-queue --kind memory_candidate --json",
+        ]
         var dict: [String: Any] = [
             "ok": true,
             "command": "item.daily-tracker",
@@ -17243,19 +17261,38 @@ struct CiderCLI {
             "rollupCount": result.rollups.count,
             "rows": result.rows.map(dailyTrackerSignalRowToDict),
             "rollups": result.rollups.map(dailyTrackerRollupToDict),
-            "safeNextCommands": [
-                "cider-cli capture review-queue --kind memory_candidate --json",
-                "cider-cli item backfill-journals --json",
-            ],
-            "safeVerificationCommands": [
-                "cider-cli item daily-tracker --json",
-                "cider-cli capture review-queue --kind memory_candidate --json",
-            ],
+            "safeNextCommands": orderedUniqueStrings([queryReplayCommand].compactMap { $0 } + genericSafeNextCommands),
+            "safeVerificationCommands": orderedUniqueStrings([queryReplayCommand].compactMap { $0 } + genericSafeVerificationCommands),
         ]
         if let resolvedQuery {
             dict["queryInterpretation"] = dailyTrackerQueryInterpretationToDict(resolvedQuery)
         }
         return dict
+    }
+
+    static func dailyTrackerQueryReplayCommand(
+        query: String,
+        from: String?,
+        to: String?,
+        sort: CiderDailyTrackerSortOrder?,
+        limit: Int?
+    ) -> String {
+        var parts = ["cider-cli", "item", "daily-tracker"]
+        if let from {
+            parts.append(contentsOf: ["--from", from])
+        }
+        if let to {
+            parts.append(contentsOf: ["--to", to])
+        }
+        parts.append(contentsOf: ["--query", shellQuoted(query)])
+        if let sort {
+            parts.append(contentsOf: ["--sort", sort.rawValue])
+        }
+        if let limit {
+            parts.append(contentsOf: ["--limit", String(limit)])
+        }
+        parts.append("--json")
+        return parts.joined(separator: " ")
     }
 
     static func dailyTrackerQueryInterpretationToDict(_ resolvedQuery: CiderDailyTrackerResolvedQuery) -> [String: Any] {
