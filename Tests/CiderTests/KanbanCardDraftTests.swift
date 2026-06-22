@@ -188,4 +188,49 @@ struct KanbanCardDraftTests {
         #expect(updated.comments.last?.kind == .evidence)
         #expect(updated.comments.last?.parentCommentID == "comment-1")
     }
+
+    @Test("draft preserves typed comment attachments")
+    func draftPreservesTypedCommentAttachments() {
+        let card = KanbanCard(
+            id: "attachment-card",
+            title: "Attachment Card"
+        )
+
+        var draft = KanbanCardDraft(card: card)
+        draft.comments.append(KanbanCardComment(
+            id: "comment-with-attachments",
+            kind: .evidence,
+            body: "Keep the research URL and local screenshot on the card.",
+            attachments: [
+                KanbanCardCommentAttachment(
+                    id: "research-url",
+                    kind: .url,
+                    type: .research,
+                    title: "Linear inspiration",
+                    url: "https://linear.app/changelog",
+                    previewKind: .link
+                ),
+                KanbanCardCommentAttachment(
+                    id: "local-shot",
+                    kind: .image,
+                    type: .inspiration,
+                    title: "Card detail screenshot",
+                    localPath: "Projects/Cider/QA/card-detail.png",
+                    previewKind: .image
+                ),
+            ]
+        ))
+
+        let updated = draft.updatedCard(from: card)
+
+        let attachments = updated.comments.first?.attachments ?? []
+        #expect(attachments.map(\.id) == ["research-url", "local-shot"])
+        #expect(attachments.first?.type == .research)
+        #expect(attachments.first?.url == "https://linear.app/changelog")
+        #expect(attachments.last?.kind == .image)
+        #expect(attachments.last?.localPath == "Projects/Cider/QA/card-detail.png")
+        #expect(updated.attachmentSummary.totalCount == 2)
+        #expect(updated.attachmentSummary.countsByType[.research] == 1)
+        #expect(updated.attachmentSummary.countsByPreviewKind[.image] == 1)
+    }
 }

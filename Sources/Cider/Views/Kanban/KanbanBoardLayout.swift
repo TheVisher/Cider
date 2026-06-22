@@ -12,6 +12,7 @@ struct KanbanCardFaceChip: Equatable {
         case tagEdit
         case featureDomain
         case typeStatus
+        case attachment
     }
 
     enum Accessory: Equatable {
@@ -37,7 +38,7 @@ struct KanbanCardFaceChip: Equatable {
             return .tagEditor
         case .featureDomain:
             return .featureDomainFilter(KanbanCardTagTaxonomy.normalized(label))
-        case .typeStatus:
+        case .typeStatus, .attachment:
             return .none
         }
     }
@@ -520,6 +521,16 @@ enum KanbanBoardLayout {
         var seen: Set<String> = []
         var featureDomainChips: [KanbanCardFaceChip] = []
         var typeStatusChips: [KanbanCardFaceChip] = []
+        var attachmentChips: [KanbanCardFaceChip] = []
+
+        if card.attachmentSummary.totalCount > 0 {
+            attachmentChips.append(KanbanCardFaceChip(
+                label: "Refs \(card.attachmentSummary.totalCount)",
+                role: .attachment,
+                accessory: .none,
+                surface: .muted
+            ))
+        }
 
         for tag in card.tags {
             let normalized = KanbanCardTagTaxonomy.normalized(tag)
@@ -544,12 +555,12 @@ enum KanbanBoardLayout {
                 featureDomainChips.append(chip)
             case .typeStatus:
                 typeStatusChips.append(chip)
-            case .tagEdit:
+            case .tagEdit, .attachment:
                 break
             }
         }
 
-        return Array((featureDomainChips + typeStatusChips).prefix(limit))
+        return Array((attachmentChips + featureDomainChips + typeStatusChips).prefix(limit))
     }
 
     private static func featureDomainTags(for card: KanbanCard) -> [String] {
@@ -631,6 +642,8 @@ enum KanbanBoardLayout {
             return .featureIcon
         case .typeStatus:
             return .colorDot
+        case .attachment:
+            return .none
         }
     }
 

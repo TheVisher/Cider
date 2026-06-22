@@ -2377,6 +2377,58 @@ struct SecondBrainFoundationTests {
         })
     }
 
+    @Test("process CLI comment add preserves typed attachments")
+    func processCLICommentAddPreservesTypedAttachments() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-comment-attachments-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        _ = try runCLI(["board", "create", "Comment Attachment Smoke"], vaultURL: vaultURL)
+        let cardOutput = try runCLI([
+            "board", "add-card", "Comment Attachment Smoke",
+            "--column", "Backlog",
+            "--title", "Needs references",
+        ], vaultURL: vaultURL)
+        let cardID = String(try #require(cardOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let commentResult = try jsonObject(from: runCLI([
+            "board", "comment", "add", "Comment Attachment Smoke",
+            "--card", cardID,
+            "--kind", "evidence",
+            "--text", "Attach research and project artifact refs.",
+            "--attachment-type", "research",
+            "--attachment-url", "https://example.com/research",
+            "--attachment-title", "Research URL",
+            "--attachment-type", "inspiration",
+            "--attachment-file", "Projects/Cider/QA/card-detail.png",
+            "--attachment-title", "Card detail screenshot",
+            "--json",
+        ], vaultURL: vaultURL))
+        let addedComment = try #require(commentResult["comment"] as? [String: Any])
+        let addedAttachments = try #require(addedComment["attachments"] as? [[String: Any]])
+        #expect(addedAttachments.map { $0["type"] as? String } == ["research", "inspiration"])
+        #expect(addedAttachments.first?["url"] as? String == "https://example.com/research")
+        #expect(addedAttachments.last?["localPath"] as? String == "Projects/Cider/QA/card-detail.png")
+
+        let updatedInspect = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Comment Attachment Smoke",
+            "--card", cardID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let updatedCard = try #require(updatedInspect["card"] as? [String: Any])
+        let attachmentSummary = try #require(updatedCard["attachmentSummary"] as? [String: Any])
+        #expect(attachmentSummary["totalCount"] as? Int == 2)
+        #expect((attachmentSummary["types"] as? [String])?.contains("research") == true)
+        #expect((attachmentSummary["previewKinds"] as? [String])?.contains("image") == true)
+
+        let comments = try #require(updatedCard["comments"] as? [[String: Any]])
+        let storedComment = try #require(comments.first)
+        let storedAttachments = try #require(storedComment["attachments"] as? [[String: Any]])
+        #expect(storedAttachments.count == 2)
+        #expect(storedAttachments.first?["kind"] as? String == "url")
+        #expect(storedAttachments.last?["kind"] as? String == "image")
+    }
+
     @Test("process CLI exposes second brain capability map for agents")
     func processCLIExposesSecondBrainCapabilityMapForAgents() throws {
         let vaultURL = FileManager.default.temporaryDirectory

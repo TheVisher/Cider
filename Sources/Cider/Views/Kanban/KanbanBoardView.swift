@@ -2805,6 +2805,8 @@ struct KanbanBoardView: View {
         case .typeStatus:
             let color = cardFaceChipColor(for: chip)
             cardFaceChipLabel(chip, color: CiderColors.secondary, indicatorColor: color)
+        case .attachment:
+            cardFaceChipLabel(chip, color: CiderColors.secondary, indicatorColor: CiderColors.tertiary)
         }
     }
 
@@ -2963,6 +2965,8 @@ struct KanbanBoardView: View {
             CiderColors.controlAccent
         case .typeStatus:
             cardFaceTypeIndicatorColor(for: chip.label)
+        case .attachment:
+            CiderColors.tertiary
         }
     }
 

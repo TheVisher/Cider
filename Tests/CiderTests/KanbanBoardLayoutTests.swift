@@ -388,4 +388,33 @@ struct KanbanBoardLayoutTests {
         #expect(KanbanBoardLayout.cards(completed.cards, in: completed, board: board, matchingProjectBoardViewID: "active").isEmpty)
         #expect(KanbanBoardLayout.cards(active.cards, in: active, board: board, matchingProjectBoardViewID: "active").map(\.id) == ["active-card"])
     }
+
+    @Test("card face chips include attachment indicator")
+    func cardFaceChipsIncludeAttachmentIndicator() {
+        let card = KanbanCard(
+            id: "card-with-refs",
+            title: "Referenced card",
+            tags: ["kanban"],
+            comments: [
+                KanbanCardComment(
+                    id: "comment-with-ref",
+                    kind: .evidence,
+                    body: "Research source.",
+                    attachments: [
+                        KanbanCardCommentAttachment(
+                            id: "research-ref",
+                            kind: .url,
+                            type: .research,
+                            url: "https://example.com/research"
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        let chips = KanbanBoardLayout.cardFaceSemanticChips(for: card, limit: 3)
+
+        #expect(chips.first == "Refs 1")
+        #expect(chips.contains("Kanban"))
+    }
 }

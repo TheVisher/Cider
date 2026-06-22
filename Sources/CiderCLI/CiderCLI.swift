@@ -9103,14 +9103,14 @@ struct CiderCLI {
 
         case "comment":
             guard args.first == "add" else {
-                printCLIError("Usage: cider-cli board comment add <board> --card <id> --kind <note|handoff|decision|evidence|qa|final-report> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--json]")
+                printCLIError("Usage: cider-cli board comment add <board> --card <id> --kind <note|handoff|decision|evidence|qa|final-report> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--attachment-type <research|inspiration|evidence|handoff|qa|reference>] [--attachment-title <title>] [--attachment-url <url>|--attachment-file <path>|--attachment-item <type:id>|--attachment-project-artifact <path>] [--json]")
                 return
             }
             let commentArgs = Array(args.dropFirst())
             guard let boardRef = commentArgs.first,
                   let cardID = parseFlag("--card", from: commentArgs),
                   let text = parseFlag("--text", from: commentArgs) else {
-                printCLIError("Usage: cider-cli board comment add <board> --card <id> --kind <note|handoff|decision|evidence|qa|final-report> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--json]")
+                printCLIError("Usage: cider-cli board comment add <board> --card <id> --kind <note|handoff|decision|evidence|qa|final-report> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--attachment-type <research|inspiration|evidence|handoff|qa|reference>] [--attachment-title <title>] [--attachment-url <url>|--attachment-file <path>|--attachment-item <type:id>|--attachment-project-artifact <path>] [--json]")
                 return
             }
             let kindValue = parseFlag("--kind", from: commentArgs) ?? "note"
@@ -9138,42 +9138,27 @@ struct CiderCLI {
                 printCLIError("Comment text cannot be blank.")
                 return
             }
+            let attachments: [KanbanCardCommentAttachment]
+            do {
+                attachments = try parseKanbanCommentAttachments(from: commentArgs)
+            } catch {
+                printCLIError(error.localizedDescription)
+                return
+            }
             let comment = KanbanCardComment(
                 kind: kind,
                 body: trimmedText,
                 author: parseFlag("--author", from: commentArgs),
                 source: parseFlag("--source", from: commentArgs),
-                parentCommentID: parseFlag("--parent", from: commentArgs)
+                parentCommentID: parseFlag("--parent", from: commentArgs),
+                attachments: attachments
             )
             guard let appended = storage.addComment(boardID: board.id, cardID: resolvedCard.id, comment: comment) else {
                 printCLIError("Could not append comment. Check that the card and optional parent comment exist.")
                 return
             }
             if jsonOutput {
-                let formatter = ISO8601DateFormatter()
-                var commentDict: [String: Any] = [
-                    "id": appended.id,
-                    "permalinkID": appended.permalinkID,
-                    "kind": appended.kind.rawValue,
-                    "body": appended.body,
-                    "createdAt": formatter.string(from: appended.createdAt),
-                ]
-                if let author = appended.author, !author.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    commentDict["author"] = author
-                }
-                if let source = appended.source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    commentDict["source"] = source
-                }
-                if let parentCommentID = appended.parentCommentID, !parentCommentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    commentDict["parentCommentID"] = parentCommentID
-                }
-                commentDict["isResolved"] = appended.isResolved
-                if let resolvedAt = appended.resolvedAt {
-                    commentDict["resolvedAt"] = formatter.string(from: resolvedAt)
-                }
-                if let resolvedBy = appended.resolvedBy, !resolvedBy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    commentDict["resolvedBy"] = resolvedBy
-                }
+                let commentDict = kanbanCommentToDict(appended)
                 var dict: [String: Any] = [
                     "ok": true,
                     "board": board.id,
@@ -10884,6 +10869,162 @@ struct CiderCLI {
         guard let flagIndex = args.firstIndex(of: flag),
               flagIndex + 1 < args.count else { return nil }
         return args[flagIndex + 1]
+    }
+
+    static func parseKanbanCommentAttachments(from args: [String]) throws -> [KanbanCardCommentAttachment] {
+        struct Builder {
+            var kind: KanbanCardCommentAttachmentKind
+            var value: String
+            var type: KanbanCardCommentAttachmentType
+            var title: String?
+        }
+
+        var pendingType: KanbanCardCommentAttachmentType = .reference
+        var pendingTitle: String?
+        var builders: [Builder] = []
+        var lastBuilderIndex: Int?
+        var index = 0
+
+        func parseType(_ raw: String) throws -> KanbanCardCommentAttachmentType {
+            let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: "-", with: "_")
+            guard let type = KanbanCardCommentAttachmentType(rawValue: normalized) else {
+                throw NSError(
+                    domain: "CiderCLI",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Invalid attachment type '\(raw)'. Use research, inspiration, evidence, handoff, qa, or reference."]
+                )
+            }
+            return type
+        }
+
+        func value(after flag: String, at index: Int) throws -> String {
+            guard index + 1 < args.count else {
+                throw NSError(
+                    domain: "CiderCLI",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Missing value after \(flag)."]
+                )
+            }
+            let value = args[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else {
+                throw NSError(
+                    domain: "CiderCLI",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "\(flag) cannot be blank."]
+                )
+            }
+            return value
+        }
+
+        while index < args.count {
+            switch args[index] {
+            case "--attachment-type", "--attachment-chip":
+                pendingType = try parseType(value(after: args[index], at: index))
+                index += 2
+            case "--attachment-title":
+                let title = try value(after: args[index], at: index)
+                if let lastBuilderIndex {
+                    builders[lastBuilderIndex].title = title
+                } else {
+                    pendingTitle = title
+                }
+                index += 2
+            case "--attachment-url":
+                let rawValue = try value(after: args[index], at: index)
+                builders.append(Builder(kind: .url, value: rawValue, type: pendingType, title: pendingTitle))
+                lastBuilderIndex = builders.indices.last
+                pendingTitle = nil
+                pendingType = .reference
+                index += 2
+            case "--attachment-file", "--attachment-image":
+                let rawValue = try value(after: args[index], at: index)
+                let kind: KanbanCardCommentAttachmentKind = isImagePath(rawValue) ? .image : .file
+                builders.append(Builder(kind: kind, value: rawValue, type: pendingType, title: pendingTitle))
+                lastBuilderIndex = builders.indices.last
+                pendingTitle = nil
+                pendingType = .reference
+                index += 2
+            case "--attachment-item":
+                let rawValue = try value(after: args[index], at: index)
+                builders.append(Builder(kind: .item, value: rawValue, type: pendingType, title: pendingTitle))
+                lastBuilderIndex = builders.indices.last
+                pendingTitle = nil
+                pendingType = .reference
+                index += 2
+            case "--attachment-project-artifact":
+                let rawValue = try value(after: args[index], at: index)
+                builders.append(Builder(kind: .projectArtifact, value: rawValue, type: pendingType, title: pendingTitle))
+                lastBuilderIndex = builders.indices.last
+                pendingTitle = nil
+                pendingType = .reference
+                index += 2
+            default:
+                index += 1
+            }
+        }
+
+        return try builders.map { builder in
+            switch builder.kind {
+            case .url:
+                return KanbanCardCommentAttachment(
+                    kind: .url,
+                    type: builder.type,
+                    title: builder.title,
+                    url: builder.value,
+                    previewKind: .link
+                )
+            case .image:
+                return KanbanCardCommentAttachment(
+                    kind: .image,
+                    type: builder.type,
+                    title: builder.title,
+                    localPath: builder.value,
+                    previewKind: .image
+                )
+            case .file:
+                return KanbanCardCommentAttachment(
+                    kind: .file,
+                    type: builder.type,
+                    title: builder.title,
+                    localPath: builder.value,
+                    previewKind: .file
+                )
+            case .projectArtifact:
+                return KanbanCardCommentAttachment(
+                    kind: .projectArtifact,
+                    type: builder.type,
+                    title: builder.title,
+                    localPath: builder.value,
+                    previewKind: isImagePath(builder.value) ? .image : .file
+                )
+            case .item:
+                let parts = builder.value.split(separator: ":", maxSplits: 1).map(String.init)
+                guard parts.count == 2,
+                      !parts[0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !parts[1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw NSError(
+                        domain: "CiderCLI",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "--attachment-item expects <type:id>, for example note:123 or bookmark:abc."]
+                    )
+                }
+                return KanbanCardCommentAttachment(
+                    kind: .item,
+                    type: builder.type,
+                    title: builder.title,
+                    itemType: parts[0],
+                    itemID: parts[1],
+                    previewKind: .item
+                )
+            }
+        }
+    }
+
+    static func isImagePath(_ path: String) -> Bool {
+        let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "heic", "webp", "tiff", "bmp"]
+        return imageExtensions.contains(URL(fileURLWithPath: path).pathExtension.lowercased())
     }
 
     static func parseItemSearchScope(from args: [String]) -> CiderItemSearchScope? {
@@ -13519,6 +13660,7 @@ struct CiderCLI {
         if let completed = card.completed { cardDict["completed"] = ISO8601DateFormatter().string(from: completed) }
         if let updatedAt = card.updatedAt { cardDict["updatedAt"] = ISO8601DateFormatter().string(from: updatedAt) }
         if let lastActivityKind = card.lastActivityKind { cardDict["lastActivityKind"] = lastActivityKind }
+        appendKanbanAttachmentSummary(card, to: &cardDict)
         appendKanbanCommentFields(card, to: &cardDict)
 
         let parent = board.parentCard(for: card.id)
@@ -15464,40 +15606,86 @@ struct CiderCLI {
         if !card.relatedCardIDs.isEmpty {
             dict["relatedCardIDs"] = card.relatedCardIDs
         }
+        appendKanbanAttachmentSummary(card, to: &dict)
         appendKanbanCommentFields(card, to: &dict)
         return dict
+    }
+
+    static func appendKanbanAttachmentSummary(_ card: KanbanCard, to dict: inout [String: Any]) {
+        let summary = card.attachmentSummary
+        dict["attachmentCount"] = summary.totalCount
+        guard summary.totalCount > 0 else { return }
+        dict["attachmentSummary"] = [
+            "totalCount": summary.totalCount,
+            "types": summary.types.map(\.rawValue),
+            "previewKinds": summary.previewKinds.map(\.rawValue),
+            "countsByType": Dictionary(uniqueKeysWithValues: summary.types.map { ($0.rawValue, summary.countsByType[$0] ?? 0) }),
+            "countsByPreviewKind": Dictionary(uniqueKeysWithValues: summary.previewKinds.map { ($0.rawValue, summary.countsByPreviewKind[$0] ?? 0) }),
+        ]
     }
 
     static func appendKanbanCommentFields(_ card: KanbanCard, to dict: inout [String: Any]) {
         dict["commentCount"] = card.comments.count
         guard !card.comments.isEmpty else { return }
+        dict["comments"] = card.comments.map(kanbanCommentToDict)
+    }
+
+    static func kanbanCommentToDict(_ comment: KanbanCardComment) -> [String: Any] {
         let formatter = ISO8601DateFormatter()
-        dict["comments"] = card.comments.map { comment in
-            var commentDict: [String: Any] = [
-                "id": comment.id,
-                "permalinkID": comment.permalinkID,
-                "kind": comment.kind.rawValue,
-                "body": comment.body,
-                "createdAt": formatter.string(from: comment.createdAt),
-                "isResolved": comment.isResolved,
-            ]
-            if let author = comment.author, !author.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                commentDict["author"] = author
-            }
-            if let source = comment.source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                commentDict["source"] = source
-            }
-            if let parentCommentID = comment.parentCommentID, !parentCommentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                commentDict["parentCommentID"] = parentCommentID
-            }
-            if let resolvedAt = comment.resolvedAt {
-                commentDict["resolvedAt"] = formatter.string(from: resolvedAt)
-            }
-            if let resolvedBy = comment.resolvedBy, !resolvedBy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                commentDict["resolvedBy"] = resolvedBy
-            }
-            return commentDict
+        var commentDict: [String: Any] = [
+            "id": comment.id,
+            "permalinkID": comment.permalinkID,
+            "kind": comment.kind.rawValue,
+            "body": comment.body,
+            "createdAt": formatter.string(from: comment.createdAt),
+            "isResolved": comment.isResolved,
+            "attachmentCount": comment.attachments.count,
+        ]
+        if let author = comment.author, !author.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            commentDict["author"] = author
         }
+        if let source = comment.source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            commentDict["source"] = source
+        }
+        if let parentCommentID = comment.parentCommentID, !parentCommentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            commentDict["parentCommentID"] = parentCommentID
+        }
+        if let resolvedAt = comment.resolvedAt {
+            commentDict["resolvedAt"] = formatter.string(from: resolvedAt)
+        }
+        if let resolvedBy = comment.resolvedBy, !resolvedBy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            commentDict["resolvedBy"] = resolvedBy
+        }
+        if !comment.attachments.isEmpty {
+            commentDict["attachments"] = comment.attachments.map(kanbanAttachmentToDict)
+        }
+        return commentDict
+    }
+
+    static func kanbanAttachmentToDict(_ attachment: KanbanCardCommentAttachment) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": attachment.id,
+            "kind": attachment.kind.rawValue,
+            "type": attachment.type.rawValue,
+            "typeLabel": attachment.type.displayName,
+            "previewKind": attachment.previewKind.rawValue,
+        ]
+        if let title = attachment.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            dict["title"] = title
+        }
+        if let url = attachment.url, !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            dict["url"] = url
+        }
+        if let localPath = attachment.localPath, !localPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            dict["localPath"] = localPath
+        }
+        if let itemType = attachment.itemType, !itemType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            dict["itemType"] = itemType
+        }
+        if let itemID = attachment.itemID, !itemID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            dict["itemID"] = itemID
+        }
+        return dict
     }
 
     static func relatedKanbanCardItems(ref rawRef: String) throws -> [[String: Any]] {

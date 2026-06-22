@@ -122,6 +122,100 @@ enum KanbanCardCommentKind: String, Codable, CaseIterable, Sendable {
     }
 }
 
+enum KanbanCardCommentAttachmentKind: String, Codable, CaseIterable, Sendable {
+    case url
+    case image
+    case item
+    case file
+    case projectArtifact = "project_artifact"
+}
+
+enum KanbanCardCommentAttachmentType: String, Codable, CaseIterable, Sendable {
+    case reference
+    case research
+    case inspiration
+    case evidence
+    case handoff
+    case qa
+
+    var displayName: String {
+        switch self {
+        case .reference: "Reference"
+        case .research: "Research"
+        case .inspiration: "Inspiration"
+        case .evidence: "Evidence"
+        case .handoff: "Handoff"
+        case .qa: "QA"
+        }
+    }
+}
+
+enum KanbanCardCommentAttachmentPreviewKind: String, Codable, CaseIterable, Sendable {
+    case link
+    case image
+    case item
+    case file
+}
+
+struct KanbanCardCommentAttachment: Codable, Identifiable, Equatable, Sendable {
+    var id: String
+    var kind: KanbanCardCommentAttachmentKind
+    var type: KanbanCardCommentAttachmentType
+    var title: String?
+    var url: String?
+    var localPath: String?
+    var itemType: String?
+    var itemID: String?
+    var previewKind: KanbanCardCommentAttachmentPreviewKind
+
+    init(
+        id: String = KanbanID.generate(),
+        kind: KanbanCardCommentAttachmentKind,
+        type: KanbanCardCommentAttachmentType = .reference,
+        title: String? = nil,
+        url: String? = nil,
+        localPath: String? = nil,
+        itemType: String? = nil,
+        itemID: String? = nil,
+        previewKind: KanbanCardCommentAttachmentPreviewKind? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.type = type
+        self.title = title
+        self.url = url
+        self.localPath = localPath
+        self.itemType = itemType
+        self.itemID = itemID
+        self.previewKind = previewKind ?? Self.defaultPreviewKind(for: kind)
+    }
+
+    private static func defaultPreviewKind(for kind: KanbanCardCommentAttachmentKind) -> KanbanCardCommentAttachmentPreviewKind {
+        switch kind {
+        case .url: .link
+        case .image: .image
+        case .item: .item
+        case .file, .projectArtifact: .file
+        }
+    }
+}
+
+struct KanbanCardAttachmentSummary: Equatable, Sendable {
+    var totalCount: Int
+    var countsByType: [KanbanCardCommentAttachmentType: Int]
+    var countsByPreviewKind: [KanbanCardCommentAttachmentPreviewKind: Int]
+
+    var types: [KanbanCardCommentAttachmentType] {
+        KanbanCardCommentAttachmentType.allCases.filter { (countsByType[$0] ?? 0) > 0 }
+    }
+
+    var previewKinds: [KanbanCardCommentAttachmentPreviewKind] {
+        KanbanCardCommentAttachmentPreviewKind.allCases.filter { (countsByPreviewKind[$0] ?? 0) > 0 }
+    }
+
+    static let empty = KanbanCardAttachmentSummary(totalCount: 0, countsByType: [:], countsByPreviewKind: [:])
+}
+
 struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
     var id: String
     var kind: KanbanCardCommentKind
@@ -134,6 +228,7 @@ struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
     var quotedChecklistItem: String?
     var resolvedAt: Date?
     var resolvedBy: String?
+    var attachments: [KanbanCardCommentAttachment]
 
     var permalinkID: String { id }
     var isResolved: Bool { resolvedAt != nil }
@@ -149,7 +244,8 @@ struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
         parentChecklistItemAnchor: String? = nil,
         quotedChecklistItem: String? = nil,
         resolvedAt: Date? = nil,
-        resolvedBy: String? = nil
+        resolvedBy: String? = nil,
+        attachments: [KanbanCardCommentAttachment] = []
     ) {
         self.id = id
         self.kind = kind
@@ -162,10 +258,11 @@ struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
         self.quotedChecklistItem = quotedChecklistItem
         self.resolvedAt = resolvedAt
         self.resolvedBy = resolvedBy
+        self.attachments = attachments
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, body, author, source, createdAt, parentCommentID, parentChecklistItemAnchor, quotedChecklistItem, resolvedAt, resolvedBy
+        case id, kind, body, author, source, createdAt, parentCommentID, parentChecklistItemAnchor, quotedChecklistItem, resolvedAt, resolvedBy, attachments
     }
 
     init(from decoder: Decoder) throws {
@@ -181,6 +278,7 @@ struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
         quotedChecklistItem = try c.decodeIfPresent(String.self, forKey: .quotedChecklistItem)
         resolvedAt = try c.decodeIfPresent(KanbanHistoryDate.self, forKey: .resolvedAt)?.date
         resolvedBy = try c.decodeIfPresent(String.self, forKey: .resolvedBy)
+        attachments = (try c.decodeIfPresent([KanbanCardCommentAttachment].self, forKey: .attachments)) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -198,6 +296,7 @@ struct KanbanCardComment: Codable, Identifiable, Equatable, Sendable {
             try c.encode(KanbanHistoryDate(date: resolvedAt), forKey: .resolvedAt)
         }
         try c.encodeIfPresent(resolvedBy, forKey: .resolvedBy)
+        if !attachments.isEmpty { try c.encode(attachments, forKey: .attachments) }
     }
 }
 
@@ -270,6 +369,16 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
     mutating func markActivity(_ kind: String, at date: Date = Date()) {
         updatedAt = date
         lastActivityKind = kind
+    }
+
+    var attachmentSummary: KanbanCardAttachmentSummary {
+        let attachments = comments.flatMap(\.attachments)
+        guard !attachments.isEmpty else { return .empty }
+        return KanbanCardAttachmentSummary(
+            totalCount: attachments.count,
+            countsByType: Dictionary(grouping: attachments, by: \.type).mapValues(\.count),
+            countsByPreviewKind: Dictionary(grouping: attachments, by: \.previewKind).mapValues(\.count)
+        )
     }
 
     // Custom Codable for date format and backward compatibility

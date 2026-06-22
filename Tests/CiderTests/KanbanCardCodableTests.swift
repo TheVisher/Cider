@@ -267,6 +267,78 @@ struct KanbanCardCodableTests {
         #expect(decoded.comments.isEmpty)
     }
 
+    @Test("card comment attachments round trip through codable storage")
+    func cardCommentAttachmentsRoundTripThroughCodableStorage() throws {
+        let card = KanbanCard(
+            id: "comment-attachment-card",
+            title: "Threaded comment attachments",
+            comments: [
+                KanbanCardComment(
+                    id: "comment-with-refs",
+                    kind: .evidence,
+                    body: "Reference material stays with the card.",
+                    attachments: [
+                        KanbanCardCommentAttachment(
+                            id: "research-link",
+                            kind: .url,
+                            type: .research,
+                            title: "Research source",
+                            url: "https://example.com/research",
+                            previewKind: .link
+                        ),
+                        KanbanCardCommentAttachment(
+                            id: "project-file",
+                            kind: .projectArtifact,
+                            type: .qa,
+                            title: "QA screenshot",
+                            localPath: "Projects/Cider/QA/shot.png",
+                            previewKind: .image
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        let data = try JSONEncoder().encode(card)
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: data)
+
+        let attachments = try #require(decoded.comments.first?.attachments)
+        #expect(attachments.map(\.id) == ["research-link", "project-file"])
+        #expect(attachments.first?.kind == .url)
+        #expect(attachments.first?.type == .research)
+        #expect(attachments.first?.url == "https://example.com/research")
+        #expect(attachments.last?.kind == .projectArtifact)
+        #expect(attachments.last?.type == .qa)
+        #expect(attachments.last?.localPath == "Projects/Cider/QA/shot.png")
+        #expect(decoded.attachmentSummary.totalCount == 2)
+        #expect(decoded.attachmentSummary.types == [.research, .qa])
+        #expect(decoded.attachmentSummary.previewKinds == [.link, .image])
+    }
+
+    @Test("legacy comments without attachments decode with empty attachment list")
+    func legacyCommentsWithoutAttachmentsDecodeWithEmptyAttachmentList() throws {
+        let json = """
+        {
+          "id": "legacy-comment-card",
+          "title": "Legacy comment card",
+          "comments": [
+            {
+              "id": "legacy-comment",
+              "kind": "note",
+              "body": "Old comment without attachments.",
+              "createdAt": "2026-05-02T12:00:00Z"
+            }
+          ],
+          "created": "2026-05-02"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: Data(json.utf8))
+
+        #expect(decoded.comments.first?.attachments.isEmpty == true)
+        #expect(decoded.attachmentSummary.totalCount == 0)
+    }
+
     @Test("date-only created values preserve local Pacific calendar day")
     func dateOnlyCreatedValuesPreserveLocalPacificCalendarDay() throws {
         let originalTimeZone = NSTimeZone.default
