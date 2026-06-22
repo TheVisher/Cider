@@ -53,6 +53,118 @@ struct KanbanBoardHeaderControlTests {
         #expect(store.preferences(for: "cider") == .default)
     }
 
+    @Test("Kanban visible card filter applies attachment type without hiding unattached cards by default")
+    func visibleCardFilterAppliesAttachmentTypeWithoutHidingUnattachedCardsByDefault() {
+        let board = KanbanBoard(
+            id: "cider",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "queued", name: "Queued", cards: [
+                    KanbanCard(
+                        id: "research-card",
+                        title: "Research card",
+                        comments: [
+                            KanbanCardComment(
+                                id: "research-comment",
+                                kind: .note,
+                                body: "Comment carries market context.",
+                                attachments: [
+                                    KanbanCardCommentAttachment(
+                                        id: "research-link",
+                                        kind: .url,
+                                        type: .research,
+                                        title: "Research",
+                                        url: "https://example.com/research"
+                                    )
+                                ]
+                            )
+                        ]
+                    ),
+                    KanbanCard(
+                        id: "qa-card",
+                        title: "QA card",
+                        comments: [
+                            KanbanCardComment(
+                                id: "qa-comment",
+                                kind: .qa,
+                                body: "QA notes.",
+                                attachments: [
+                                    KanbanCardCommentAttachment(
+                                        id: "qa-file",
+                                        kind: .file,
+                                        type: .qa,
+                                        title: "QA",
+                                        localPath: "Projects/Cider/QA/report.md"
+                                    )
+                                ]
+                            )
+                        ]
+                    ),
+                    KanbanCard(id: "plain-card", title: "Plain card")
+                ])
+            ]
+        )
+        let column = board.columns[0]
+
+        let unfiltered = KanbanBoardVisibleCardFilter.filteredCards(
+            column.cards,
+            in: column,
+            board: board,
+            searchText: "",
+            attachmentType: nil,
+            featureDomainFilter: nil,
+            projectBoardViewID: "all",
+            milestoneFilterCardID: nil
+        )
+        let researchFiltered = KanbanBoardVisibleCardFilter.filteredCards(
+            column.cards,
+            in: column,
+            board: board,
+            searchText: "",
+            attachmentType: .research,
+            featureDomainFilter: nil,
+            projectBoardViewID: "all",
+            milestoneFilterCardID: nil
+        )
+        let commentSearchFiltered = KanbanBoardVisibleCardFilter.filteredCards(
+            column.cards,
+            in: column,
+            board: board,
+            searchText: "market context",
+            attachmentType: nil,
+            featureDomainFilter: nil,
+            projectBoardViewID: "all",
+            milestoneFilterCardID: nil
+        )
+        let researchAndPlainIDFiltered = KanbanBoardVisibleCardFilter.filteredCards(
+            column.cards,
+            in: column,
+            board: board,
+            searchText: "plain-card",
+            attachmentType: .research,
+            featureDomainFilter: nil,
+            projectBoardViewID: "all",
+            milestoneFilterCardID: nil
+        )
+
+        #expect(unfiltered.map(\.id) == ["research-card", "qa-card", "plain-card"])
+        #expect(researchFiltered.map(\.id) == ["research-card"])
+        #expect(commentSearchFiltered.map(\.id) == ["research-card"])
+        #expect(researchAndPlainIDFiltered.isEmpty)
+    }
+
+    @Test("Kanban attachment filter options use command-center order")
+    func attachmentFilterOptionsUseCommandCenterOrder() {
+        #expect(KanbanBoardAttachmentTypeFilterOption.allCases.map(\.type) == [
+            .research,
+            .inspiration,
+            .evidence,
+            .handoff,
+            .qa,
+            .reference,
+        ])
+    }
+
     @Test("Kanban board header exposes the three control entry points")
     func exposesBoardControlEntryPoints() {
         #expect(KanbanBoardHeaderControl.allCases.map(\.title) == [
@@ -241,6 +353,7 @@ struct KanbanBoardHeaderControlTests {
             "Status",
             "Priority",
             "Labels",
+            "Attachments",
             "Relations",
             "Dates",
             "Project milestone",
@@ -254,6 +367,7 @@ struct KanbanBoardHeaderControlTests {
             "Coming later",
             "Coming later",
             "Coming later",
+            "Ready",
             "Coming later",
             "Coming later",
             "Next",

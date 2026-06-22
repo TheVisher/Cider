@@ -66,6 +66,7 @@ enum KanbanBoardFilterCategory: String, CaseIterable, Identifiable {
     case status
     case priority
     case labels
+    case attachments
     case relations
     case dates
     case projectMilestone
@@ -81,6 +82,7 @@ enum KanbanBoardFilterCategory: String, CaseIterable, Identifiable {
         case .status: "Status"
         case .priority: "Priority"
         case .labels: "Labels"
+        case .attachments: "Attachments"
         case .relations: "Relations"
         case .dates: "Dates"
         case .projectMilestone: "Project milestone"
@@ -96,6 +98,7 @@ enum KanbanBoardFilterCategory: String, CaseIterable, Identifiable {
         case .status: "circle.dashed"
         case .priority: "flag"
         case .labels: "tag"
+        case .attachments: "paperclip"
         case .relations: "link"
         case .dates: "calendar"
         case .projectMilestone: "diamond"
@@ -111,6 +114,7 @@ enum KanbanBoardFilterCategory: String, CaseIterable, Identifiable {
         case .status: "Column and state filters"
         case .priority: "Priority tags and markers"
         case .labels: "Card tags and domains"
+        case .attachments: "Typed comment attachments"
         case .relations: "Parent, child, and related cards"
         case .dates: "Created, updated, and reviewed dates"
         case .projectMilestone: "Milestone card scope"
@@ -125,13 +129,15 @@ enum KanbanBoardFilterCategory: String, CaseIterable, Identifiable {
             "Placeholder"
         case .projectMilestone:
             "Next"
+        case .attachments:
+            "Ready"
         case .status, .priority, .labels, .relations, .dates, .content, .links:
             "Coming later"
         }
     }
 
     var isNextWiringTarget: Bool {
-        self == .projectMilestone
+        self == .projectMilestone || self == .attachments
     }
 }
 
@@ -462,6 +468,22 @@ struct KanbanBoardMilestoneFilterOption: Identifiable, Equatable {
     }
 }
 
+struct KanbanBoardAttachmentTypeFilterOption: Identifiable, Equatable {
+    let type: KanbanCardCommentAttachmentType
+
+    var id: String { type.rawValue }
+    var title: String { type.displayName }
+
+    static let allCases: [KanbanBoardAttachmentTypeFilterOption] = [
+        KanbanBoardAttachmentTypeFilterOption(type: .research),
+        KanbanBoardAttachmentTypeFilterOption(type: .inspiration),
+        KanbanBoardAttachmentTypeFilterOption(type: .evidence),
+        KanbanBoardAttachmentTypeFilterOption(type: .handoff),
+        KanbanBoardAttachmentTypeFilterOption(type: .qa),
+        KanbanBoardAttachmentTypeFilterOption(type: .reference),
+    ]
+}
+
 enum KanbanBoardDisplayModeOption: String, CaseIterable, Identifiable {
     case board
     case list
@@ -687,6 +709,105 @@ struct KanbanBoardDisplayPropertyValue: Identifiable, Equatable {
     }
 }
 
+enum KanbanBoardVisibleCardFilter {
+    static func filteredCards(
+        _ cards: [KanbanCard],
+        in column: KanbanColumn,
+        board: KanbanBoard,
+        searchText: String,
+        attachmentType: KanbanCardCommentAttachmentType?,
+        featureDomainFilter: String?,
+        projectBoardViewID: String,
+        milestoneFilterCardID: String?
+    ) -> [KanbanCard] {
+        let viewFilteredCards = KanbanBoardLayout.cards(
+            cards,
+            in: column,
+            board: board,
+            matchingProjectBoardViewID: projectBoardViewID
+        )
+        let featureFilteredCards = KanbanBoardLayout.cards(
+            viewFilteredCards,
+            matchingFeatureDomainFilter: featureDomainFilter
+        )
+        let milestoneFilteredCards = Self.milestoneFilteredCards(
+            featureFilteredCards,
+            board: board,
+            milestoneFilterCardID: milestoneFilterCardID
+        )
+
+        let discoveryFilter = KanbanBoardDiscoveryFilter(
+            query: searchText,
+            attachmentTypes: attachmentType.map { [$0] } ?? []
+        )
+        guard !discoveryFilter.isEmpty else { return milestoneFilteredCards }
+
+        let filteredColumn = KanbanColumn(
+            id: column.id,
+            name: column.name,
+            isDoneColumn: column.isDoneColumn,
+            cards: milestoneFilteredCards
+        )
+        let scopedBoard = KanbanBoard(
+            id: board.id,
+            name: board.name,
+            columns: [filteredColumn]
+        )
+
+        guard let result = try? scopedBoard.filteredForDiscovery(discoveryFilter) else {
+            return milestoneFilteredCards
+        }
+
+        if !discoveryFilter.query.isEmpty {
+            let discoveryIDs = Set(result.board.columns.first?.cards.map { $0.id } ?? [String]())
+            return milestoneFilteredCards.filter { card in
+                discoveryIDs.contains(card.id) || (
+                    matchesBoardSearchFallback(card, board: board, query: discoveryFilter.query) &&
+                    matchesAttachmentType(card, attachmentType)
+                )
+            }
+        }
+
+        return result.board.columns.first?.cards ?? []
+    }
+
+    private static func milestoneFilteredCards(
+        _ cards: [KanbanCard],
+        board: KanbanBoard,
+        milestoneFilterCardID: String?
+    ) -> [KanbanCard] {
+        guard let milestoneID = milestoneFilterCardID,
+              board.allCards.contains(where: { $0.id == milestoneID }) else {
+            return cards
+        }
+        let cardsByParentID = Dictionary(grouping: board.allCards) { $0.parentCardID ?? "" }
+        var includedCardIDs: Set<String> = [milestoneID]
+        var pendingCardIDs = [milestoneID]
+        while let parentID = pendingCardIDs.popLast() {
+            for child in cardsByParentID[parentID, default: []] where !includedCardIDs.contains(child.id) {
+                includedCardIDs.insert(child.id)
+                pendingCardIDs.append(child.id)
+            }
+        }
+        return cards.filter { card in
+            includedCardIDs.contains(card.id)
+        }
+    }
+
+    private static func matchesBoardSearchFallback(_ card: KanbanCard, board: KanbanBoard, query: String) -> Bool {
+        card.id.localizedStandardContains(query) ||
+            board.displayKey(for: card).localizedStandardContains(query) ||
+            (card.agent ?? "").localizedStandardContains(query)
+    }
+
+    private static func matchesAttachmentType(_ card: KanbanCard, _ attachmentType: KanbanCardCommentAttachmentType?) -> Bool {
+        guard let attachmentType else { return true }
+        return card.comments.contains { comment in
+            comment.attachments.contains { $0.type == attachmentType }
+        }
+    }
+}
+
 /// Renders a Kanban board as horizontal scrolling columns with draggable cards.
 struct KanbanBoardView: View {
     let boardID: String
@@ -711,6 +832,7 @@ struct KanbanBoardView: View {
     @State private var tagEditorCardID: String?
     @State private var tagEditorDraft = ""
     @State private var selectedFeatureDomainFilter: String?
+    @State private var selectedAttachmentTypeFilter: KanbanCardCommentAttachmentType?
     @State private var selectedProjectBoardViewID = "all"
     @State private var selectedMilestoneFilterCardID: String?
     @State private var activeHeaderPopover: KanbanBoardHeaderControl?
@@ -737,29 +859,18 @@ struct KanbanBoardView: View {
         storage.boards.first { $0.id == boardID }
     }
 
-    /// Filter cards by search text across title, notes, agent, and tags.
+    /// Filter cards by board view, search text, milestone, domain, and typed attachments.
     private func filteredCards(_ cards: [KanbanCard], in column: KanbanColumn, board: KanbanBoard) -> [KanbanCard] {
-        let viewFilteredCards = KanbanBoardLayout.cards(
+        KanbanBoardVisibleCardFilter.filteredCards(
             cards,
             in: column,
             board: board,
-            matchingProjectBoardViewID: selectedProjectBoardViewID
+            searchText: searchText,
+            attachmentType: selectedAttachmentTypeFilter,
+            featureDomainFilter: selectedFeatureDomainFilter,
+            projectBoardViewID: selectedProjectBoardViewID,
+            milestoneFilterCardID: selectedMilestoneFilterCardID
         )
-        let featureFilteredCards = KanbanBoardLayout.cards(
-            viewFilteredCards,
-            matchingFeatureDomainFilter: selectedFeatureDomainFilter
-        )
-        let milestoneFilteredCards = milestoneFilteredCards(featureFilteredCards, board: board)
-        guard !searchText.isEmpty else { return milestoneFilteredCards }
-        let query = searchText.lowercased()
-        return milestoneFilteredCards.filter { card in
-            card.title.localizedStandardContains(query) ||
-            board.displayKey(for: card).localizedStandardContains(query) ||
-            card.id.localizedStandardContains(query) ||
-            (card.notes ?? "").localizedStandardContains(query) ||
-            (card.agent ?? "").localizedStandardContains(query) ||
-            card.tags.contains { $0.localizedStandardContains(query) }
-        }
     }
 
     var body: some View {
@@ -780,6 +891,7 @@ struct KanbanBoardView: View {
             .onChange(of: boardID) { _, _ in
                 projectLaneScrollIndexByID.removeAll()
                 selectedFeatureDomainFilter = nil
+                selectedAttachmentTypeFilter = nil
                 selectedProjectBoardViewID = "all"
                 selectedMilestoneFilterCardID = milestoneFilterCardID
                 activeHeaderPopover = nil
@@ -797,25 +909,6 @@ struct KanbanBoardView: View {
             }
         } else {
             emptyState
-        }
-    }
-
-    private func milestoneFilteredCards(_ cards: [KanbanCard], board: KanbanBoard) -> [KanbanCard] {
-        guard let milestoneID = selectedMilestoneFilterCardID,
-              board.allCards.contains(where: { $0.id == milestoneID }) else {
-            return cards
-        }
-        let cardsByParentID = Dictionary(grouping: board.allCards) { $0.parentCardID ?? "" }
-        var includedCardIDs: Set<String> = [milestoneID]
-        var pendingCardIDs = [milestoneID]
-        while let parentID = pendingCardIDs.popLast() {
-            for child in cardsByParentID[parentID, default: []] where !includedCardIDs.contains(child.id) {
-                includedCardIDs.insert(child.id)
-                pendingCardIDs.append(child.id)
-            }
-        }
-        return cards.filter { card in
-            includedCardIDs.contains(card.id)
         }
     }
 
@@ -885,6 +978,8 @@ struct KanbanBoardView: View {
             if !featureFilters.isEmpty {
                 domainFilterMenu(featureFilters, mode: mode)
             }
+
+            attachmentTypeFilterMenu(mode: mode)
 
             HStack(spacing: Spacing.xxs) {
                 ForEach(KanbanBoardHeaderControl.allCases) { control in
@@ -1108,6 +1203,81 @@ struct KanbanBoardView: View {
         .fixedSize(horizontal: true, vertical: false)
         .help(selected.map { "Domain filter: \($0.label)" } ?? "Domain filter")
         .accessibilityLabel(selected.map { "Domain filter: \($0.label)" } ?? "Domain filter")
+    }
+
+    private func attachmentTypeFilterMenu(mode: KanbanBoardHeaderLayoutMode = .regular) -> some View {
+        let isCompact = mode == .compact
+        let selected = selectedAttachmentTypeFilter
+
+        return Menu {
+            Button {
+                withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
+                    selectedAttachmentTypeFilter = nil
+                }
+            } label: {
+                Label("All Attachments", systemImage: selected == nil ? "checkmark" : "paperclip")
+            }
+
+            Divider()
+
+            ForEach(KanbanBoardAttachmentTypeFilterOption.allCases) { option in
+                Button {
+                    withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
+                        selectedAttachmentTypeFilter = option.type
+                    }
+                } label: {
+                    Label(
+                        option.title,
+                        systemImage: selected == option.type ? "checkmark" : "paperclip"
+                    )
+                }
+            }
+        } label: {
+            HStack(spacing: 0) {
+                HStack(spacing: Spacing.xxs) {
+                    Image(systemName: "paperclip")
+                        .font(CiderFont.caption)
+                    if !isCompact {
+                        Text(selected?.displayName ?? "Attachments")
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(CiderFont.micro)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                }
+                .padding(.trailing, selected == nil || isCompact ? 0 : Spacing.xxs)
+            }
+            .font(CiderFont.captionMedium)
+            .foregroundColor(selected == nil ? CiderColors.tertiary : CiderColors.controlAccent)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, Spacing.xxs)
+            .frame(minWidth: isCompact ? 24 : 0, minHeight: 24)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(selected == nil ? CiderColors.surfaceInput : CiderColors.controlAccent.opacity(0.12))
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+        .help(selected.map { "Attachment filter: \($0.displayName)" } ?? "Attachment filter")
+        .accessibilityLabel(selected.map { "Attachment filter: \($0.displayName)" } ?? "Attachment filter")
+        .overlay(alignment: .trailing) {
+            if selected != nil, !isCompact {
+                Button {
+                    withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
+                        selectedAttachmentTypeFilter = nil
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.controlAccent)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, Spacing.xs)
+                .help("Clear attachment filter")
+                .accessibilityLabel("Clear attachment filter")
+            }
+        }
     }
 
     private func boardHeaderControlButton(_ control: KanbanBoardHeaderControl) -> some View {
