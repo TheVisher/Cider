@@ -25,6 +25,30 @@ struct KanbanCardAgentContext: Equatable {
     }
 }
 
+struct KanbanCardReadinessSurface: Equatable {
+    var title: String
+    var dashboardSlot: String
+    var status: KanbanCardQualityReport.Status
+    var summary: String
+    var presentChecks: [String]
+    var missingChecks: [String]
+    var needsWorkChecks: [String]
+
+    init(report: KanbanCardQualityReport) {
+        title = "Structure Hints"
+        dashboardSlot = "Below What To Test and above Problem"
+        status = report.status
+        summary = report.summary
+        presentChecks = report.items
+            .filter(\.isPresent)
+            .map(\.section.displayName)
+        missingChecks = report.missingEssentials
+            .map(\.section.displayName)
+        needsWorkChecks = report.missingEssentials
+            .map(\.section.displayName)
+    }
+}
+
 struct KanbanCardDashboardModel: Equatable {
     var title: String
     var hasStructuredContent: Bool
@@ -43,12 +67,14 @@ struct KanbanCardDashboardModel: Equatable {
     var hasFailedQA: Bool
     var relatedItems: [KanbanCardDashboardEntry]
     var agentContext: KanbanCardAgentContext
+    var readinessSurface: KanbanCardReadinessSurface
     var missingCoreSections: [String]
     var fallbackSummary: String
 
     init(title: String, notes: String?) {
         self.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let parsedSections = KanbanCardSectionParser.sections(from: notes)
+        let readinessReport = KanbanCardQualityReport(notes: notes ?? "")
         sections = parsedSections
         hasStructuredContent = !parsedSections.isEmpty
 
@@ -73,6 +99,7 @@ struct KanbanCardDashboardModel: Equatable {
         relatedItems = Self.entries(from: parsedSections, matching: Self.relatedKeys, fallbackTitle: "Related")
         openLoops = Self.openLoopEntries(from: parsedSections)
         agentContext = Self.agentContext(from: parsedSections)
+        readinessSurface = KanbanCardReadinessSurface(report: readinessReport)
 
         missingCoreSections = [
             ("Current State", currentState),

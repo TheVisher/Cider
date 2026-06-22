@@ -433,13 +433,15 @@ private struct KanbanCardDashboardView: View {
                                 )
                             }
 
+                            KanbanDashboardReadinessSurfaceView(surface: model.readinessSurface)
+
+                            KanbanDashboardTripleSection(model: model)
+
                             KanbanCardHistorySectionView(
                                 entries: $historyEntries,
                                 newEntryType: $newHistoryType,
                                 newEntryBody: $newHistoryBody
                             )
-
-                            KanbanDashboardTripleSection(model: model)
 
                             if !model.qaFindingsEntries.isEmpty {
                                 KanbanDashboardEntryGroup(
@@ -479,10 +481,6 @@ private struct KanbanCardDashboardView: View {
                             )
 
                             KanbanDashboardAgentHandoffView(boardName: boardName, cardID: cardID, context: model.agentContext)
-
-                            if !model.missingCoreSections.isEmpty {
-                                KanbanDashboardMissingSectionsView(sections: model.missingCoreSections)
-                            }
                         }
                         .padding(.top, Spacing.sm)
                     } label: {
@@ -1184,21 +1182,55 @@ private struct KanbanDashboardAgentHandoffView: View {
     }
 }
 
-private struct KanbanDashboardMissingSectionsView: View {
-    let sections: [String]
+private struct KanbanDashboardReadinessSurfaceView: View {
+    let surface: KanbanCardReadinessSurface
+
+    private var statusColor: Color {
+        switch surface.status {
+        case .ready:
+            CiderColors.success
+        case .needsContext:
+            CiderColors.warning
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("Structure Hints")
-                .font(CiderFont.captionSemibold)
-                .foregroundColor(CiderColors.tertiary)
-            Text("Missing: \(sections.joined(separator: ", "))")
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: surface.status == .ready ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(statusColor)
+                Text(surface.title)
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+                Spacer(minLength: Spacing.sm)
+                KanbanDashboardBadge(text: surface.status == .ready ? "ready" : "needs context")
+            }
+
+            Text(surface.summary)
                 .font(CiderFont.caption)
-                .foregroundColor(CiderColors.tertiary)
+                .foregroundColor(CiderColors.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if !surface.needsWorkChecks.isEmpty {
+                Text("Needs work: \(surface.needsWorkChecks.joined(separator: ", "))")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
         }
         .padding(Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(statusColor.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .stroke(statusColor.opacity(0.30), lineWidth: 1)
+        )
+        .help("\(surface.title): \(surface.dashboardSlot)")
     }
 }
 
@@ -2272,7 +2304,7 @@ private struct KanbanCardQualityChecklistView: View {
 
                 Spacer(minLength: Spacing.sm)
 
-                Text("Agent checklist")
+                Text("Structure Hints")
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
             }

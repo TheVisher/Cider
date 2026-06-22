@@ -16156,6 +16156,15 @@ struct CiderCLI {
             "hasFailedQA": model.hasFailedQA,
             "relatedItems": model.relatedItems.map(dashboardEntryToDict),
             "missingCoreSections": model.missingCoreSections,
+            "readinessSurface": [
+                "title": model.readinessSurface.title,
+                "dashboardSlot": model.readinessSurface.dashboardSlot,
+                "status": String(describing: model.readinessSurface.status),
+                "summary": model.readinessSurface.summary,
+                "presentChecks": model.readinessSurface.presentChecks,
+                "missingChecks": model.readinessSurface.missingChecks,
+                "needsWorkChecks": model.readinessSurface.needsWorkChecks,
+            ],
             "fallbackSummary": model.fallbackSummary,
             "agentContext": [
                 "notes": model.agentContext.notes,

@@ -2,7 +2,7 @@ import Foundation
 
 /// Deterministic, non-blocking readiness hints for Kanban cards.
 ///
-/// The checklist intentionally uses simple heading/label heuristics. It helps agents
+/// Structure Hints intentionally use simple heading/label heuristics. They help agents
 /// improve handoffs without enforcing a rigid template or generating content.
 struct KanbanCardQualityReport: Equatable, Sendable {
     enum Status: Equatable, Sendable {
