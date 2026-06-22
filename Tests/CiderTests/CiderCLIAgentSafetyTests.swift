@@ -2642,6 +2642,7 @@ struct CiderCLIAgentSafetyTests {
 
         #expect(result.stdout.contains("Usage: cider-cli bookmark update <id>"))
         #expect(result.stdout.contains("--ai-summary <text>|--clear-ai-summary"))
+        #expect(result.stdout.contains("--clear-ocr-text"))
     }
 
     @Test("cli help documents source path versus destination path flags")

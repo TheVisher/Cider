@@ -2484,7 +2484,7 @@ struct CiderCLI {
 
         case "update", "set":
             guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli bookmark update <id> [--title <t>] [--notes <n>] [--url <u>] [--ai-summary <text>|--clear-ai-summary] [--enrichment-status none|partial|complete] [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]")
+                print("Error: ID prefix required. Usage: cider-cli bookmark update <id> [--title <t>] [--notes <n>] [--url <u>] [--ai-summary <text>|--clear-ai-summary] [--clear-ocr-text] [--enrichment-status none|partial|complete] [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]")
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
@@ -2493,6 +2493,7 @@ struct CiderCLI {
                 let newURL = parseFlag("--url", from: args)
                 let newAISummary = parseFlag("--ai-summary", from: args)
                 let clearAISummary = args.contains("--clear-ai-summary")
+                let clearOCRText = args.contains("--clear-ocr-text")
                 if clearAISummary, newAISummary != nil {
                     print("Error: Use either --ai-summary <text> or --clear-ai-summary, not both.")
                     return
@@ -2509,6 +2510,7 @@ struct CiderCLI {
                     for: bm.id,
                     aiSummary: newAISummary,
                     clearAISummary: clearAISummary,
+                    clearOCRText: clearOCRText,
                     enrichmentStatus: newEnrichmentStatus
                 )
                 if let mt = parseFlag("--media-type", from: args),

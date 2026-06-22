@@ -912,6 +912,7 @@ final class VaultBookmarkService: ObservableObject {
         for bookmarkID: UUID,
         aiSummary: String? = nil,
         clearAISummary: Bool = false,
+        clearOCRText: Bool = false,
         enrichmentStatus: String? = nil
     ) -> Bool {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
@@ -922,6 +923,10 @@ final class VaultBookmarkService: ObservableObject {
             changed = true
         } else if let aiSummary, bookmarks[index].aiSummary != aiSummary {
             bookmarks[index].aiSummary = aiSummary
+            changed = true
+        }
+        if clearOCRText, bookmarks[index].ocrText != nil {
+            bookmarks[index].ocrText = nil
             changed = true
         }
         if let enrichmentStatus, bookmarks[index].enrichmentStatus != enrichmentStatus {
@@ -1563,7 +1568,10 @@ final class VaultBookmarkService: ObservableObject {
         var bookmark = bookmarks[index]
         var changed = false
         if bookmark.tags != tags { bookmark.tags = tags; changed = true }
-        if bookmark.ocrText != ocrText { bookmark.ocrText = ocrText; changed = true }
+        let sanitizedOCRText = ocrText.flatMap {
+            SummaryService.looksLikeXPrivacyExtensionTroubleshooting($0) ? nil : $0
+        }
+        if bookmark.ocrText != sanitizedOCRText { bookmark.ocrText = sanitizedOCRText; changed = true }
         if bookmark.dominantColors != dominantColors { bookmark.dominantColors = dominantColors; changed = true }
         if let title, !title.isEmpty, bookmark.title != title, !bookmark.titleManuallySet { bookmark.title = title; changed = true }
         changed = markEnrichmentComplete(&bookmark) || changed

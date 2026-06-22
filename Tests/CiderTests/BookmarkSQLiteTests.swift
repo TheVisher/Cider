@@ -615,6 +615,34 @@ struct BookmarkSQLiteTests {
         #expect(loaded.dominantColors == ["#112233"])
     }
 
+    @Test("AI enrichment drops X privacy extension troubleshooting OCR")
+    func aiEnrichmentDropsXPrivacyExtensionTroubleshootingOCR() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        let bookmark = Bookmark(
+            title: "X Screenshot",
+            urlString: "https://x.com/example/status/2059500091849994699?s=12"
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        service.applyAIResults(
+            for: bookmark.id,
+            tags: [],
+            ocrText: "Some privacy-related extensions may cause issues on x.com. Please disable them and try again.",
+            dominantColors: nil
+        )
+
+        let service2 = makeService(db)
+        service2.loadBookmarksFromDatabase(db)
+
+        let loaded = try #require(service2.bookmarks.first)
+        #expect(loaded.ocrText == nil)
+    }
+
     // MARK: - Date Precision
 
     @Test("Date fields survive round-trip with reasonable precision")
@@ -713,6 +741,49 @@ struct BookmarkSQLiteTests {
             chunkStmt.bind(DatabaseHelpers.encode(bookmark.id), at: 1)
             try #require(try chunkStmt.step())
             #expect(!chunkStmt.string(at: 0).contains("Privacy extension troubleshooting should disappear."))
+        }
+    }
+
+    @Test("Update enrichment clears OCR text explicitly and refreshes chunks")
+    func updateEnrichmentClearsOCRTextExplicitlyAndRefreshesChunks() throws {
+        try withIsolatedVault { db, service in
+            let bookmark = Bookmark(
+                title: "X OCR Clip",
+                urlString: "https://x.com/example/status/2059500091849994699?s=12",
+                ocrText: "Some privacy-related extensions may cause issues on x.com. Please disable them and try again.",
+                relativePath: "Inbox/Bookmarks/X OCR Clip.webloc"
+            )
+            service.persistBookmarkToDatabase(db, bookmark: bookmark)
+            service.loadBookmarksFromDatabase(db)
+            _ = try SecondBrainItemContentIndexingService(database: db).rebuild(
+                owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmark.id.uuidString)
+            )
+
+            let changed = service.updateEnrichment(for: bookmark.id, clearOCRText: true)
+
+            #expect(changed)
+            let updated = try #require(service.bookmarks.first)
+            #expect(updated.ocrText == nil)
+            #expect(updated.lastEnrichedAt != nil)
+
+            let reloaded = VaultBookmarkService(database: db, schedulesEnrichment: false)
+            reloaded.loadBookmarksFromDatabase(db)
+            #expect(reloaded.bookmarks.first?.ocrText == nil)
+
+            let ocrStmt = try db.prepare("SELECT ocr_text FROM bookmarks WHERE item_id = ?;")
+            ocrStmt.bind(DatabaseHelpers.encode(bookmark.id), at: 1)
+            try #require(try ocrStmt.step())
+            #expect(ocrStmt.optionalString(at: 0) == nil)
+
+            let chunkStmt = try db.prepare("""
+                SELECT body
+                FROM content_chunks
+                WHERE owner_type = 'bookmark' AND owner_id = ?
+                LIMIT 1;
+                """)
+            chunkStmt.bind(DatabaseHelpers.encode(bookmark.id), at: 1)
+            try #require(try chunkStmt.step())
+            #expect(!chunkStmt.string(at: 0).contains("privacy-related extensions"))
         }
     }
 

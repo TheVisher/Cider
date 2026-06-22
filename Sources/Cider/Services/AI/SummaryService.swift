@@ -55,13 +55,30 @@ final class SummaryService {
         let summary = rawSummary.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !summary.isEmpty else { return nil }
 
-        let normalized = summary.lowercased()
-        let looksLikeAccessTroubleshooting = normalized.contains("privacy-related issue")
-            && normalized.contains("disable")
-            && normalized.contains("privacy-related extension")
-        if looksLikeAccessTroubleshooting { return nil }
+        if Self.looksLikeXPrivacyExtensionTroubleshooting(summary) { return nil }
 
         return summary
+    }
+
+    nonisolated static func looksLikeXPrivacyExtensionTroubleshooting(_ text: String) -> Bool {
+        let normalized = text.lowercased()
+        let mentionsX = normalized.contains("x.com")
+        let mentionsPrivacyExtensions = normalized.contains("privacy-related extension")
+            || normalized.contains("privacy related extension")
+        let mentionsTroubleshootingAction = normalized.contains("disable")
+            || normalized.contains("disabling")
+            || normalized.contains("try again")
+        let mentionsTroubleshootingIssue = normalized.contains("may cause issues")
+            || normalized.contains("might cause issues")
+            || normalized.contains("cause issues")
+            || normalized.contains("has been reported")
+            || normalized.contains("privacy-related issue")
+            || normalized.contains("does not load")
+        let looksLikeAccessTroubleshooting = mentionsX
+            && mentionsPrivacyExtensions
+            && mentionsTroubleshootingAction
+            && mentionsTroubleshootingIssue
+        return looksLikeAccessTroubleshooting
     }
 
     func _setSummarizeArticleOverrideForTesting(_ override: @escaping (String) async -> String?) {
