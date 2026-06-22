@@ -2645,6 +2645,29 @@ struct CiderCLIAgentSafetyTests {
         #expect(result.stdout.contains("--clear-ocr-text"))
     }
 
+    @Test("bookmark update help documents repair flags without ID lookup")
+    func bookmarkUpdateHelpDocumentsRepairFlagsWithoutIDLookup() throws {
+        let result = try runCLI(args: ["bookmark", "update", "--help"])
+
+        #expect(result.status == 0)
+        #expect(result.stdout.contains("Usage: cider-cli bookmark update <id>"))
+        #expect(result.stdout.contains("--ai-summary <text>|--clear-ai-summary"))
+        #expect(result.stdout.contains("--clear-ocr-text"))
+        #expect(!result.stdout.contains("No bookmark found with ID prefix: --help"))
+        #expect(!result.stderr.contains("No bookmark found with ID prefix: --help"))
+    }
+
+    @Test("bookmark help points agents to blessed update repair flags")
+    func bookmarkHelpPointsAgentsToBlessedUpdateRepairFlags() throws {
+        let result = try runCLI(args: ["bookmark", "--help"])
+
+        #expect(result.status == 0)
+        #expect(result.stdout.contains("Legacy bookmark workflows remain removed"))
+        #expect(result.stdout.contains("cider-cli bookmark update --help"))
+        #expect(result.stdout.contains("--clear-ai-summary"))
+        #expect(result.stdout.contains("--clear-ocr-text"))
+    }
+
     @Test("cli help documents source path versus destination path flags")
     func cliHelpDocumentsSourcePathVersusDestinationPathFlags() throws {
         let captureHelp = try runCLI(args: ["capture", "add", "--help"])

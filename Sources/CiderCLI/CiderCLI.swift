@@ -175,6 +175,29 @@ struct CiderCLI {
         }
     }
 
+    static func handleBookmarkRepairEarlyHelp(command rawCommand: String, subcommand rawSubcommand: String?, args: [String]) -> Bool {
+        let command = rawCommand.lowercased()
+        guard command == "bookmark" || command == "bm" else {
+            return false
+        }
+
+        let subcommand = rawSubcommand?.lowercased()
+        guard subcommand == "--help" || subcommand == "-h" || subcommand == "help" ||
+            (subcommand == nil && (args.contains("--help") || args.contains("-h") || args.contains("help"))) else {
+            return false
+        }
+
+        printBookmarkRepairHelp()
+        return true
+    }
+
+    static func printBookmarkRepairHelp() {
+        print("Legacy bookmark workflows remain removed from the blessed second-brain CLI surface.")
+        print("Narrow blessed bookmark repair usage:")
+        print("  cider-cli bookmark update --help")
+        print("  cider-cli bookmark update <id> [--ai-summary <text>|--clear-ai-summary] [--clear-ocr-text] [--json]")
+    }
+
     static func handleEarlyHelpRequest(command rawCommand: String, subcommand rawSubcommand: String?, args: [String]) -> Bool {
         let command = rawCommand.lowercased()
         let subcommand = rawSubcommand?.lowercased()
@@ -310,6 +333,9 @@ struct CiderCLI {
         let remaining = Array(args.dropFirst(2))
 
         if handleRemovedLegacyTopLevelCommand(command, subcommand: subcommand) {
+            return
+        }
+        if handleBookmarkRepairEarlyHelp(command: command, subcommand: subcommand, args: remaining) {
             return
         }
         if let removed = hiddenLegacyCommandResponse(command: command, subcommand: subcommand, args: remaining) {
@@ -2232,6 +2258,11 @@ struct CiderCLI {
     }
 
     static func handleBookmark(subcommand: String?, args: [String], service: VaultBookmarkService) async {
+        if subcommand == "--help" || subcommand == "-h" || subcommand == "help" ||
+            (subcommand == nil && (args.contains("--help") || args.contains("-h") || args.contains("help"))) {
+            printBookmarkRepairHelp()
+            return
+        }
         guard !printHiddenLegacyCommandIfRemoved(command: "bookmark", subcommand: subcommand, args: args) else {
             return
         }
@@ -2483,8 +2514,13 @@ struct CiderCLI {
             )
 
         case "update", "set":
+            let usage = "Usage: cider-cli bookmark update <id> [--title <t>] [--notes <n>] [--url <u>] [--ai-summary <text>|--clear-ai-summary] [--clear-ocr-text] [--enrichment-status none|partial|complete] [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]"
+            if args.contains("--help") || args.contains("-h") || args.contains("help") {
+                print(usage)
+                return
+            }
             guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli bookmark update <id> [--title <t>] [--notes <n>] [--url <u>] [--ai-summary <text>|--clear-ai-summary] [--clear-ocr-text] [--enrichment-status none|partial|complete] [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]")
+                print("Error: ID prefix required. \(usage)")
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
