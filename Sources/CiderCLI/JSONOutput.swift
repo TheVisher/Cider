@@ -979,10 +979,24 @@ private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
                     if !card.tags.isEmpty { d["tags"] = card.tags }
                     if let parentCardID = card.parentCardID { d["parentCardID"] = parentCardID }
                     if let completed = card.completed { d["completed"] = ISO8601DateFormatter().string(from: completed) }
+                    appendKanbanCardAttachmentSummary(card, to: &d)
                     return d
                 },
             ] as [String: Any]
         },
+    ]
+}
+
+@MainActor private func appendKanbanCardAttachmentSummary(_ card: KanbanCard, to dict: inout [String: Any]) {
+    let summary = card.attachmentSummary
+    dict["attachmentCount"] = summary.totalCount
+    guard summary.totalCount > 0 else { return }
+    dict["attachmentSummary"] = [
+        "totalCount": summary.totalCount,
+        "types": summary.types.map(\.rawValue),
+        "previewKinds": summary.previewKinds.map(\.rawValue),
+        "countsByType": Dictionary(uniqueKeysWithValues: summary.types.map { ($0.rawValue, summary.countsByType[$0] ?? 0) }),
+        "countsByPreviewKind": Dictionary(uniqueKeysWithValues: summary.previewKinds.map { ($0.rawValue, summary.countsByPreviewKind[$0] ?? 0) }),
     ]
 }
 

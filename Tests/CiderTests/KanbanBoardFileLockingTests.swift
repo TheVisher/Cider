@@ -598,7 +598,78 @@ struct KanbanBoardFileLockingTests {
 
         #expect(result.status == 1)
         #expect(payload["ok"] as? Bool == false)
-        #expect(output.contains("Usage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]"))
+        #expect(output.contains("Usage: cider-cli board show <board> [--query <text>] [--tag <tag>] [--tags <csv>] [--attachment-type <type>] [--json]"))
+    }
+
+    @Test("board show filters by attachment type and returns match metadata")
+    func boardShowFiltersByAttachmentTypeAndReturnsMatchMetadata() throws {
+        let cli = try #require(Self.ciderCLIURL())
+        let vault = try Self.makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        try Self.runCLI(cli, vault: vault, args: ["board", "create", "Attachment Discovery"])
+        let researchCardData = try Self.runCLIData(
+            cli,
+            vault: vault,
+            args: ["board", "add-card", "Attachment Discovery", "--column", "backlog", "--title", "Research card", "--json"]
+        )
+        let qaCardData = try Self.runCLIData(
+            cli,
+            vault: vault,
+            args: ["board", "add-card", "Attachment Discovery", "--column", "backlog", "--title", "QA card", "--json"]
+        )
+        let researchPayload = try #require(try JSONSerialization.jsonObject(with: researchCardData) as? [String: Any])
+        let qaPayload = try #require(try JSONSerialization.jsonObject(with: qaCardData) as? [String: Any])
+        let researchCard = try #require(researchPayload["card"] as? [String: Any])
+        let qaCard = try #require(qaPayload["card"] as? [String: Any])
+        let researchCardID = try #require(researchCard["id"] as? String)
+        let qaCardID = try #require(qaCard["id"] as? String)
+
+        try Self.runCLI(
+            cli,
+            vault: vault,
+            args: [
+                "board", "comment", "add", "Attachment Discovery",
+                "--card", researchCardID,
+                "--kind", "note",
+                "--text", "Research link",
+                "--attachment-type", "research",
+                "--attachment-title", "Research source",
+                "--attachment-url", "https://example.com/research"
+            ]
+        )
+        try Self.runCLI(
+            cli,
+            vault: vault,
+            args: [
+                "board", "comment", "add", "Attachment Discovery",
+                "--card", qaCardID,
+                "--kind", "qa",
+                "--text", "QA evidence",
+                "--attachment-type", "qa",
+                "--attachment-title", "QA file",
+                "--attachment-file", "Projects/Cider/QA/report.md"
+            ]
+        )
+
+        let resultData = try Self.runCLIData(
+            cli,
+            vault: vault,
+            args: ["board", "show", "Attachment Discovery", "--attachment-type", "research", "--json"]
+        )
+        let payload = try #require(try JSONSerialization.jsonObject(with: resultData) as? [String: Any])
+        let boardDetail = try #require(payload["boardDetail"] as? [String: Any])
+        let columns = try #require(boardDetail["columns"] as? [[String: Any]])
+        let cards = try #require(columns.first?["cards"] as? [[String: Any]])
+        let matches = try #require(payload["matches"] as? [[String: Any]])
+        let firstMatch = try #require(matches.first)
+
+        #expect(cards.map { $0["id"] as? String } == [researchCardID])
+        #expect(firstMatch["cardID"] as? String == researchCardID)
+        #expect(firstMatch["reasons"] as? [String] == ["attachmentType"])
+        #expect(firstMatch["attachmentTypes"] as? [String] == ["research"])
+        #expect((firstMatch["attachmentIDs"] as? [String])?.isEmpty == false)
+        #expect(matches.contains { $0["cardID"] as? String == qaCardID } == false)
     }
 
     @Test("board card mutation usage advertises JSON flag")

@@ -86,4 +86,109 @@ struct KanbanCardTagTaxonomyTests {
 
         #expect(filtered.columns[0].cards.map(\.id) == ["combined"])
     }
+
+    @Test("board discovery filter matches attachment type and explains match")
+    func boardDiscoveryFilterMatchesAttachmentTypeAndExplainsMatch() throws {
+        let board = KanbanBoard(
+            id: "board",
+            name: "Cider",
+            columns: [
+                KanbanColumn(
+                    id: "queued",
+                    name: "Queued",
+                    cards: [
+                        KanbanCard(
+                            id: "research-card",
+                            title: "Research card",
+                            comments: [
+                                KanbanCardComment(
+                                    id: "research-comment",
+                                    kind: .note,
+                                    body: "Useful reference.",
+                                    attachments: [
+                                        KanbanCardCommentAttachment(
+                                            id: "research-link",
+                                            kind: .url,
+                                            type: .research,
+                                            title: "Research link",
+                                            url: "https://example.com/research"
+                                        )
+                                    ]
+                                )
+                            ]
+                        ),
+                        KanbanCard(
+                            id: "qa-card",
+                            title: "QA card",
+                            comments: [
+                                KanbanCardComment(
+                                    id: "qa-comment",
+                                    kind: .qa,
+                                    body: "QA evidence.",
+                                    attachments: [
+                                        KanbanCardCommentAttachment(
+                                            id: "qa-file",
+                                            kind: .file,
+                                            type: .qa,
+                                            title: "QA file",
+                                            localPath: "Projects/Cider/QA/report.md"
+                                        )
+                                    ]
+                                )
+                            ]
+                        ),
+                        KanbanCard(id: "plain-card", title: "Plain card")
+                    ]
+                )
+            ]
+        )
+
+        let result = try board.filteredForDiscovery(
+            KanbanBoardDiscoveryFilter(attachmentTypes: [.research])
+        )
+
+        #expect(result.board.columns[0].cards.map(\.id) == ["research-card"])
+        let match = try #require(result.matchesByCardID["research-card"])
+        #expect(match.reasons == [.attachmentType])
+        #expect(match.attachmentTypes == [.research])
+        #expect(match.commentIDs == ["research-comment"])
+        #expect(match.attachmentIDs == ["research-link"])
+        #expect(result.matchesByCardID["qa-card"] == nil)
+        #expect(result.matchesByCardID["plain-card"] == nil)
+    }
+
+    @Test("board discovery text query preserves title notes tags and comment matching")
+    func boardDiscoveryTextQueryPreservesTitleNotesTagsAndCommentMatching() {
+        let board = KanbanBoard(
+            id: "board",
+            name: "Cider",
+            columns: [
+                KanbanColumn(
+                    id: "queued",
+                    name: "Queued",
+                    cards: [
+                        KanbanCard(id: "title", title: "Reference polish"),
+                        KanbanCard(id: "notes", title: "Other", notes: "Contains reference details"),
+                        KanbanCard(id: "tag", title: "Other", tags: ["reference"]),
+                        KanbanCard(
+                            id: "comment",
+                            title: "Other",
+                            comments: [
+                                KanbanCardComment(kind: .note, body: "Comment mentions reference")
+                            ]
+                        ),
+                        KanbanCard(id: "miss", title: "Other")
+                    ]
+                )
+            ]
+        )
+
+        let result = try? board.filteredForDiscovery(KanbanBoardDiscoveryFilter(query: "reference"))
+
+        #expect(result?.board.columns[0].cards.map(\.id) == ["title", "notes", "tag", "comment"])
+        #expect(result?.matchesByCardID["title"]?.reasons == [.title])
+        #expect(result?.matchesByCardID["notes"]?.reasons == [.notes])
+        #expect(result?.matchesByCardID["tag"]?.reasons == [.tag])
+        #expect(result?.matchesByCardID["comment"]?.reasons == [.comment])
+    }
 }

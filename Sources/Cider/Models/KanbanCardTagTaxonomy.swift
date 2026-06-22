@@ -73,3 +73,135 @@ extension KanbanBoard {
         return copy
     }
 }
+
+enum KanbanBoardDiscoveryMatchReason: String, Equatable, Sendable {
+    case title
+    case notes
+    case tag
+    case comment
+    case attachmentType
+}
+
+struct KanbanBoardDiscoveryFilter: Equatable, Sendable {
+    var query: String
+    var tags: [String]
+    var attachmentTypes: [KanbanCardCommentAttachmentType]
+
+    init(
+        query: String = "",
+        tags: [String] = [],
+        attachmentTypes: [KanbanCardCommentAttachmentType] = []
+    ) {
+        self.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.tags = KanbanCardTagTaxonomy.normalizedTags(from: tags)
+        self.attachmentTypes = Self.uniqueAttachmentTypes(attachmentTypes)
+    }
+
+    var isEmpty: Bool {
+        query.isEmpty && tags.isEmpty && attachmentTypes.isEmpty
+    }
+
+    private static func uniqueAttachmentTypes(_ types: [KanbanCardCommentAttachmentType]) -> [KanbanCardCommentAttachmentType] {
+        var seen = Set<KanbanCardCommentAttachmentType>()
+        return types.filter { seen.insert($0).inserted }
+    }
+}
+
+struct KanbanBoardDiscoveryCardMatch: Equatable, Sendable {
+    var cardID: String
+    var reasons: [KanbanBoardDiscoveryMatchReason]
+    var attachmentTypes: [KanbanCardCommentAttachmentType]
+    var commentIDs: [String]
+    var attachmentIDs: [String]
+}
+
+struct KanbanBoardDiscoveryResult: Equatable, Sendable {
+    var board: KanbanBoard
+    var matchesByCardID: [String: KanbanBoardDiscoveryCardMatch]
+}
+
+extension KanbanBoard {
+    func filteredForDiscovery(_ filter: KanbanBoardDiscoveryFilter) throws -> KanbanBoardDiscoveryResult {
+        guard !filter.isEmpty else {
+            return KanbanBoardDiscoveryResult(board: self, matchesByCardID: [:])
+        }
+
+        var matchesByCardID: [String: KanbanBoardDiscoveryCardMatch] = [:]
+        var copy = self
+        copy.columns = columns.map { column in
+            var filteredColumn = column
+            filteredColumn.cards = column.cards.compactMap { card in
+                guard let match = discoveryMatch(for: card, filter: filter) else { return nil }
+                matchesByCardID[card.id] = match
+                return card
+            }
+            return filteredColumn
+        }
+        return KanbanBoardDiscoveryResult(board: copy, matchesByCardID: matchesByCardID)
+    }
+
+    private func discoveryMatch(
+        for card: KanbanCard,
+        filter: KanbanBoardDiscoveryFilter
+    ) -> KanbanBoardDiscoveryCardMatch? {
+        var reasons: [KanbanBoardDiscoveryMatchReason] = []
+        var attachmentTypes: [KanbanCardCommentAttachmentType] = []
+        var commentIDs: [String] = []
+        var attachmentIDs: [String] = []
+
+        if !filter.tags.isEmpty {
+            guard KanbanCardTagTaxonomy.card(card, matchesAll: filter.tags) else { return nil }
+            appendUnique(.tag, to: &reasons)
+        }
+
+        if !filter.query.isEmpty {
+            let query = filter.query
+            var queryMatched = false
+            if card.title.localizedCaseInsensitiveContains(query) {
+                appendUnique(.title, to: &reasons)
+                queryMatched = true
+            }
+            if card.notes?.localizedCaseInsensitiveContains(query) == true {
+                appendUnique(.notes, to: &reasons)
+                queryMatched = true
+            }
+            if card.tags.contains(where: { $0.localizedCaseInsensitiveContains(query) }) {
+                appendUnique(.tag, to: &reasons)
+                queryMatched = true
+            }
+            if card.comments.contains(where: { $0.body.localizedCaseInsensitiveContains(query) }) {
+                appendUnique(.comment, to: &reasons)
+                queryMatched = true
+            }
+            guard queryMatched else { return nil }
+        }
+
+        if !filter.attachmentTypes.isEmpty {
+            let requestedTypes = Set(filter.attachmentTypes)
+            for comment in card.comments {
+                let matchingAttachments = comment.attachments.filter { requestedTypes.contains($0.type) }
+                guard !matchingAttachments.isEmpty else { continue }
+                appendUnique(comment.id, to: &commentIDs)
+                for attachment in matchingAttachments {
+                    appendUnique(attachment.type, to: &attachmentTypes)
+                    appendUnique(attachment.id, to: &attachmentIDs)
+                }
+            }
+            guard !attachmentIDs.isEmpty else { return nil }
+            appendUnique(.attachmentType, to: &reasons)
+        }
+
+        return KanbanBoardDiscoveryCardMatch(
+            cardID: card.id,
+            reasons: reasons,
+            attachmentTypes: attachmentTypes,
+            commentIDs: commentIDs,
+            attachmentIDs: attachmentIDs
+        )
+    }
+
+    private func appendUnique<T: Equatable>(_ value: T, to values: inout [T]) {
+        guard !values.contains(value) else { return }
+        values.append(value)
+    }
+}

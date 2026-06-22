@@ -8531,23 +8531,46 @@ struct CiderCLI {
 
         case "show", "cards":
             guard let name = args.first else {
-                print("Error: Board name required.")
+                printBoardShowUsage()
+                return
+            }
+            if args.count == 1, ["--help", "-h", "help"].contains(name) {
+                printBoardShowUsage()
                 return
             }
             if let board = findBoardSilently(name, in: storage) {
                 guard let tagFilters = parseBoardTagFilters(from: args) else { return }
-                let visibleBoard = board.filteredByTags(tagFilters)
+                guard let attachmentTypeFilters = parseBoardAttachmentTypeFilters(from: args) else { return }
+                guard let query = parseBoardSearchQuery(from: args) else { return }
+                let filter = KanbanBoardDiscoveryFilter(
+                    query: query,
+                    tags: tagFilters,
+                    attachmentTypes: attachmentTypeFilters
+                )
+                let discoveryResult = (try? board.filteredForDiscovery(filter)) ?? KanbanBoardDiscoveryResult(board: board, matchesByCardID: [:])
+                let visibleBoard = discoveryResult.board
                 if jsonOutput {
                     var payload: [String: Any] = [
                         "boardDetail": boardToDict(visibleBoard),
                         "tagFilters": tagFilters,
+                        "attachmentTypeFilters": attachmentTypeFilters.map(\.rawValue),
+                        "query": query,
                     ]
+                    if !discoveryResult.matchesByCardID.isEmpty {
+                        payload["matches"] = boardDiscoveryMatchesToDict(visibleBoard, matchesByCardID: discoveryResult.matchesByCardID)
+                    }
                     payload["columns"] = visibleBoard.columns.map(boardColumnSummaryToDict)
                     outputJSON(boardReadEnvelope(command: "board.show", board: visibleBoard, payload: payload))
                 } else {
                     print("Board: \(visibleBoard.name) (\(visibleBoard.id))")
                     if !tagFilters.isEmpty {
                         print("Filtered by tags: \(tagFilters.joined(separator: ", "))")
+                    }
+                    if !attachmentTypeFilters.isEmpty {
+                        print("Filtered by attachment types: \(attachmentTypeFilters.map(\.rawValue).joined(separator: ", "))")
+                    }
+                    if !query.isEmpty {
+                        print("Filtered by search: \(query)")
                     }
                     for col in visibleBoard.columns {
                         let done = col.isDoneColumn ? " ✅" : ""
@@ -8570,14 +8593,14 @@ struct CiderCLI {
             if jsonOutput {
                 outputJSON([
                     "coreTags": KanbanCardTagTaxonomy.coreTags,
-                    "usage": "Use cider-cli board show <board> --tag <tag> [--tag <tag>] [--tags <csv>] [--json] to filter cards by all requested tags.",
+                    "usage": "Use cider-cli board show <board> [--query <text>] [--tag <tag>] [--tags <csv>] [--attachment-type <research|inspiration|evidence|handoff|qa|reference>] [--json] to filter cards by text, all requested tags, and typed attachments.",
                 ])
             } else {
                 print("Core Kanban tags:")
                 for tag in KanbanCardTagTaxonomy.coreTags {
                     print("  - \(tag)")
                 }
-                print("\nFilter cards: cider-cli board show <board> --tag bug --tag kanban [--tags qa,agent-handoff] [--json]")
+                print("\nFilter cards: cider-cli board show <board> --query refs --tag bug --attachment-type research [--json]")
             }
 
         case "workflow":
@@ -16625,6 +16648,31 @@ struct CiderCLI {
         ]
     }
 
+    static func boardDiscoveryMatchesToDict(
+        _ board: KanbanBoard,
+        matchesByCardID: [String: KanbanBoardDiscoveryCardMatch]
+    ) -> [[String: Any]] {
+        board.allCards.compactMap { card in
+            guard let match = matchesByCardID[card.id] else { return nil }
+            var dict: [String: Any] = [
+                "cardID": match.cardID,
+                "displayKey": board.displayKey(for: card),
+                "title": card.title,
+                "reasons": match.reasons.map(\.rawValue),
+            ]
+            if !match.attachmentTypes.isEmpty {
+                dict["attachmentTypes"] = match.attachmentTypes.map(\.rawValue)
+            }
+            if !match.commentIDs.isEmpty {
+                dict["commentIDs"] = match.commentIDs
+            }
+            if !match.attachmentIDs.isEmpty {
+                dict["attachmentIDs"] = match.attachmentIDs
+            }
+            return dict
+        }
+    }
+
     static func boardVerificationCommands(board: KanbanBoard, card: KanbanCard? = nil) -> [String] {
         var commands = [
             "cider-cli board show \(board.id) --json"
@@ -23307,13 +23355,73 @@ struct CiderCLI {
                 continue
             }
             guard i + 1 < args.count, !args[i + 1].hasPrefix("--") else {
-                printCLIError("\(token) requires a tag value.\nUsage: cider-cli board show <board> [--tag <tag>] [--tags <csv>] [--json]")
+                printCLIError("\(token) requires a tag value.\nUsage: cider-cli board show <board> [--query <text>] [--tag <tag>] [--tags <csv>] [--attachment-type <type>] [--json]")
                 return nil
             }
             values.append(args[i + 1])
             i += 2
         }
         return KanbanCardTagTaxonomy.normalizedTags(from: values)
+    }
+
+    static func printBoardShowUsage() {
+        print("Usage: cider-cli board show <board> [--query <text>] [--tag <tag>] [--tags <csv>] [--attachment-type <research|inspiration|evidence|handoff|qa|reference>] [--json]")
+        print("Filters are combined: text matches title, notes, tags, or comments; tag filters require all tags; attachment type filters match cards with typed comment attachments.")
+    }
+
+    static func parseBoardSearchQuery(from args: [String]) -> String? {
+        let flags = ["--query", "--search"]
+        var values: [String] = []
+        var i = 0
+        while i < args.count {
+            let token = args[i]
+            guard flags.contains(token) else {
+                i += 1
+                continue
+            }
+            guard i + 1 < args.count, !args[i + 1].hasPrefix("--") else {
+                printCLIError("\(token) requires a search value.\nUsage: cider-cli board show <board> [--query <text>] [--tag <tag>] [--tags <csv>] [--attachment-type <type>] [--json]")
+                return nil
+            }
+            values.append(args[i + 1])
+            i += 2
+        }
+        return values.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func parseBoardAttachmentTypeFilters(from args: [String]) -> [KanbanCardCommentAttachmentType]? {
+        var values: [String] = []
+        var i = 0
+        while i < args.count {
+            let token = args[i]
+            guard token == "--attachment-type" || token == "--attachment-types" else {
+                i += 1
+                continue
+            }
+            guard i + 1 < args.count, !args[i + 1].hasPrefix("--") else {
+                printCLIError("\(token) requires an attachment type.\nUsage: cider-cli board show <board> [--attachment-type <research|inspiration|evidence|handoff|qa|reference>] [--json]")
+                return nil
+            }
+            values += splitIDs(args[i + 1])
+            i += 2
+        }
+
+        var parsed: [KanbanCardCommentAttachmentType] = []
+        for value in values {
+            let normalized = value
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: "-", with: "_")
+            guard let type = KanbanCardCommentAttachmentType(rawValue: normalized) else {
+                let allowed = KanbanCardCommentAttachmentType.allCases.map(\.rawValue).joined(separator: "|")
+                printCLIError("Invalid attachment type '\(value)'. Use one of: \(allowed).")
+                return nil
+            }
+            if !parsed.contains(type) {
+                parsed.append(type)
+            }
+        }
+        return parsed
     }
 
     /// Parse every occurrence of `--flag <value>` in `args`. Used for
@@ -24162,7 +24270,7 @@ struct CiderCLI {
 
         BOARD WORKFLOW
           cider-cli board list
-          cider-cli board show <board-name-or-id> [--tag <tag>] [--tags <csv>] [--json]
+          cider-cli board show <board-name-or-id> [--query <text>] [--tag <tag>] [--tags <csv>] [--attachment-type <research|inspiration|evidence|handoff|qa|reference>] [--json]
           cider-cli board tags [--json]
           cider-cli board recent <board> [--limit <count>] [--json]
           cider-cli board testing-summary <board> [--json]
