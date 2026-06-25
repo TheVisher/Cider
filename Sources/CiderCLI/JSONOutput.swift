@@ -1328,6 +1328,83 @@ func dueToSurfaceFeedToDict(_ feed: CiderDueToSurfaceFeed) -> [String: Any] {
     ]
 }
 
+func dailyEpisodePreviewToDict(_ preview: DailyEpisodePreview) -> [String: Any] {
+    var dict: [String: Any] = [
+        "ok": true,
+        "command": "item.daily-episode",
+        "readOnly": true,
+        "changed": false,
+        "date": preview.date,
+        "title": preview.title,
+        "exists": preview.exists,
+        "sourceItemRefs": preview.sourceItemRefs.map(dailyEpisodeSourceItemToDict),
+        "entries": preview.entries.map(dailyEpisodeEntryToDict),
+        "trustBoundary": [
+            "status": "preview_read_model",
+            "generatedTruth": false,
+            "acceptedGeneratedTruth": false,
+            "sourcePreserved": true,
+            "sourceMutation": false,
+            "proseGeneration": false,
+        ],
+        "safeNextCommands": preview.safeNextCommands,
+    ]
+    if let dailyJournal = preview.dailyJournal {
+        dict["dailyJournal"] = dailyEpisodeSourceItemToDict(dailyJournal)
+    }
+    if let explanation = preview.explanation {
+        dict["explanation"] = explanation
+    }
+    return dict
+}
+
+func dailyEpisodeSourceItemToDict(_ item: DailyEpisodeSourceItem) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": item.id,
+        "type": item.type,
+        "ref": item.ref,
+        "title": item.title,
+    ]
+    if let relativePath = item.relativePath {
+        dict["relativePath"] = relativePath
+    }
+    return dict
+}
+
+func dailyEpisodeEntryToDict(_ entry: DailyEpisodeEntry) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": entry.id,
+        "date": entry.date,
+        "snippet": entry.snippet,
+        "sourceItemRef": entry.sourceItemRef,
+        "sourceLine": entry.sourceLine,
+        "provenanceRefs": entry.provenanceRefs.map(dailyEpisodeProvenanceRefToDict),
+    ]
+    if let time = entry.time { dict["time"] = time }
+    if let heading = entry.heading { dict["heading"] = heading }
+    return dict
+}
+
+func dailyEpisodeProvenanceRefToDict(_ ref: DailyEpisodeProvenanceRef) -> [String: Any] {
+    var dict: [String: Any] = [
+        "ref": ref.ref,
+        "ownerType": ref.ownerType,
+        "ownerID": ref.ownerID,
+        "sourceKind": ref.sourceKind,
+        "metadata": ref.metadata,
+        "createdAt": ISO8601DateFormatter().string(from: ref.createdAt),
+    ]
+    if let surface = ref.surface { dict["surface"] = surface }
+    if let channel = ref.channel { dict["channel"] = channel }
+    if let channelID = ref.channelID { dict["channelID"] = channelID }
+    if let threadID = ref.threadID { dict["threadID"] = threadID }
+    if let messageID = ref.messageID { dict["messageID"] = messageID }
+    if let senderID = ref.senderID { dict["senderID"] = senderID }
+    if let senderName = ref.senderName { dict["senderName"] = senderName }
+    if let sourceText = ref.sourceText { dict["sourceText"] = sourceText }
+    return dict
+}
+
 func dueToSurfaceCandidateToDict(_ candidate: CiderDueToSurfaceCandidate, formatter: ISO8601DateFormatter) -> [String: Any] {
     var dict: [String: Any] = [
         "id": candidate.id,

@@ -244,6 +244,7 @@ struct CiderCLI {
           cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
           cider-cli item graph-health [--json]
           cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
+          cider-cli item daily-episode --date YYYY-MM-DD [--json]
           cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
             Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
 
@@ -295,6 +296,8 @@ struct CiderCLI {
             return "cider-cli item sync-project <project-id-or-name> [--json]"
         case "daily-tracker", "tracker-daily", "daily-signals":
             return "cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]\nDefault sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows."
+        case "daily-episode", "episode-daily":
+            return "cider-cli item daily-episode --date YYYY-MM-DD [--json]"
         default:
             return nil
         }
@@ -5122,6 +5125,7 @@ struct CiderCLI {
               cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
               cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]
               cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
+              cider-cli item daily-episode --date YYYY-MM-DD [--json]
               cider-cli item sync-project <project-id-or-name> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
               cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]
@@ -5214,6 +5218,32 @@ struct CiderCLI {
                     for error in report.errors {
                         print("  Error [\(error.kind)]: \(error.message)")
                     }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "daily-episode", "episode-daily":
+            guard let date = parseFlag("--date", from: args), isValidLocalDateString(date) else {
+                printCLIError("Usage: cider-cli item daily-episode --date YYYY-MM-DD [--json]")
+                return
+            }
+            do {
+                let preview = try DailyEpisodeReadModelService(
+                    database: .shared,
+                    notesStorage: .shared
+                ).preview(date: date)
+                if jsonOutput {
+                    outputJSON(dailyEpisodePreviewToDict(preview))
+                } else {
+                    print("\(preview.title)")
+                    if let journal = preview.dailyJournal {
+                        print("  Journal: \(journal.title) (\(journal.id.prefix(8)))")
+                    } else if let explanation = preview.explanation {
+                        print("  \(explanation)")
+                    }
+                    print("  Entries: \(preview.entries.count)")
+                    print("  Read-only preview; no source notes changed.")
                 }
             } catch {
                 printCLIError(error.localizedDescription)
