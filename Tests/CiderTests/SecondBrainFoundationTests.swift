@@ -1704,13 +1704,25 @@ struct SecondBrainFoundationTests {
         #expect(model.historyEntries.first?.body == "Added history support.")
         #expect(model.historyEntries.first?.source == "codex")
         #expect(model.agentContext.notes.contains("Future agents should append verification"))
-        #expect(model.agentContext.commands(board: "Cider", cardID: "abc123").contains {
+        let commands = model.agentContext.commands(board: "Cider", cardID: "abc123")
+        let commentListIndex = commands.firstIndex {
+            $0.contains("board comment list Cider --card abc123")
+        } ?? Int.max
+        let historyIndex = commands.firstIndex {
+            $0.contains("board history add Cider --card abc123")
+        } ?? Int.max
+        let commentAddIndex = commands.firstIndex {
             $0.contains("board comment add Cider --card abc123")
-        })
-        #expect(model.agentContext.commands(board: "Cider", cardID: "abc123").contains {
+        } ?? Int.max
+        let evidenceIndex = commands.firstIndex {
+            $0.contains("board evidence add Cider --card abc123")
+        } ?? Int.max
+        #expect(commentListIndex < historyIndex)
+        #expect(commentAddIndex < evidenceIndex)
+        #expect(commands.contains {
             $0.contains("board evidence add Cider --card abc123")
         })
-        #expect(model.agentContext.commands(board: "Cider", cardID: "abc123").contains {
+        #expect(commands.contains {
             $0.contains("board history add Cider --card abc123")
         })
     }
@@ -2221,6 +2233,12 @@ struct SecondBrainFoundationTests {
         #expect(safeCommands.contains("cider-cli item get card \(cardRef) --json"))
         #expect(safeCommands.contains("cider-cli board card inspect \(contextBoardID) --card \(cardRef) --json"))
         #expect(safeCommands.contains("cider-cli board section update \(contextBoardID) --card \(cardRef) --section \"Current State\" --value \"...\" --json"))
+        let contextCommentListIndex = safeCommands.firstIndex(of: "cider-cli board comment list \(contextBoardID) --card \(cardRef) --json") ?? Int.max
+        let contextCommentAddIndex = safeCommands.firstIndex(of: "cider-cli board comment add \(contextBoardID) --card \(cardRef) --kind implementation --text \"...\" --author \"...\" --source \"...\" --json") ?? Int.max
+        let contextHistoryIndex = safeCommands.firstIndex(of: "cider-cli board history add \(contextBoardID) --card \(cardRef) --type implementation --text \"...\" --source \"...\" --json") ?? Int.max
+        let contextEvidenceIndex = safeCommands.firstIndex(of: "cider-cli board evidence add \(contextBoardID) --card \(cardRef) --text \"...\" --source \"...\" --json") ?? Int.max
+        #expect(contextCommentListIndex < contextHistoryIndex)
+        #expect(contextCommentAddIndex < contextEvidenceIndex)
         #expect(safeCommands.contains("cider-cli board evidence add \(contextBoardID) --card \(cardRef) --text \"...\" --source \"...\" --json"))
         #expect(safeCommands.contains("cider-cli board history add \(contextBoardID) --card \(cardRef) --type implementation --text \"...\" --source \"...\" --json"))
 

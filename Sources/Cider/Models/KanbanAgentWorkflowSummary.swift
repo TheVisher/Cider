@@ -103,6 +103,7 @@ struct KanbanAgentWorkflowSummary: Equatable, Sendable {
         let boardRef = quoted(board.name)
         let inspect = "cider-cli board card inspect \(boardRef) --card \(card.id) --json"
         let itemContext = "cider-cli item context card \(card.id) --json"
+        let commentList = "cider-cli board comment list \(boardRef) --card \(card.id) --json"
 
         switch role {
         case .implementationQueue:
@@ -134,15 +135,18 @@ struct KanbanAgentWorkflowSummary: Equatable, Sendable {
                 sourceColumnName: column.name,
                 action: .continueAgent,
                 label: "Continue implementation",
-                reason: "Card is actively owned; continue from card context and record evidence before routing forward.",
+                reason: "Card is actively owned; continue from card context and record routine work-log updates as chronological comments before routing forward.",
                 requiresApproval: false,
                 destinationColumnID: destination?.id,
                 destinationColumnName: destination?.name,
                 safeCommands: [
                     inspect,
                     itemContext,
-                    "cider-cli board history add \(boardRef) --card \(card.id) --type implementation --text \"<summary>\" --source <agent>",
-                    "cider-cli board evidence add \(boardRef) --card \(card.id) --text \"<verification>\" --source <agent>",
+                    commentList,
+                    "cider-cli board comment add \(boardRef) --card \(card.id) --kind implementation --text \"<summary>\" --author <agent> --source <agent> --json",
+                    "cider-cli board comment add \(boardRef) --card \(card.id) --kind test --text \"<verification>\" --author <agent> --source <agent> --json",
+                    "cider-cli board evidence add \(boardRef) --card \(card.id) --text \"<structured verification>\" --source <agent>",
+                    "cider-cli board history add \(boardRef) --card \(card.id) --type implementation --text \"<legacy summary>\" --source <agent>",
                     "cider-cli board move-card \(boardRef) --card \(card.id) --to \(quoted(destination?.name ?? "Testing"))",
                 ]
             )
@@ -157,12 +161,14 @@ struct KanbanAgentWorkflowSummary: Equatable, Sendable {
                     sourceColumnName: column.name,
                     action: .routeBackForFix,
                     label: "Route back for fix",
-                    reason: "Manual QA failed; route back with an explicit failed-attempt note before more implementation.",
+                    reason: "Manual QA failed; route back with an explicit regression comment before more implementation.",
                     requiresApproval: true,
                     destinationColumnID: destination?.id,
                     destinationColumnName: destination?.name,
                     safeCommands: [
                         inspect,
+                        commentList,
+                        "cider-cli board comment add \(boardRef) --card \(card.id) --kind regression --text \(quoted(firstFailure)) --author reviewer --source reviewer --json",
                         "cider-cli board history add \(boardRef) --card \(card.id) --type failed-attempt --text \(quoted(firstFailure)) --source reviewer",
                         "cider-cli board move-card \(boardRef) --card \(card.id) --to \(quoted(destination?.name ?? "Needs Fix"))",
                     ]
@@ -175,12 +181,14 @@ struct KanbanAgentWorkflowSummary: Equatable, Sendable {
                 sourceColumnName: column.name,
                 action: .reviewTesting,
                 label: "Review testing evidence",
-                reason: "Card is in Testing; inspect evidence and classify whether Erik or an agent should verify next.",
+                reason: "Card is in Testing; inspect chronological comments and classify whether Erik or an agent should verify next.",
                 requiresApproval: false,
                 safeCommands: [
                     inspect,
+                    commentList,
                     "cider-cli board testing-summary \(boardRef) --json",
-                    "cider-cli board evidence add \(boardRef) --card \(card.id) --text \"<review result>\" --source reviewer",
+                    "cider-cli board comment add \(boardRef) --card \(card.id) --kind test --text \"<review result>\" --author reviewer --source reviewer --json",
+                    "cider-cli board evidence add \(boardRef) --card \(card.id) --text \"<structured review result>\" --source reviewer",
                 ]
             )
         case .needsFix:

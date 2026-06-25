@@ -17,9 +17,9 @@ struct KanbanCardAgentContext: Equatable {
             "cider-cli board recent \(board) --limit 20 --json",
             "cider-cli board card inspect \(board) --card \(cardID) --json",
             "cider-cli item get card \(cardID) --json",
-            "cider-cli board section update \(board) --card \(cardID) --section \"Current State\" --value \"...\" --json",
             "cider-cli board comment list \(board) --card \(cardID) --json",
             "cider-cli board comment add \(board) --card \(cardID) --kind implementation --text \"...\" --author \"...\" --source \"...\" --json",
+            "cider-cli board section update \(board) --card \(cardID) --section \"Current State\" --value \"...\" --json",
             "cider-cli board history add \(board) --card \(cardID) --type implementation --text \"...\" --source \"...\" --json",
             "cider-cli board evidence add \(board) --card \(cardID) --text \"...\" --source \"...\" --json",
         ]
@@ -326,10 +326,10 @@ struct KanbanCardDashboardModel: Equatable {
 
     private static func agentContext(from sections: [KanbanCardSection]) -> KanbanCardAgentContext {
         let notes = firstBody(in: sections, matching: agentContextKeys)
-            ?? "Future agents should update this card through Cider CLI commands. Put implementation summaries in Implementation History, failed attempts in Failed Attempts, verification in Test Evidence, commit traceability in Commits, durable decisions in Decisions, and current status in Current State."
+            ?? "Future agents should update this card through Cider CLI commands. Use card comments as the chronological work log for implementation, test, handoff, blocker, regression, and final-report updates. Use structured sections for durable current state, decisions, and compatibility evidence when needed."
         return KanbanCardAgentContext(
             notes: notes,
-            updateTargets: ["Current State", "Implementation History", "Failed Attempts", "Commits", "Decisions", "Test Evidence", "QA Findings", "Agent Handoff"]
+            updateTargets: ["Card Comments", "Current State", "Implementation History", "Failed Attempts", "Commits", "Decisions", "Test Evidence", "QA Findings", "Agent Handoff"]
         )
     }
 

@@ -9194,7 +9194,7 @@ struct CiderCLI {
                     "canonicalSurface": "card_comments_work_log",
                     "commentCount": resolvedCard.comments.count,
                     "comments": limitedComments.map(kanbanCommentToDict),
-                    "usage": "Append implementation, test, handoff, blocker, regression, and final-report notes with board comment add; inspect or list comments to read the chronological work log.",
+                    "usage": "List comments to read the chronological work log, then append implementation, test, handoff, blocker, regression, and final-report notes with board comment add.",
                     "safeNextCommands": [
                         "cider-cli board comment add \(board.id) --card \(resolvedCard.id) --kind implementation --text \"...\" --author \"...\" --source \"...\" --json",
                         "cider-cli board card inspect \(board.id) --card \(resolvedCard.id) --json",
@@ -11111,8 +11111,8 @@ struct CiderCLI {
     static func boardCommentUsage() -> String {
         """
         Usage:
-          cider-cli board comment add <board> --card <id> --kind <\(kanbanCommentKindUsageList(separator: "|"))> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--attachment-type <research|inspiration|evidence|handoff|qa|reference>] [--attachment-title <title>] [--attachment-url <url>|--attachment-file <path>|--attachment-item <type:id>|--attachment-project-artifact <path>] [--json]
           cider-cli board comment list <board> --card <id> [--limit <count>] [--json]
+          cider-cli board comment add <board> --card <id> --kind <\(kanbanCommentKindUsageList(separator: "|"))> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--attachment-type <research|inspiration|evidence|handoff|qa|reference>] [--attachment-title <title>] [--attachment-url <url>|--attachment-file <path>|--attachment-item <type:id>|--attachment-project-artifact <path>] [--json]
 
         Card comments are the canonical chronological work log for implementation, test, handoff, blocker, regression, and final-report notes.
         """
@@ -15465,9 +15465,9 @@ struct CiderCLI {
             "cider-cli item relations card \(detail.card.id) --json",
             "cider-cli item backlinks card \(detail.card.id) --json",
             "cider-cli board card inspect \(detail.board.id) --card \(detail.card.id) --json",
-            "cider-cli board section update \(detail.board.id) --card \(detail.card.id) --section \"Current State\" --value \"...\" --json",
             "cider-cli board comment list \(detail.board.id) --card \(detail.card.id) --json",
             "cider-cli board comment add \(detail.board.id) --card \(detail.card.id) --kind implementation --text \"...\" --author \"...\" --source \"...\" --json",
+            "cider-cli board section update \(detail.board.id) --card \(detail.card.id) --section \"Current State\" --value \"...\" --json",
             "cider-cli board history add \(detail.board.id) --card \(detail.card.id) --type implementation --text \"...\" --source \"...\" --json",
             "cider-cli board evidence add \(detail.board.id) --card \(detail.card.id) --text \"...\" --source \"...\" --json",
         ]
@@ -24399,8 +24399,8 @@ struct CiderCLI {
                                          [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none]
                                          [--parent <card-id>] [--clear-parent]
           cider-cli board section update <board> --card <id> --section <name> --value <text> [--json]
-          cider-cli board comment add <board> --card <id> --kind <note|implementation|test|handoff|blocker|regression|decision|evidence|qa|final-report> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--json]
           cider-cli board comment list <board> --card <id> [--limit <count>] [--json]
+          cider-cli board comment add <board> --card <id> --kind <note|implementation|test|handoff|blocker|regression|decision|evidence|qa|final-report> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--json]
             Card comments are the canonical chronological work log for implementation, test, handoff, blocker, regression, and final-report notes.
           cider-cli board evidence add <board> --card <id> --text <text> [--source <source>] [--json]
           cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff|commit> --text <text> [--source <source>] [--json]

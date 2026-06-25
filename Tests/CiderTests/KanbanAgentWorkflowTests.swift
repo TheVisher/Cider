@@ -319,7 +319,9 @@ struct KanbanAgentWorkflowTests {
                 KanbanColumn(
                     id: "in_progress",
                     name: "In Progress",
-                    cards: []
+                    cards: [
+                        KanbanCard(id: "active", title: "Active implementation", agent: "codex"),
+                    ]
                 ),
                 KanbanColumn(
                     id: "testing",
@@ -350,10 +352,27 @@ struct KanbanAgentWorkflowTests {
         #expect(startAction.requiresApproval)
         #expect(startAction.safeCommands.contains("cider-cli board move-card \"Agent Loop\" --card next --to \"In Progress\""))
 
+        let activeAction = try #require(summary.automationActions.first { $0.cardID == "active" })
+        #expect(activeAction.action == .continueAgent)
+        #expect(activeAction.reason == "Card is actively owned; continue from card context and record routine work-log updates as chronological comments before routing forward.")
+        #expect(Array(activeAction.safeCommands.prefix(4)) == [
+            "cider-cli board card inspect \"Agent Loop\" --card active --json",
+            "cider-cli item context card active --json",
+            "cider-cli board comment list \"Agent Loop\" --card active --json",
+            "cider-cli board comment add \"Agent Loop\" --card active --kind implementation --text \"<summary>\" --author <agent> --source <agent> --json",
+        ])
+        #expect(activeAction.safeCommands.contains("cider-cli board evidence add \"Agent Loop\" --card active --text \"<structured verification>\" --source <agent>"))
+        #expect(activeAction.safeCommands.contains("cider-cli board history add \"Agent Loop\" --card active --type implementation --text \"<legacy summary>\" --source <agent>"))
+
         let failedReviewAction = try #require(summary.automationActions.first { $0.cardID == "failed" })
         #expect(failedReviewAction.action == .routeBackForFix)
         #expect(failedReviewAction.destinationColumnID == "needs_fix")
-        #expect(failedReviewAction.reason == "Manual QA failed; route back with an explicit failed-attempt note before more implementation.")
+        #expect(failedReviewAction.reason == "Manual QA failed; route back with an explicit regression comment before more implementation.")
+        #expect(Array(failedReviewAction.safeCommands.prefix(3)) == [
+            "cider-cli board card inspect \"Agent Loop\" --card failed --json",
+            "cider-cli board comment list \"Agent Loop\" --card failed --json",
+            "cider-cli board comment add \"Agent Loop\" --card failed --kind regression --text \"Step 1 failed: The review button moved the card without recording why.\" --author reviewer --source reviewer --json",
+        ])
         #expect(failedReviewAction.safeCommands.contains("cider-cli board history add \"Agent Loop\" --card failed --type failed-attempt --text \"Step 1 failed: The review button moved the card without recording why.\" --source reviewer"))
         #expect(failedReviewAction.safeCommands.contains("cider-cli board move-card \"Agent Loop\" --card failed --to \"Needs Fix\""))
     }
