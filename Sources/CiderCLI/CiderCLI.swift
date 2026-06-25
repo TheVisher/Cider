@@ -9163,35 +9163,60 @@ struct CiderCLI {
             printBoardCardSectionResult(board: board, card: updatedCard)
 
         case "comment":
-            guard args.first == "add" else {
-                printCLIError("Usage: cider-cli board comment add <board> --card <id> --kind <note|handoff|decision|evidence|qa|final-report> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--attachment-type <research|inspiration|evidence|handoff|qa|reference>] [--attachment-title <title>] [--attachment-url <url>|--attachment-file <path>|--attachment-item <type:id>|--attachment-project-artifact <path>] [--json]")
+            guard let commentCommand = args.first else {
+                printCLIError(boardCommentUsage())
                 return
             }
             let commentArgs = Array(args.dropFirst())
-            guard let boardRef = commentArgs.first,
-                  let cardID = parseFlag("--card", from: commentArgs),
-                  let text = parseFlag("--text", from: commentArgs) else {
-                printCLIError("Usage: cider-cli board comment add <board> --card <id> --kind <note|handoff|decision|evidence|qa|final-report> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--attachment-type <research|inspiration|evidence|handoff|qa|reference>] [--attachment-title <title>] [--attachment-url <url>|--attachment-file <path>|--attachment-item <type:id>|--attachment-project-artifact <path>] [--json]")
+            if ["help", "--help", "-h"].contains(commentCommand) {
+                print(boardCommentUsage())
                 return
             }
-            let kindValue = parseFlag("--kind", from: commentArgs) ?? "note"
-            let kind: KanbanCardCommentKind?
-            switch kindValue.lowercased().replacingOccurrences(of: "_", with: "-") {
-            case "note": kind = .note
-            case "handoff": kind = .handoff
-            case "decision": kind = .decision
-            case "evidence": kind = .evidence
-            case "qa": kind = .qa
-            case "final-report", "final", "report": kind = .finalReport
-            default: kind = nil
+            guard ["add", "list"].contains(commentCommand) else {
+                printCLIError(boardCommentUsage())
+                return
             }
-            guard let kind else {
-                printCLIError("Invalid comment kind '\(kindValue)'. Use note, handoff, decision, evidence, qa, or final-report.")
+            guard let boardRef = commentArgs.first,
+                  let cardID = parseFlag("--card", from: commentArgs) else {
+                printCLIError(boardCommentUsage())
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
             guard let resolvedCard = board.card(matching: cardID) else {
                 printCLIError("Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+            if commentCommand == "list" {
+                guard let parsedLimit = parsePositiveIntFlag("--limit", from: commentArgs, command: "board.comment.list", minimum: 0) else { return }
+                let sortedComments = chronologicalKanbanComments(resolvedCard.comments)
+                let limitedComments = parsedLimit.map { Array(sortedComments.prefix($0)) } ?? sortedComments
+                let payload: [String: Any] = [
+                    "canonicalSurface": "card_comments_work_log",
+                    "commentCount": resolvedCard.comments.count,
+                    "comments": limitedComments.map(kanbanCommentToDict),
+                    "usage": "Append implementation, test, handoff, blocker, regression, and final-report notes with board comment add; inspect or list comments to read the chronological work log.",
+                    "safeNextCommands": [
+                        "cider-cli board comment add \(board.id) --card \(resolvedCard.id) --kind implementation --text \"...\" --author \"...\" --source \"...\" --json",
+                        "cider-cli board card inspect \(board.id) --card \(resolvedCard.id) --json",
+                    ],
+                ]
+                if jsonOutput {
+                    outputJSON(boardReadEnvelope(command: "board.comment.list", board: board, card: resolvedCard, payload: payload))
+                } else {
+                    print("Work Log comments for \(resolvedCard.title) [\(resolvedCard.id)]")
+                    for comment in limitedComments {
+                        print("  [\(comment.id)] \(comment.kind.displayName): \(comment.body)")
+                    }
+                }
+                return
+            }
+            guard let text = parseFlag("--text", from: commentArgs) else {
+                printCLIError(boardCommentUsage())
+                return
+            }
+            let kindValue = parseFlag("--kind", from: commentArgs) ?? "note"
+            guard let kind = parseKanbanCommentKind(kindValue) else {
+                printCLIError("Invalid comment kind '\(kindValue)'. Use \(kanbanCommentKindUsageList()).")
                 return
             }
             let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -9507,7 +9532,7 @@ struct CiderCLI {
             }
 
         default:
-            printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, audit, show, tags, workflow, recent, testing-summary, parent-summary, milestone create/list/inspect/attach-card, card inspect, create, rename, delete, add-card, update-card, section update, comment add, evidence add, history add, move-card, delete-card, children, add-column, set-column-done, rename-column, delete-column")
+            printCLIError("Unknown board command: \(subcommand ?? "nil"). Commands: list, audit, show, tags, workflow, recent, testing-summary, parent-summary, milestone create/list/inspect/attach-card, card inspect, create, rename, delete, add-card, update-card, section update, comment add/list, evidence add, history add, move-card, delete-card, children, add-column, set-column-done, rename-column, delete-column")
         }
     }
 
@@ -11080,6 +11105,47 @@ struct CiderCLI {
                     previewKind: .item
                 )
             }
+        }
+    }
+
+    static func boardCommentUsage() -> String {
+        """
+        Usage:
+          cider-cli board comment add <board> --card <id> --kind <\(kanbanCommentKindUsageList(separator: "|"))> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--attachment-type <research|inspiration|evidence|handoff|qa|reference>] [--attachment-title <title>] [--attachment-url <url>|--attachment-file <path>|--attachment-item <type:id>|--attachment-project-artifact <path>] [--json]
+          cider-cli board comment list <board> --card <id> [--limit <count>] [--json]
+
+        Card comments are the canonical chronological work log for implementation, test, handoff, blocker, regression, and final-report notes.
+        """
+    }
+
+    static func kanbanCommentKindUsageList(separator: String = ", ") -> String {
+        [
+            "note",
+            "implementation",
+            "test",
+            "handoff",
+            "blocker",
+            "regression",
+            "decision",
+            "evidence",
+            "qa",
+            "final-report",
+        ].joined(separator: separator)
+    }
+
+    static func parseKanbanCommentKind(_ value: String) -> KanbanCardCommentKind? {
+        switch value.lowercased().replacingOccurrences(of: "_", with: "-") {
+        case "note": .note
+        case "implementation", "implement": .implementation
+        case "test", "tests": .test
+        case "handoff": .handoff
+        case "blocker", "blocked": .blocker
+        case "regression", "regressed": .regression
+        case "decision": .decision
+        case "evidence": .evidence
+        case "qa": .qa
+        case "final-report", "final", "report": .finalReport
+        default: nil
         }
     }
 
@@ -15400,7 +15466,8 @@ struct CiderCLI {
             "cider-cli item backlinks card \(detail.card.id) --json",
             "cider-cli board card inspect \(detail.board.id) --card \(detail.card.id) --json",
             "cider-cli board section update \(detail.board.id) --card \(detail.card.id) --section \"Current State\" --value \"...\" --json",
-            "cider-cli board comment add \(detail.board.id) --card \(detail.card.id) --kind note --text \"...\" --author \"...\" --source \"...\" --json",
+            "cider-cli board comment list \(detail.board.id) --card \(detail.card.id) --json",
+            "cider-cli board comment add \(detail.board.id) --card \(detail.card.id) --kind implementation --text \"...\" --author \"...\" --source \"...\" --json",
             "cider-cli board history add \(detail.board.id) --card \(detail.card.id) --type implementation --text \"...\" --source \"...\" --json",
             "cider-cli board evidence add \(detail.board.id) --card \(detail.card.id) --text \"...\" --source \"...\" --json",
         ]
@@ -15688,7 +15755,16 @@ struct CiderCLI {
     static func appendKanbanCommentFields(_ card: KanbanCard, to dict: inout [String: Any]) {
         dict["commentCount"] = card.comments.count
         guard !card.comments.isEmpty else { return }
-        dict["comments"] = card.comments.map(kanbanCommentToDict)
+        dict["comments"] = chronologicalKanbanComments(card.comments).map(kanbanCommentToDict)
+    }
+
+    static func chronologicalKanbanComments(_ comments: [KanbanCardComment]) -> [KanbanCardComment] {
+        comments.sorted {
+            if $0.createdAt == $1.createdAt {
+                return $0.id < $1.id
+            }
+            return $0.createdAt < $1.createdAt
+        }
     }
 
     static func kanbanCommentToDict(_ comment: KanbanCardComment) -> [String: Any] {
@@ -24323,6 +24399,9 @@ struct CiderCLI {
                                          [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none]
                                          [--parent <card-id>] [--clear-parent]
           cider-cli board section update <board> --card <id> --section <name> --value <text> [--json]
+          cider-cli board comment add <board> --card <id> --kind <note|implementation|test|handoff|blocker|regression|decision|evidence|qa|final-report> --text <text> [--author <name>] [--source <source>] [--parent <comment-id>] [--json]
+          cider-cli board comment list <board> --card <id> [--limit <count>] [--json]
+            Card comments are the canonical chronological work log for implementation, test, handoff, blocker, regression, and final-report notes.
           cider-cli board evidence add <board> --card <id> --text <text> [--source <source>] [--json]
           cider-cli board history add <board> --card <id> --type <implementation|failed-attempt|test|decision|handoff|commit> --text <text> [--source <source>] [--json]
           cider-cli board move-card <board> --card <id> --to <column>

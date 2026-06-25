@@ -93,7 +93,11 @@ struct KanbanCardHistoryEntry: Codable, Identifiable, Equatable, Sendable {
 
 enum KanbanCardCommentKind: String, Codable, CaseIterable, Sendable {
     case note
+    case implementation
+    case test
     case handoff
+    case blocker
+    case regression
     case decision
     case evidence
     case qa
@@ -102,7 +106,11 @@ enum KanbanCardCommentKind: String, Codable, CaseIterable, Sendable {
     var displayName: String {
         switch self {
         case .note: "Note"
+        case .implementation: "Implementation"
+        case .test: "Test"
         case .handoff: "Handoff"
+        case .blocker: "Blocker"
+        case .regression: "Regression"
         case .decision: "Decision"
         case .evidence: "Evidence"
         case .qa: "QA"
@@ -113,7 +121,11 @@ enum KanbanCardCommentKind: String, Codable, CaseIterable, Sendable {
     var symbolName: String {
         switch self {
         case .note: "text.bubble"
+        case .implementation: "hammer"
+        case .test: "checklist.checked"
         case .handoff: "person.2.wave.2"
+        case .blocker: "exclamationmark.triangle"
+        case .regression: "arrow.uturn.backward"
         case .decision: "checkmark.seal.fill"
         case .evidence: "checkmark.seal"
         case .qa: "list.clipboard"

@@ -18,7 +18,8 @@ struct KanbanCardAgentContext: Equatable {
             "cider-cli board card inspect \(board) --card \(cardID) --json",
             "cider-cli item get card \(cardID) --json",
             "cider-cli board section update \(board) --card \(cardID) --section \"Current State\" --value \"...\" --json",
-            "cider-cli board comment add \(board) --card \(cardID) --kind note --text \"...\" --author \"...\" --source \"...\" --json",
+            "cider-cli board comment list \(board) --card \(cardID) --json",
+            "cider-cli board comment add \(board) --card \(cardID) --kind implementation --text \"...\" --author \"...\" --source \"...\" --json",
             "cider-cli board history add \(board) --card \(cardID) --type implementation --text \"...\" --source \"...\" --json",
             "cider-cli board evidence add \(board) --card \(cardID) --text \"...\" --source \"...\" --json",
         ]

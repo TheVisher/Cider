@@ -2377,6 +2377,76 @@ struct SecondBrainFoundationTests {
         })
     }
 
+    @Test("process CLI lists card work log comments chronologically")
+    func processCLIListsCardWorkLogCommentsChronologically() throws {
+        let vaultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-work-log-comments-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        let help = try runCLI(["board", "--help"], vaultURL: vaultURL)
+        #expect(help.contains("board comment add <board> --card <id> --kind <note|implementation|test|handoff|blocker|regression|decision|evidence|qa|final-report>"))
+        #expect(help.contains("board comment list <board> --card <id> [--limit <count>] [--json]"))
+        #expect(help.contains("Card comments are the canonical chronological work log for implementation, test, handoff, blocker, regression, and final-report notes."))
+
+        _ = try runCLI(["board", "create", "Work Log Smoke"], vaultURL: vaultURL)
+        let cardOutput = try runCLI([
+            "board", "add-card", "Work Log Smoke",
+            "--column", "Backlog",
+            "--title", "Needs work log",
+        ], vaultURL: vaultURL)
+        let cardID = String(try #require(cardOutput.firstMatch(of: /\[([A-Za-z0-9]+)\]/)?.1))
+
+        let firstAdd = try jsonObject(from: runCLI([
+            "board", "comment", "add", "Work Log Smoke",
+            "--card", cardID,
+            "--kind", "implementation",
+            "--text", "Implemented the first slice.",
+            "--author", "Codex",
+            "--source", "codex",
+            "--json",
+        ], vaultURL: vaultURL))
+        let first = try #require(firstAdd["comment"] as? [String: Any])
+        let firstID = try #require(first["id"] as? String)
+
+        _ = try jsonObject(from: runCLI([
+            "board", "comment", "add", "Work Log Smoke",
+            "--card", cardID,
+            "--kind", "test",
+            "--text", "Focused tests passed.",
+            "--author", "Codex",
+            "--source", "swift-test",
+            "--parent", firstID,
+            "--json",
+        ], vaultURL: vaultURL))
+
+        let listed = try jsonObject(from: runCLI([
+            "board", "comment", "list", "Work Log Smoke",
+            "--card", cardID,
+            "--json",
+        ], vaultURL: vaultURL))
+        #expect(listed["command"] as? String == "board.comment.list")
+        #expect(listed["readOnly"] as? Bool == true)
+        #expect(listed["changed"] as? Bool == false)
+        #expect(listed["canonicalSurface"] as? String == "card_comments_work_log")
+        #expect(listed["commentCount"] as? Int == 2)
+
+        let comments = try #require(listed["comments"] as? [[String: Any]])
+        #expect(comments.map { $0["kind"] as? String } == ["implementation", "test"])
+        #expect(comments.first?["author"] as? String == "Codex")
+        #expect(comments.first?["source"] as? String == "codex")
+        #expect(comments.first?["permalinkID"] as? String == firstID)
+        #expect(comments.last?["parentCommentID"] as? String == firstID)
+
+        let inspected = try jsonObject(from: runCLI([
+            "board", "card", "inspect", "Work Log Smoke",
+            "--card", cardID,
+            "--json",
+        ], vaultURL: vaultURL))
+        let inspectedCard = try #require(inspected["card"] as? [String: Any])
+        let inspectedComments = try #require(inspectedCard["comments"] as? [[String: Any]])
+        #expect(inspectedComments.map { $0["kind"] as? String } == ["implementation", "test"])
+    }
+
     @Test("process CLI comment add preserves typed attachments")
     func processCLICommentAddPreservesTypedAttachments() throws {
         let vaultURL = FileManager.default.temporaryDirectory

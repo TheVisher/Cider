@@ -1031,7 +1031,12 @@ private func libraryEntityRefToDict(_ ref: LibraryEntityRef) -> [String: Any] {
         }
     }
     if !card.comments.isEmpty {
-        dict["comments"] = card.comments.map { comment in
+        dict["comments"] = card.comments.sorted {
+            if $0.createdAt == $1.createdAt {
+                return $0.id < $1.id
+            }
+            return $0.createdAt < $1.createdAt
+        }.map { comment in
             var commentDict: [String: Any] = [
                 "id": comment.id,
                 "permalinkID": comment.permalinkID,

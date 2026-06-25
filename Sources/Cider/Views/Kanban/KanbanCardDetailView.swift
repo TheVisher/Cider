@@ -1367,7 +1367,7 @@ private struct KanbanCardCommentsSectionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(alignment: .center, spacing: Spacing.sm) {
-                Text("Comments")
+                Text("Work Log")
                     .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.tertiary)
 
@@ -1391,7 +1391,7 @@ private struct KanbanCardCommentsSectionView: View {
             }
 
             if comments.isEmpty {
-                Text("No comments yet. Add human notes, agent handoffs, decisions, evidence, QA, or final reports without growing the source notes wall.")
+                Text("No work-log comments yet. Add human notes, implementation updates, tests, handoffs, blockers, regressions, decisions, evidence, QA, or final reports without growing the source notes wall.")
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
