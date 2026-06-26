@@ -61,6 +61,46 @@ struct CiderItemContextBundle: Equatable {
     var captureProvenance: [CiderItemCaptureProvenance]
 }
 
+struct CiderLibraryHubRelatedItem: Identifiable, Equatable {
+    var id: String { item.id.uuidString }
+    var item: CiderItemSummary
+    var owner: SecondBrainOwnerRef
+    var relationType: String
+    var relationDirection: String
+    var relation: SecondBrainRelation?
+    var captureProvenance: [CiderItemCaptureProvenance]
+}
+
+struct CiderLibraryHubGroup: Identifiable, Equatable {
+    var id: String { "\(kind):\(key)" }
+    var kind: String
+    var key: String
+    var title: String
+    var itemRefs: [String]
+}
+
+struct CiderLibraryHubCandidate: Identifiable, Equatable {
+    var id: String
+    var kind: String
+    var reviewState: String
+    var sourceOwner: SecondBrainOwnerRef
+    var targetOwner: SecondBrainOwnerRef?
+    var relationType: String?
+    var value: String
+    var evidence: String
+    var source: String
+    var confidence: Double?
+    var metadata: [String: String]
+}
+
+struct CiderLibraryHubReadModel: Equatable {
+    var anchor: CiderItemContextBundle
+    var relatedItems: [CiderLibraryHubRelatedItem]
+    var groups: [CiderLibraryHubGroup]
+    var reviewableCandidates: [CiderLibraryHubCandidate]
+    var safeNextCommands: [String]
+}
+
 struct CiderItemAgentContextLimits: Equatable {
     var maxSections: Int = 3
     var maxChunks: Int = 3
@@ -360,6 +400,61 @@ final class CiderItemContextService {
             recentHistory: recentHistory(for: bundle, limit: normalizedLimits.maxHistory),
             safeCommands: safeCommands(for: bundle),
             limits: normalizedLimits
+        )
+    }
+
+    func libraryHub(
+        for ref: LibraryEntityRef,
+        maxRelated: Int = 24
+    ) throws -> CiderLibraryHubReadModel {
+        let anchor = try context(for: ref)
+        let boundedMaxRelated = max(1, maxRelated)
+        let relations = try secondBrainStore.relatedRelations(for: anchor.owner)
+        var relatedByOwner: [String: CiderLibraryHubRelatedItem] = [:]
+
+        for relation in relations {
+            guard let related = relatedItem(from: relation, anchor: anchor.owner) else { continue }
+            let key = related.owner.canonicalRef
+            if let existing = relatedByOwner[key] {
+                relatedByOwner[key] = preferredHubRelatedItem(existing, related)
+            } else {
+                relatedByOwner[key] = related
+            }
+        }
+
+        for summary in anchor.related {
+            let owner = SecondBrainOwnerRef(ownerType: summary.ref.type.rawValue, ownerID: summary.ref.entityID.uuidString)
+            let key = owner.canonicalRef
+            guard relatedByOwner[key] == nil,
+                  let item = try? itemSummary(owner: owner) else { continue }
+            relatedByOwner[key] = CiderLibraryHubRelatedItem(
+                item: item,
+                owner: owner,
+                relationType: "related_to",
+                relationDirection: "item_link",
+                relation: nil,
+                captureProvenance: captureProvenance(for: owner)
+            )
+        }
+
+        let relatedItems = Array(relatedByOwner.values)
+            .sorted { lhs, rhs in
+                if !lhs.captureProvenance.isEmpty != !rhs.captureProvenance.isEmpty {
+                    return !lhs.captureProvenance.isEmpty
+                }
+                if lhs.item.updatedAt != rhs.item.updatedAt { return lhs.item.updatedAt > rhs.item.updatedAt }
+                return lhs.item.title.localizedStandardCompare(rhs.item.title) == .orderedAscending
+            }
+            .prefix(boundedMaxRelated)
+            .map { $0 }
+
+        let candidates = hubReviewableCandidates(for: anchor)
+        return CiderLibraryHubReadModel(
+            anchor: anchor,
+            relatedItems: relatedItems,
+            groups: hubGroups(anchor: anchor, relatedItems: relatedItems),
+            reviewableCandidates: candidates,
+            safeNextCommands: hubSafeCommands(anchor: anchor, relatedItems: relatedItems, hasReviewableCandidates: !candidates.isEmpty)
         )
     }
 
@@ -2054,6 +2149,178 @@ final class CiderItemContextService {
                 return lhs.id < rhs.id
             }
             .prefix(limit))
+    }
+
+    private func relatedItem(
+        from relation: SecondBrainRelation,
+        anchor: SecondBrainOwnerRef
+    ) -> CiderLibraryHubRelatedItem? {
+        let relatedOwner: SecondBrainOwnerRef
+        let direction: String
+        if relation.sourceOwner == anchor {
+            relatedOwner = relation.targetOwner
+            direction = "outgoing"
+        } else if relation.targetOwner == anchor {
+            relatedOwner = relation.sourceOwner
+            direction = "backlink"
+        } else {
+            return nil
+        }
+        guard let item = try? itemSummary(owner: relatedOwner) else { return nil }
+        return CiderLibraryHubRelatedItem(
+            item: item,
+            owner: relatedOwner,
+            relationType: relation.relationType,
+            relationDirection: direction,
+            relation: relation,
+            captureProvenance: captureProvenance(for: relatedOwner)
+        )
+    }
+
+    private func preferredHubRelatedItem(
+        _ lhs: CiderLibraryHubRelatedItem,
+        _ rhs: CiderLibraryHubRelatedItem
+    ) -> CiderLibraryHubRelatedItem {
+        if lhs.relation?.source == "item_links", rhs.relation?.source != "item_links" { return rhs }
+        if lhs.captureProvenance.isEmpty, !rhs.captureProvenance.isEmpty { return rhs }
+        if lhs.relationDirection == "item_link", rhs.relationDirection != "item_link" { return rhs }
+        return lhs
+    }
+
+    private func hubGroups(
+        anchor: CiderItemContextBundle,
+        relatedItems: [CiderLibraryHubRelatedItem]
+    ) -> [CiderLibraryHubGroup] {
+        var buckets: [String: (kind: String, key: String, title: String, refs: [String])] = [:]
+        func add(kind: String, key: String, title: String, ref: String) {
+            let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedKey.isEmpty else { return }
+            let bucketKey = "\(kind):\(normalizedKey)"
+            var bucket = buckets[bucketKey] ?? (kind, normalizedKey, title, [])
+            if !bucket.refs.contains(ref) { bucket.refs.append(ref) }
+            buckets[bucketKey] = bucket
+        }
+
+        for related in relatedItems {
+            let ref = related.owner.canonicalRef
+            add(kind: "type", key: related.item.type.rawValue, title: related.item.type.rawValue, ref: ref)
+            add(kind: "relation", key: related.relationType, title: related.relationType, ref: ref)
+            add(kind: "source", key: related.relation?.source ?? "item_context", title: related.relation?.source ?? "Item context", ref: ref)
+            if related.captureProvenance.isEmpty {
+                add(kind: "provenance", key: "no_capture_provenance", title: "No capture provenance", ref: ref)
+            } else {
+                for provenance in related.captureProvenance {
+                    add(kind: "source", key: provenance.sourceKind, title: provenance.sourceKind, ref: ref)
+                    add(kind: "provenance", key: captureProvenanceGroupKey(provenance), title: captureProvenanceGroupTitle(provenance), ref: ref)
+                }
+            }
+        }
+
+        if !anchor.captureProvenance.isEmpty {
+            for provenance in anchor.captureProvenance {
+                add(kind: "source", key: provenance.sourceKind, title: provenance.sourceKind, ref: anchor.owner.canonicalRef)
+                add(kind: "provenance", key: captureProvenanceGroupKey(provenance), title: captureProvenanceGroupTitle(provenance), ref: anchor.owner.canonicalRef)
+            }
+        }
+
+        return buckets.values
+            .map { CiderLibraryHubGroup(kind: $0.kind, key: $0.key, title: $0.title, itemRefs: $0.refs.sorted()) }
+            .sorted { lhs, rhs in
+                if lhs.kind != rhs.kind { return lhs.kind < rhs.kind }
+                if lhs.itemRefs.count != rhs.itemRefs.count { return lhs.itemRefs.count > rhs.itemRefs.count }
+                return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+            }
+    }
+
+    private func captureProvenanceGroupKey(_ provenance: CiderItemCaptureProvenance) -> String {
+        [provenance.surface, provenance.channel, provenance.sourceKind]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty }) ?? provenance.sourceKind
+    }
+
+    private func captureProvenanceGroupTitle(_ provenance: CiderItemCaptureProvenance) -> String {
+        if let surface = provenance.surface, let channel = provenance.channel {
+            return "\(surface)/\(channel)"
+        }
+        return provenance.surface ?? provenance.channel ?? provenance.sourceKind
+    }
+
+    private func hubReviewableCandidates(for anchor: CiderItemContextBundle) -> [CiderLibraryHubCandidate] {
+        let reviewableStates: Set<String> = ["suggested", "needs_review", "deferred"]
+        let similarity = anchor.relationCandidates
+            .filter { reviewableStates.contains($0.reviewState) }
+            .map { candidate in
+                CiderLibraryHubCandidate(
+                    id: candidate.id,
+                    kind: candidate.candidateType,
+                    reviewState: candidate.reviewState,
+                    sourceOwner: candidate.sourceOwner,
+                    targetOwner: candidate.targetOwner,
+                    relationType: candidate.metadata["relation_type"] ?? candidate.metadata["accepted_relation_type"],
+                    value: candidate.signal,
+                    evidence: candidate.evidence,
+                    source: candidate.source,
+                    confidence: candidate.score,
+                    metadata: candidate.metadata
+                )
+            }
+
+        let graph = anchor.enrichmentOutputs
+            .filter { $0.kind == SecondBrainGraphCandidateContract.outputKind }
+            .filter { reviewableStates.contains($0.reviewState) }
+            .map { output in
+                CiderLibraryHubCandidate(
+                    id: output.id,
+                    kind: output.metadata[SecondBrainGraphCandidateContract.MetadataKey.candidateKind] ?? output.kind,
+                    reviewState: output.reviewState,
+                    sourceOwner: output.owner,
+                    targetOwner: acceptedTargetOwner(from: output.metadata),
+                    relationType: output.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedRelationType]
+                        ?? output.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses],
+                    value: output.value,
+                    evidence: output.evidence,
+                    source: output.source,
+                    confidence: output.confidence,
+                    metadata: output.metadata
+                )
+            }
+
+        return (similarity + graph).sorted { lhs, rhs in
+            if lhs.reviewState != rhs.reviewState { return lhs.reviewState < rhs.reviewState }
+            return lhs.id < rhs.id
+        }
+    }
+
+    private func acceptedTargetOwner(from metadata: [String: String]) -> SecondBrainOwnerRef? {
+        guard let type = metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerType],
+              let id = metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerID],
+              !type.isEmpty,
+              !id.isEmpty else { return nil }
+        return SecondBrainOwnerRef(ownerType: type, ownerID: id)
+    }
+
+    private func hubSafeCommands(
+        anchor: CiderItemContextBundle,
+        relatedItems: [CiderLibraryHubRelatedItem],
+        hasReviewableCandidates: Bool
+    ) -> [String] {
+        let type = anchor.item.type.rawValue
+        let id = anchor.item.id.uuidString
+        var commands = [
+            "cider-cli item hub \(type) \(id) --json",
+            "cider-cli item context \(type) \(id) --json",
+            "cider-cli item relations \(type) \(id) --json",
+            "cider-cli item backlinks \(type) \(id) --json",
+            "cider-cli item search \"\(escapedCommandArgument(anchor.item.title))\" --limit 5 --json",
+        ]
+        if hasReviewableCandidates {
+            commands.append("cider-cli item graph-candidates \(anchor.owner.ownerType) \(anchor.owner.ownerID) --json")
+            commands.append("cider-cli capture review-queue --limit 20 --json")
+        }
+        for related in relatedItems.prefix(5) {
+            commands.append("cider-cli item context \(related.item.type.rawValue) \(related.item.id.uuidString) --json")
+        }
+        return orderedUnique(commands)
     }
 
     private func captureProvenance(from backlinks: [SecondBrainRelation]) throws -> [CiderItemCaptureProvenance] {

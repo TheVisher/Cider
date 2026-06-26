@@ -241,6 +241,7 @@ struct CiderCLI {
           cider-cli item get <type> <id-or-ref> [--json]
           cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
             Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
+          cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--json]
           cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
           cider-cli item graph-health [--json]
           cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
@@ -278,6 +279,8 @@ struct CiderCLI {
             return "cider-cli item relations <owner-type> <owner-id-or-ref> [--json]"
         case "backlinks":
             return "cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]"
+        case "hub", "library-hub", "card-hub":
+            return "cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--json]"
         case "backfill-kanban":
             return "cider-cli item backfill-kanban [--board <name-or-id>] [--json]"
         case "rebuild-references", "reference-rebuild", "references-rebuild":
@@ -5081,6 +5084,7 @@ struct CiderCLI {
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
                 Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
               cider-cli item open <type> <id-or-ref> [--json]
+              cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--json]
               cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
               cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
               cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
@@ -5294,6 +5298,40 @@ struct CiderCLI {
                 }
             } catch {
                 printCLIError(error.localizedDescription)
+            }
+
+        case "hub", "library-hub", "card-hub":
+            if args.contains("--help") || args.contains("-h") {
+                print("Usage: cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--json]")
+                return
+            }
+            do {
+                let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 24
+                let ref = try resolveLibraryHubRef(args: args, contextService: contextService)
+                let hub = try contextService.libraryHub(for: ref, maxRelated: limit)
+                let payload = libraryHubReadModelToDict(hub, sourceArgs: args)
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("\(hub.anchor.item.type.rawValue):\(hub.anchor.item.id.uuidString)")
+                    print("  Title: \(hub.anchor.item.title)")
+                    print("  Related items: \(hub.relatedItems.count)")
+                    print("  Groups: \(hub.groups.count)")
+                    print("  Reviewable candidates: \(hub.reviewableCandidates.count)")
+                }
+            } catch {
+                printCLIError(
+                    error.localizedDescription,
+                    details: [
+                        "command": "item.hub",
+                        "readOnly": true,
+                        "changed": false,
+                        "safeNextCommands": [
+                            "cider-cli item search \"<query>\" --limit 5 --json",
+                            "cider-cli item context <type> <id-or-ref> --json",
+                        ],
+                    ]
+                )
             }
 
         case "get", "inspect":
@@ -18295,6 +18333,120 @@ struct CiderCLI {
         ]
         CiderAgentDecisionContract.merge(itemContextBundleDecisionDictionary(for: bundle), into: &dict)
         return dict
+    }
+
+    static func libraryHubReadModelToDict(_ hub: CiderLibraryHubReadModel, sourceArgs: [String] = []) -> [String: Any] {
+        [
+            "ok": true,
+            "command": "item.hub",
+            "readOnly": true,
+            "changed": false,
+            "sourceRef": [
+                "type": hub.anchor.item.type.rawValue,
+                "id": hub.anchor.item.id.uuidString,
+                "args": sourceArgs,
+            ],
+            "hub": [
+                "title": hub.anchor.item.title,
+                "anchor": itemContextBundleToDict(hub.anchor),
+                "relatedItems": hub.relatedItems.map(libraryHubRelatedItemToDict),
+                "groups": hub.groups.map(libraryHubGroupToDict),
+                "reviewableCandidates": hub.reviewableCandidates.map(libraryHubCandidateToDict),
+                "counts": [
+                    "relatedItems": hub.relatedItems.count,
+                    "groups": hub.groups.count,
+                    "reviewableCandidates": hub.reviewableCandidates.count,
+                    "anchorCaptureProvenance": hub.anchor.captureProvenance.count,
+                ],
+                "truthBoundary": [
+                    "acceptedRelationsAreTruth": true,
+                    "reviewableCandidatesAreTruth": false,
+                    "autoMutatedUserFields": false,
+                    "sourceBacked": true,
+                ],
+            ],
+            "safeNextCommands": hub.safeNextCommands,
+        ]
+    }
+
+    static func libraryHubRelatedItemToDict(_ related: CiderLibraryHubRelatedItem) -> [String: Any] {
+        var dict: [String: Any] = [
+            "item": itemSummaryToDict(related.item, ownerRelations: related.relation.map { [$0] } ?? []),
+            "owner": ownerToDict(related.owner),
+            "relationType": related.relationType,
+            "relationDirection": related.relationDirection,
+            "captureProvenance": related.captureProvenance.map(captureProvenanceToDict),
+            "sourceSummary": [
+                "relationSource": related.relation?.source ?? "item_link",
+                "captureSourceKinds": Array(Set(related.captureProvenance.map(\.sourceKind))).sorted(),
+                "hasCaptureProvenance": !related.captureProvenance.isEmpty,
+            ],
+        ]
+        if let relation = related.relation {
+            dict["relation"] = ownerRelationToDict(relation)
+        }
+        return dict
+    }
+
+    static func libraryHubGroupToDict(_ group: CiderLibraryHubGroup) -> [String: Any] {
+        [
+            "kind": group.kind,
+            "key": group.key,
+            "title": group.title,
+            "itemRefs": group.itemRefs,
+            "count": group.itemRefs.count,
+        ]
+    }
+
+    static func libraryHubCandidateToDict(_ candidate: CiderLibraryHubCandidate) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": candidate.id,
+            "kind": candidate.kind,
+            "reviewState": candidate.reviewState,
+            "sourceOwner": ownerToDict(candidate.sourceOwner),
+            "value": candidate.value,
+            "evidence": candidate.evidence,
+            "source": candidate.source,
+            "metadata": candidate.metadata,
+            "truthBoundary": "reviewable_candidate_not_truth",
+        ]
+        if let targetOwner = candidate.targetOwner { dict["targetOwner"] = ownerToDict(targetOwner) }
+        if let relationType = candidate.relationType { dict["relationType"] = relationType }
+        if let confidence = candidate.confidence { dict["confidence"] = confidence }
+        return dict
+    }
+
+    static func resolveLibraryHubRef(
+        args: [String],
+        contextService: CiderItemContextService
+    ) throws -> LibraryEntityRef {
+        let positional = leadingPositionalArgs(from: args)
+        if positional.count >= 2 {
+            let type = try ItemLinkService.entityType(from: positional[0])
+            return try ItemLinkService.shared.resolve(type: type, ref: positional[1])
+        }
+
+        let rawQuery = parseFlag("--query", from: args)
+            ?? parseFlag("-q", from: args)
+            ?? positional.joined(separator: " ")
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Usage: cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--json]"]
+            )
+        }
+
+        let matches = try contextService.search(query, limit: 5, scope: .all, sort: .relevance)
+        guard let item = matches.compactMap(\.item).first else {
+            throw NSError(
+                domain: "CiderCLI",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "No saved Library item matched '\(query)'."]
+            )
+        }
+        return LibraryEntityRef(type: item.type, entityID: item.id)
     }
 
     static func itemContextBundleDecisionDictionary(for bundle: CiderItemContextBundle) -> [String: Any] {

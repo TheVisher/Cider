@@ -78,6 +78,36 @@ struct CiderItemContextServiceTests {
         }
     }
 
+    private func insertCaptureEvent(
+        id: UUID,
+        sourceKind: String,
+        surface: String,
+        channel: String,
+        messageID: String,
+        sourceText: String,
+        createdAt: Date,
+        into db: CiderDatabase
+    ) throws {
+        let insertEvent = try db.prepare("""
+            INSERT INTO capture_events (
+                id, source_kind, surface, channel, channel_id, thread_id, message_id,
+                sender_id, sender_name, source_url, source_file, source_text,
+                attachment_count, metadata, created_at
+            ) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, ?, 0, ?, ?);
+            """)
+        insertEvent.bind(id.uuidString, at: 1)
+            .bind(sourceKind, at: 2)
+            .bind(surface, at: 3)
+            .bind(channel, at: 4)
+            .bind(messageID, at: 5)
+            .bind("codex", at: 6)
+            .bind("Codex", at: 7)
+            .bind(sourceText, at: 8)
+            .bind(DatabaseHelpers.encodeJSON(["test": "library-hub"]) ?? "{}", at: 9)
+            .bind(DatabaseHelpers.encode(createdAt), at: 10)
+        try insertEvent.step()
+    }
+
     @Test("context bundle includes item identity, sections, chunks, and related items")
     func contextBundleIncludesIdentitySectionsChunksAndRelatedItems() throws {
         let (db, url) = try makeTestDB()
@@ -198,6 +228,128 @@ struct CiderItemContextServiceTests {
         let packet = try service.agentContext(for: note)
         #expect(packet.provenance.contains("capture:codex_dogfood/cli"))
         #expect(packet.captureProvenance.map(\.eventID) == [eventID.uuidString])
+    }
+
+    @Test("library hub groups related captures by source type relation and provenance without promoting candidates")
+    func libraryHubGroupsRelatedCapturesBySourceTypeRelationAndProvenance() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let base = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let guide = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let buildNote = LibraryEntityRef(type: .note, entityID: UUID())
+        let now = Date(timeIntervalSince1970: 1_767_000_000)
+        try insertItem(base, title: "World of Warcraft Hub", relativePath: "Bookmarks/Games/World of Warcraft.webloc", into: db, createdAt: now, updatedAt: now)
+        try insertItem(guide, title: "WoW Priest Guide", relativePath: "Bookmarks/Games/WoW Priest Guide.webloc", into: db, createdAt: now, updatedAt: now.addingTimeInterval(10))
+        try insertItem(buildNote, title: "WoW mythic build notes", relativePath: "Notes/Games/WoW mythic build notes.md", into: db, createdAt: now, updatedAt: now.addingTimeInterval(20))
+
+        let store = SecondBrainStore(database: db)
+        let baseOwner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: base.entityID.uuidString)
+        let guideOwner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: guide.entityID.uuidString)
+        let noteOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: buildNote.entityID.uuidString)
+
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: baseOwner,
+            targetOwner: guideOwner,
+            relationType: "source_for",
+            evidence: "Base WoW bookmark is the source hub for the guide bookmark.",
+            source: "test.accepted-link",
+            actor: "Codex",
+            confidence: 1
+        ))
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: noteOwner,
+            targetOwner: baseOwner,
+            relationType: "related_to",
+            evidence: "Build notes explicitly link back to the World of Warcraft hub.",
+            source: "test.accepted-link",
+            actor: "Codex",
+            confidence: 1
+        ))
+
+        let guideCaptureID = UUID()
+        let noteCaptureID = UUID()
+        try insertCaptureEvent(
+            id: guideCaptureID,
+            sourceKind: "bookmark",
+            surface: "cider-cli",
+            channel: "cli",
+            messageID: "wow-guide",
+            sourceText: "Captured WoW priest guide URL.",
+            createdAt: now.addingTimeInterval(30),
+            into: db
+        )
+        try insertCaptureEvent(
+            id: noteCaptureID,
+            sourceKind: "journal",
+            surface: "voice",
+            channel: "driving",
+            messageID: "wow-build-note",
+            sourceText: "Remember WoW mythic build details.",
+            createdAt: now.addingTimeInterval(40),
+            into: db
+        )
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: guideCaptureID.uuidString),
+            targetOwner: guideOwner,
+            relationType: "produced_item",
+            evidence: "Capture produced guide bookmark.",
+            source: "capture.add",
+            actor: "system",
+            confidence: 1
+        ))
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: noteCaptureID.uuidString),
+            targetOwner: noteOwner,
+            relationType: "produced_item",
+            evidence: "Capture produced build note.",
+            source: "capture.add",
+            actor: "system",
+            confidence: 1
+        ))
+
+        try SecondBrainEnrichmentOutputService(database: db).record(SecondBrainEnrichmentOutput(
+            owner: baseOwner,
+            chunkID: nil,
+            kind: SecondBrainGraphCandidateContract.outputKind,
+            value: "WoW raid group",
+            normalizedValue: "wow raid group",
+            label: "Possible related object",
+            evidence: "Maybe this belongs with the WoW raid group too.",
+            source: "test.graph-candidate",
+            confidence: 0.62,
+            reviewState: "needs_review",
+            metadata: [
+                SecondBrainGraphCandidateContract.MetadataKey.candidateKind: "object_relation",
+                SecondBrainGraphCandidateContract.MetadataKey.relationGuesses: "related_to",
+            ]
+        ))
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let hub = try service.libraryHub(for: base)
+
+        #expect(hub.anchor.item.title == "World of Warcraft Hub")
+        #expect(hub.relatedItems.map(\.item.title).contains("WoW Priest Guide"))
+        #expect(hub.relatedItems.map(\.item.title).contains("WoW mythic build notes"))
+        #expect(hub.relatedItems.flatMap(\.captureProvenance).map(\.sourceKind).contains("bookmark"))
+        #expect(hub.relatedItems.flatMap(\.captureProvenance).map(\.sourceKind).contains("journal"))
+        #expect(hub.groups.contains { $0.kind == "type" && $0.key == "bookmark" })
+        #expect(hub.groups.contains { $0.kind == "type" && $0.key == "note" })
+        #expect(hub.groups.contains { $0.kind == "relation" && $0.key == "source_for" })
+        #expect(hub.groups.contains { $0.kind == "relation" && $0.key == "related_to" })
+        #expect(hub.groups.contains { $0.kind == "provenance" && $0.key == "cider-cli" })
+        #expect(hub.groups.contains { $0.kind == "provenance" && $0.key == "voice" })
+        #expect(hub.reviewableCandidates.count == 1)
+        #expect(hub.reviewableCandidates[0].reviewState == "needs_review")
+        #expect(hub.safeNextCommands.contains("cider-cli item hub bookmark \(base.entityID.uuidString) --json"))
+
+        let dict = CiderCLI.libraryHubReadModelToDict(hub)
+        let hubDict = try #require(dict["hub"] as? [String: Any])
+        let boundary = try #require(hubDict["truthBoundary"] as? [String: Any])
+        #expect(boundary["reviewableCandidatesAreTruth"] as? Bool == false)
+        #expect(boundary["autoMutatedUserFields"] as? Bool == false)
+        let safeNextCommands = try #require(dict["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item graph-candidates bookmark \(base.entityID.uuidString) --json"))
     }
 
     @Test("item context and home overview share recent capture surfacing for unfiled bookmarks")
