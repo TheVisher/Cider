@@ -93,10 +93,22 @@ struct CiderLibraryHubCandidate: Identifiable, Equatable {
     var metadata: [String: String]
 }
 
+struct CiderLibraryHubDomainFacet: Identifiable, Equatable {
+    var id: String { "\(kind):\(key)" }
+    var kind: String
+    var key: String
+    var displayValue: String
+    var confidenceLabel: String
+    var source: String
+    var evidence: String
+    var itemRefs: [String]
+}
+
 struct CiderLibraryHubReadModel: Equatable {
     var anchor: CiderItemContextBundle
     var relatedItems: [CiderLibraryHubRelatedItem]
     var groups: [CiderLibraryHubGroup]
+    var domainFacets: [CiderLibraryHubDomainFacet]
     var reviewableCandidates: [CiderLibraryHubCandidate]
     var safeNextCommands: [String]
 }
@@ -449,12 +461,19 @@ final class CiderItemContextService {
             .map { $0 }
 
         let candidates = hubReviewableCandidates(for: anchor)
+        let domainFacets = hubDomainFacets(anchor: anchor, relatedItems: relatedItems, reviewableCandidates: candidates)
         return CiderLibraryHubReadModel(
             anchor: anchor,
             relatedItems: relatedItems,
             groups: hubGroups(anchor: anchor, relatedItems: relatedItems),
+            domainFacets: domainFacets,
             reviewableCandidates: candidates,
-            safeNextCommands: hubSafeCommands(anchor: anchor, relatedItems: relatedItems, hasReviewableCandidates: !candidates.isEmpty)
+            safeNextCommands: hubSafeCommands(
+                anchor: anchor,
+                relatedItems: relatedItems,
+                domainFacets: domainFacets,
+                hasReviewableCandidates: !candidates.isEmpty
+            )
         )
     }
 
@@ -886,6 +905,14 @@ final class CiderItemContextService {
             "steam": ["Steam", "game", "games", "media"],
             "game": ["game", "games", "Steam", "media"],
             "games": ["games", "game", "Steam", "media"],
+            "wow": ["WoW", "World of Warcraft", "warcraft", "game", "games"],
+            "warcraft": ["World of Warcraft", "WoW", "game", "games"],
+            "restaurant": ["restaurant", "restaurants", "place", "food", "dinner"],
+            "restaurants": ["restaurants", "restaurant", "place", "food", "dinner"],
+            "media": ["media", "movie", "movies", "tv show", "tv shows", "game", "games"],
+            "tv": ["TV", "tv show", "tv shows", "show", "media"],
+            "show": ["show", "shows", "tv show", "TV", "media"],
+            "shows": ["shows", "show", "tv shows", "TV", "media"],
             "tl": ["TL", "team leader", "team lead", "work hub"],
             "team": ["team leader", "team lead", "TL"],
             "leader": ["team leader", "team lead", "TL"],
@@ -2245,6 +2272,261 @@ final class CiderItemContextService {
         return provenance.surface ?? provenance.channel ?? provenance.sourceKind
     }
 
+    private func hubDomainFacets(
+        anchor: CiderItemContextBundle,
+        relatedItems: [CiderLibraryHubRelatedItem],
+        reviewableCandidates: [CiderLibraryHubCandidate]
+    ) -> [CiderLibraryHubDomainFacet] {
+        var facets: [String: CiderLibraryHubDomainFacet] = [:]
+
+        func add(
+            kind: String,
+            key: String,
+            displayValue: String,
+            confidenceLabel: String,
+            source: String,
+            evidence: String,
+            itemRef: String
+        ) {
+            let normalizedKey = normalizedHubFacetKey(key)
+            guard !normalizedKey.isEmpty else { return }
+            let id = "\(kind):\(normalizedKey)"
+            var facet = facets[id] ?? CiderLibraryHubDomainFacet(
+                kind: kind,
+                key: normalizedKey,
+                displayValue: displayValue,
+                confidenceLabel: confidenceLabel,
+                source: source,
+                evidence: evidence,
+                itemRefs: []
+            )
+            if facet.confidenceLabel != "source_backed", confidenceLabel == "source_backed" {
+                facet.confidenceLabel = confidenceLabel
+                facet.source = source
+                facet.evidence = evidence
+            }
+            if !facet.itemRefs.contains(itemRef) {
+                facet.itemRefs.append(itemRef)
+            }
+            facets[id] = facet
+        }
+
+        func addTerms(from item: CiderItemSummary, owner: SecondBrainOwnerRef) {
+            let searchable = [item.title, item.relativePath].compactMap { $0 }.joined(separator: " ")
+            let ref = owner.canonicalRef
+            if containsHubTerm(searchable, terms: ["world of warcraft", "wow"]) {
+                add(kind: "domain", key: "games", displayValue: "Games", confidenceLabel: "inferred", source: "title_path", evidence: item.title, itemRef: ref)
+                add(kind: "entity_type", key: "game", displayValue: "Game", confidenceLabel: "inferred", source: "title_path", evidence: item.title, itemRef: ref)
+                add(kind: "alias", key: "wow", displayValue: "WoW", confidenceLabel: "inferred", source: "known_safe_alias", evidence: item.title, itemRef: ref)
+                add(kind: "alias", key: "world of warcraft", displayValue: "World of Warcraft", confidenceLabel: "inferred", source: "known_safe_alias", evidence: item.title, itemRef: ref)
+            }
+            if containsHubTerm(searchable, terms: ["game", "games", "steam"]) {
+                add(kind: "domain", key: "games", displayValue: "Games", confidenceLabel: "inferred", source: "title_path", evidence: item.title, itemRef: ref)
+                add(kind: "entity_type", key: "game", displayValue: "Game", confidenceLabel: "inferred", source: "title_path", evidence: item.title, itemRef: ref)
+            }
+            if containsHubTerm(searchable, terms: ["media", "movie", "movies", "tv show", "tv shows", "imdb", "apple tv"]) {
+                add(kind: "domain", key: "media", displayValue: "Media", confidenceLabel: "inferred", source: "title_path", evidence: item.title, itemRef: ref)
+            }
+            if containsHubTerm(searchable, terms: ["movie", "movies", "imdb"]) {
+                add(kind: "entity_type", key: "movie", displayValue: "Movie", confidenceLabel: "inferred", source: "title_path", evidence: item.title, itemRef: ref)
+            }
+            if containsHubTerm(searchable, terms: ["tv show", "tv shows", "show", "shows"]) {
+                add(kind: "entity_type", key: "tv_show", displayValue: "TV Show", confidenceLabel: "inferred", source: "title_path", evidence: item.title, itemRef: ref)
+            }
+            if containsHubTerm(searchable, terms: ["restaurant", "restaurants", "dinner", "lunch"]) {
+                add(kind: "domain", key: "restaurants", displayValue: "Restaurants", confidenceLabel: "inferred", source: "title_path", evidence: item.title, itemRef: ref)
+                add(kind: "entity_type", key: "restaurant", displayValue: "Restaurant", confidenceLabel: "inferred", source: "title_path", evidence: item.title, itemRef: ref)
+            }
+            for city in inferredHubCities(in: searchable) {
+                add(kind: "place", key: city, displayValue: displayHubFacetValue(city), confidenceLabel: "inferred", source: "title_path", evidence: item.title, itemRef: ref)
+            }
+        }
+
+        addTerms(from: anchor.item, owner: anchor.owner)
+        for related in relatedItems {
+            addTerms(from: related.item, owner: related.owner)
+            if let relation = related.relation {
+                addRelationMetadataFacets(relation.metadata, evidence: relation.evidence, source: relation.source, itemRef: related.owner.canonicalRef, add: add)
+            }
+        }
+
+        for candidate in reviewableCandidates {
+            let itemRef = candidate.sourceOwner.canonicalRef
+            let candidateEvidence = candidate.evidence.isEmpty ? candidate.value : candidate.evidence
+            addCandidateMetadataFacets(candidate.metadata, evidence: candidateEvidence, source: candidate.source, itemRef: itemRef, add: add)
+            addHubTextFacets(fromText: "\(candidate.value) \(candidateEvidence)", itemRef: itemRef, source: candidate.source, evidence: candidateEvidence, add: add)
+        }
+
+        return facets.values
+            .map {
+                CiderLibraryHubDomainFacet(
+                    kind: $0.kind,
+                    key: $0.key,
+                    displayValue: $0.displayValue,
+                    confidenceLabel: $0.confidenceLabel,
+                    source: $0.source,
+                    evidence: $0.evidence,
+                    itemRefs: $0.itemRefs.sorted()
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.kind != rhs.kind { return lhs.kind < rhs.kind }
+                return lhs.displayValue.localizedStandardCompare(rhs.displayValue) == .orderedAscending
+            }
+    }
+
+    private func addHubTextFacets(
+        fromText text: String,
+        itemRef: String,
+        source: String,
+        evidence: String,
+        add: (String, String, String, String, String, String, String) -> Void
+    ) {
+        if containsHubTerm(text, terms: ["restaurant", "restaurants"]) {
+            add("domain", "restaurants", "Restaurants", "source_backed", source, evidence, itemRef)
+            add("entity_type", "restaurant", "Restaurant", "source_backed", source, evidence, itemRef)
+        }
+        if containsHubTerm(text, terms: ["movie", "movies"]) {
+            add("domain", "media", "Media", "source_backed", source, evidence, itemRef)
+            add("entity_type", "movie", "Movie", "source_backed", source, evidence, itemRef)
+        }
+        if containsHubTerm(text, terms: ["game", "games", "world of warcraft", "wow"]) {
+            add("domain", "games", "Games", "source_backed", source, evidence, itemRef)
+            add("entity_type", "game", "Game", "source_backed", source, evidence, itemRef)
+        }
+    }
+
+    private func addRelationMetadataFacets(
+        _ metadata: [String: String],
+        evidence: String,
+        source: String,
+        itemRef: String,
+        add: (String, String, String, String, String, String, String) -> Void
+    ) {
+        for key in ["domain", "facet_domain"] {
+            for value in decodedHubFacetValues(metadata[key]) {
+                add("domain", value, displayHubFacetValue(value), "source_backed", source, evidence, itemRef)
+            }
+        }
+        for key in ["entity_type", "object_type", "object_types", SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses] {
+            for value in decodedHubFacetValues(metadata[key]) {
+                addHubObjectTypeFacet(value, evidence: evidence, source: source, itemRef: itemRef, add: add)
+            }
+        }
+        for key in ["city", "town", "place"] {
+            for value in decodedHubFacetValues(metadata[key]) {
+                add("place", value, displayHubFacetValue(value), "source_backed", source, evidence, itemRef)
+            }
+        }
+        for key in ["alias", "aliases"] {
+            for value in decodedHubFacetValues(metadata[key]) {
+                add("alias", value, displayHubFacetValue(value), "source_backed", source, evidence, itemRef)
+            }
+        }
+    }
+
+    private func addCandidateMetadataFacets(
+        _ metadata: [String: String],
+        evidence: String,
+        source: String,
+        itemRef: String,
+        add: (String, String, String, String, String, String, String) -> Void
+    ) {
+        addRelationMetadataFacets(metadata, evidence: evidence, source: source, itemRef: itemRef, add: add)
+    }
+
+    private func addHubObjectTypeFacet(
+        _ rawValue: String,
+        evidence: String,
+        source: String,
+        itemRef: String,
+        add: (String, String, String, String, String, String, String) -> Void
+    ) {
+        let key = normalizedHubFacetKey(rawValue)
+        guard !key.isEmpty else { return }
+        add("entity_type", key, displayHubFacetValue(key), "source_backed", source, evidence, itemRef)
+        switch key {
+        case "game":
+            add("domain", "games", "Games", "source_backed", source, evidence, itemRef)
+        case "movie", "tv_show", "media":
+            add("domain", "media", "Media", "source_backed", source, evidence, itemRef)
+        case "restaurant":
+            add("domain", "restaurants", "Restaurants", "source_backed", source, evidence, itemRef)
+        case "place":
+            add("domain", "places", "Places", "source_backed", source, evidence, itemRef)
+        default:
+            break
+        }
+    }
+
+    private func decodedHubFacetValues(_ raw: String?) -> [String] {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return [] }
+        let decoded = DatabaseHelpers.decodeStringArray(raw)
+        if !decoded.isEmpty {
+            return decoded
+        }
+        let separators = CharacterSet(charactersIn: ",;|/")
+        return raw.components(separatedBy: separators)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "[]\"'"))) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func inferredHubCities(in text: String) -> [String] {
+        let knownCities = ["tacoma", "seattle", "puyallup", "olympia", "portland"]
+        let lower = text.lowercased()
+        return knownCities.filter { lower.contains($0) }
+    }
+
+    private func containsHubTerm(_ text: String, terms: [String]) -> Bool {
+        let normalized = " \(text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).lowercased()) "
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+        return terms.contains { term in
+            normalized.contains(" \(term.lowercased()) ")
+                || normalized.contains("/\(term.lowercased())/")
+                || normalized.contains("/\(term.lowercased()) ")
+                || normalized.contains(" \(term.lowercased())/")
+        }
+    }
+
+    private func normalizedHubFacetKey(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let lowered = trimmed.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).lowercased()
+        switch lowered {
+        case "tv", "tv shows", "tv show", "show", "shows":
+            return "tv_show"
+        case "movies":
+            return "movie"
+        case "games":
+            return "games"
+        case "restaurants":
+            return "restaurants"
+        case "world_of_warcraft", "world-of-warcraft":
+            return "world_of_warcraft"
+        default:
+            return lowered
+                .split { !$0.isLetter && !$0.isNumber }
+                .joined(separator: "_")
+        }
+    }
+
+    private func displayHubFacetValue(_ value: String) -> String {
+        let key = normalizedHubFacetKey(value)
+        switch key {
+        case "tv_show": return "TV Show"
+        case "wow": return "WoW"
+        case "world_of_warcraft": return "World of Warcraft"
+        default:
+            return key
+                .split(separator: "_")
+                .map { part in
+                    part.prefix(1).uppercased() + part.dropFirst()
+                }
+                .joined(separator: " ")
+        }
+    }
+
     private func hubReviewableCandidates(for anchor: CiderItemContextBundle) -> [CiderLibraryHubCandidate] {
         let reviewableStates: Set<String> = ["suggested", "needs_review", "deferred"]
         let similarity = anchor.relationCandidates
@@ -2302,6 +2584,7 @@ final class CiderItemContextService {
     private func hubSafeCommands(
         anchor: CiderItemContextBundle,
         relatedItems: [CiderLibraryHubRelatedItem],
+        domainFacets: [CiderLibraryHubDomainFacet],
         hasReviewableCandidates: Bool
     ) -> [String] {
         let type = anchor.item.type.rawValue
@@ -2313,12 +2596,21 @@ final class CiderItemContextService {
             "cider-cli item backlinks \(type) \(id) --json",
             "cider-cli item search \"\(escapedCommandArgument(anchor.item.title))\" --limit 5 --json",
         ]
+        for facet in domainFacets where facet.kind == "alias" {
+            commands.append("cider-cli item hub --query \"\(escapedCommandArgument(facet.displayValue))\" --limit 5 --json")
+        }
+        if domainFacets.contains(where: { ["domain", "entity_type"].contains($0.kind) }) {
+            commands.append("cider-cli item hub --query \"\(escapedCommandArgument(anchor.item.title))\" --limit 5 --json")
+        }
         if hasReviewableCandidates {
             commands.append("cider-cli item graph-candidates \(anchor.owner.ownerType) \(anchor.owner.ownerID) --json")
             commands.append("cider-cli capture review-queue --limit 20 --json")
         }
         for related in relatedItems.prefix(5) {
             commands.append("cider-cli item context \(related.item.type.rawValue) \(related.item.id.uuidString) --json")
+            if domainFacets.contains(where: { $0.itemRefs.contains(related.owner.canonicalRef) }) {
+                commands.append("cider-cli item hub --query \"\(escapedCommandArgument(related.item.title))\" --limit 5 --json")
+            }
         }
         return orderedUnique(commands)
     }

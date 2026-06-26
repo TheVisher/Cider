@@ -331,6 +331,18 @@ struct CiderItemContextServiceTests {
         #expect(hub.anchor.item.title == "World of Warcraft Hub")
         #expect(hub.relatedItems.map(\.item.title).contains("WoW Priest Guide"))
         #expect(hub.relatedItems.map(\.item.title).contains("WoW mythic build notes"))
+        #expect(hub.domainFacets.contains {
+            $0.kind == "domain" && $0.key == "games" && $0.confidenceLabel == "source_backed"
+        })
+        #expect(hub.domainFacets.contains {
+            $0.kind == "entity_type" && $0.key == "game" && $0.confidenceLabel == "source_backed"
+        })
+        #expect(hub.domainFacets.contains {
+            $0.kind == "alias" && $0.key == "wow" && $0.displayValue == "WoW"
+        })
+        #expect(hub.domainFacets.contains {
+            $0.kind == "alias" && $0.key == "world_of_warcraft" && $0.displayValue == "World of Warcraft"
+        })
         #expect(hub.relatedItems.flatMap(\.captureProvenance).map(\.sourceKind).contains("bookmark"))
         #expect(hub.relatedItems.flatMap(\.captureProvenance).map(\.sourceKind).contains("journal"))
         #expect(hub.groups.contains { $0.kind == "type" && $0.key == "bookmark" })
@@ -345,11 +357,104 @@ struct CiderItemContextServiceTests {
 
         let dict = CiderCLI.libraryHubReadModelToDict(hub)
         let hubDict = try #require(dict["hub"] as? [String: Any])
+        let facets = try #require(hubDict["domainFacets"] as? [[String: Any]])
+        #expect(facets.contains {
+            $0["kind"] as? String == "alias"
+                && $0["key"] as? String == "wow"
+                && $0["truthBoundary"] as? String == "interpretive_metadata_not_accepted_truth"
+        })
+        #expect(facets.contains {
+            $0["kind"] as? String == "domain"
+                && $0["key"] as? String == "games"
+                && $0["confidenceLabel"] as? String == "source_backed"
+        })
         let boundary = try #require(hubDict["truthBoundary"] as? [String: Any])
         #expect(boundary["reviewableCandidatesAreTruth"] as? Bool == false)
+        #expect(boundary["domainFacetsAreTruth"] as? Bool == false)
         #expect(boundary["autoMutatedUserFields"] as? Bool == false)
         let safeNextCommands = try #require(dict["safeNextCommands"] as? [String])
         #expect(safeNextCommands.contains("cider-cli item graph-candidates bookmark \(base.entityID.uuidString) --json"))
+        #expect(safeNextCommands.contains("cider-cli item hub --query \"WoW\" --limit 5 --json"))
+        #expect(safeNextCommands.contains("cider-cli item hub --query \"World of Warcraft\" --limit 5 --json"))
+    }
+
+    @Test("library hub exposes media and restaurant facets from source-backed metadata without promotion")
+    func libraryHubExposesMediaAndRestaurantFacetsFromMetadataWithoutPromotion() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let movie = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let restaurant = LibraryEntityRef(type: .note, entityID: UUID())
+        let now = Date(timeIntervalSince1970: 1_767_001_000)
+        try insertItem(movie, title: "The Way Way Back movie", relativePath: "Bookmarks/Media/Movies/The Way Way Back.webloc", into: db, createdAt: now, updatedAt: now)
+        try insertItem(restaurant, title: "Cactus Tacoma dinner notes", relativePath: "Notes/Restaurants/Tacoma/Cactus.md", into: db, createdAt: now, updatedAt: now.addingTimeInterval(10))
+
+        let store = SecondBrainStore(database: db)
+        let movieOwner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: movie.entityID.uuidString)
+        let restaurantOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: restaurant.entityID.uuidString)
+
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: movieOwner,
+            targetOwner: restaurantOwner,
+            relationType: "related_to",
+            evidence: "Movie night note also mentioned Cactus in Tacoma.",
+            source: "test.accepted-link",
+            actor: "Codex",
+            confidence: 1
+        ))
+
+        try SecondBrainEnrichmentOutputService(database: db).record(SecondBrainEnrichmentOutput(
+            owner: movieOwner,
+            chunkID: nil,
+            kind: SecondBrainGraphCandidateContract.outputKind,
+            value: "The Way Way Back",
+            normalizedValue: "the way way back",
+            label: "Possible movie",
+            evidence: "I watched The Way Way Back last night.",
+            source: "test.graph-candidate",
+            confidence: 0.8,
+            reviewState: "suggested",
+            metadata: [
+                SecondBrainGraphCandidateContract.MetadataKey.candidateKind: "object_relation",
+                SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses: "movie, media",
+                SecondBrainGraphCandidateContract.MetadataKey.relationGuesses: "watched",
+            ]
+        ))
+        try SecondBrainEnrichmentOutputService(database: db).record(SecondBrainEnrichmentOutput(
+            owner: restaurantOwner,
+            chunkID: nil,
+            kind: SecondBrainGraphCandidateContract.outputKind,
+            value: "Cactus",
+            normalizedValue: "cactus",
+            label: "Possible restaurant",
+            evidence: "We went to Cactus in Tacoma.",
+            source: "test.graph-candidate",
+            confidence: 0.72,
+            reviewState: "needs_review",
+            metadata: [
+                SecondBrainGraphCandidateContract.MetadataKey.candidateKind: "object_candidate",
+                SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses: "restaurant, place",
+            ]
+        ))
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let movieHub = try service.libraryHub(for: movie)
+        #expect(movieHub.domainFacets.contains { $0.kind == "domain" && $0.key == "media" })
+        #expect(movieHub.domainFacets.contains { $0.kind == "entity_type" && $0.key == "movie" && $0.confidenceLabel == "source_backed" })
+        #expect(movieHub.domainFacets.contains { $0.kind == "entity_type" && $0.key == "restaurant" })
+        #expect(movieHub.domainFacets.contains { $0.kind == "place" && $0.key == "tacoma" && $0.displayValue == "Tacoma" })
+
+        let dict = CiderCLI.libraryHubReadModelToDict(movieHub)
+        let hubDict = try #require(dict["hub"] as? [String: Any])
+        let facets = try #require(hubDict["domainFacets"] as? [[String: Any]])
+        #expect(facets.contains {
+            $0["kind"] as? String == "entity_type"
+                && $0["key"] as? String == "movie"
+                && $0["truthBoundary"] as? String == "interpretive_metadata_not_accepted_truth"
+        })
+        let safeNextCommands = try #require(dict["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item hub --query \"The Way Way Back movie\" --limit 5 --json"))
+        #expect(safeNextCommands.contains("cider-cli item hub --query \"Cactus Tacoma dinner notes\" --limit 5 --json"))
     }
 
     @Test("item context and home overview share recent capture surfacing for unfiled bookmarks")
@@ -501,7 +606,8 @@ struct CiderItemContextServiceTests {
         #expect(captureProvenance[0]["createdAt"] as? String == ISO8601DateFormatter().string(from: captureCreatedAt))
         let safeNextCommands = try #require(noteResultDict["safeNextCommands"] as? [String])
         #expect(safeNextCommands == [
-            "cider-cli item context note \(dentist.entityID.uuidString) --json"
+            "cider-cli item context note \(dentist.entityID.uuidString) --json",
+            "cider-cli item hub note \(dentist.entityID.uuidString) --json",
         ])
         #expect(!safeNextCommands.contains { command in
             command.contains(" delete ")

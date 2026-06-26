@@ -18351,16 +18351,19 @@ struct CiderCLI {
                 "anchor": itemContextBundleToDict(hub.anchor),
                 "relatedItems": hub.relatedItems.map(libraryHubRelatedItemToDict),
                 "groups": hub.groups.map(libraryHubGroupToDict),
+                "domainFacets": hub.domainFacets.map(libraryHubDomainFacetToDict),
                 "reviewableCandidates": hub.reviewableCandidates.map(libraryHubCandidateToDict),
                 "counts": [
                     "relatedItems": hub.relatedItems.count,
                     "groups": hub.groups.count,
+                    "domainFacets": hub.domainFacets.count,
                     "reviewableCandidates": hub.reviewableCandidates.count,
                     "anchorCaptureProvenance": hub.anchor.captureProvenance.count,
                 ],
                 "truthBoundary": [
                     "acceptedRelationsAreTruth": true,
                     "reviewableCandidatesAreTruth": false,
+                    "domainFacetsAreTruth": false,
                     "autoMutatedUserFields": false,
                     "sourceBacked": true,
                 ],
@@ -18395,6 +18398,20 @@ struct CiderCLI {
             "title": group.title,
             "itemRefs": group.itemRefs,
             "count": group.itemRefs.count,
+        ]
+    }
+
+    static func libraryHubDomainFacetToDict(_ facet: CiderLibraryHubDomainFacet) -> [String: Any] {
+        [
+            "kind": facet.kind,
+            "key": facet.key,
+            "displayValue": facet.displayValue,
+            "confidenceLabel": facet.confidenceLabel,
+            "source": facet.source,
+            "evidence": facet.evidence,
+            "itemRefs": facet.itemRefs,
+            "count": facet.itemRefs.count,
+            "truthBoundary": "interpretive_metadata_not_accepted_truth",
         ]
     }
 
@@ -23131,7 +23148,10 @@ struct CiderCLI {
         else {
             return []
         }
-        return ["cider-cli item context \(item.type.rawValue) \(item.id.uuidString) --json"]
+        return [
+            "cider-cli item context \(item.type.rawValue) \(item.id.uuidString) --json",
+            "cider-cli item hub \(item.type.rawValue) \(item.id.uuidString) --json",
+        ]
     }
 
     static func itemSearchDiagnosticsReportToDict(_ report: CiderItemSearchDiagnosticsReport) -> [String: Any] {
