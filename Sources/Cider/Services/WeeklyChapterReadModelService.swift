@@ -8,6 +8,7 @@ struct WeeklyChapterPreview {
     var dailyEpisodes: [WeeklyChapterDayPreview]
     var sourceItemRefs: [DailyEpisodeSourceItem]
     var recurringSignals: [WeeklyChapterRecurringSignal]
+    var candidateCoverageDiagnostic: WeeklyChapterCandidateCoverageDiagnostic
     var explanation: String?
     var safeNextCommands: [String]
 }
@@ -44,6 +45,51 @@ struct WeeklyChapterSignalExample: Equatable {
     var confidence: Double?
 }
 
+struct WeeklyChapterCandidateCoverageDiagnostic: Equatable {
+    var truthBoundary: String
+    var explanation: String
+    var whyRecurringSignals: String
+    var reviewableRepeatThreshold: Int
+    var counts: WeeklyChapterCandidateCoverageCounts
+    var byDay: [WeeklyChapterCandidateCoverageDay]
+    var singletonReviewableGroups: [WeeklyChapterCandidateCoverageGroup]
+    var safeNextCommands: [String]
+}
+
+struct WeeklyChapterCandidateCoverageCounts: Equatable {
+    var sourceItemCount: Int
+    var daysWithSources: Int
+    var graphCandidateOutputCount: Int
+    var reviewableCandidateOutputCount: Int
+    var repeatedReviewableGroupCount: Int
+    var singletonReviewableGroupCount: Int
+    var filteredAcceptedCount: Int
+    var filteredRejectedCount: Int
+    var filteredOtherStateCount: Int
+    var malformedCandidatePayloadCount: Int
+    var unsupportedCandidatePayloadCount: Int
+}
+
+struct WeeklyChapterCandidateCoverageDay: Equatable {
+    var date: String
+    var sourceItemCount: Int
+    var graphCandidateOutputCount: Int
+    var reviewableCandidateOutputCount: Int
+    var repeatedReviewableGroupCount: Int
+    var singletonReviewableGroupCount: Int
+    var malformedCandidatePayloadCount: Int
+}
+
+struct WeeklyChapterCandidateCoverageGroup: Equatable {
+    var id: String
+    var mentionText: String
+    var normalizedValue: String
+    var count: Int
+    var candidateRefs: [String]
+    var sourceRefs: [String]
+    var reviewState: String
+}
+
 @MainActor
 final class WeeklyChapterReadModelService {
     private let database: CiderDatabase
@@ -71,7 +117,11 @@ final class WeeklyChapterReadModelService {
         let dayPreviews = dailyPreviews.map(Self.dayPreview(from:))
         let sourceItemRefs = orderedUniqueSourceItems(dailyPreviews.flatMap(\.sourceItemRefs))
         let sourceOwnerRefs = Set(sourceItemRefs.map(\.ref))
-        let recurringSignals = try recurringCandidateSignals(sourceOwnerRefs: sourceOwnerRefs)
+        let coverage = try recurringCandidateCoverage(
+            sourceOwnerRefs: sourceOwnerRefs,
+            dayPreviews: dayPreviews
+        )
+        let recurringSignals = coverage.signals
         let exists = dayPreviews.contains(where: \.exists) || !recurringSignals.isEmpty
         let title = "Weekly Chapter \(weekStart) to \(weekEnd)"
         let explanation = exists ? nil : "No daily journal notes or recurring candidate themes were found for \(weekStart) to \(weekEnd)."
@@ -84,6 +134,7 @@ final class WeeklyChapterReadModelService {
             dailyEpisodes: dayPreviews,
             sourceItemRefs: sourceItemRefs,
             recurringSignals: recurringSignals,
+            candidateCoverageDiagnostic: coverage.diagnostic,
             explanation: explanation,
             safeNextCommands: safeNextCommands(
                 weekStart: weekStart,
@@ -117,75 +168,285 @@ final class WeeklyChapterReadModelService {
         )
     }
 
-    private func recurringCandidateSignals(sourceOwnerRefs: Set<String>) throws -> [WeeklyChapterRecurringSignal] {
-        guard database.isOpen, !sourceOwnerRefs.isEmpty else { return [] }
+    private struct CandidateCoverageResult {
+        var signals: [WeeklyChapterRecurringSignal]
+        var diagnostic: WeeklyChapterCandidateCoverageDiagnostic
+    }
+
+    private func recurringCandidateCoverage(
+        sourceOwnerRefs: Set<String>,
+        dayPreviews: [WeeklyChapterDayPreview]
+    ) throws -> CandidateCoverageResult {
+        guard database.isOpen, !sourceOwnerRefs.isEmpty else {
+            let diagnostic = WeeklyChapterCandidateCoverageDiagnostic(
+                truthBoundary: "candidate_coverage_not_truth",
+                explanation: "No source items were found for this week, so Cider did not find graph candidate outputs to group.",
+                whyRecurringSignals: "no_source_items",
+                reviewableRepeatThreshold: 2,
+                counts: WeeklyChapterCandidateCoverageCounts(
+                    sourceItemCount: 0,
+                    daysWithSources: 0,
+                    graphCandidateOutputCount: 0,
+                    reviewableCandidateOutputCount: 0,
+                    repeatedReviewableGroupCount: 0,
+                    singletonReviewableGroupCount: 0,
+                    filteredAcceptedCount: 0,
+                    filteredRejectedCount: 0,
+                    filteredOtherStateCount: 0,
+                    malformedCandidatePayloadCount: 0,
+                    unsupportedCandidatePayloadCount: 0
+                ),
+                byDay: dayPreviews.map {
+                    WeeklyChapterCandidateCoverageDay(
+                        date: $0.date,
+                        sourceItemCount: $0.dailyJournal == nil ? 0 : 1,
+                        graphCandidateOutputCount: 0,
+                        reviewableCandidateOutputCount: 0,
+                        repeatedReviewableGroupCount: 0,
+                        singletonReviewableGroupCount: 0,
+                        malformedCandidatePayloadCount: 0
+                    )
+                },
+                singletonReviewableGroups: [],
+                safeNextCommands: ["cider-cli capture review-queue --kind graph_candidate --json"]
+            )
+            return CandidateCoverageResult(signals: [], diagnostic: diagnostic)
+        }
+
         let outputs = try enrichmentService.outputs(
             kind: SecondBrainGraphCandidateContract.outputKind,
-            reviewStates: ["suggested", "needs_review", "deferred"],
+            reviewStates: nil,
             limit: nil
         )
         let weeklyOutputs = outputs.filter { sourceOwnerRefs.contains($0.owner.canonicalRef) }
-        let valid = weeklyOutputs.compactMap { output -> (SecondBrainEnrichmentOutput, SecondBrainGraphCandidateContract.Candidate)? in
-            guard let candidate = try? SecondBrainGraphCandidateContract.validate(output) else { return nil }
-            return (output, candidate)
+        var reviewable: [(SecondBrainEnrichmentOutput, SecondBrainGraphCandidateContract.Candidate)] = []
+        var acceptedCount = 0
+        var rejectedCount = 0
+        var filteredOtherStateCount = 0
+        var malformedCount = 0
+        var unsupportedCount = 0
+
+        for output in weeklyOutputs {
+            do {
+                let candidate = try SecondBrainGraphCandidateContract.validate(output)
+                switch candidate.reviewState {
+                case .suggested, .needsReview, .deferred:
+                    reviewable.append((output, candidate))
+                case .accepted:
+                    acceptedCount += 1
+                case .rejected:
+                    rejectedCount += 1
+                }
+            } catch let error as SecondBrainGraphCandidateContract.ValidationError {
+                switch error {
+                case .invalidCandidateKind, .wrongKind:
+                    unsupportedCount += 1
+                case .invalidReviewState:
+                    filteredOtherStateCount += 1
+                default:
+                    malformedCount += 1
+                }
+            } catch {
+                malformedCount += 1
+            }
         }
-        let grouped = Dictionary(grouping: valid) { pair in
+        let grouped = Dictionary(grouping: reviewable) { pair in
             pair.0.normalizedValue.isEmpty
                 ? pair.1.mentionText.lowercased()
                 : pair.0.normalizedValue.lowercased()
         }
+        let repeatedGroups = grouped.values.filter { $0.count >= 2 }
+        let singletonGroups = grouped.values.filter { $0.count == 1 }
 
-        return grouped.values.compactMap { pairs -> WeeklyChapterRecurringSignal? in
-            guard pairs.count >= 2 else { return nil }
-            let sorted = pairs.sorted {
-                if $0.0.owner.canonicalRef != $1.0.owner.canonicalRef {
-                    return $0.0.owner.canonicalRef < $1.0.owner.canonicalRef
-                }
-                return $0.0.id < $1.0.id
-            }
-            let first = sorted[0]
-            let reviewStates = orderedUniqueStrings(sorted.map { $0.0.reviewState })
-            let relationGuesses = orderedUniqueStrings(sorted.flatMap { $0.1.relationGuesses.map(\.rawValue) })
-            let objectTypeGuesses = orderedUniqueStrings(sorted.flatMap { $0.1.objectTypeGuesses.map(\.rawValue) })
-            let candidateRefs = sorted.map { "graph_candidate:\($0.0.id)" }
-            let sourceRefs = orderedUniqueStrings(sorted.map { $0.0.owner.canonicalRef })
-            let examples = sorted.prefix(5).map { output, candidate in
-                WeeklyChapterSignalExample(
-                    candidateRef: "graph_candidate:\(output.id)",
-                    sourceRef: output.owner.canonicalRef,
-                    sourceQuote: candidate.sourceQuote,
-                    reviewState: output.reviewState,
-                    confidence: output.confidence
-                )
-            }
-            let safeCommands = orderedUniqueStrings(
-                sorted.flatMap { output, _ in
-                    [
-                        "cider-cli item graph-candidate \(output.id) --json",
-                        "cider-cli item graph-candidates \(output.owner.ownerType) \(output.owner.ownerID) --json",
-                        "cider-cli item context \(output.owner.ownerType) \(output.owner.ownerID) --json",
-                    ]
-                } + ["cider-cli capture review-queue --kind graph_candidate --json"]
-            )
-            return WeeklyChapterRecurringSignal(
-                id: first.0.normalizedValue.isEmpty ? first.1.mentionText.lowercased() : first.0.normalizedValue,
-                mentionText: first.1.mentionText,
-                normalizedValue: first.0.normalizedValue,
-                count: sorted.count,
-                reviewState: reviewStates.count == 1 ? reviewStates[0] : "mixed_review_states",
-                truthBoundary: "reviewable_candidate_not_truth",
-                candidateRefs: candidateRefs,
-                sourceRefs: sourceRefs,
-                relationGuesses: relationGuesses,
-                objectTypeGuesses: objectTypeGuesses,
-                examples: examples,
-                safeNextCommands: safeCommands
-            )
-        }
-        .sorted {
+        let signals = repeatedGroups.map(signal(from:)).sorted {
             if $0.count != $1.count { return $0.count > $1.count }
             return $0.mentionText.localizedCaseInsensitiveCompare($1.mentionText) == .orderedAscending
         }
+        let singletonDiagnostics = singletonGroups.map(candidateCoverageGroup(from:)).sorted {
+            $0.mentionText.localizedCaseInsensitiveCompare($1.mentionText) == .orderedAscending
+        }
+
+        let ownerOutputs = Dictionary(grouping: weeklyOutputs, by: { $0.owner.canonicalRef })
+        let ownerReviewable = Dictionary(grouping: reviewable, by: { $0.0.owner.canonicalRef })
+        let ownerMalformedCounts = malformedCandidateCountsByOwner(weeklyOutputs)
+        let byDay = dayPreviews.map { day -> WeeklyChapterCandidateCoverageDay in
+            let refs = [day.dailyJournal?.ref].compactMap { $0 }
+            let dayOutputs = refs.flatMap { ownerOutputs[$0] ?? [] }
+            let dayReviewable = refs.flatMap { ownerReviewable[$0] ?? [] }
+            let dayGrouped = Dictionary(grouping: dayReviewable) { pair in
+                pair.0.normalizedValue.isEmpty
+                    ? pair.1.mentionText.lowercased()
+                    : pair.0.normalizedValue.lowercased()
+            }
+            return WeeklyChapterCandidateCoverageDay(
+                date: day.date,
+                sourceItemCount: refs.count,
+                graphCandidateOutputCount: dayOutputs.count,
+                reviewableCandidateOutputCount: dayReviewable.count,
+                repeatedReviewableGroupCount: dayGrouped.values.filter { $0.count >= 2 }.count,
+                singletonReviewableGroupCount: dayGrouped.values.filter { $0.count == 1 }.count,
+                malformedCandidatePayloadCount: refs.reduce(0) { $0 + (ownerMalformedCounts[$1] ?? 0) }
+            )
+        }
+
+        let counts = WeeklyChapterCandidateCoverageCounts(
+            sourceItemCount: sourceOwnerRefs.count,
+            daysWithSources: dayPreviews.filter { $0.dailyJournal != nil }.count,
+            graphCandidateOutputCount: weeklyOutputs.count,
+            reviewableCandidateOutputCount: reviewable.count,
+            repeatedReviewableGroupCount: repeatedGroups.count,
+            singletonReviewableGroupCount: singletonGroups.count,
+            filteredAcceptedCount: acceptedCount,
+            filteredRejectedCount: rejectedCount,
+            filteredOtherStateCount: filteredOtherStateCount,
+            malformedCandidatePayloadCount: malformedCount,
+            unsupportedCandidatePayloadCount: unsupportedCount
+        )
+        let reason = whyRecurringSignals(counts: counts)
+        let diagnostic = WeeklyChapterCandidateCoverageDiagnostic(
+            truthBoundary: "candidate_coverage_not_truth",
+            explanation: explanation(forCoverageReason: reason),
+            whyRecurringSignals: reason,
+            reviewableRepeatThreshold: 2,
+            counts: counts,
+            byDay: byDay,
+            singletonReviewableGroups: Array(singletonDiagnostics.prefix(10)),
+            safeNextCommands: diagnosticSafeNextCommands(dayPreviews: dayPreviews, weeklyOutputs: weeklyOutputs)
+        )
+
+        return CandidateCoverageResult(signals: signals, diagnostic: diagnostic)
+    }
+
+    private func signal(
+        from pairs: [(SecondBrainEnrichmentOutput, SecondBrainGraphCandidateContract.Candidate)]
+    ) -> WeeklyChapterRecurringSignal {
+        let sorted = sortedCandidatePairs(pairs)
+        let first = sorted[0]
+        let reviewStates = orderedUniqueStrings(sorted.map { $0.0.reviewState })
+        let relationGuesses = orderedUniqueStrings(sorted.flatMap { $0.1.relationGuesses.map(\.rawValue) })
+        let objectTypeGuesses = orderedUniqueStrings(sorted.flatMap { $0.1.objectTypeGuesses.map(\.rawValue) })
+        let candidateRefs = sorted.map { "graph_candidate:\($0.0.id)" }
+        let sourceRefs = orderedUniqueStrings(sorted.map { $0.0.owner.canonicalRef })
+        let examples = sorted.prefix(5).map { output, candidate in
+            WeeklyChapterSignalExample(
+                candidateRef: "graph_candidate:\(output.id)",
+                sourceRef: output.owner.canonicalRef,
+                sourceQuote: candidate.sourceQuote,
+                reviewState: output.reviewState,
+                confidence: output.confidence
+            )
+        }
+        let safeCommands = orderedUniqueStrings(
+            sorted.flatMap { output, _ in
+                [
+                    "cider-cli item graph-candidate \(output.id) --json",
+                    "cider-cli item graph-candidates \(output.owner.ownerType) \(output.owner.ownerID) --json",
+                    "cider-cli item context \(output.owner.ownerType) \(output.owner.ownerID) --json",
+                ]
+            } + ["cider-cli capture review-queue --kind graph_candidate --json"]
+        )
+        return WeeklyChapterRecurringSignal(
+            id: first.0.normalizedValue.isEmpty ? first.1.mentionText.lowercased() : first.0.normalizedValue,
+            mentionText: first.1.mentionText,
+            normalizedValue: first.0.normalizedValue,
+            count: sorted.count,
+            reviewState: reviewStates.count == 1 ? reviewStates[0] : "mixed_review_states",
+            truthBoundary: "reviewable_candidate_not_truth",
+            candidateRefs: candidateRefs,
+            sourceRefs: sourceRefs,
+            relationGuesses: relationGuesses,
+            objectTypeGuesses: objectTypeGuesses,
+            examples: examples,
+            safeNextCommands: safeCommands
+        )
+    }
+
+    private func candidateCoverageGroup(
+        from pairs: [(SecondBrainEnrichmentOutput, SecondBrainGraphCandidateContract.Candidate)]
+    ) -> WeeklyChapterCandidateCoverageGroup {
+        let sorted = sortedCandidatePairs(pairs)
+        let first = sorted[0]
+        let reviewStates = orderedUniqueStrings(sorted.map { $0.0.reviewState })
+        return WeeklyChapterCandidateCoverageGroup(
+            id: first.0.normalizedValue.isEmpty ? first.1.mentionText.lowercased() : first.0.normalizedValue,
+            mentionText: first.1.mentionText,
+            normalizedValue: first.0.normalizedValue,
+            count: sorted.count,
+            candidateRefs: sorted.map { "graph_candidate:\($0.0.id)" },
+            sourceRefs: orderedUniqueStrings(sorted.map { $0.0.owner.canonicalRef }),
+            reviewState: reviewStates.count == 1 ? reviewStates[0] : "mixed_review_states"
+        )
+    }
+
+    private func sortedCandidatePairs(
+        _ pairs: [(SecondBrainEnrichmentOutput, SecondBrainGraphCandidateContract.Candidate)]
+    ) -> [(SecondBrainEnrichmentOutput, SecondBrainGraphCandidateContract.Candidate)] {
+        pairs.sorted {
+            if $0.0.owner.canonicalRef != $1.0.owner.canonicalRef {
+                return $0.0.owner.canonicalRef < $1.0.owner.canonicalRef
+            }
+            return $0.0.id < $1.0.id
+        }
+    }
+
+    private func malformedCandidateCountsByOwner(_ outputs: [SecondBrainEnrichmentOutput]) -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for output in outputs {
+            do {
+                _ = try SecondBrainGraphCandidateContract.validate(output)
+            } catch let error as SecondBrainGraphCandidateContract.ValidationError {
+                switch error {
+                case .invalidCandidateKind, .wrongKind, .invalidReviewState:
+                    continue
+                default:
+                    counts[output.owner.canonicalRef, default: 0] += 1
+                }
+            } catch {
+                counts[output.owner.canonicalRef, default: 0] += 1
+            }
+        }
+        return counts
+    }
+
+    private func whyRecurringSignals(counts: WeeklyChapterCandidateCoverageCounts) -> String {
+        if counts.sourceItemCount == 0 { return "no_source_items" }
+        if counts.graphCandidateOutputCount == 0 { return "source_items_but_no_graph_candidates" }
+        if counts.reviewableCandidateOutputCount == 0 { return "no_reviewable_graph_candidates_after_filters" }
+        if counts.repeatedReviewableGroupCount == 0 { return "singleton_only_reviewable_candidates" }
+        return "repeated_reviewable_candidates_found"
+    }
+
+    private func explanation(forCoverageReason reason: String) -> String {
+        switch reason {
+        case "no_source_items":
+            return "No source items were found for this week, so Cider did not find graph candidate outputs to group."
+        case "source_items_but_no_graph_candidates":
+            return "Source items exist for this week, but no graph candidate enrichment outputs were found for those sources."
+        case "no_reviewable_graph_candidates_after_filters":
+            return "Graph candidate outputs were found, but none are reviewable recurring-signal inputs after state and payload checks."
+        case "singleton_only_reviewable_candidates":
+            return "Reviewable graph candidates were found, but each candidate group appears only once in the week."
+        default:
+            return "Repeated reviewable graph candidate groups were found; recurringSignals only reflects source-backed candidates, not accepted truth."
+        }
+    }
+
+    private func diagnosticSafeNextCommands(
+        dayPreviews: [WeeklyChapterDayPreview],
+        weeklyOutputs: [SecondBrainEnrichmentOutput]
+    ) -> [String] {
+        orderedUniqueStrings(
+            dayPreviews.map {
+                "cider-cli item daily-episode --date \($0.date) --json"
+            } + dayPreviews.compactMap(\.dailyJournal).flatMap { item in
+                [
+                    "cider-cli item context \(item.type) \(item.id) --json",
+                    "cider-cli item graph-candidates \(item.type) \(item.id) --json",
+                ]
+            } + weeklyOutputs.prefix(10).map {
+                "cider-cli item graph-candidate \($0.id) --json"
+            } + ["cider-cli capture review-queue --kind graph_candidate --json"]
+        )
     }
 
     private func safeNextCommands(

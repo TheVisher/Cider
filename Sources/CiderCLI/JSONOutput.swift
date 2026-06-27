@@ -1371,6 +1371,7 @@ func weeklyChapterPreviewToDict(_ preview: WeeklyChapterPreview) -> [String: Any
         "sourceItemRefs": preview.sourceItemRefs.map(dailyEpisodeSourceItemToDict),
         "dailyEpisodes": preview.dailyEpisodes.map(weeklyChapterDayPreviewToDict),
         "recurringSignals": preview.recurringSignals.map(weeklyChapterRecurringSignalToDict),
+        "candidateCoverageDiagnostic": weeklyChapterCandidateCoverageDiagnosticToDict(preview.candidateCoverageDiagnostic),
         "trustBoundary": [
             "status": "reviewable_weekly_read_model",
             "generatedTruth": false,
@@ -1386,6 +1387,64 @@ func weeklyChapterPreviewToDict(_ preview: WeeklyChapterPreview) -> [String: Any
         dict["explanation"] = explanation
     }
     return dict
+}
+
+func weeklyChapterCandidateCoverageDiagnosticToDict(_ diagnostic: WeeklyChapterCandidateCoverageDiagnostic) -> [String: Any] {
+    [
+        "truthBoundary": diagnostic.truthBoundary,
+        "acceptedAsTruth": false,
+        "sourceMutation": false,
+        "autoPromotesCandidates": false,
+        "explanation": diagnostic.explanation,
+        "whyRecurringSignals": diagnostic.whyRecurringSignals,
+        "reviewableRepeatThreshold": diagnostic.reviewableRepeatThreshold,
+        "counts": weeklyChapterCandidateCoverageCountsToDict(diagnostic.counts),
+        "byDay": diagnostic.byDay.map(weeklyChapterCandidateCoverageDayToDict),
+        "singletonReviewableGroups": diagnostic.singletonReviewableGroups.map(weeklyChapterCandidateCoverageGroupToDict),
+        "safeNextCommands": diagnostic.safeNextCommands,
+    ]
+}
+
+func weeklyChapterCandidateCoverageCountsToDict(_ counts: WeeklyChapterCandidateCoverageCounts) -> [String: Any] {
+    [
+        "sourceItemCount": counts.sourceItemCount,
+        "daysWithSources": counts.daysWithSources,
+        "graphCandidateOutputCount": counts.graphCandidateOutputCount,
+        "reviewableCandidateOutputCount": counts.reviewableCandidateOutputCount,
+        "repeatedReviewableGroupCount": counts.repeatedReviewableGroupCount,
+        "singletonReviewableGroupCount": counts.singletonReviewableGroupCount,
+        "filteredAcceptedCount": counts.filteredAcceptedCount,
+        "filteredRejectedCount": counts.filteredRejectedCount,
+        "filteredOtherStateCount": counts.filteredOtherStateCount,
+        "malformedCandidatePayloadCount": counts.malformedCandidatePayloadCount,
+        "unsupportedCandidatePayloadCount": counts.unsupportedCandidatePayloadCount,
+    ]
+}
+
+func weeklyChapterCandidateCoverageDayToDict(_ day: WeeklyChapterCandidateCoverageDay) -> [String: Any] {
+    [
+        "date": day.date,
+        "sourceItemCount": day.sourceItemCount,
+        "graphCandidateOutputCount": day.graphCandidateOutputCount,
+        "reviewableCandidateOutputCount": day.reviewableCandidateOutputCount,
+        "repeatedReviewableGroupCount": day.repeatedReviewableGroupCount,
+        "singletonReviewableGroupCount": day.singletonReviewableGroupCount,
+        "malformedCandidatePayloadCount": day.malformedCandidatePayloadCount,
+    ]
+}
+
+func weeklyChapterCandidateCoverageGroupToDict(_ group: WeeklyChapterCandidateCoverageGroup) -> [String: Any] {
+    [
+        "id": group.id,
+        "mentionText": group.mentionText,
+        "normalizedValue": group.normalizedValue,
+        "count": group.count,
+        "candidateRefs": group.candidateRefs,
+        "sourceRefs": group.sourceRefs,
+        "reviewState": group.reviewState,
+        "truthBoundary": "reviewable_candidate_not_truth",
+        "acceptedAsTruth": false,
+    ]
 }
 
 func weeklyChapterDayPreviewToDict(_ day: WeeklyChapterDayPreview) -> [String: Any] {

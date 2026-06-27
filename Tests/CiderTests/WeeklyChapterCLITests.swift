@@ -65,6 +65,20 @@ struct WeeklyChapterCLITests {
         #expect(silo["truthBoundary"] as? String == "reviewable_candidate_not_truth")
         #expect(silo["reviewState"] as? String == "suggested")
 
+        let diagnostic = try #require(preview["candidateCoverageDiagnostic"] as? [String: Any])
+        #expect(diagnostic["truthBoundary"] as? String == "candidate_coverage_not_truth")
+        #expect(diagnostic["whyRecurringSignals"] as? String == "repeated_reviewable_candidates_found")
+        #expect(diagnostic["reviewableRepeatThreshold"] as? Int == 2)
+        let counts = try #require(diagnostic["counts"] as? [String: Any])
+        #expect(counts["sourceItemCount"] as? Int == 3)
+        #expect(counts["graphCandidateOutputCount"] as? Int == 3)
+        #expect(counts["reviewableCandidateOutputCount"] as? Int == 3)
+        #expect(counts["repeatedReviewableGroupCount"] as? Int == 1)
+        #expect(counts["singletonReviewableGroupCount"] as? Int == 1)
+        #expect(counts["filteredAcceptedCount"] as? Int == 0)
+        #expect(counts["filteredRejectedCount"] as? Int == 0)
+        #expect(counts["malformedCandidatePayloadCount"] as? Int == 0)
+
         let candidateRefs = try #require(silo["candidateRefs"] as? [String])
         #expect(candidateRefs.count == 2)
         #expect(candidateRefs.allSatisfy { $0.hasPrefix("graph_candidate:") })
@@ -81,6 +95,10 @@ struct WeeklyChapterCLITests {
         #expect(safeCommands.contains("cider-cli item daily-episode --date 2026-06-22 --json"))
         #expect(safeCommands.contains("cider-cli item graph-candidates note \(mondayNoteID) --json"))
         #expect(safeCommands.contains("cider-cli capture review-queue --kind graph_candidate --json"))
+
+        let diagnosticSafeCommands = try #require(diagnostic["safeNextCommands"] as? [String])
+        #expect(diagnosticSafeCommands.contains("cider-cli item graph-candidates note \(mondayNoteID) --json"))
+        #expect(diagnosticSafeCommands.contains("cider-cli capture review-queue --kind graph_candidate --json"))
     }
 
     @Test("weekly chapter preview for empty week is read only and does not mutate")
@@ -102,6 +120,16 @@ struct WeeklyChapterCLITests {
         #expect(preview["exists"] as? Bool == false)
         #expect(preview["explanation"] as? String == "No daily journal notes or recurring candidate themes were found for 2026-07-06 to 2026-07-12.")
 
+        let diagnostic = try #require(preview["candidateCoverageDiagnostic"] as? [String: Any])
+        #expect(diagnostic["truthBoundary"] as? String == "candidate_coverage_not_truth")
+        #expect(diagnostic["whyRecurringSignals"] as? String == "no_source_items")
+        #expect(diagnostic["explanation"] as? String == "No source items were found for this week, so Cider did not find graph candidate outputs to group.")
+        let counts = try #require(diagnostic["counts"] as? [String: Any])
+        #expect(counts["sourceItemCount"] as? Int == 0)
+        #expect(counts["graphCandidateOutputCount"] as? Int == 0)
+        #expect(counts["reviewableCandidateOutputCount"] as? Int == 0)
+        #expect(counts["repeatedReviewableGroupCount"] as? Int == 0)
+
         let days = try #require(preview["dailyEpisodes"] as? [[String: Any]])
         #expect(days.count == 7)
         #expect(days.allSatisfy { $0["exists"] as? Bool == false })
@@ -112,6 +140,105 @@ struct WeeklyChapterCLITests {
         let safeCommands = try #require(preview["safeNextCommands"] as? [String])
         #expect(safeCommands.contains("cider-cli item search \"2026-07-06\" --scope personalMemory --json"))
         #expect(safeCommands.contains("cider-cli item daily-episode --date 2026-07-06 --json"))
+    }
+
+    @Test("weekly chapter diagnostic explains source items with no graph candidates")
+    func weeklyChapterDiagnosticExplainsSourcesWithNoCandidates() throws {
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let capture = try captureJournal(
+            date: "2026-07-13",
+            time: "08:10",
+            text: "quiet notes without extractor-shaped phrases.",
+            vault: vault
+        )
+        let item = try #require(capture["item"] as? [String: Any])
+        let noteID = try #require(item["id"] as? String)
+
+        let preview = try assertJSON(
+            runCLI(args: ["item", "weekly-chapter", "--week", "2026-07-13", "--json"], vault: vault),
+            command: "item.weekly-chapter"
+        )
+
+        let recurring = try #require(preview["recurringSignals"] as? [[String: Any]])
+        #expect(recurring.isEmpty)
+
+        let diagnostic = try #require(preview["candidateCoverageDiagnostic"] as? [String: Any])
+        #expect(diagnostic["whyRecurringSignals"] as? String == "source_items_but_no_graph_candidates")
+        #expect(diagnostic["explanation"] as? String == "Source items exist for this week, but no graph candidate enrichment outputs were found for those sources.")
+        let counts = try #require(diagnostic["counts"] as? [String: Any])
+        #expect(counts["sourceItemCount"] as? Int == 1)
+        #expect(counts["graphCandidateOutputCount"] as? Int == 0)
+
+        let byDay = try #require(diagnostic["byDay"] as? [[String: Any]])
+        let monday = try #require(byDay.first { $0["date"] as? String == "2026-07-13" })
+        #expect(monday["sourceItemCount"] as? Int == 1)
+        #expect(monday["graphCandidateOutputCount"] as? Int == 0)
+
+        let safeCommands = try #require(diagnostic["safeNextCommands"] as? [String])
+        #expect(safeCommands.contains("cider-cli item context note \(noteID) --json"))
+        #expect(safeCommands.contains("cider-cli item graph-candidates note \(noteID) --json"))
+    }
+
+    @Test("weekly chapter diagnostic explains singleton-only candidates and filtered states")
+    func weeklyChapterDiagnosticExplainsSingletonOnlyCandidatesAndFilteredStates() throws {
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let capture = try captureJournal(
+            date: "2026-07-20",
+            time: "10:00",
+            text: "I watched Silo.",
+            vault: vault
+        )
+        let item = try #require(capture["item"] as? [String: Any])
+        let noteID = try #require(item["id"] as? String)
+        try recordGraphCandidate(
+            ownerType: "note",
+            ownerID: noteID,
+            mention: "Cactus",
+            quote: "We went to Cactus.",
+            reviewState: .accepted,
+            vault: vault
+        )
+        try recordGraphCandidate(
+            ownerType: "note",
+            ownerID: noteID,
+            mention: "Rejected place",
+            quote: "We did not go to Rejected place.",
+            reviewState: .rejected,
+            vault: vault
+        )
+        try recordMalformedGraphCandidate(
+            ownerType: "note",
+            ownerID: noteID,
+            vault: vault
+        )
+
+        let preview = try assertJSON(
+            runCLI(args: ["item", "weekly-chapter", "--week", "2026-07-20", "--json"], vault: vault),
+            command: "item.weekly-chapter"
+        )
+
+        let recurring = try #require(preview["recurringSignals"] as? [[String: Any]])
+        #expect(recurring.isEmpty)
+
+        let diagnostic = try #require(preview["candidateCoverageDiagnostic"] as? [String: Any])
+        #expect(diagnostic["whyRecurringSignals"] as? String == "singleton_only_reviewable_candidates")
+        #expect(diagnostic["explanation"] as? String == "Reviewable graph candidates were found, but each candidate group appears only once in the week.")
+        let counts = try #require(diagnostic["counts"] as? [String: Any])
+        #expect(counts["sourceItemCount"] as? Int == 1)
+        #expect(counts["graphCandidateOutputCount"] as? Int == 4)
+        #expect(counts["reviewableCandidateOutputCount"] as? Int == 1)
+        #expect(counts["singletonReviewableGroupCount"] as? Int == 1)
+        #expect(counts["repeatedReviewableGroupCount"] as? Int == 0)
+        #expect(counts["filteredAcceptedCount"] as? Int == 1)
+        #expect(counts["filteredRejectedCount"] as? Int == 1)
+        #expect(counts["malformedCandidatePayloadCount"] as? Int == 1)
+
+        let singletonGroups = try #require(diagnostic["singletonReviewableGroups"] as? [[String: Any]])
+        #expect(singletonGroups.contains { ($0["mentionText"] as? String)?.localizedCaseInsensitiveContains("Silo") == true })
     }
 
     @Test("weekly chapter help is discoverable and side effect free")
@@ -149,6 +276,66 @@ struct WeeklyChapterCLITests {
             ),
             command: "capture.add"
         )
+    }
+
+    private func recordGraphCandidate(
+        ownerType: String,
+        ownerID: String,
+        mention: String,
+        quote: String,
+        reviewState: SecondBrainGraphCandidateContract.ReviewState,
+        vault: URL
+    ) throws {
+        let db = try openDatabase(in: vault)
+        defer { db.close() }
+        let owner = SecondBrainOwnerRef(ownerType: ownerType, ownerID: ownerID)
+        var output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: mention,
+            sourceQuote: quote,
+            objectTypeGuesses: [.place],
+            relationGuesses: [.visited],
+            reviewState: .suggested,
+            source: "graph_candidate.weekly_chapter_test"
+        )
+        output.reviewState = reviewState.rawValue
+        if reviewState == .accepted {
+            output.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerType] = "place"
+            output.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerID] = UUID().uuidString
+            output.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedRelationType] = SecondBrainGraphCandidateContract.RelationType.visited.rawValue
+        }
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+    }
+
+    private func recordMalformedGraphCandidate(ownerType: String, ownerID: String, vault: URL) throws {
+        let db = try openDatabase(in: vault)
+        defer { db.close() }
+        let output = SecondBrainEnrichmentOutput(
+            owner: SecondBrainOwnerRef(ownerType: ownerType, ownerID: ownerID),
+            kind: SecondBrainGraphCandidateContract.outputKind,
+            value: "Malformed",
+            normalizedValue: "malformed",
+            label: "Malformed candidate",
+            evidence: "",
+            source: "graph_candidate.weekly_chapter_test",
+            confidence: 0.5,
+            reviewState: "suggested",
+            metadata: [
+                SecondBrainGraphCandidateContract.MetadataKey.candidateKind: "object",
+            ]
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+    }
+
+    private func openDatabase(in vault: URL) throws -> CiderDatabase {
+        try FileManager.default.createDirectory(
+            at: vault.appendingPathComponent(".cider", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        return db
     }
 
     private func makeTempVault() throws -> URL {
