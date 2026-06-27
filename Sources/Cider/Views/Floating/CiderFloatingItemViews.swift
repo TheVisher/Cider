@@ -350,7 +350,8 @@ private struct FloatingBookmarkDetailContent: View {
             onSave: saveDraft,
             onCancel: {},
             onOpenLinkedRef: floatLinkedRef,
-            canOpenLinkedRef: canFloatLinkedRef
+            canOpenLinkedRef: canFloatLinkedRef,
+            onOpenHubNavigationTarget: LibraryHubNavigationRequest.floatingPanelHandler()
         )
     }
 
@@ -517,7 +518,8 @@ private struct FloatingDateCardDetail: View {
                     canOpenLinkedRef: canFloatLinkedRef,
                     onFolderChanged: assignFolder,
                     onToggleLabel: toggleLabel,
-                    onDelete: deleteDateCard
+                    onDelete: deleteDateCard,
+                    onOpenHubNavigationTarget: LibraryHubNavigationRequest.floatingPanelHandler()
                 )
             }
         ) {
@@ -596,7 +598,8 @@ private struct FloatingTodoDetail: View {
                     canOpenLinkedRef: canFloatLinkedRef,
                     onFolderChanged: assignFolder,
                     onToggleLabel: toggleLabel,
-                    onDelete: deleteTodo
+                    onDelete: deleteTodo,
+                    onOpenHubNavigationTarget: LibraryHubNavigationRequest.floatingPanelHandler()
                 )
             }
         ) {

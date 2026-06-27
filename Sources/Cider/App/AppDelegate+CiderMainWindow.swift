@@ -84,6 +84,14 @@ extension AppDelegate {
                 }
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .openCiderLibraryHubNavigationTargetInMainWindow)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard LibraryHubNavigationRequest.target(from: notification) != nil else { return }
+                self?.transitionToCiderMainWindow()
+            }
+            .store(in: &cancellables)
     }
 
     func observeExternalOpenRequests() {

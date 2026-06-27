@@ -282,6 +282,13 @@ struct CiderPanelView: View {
             }
             openSurfaceInMainWindow(floatableSurface)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openCiderLibraryHubNavigationTargetInMainWindow)) { notification in
+            guard surface == .mainWindow,
+                  let target = LibraryHubNavigationRequest.target(from: notification) else {
+                return
+            }
+            openHubNavigationTarget(target)
+        }
         .modifier(CiderExternalOpenModifier(isMainWindow: surface == .mainWindow, open: handleExternalOpenTarget))
         .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { notification in
             let ui = notification.userInfo
