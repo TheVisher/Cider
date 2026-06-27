@@ -247,6 +247,7 @@ struct CiderCLI {
           cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
           cider-cli item daily-episode --date YYYY-MM-DD [--json]
           cider-cli item weekly-chapter --week YYYY-MM-DD [--json]
+          cider-cli item monthly-chapter --month YYYY-MM [--json]
           cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
             Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
 
@@ -304,6 +305,8 @@ struct CiderCLI {
             return "cider-cli item daily-episode --date YYYY-MM-DD [--json]"
         case "weekly-chapter", "chapter-weekly":
             return "cider-cli item weekly-chapter --week YYYY-MM-DD [--json]"
+        case "monthly-chapter", "chapter-monthly":
+            return "cider-cli item monthly-chapter --month YYYY-MM [--json]"
         default:
             return nil
         }
@@ -343,8 +346,13 @@ struct CiderCLI {
         let weeklyLifeRecallIntent = command.lowercased() == "query"
             ? parseWeeklyLifeRecallQuery(Array(args.dropFirst()))
             : nil
+        let monthlyLifeRecallIntent = command.lowercased() == "query"
+            ? parseMonthlyLifeRecallQuery(Array(args.dropFirst()))
+            : nil
 
-        if weeklyLifeRecallIntent == nil, handleRemovedLegacyTopLevelCommand(command, subcommand: subcommand) {
+        if weeklyLifeRecallIntent == nil,
+           monthlyLifeRecallIntent == nil,
+           handleRemovedLegacyTopLevelCommand(command, subcommand: subcommand) {
             return
         }
         if handleBookmarkRepairEarlyHelp(command: command, subcommand: subcommand, args: remaining) {
@@ -483,7 +491,9 @@ struct CiderCLI {
         case "duplicate-check", "dupecheck":
             handleDuplicateCheck(args: Array(args.dropFirst()))
         case "query":
-            if let weeklyLifeRecallIntent {
+            if let monthlyLifeRecallIntent {
+                handleMonthlyLifeRecallQuery(monthlyLifeRecallIntent)
+            } else if let weeklyLifeRecallIntent {
                 handleWeeklyLifeRecallQuery(weeklyLifeRecallIntent)
             } else {
                 await handleQuery(args: Array(args.dropFirst()))
@@ -3605,6 +3615,10 @@ struct CiderCLI {
         localDateFormatter.date(from: value).map { localDateFormatter.string(from: $0) == value } ?? false
     }
 
+    static func isValidLocalMonthString(_ value: String) -> Bool {
+        localMonthFormatter.date(from: value).map { localMonthFormatter.string(from: $0) == value } ?? false
+    }
+
     static func isValidClockTimeString(_ value: String) -> Bool {
         twentyFourHourTimeFormatter.date(from: value).map { twentyFourHourTimeFormatter.string(from: $0) == value } ?? false
     }
@@ -5143,6 +5157,7 @@ struct CiderCLI {
               cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
               cider-cli item daily-episode --date YYYY-MM-DD [--json]
               cider-cli item weekly-chapter --week YYYY-MM-DD [--json]
+              cider-cli item monthly-chapter --month YYYY-MM [--json]
               cider-cli item sync-project <project-id-or-name> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
               cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]
@@ -5284,6 +5299,32 @@ struct CiderCLI {
                         print("  \(explanation)")
                     }
                     print("  Daily episodes: \(preview.dailyEpisodes.filter(\.exists).count)/\(preview.dailyEpisodes.count)")
+                    print("  Recurring reviewable signals: \(preview.recurringSignals.count)")
+                    print("  Read-only preview; no candidates were promoted or source notes changed.")
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "monthly-chapter", "chapter-monthly":
+            guard let month = parseFlag("--month", from: args), isValidLocalMonthString(month) else {
+                printCLIError("Usage: cider-cli item monthly-chapter --month YYYY-MM [--json]")
+                return
+            }
+            do {
+                let preview = try MonthlyChapterReadModelService(
+                    database: .shared,
+                    notesStorage: .shared
+                ).preview(month: month)
+                if jsonOutput {
+                    outputJSON(monthlyChapterPreviewToDict(preview))
+                } else {
+                    print("\(preview.title)")
+                    if let explanation = preview.explanation {
+                        print("  \(explanation)")
+                    }
+                    print("  Week previews: \(preview.weeks.filter(\.exists).count)/\(preview.weeks.count)")
+                    print("  Source-backed days: \(preview.candidateCoverageDiagnostic.counts.daysWithSources)")
                     print("  Recurring reviewable signals: \(preview.recurringSignals.count)")
                     print("  Read-only preview; no candidates were promoted or source notes changed.")
                 }
@@ -10116,6 +10157,49 @@ struct CiderCLI {
         var matchedDatePhrase: String
     }
 
+    struct MonthlyLifeRecallQueryIntent {
+        var rawQuery: String
+        var month: String
+        var matchedDatePhrase: String
+    }
+
+    static func parseMonthlyLifeRecallQuery(_ args: [String], referenceDate: Date = Date()) -> MonthlyLifeRecallQueryIntent? {
+        let rawQuery = args
+            .filter { $0 != "--json" }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawQuery.isEmpty else { return nil }
+
+        let normalized = normalizedWeeklyRecallQuery(rawQuery)
+        guard isMonthlyLifeRecallPhrase(normalized) else { return nil }
+
+        if normalized.contains("last month") {
+            return MonthlyLifeRecallQueryIntent(
+                rawQuery: rawQuery,
+                month: monthForLastMonth(referenceDate: referenceDate),
+                matchedDatePhrase: "last month"
+            )
+        }
+
+        if normalized.contains("this month") {
+            return MonthlyLifeRecallQueryIntent(
+                rawQuery: rawQuery,
+                month: month(containing: referenceDate),
+                matchedDatePhrase: "this month"
+            )
+        }
+
+        if let literalMonth = firstMonthLiteral(in: rawQuery), normalized.contains("month") {
+            return MonthlyLifeRecallQueryIntent(
+                rawQuery: rawQuery,
+                month: literalMonth,
+                matchedDatePhrase: "month \(literalMonth)"
+            )
+        }
+
+        return nil
+    }
+
     static func parseWeeklyLifeRecallQuery(_ args: [String], referenceDate: Date = Date()) -> WeeklyLifeRecallQueryIntent? {
         let rawQuery = args
             .filter { $0 != "--json" }
@@ -10152,6 +10236,53 @@ struct CiderCLI {
         }
 
         return nil
+    }
+
+    static func handleMonthlyLifeRecallQuery(_ intent: MonthlyLifeRecallQueryIntent) {
+        do {
+            let preview = try MonthlyChapterReadModelService(
+                database: .shared,
+                notesStorage: .shared
+            ).preview(month: intent.month)
+            let safeCommand = "cider-cli item monthly-chapter --month \(intent.month) --json"
+            var safeNextCommands = [safeCommand]
+            for command in preview.safeNextCommands where !safeNextCommands.contains(command) {
+                safeNextCommands.append(command)
+            }
+
+            if jsonOutput {
+                outputJSON([
+                    "ok": true,
+                    "command": "query.monthly-chapter",
+                    "readOnly": true,
+                    "changed": false,
+                    "query": intent.rawQuery,
+                    "intent": "monthly_life_recap",
+                    "matchedDatePhrase": intent.matchedDatePhrase,
+                    "month": preview.month,
+                    "monthStart": preview.monthStart,
+                    "monthEnd": preview.monthEnd,
+                    "safeCommand": safeCommand,
+                    "monthlyChapter": monthlyChapterPreviewToDict(preview),
+                    "trustBoundary": [
+                        "status": "monthly_chapter_query_interpretation",
+                        "generatedTruth": false,
+                        "acceptedGeneratedTruth": false,
+                        "sourcePreserved": true,
+                        "sourceMutation": false,
+                        "autoPromotesCandidates": false,
+                        "truthBoundary": "routes_to_reviewable_monthly_read_model",
+                    ],
+                    "safeNextCommands": safeNextCommands,
+                ])
+            } else {
+                print("Interpreted as monthly life recap for \(preview.monthStart) to \(preview.monthEnd).")
+                print("Run: \(safeCommand)")
+                print("Read-only interpretation; no source notes or candidates were changed.")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
     }
 
     static func handleWeeklyLifeRecallQuery(_ intent: WeeklyLifeRecallQueryIntent) {
@@ -10228,6 +10359,22 @@ struct CiderCLI {
         return recapStarts.contains { normalized.contains($0) }
     }
 
+    static func isMonthlyLifeRecallPhrase(_ normalized: String) -> Bool {
+        let hasMonthTarget = normalized.contains("last month")
+            || normalized.contains("this month")
+            || (normalized.contains("month") && firstMonthLiteral(in: normalized) != nil)
+        guard hasMonthTarget else { return false }
+
+        let recapStarts = [
+            "what happened",
+            "what was happening",
+            "what did i do",
+            "what have i been doing",
+            "what were things like",
+        ]
+        return recapStarts.contains { normalized.contains($0) }
+    }
+
     static func firstDateLiteral(in raw: String) -> Date? {
         let pattern = #"\b\d{4}-\d{2}-\d{2}\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
@@ -10237,6 +10384,30 @@ struct CiderCLI {
             return nil
         }
         return weeklyRecallDateFormatter.date(from: String(raw[range]))
+    }
+
+    static func firstMonthLiteral(in raw: String) -> String? {
+        let pattern = #"\b\d{4}-\d{2}\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+              let range = Range(match.range, in: raw)
+        else {
+            return nil
+        }
+        let value = String(raw[range])
+        return weeklyRecallMonthFormatter.date(from: value).map { weeklyRecallMonthFormatter.string(from: $0) }
+    }
+
+    static func monthForLastMonth(referenceDate: Date) -> String {
+        let currentMonth = weeklyRecallCalendar.date(
+            from: weeklyRecallCalendar.dateComponents([.year, .month], from: referenceDate)
+        ) ?? referenceDate
+        let lastMonth = weeklyRecallCalendar.date(byAdding: .month, value: -1, to: currentMonth) ?? currentMonth
+        return weeklyRecallMonthFormatter.string(from: lastMonth)
+    }
+
+    static func month(containing date: Date) -> String {
+        weeklyRecallMonthFormatter.string(from: date)
     }
 
     static func weekStartForLastWeek(referenceDate: Date) -> String {
@@ -10269,6 +10440,15 @@ struct CiderCLI {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    static let weeklyRecallMonthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM"
         return formatter
     }()
 
@@ -11179,6 +11359,14 @@ struct CiderCLI {
     static let localDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .autoupdatingCurrent
+        return f
+    }()
+
+    static let localMonthFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM"
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = .autoupdatingCurrent
         return f

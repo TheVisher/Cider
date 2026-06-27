@@ -1389,6 +1389,82 @@ func weeklyChapterPreviewToDict(_ preview: WeeklyChapterPreview) -> [String: Any
     return dict
 }
 
+func monthlyChapterPreviewToDict(_ preview: MonthlyChapterPreview) -> [String: Any] {
+    var dict: [String: Any] = [
+        "ok": true,
+        "command": "item.monthly-chapter",
+        "readOnly": true,
+        "changed": false,
+        "month": preview.month,
+        "monthStart": preview.monthStart,
+        "monthEnd": preview.monthEnd,
+        "title": preview.title,
+        "exists": preview.exists,
+        "sourceItemRefs": preview.sourceItemRefs.map(dailyEpisodeSourceItemToDict),
+        "weeks": preview.weeks.map(monthlyChapterWeekPreviewToDict),
+        "recurringSignals": preview.recurringSignals.map(weeklyChapterRecurringSignalToDict),
+        "candidateCoverageDiagnostic": monthlyChapterCandidateCoverageDiagnosticToDict(preview.candidateCoverageDiagnostic),
+        "trustBoundary": [
+            "status": "reviewable_monthly_read_model",
+            "generatedTruth": false,
+            "acceptedGeneratedTruth": false,
+            "sourcePreserved": true,
+            "sourceMutation": false,
+            "autoPromotesCandidates": false,
+            "truthBoundary": "reviewable_candidate_not_truth",
+        ],
+        "safeNextCommands": preview.safeNextCommands,
+    ]
+    if let explanation = preview.explanation {
+        dict["explanation"] = explanation
+    }
+    return dict
+}
+
+func monthlyChapterWeekPreviewToDict(_ week: MonthlyChapterWeekPreview) -> [String: Any] {
+    [
+        "weekStart": week.weekStart,
+        "weekEnd": week.weekEnd,
+        "exists": week.exists,
+        "daysInMonth": week.daysInMonth,
+        "daysInMonthWithSources": week.daysInMonthWithSources,
+        "sourceItemRefs": week.sourceItemRefs.map(dailyEpisodeSourceItemToDict),
+        "recurringSignals": week.recurringSignals.map(weeklyChapterRecurringSignalToDict),
+        "candidateCoverageDiagnostic": weeklyChapterCandidateCoverageDiagnosticToDict(week.candidateCoverageDiagnostic),
+        "safeNextCommands": week.safeNextCommands,
+    ]
+}
+
+func monthlyChapterCandidateCoverageDiagnosticToDict(_ diagnostic: MonthlyChapterCandidateCoverageDiagnostic) -> [String: Any] {
+    [
+        "truthBoundary": diagnostic.truthBoundary,
+        "acceptedAsTruth": false,
+        "sourceMutation": false,
+        "autoPromotesCandidates": false,
+        "explanation": diagnostic.explanation,
+        "whyRecurringSignals": diagnostic.whyRecurringSignals,
+        "reviewableRepeatThreshold": diagnostic.reviewableRepeatThreshold,
+        "counts": weeklyChapterCandidateCoverageCountsToDict(diagnostic.counts),
+        "byWeek": diagnostic.byWeek.map(monthlyChapterCandidateCoverageWeekToDict),
+        "singletonReviewableGroups": diagnostic.singletonReviewableGroups.map(weeklyChapterCandidateCoverageGroupToDict),
+        "safeNextCommands": diagnostic.safeNextCommands,
+    ]
+}
+
+func monthlyChapterCandidateCoverageWeekToDict(_ week: MonthlyChapterCandidateCoverageWeek) -> [String: Any] {
+    [
+        "weekStart": week.weekStart,
+        "weekEnd": week.weekEnd,
+        "sourceItemCount": week.sourceItemCount,
+        "daysWithSources": week.daysWithSources,
+        "graphCandidateOutputCount": week.graphCandidateOutputCount,
+        "reviewableCandidateOutputCount": week.reviewableCandidateOutputCount,
+        "repeatedReviewableGroupCount": week.repeatedReviewableGroupCount,
+        "singletonReviewableGroupCount": week.singletonReviewableGroupCount,
+        "malformedCandidatePayloadCount": week.malformedCandidatePayloadCount,
+    ]
+}
+
 func weeklyChapterCandidateCoverageDiagnosticToDict(_ diagnostic: WeeklyChapterCandidateCoverageDiagnostic) -> [String: Any] {
     [
         "truthBoundary": diagnostic.truthBoundary,
