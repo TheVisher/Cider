@@ -237,6 +237,16 @@ extension CiderPanelView {
         }
     }
 
+    func openHubNavigationTarget(_ target: LibraryHubNavigationTarget) {
+        guard target.readOnly, !target.promotesTruth else { return }
+        switch target {
+        case .query(let query):
+            navigateToWorkspaceRoute(.library(.search(query)))
+        case .item(let ref):
+            openLinkedRef(ref)
+        }
+    }
+
     private func clearDetailStateBeforeOpeningLinkedRef() {
         if isDetailOpen { saveBookmarkDetails() }
         if isNoteDetailOpen { notesViewModel.flushSave() }

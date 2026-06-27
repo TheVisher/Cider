@@ -28,6 +28,7 @@ struct BasicItemMetadataInspectorView: View {
     var onFolderChanged: ((UUID?) -> Void)?
     var onToggleLabel: ((UUID) -> Void)?
     var onDelete: (() -> Void)?
+    var onOpenHubNavigationTarget: ((LibraryHubNavigationTarget) -> Void)? = nil
 
     @State private var isLinkedExpanded = true
     @State private var isFolderExpanded = true
@@ -39,7 +40,7 @@ struct BasicItemMetadataInspectorView: View {
     private var hubFacetRowModel: LibraryHubFacetChipRowModel {
         LibraryHubFacetChipRowModel(
             presentation: hubFacetPresentation,
-            supportsOpenHubActions: false
+            supportsOpenHubActions: onOpenHubNavigationTarget != nil
         )
     }
 
@@ -56,7 +57,8 @@ struct BasicItemMetadataInspectorView: View {
 
                 LibraryHubFacetChipSectionView(
                     model: hubFacetRowModel,
-                    isExpanded: $isHubFacetsExpanded
+                    isExpanded: $isHubFacetsExpanded,
+                    onOpenHubAction: openHubAction
                 )
             }
 
@@ -131,6 +133,15 @@ struct BasicItemMetadataInspectorView: View {
             hasContent: hubFacetRowModel.isVisible
         )
     }
+
+    private func openHubAction(_ action: LibraryHubFacetChipRowModel.OpenAction) {
+        guard action.isEnabled,
+              action.readOnly,
+              !action.promotesTruth,
+              let target = action.target
+        else { return }
+        onOpenHubNavigationTarget?(target)
+    }
 }
 
 extension BasicItemMetadataInspectorView {
@@ -140,7 +151,8 @@ extension BasicItemMetadataInspectorView {
         canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil,
         onFolderChanged: ((UUID?) -> Void)? = nil,
         onToggleLabel: ((UUID) -> Void)? = nil,
-        onDelete: (() -> Void)? = nil
+        onDelete: (() -> Void)? = nil,
+        onOpenHubNavigationTarget: ((LibraryHubNavigationTarget) -> Void)? = nil
     ) {
         self.init(
             title: dateCard.title,
@@ -155,7 +167,8 @@ extension BasicItemMetadataInspectorView {
             canOpenLinkedRef: canOpenLinkedRef,
             onFolderChanged: onFolderChanged,
             onToggleLabel: onToggleLabel,
-            onDelete: onDelete
+            onDelete: onDelete,
+            onOpenHubNavigationTarget: onOpenHubNavigationTarget
         )
     }
 
@@ -165,7 +178,8 @@ extension BasicItemMetadataInspectorView {
         canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil,
         onFolderChanged: ((UUID?) -> Void)? = nil,
         onToggleLabel: ((UUID) -> Void)? = nil,
-        onDelete: (() -> Void)? = nil
+        onDelete: (() -> Void)? = nil,
+        onOpenHubNavigationTarget: ((LibraryHubNavigationTarget) -> Void)? = nil
     ) {
         self.init(
             title: todo.title,
@@ -180,14 +194,16 @@ extension BasicItemMetadataInspectorView {
             canOpenLinkedRef: canOpenLinkedRef,
             onFolderChanged: onFolderChanged,
             onToggleLabel: onToggleLabel,
-            onDelete: onDelete
+            onDelete: onDelete,
+            onOpenHubNavigationTarget: onOpenHubNavigationTarget
         )
     }
 
     init(
         file: VaultFile,
         onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil,
-        canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil
+        canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil,
+        onOpenHubNavigationTarget: ((LibraryHubNavigationTarget) -> Void)? = nil
     ) {
         self.init(
             title: file.displayTitle,
@@ -199,7 +215,8 @@ extension BasicItemMetadataInspectorView {
             linkedRef: .vaultFile(file.id),
             extraRows: Self.fileRows(for: file),
             onOpenLinkedRef: onOpenLinkedRef,
-            canOpenLinkedRef: canOpenLinkedRef
+            canOpenLinkedRef: canOpenLinkedRef,
+            onOpenHubNavigationTarget: onOpenHubNavigationTarget
         )
     }
 

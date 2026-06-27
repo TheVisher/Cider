@@ -228,6 +228,7 @@ struct LibraryHubFacetChipSectionView: View {
                         HStack(spacing: Spacing.xs) {
                             ForEach(model.openActions.prefix(2)) { action in
                                 Button {
+                                    guard action.isEnabled else { return }
                                     onOpenHubAction?(action)
                                 } label: {
                                     Label(action.label, systemImage: "rectangle.connected.to.line.below")

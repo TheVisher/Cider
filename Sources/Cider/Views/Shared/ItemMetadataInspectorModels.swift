@@ -65,6 +65,7 @@ struct LibraryHubFacetChipRowModel: Equatable {
         var readOnly: Bool
         var promotesTruth: Bool
         var isEnabled: Bool
+        var target: LibraryHubNavigationTarget?
     }
 
     var title: String
@@ -88,13 +89,15 @@ struct LibraryHubFacetChipRowModel: Equatable {
             )
         }
         openActions = (presentation?.openHubActions ?? []).map { action in
-            OpenAction(
+            let target = LibraryHubNavigationTarget(command: action.command)
+            return OpenAction(
                 id: action.id,
                 label: action.label,
                 command: action.command,
                 readOnly: action.readOnly,
                 promotesTruth: action.promotesTruth,
-                isEnabled: supportsOpenHubActions && action.readOnly && !action.promotesTruth
+                isEnabled: supportsOpenHubActions && action.readOnly && !action.promotesTruth && target != nil,
+                target: target
             )
         }
     }

@@ -50,6 +50,7 @@ extension CiderPanelView {
             onCancel: closeBookmarkDetails,
             onOpenLinkedRef: openLinkedRef,
             onOpenKanbanCard: openKanbanCardDetail,
+            onOpenHubNavigationTarget: openHubNavigationTarget,
             onModeChange: changeDetailViewMode
         )
         }
@@ -77,6 +78,7 @@ extension CiderPanelView {
                 onCancel: closeBookmarkDetails,
                 onOpenLinkedRef: openLinkedRef,
                 onOpenKanbanCard: openKanbanCardDetail,
+                onOpenHubNavigationTarget: openHubNavigationTarget,
                 onModeChange: changeDetailViewMode,
                 showDragHandle: false
             )
@@ -112,7 +114,8 @@ extension CiderPanelView {
                         onOpenLinkedRef: openLinkedRef,
                         onFolderChanged: assignDetailDateCardToFolder,
                         onToggleLabel: toggleDetailDateCardLabel,
-                        onDelete: deleteDetailDateCard
+                        onDelete: deleteDetailDateCard,
+                        onOpenHubNavigationTarget: openHubNavigationTarget
                     )
                 }
             ) {
@@ -176,7 +179,8 @@ extension CiderPanelView {
                         onOpenLinkedRef: openLinkedRef,
                         onFolderChanged: assignDetailTodoToFolder,
                         onToggleLabel: toggleDetailTodoLabel,
-                        onDelete: deleteDetailTodo
+                        onDelete: deleteDetailTodo,
+                        onOpenHubNavigationTarget: openHubNavigationTarget
                     )
                 }
             ) {
@@ -342,7 +346,8 @@ extension CiderPanelView {
                         onOpenLinkedRef: openLinkedRef,
                         onFolderChanged: assignDetailDateCardToFolder,
                         onToggleLabel: toggleDetailDateCardLabel,
-                        onDelete: deleteDetailDateCard
+                        onDelete: deleteDetailDateCard,
+                        onOpenHubNavigationTarget: openHubNavigationTarget
                     )
                 }
             ) {
@@ -533,6 +538,7 @@ extension CiderPanelView {
             onCancel: closeBookmarkDetails,
             onOpenLinkedRef: openLinkedRef,
             onOpenKanbanCard: openKanbanCardDetail,
+            onOpenHubNavigationTarget: openHubNavigationTarget,
             onModeChange: changeDetailViewMode,
             showDragHandle: false
         )
@@ -558,7 +564,8 @@ extension CiderPanelView {
                         onOpenLinkedRef: openLinkedRef,
                         onFolderChanged: assignDetailDateCardToFolder,
                         onToggleLabel: toggleDetailDateCardLabel,
-                        onDelete: deleteDetailDateCard
+                        onDelete: deleteDetailDateCard,
+                        onOpenHubNavigationTarget: openHubNavigationTarget
                     )
                 }
             ) {

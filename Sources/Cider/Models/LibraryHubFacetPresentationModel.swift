@@ -90,7 +90,7 @@ struct LibraryHubFacetPresentationModel: Codable, Equatable {
 
     private static func openHubActions(from commands: [String]) -> [OpenHubAction] {
         var actions: [OpenHubAction] = []
-        for command in commands where command.hasPrefix("cider-cli item hub ") {
+        for command in commands where LibraryHubNavigationTarget(command: command) != nil {
             let label = openHubLabel(for: command, isFirst: actions.isEmpty)
             let id = command
             guard !actions.contains(where: { $0.id == id }) else { continue }

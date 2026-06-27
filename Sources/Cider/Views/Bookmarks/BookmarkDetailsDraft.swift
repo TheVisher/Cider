@@ -48,6 +48,7 @@ struct BookmarkMetadataSidebar: View {
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil
     var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil
     var onOpenKanbanCard: ((String, String) -> Void)? = nil
+    var onOpenHubNavigationTarget: ((LibraryHubNavigationTarget) -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.textScale) private var textScale
@@ -80,7 +81,7 @@ struct BookmarkMetadataSidebar: View {
     private var hubFacetRowModel: LibraryHubFacetChipRowModel {
         LibraryHubFacetChipRowModel(
             presentation: hubFacetPresentation,
-            supportsOpenHubActions: false
+            supportsOpenHubActions: onOpenHubNavigationTarget != nil
         )
     }
 
@@ -107,7 +108,8 @@ struct BookmarkMetadataSidebar: View {
                         sectionDivider
                         LibraryHubFacetChipSectionView(
                             model: hubFacetRowModel,
-                            isExpanded: $isHubFacetsExpanded
+                            isExpanded: $isHubFacetsExpanded,
+                            onOpenHubAction: openHubAction
                         )
                         .padding(.vertical, Spacing.md)
                     }
@@ -259,6 +261,15 @@ struct BookmarkMetadataSidebar: View {
             for: .intelligence,
             hasContent: hubFacetRowModel.isVisible
         )
+    }
+
+    private func openHubAction(_ action: LibraryHubFacetChipRowModel.OpenAction) {
+        guard action.isEnabled,
+              action.readOnly,
+              !action.promotesTruth,
+              let target = action.target
+        else { return }
+        onOpenHubNavigationTarget?(target)
     }
 
     private func resetSectionExpansionDefaults() {

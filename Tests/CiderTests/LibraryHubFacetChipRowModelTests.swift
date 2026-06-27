@@ -61,6 +61,43 @@ struct LibraryHubFacetChipRowModelTests {
         #expect(model.openActions.allSatisfy { $0.readOnly && !$0.promotesTruth })
     }
 
+    @Test("chip row model enables only parsed safe hub navigation targets")
+    func chipRowModelEnablesOnlyParsedSafeHubNavigationTargets() throws {
+        let anchorID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let presentation = LibraryHubFacetPresentationModel(hub: makeHub(
+            itemID: anchorID,
+            title: "World of Warcraft Hub",
+            facets: [
+                LibraryHubFacetPresentationModel.Chip(
+                    id: "domain:games",
+                    role: .domain,
+                    label: "Games",
+                    confidenceLabel: "source_backed",
+                    source: "test.accepted-link",
+                    evidence: "World of Warcraft source.",
+                    itemRefs: ["bookmark:\(anchorID.uuidString)"],
+                    truthBoundary: "interpretive_metadata_not_accepted_truth"
+                ).domainFacet,
+            ],
+            safeNextCommands: [
+                "cider-cli item hub --query \"WoW\" --limit 5 --json",
+                "cider-cli item hub --query \"WoW\" --accept --json",
+            ]
+        ))
+
+        let model = LibraryHubFacetChipRowModel(
+            presentation: presentation,
+            supportsOpenHubActions: true
+        )
+
+        #expect(model.openActions.count == 1)
+        let action = try #require(model.openActions.first)
+        #expect(action.isEnabled)
+        #expect(action.target == .query("WoW"))
+        #expect(action.readOnly)
+        #expect(!action.promotesTruth)
+    }
+
     @Test("chip row model hides when there are no chips")
     func chipRowModelHidesWithoutChips() {
         let presentation = LibraryHubFacetPresentationModel(hub: makeHub(
