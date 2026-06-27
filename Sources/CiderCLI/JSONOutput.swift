@@ -1453,6 +1453,302 @@ func yearlyBookPreviewToDict(_ preview: YearlyBookPreview) -> [String: Any] {
     return dict
 }
 
+func weeklyLifeRecapToDict(
+    _ preview: WeeklyChapterPreview,
+    safeCommand: String,
+    safeNextCommands: [String]
+) -> [String: Any] {
+    lifeRecapToDict(
+        periodKind: "week",
+        periodLabel: preview.title,
+        periodStart: preview.weekStart,
+        periodEnd: preview.weekEnd,
+        sourceItemRefs: preview.sourceItemRefs,
+        sourceBackedDayCount: preview.dailyEpisodes.filter(\.exists).count,
+        totalBucketCount: preview.dailyEpisodes.count,
+        sourceBackedBucketLabel: "day",
+        bucketLabel: "day",
+        sourceClaims: preview.dailyEpisodes.flatMap { day in
+            day.summaries.map { summary in
+                LifeRecapSourceClaim(
+                    text: summary,
+                    sourceRefs: [day.dailyJournal?.ref].compactMap { $0 },
+                    dateLabel: day.date
+                )
+            }
+        },
+        recurringSignals: preview.recurringSignals,
+        sparseExplanation: preview.explanation,
+        sparseReason: preview.candidateCoverageDiagnostic.whyRecurringSignals,
+        coverageExplanation: preview.candidateCoverageDiagnostic.explanation,
+        safeCommand: safeCommand,
+        safeNextCommands: safeNextCommands
+    )
+}
+
+func monthlyLifeRecapToDict(
+    _ preview: MonthlyChapterPreview,
+    safeCommand: String,
+    safeNextCommands: [String]
+) -> [String: Any] {
+    let claims = preview.weeks.flatMap { week in
+        week.weeklyChapter.dailyEpisodes
+            .filter { $0.date >= preview.monthStart && $0.date <= preview.monthEnd }
+            .flatMap { day in
+                day.summaries.map { summary in
+                    LifeRecapSourceClaim(
+                        text: summary,
+                        sourceRefs: [day.dailyJournal?.ref].compactMap { $0 },
+                        dateLabel: day.date
+                    )
+                }
+            }
+    }
+    return lifeRecapToDict(
+        periodKind: "month",
+        periodLabel: preview.title,
+        periodStart: preview.monthStart,
+        periodEnd: preview.monthEnd,
+        sourceItemRefs: preview.sourceItemRefs,
+        sourceBackedDayCount: preview.candidateCoverageDiagnostic.counts.daysWithSources,
+        totalBucketCount: preview.weeks.reduce(0) { $0 + $1.daysInMonth },
+        sourceBackedBucketLabel: "day",
+        bucketLabel: "day",
+        sourceClaims: claims,
+        recurringSignals: preview.recurringSignals,
+        sparseExplanation: preview.explanation,
+        sparseReason: preview.candidateCoverageDiagnostic.whyRecurringSignals,
+        coverageExplanation: preview.candidateCoverageDiagnostic.explanation,
+        safeCommand: safeCommand,
+        safeNextCommands: safeNextCommands
+    )
+}
+
+func yearlyLifeRecapToDict(
+    _ preview: YearlyBookPreview,
+    safeCommand: String,
+    safeNextCommands: [String]
+) -> [String: Any] {
+    let claims = preview.sourceItemRefs.map { item in
+        LifeRecapSourceClaim(
+            text: "Cider has source material titled \"\(item.title)\" for this year.",
+            sourceRefs: [item.ref],
+            dateLabel: inferredSourceDate(from: item)
+        )
+    }
+    return lifeRecapToDict(
+        periodKind: "year",
+        periodLabel: preview.title,
+        periodStart: preview.yearStart,
+        periodEnd: preview.yearEnd,
+        sourceItemRefs: preview.sourceItemRefs,
+        sourceBackedDayCount: preview.months.filter(\.exists).count,
+        totalBucketCount: preview.months.count,
+        sourceBackedBucketLabel: "month",
+        bucketLabel: "month",
+        sourceClaims: claims,
+        recurringSignals: preview.recurringSignals,
+        sparseExplanation: preview.explanation,
+        sparseReason: preview.candidateCoverageDiagnostic.whyRecurringSignals,
+        coverageExplanation: preview.candidateCoverageDiagnostic.explanation,
+        safeCommand: safeCommand,
+        safeNextCommands: safeNextCommands
+    )
+}
+
+private struct LifeRecapSourceClaim {
+    var text: String
+    var sourceRefs: [String]
+    var dateLabel: String?
+}
+
+private func lifeRecapToDict(
+    periodKind: String,
+    periodLabel: String,
+    periodStart: String,
+    periodEnd: String,
+    sourceItemRefs: [DailyEpisodeSourceItem],
+    sourceBackedDayCount: Int,
+    totalBucketCount: Int,
+    sourceBackedBucketLabel: String,
+    bucketLabel: String,
+    sourceClaims: [LifeRecapSourceClaim],
+    recurringSignals: [WeeklyChapterRecurringSignal],
+    sparseExplanation: String?,
+    sparseReason: String,
+    coverageExplanation: String,
+    safeCommand: String,
+    safeNextCommands: [String]
+) -> [String: Any] {
+    let citations = sourceItemRefs.map(lifeRecapSourceCitationToDict)
+    let boundedClaims = sourceClaims
+        .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.sourceRefs.isEmpty }
+        .prefix(8)
+        .map(lifeRecapSourceClaimToDict)
+    let diagnostics = lifeRecapDiagnostics(
+        recurringSignals: recurringSignals,
+        sparseReason: sparseReason,
+        coverageExplanation: coverageExplanation
+    )
+    let answer = lifeRecapAnswer(
+        periodLabel: periodLabel,
+        periodStart: periodStart,
+        periodEnd: periodEnd,
+        sourceItemCount: sourceItemRefs.count,
+        sourceBackedDayCount: sourceBackedDayCount,
+        sourceBackedBucketLabel: sourceBackedBucketLabel,
+        sourceClaims: Array(sourceClaims.prefix(3)),
+        sparseExplanation: sparseExplanation,
+        sparseReason: sparseReason,
+        coverageExplanation: coverageExplanation
+    )
+
+    return [
+        "responseKind": "source_backed_life_recap",
+        "periodKind": periodKind,
+        "periodLabel": periodLabel,
+        "periodStart": periodStart,
+        "periodEnd": periodEnd,
+        "answer": answer,
+        "sourceCoverageSummary": sourceCoverageSummary(
+            sourceItemCount: sourceItemRefs.count,
+            sourceBackedDayCount: sourceBackedDayCount,
+            totalBucketCount: totalBucketCount,
+            sourceBackedBucketLabel: sourceBackedBucketLabel,
+            bucketLabel: bucketLabel
+        ),
+        "sourceCitations": citations,
+        "claims": boundedClaims,
+        "reviewableDiagnostics": diagnostics,
+        "sparseReason": sparseReason,
+        "safeCommand": safeCommand,
+        "safeNextCommands": safeNextCommands,
+        "truthBoundary": [
+            "status": "source_backed_read_model_recap",
+            "generatedTruth": false,
+            "acceptedGeneratedTruth": false,
+            "sourceBackedClaimsOnly": true,
+            "sourcePreserved": true,
+            "sourceMutation": false,
+            "autoPromotesCandidates": false,
+            "candidateSignalsAcceptedAsTruth": false,
+            "candidateSignalsAreDiagnosticsOnly": true,
+        ],
+    ]
+}
+
+private func lifeRecapAnswer(
+    periodLabel: String,
+    periodStart: String,
+    periodEnd: String,
+    sourceItemCount: Int,
+    sourceBackedDayCount: Int,
+    sourceBackedBucketLabel: String,
+    sourceClaims: [LifeRecapSourceClaim],
+    sparseExplanation: String?,
+    sparseReason: String,
+    coverageExplanation: String
+) -> String {
+    if sourceItemCount == 0 {
+        return "\(periodLabel) covers \(periodStart) to \(periodEnd), but Cider has no source items for that period. \(coverageExplanation)"
+    }
+
+    let claimTexts = sourceClaims
+        .filter { !$0.sourceRefs.isEmpty }
+        .prefix(3)
+        .map { claim in
+            if let date = claim.dateLabel, !date.isEmpty {
+                return "\(date): \(claim.text)"
+            }
+            return claim.text
+        }
+    if !claimTexts.isEmpty {
+        return "\(periodLabel) covers \(periodStart) to \(periodEnd). Cider found \(sourceItemCount) source item(s) across \(sourceBackedDayCount) source-backed \(sourceBackedBucketLabel)(s): \(claimTexts.joined(separator: " "))"
+    }
+
+    if let sparseExplanation, !sparseExplanation.isEmpty {
+        return "\(periodLabel) covers \(periodStart) to \(periodEnd). \(sparseExplanation) \(coverageExplanation)"
+    }
+
+    return "\(periodLabel) covers \(periodStart) to \(periodEnd). Cider found \(sourceItemCount) source item(s), but no concise source-backed entry snippets were available. Diagnostic reason: \(sparseReason)."
+}
+
+private func sourceCoverageSummary(
+    sourceItemCount: Int,
+    sourceBackedDayCount: Int,
+    totalBucketCount: Int,
+    sourceBackedBucketLabel: String,
+    bucketLabel: String
+) -> String {
+    "\(sourceItemCount) source item(s); \(sourceBackedDayCount) source-backed \(sourceBackedBucketLabel)(s) across \(totalBucketCount) \(bucketLabel)(s)."
+}
+
+private func lifeRecapSourceCitationToDict(_ item: DailyEpisodeSourceItem) -> [String: Any] {
+    var dict: [String: Any] = [
+        "ref": item.ref,
+        "id": item.id,
+        "type": item.type,
+        "title": item.title,
+        "acceptedAsTruth": true,
+    ]
+    if let relativePath = item.relativePath {
+        dict["relativePath"] = relativePath
+    }
+    if let date = inferredSourceDate(from: item) {
+        dict["sourceDate"] = date
+    }
+    return dict
+}
+
+private func lifeRecapSourceClaimToDict(_ claim: LifeRecapSourceClaim) -> [String: Any] {
+    var dict: [String: Any] = [
+        "text": claim.text,
+        "sourceRefs": claim.sourceRefs,
+        "acceptedAsTruth": true,
+        "truthBoundary": "source_backed_claim",
+    ]
+    if let date = claim.dateLabel {
+        dict["date"] = date
+    }
+    return dict
+}
+
+private func lifeRecapDiagnostics(
+    recurringSignals: [WeeklyChapterRecurringSignal],
+    sparseReason: String,
+    coverageExplanation: String
+) -> [[String: Any]] {
+    var diagnostics = recurringSignals.prefix(5).map { signal -> [String: Any] in
+        [
+            "text": "\(signal.mentionText) appeared \(signal.count) time(s) as a reviewable candidate signal.",
+            "mentionText": signal.mentionText,
+            "count": signal.count,
+            "candidateRefs": signal.candidateRefs,
+            "sourceRefs": signal.sourceRefs,
+            "reviewState": signal.reviewState,
+            "truthBoundary": "reviewable_candidate_not_truth",
+            "acceptedAsTruth": false,
+        ]
+    }
+    diagnostics.append([
+        "text": coverageExplanation,
+        "reason": sparseReason,
+        "truthBoundary": "candidate_coverage_not_truth",
+        "acceptedAsTruth": false,
+    ])
+    return diagnostics
+}
+
+private func inferredSourceDate(from item: DailyEpisodeSourceItem) -> String? {
+    let candidates = [item.title, item.relativePath ?? ""]
+    for candidate in candidates {
+        if let range = candidate.range(of: #"\d{4}-\d{2}-\d{2}"#, options: .regularExpression) {
+            return String(candidate[range])
+        }
+    }
+    return nil
+}
+
 func yearlyBookMonthPreviewToDict(_ month: YearlyBookMonthPreview) -> [String: Any] {
     [
         "month": month.month,

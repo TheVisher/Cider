@@ -10346,6 +10346,11 @@ struct CiderCLI {
                     "yearStart": preview.yearStart,
                     "yearEnd": preview.yearEnd,
                     "safeCommand": safeCommand,
+                    "recap": yearlyLifeRecapToDict(
+                        preview,
+                        safeCommand: safeCommand,
+                        safeNextCommands: safeNextCommands
+                    ),
                     "yearlyBook": yearlyBookPreviewToDict(preview),
                     "trustBoundary": [
                         "status": "yearly_book_query_interpretation",
@@ -10393,6 +10398,11 @@ struct CiderCLI {
                     "monthStart": preview.monthStart,
                     "monthEnd": preview.monthEnd,
                     "safeCommand": safeCommand,
+                    "recap": monthlyLifeRecapToDict(
+                        preview,
+                        safeCommand: safeCommand,
+                        safeNextCommands: safeNextCommands
+                    ),
                     "monthlyChapter": monthlyChapterPreviewToDict(preview),
                     "trustBoundary": [
                         "status": "monthly_chapter_query_interpretation",
@@ -10439,6 +10449,11 @@ struct CiderCLI {
                     "weekStart": preview.weekStart,
                     "weekEnd": preview.weekEnd,
                     "safeCommand": safeCommand,
+                    "recap": weeklyLifeRecapToDict(
+                        preview,
+                        safeCommand: safeCommand,
+                        safeNextCommands: safeNextCommands
+                    ),
                     "weeklyChapter": weeklyChapterPreviewToDict(preview),
                     "trustBoundary": [
                         "status": "weekly_chapter_query_interpretation",
