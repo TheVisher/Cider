@@ -246,6 +246,7 @@ struct CiderCLI {
           cider-cli item graph-health [--json]
           cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
           cider-cli item daily-episode --date YYYY-MM-DD [--json]
+          cider-cli item weekly-chapter --week YYYY-MM-DD [--json]
           cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
             Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
 
@@ -301,6 +302,8 @@ struct CiderCLI {
             return "cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]\nDefault sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows."
         case "daily-episode", "episode-daily":
             return "cider-cli item daily-episode --date YYYY-MM-DD [--json]"
+        case "weekly-chapter", "chapter-weekly":
+            return "cider-cli item weekly-chapter --week YYYY-MM-DD [--json]"
         default:
             return nil
         }
@@ -5130,6 +5133,7 @@ struct CiderCLI {
               cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]
               cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
               cider-cli item daily-episode --date YYYY-MM-DD [--json]
+              cider-cli item weekly-chapter --week YYYY-MM-DD [--json]
               cider-cli item sync-project <project-id-or-name> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
               cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]
@@ -5248,6 +5252,31 @@ struct CiderCLI {
                     }
                     print("  Entries: \(preview.entries.count)")
                     print("  Read-only preview; no source notes changed.")
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "weekly-chapter", "chapter-weekly":
+            guard let week = parseFlag("--week", from: args), isValidLocalDateString(week) else {
+                printCLIError("Usage: cider-cli item weekly-chapter --week YYYY-MM-DD [--json]")
+                return
+            }
+            do {
+                let preview = try WeeklyChapterReadModelService(
+                    database: .shared,
+                    notesStorage: .shared
+                ).preview(weekStart: week)
+                if jsonOutput {
+                    outputJSON(weeklyChapterPreviewToDict(preview))
+                } else {
+                    print("\(preview.title)")
+                    if let explanation = preview.explanation {
+                        print("  \(explanation)")
+                    }
+                    print("  Daily episodes: \(preview.dailyEpisodes.filter(\.exists).count)/\(preview.dailyEpisodes.count)")
+                    print("  Recurring reviewable signals: \(preview.recurringSignals.count)")
+                    print("  Read-only preview; no candidates were promoted or source notes changed.")
                 }
             } catch {
                 printCLIError(error.localizedDescription)

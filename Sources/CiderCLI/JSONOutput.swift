@@ -1358,6 +1358,82 @@ func dailyEpisodePreviewToDict(_ preview: DailyEpisodePreview) -> [String: Any] 
     return dict
 }
 
+func weeklyChapterPreviewToDict(_ preview: WeeklyChapterPreview) -> [String: Any] {
+    var dict: [String: Any] = [
+        "ok": true,
+        "command": "item.weekly-chapter",
+        "readOnly": true,
+        "changed": false,
+        "weekStart": preview.weekStart,
+        "weekEnd": preview.weekEnd,
+        "title": preview.title,
+        "exists": preview.exists,
+        "sourceItemRefs": preview.sourceItemRefs.map(dailyEpisodeSourceItemToDict),
+        "dailyEpisodes": preview.dailyEpisodes.map(weeklyChapterDayPreviewToDict),
+        "recurringSignals": preview.recurringSignals.map(weeklyChapterRecurringSignalToDict),
+        "trustBoundary": [
+            "status": "reviewable_weekly_read_model",
+            "generatedTruth": false,
+            "acceptedGeneratedTruth": false,
+            "sourcePreserved": true,
+            "sourceMutation": false,
+            "autoPromotesCandidates": false,
+            "truthBoundary": "reviewable_candidate_not_truth",
+        ],
+        "safeNextCommands": preview.safeNextCommands,
+    ]
+    if let explanation = preview.explanation {
+        dict["explanation"] = explanation
+    }
+    return dict
+}
+
+func weeklyChapterDayPreviewToDict(_ day: WeeklyChapterDayPreview) -> [String: Any] {
+    var dict: [String: Any] = [
+        "date": day.date,
+        "exists": day.exists,
+        "entryCount": day.entryCount,
+        "summaries": day.summaries,
+        "safeNextCommands": day.safeNextCommands,
+    ]
+    if let dailyJournal = day.dailyJournal {
+        dict["dailyJournal"] = dailyEpisodeSourceItemToDict(dailyJournal)
+        dict["dailyJournalRef"] = dailyJournal.ref
+    }
+    return dict
+}
+
+func weeklyChapterRecurringSignalToDict(_ signal: WeeklyChapterRecurringSignal) -> [String: Any] {
+    [
+        "id": signal.id,
+        "mentionText": signal.mentionText,
+        "normalizedValue": signal.normalizedValue,
+        "count": signal.count,
+        "reviewState": signal.reviewState,
+        "truthBoundary": signal.truthBoundary,
+        "acceptedAsTruth": false,
+        "candidateRefs": signal.candidateRefs,
+        "sourceRefs": signal.sourceRefs,
+        "relationGuesses": signal.relationGuesses,
+        "objectTypeGuesses": signal.objectTypeGuesses,
+        "examples": signal.examples.map(weeklyChapterSignalExampleToDict),
+        "safeNextCommands": signal.safeNextCommands,
+    ]
+}
+
+func weeklyChapterSignalExampleToDict(_ example: WeeklyChapterSignalExample) -> [String: Any] {
+    var dict: [String: Any] = [
+        "candidateRef": example.candidateRef,
+        "sourceRef": example.sourceRef,
+        "sourceQuote": example.sourceQuote,
+        "reviewState": example.reviewState,
+    ]
+    if let confidence = example.confidence {
+        dict["confidence"] = confidence
+    }
+    return dict
+}
+
 func dailyEpisodeSourceItemToDict(_ item: DailyEpisodeSourceItem) -> [String: Any] {
     var dict: [String: Any] = [
         "id": item.id,
