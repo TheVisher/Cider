@@ -18352,6 +18352,7 @@ struct CiderCLI {
                 "relatedItems": hub.relatedItems.map(libraryHubRelatedItemToDict),
                 "groups": hub.groups.map(libraryHubGroupToDict),
                 "domainFacets": hub.domainFacets.map(libraryHubDomainFacetToDict),
+                "presentation": libraryHubFacetPresentationToDict(LibraryHubFacetPresentationModel(hub: hub)),
                 "reviewableCandidates": hub.reviewableCandidates.map(libraryHubCandidateToDict),
                 "counts": [
                     "relatedItems": hub.relatedItems.count,
@@ -18369,6 +18370,45 @@ struct CiderCLI {
                 ],
             ],
             "safeNextCommands": hub.safeNextCommands,
+        ]
+    }
+
+    static func libraryHubFacetPresentationToDict(_ presentation: LibraryHubFacetPresentationModel) -> [String: Any] {
+        [
+            "title": presentation.title,
+            "chips": presentation.chips.map(libraryHubFacetChipToDict),
+            "openHubActions": presentation.openHubActions.map(libraryHubOpenHubActionToDict),
+            "truthBoundary": [
+                "domainFacetsAreTruth": presentation.truthBoundary.domainFacetsAreTruth,
+                "autoMutatedUserFields": presentation.truthBoundary.autoMutatedUserFields,
+                "note": presentation.truthBoundary.note,
+            ],
+            "isEmpty": presentation.isEmpty,
+        ]
+    }
+
+    static func libraryHubFacetChipToDict(_ chip: LibraryHubFacetPresentationModel.Chip) -> [String: Any] {
+        [
+            "id": chip.id,
+            "role": chip.role.rawValue,
+            "label": chip.label,
+            "confidenceLabel": chip.confidenceLabel,
+            "source": chip.source,
+            "evidence": chip.evidence,
+            "itemRefs": chip.itemRefs,
+            "count": chip.itemRefs.count,
+            "truthBoundary": chip.truthBoundary,
+            "accessibilityLabel": chip.accessibilityLabel,
+        ]
+    }
+
+    static func libraryHubOpenHubActionToDict(_ action: LibraryHubFacetPresentationModel.OpenHubAction) -> [String: Any] {
+        [
+            "id": action.id,
+            "label": action.label,
+            "command": action.command,
+            "readOnly": action.readOnly,
+            "promotesTruth": action.promotesTruth,
         ]
     }
 
