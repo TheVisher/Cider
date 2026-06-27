@@ -191,6 +191,99 @@ struct ItemMetadataActionButton: View {
     }
 }
 
+struct LibraryHubFacetChipSectionView: View {
+    let model: LibraryHubFacetChipRowModel
+    @Binding var isExpanded: Bool
+    var onOpenHubAction: ((LibraryHubFacetChipRowModel.OpenAction) -> Void)?
+
+    @Environment(\.textScale) private var textScale
+
+    var body: some View {
+        if model.isVisible {
+            ItemMetadataSectionView(title: model.title, isExpanded: $isExpanded) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text(model.subtitle)
+                        .font(CiderFont.caption(scale: textScale))
+                        .foregroundColor(CiderColors.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    TagFlowLayout(spacing: Spacing.xs) {
+                        ForEach(model.chips) { chip in
+                            Text(chip.label)
+                                .font(CiderFont.captionMedium(scale: textScale))
+                                .foregroundColor(foregroundColor(for: chip.role))
+                                .lineLimit(1)
+                                .padding(.horizontal, Spacing.xs)
+                                .padding(.vertical, Spacing.xxs)
+                                .background(
+                                    RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                        .fill(backgroundColor(for: chip.role))
+                                )
+                                .accessibilityLabel(chip.accessibilityLabel)
+                                .help(chip.accessibilityLabel)
+                        }
+                    }
+
+                    if !model.openActions.isEmpty {
+                        HStack(spacing: Spacing.xs) {
+                            ForEach(model.openActions.prefix(2)) { action in
+                                Button {
+                                    onOpenHubAction?(action)
+                                } label: {
+                                    Label(action.label, systemImage: "rectangle.connected.to.line.below")
+                                        .font(CiderFont.captionMedium(scale: textScale))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundColor(action.isEnabled ? CiderColors.secondary : CiderColors.quaternary)
+                                .padding(.horizontal, Spacing.xs)
+                                .padding(.vertical, Spacing.xxs)
+                                .background(
+                                    RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                        .fill(CiderColors.surfaceInput)
+                                )
+                                .disabled(!action.isEnabled || onOpenHubAction == nil)
+                                .help(actionHelp(for: action))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func actionHelp(for action: LibraryHubFacetChipRowModel.OpenAction) -> String {
+        if action.isEnabled {
+            return "\(action.label). Read-only."
+        }
+        return "Hub navigation is not available from this surface yet. Action is read-only and does not promote facets into truth."
+    }
+
+    private func foregroundColor(for role: LibraryHubFacetPresentationModel.Chip.Role) -> Color {
+        switch role {
+        case .domain:
+            return CiderColors.controlAccent
+        case .entityType:
+            return CiderColors.secondary
+        case .place:
+            return CiderColors.success
+        case .alias:
+            return CiderColors.accentText
+        case .other:
+            return CiderColors.tertiary
+        }
+    }
+
+    private func backgroundColor(for role: LibraryHubFacetPresentationModel.Chip.Role) -> Color {
+        switch role {
+        case .domain:
+            return CiderColors.accentSubtle
+        case .entityType, .place, .alias, .other:
+            return CiderColors.surfaceInput
+        }
+    }
+}
+
 struct ItemMetadataFolderPicker: View {
     var folderID: UUID?
     var folders: [Folder] = VaultFolderService.shared.legacySelectableFolders

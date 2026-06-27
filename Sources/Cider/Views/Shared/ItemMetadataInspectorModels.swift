@@ -50,6 +50,60 @@ struct ItemMetadataSection: Identifiable, Equatable {
     }
 }
 
+struct LibraryHubFacetChipRowModel: Equatable {
+    struct Chip: Identifiable, Equatable {
+        var id: String
+        var label: String
+        var role: LibraryHubFacetPresentationModel.Chip.Role
+        var accessibilityLabel: String
+    }
+
+    struct OpenAction: Identifiable, Equatable {
+        var id: String
+        var label: String
+        var command: String
+        var readOnly: Bool
+        var promotesTruth: Bool
+        var isEnabled: Bool
+    }
+
+    var title: String
+    var subtitle: String
+    var chips: [Chip]
+    var openActions: [OpenAction]
+
+    init(
+        presentation: LibraryHubFacetPresentationModel?,
+        supportsOpenHubActions: Bool = false
+    ) {
+        let subtitle = "Interpretive metadata, not accepted truth."
+        title = "Source-backed hints"
+        self.subtitle = subtitle
+        chips = (presentation?.chips ?? []).map { chip in
+            Chip(
+                id: chip.id,
+                label: chip.label,
+                role: chip.role,
+                accessibilityLabel: "\(chip.accessibilityLabel). \(subtitle)"
+            )
+        }
+        openActions = (presentation?.openHubActions ?? []).map { action in
+            OpenAction(
+                id: action.id,
+                label: action.label,
+                command: action.command,
+                readOnly: action.readOnly,
+                promotesTruth: action.promotesTruth,
+                isEnabled: supportsOpenHubActions && action.readOnly && !action.promotesTruth
+            )
+        }
+    }
+
+    var isVisible: Bool {
+        !chips.isEmpty
+    }
+}
+
 struct ItemMetadataLinkCandidate: Identifiable, Equatable {
     let ref: LibraryEntityRef
     let title: String

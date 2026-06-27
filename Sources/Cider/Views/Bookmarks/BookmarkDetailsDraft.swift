@@ -74,6 +74,15 @@ struct BookmarkMetadataSidebar: View {
     @State private var isPropertiesExpanded = true
     @State private var isAIExpanded = true
     @State private var linkedSummaries: [ItemLinkSummary] = []
+    @State private var hubFacetPresentation: LibraryHubFacetPresentationModel?
+    @State private var isHubFacetsExpanded = true
+
+    private var hubFacetRowModel: LibraryHubFacetChipRowModel {
+        LibraryHubFacetChipRowModel(
+            presentation: hubFacetPresentation,
+            supportsOpenHubActions: false
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -93,6 +102,15 @@ struct BookmarkMetadataSidebar: View {
                     sectionDivider
                     sourceSection
                         .padding(.vertical, Spacing.md)
+
+                    if hubFacetRowModel.isVisible {
+                        sectionDivider
+                        LibraryHubFacetChipSectionView(
+                            model: hubFacetRowModel,
+                            isExpanded: $isHubFacetsExpanded
+                        )
+                        .padding(.vertical, Spacing.md)
+                    }
 
                     if bookmark?.isCarousel == true {
                         sectionDivider
@@ -165,12 +183,14 @@ struct BookmarkMetadataSidebar: View {
             newTagText = ""
             copiedHex = nil
             linkedSummaries = []
+            hubFacetPresentation = nil
             resetSectionExpansionDefaults()
         }
         .task(id: bookmark?.id) {
             fileSize = nil
             imageSourceExists = false
             refreshLinkedSummaries()
+            refreshHubFacetPresentation()
             // Snapshot the URLs needed for background work before the async hop.
             let sizeURL = bookmark?.originalImageFileURL ?? bookmark?.thumbnailFileURL
             let originalFileURL = bookmark?.originalImageFileURL
@@ -227,6 +247,20 @@ struct BookmarkMetadataSidebar: View {
         isLinkedItemsExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .linked, hasContent: !linkedSummaries.isEmpty)
     }
 
+    private func refreshHubFacetPresentation() {
+        guard let bookmark else {
+            hubFacetPresentation = nil
+            return
+        }
+        let ref = LibraryEntityRef(type: .bookmark, entityID: bookmark.id)
+        hubFacetPresentation = try? CiderItemContextService()
+            .libraryHubFacetPresentation(for: ref)
+        isHubFacetsExpanded = MetadataRailExpansionPolicy.defaultExpanded(
+            for: .intelligence,
+            hasContent: hubFacetRowModel.isVisible
+        )
+    }
+
     private func resetSectionExpansionDefaults() {
         isSourceExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .source, hasContent: draft.hasURL)
         isImagesExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .images, hasContent: hasCarouselImages)
@@ -236,6 +270,7 @@ struct BookmarkMetadataSidebar: View {
         isNotesExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .notes, hasContent: hasBookmarkNotes)
         isLinkedItemsExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .linked, hasContent: !linkedSummaries.isEmpty)
         isAIExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .intelligence, hasContent: hasIntelligenceContent)
+        isHubFacetsExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .intelligence, hasContent: hubFacetRowModel.isVisible)
         isPropertiesExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .info, hasContent: true)
     }
 

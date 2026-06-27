@@ -33,6 +33,15 @@ struct BasicItemMetadataInspectorView: View {
     @State private var isFolderExpanded = true
     @State private var isLabelsExpanded = true
     @State private var isDetailsExpanded = true
+    @State private var isHubFacetsExpanded = true
+    @State private var hubFacetPresentation: LibraryHubFacetPresentationModel?
+
+    private var hubFacetRowModel: LibraryHubFacetChipRowModel {
+        LibraryHubFacetChipRowModel(
+            presentation: hubFacetPresentation,
+            supportsOpenHubActions: false
+        )
+    }
 
     var body: some View {
         ItemMetadataPanel {
@@ -41,6 +50,15 @@ struct BasicItemMetadataInspectorView: View {
                 .foregroundColor(CiderColors.primary)
                 .lineLimit(3)
                 .padding(.bottom, Spacing.md)
+
+            if hubFacetRowModel.isVisible {
+                ItemMetadataDivider()
+
+                LibraryHubFacetChipSectionView(
+                    model: hubFacetRowModel,
+                    isExpanded: $isHubFacetsExpanded
+                )
+            }
 
             ItemMetadataDivider()
 
@@ -87,6 +105,9 @@ struct BasicItemMetadataInspectorView: View {
                 onDelete: onDelete
             )
         }
+        .task(id: linkedRef.id) {
+            refreshHubFacetPresentation()
+        }
     }
 
     private func createAndAssignLabel() {
@@ -100,6 +121,15 @@ struct BasicItemMetadataInspectorView: View {
     private var relatedRows: [ItemMetadataRow] {
         let refs = (try? ItemLinkService.shared.relatedRefs(for: linkedRef)) ?? []
         return ItemLinkService.shared.summaries(for: refs).map(ItemMetadataRow.related)
+    }
+
+    private func refreshHubFacetPresentation() {
+        hubFacetPresentation = try? CiderItemContextService()
+            .libraryHubFacetPresentation(for: linkedRef)
+        isHubFacetsExpanded = MetadataRailExpansionPolicy.defaultExpanded(
+            for: .intelligence,
+            hasContent: hubFacetRowModel.isVisible
+        )
     }
 }
 
