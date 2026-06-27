@@ -248,6 +248,7 @@ struct CiderCLI {
           cider-cli item daily-episode --date YYYY-MM-DD [--json]
           cider-cli item weekly-chapter --week YYYY-MM-DD [--json]
           cider-cli item monthly-chapter --month YYYY-MM [--json]
+          cider-cli item yearly-book --year YYYY [--json]
           cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
             Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
 
@@ -307,6 +308,8 @@ struct CiderCLI {
             return "cider-cli item weekly-chapter --week YYYY-MM-DD [--json]"
         case "monthly-chapter", "chapter-monthly":
             return "cider-cli item monthly-chapter --month YYYY-MM [--json]"
+        case "yearly-book", "book-yearly":
+            return "cider-cli item yearly-book --year YYYY [--json]"
         default:
             return nil
         }
@@ -349,9 +352,13 @@ struct CiderCLI {
         let monthlyLifeRecallIntent = command.lowercased() == "query"
             ? parseMonthlyLifeRecallQuery(Array(args.dropFirst()))
             : nil
+        let yearlyLifeRecallIntent = command.lowercased() == "query"
+            ? parseYearlyLifeRecallQuery(Array(args.dropFirst()))
+            : nil
 
         if weeklyLifeRecallIntent == nil,
            monthlyLifeRecallIntent == nil,
+           yearlyLifeRecallIntent == nil,
            handleRemovedLegacyTopLevelCommand(command, subcommand: subcommand) {
             return
         }
@@ -491,7 +498,9 @@ struct CiderCLI {
         case "duplicate-check", "dupecheck":
             handleDuplicateCheck(args: Array(args.dropFirst()))
         case "query":
-            if let monthlyLifeRecallIntent {
+            if let yearlyLifeRecallIntent {
+                handleYearlyLifeRecallQuery(yearlyLifeRecallIntent)
+            } else if let monthlyLifeRecallIntent {
                 handleMonthlyLifeRecallQuery(monthlyLifeRecallIntent)
             } else if let weeklyLifeRecallIntent {
                 handleWeeklyLifeRecallQuery(weeklyLifeRecallIntent)
@@ -3619,6 +3628,10 @@ struct CiderCLI {
         localMonthFormatter.date(from: value).map { localMonthFormatter.string(from: $0) == value } ?? false
     }
 
+    static func isValidLocalYearString(_ value: String) -> Bool {
+        localYearFormatter.date(from: value).map { localYearFormatter.string(from: $0) == value } ?? false
+    }
+
     static func isValidClockTimeString(_ value: String) -> Bool {
         twentyFourHourTimeFormatter.date(from: value).map { twentyFourHourTimeFormatter.string(from: $0) == value } ?? false
     }
@@ -5158,6 +5171,7 @@ struct CiderCLI {
               cider-cli item daily-episode --date YYYY-MM-DD [--json]
               cider-cli item weekly-chapter --week YYYY-MM-DD [--json]
               cider-cli item monthly-chapter --month YYYY-MM [--json]
+              cider-cli item yearly-book --year YYYY [--json]
               cider-cli item sync-project <project-id-or-name> [--json]
               cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
               cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]
@@ -5324,6 +5338,32 @@ struct CiderCLI {
                         print("  \(explanation)")
                     }
                     print("  Week previews: \(preview.weeks.filter(\.exists).count)/\(preview.weeks.count)")
+                    print("  Source-backed days: \(preview.candidateCoverageDiagnostic.counts.daysWithSources)")
+                    print("  Recurring reviewable signals: \(preview.recurringSignals.count)")
+                    print("  Read-only preview; no candidates were promoted or source notes changed.")
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "yearly-book", "book-yearly":
+            guard let year = parseFlag("--year", from: args), isValidLocalYearString(year) else {
+                printCLIError("Usage: cider-cli item yearly-book --year YYYY [--json]")
+                return
+            }
+            do {
+                let preview = try YearlyBookReadModelService(
+                    database: .shared,
+                    notesStorage: .shared
+                ).preview(year: year)
+                if jsonOutput {
+                    outputJSON(yearlyBookPreviewToDict(preview))
+                } else {
+                    print("\(preview.title)")
+                    if let explanation = preview.explanation {
+                        print("  \(explanation)")
+                    }
+                    print("  Month previews: \(preview.months.filter(\.exists).count)/\(preview.months.count)")
                     print("  Source-backed days: \(preview.candidateCoverageDiagnostic.counts.daysWithSources)")
                     print("  Recurring reviewable signals: \(preview.recurringSignals.count)")
                     print("  Read-only preview; no candidates were promoted or source notes changed.")
@@ -10163,6 +10203,49 @@ struct CiderCLI {
         var matchedDatePhrase: String
     }
 
+    struct YearlyLifeRecallQueryIntent {
+        var rawQuery: String
+        var year: String
+        var matchedDatePhrase: String
+    }
+
+    static func parseYearlyLifeRecallQuery(_ args: [String], referenceDate: Date = Date()) -> YearlyLifeRecallQueryIntent? {
+        let rawQuery = args
+            .filter { $0 != "--json" }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawQuery.isEmpty else { return nil }
+
+        let normalized = normalizedWeeklyRecallQuery(rawQuery)
+        guard isYearlyLifeRecallPhrase(normalized) else { return nil }
+
+        if normalized.contains("last year") {
+            return YearlyLifeRecallQueryIntent(
+                rawQuery: rawQuery,
+                year: yearForLastYear(referenceDate: referenceDate),
+                matchedDatePhrase: "last year"
+            )
+        }
+
+        if normalized.contains("this year") {
+            return YearlyLifeRecallQueryIntent(
+                rawQuery: rawQuery,
+                year: year(containing: referenceDate),
+                matchedDatePhrase: "this year"
+            )
+        }
+
+        if let literalYear = firstYearLiteral(in: rawQuery), normalized.contains("year") {
+            return YearlyLifeRecallQueryIntent(
+                rawQuery: rawQuery,
+                year: literalYear,
+                matchedDatePhrase: "year \(literalYear)"
+            )
+        }
+
+        return nil
+    }
+
     static func parseMonthlyLifeRecallQuery(_ args: [String], referenceDate: Date = Date()) -> MonthlyLifeRecallQueryIntent? {
         let rawQuery = args
             .filter { $0 != "--json" }
@@ -10236,6 +10319,53 @@ struct CiderCLI {
         }
 
         return nil
+    }
+
+    static func handleYearlyLifeRecallQuery(_ intent: YearlyLifeRecallQueryIntent) {
+        do {
+            let preview = try YearlyBookReadModelService(
+                database: .shared,
+                notesStorage: .shared
+            ).preview(year: intent.year)
+            let safeCommand = "cider-cli item yearly-book --year \(intent.year) --json"
+            var safeNextCommands = [safeCommand]
+            for command in preview.safeNextCommands where !safeNextCommands.contains(command) {
+                safeNextCommands.append(command)
+            }
+
+            if jsonOutput {
+                outputJSON([
+                    "ok": true,
+                    "command": "query.yearly-book",
+                    "readOnly": true,
+                    "changed": false,
+                    "query": intent.rawQuery,
+                    "intent": "yearly_life_recap",
+                    "matchedDatePhrase": intent.matchedDatePhrase,
+                    "year": preview.year,
+                    "yearStart": preview.yearStart,
+                    "yearEnd": preview.yearEnd,
+                    "safeCommand": safeCommand,
+                    "yearlyBook": yearlyBookPreviewToDict(preview),
+                    "trustBoundary": [
+                        "status": "yearly_book_query_interpretation",
+                        "generatedTruth": false,
+                        "acceptedGeneratedTruth": false,
+                        "sourcePreserved": true,
+                        "sourceMutation": false,
+                        "autoPromotesCandidates": false,
+                        "truthBoundary": "routes_to_reviewable_yearly_book_read_model",
+                    ],
+                    "safeNextCommands": safeNextCommands,
+                ])
+            } else {
+                print("Interpreted as yearly life recap for \(preview.yearStart) to \(preview.yearEnd).")
+                print("Run: \(safeCommand)")
+                print("Read-only interpretation; no source notes or candidates were changed.")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
     }
 
     static func handleMonthlyLifeRecallQuery(_ intent: MonthlyLifeRecallQueryIntent) {
@@ -10359,6 +10489,22 @@ struct CiderCLI {
         return recapStarts.contains { normalized.contains($0) }
     }
 
+    static func isYearlyLifeRecallPhrase(_ normalized: String) -> Bool {
+        let hasYearTarget = normalized.contains("last year")
+            || normalized.contains("this year")
+            || (normalized.contains("year") && firstYearLiteral(in: normalized) != nil)
+        guard hasYearTarget else { return false }
+
+        let recapStarts = [
+            "what happened",
+            "what was happening",
+            "what did i do",
+            "what have i been doing",
+            "what were things like",
+        ]
+        return recapStarts.contains { normalized.contains($0) }
+    }
+
     static func isMonthlyLifeRecallPhrase(_ normalized: String) -> Bool {
         let hasMonthTarget = normalized.contains("last month")
             || normalized.contains("this month")
@@ -10396,6 +10542,30 @@ struct CiderCLI {
         }
         let value = String(raw[range])
         return weeklyRecallMonthFormatter.date(from: value).map { weeklyRecallMonthFormatter.string(from: $0) }
+    }
+
+    static func firstYearLiteral(in raw: String) -> String? {
+        let pattern = #"\b\d{4}\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+              let range = Range(match.range, in: raw)
+        else {
+            return nil
+        }
+        let value = String(raw[range])
+        return weeklyRecallYearFormatter.date(from: value).map { weeklyRecallYearFormatter.string(from: $0) }
+    }
+
+    static func yearForLastYear(referenceDate: Date) -> String {
+        let currentYear = weeklyRecallCalendar.date(
+            from: weeklyRecallCalendar.dateComponents([.year], from: referenceDate)
+        ) ?? referenceDate
+        let lastYear = weeklyRecallCalendar.date(byAdding: .year, value: -1, to: currentYear) ?? currentYear
+        return weeklyRecallYearFormatter.string(from: lastYear)
+    }
+
+    static func year(containing date: Date) -> String {
+        weeklyRecallYearFormatter.string(from: date)
     }
 
     static func monthForLastMonth(referenceDate: Date) -> String {
@@ -10449,6 +10619,15 @@ struct CiderCLI {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyy-MM"
+        return formatter
+    }()
+
+    static let weeklyRecallYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy"
         return formatter
     }()
 
@@ -11367,6 +11546,14 @@ struct CiderCLI {
     static let localMonthFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .autoupdatingCurrent
+        return f
+    }()
+
+    static let localYearFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy"
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = .autoupdatingCurrent
         return f

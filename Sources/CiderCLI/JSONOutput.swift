@@ -1421,6 +1421,84 @@ func monthlyChapterPreviewToDict(_ preview: MonthlyChapterPreview) -> [String: A
     return dict
 }
 
+func yearlyBookPreviewToDict(_ preview: YearlyBookPreview) -> [String: Any] {
+    var dict: [String: Any] = [
+        "ok": true,
+        "command": "item.yearly-book",
+        "readOnly": true,
+        "changed": false,
+        "year": preview.year,
+        "yearStart": preview.yearStart,
+        "yearEnd": preview.yearEnd,
+        "title": preview.title,
+        "exists": preview.exists,
+        "sourceItemRefs": preview.sourceItemRefs.map(dailyEpisodeSourceItemToDict),
+        "months": preview.months.map(yearlyBookMonthPreviewToDict),
+        "recurringSignals": preview.recurringSignals.map(weeklyChapterRecurringSignalToDict),
+        "candidateCoverageDiagnostic": yearlyBookCandidateCoverageDiagnosticToDict(preview.candidateCoverageDiagnostic),
+        "trustBoundary": [
+            "status": "reviewable_yearly_book_read_model",
+            "generatedTruth": false,
+            "acceptedGeneratedTruth": false,
+            "sourcePreserved": true,
+            "sourceMutation": false,
+            "autoPromotesCandidates": false,
+            "truthBoundary": "reviewable_candidate_not_truth",
+        ],
+        "safeNextCommands": preview.safeNextCommands,
+    ]
+    if let explanation = preview.explanation {
+        dict["explanation"] = explanation
+    }
+    return dict
+}
+
+func yearlyBookMonthPreviewToDict(_ month: YearlyBookMonthPreview) -> [String: Any] {
+    [
+        "month": month.month,
+        "monthStart": month.monthStart,
+        "monthEnd": month.monthEnd,
+        "exists": month.exists,
+        "sourceItemCount": month.sourceItemCount,
+        "sourceItemRefs": month.sourceItemRefs.map(dailyEpisodeSourceItemToDict),
+        "recurringSignalCount": month.recurringSignalCount,
+        "candidateCoverageCounts": weeklyChapterCandidateCoverageCountsToDict(month.candidateCoverageDiagnostic.counts),
+        "whyRecurringSignals": month.candidateCoverageDiagnostic.whyRecurringSignals,
+        "safeNextCommands": month.safeNextCommands,
+    ]
+}
+
+func yearlyBookCandidateCoverageDiagnosticToDict(_ diagnostic: YearlyBookCandidateCoverageDiagnostic) -> [String: Any] {
+    [
+        "truthBoundary": diagnostic.truthBoundary,
+        "acceptedAsTruth": false,
+        "sourceMutation": false,
+        "autoPromotesCandidates": false,
+        "explanation": diagnostic.explanation,
+        "whyRecurringSignals": diagnostic.whyRecurringSignals,
+        "reviewableRepeatThreshold": diagnostic.reviewableRepeatThreshold,
+        "counts": weeklyChapterCandidateCoverageCountsToDict(diagnostic.counts),
+        "byMonth": diagnostic.byMonth.map(yearlyBookCandidateCoverageMonthToDict),
+        "singletonReviewableGroups": diagnostic.singletonReviewableGroups.map(weeklyChapterCandidateCoverageGroupToDict),
+        "safeNextCommands": diagnostic.safeNextCommands,
+    ]
+}
+
+func yearlyBookCandidateCoverageMonthToDict(_ month: YearlyBookCandidateCoverageMonth) -> [String: Any] {
+    [
+        "month": month.month,
+        "monthStart": month.monthStart,
+        "monthEnd": month.monthEnd,
+        "sourceItemCount": month.sourceItemCount,
+        "daysWithSources": month.daysWithSources,
+        "graphCandidateOutputCount": month.graphCandidateOutputCount,
+        "reviewableCandidateOutputCount": month.reviewableCandidateOutputCount,
+        "repeatedReviewableGroupCount": month.repeatedReviewableGroupCount,
+        "singletonReviewableGroupCount": month.singletonReviewableGroupCount,
+        "malformedCandidatePayloadCount": month.malformedCandidatePayloadCount,
+    ]
+}
+
 func monthlyChapterWeekPreviewToDict(_ week: MonthlyChapterWeekPreview) -> [String: Any] {
     [
         "weekStart": week.weekStart,
