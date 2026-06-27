@@ -340,8 +340,11 @@ struct CiderCLI {
         }
         let subcommand = args.count > 1 ? args[1] : nil
         let remaining = Array(args.dropFirst(2))
+        let weeklyLifeRecallIntent = command.lowercased() == "query"
+            ? parseWeeklyLifeRecallQuery(Array(args.dropFirst()))
+            : nil
 
-        if handleRemovedLegacyTopLevelCommand(command, subcommand: subcommand) {
+        if weeklyLifeRecallIntent == nil, handleRemovedLegacyTopLevelCommand(command, subcommand: subcommand) {
             return
         }
         if handleBookmarkRepairEarlyHelp(command: command, subcommand: subcommand, args: remaining) {
@@ -479,6 +482,12 @@ struct CiderCLI {
             handleUsage(subcommand: subcommand, args: remaining)
         case "duplicate-check", "dupecheck":
             handleDuplicateCheck(args: Array(args.dropFirst()))
+        case "query":
+            if let weeklyLifeRecallIntent {
+                handleWeeklyLifeRecallQuery(weeklyLifeRecallIntent)
+            } else {
+                await handleQuery(args: Array(args.dropFirst()))
+            }
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -10100,6 +10109,168 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // MARK: - Query (natural language search)
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    struct WeeklyLifeRecallQueryIntent {
+        var rawQuery: String
+        var weekStart: String
+        var matchedDatePhrase: String
+    }
+
+    static func parseWeeklyLifeRecallQuery(_ args: [String], referenceDate: Date = Date()) -> WeeklyLifeRecallQueryIntent? {
+        let rawQuery = args
+            .filter { $0 != "--json" }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawQuery.isEmpty else { return nil }
+
+        let normalized = normalizedWeeklyRecallQuery(rawQuery)
+        guard isWeeklyLifeRecallPhrase(normalized) else { return nil }
+
+        if normalized.contains("last week") {
+            return WeeklyLifeRecallQueryIntent(
+                rawQuery: rawQuery,
+                weekStart: weekStartForLastWeek(referenceDate: referenceDate),
+                matchedDatePhrase: "last week"
+            )
+        }
+
+        if normalized.contains("this week") {
+            return WeeklyLifeRecallQueryIntent(
+                rawQuery: rawQuery,
+                weekStart: weekStart(containing: referenceDate),
+                matchedDatePhrase: "this week"
+            )
+        }
+
+        if let literalDate = firstDateLiteral(in: rawQuery),
+           normalized.contains("week") {
+            return WeeklyLifeRecallQueryIntent(
+                rawQuery: rawQuery,
+                weekStart: weekStart(containing: literalDate),
+                matchedDatePhrase: "week of \(weeklyRecallDateFormatter.string(from: literalDate))"
+            )
+        }
+
+        return nil
+    }
+
+    static func handleWeeklyLifeRecallQuery(_ intent: WeeklyLifeRecallQueryIntent) {
+        do {
+            let preview = try WeeklyChapterReadModelService(
+                database: .shared,
+                notesStorage: .shared
+            ).preview(weekStart: intent.weekStart)
+            let safeCommand = "cider-cli item weekly-chapter --week \(intent.weekStart) --json"
+            var safeNextCommands = [safeCommand]
+            for command in preview.safeNextCommands where !safeNextCommands.contains(command) {
+                safeNextCommands.append(command)
+            }
+
+            if jsonOutput {
+                outputJSON([
+                    "ok": true,
+                    "command": "query.weekly-chapter",
+                    "readOnly": true,
+                    "changed": false,
+                    "query": intent.rawQuery,
+                    "intent": "weekly_life_recap",
+                    "matchedDatePhrase": intent.matchedDatePhrase,
+                    "weekStart": preview.weekStart,
+                    "weekEnd": preview.weekEnd,
+                    "safeCommand": safeCommand,
+                    "weeklyChapter": weeklyChapterPreviewToDict(preview),
+                    "trustBoundary": [
+                        "status": "weekly_chapter_query_interpretation",
+                        "generatedTruth": false,
+                        "acceptedGeneratedTruth": false,
+                        "sourcePreserved": true,
+                        "sourceMutation": false,
+                        "autoPromotesCandidates": false,
+                        "truthBoundary": "routes_to_reviewable_weekly_read_model",
+                    ],
+                    "safeNextCommands": safeNextCommands,
+                ])
+            } else {
+                print("Interpreted as weekly life recap for \(preview.weekStart) to \(preview.weekEnd).")
+                print("Run: \(safeCommand)")
+                print("Read-only interpretation; no source notes or candidates were changed.")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func normalizedWeeklyRecallQuery(_ raw: String) -> String {
+        let lowered = raw.lowercased()
+        let scalars = lowered.unicodeScalars.map { scalar -> Character in
+            CharacterSet.alphanumerics.contains(scalar) || scalar == "-"
+                ? Character(scalar)
+                : " "
+        }
+        return String(scalars)
+            .split(separator: " ")
+            .joined(separator: " ")
+    }
+
+    static func isWeeklyLifeRecallPhrase(_ normalized: String) -> Bool {
+        let hasWeekTarget = normalized.contains("last week")
+            || normalized.contains("this week")
+            || (normalized.contains("week") && firstDateLiteral(in: normalized) != nil)
+        guard hasWeekTarget else { return false }
+
+        let recapStarts = [
+            "what happened",
+            "what was happening",
+            "what did i do",
+            "what have i been doing",
+            "what were things like",
+        ]
+        return recapStarts.contains { normalized.contains($0) }
+    }
+
+    static func firstDateLiteral(in raw: String) -> Date? {
+        let pattern = #"\b\d{4}-\d{2}-\d{2}\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+              let range = Range(match.range, in: raw)
+        else {
+            return nil
+        }
+        return weeklyRecallDateFormatter.date(from: String(raw[range]))
+    }
+
+    static func weekStartForLastWeek(referenceDate: Date) -> String {
+        let currentWeekStart = weeklyRecallWeekStart(containing: referenceDate)
+        let lastWeekStart = weeklyRecallCalendar.date(byAdding: .day, value: -7, to: currentWeekStart) ?? currentWeekStart
+        return weeklyRecallDateFormatter.string(from: lastWeekStart)
+    }
+
+    static func weekStart(containing date: Date) -> String {
+        weeklyRecallDateFormatter.string(from: weeklyRecallWeekStart(containing: date))
+    }
+
+    static func weeklyRecallWeekStart(containing date: Date) -> Date {
+        let startOfDay = weeklyRecallCalendar.startOfDay(for: date)
+        let weekday = weeklyRecallCalendar.component(.weekday, from: startOfDay)
+        let daysFromMonday = (weekday - weeklyRecallCalendar.firstWeekday + 7) % 7
+        return weeklyRecallCalendar.date(byAdding: .day, value: -daysFromMonday, to: startOfDay) ?? startOfDay
+    }
+
+    static let weeklyRecallCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        calendar.firstWeekday = 2
+        return calendar
+    }()
+
+    static let weeklyRecallDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 
     static func handleQuery(args: [String]) async {
         let raw = args.filter { $0 != "--json" }.joined(separator: " ")

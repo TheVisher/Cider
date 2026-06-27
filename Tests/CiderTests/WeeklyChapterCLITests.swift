@@ -255,6 +255,76 @@ struct WeeklyChapterCLITests {
         #expect(after == before)
     }
 
+    @Test("natural weekly life recall query redirects to weekly chapter preview")
+    func naturalWeeklyLifeRecallQueryRedirectsToWeeklyChapterPreview() throws {
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let before = try tableCounts(in: vault)
+        let result = try assertJSON(
+            runCLI(args: ["query", "what was happening in my life last week", "--json"], vault: vault),
+            command: "query.weekly-chapter"
+        )
+        let after = try tableCounts(in: vault)
+
+        let expectedWeekStart = weekStartForLastWeek()
+        #expect(after == before)
+        #expect(result["ok"] as? Bool == true)
+        #expect(result["readOnly"] as? Bool == true)
+        #expect(result["changed"] as? Bool == false)
+        #expect(result["intent"] as? String == "weekly_life_recap")
+        #expect(result["query"] as? String == "what was happening in my life last week")
+        #expect(result["weekStart"] as? String == expectedWeekStart)
+        #expect(result["safeCommand"] as? String == "cider-cli item weekly-chapter --week \(expectedWeekStart) --json")
+
+        let safeCommands = try #require(result["safeNextCommands"] as? [String])
+        #expect(safeCommands.first == "cider-cli item weekly-chapter --week \(expectedWeekStart) --json")
+
+        let trust = try #require(result["trustBoundary"] as? [String: Any])
+        #expect(trust["status"] as? String == "weekly_chapter_query_interpretation")
+        #expect(trust["generatedTruth"] as? Bool == false)
+        #expect(trust["sourceMutation"] as? Bool == false)
+        #expect(trust["autoPromotesCandidates"] as? Bool == false)
+
+        let weeklyChapter = try #require(result["weeklyChapter"] as? [String: Any])
+        #expect(weeklyChapter["command"] as? String == "item.weekly-chapter")
+        #expect(weeklyChapter["readOnly"] as? Bool == true)
+        #expect(weeklyChapter["changed"] as? Bool == false)
+        #expect(weeklyChapter["weekStart"] as? String == expectedWeekStart)
+        #expect(weeklyChapter["candidateCoverageDiagnostic"] is [String: Any])
+    }
+
+    @Test("natural weekly life recall query accepts literal week date")
+    func naturalWeeklyLifeRecallQueryAcceptsLiteralWeekDate() throws {
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try assertJSON(
+            runCLI(args: ["query", "what happened in my life week of 2026-06-24", "--json"], vault: vault),
+            command: "query.weekly-chapter"
+        )
+
+        #expect(result["weekStart"] as? String == "2026-06-22")
+        #expect(result["safeCommand"] as? String == "cider-cli item weekly-chapter --week 2026-06-22 --json")
+    }
+
+    @Test("non recap query keeps existing query behavior")
+    func nonRecapQueryKeepsExistingQueryBehavior() throws {
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let before = try tableCounts(in: vault)
+        let output = try runCLI(args: ["query", "restaurants I saved last week", "--json"], vault: vault)
+        let after = try tableCounts(in: vault)
+        let payload = try parseJSONObject(output.stdout)
+
+        #expect(output.status != 0)
+        #expect(after == before)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["legacyRemoved"] as? Bool == true)
+        #expect(payload["replacement"] as? String == "Use cider-cli item search <query> --json.")
+    }
+
     private func captureJournal(
         date: String,
         time: String,
@@ -345,6 +415,23 @@ struct WeeklyChapterCLITests {
         return vault
     }
 
+    private func weekStartForLastWeek(referenceDate: Date = Date()) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        calendar.firstWeekday = 2
+        let startOfToday = calendar.startOfDay(for: referenceDate)
+        let currentWeekStart = startOfWeek(containing: startOfToday, calendar: calendar)
+        let lastWeekStart = calendar.date(byAdding: .day, value: -7, to: currentWeekStart) ?? currentWeekStart
+        return Self.weekFormatter.string(from: lastWeekStart)
+    }
+
+    private func startOfWeek(containing date: Date, calendar: Calendar) -> Date {
+        let weekday = calendar.component(.weekday, from: date)
+        let daysFromWeekStart = (weekday - calendar.firstWeekday + 7) % 7
+        return calendar.date(byAdding: .day, value: -daysFromWeekStart, to: calendar.startOfDay(for: date))
+            ?? calendar.startOfDay(for: date)
+    }
+
     private func tableCounts(in vault: URL) throws -> [String: Int] {
         try FileManager.default.createDirectory(
             at: vault.appendingPathComponent(".cider", isDirectory: true),
@@ -421,4 +508,13 @@ struct WeeklyChapterCLITests {
         let object = try JSONSerialization.jsonObject(with: data)
         return try #require(object as? [String: Any])
     }
+
+    private static let weekFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 }
