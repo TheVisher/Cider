@@ -5118,6 +5118,8 @@ struct CiderCLI {
                 Use one scope value at a time; do not combine scope names.
                 Valid --sort values: relevance, newest, oldest. Default is relevance; newest/oldest use capture provenance timestamps when present, otherwise item updated/created timestamps.
                 Use newest/oldest only for recency-oriented recall or audit/debug.
+              cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]
+                Read-only source-backed natural preference/item recall over journaled and captured items.
               cider-cli item search-debug <query> [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
@@ -5239,6 +5241,44 @@ struct CiderCLI {
                 }
             } catch {
                 printCLIError(error.localizedDescription)
+            }
+
+        case "preference-recall", "natural-recall", "item-recall":
+            let query = (parseFlag("--query", from: args) ?? leadingPositionalArgs(from: args).joined(separator: " "))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.isEmpty else {
+                printCLIError("Usage: cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]")
+                return
+            }
+            let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 8
+            do {
+                let response = try CiderNaturalPreferenceRecallService(contextService: contextService)
+                    .answer(query, limit: limit)
+                if jsonOutput {
+                    outputJSON(naturalPreferenceRecallResponseToDict(response))
+                } else {
+                    print(response.summary)
+                    if !response.citations.isEmpty {
+                        print("Citations:")
+                        for citation in response.citations {
+                            print("  - \(citation.sourceRef): \(citation.title)")
+                        }
+                    }
+                    print("Truth boundary: \(response.truthBoundary)")
+                }
+            } catch {
+                printCLIError(
+                    error.localizedDescription,
+                    details: [
+                        "command": "item.preference-recall",
+                        "readOnly": true,
+                        "changed": false,
+                        "safeNextCommands": [
+                            "cider-cli item search \"\(recallEscapedCommandArgument(query))\" --scope personalMemory --json",
+                            "cider-cli item search-debug \"\(recallEscapedCommandArgument(query))\" --json",
+                        ],
+                    ]
+                )
             }
 
         case "search-debug", "debug-search":
@@ -23768,6 +23808,68 @@ struct CiderCLI {
             dict["safeNextCommands"] = safeNextCommands
         }
         return dict
+    }
+
+    static func naturalPreferenceRecallResponseToDict(_ response: CiderNaturalPreferenceRecallResponse) -> [String: Any] {
+        var intent: [String: Any] = [
+            "originalQuery": response.intent.originalQuery,
+            "normalizedQuery": response.intent.normalizedQuery,
+            "questionKind": response.intent.questionKind.rawValue,
+            "searchQueries": response.intent.searchQueries,
+        ]
+        if let subject = response.intent.subject {
+            intent["subject"] = subject
+        }
+        return [
+            "ok": response.ok,
+            "command": response.command,
+            "readOnly": response.readOnly,
+            "changed": response.changed,
+            "intent": intent,
+            "answer": [
+                "kind": "natural_preference_item_recall",
+                "summary": response.summary,
+                "truthBoundary": response.truthBoundary,
+                "reviewRequired": response.reviewStatus.needsReview,
+            ],
+            "summary": response.summary,
+            "truthBoundary": response.truthBoundary,
+            "reviewStatus": [
+                "needsReview": response.reviewStatus.needsReview,
+                "copy": response.reviewStatus.copy,
+            ],
+            "searchPlan": response.searchPlan.map { step in
+                [
+                    "query": step.query,
+                    "scope": step.scope.rawValue,
+                    "sort": step.sort.rawValue,
+                    "limit": step.limit,
+                    "safeNextCommand": "cider-cli item search \"\(recallEscapedCommandArgument(step.query))\" --scope \(step.scope.rawValue) --sort \(step.sort.rawValue) --limit \(step.limit) --json",
+                ] as [String: Any]
+            },
+            "citations": response.citations.map { citation in
+                var dict: [String: Any] = [
+                    "id": citation.id,
+                    "owner": ownerToDict(citation.owner),
+                    "title": citation.title,
+                    "quote": citation.quote,
+                    "source": citation.source,
+                    "sourceRef": citation.sourceRef,
+                    "safeNextCommands": citation.safeNextCommands,
+                ]
+                if let itemType = citation.itemType { dict["itemType"] = itemType }
+                if let itemID = citation.itemID {
+                    dict["itemID"] = itemID
+                    dict["sourceRef"] = [
+                        "type": citation.itemType ?? citation.owner.ownerType,
+                        "ref": itemID,
+                    ]
+                }
+                return dict
+            },
+            "warnings": response.warnings,
+            "safeNextCommands": response.safeNextCommands,
+        ]
     }
 
     private static func itemSearchResultSafeNextCommands(_ result: CiderItemSearchResult) -> [String] {
