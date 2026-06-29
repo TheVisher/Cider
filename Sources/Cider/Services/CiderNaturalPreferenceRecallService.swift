@@ -9,6 +9,32 @@ enum CiderNaturalPreferenceRecallQuestionKind: String, Codable, Equatable {
     case general
 }
 
+enum CiderNaturalRecallMode: String, Codable, Equatable {
+    case preference
+    case memory
+
+    var command: String {
+        switch self {
+        case .preference: return "item.preference-recall"
+        case .memory: return "item.memory-recall"
+        }
+    }
+
+    var answerKind: String {
+        switch self {
+        case .preference: return "natural_preference_item_recall"
+        case .memory: return "natural_memory_recall"
+        }
+    }
+
+    var noun: String {
+        switch self {
+        case .preference: return "preference"
+        case .memory: return "memory"
+        }
+    }
+}
+
 struct CiderNaturalPreferenceRecallIntent: Codable, Equatable {
     var originalQuery: String
     var normalizedQuery: String
@@ -82,8 +108,16 @@ final class CiderNaturalPreferenceRecallService {
     }
 
     func answer(_ query: String, limit: Int = 8) throws -> CiderNaturalPreferenceRecallResponse {
+        try answer(query, limit: limit, mode: .preference)
+    }
+
+    func answerMemory(_ query: String, limit: Int = 8) throws -> CiderNaturalPreferenceRecallResponse {
+        try answer(query, limit: limit, mode: .memory)
+    }
+
+    func answer(_ query: String, limit: Int = 8, mode: CiderNaturalRecallMode) throws -> CiderNaturalPreferenceRecallResponse {
         let boundedLimit = max(1, limit)
-        let intent = interpret(query)
+        let intent = interpret(query, mode: mode)
         let searchPlan = intent.searchQueries.map {
             CiderNaturalPreferenceRecallSearchStep(
                 query: $0,
@@ -95,7 +129,7 @@ final class CiderNaturalPreferenceRecallService {
         var citationsByOwner: [String: (citation: CiderNaturalPreferenceRecallCitation, score: Int)] = [:]
         var candidatesByOwner: [String: CiderNaturalPreferenceRecallCandidate] = [:]
         var safeCommands: [String] = [
-            "cider-cli item preference-recall \"\(escapedCommandArgument(intent.originalQuery))\" --limit \(boundedLimit) --json",
+            "cider-cli item \(mode.command.replacingOccurrences(of: "item.", with: "")) \"\(escapedCommandArgument(intent.originalQuery))\" --limit \(boundedLimit) --json",
         ]
 
         for step in searchPlan {
@@ -109,17 +143,17 @@ final class CiderNaturalPreferenceRecallService {
             for result in results {
                 guard let item = result.item else { continue }
                 let bundle = try contextService.context(for: LibraryEntityRef(type: item.type, entityID: item.id))
-                let quote = bestQuote(in: bundle, result: result, intent: intent)
-                guard qualifies(quote: quote, bundle: bundle, result: result, intent: intent) else { continue }
+                let quote = bestQuote(in: bundle, result: result, intent: intent, mode: mode)
+                guard qualifies(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode) else { continue }
                 let key = bundle.owner.canonicalRef
                 let commands = [
                     "cider-cli item context \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
                     "cider-cli item search \"\(escapedCommandArgument(step.query))\" --scope \(step.scope.rawValue) --sort \(step.sort.rawValue) --limit \(step.limit) --json",
                 ]
                 let sourceRef = "\(bundle.item.type.rawValue):\(bundle.item.id.uuidString)"
-                let score = evidenceScore(quote: quote, bundle: bundle, result: result, intent: intent)
-                let rankReason = rankReason(quote: quote, bundle: bundle, result: result, intent: intent)
-                let evidenceKind = evidenceKind(quote: quote, result: result, intent: intent)
+                let score = evidenceScore(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode)
+                let rankReason = rankReason(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode)
+                let evidenceKind = evidenceKind(quote: quote, result: result, intent: intent, mode: mode)
                 if var candidate = candidatesByOwner[key] {
                     candidate.claim = mergeClaims(candidate.claim, quote)
                     candidate.snippet = mergeClaims(candidate.snippet, clipped(result.snippet, limit: 260))
@@ -181,15 +215,15 @@ final class CiderNaturalPreferenceRecallService {
             .prefix(boundedLimit)
             .map(\.citation)
         let warnings = citations.isEmpty
-            ? ["No source-backed item or chunk matches were found for this natural preference recall query."]
+            ? ["No source-backed item or chunk matches were found for this natural \(mode.noun) recall query."]
             : []
         return CiderNaturalPreferenceRecallResponse(
             ok: true,
-            command: "item.preference-recall",
+            command: mode.command,
             readOnly: true,
             changed: false,
             intent: intent,
-            summary: summary(for: intent, citations: citations),
+            summary: summary(for: intent, citations: citations, mode: mode),
             truthBoundary: "source_backed_observations_not_accepted_truth",
             reviewStatus: CiderNaturalPreferenceRecallReviewStatus(
                 needsReview: false,
@@ -203,7 +237,7 @@ final class CiderNaturalPreferenceRecallService {
         )
     }
 
-    func interpret(_ rawQuery: String) -> CiderNaturalPreferenceRecallIntent {
+    func interpret(_ rawQuery: String, mode: CiderNaturalRecallMode = .preference) -> CiderNaturalPreferenceRecallIntent {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = query.lowercased()
         let subject = extractSubject(from: query)
@@ -227,15 +261,21 @@ final class CiderNaturalPreferenceRecallService {
             normalizedQuery: normalized,
             questionKind: kind,
             subject: subject,
-            searchQueries: searchQueries(subject: subject, kind: kind, normalizedQuery: normalized)
+            searchQueries: searchQueries(subject: subject, kind: kind, normalizedQuery: normalized, mode: mode)
         )
     }
 
     private func searchQueries(
         subject: String?,
         kind: CiderNaturalPreferenceRecallQuestionKind,
-        normalizedQuery: String
+        normalizedQuery: String,
+        mode: CiderNaturalRecallMode
     ) -> [String] {
+        if mode == .memory {
+            let focused = significantQueryTokens(in: normalizedQuery).joined(separator: " ")
+            return orderedUnique([focused, normalizedQuery].filter { !$0.isEmpty })
+        }
+
         if let subject, !subject.isEmpty {
             switch kind {
             case .liked, .repeatSuggestion:
@@ -289,10 +329,11 @@ final class CiderNaturalPreferenceRecallService {
     private func bestQuote(
         in bundle: CiderItemContextBundle,
         result: CiderItemSearchResult,
-        intent: CiderNaturalPreferenceRecallIntent
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode
     ) -> String {
         let candidates = bundle.chunks.map(\.body) + bundle.sections.map(\.body) + [result.snippet]
-        let tokens = evidenceTokens(for: intent)
+        let tokens = evidenceTokens(for: intent, mode: mode)
         let scored = candidates
             .map { quoteLines(from: $0, tokens: tokens, intent: intent) }
             .filter { !$0.isEmpty }
@@ -304,12 +345,19 @@ final class CiderNaturalPreferenceRecallService {
         quote: String,
         bundle: CiderItemContextBundle,
         result: CiderItemSearchResult,
-        intent: CiderNaturalPreferenceRecallIntent
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode
     ) -> Bool {
         let quoteText = quote.lowercased()
         let searchable = ([quote, result.title, result.snippet, bundle.item.title] + bundle.chunks.map(\.body))
             .joined(separator: "\n")
             .lowercased()
+        if mode == .memory {
+            let tokens = significantQueryTokens(in: intent.normalizedQuery)
+            let overlap = tokens.filter { searchable.contains($0) }.count
+            return overlap >= min(2, max(1, tokens.count))
+        }
+
         if let subject = intent.subject?.lowercased(), !subject.isEmpty {
             return quoteText.contains(subject) || searchable.contains(subject)
         }
@@ -326,10 +374,18 @@ final class CiderNaturalPreferenceRecallService {
         quote: String,
         bundle: CiderItemContextBundle,
         result: CiderItemSearchResult,
-        intent: CiderNaturalPreferenceRecallIntent
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode
     ) -> Int {
-        var total = score(quote, tokens: evidenceTokens(for: intent))
+        var total = score(quote, tokens: evidenceTokens(for: intent, mode: mode))
         let lower = quote.lowercased()
+        if mode == .memory {
+            let tokens = significantQueryTokens(in: intent.normalizedQuery)
+            total = tokens.filter { lower.contains($0) }.count * 4
+            if result.kind == .chunk { total += 3 }
+            if bundle.item.title.lowercased().contains("daily journal") { total += 2 }
+            return total
+        }
         if let subject = intent.subject?.lowercased(), lower.contains(subject) { total += 12 }
         if containsFoodSignal(lower) { total += 4 }
         if containsPreferenceSignal(lower) { total += 4 }
@@ -350,8 +406,12 @@ final class CiderNaturalPreferenceRecallService {
     private func evidenceKind(
         quote: String,
         result: CiderItemSearchResult,
-        intent: CiderNaturalPreferenceRecallIntent
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode
     ) -> String {
+        if mode == .memory {
+            return "source_backed_memory_observation"
+        }
         let text = [quote, result.title, result.snippet].joined(separator: "\n").lowercased()
         if containsSavedCandidateSignal(text) {
             return "source_backed_candidate"
@@ -363,10 +423,26 @@ final class CiderNaturalPreferenceRecallService {
         quote: String,
         bundle: CiderItemContextBundle,
         result: CiderItemSearchResult,
-        intent: CiderNaturalPreferenceRecallIntent
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode
     ) -> String {
         var reasons: [String] = []
         let lower = quote.lowercased()
+        if mode == .memory {
+            let overlap = significantQueryTokens(in: intent.normalizedQuery).filter { lower.contains($0) }.count
+            if overlap > 0 {
+                reasons.append("query fact match")
+            }
+            if result.kind == .chunk {
+                reasons.append("source-backed chunk evidence")
+            } else {
+                reasons.append("source-backed item evidence")
+            }
+            if bundle.item.title.lowercased().contains("daily journal") {
+                reasons.append("journal source")
+            }
+            return orderedUnique(reasons).joined(separator: "; ")
+        }
         if let subject = intent.subject?.lowercased(), lower.contains(subject) {
             reasons.append("specific subject match")
         }
@@ -387,8 +463,12 @@ final class CiderNaturalPreferenceRecallService {
         return orderedUnique(reasons).joined(separator: "; ")
     }
 
-    private func evidenceTokens(for intent: CiderNaturalPreferenceRecallIntent) -> [String] {
+    private func evidenceTokens(for intent: CiderNaturalPreferenceRecallIntent, mode: CiderNaturalRecallMode) -> [String] {
+        if mode == .memory {
+            return significantQueryTokens(in: intent.normalizedQuery)
+        }
         var tokens = ["liked", "like", "great", "good", "okay", "worth", "again", "order", "ordered", "had", "ate", "food", "breakfast", "lunch", "dinner"]
+        tokens.append(contentsOf: significantQueryTokens(in: intent.normalizedQuery))
         if let subject = intent.subject {
             tokens.append(contentsOf: subject.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
         }
@@ -452,6 +532,20 @@ final class CiderNaturalPreferenceRecallService {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func significantQueryTokens(in text: String) -> [String] {
+        let stopWords: Set<String> = [
+            "a", "an", "and", "are", "at", "did", "do", "does", "for", "have", "how", "i",
+            "is", "it", "me", "my", "of", "on", "or", "the", "to", "was", "what", "when",
+            "where", "which", "who", "why", "with",
+        ]
+        return orderedUnique(
+            text.lowercased()
+                .split { !$0.isLetter && !$0.isNumber && $0 != "-" }
+                .map(String.init)
+                .filter { $0.count > 1 && !stopWords.contains($0) }
+        )
+    }
+
     private func isMetaRecallPlanningLine(_ line: String) -> Bool {
         let lower = line.lowercased()
         return lower.contains("i want cider")
@@ -470,24 +564,29 @@ final class CiderNaturalPreferenceRecallService {
 
     private func summary(
         for intent: CiderNaturalPreferenceRecallIntent,
-        citations: [CiderNaturalPreferenceRecallCitation]
+        citations: [CiderNaturalPreferenceRecallCitation],
+        mode: CiderNaturalRecallMode
     ) -> String {
         guard !citations.isEmpty else {
-            return "I did not find source-backed journal or captured-item evidence for this preference/item recall question."
+            return "I did not find source-backed journal or captured-item evidence for this \(mode.noun) recall question."
         }
         let subjectCopy = intent.subject.map { " for \($0)" } ?? ""
         let lead: String
-        switch intent.questionKind {
-        case .existence:
-            lead = "I found journaled/captured evidence\(subjectCopy)."
-        case .lastOrder:
-            lead = "I found source-backed order/item notes\(subjectCopy)."
-        case .repeatSuggestion:
-            lead = "Based only on cited journaled/captured observations, these are repeat candidates\(subjectCopy)."
-        case .liked, .recentLiked:
-            lead = "I found source-backed liked/preference observations\(subjectCopy)."
-        case .general:
-            lead = "I found source-backed preference/item observations\(subjectCopy)."
+        if mode == .memory {
+            lead = "I found source-backed memory observations\(subjectCopy)."
+        } else {
+            switch intent.questionKind {
+            case .existence:
+                lead = "I found journaled/captured evidence\(subjectCopy)."
+            case .lastOrder:
+                lead = "I found source-backed order/item notes\(subjectCopy)."
+            case .repeatSuggestion:
+                lead = "Based only on cited journaled/captured observations, these are repeat candidates\(subjectCopy)."
+            case .liked, .recentLiked:
+                lead = "I found source-backed liked/preference observations\(subjectCopy)."
+            case .general:
+                lead = "I found source-backed preference/item observations\(subjectCopy)."
+            }
         }
         let bullets = citations.prefix(4).map { "- \($0.title): \($0.quote)" }.joined(separator: "\n")
         return "\(lead) These are observations from sources, not accepted memory truth:\n\(bullets)"

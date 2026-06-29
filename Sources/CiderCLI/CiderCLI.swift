@@ -5120,6 +5120,8 @@ struct CiderCLI {
                 Use newest/oldest only for recency-oriented recall or audit/debug.
               cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]
                 Read-only source-backed natural preference/item recall over journaled and captured items.
+              cider-cli item memory-recall <natural question>|--query <natural question> [--limit <n>] [--json]
+                Read-only source-backed natural personal/work memory recall over Cider items.
               cider-cli item search-debug <query> [--limit <n>] [--json]
               cider-cli item get <type> <id-or-ref> [--json]
               cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
@@ -5243,17 +5245,19 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
-        case "preference-recall", "natural-recall", "item-recall":
+        case "preference-recall", "natural-recall", "item-recall", "memory-recall":
             let query = (parseFlag("--query", from: args) ?? leadingPositionalArgs(from: args).joined(separator: " "))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !query.isEmpty else {
-                printCLIError("Usage: cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]")
+                printCLIError("Usage: cider-cli item preference-recall|memory-recall <natural question>|--query <natural question> [--limit <n>] [--json]")
                 return
             }
             let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 8
             do {
-                let response = try CiderNaturalPreferenceRecallService(contextService: contextService)
-                    .answer(query, limit: limit)
+                let service = CiderNaturalPreferenceRecallService(contextService: contextService)
+                let response = try subcommand == "memory-recall"
+                    ? service.answerMemory(query, limit: limit)
+                    : service.answer(query, limit: limit)
                 if jsonOutput {
                     outputJSON(naturalPreferenceRecallResponseToDict(response))
                 } else {
@@ -5270,7 +5274,7 @@ struct CiderCLI {
                 printCLIError(
                     error.localizedDescription,
                     details: [
-                        "command": "item.preference-recall",
+                        "command": subcommand == "memory-recall" ? "item.memory-recall" : "item.preference-recall",
                         "readOnly": true,
                         "changed": false,
                         "safeNextCommands": [
@@ -23827,7 +23831,7 @@ struct CiderCLI {
             "changed": response.changed,
             "intent": intent,
             "answer": [
-                "kind": "natural_preference_item_recall",
+                "kind": response.command == "item.memory-recall" ? "natural_memory_recall" : "natural_preference_item_recall",
                 "summary": response.summary,
                 "truthBoundary": response.truthBoundary,
                 "reviewRequired": response.reviewStatus.needsReview,

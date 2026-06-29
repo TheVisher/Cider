@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Cider
+@testable import CiderCLI
 
 @Suite("Natural Preference Recall Tests")
 @MainActor
@@ -216,5 +217,100 @@ struct NaturalPreferenceRecallTests {
         #expect(response.citations.map(\.owner.ownerID).contains(tasteJournalID.uuidString))
         #expect(response.reviewStatus.needsReview == false)
         #expect(response.searchPlan.contains { $0.query == "liked great worth ordering again food" })
+    }
+
+    @Test("general memory recall returns non food work fact with cited source boundary")
+    func generalMemoryRecallReturnsNonFoodWorkFactWithCitedSourceBoundary() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let coverallsNoteID = UUID()
+        try insertJournal(
+            id: coverallsNoteID,
+            title: "Work coveralls size",
+            body: "Visher is 6'3, and Red Kap size 60-RG / 60 regular navy coveralls fit well for work.",
+            createdAt: Date(timeIntervalSince1970: 1_782_701_200),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what size coveralls fit me at work?", limit: 5)
+
+        #expect(response.command == "item.memory-recall")
+        #expect(response.readOnly == true)
+        #expect(response.changed == false)
+        #expect(response.intent.questionKind == .general)
+        #expect(response.summary.contains("Red Kap size 60-RG"))
+        #expect(response.summary.contains("not accepted memory truth"))
+        #expect(response.truthBoundary == "source_backed_observations_not_accepted_truth")
+        let candidate = try #require(response.candidates.first)
+        #expect(candidate.owner.ownerID == coverallsNoteID.uuidString)
+        #expect(candidate.title == "Work coveralls size")
+        #expect(candidate.evidenceKind == "source_backed_memory_observation")
+        #expect(candidate.claim.contains("60 regular navy coveralls"))
+        #expect(candidate.rankReason.contains("query fact match"))
+        #expect(candidate.citationRefs == ["note:\(coverallsNoteID.uuidString)"])
+        #expect(response.safeNextCommands.contains("cider-cli item memory-recall \"what size coveralls fit me at work?\" --limit 5 --json"))
+        #expect(response.safeNextCommands.contains("cider-cli item context note \(coverallsNoteID.uuidString) --json"))
+    }
+
+    @Test("CLI JSON formatter exposes natural memory recall contract")
+    func cliJSONFormatterExposesNaturalMemoryRecallContract() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let lockerNoteID = UUID()
+        try insertJournal(
+            id: lockerNoteID,
+            title: "Work locker code",
+            body: "The work locker uses code 2468 for the temporary supply cage.",
+            createdAt: Date(timeIntervalSince1970: 1_782_701_200),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what is the work locker code?", limit: 5)
+        let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
+
+        #expect(payload["command"] as? String == "item.memory-recall")
+        let answer = try #require(payload["answer"] as? [String: Any])
+        #expect(answer["kind"] as? String == "natural_memory_recall")
+        #expect(answer["truthBoundary"] as? String == "source_backed_observations_not_accepted_truth")
+        let candidates = try #require(payload["candidates"] as? [[String: Any]])
+        let candidate = try #require(candidates.first)
+        #expect(candidate["evidenceKind"] as? String == "source_backed_memory_observation")
+        #expect((candidate["claim"] as? String)?.contains("2468") == true)
+        let citations = try #require(payload["citations"] as? [[String: Any]])
+        #expect((citations.first?["quote"] as? String)?.contains("temporary supply cage") == true)
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item memory-recall \"what is the work locker code?\" --limit 5 --json"))
+    }
+
+    @Test("memory recall misses do not use preference wording")
+    func memoryRecallMissesDoNotUsePreferenceWording() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what size coveralls fit me at work?", limit: 5)
+
+        #expect(response.command == "item.memory-recall")
+        #expect(response.summary.contains("memory recall question"))
+        #expect(response.warnings == ["No source-backed item or chunk matches were found for this natural memory recall query."])
+        #expect(response.safeNextCommands.contains("cider-cli item memory-recall \"what size coveralls fit me at work?\" --limit 5 --json"))
     }
 }
