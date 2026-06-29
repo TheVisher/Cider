@@ -23847,6 +23847,30 @@ struct CiderCLI {
                     "safeNextCommand": "cider-cli item search \"\(recallEscapedCommandArgument(step.query))\" --scope \(step.scope.rawValue) --sort \(step.sort.rawValue) --limit \(step.limit) --json",
                 ] as [String: Any]
             },
+            "candidates": response.candidates.map { candidate in
+                var dict: [String: Any] = [
+                    "id": candidate.id,
+                    "owner": ownerToDict(candidate.owner),
+                    "title": candidate.title,
+                    "evidenceKind": candidate.evidenceKind,
+                    "snippet": candidate.snippet,
+                    "claim": candidate.claim,
+                    "citationRefs": candidate.citationRefs,
+                    "score": candidate.score,
+                    "rankReason": candidate.rankReason,
+                    "truthBoundary": candidate.truthBoundary,
+                    "safeNextCommands": candidate.safeNextCommands,
+                ]
+                if let itemType = candidate.itemType { dict["itemType"] = itemType }
+                if let itemID = candidate.itemID {
+                    dict["itemID"] = itemID
+                    dict["sourceRef"] = [
+                        "type": candidate.itemType ?? candidate.owner.ownerType,
+                        "ref": itemID,
+                    ]
+                }
+                return dict
+            },
             "citations": response.citations.map { citation in
                 var dict: [String: Any] = [
                     "id": citation.id,

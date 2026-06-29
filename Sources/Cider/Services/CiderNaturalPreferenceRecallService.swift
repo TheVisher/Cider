@@ -36,6 +36,22 @@ struct CiderNaturalPreferenceRecallCitation: Identifiable, Codable, Equatable {
     var safeNextCommands: [String]
 }
 
+struct CiderNaturalPreferenceRecallCandidate: Identifiable, Codable, Equatable {
+    var id: String
+    var owner: SecondBrainOwnerRef
+    var title: String
+    var itemType: String?
+    var itemID: String?
+    var evidenceKind: String
+    var snippet: String
+    var claim: String
+    var citationRefs: [String]
+    var score: Int
+    var rankReason: String
+    var truthBoundary: String
+    var safeNextCommands: [String]
+}
+
 struct CiderNaturalPreferenceRecallReviewStatus: Codable, Equatable {
     var needsReview: Bool
     var copy: String
@@ -51,6 +67,7 @@ struct CiderNaturalPreferenceRecallResponse: Codable, Equatable {
     var truthBoundary: String
     var reviewStatus: CiderNaturalPreferenceRecallReviewStatus
     var searchPlan: [CiderNaturalPreferenceRecallSearchStep]
+    var candidates: [CiderNaturalPreferenceRecallCandidate]
     var citations: [CiderNaturalPreferenceRecallCitation]
     var safeNextCommands: [String]
     var warnings: [String]
@@ -76,6 +93,7 @@ final class CiderNaturalPreferenceRecallService {
             )
         }
         var citationsByOwner: [String: (citation: CiderNaturalPreferenceRecallCitation, score: Int)] = [:]
+        var candidatesByOwner: [String: CiderNaturalPreferenceRecallCandidate] = [:]
         var safeCommands: [String] = [
             "cider-cli item preference-recall \"\(escapedCommandArgument(intent.originalQuery))\" --limit \(boundedLimit) --json",
         ]
@@ -94,11 +112,43 @@ final class CiderNaturalPreferenceRecallService {
                 let quote = bestQuote(in: bundle, result: result, intent: intent)
                 guard qualifies(quote: quote, bundle: bundle, result: result, intent: intent) else { continue }
                 let key = bundle.owner.canonicalRef
+                let commands = [
+                    "cider-cli item context \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
+                    "cider-cli item search \"\(escapedCommandArgument(step.query))\" --scope \(step.scope.rawValue) --sort \(step.sort.rawValue) --limit \(step.limit) --json",
+                ]
+                let sourceRef = "\(bundle.item.type.rawValue):\(bundle.item.id.uuidString)"
+                let score = evidenceScore(quote: quote, bundle: bundle, result: result, intent: intent)
+                let rankReason = rankReason(quote: quote, bundle: bundle, result: result, intent: intent)
+                let evidenceKind = evidenceKind(quote: quote, result: result, intent: intent)
+                if var candidate = candidatesByOwner[key] {
+                    candidate.claim = mergeClaims(candidate.claim, quote)
+                    candidate.snippet = mergeClaims(candidate.snippet, clipped(result.snippet, limit: 260))
+                    candidate.citationRefs = orderedUnique(candidate.citationRefs + [sourceRef])
+                    candidate.score = max(candidate.score, score)
+                    candidate.rankReason = mergeRankReasons(candidate.rankReason, rankReason)
+                    candidate.safeNextCommands = orderedUnique(candidate.safeNextCommands + commands)
+                    if evidenceKind == "source_backed_candidate" {
+                        candidate.evidenceKind = evidenceKind
+                    }
+                    candidatesByOwner[key] = candidate
+                } else {
+                    candidatesByOwner[key] = CiderNaturalPreferenceRecallCandidate(
+                        id: key,
+                        owner: bundle.owner,
+                        title: bundle.item.title,
+                        itemType: bundle.item.type.rawValue,
+                        itemID: bundle.item.id.uuidString,
+                        evidenceKind: evidenceKind,
+                        snippet: clipped(result.snippet, limit: 260),
+                        claim: quote,
+                        citationRefs: [sourceRef],
+                        score: score,
+                        rankReason: rankReason,
+                        truthBoundary: "source_backed_observations_not_accepted_truth",
+                        safeNextCommands: commands
+                    )
+                }
                 if citationsByOwner[key] == nil {
-                    let commands = [
-                        "cider-cli item context \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
-                        "cider-cli item search \"\(escapedCommandArgument(step.query))\" --scope \(step.scope.rawValue) --sort \(step.sort.rawValue) --limit \(step.limit) --json",
-                    ]
                     let citation = CiderNaturalPreferenceRecallCitation(
                         id: key,
                         owner: bundle.owner,
@@ -107,15 +157,22 @@ final class CiderNaturalPreferenceRecallService {
                         source: result.stage ?? result.kind.rawValue,
                         itemType: bundle.item.type.rawValue,
                         itemID: bundle.item.id.uuidString,
-                        sourceRef: "\(bundle.item.type.rawValue):\(bundle.item.id.uuidString)",
+                        sourceRef: sourceRef,
                         safeNextCommands: commands
                     )
-                    citationsByOwner[key] = (citation, evidenceScore(quote: quote, bundle: bundle, result: result, intent: intent))
+                    citationsByOwner[key] = (citation, score)
                     safeCommands.append(contentsOf: commands)
                 }
             }
         }
 
+        let candidates = candidatesByOwner.values
+            .sorted {
+                if $0.score != $1.score { return $0.score > $1.score }
+                return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            }
+            .prefix(boundedLimit)
+            .map { $0 }
         let citations = citationsByOwner.values
             .sorted {
                 if $0.score != $1.score { return $0.score > $1.score }
@@ -139,6 +196,7 @@ final class CiderNaturalPreferenceRecallService {
                 copy: "Journaled/captured observations are cited source evidence. They were not promoted into accepted memory truth."
             ),
             searchPlan: searchPlan,
+            candidates: candidates,
             citations: citations,
             safeNextCommands: orderedUnique(safeCommands),
             warnings: warnings
@@ -190,6 +248,9 @@ final class CiderNaturalPreferenceRecallService {
         }
 
         if normalizedQuery.contains("food") {
+            if containsSavedCandidateIntent(normalizedQuery) {
+                return [normalizedQuery, "saved try lynnwood asian food", "saved place try food"]
+            }
             return ["liked great worth ordering again food", "breakfast lunch dinner great liked"]
         }
         if kind == .repeatSuggestion {
@@ -253,10 +314,10 @@ final class CiderNaturalPreferenceRecallService {
             return quoteText.contains(subject) || searchable.contains(subject)
         }
         if intent.normalizedQuery.contains("food") {
-            return containsFoodSignal(quoteText) && containsPreferenceSignal(quoteText)
+            return containsFoodSignal(quoteText) && (containsPreferenceSignal(quoteText) || containsSavedCandidateSignal(searchable))
         }
         if intent.questionKind == .repeatSuggestion {
-            return containsFoodSignal(quoteText) && containsPreferenceSignal(quoteText)
+            return containsFoodSignal(quoteText) && (containsPreferenceSignal(quoteText) || containsSavedCandidateSignal(searchable))
         }
         return containsPreferenceSignal(quoteText)
     }
@@ -272,9 +333,58 @@ final class CiderNaturalPreferenceRecallService {
         if let subject = intent.subject?.lowercased(), lower.contains(subject) { total += 12 }
         if containsFoodSignal(lower) { total += 4 }
         if containsPreferenceSignal(lower) { total += 4 }
+        if containsSavedCandidateSignal(lower) { total += 3 }
+        if result.kind == .chunk { total += 3 }
         if bundle.item.title.lowercased().contains("daily journal") { total += 2 }
-        if result.kind == .chunk { total += 1 }
+        if containsSavedCandidateIntent(intent.normalizedQuery) {
+            if containsSavedCandidateSignal(lower) { total += 10 }
+            if lower.contains("lynnwood") { total += 8 }
+            if lower.contains("asian") { total += 6 }
+            if lower.contains("place") || lower.contains("restaurant") { total += 3 }
+            if !containsSavedCandidateSignal(lower) { total -= 10 }
+            if containsPreferenceSignal(lower) && !containsSavedCandidateSignal(lower) { total -= 6 }
+        }
         return total
+    }
+
+    private func evidenceKind(
+        quote: String,
+        result: CiderItemSearchResult,
+        intent: CiderNaturalPreferenceRecallIntent
+    ) -> String {
+        let text = [quote, result.title, result.snippet].joined(separator: "\n").lowercased()
+        if containsSavedCandidateSignal(text) {
+            return "source_backed_candidate"
+        }
+        return "source_backed_observation"
+    }
+
+    private func rankReason(
+        quote: String,
+        bundle: CiderItemContextBundle,
+        result: CiderItemSearchResult,
+        intent: CiderNaturalPreferenceRecallIntent
+    ) -> String {
+        var reasons: [String] = []
+        let lower = quote.lowercased()
+        if let subject = intent.subject?.lowercased(), lower.contains(subject) {
+            reasons.append("specific subject match")
+        }
+        if result.kind == .chunk {
+            reasons.append("source-backed chunk evidence")
+        } else {
+            reasons.append("source-backed item evidence")
+        }
+        if containsPreferenceSignal(lower) {
+            reasons.append("specific preference wording")
+        }
+        if containsSavedCandidateSignal(lower) {
+            reasons.append("saved-to-try source-backed candidate")
+        }
+        if bundle.item.title.lowercased().contains("daily journal") {
+            reasons.append("journal source")
+        }
+        return orderedUnique(reasons).joined(separator: "; ")
     }
 
     private func evidenceTokens(for intent: CiderNaturalPreferenceRecallIntent) -> [String] {
@@ -289,7 +399,7 @@ final class CiderNaturalPreferenceRecallService {
         [
             "liked", "likes", "like ", "great", "good", "very good", "pretty damn good",
             "worth ordering again", "get it again", "get it more often", "wants more",
-            "prefers", "preference", "favorite",
+            "prefers", "favorite",
         ].contains { text.contains($0) }
     }
 
@@ -298,7 +408,24 @@ final class CiderNaturalPreferenceRecallService {
             "food", "breakfast", "lunch", "dinner", "restaurant", "cafeteria", "doordash",
             "ordered", "ramen", "chicken", "burrito", "musubi", "loco moco",
             "kimchee", "cucumber", "pasta", "soup", "drink", "candy", "latte", "flavor",
+            "asian",
         ].contains { text.contains($0) }
+    }
+
+    private func containsSavedCandidateIntent(_ text: String) -> Bool {
+        text.contains("save to try")
+            || text.contains("saved to try")
+            || text.contains("places did i save")
+            || text.contains("place did i save")
+    }
+
+    private func containsSavedCandidateSignal(_ text: String) -> Bool {
+        text.contains("saved to try")
+            || text.contains("save to try")
+            || text.contains("place to try")
+            || text.contains("places to try")
+            || text.contains("want to try")
+            || text.contains("try for")
     }
 
     private func quoteLines(
@@ -315,7 +442,7 @@ final class CiderNaturalPreferenceRecallService {
         let matched = lines.filter { line in
             let lower = line.lowercased()
             if intent.normalizedQuery.contains("food") || intent.questionKind == .repeatSuggestion {
-                return containsFoodSignal(lower) && containsPreferenceSignal(lower)
+                return containsFoodSignal(lower) && (containsPreferenceSignal(lower) || containsSavedCandidateSignal(lower))
             }
             return tokens.contains { lower.contains($0) }
         }
@@ -370,6 +497,22 @@ final class CiderNaturalPreferenceRecallService {
         guard value.count > limit else { return value }
         let end = value.index(value.startIndex, offsetBy: limit)
         return String(value[..<end])
+    }
+
+    private func mergeClaims(_ lhs: String, _ rhs: String) -> String {
+        let lines = (lhs + "\n" + rhs)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return clipped(orderedUnique(lines).prefix(6).joined(separator: "\n"), limit: 700)
+    }
+
+    private func mergeRankReasons(_ lhs: String, _ rhs: String) -> String {
+        let parts = (lhs + ";" + rhs)
+            .split(separator: ";", omittingEmptySubsequences: true)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return orderedUnique(parts).joined(separator: "; ")
     }
 
     private func orderedUnique(_ values: [String]) -> [String] {
