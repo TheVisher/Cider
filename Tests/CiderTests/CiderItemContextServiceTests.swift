@@ -1235,6 +1235,110 @@ struct CiderItemContextServiceTests {
         #expect((dict["safeNextCommands"] as? [String])?.contains("cider-cli item context note \(noteID.uuidString) --json") == true)
     }
 
+    @Test("scoped item search JSON wrapper includes read only action receipt")
+    func scopedItemSearchJSONWrapperIncludesReadOnlyActionReceipt() throws {
+        let noteID = UUID()
+        let result = CiderItemSearchResult(
+            id: "item-\(noteID.uuidString)",
+            kind: .item,
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString),
+            item: CiderItemSummary(
+                id: noteID,
+                type: .note,
+                title: "Work coveralls size",
+                relativePath: "Inbox/Notes/Work coveralls size.md",
+                folderID: nil,
+                createdAt: Date(timeIntervalSince1970: 1_782_701_200),
+                updatedAt: Date(timeIntervalSince1970: 1_782_701_200)
+            ),
+            title: "Work coveralls size",
+            snippet: "Red Kap size 60-RG coveralls fit.",
+            rank: 250,
+            searchScope: .personalMemory
+        )
+
+        let payload = CiderCLI.itemSearchResponseToDict(
+            query: "coveralls",
+            scope: .personalMemory,
+            sort: .newest,
+            space: nil,
+            results: [result]
+        )
+
+        #expect(payload["ok"] as? Bool == true)
+        #expect(payload["query"] as? String == "coveralls")
+        let actionReceipt = try #require(payload["actionReceipt"] as? [String: Any])
+        #expect(actionReceipt["command"] as? String == "item.search")
+        #expect(actionReceipt["commandFamily"] as? String == "item")
+        #expect(actionReceipt["subcommand"] as? String == "search")
+        #expect(actionReceipt["readOnly"] as? Bool == true)
+        #expect(actionReceipt["status"] as? String == "succeeded")
+        #expect(actionReceipt["matchedCount"] as? Int == 1)
+        #expect((actionReceipt["matchedSourceRefs"] as? [String]) == ["note:\(noteID.uuidString)"])
+        #expect((actionReceipt["safeCommandRefs"] as? [String])?.contains("cider-cli item context note \(noteID.uuidString) --json") == true)
+        #expect(actionReceipt["truthBoundary"] as? String == "receipt_proves_command_execution_not_memory_truth")
+    }
+
+    @Test("default unscoped item search JSON compatibility remains array shaped")
+    func defaultUnscopedItemSearchJSONCompatibilityRemainsArrayShaped() throws {
+        let result = CiderItemSearchResult(
+            id: "item-\(UUID().uuidString)",
+            kind: .item,
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString),
+            item: nil,
+            title: "Array compatibility",
+            snippet: "legacy array",
+            rank: 10,
+            searchScope: .all
+        )
+
+        let payload = CiderCLI.unscopedItemSearchArrayPayload(results: [result])
+
+        #expect(payload.count == 1)
+        #expect(payload.first?["title"] as? String == "Array compatibility")
+        #expect(payload.first?["actionReceipt"] == nil)
+    }
+
+    @Test("item context JSON includes read only action receipt for same source ref")
+    func itemContextJSONIncludesReadOnlyActionReceiptForSameSourceRef() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(note, title: "Coveralls source note", relativePath: "Inbox/Notes/Coveralls source note.md", into: db)
+        let service = CiderItemContextService(database: db)
+        let packet = try service.agentContext(for: note)
+
+        let payload = CiderCLI.itemAgentContextResponseToDict(packet, requestedType: "note", requestedRef: note.entityID.uuidString)
+
+        let actionReceipt = try #require(payload["actionReceipt"] as? [String: Any])
+        #expect(actionReceipt["command"] as? String == "item.context")
+        #expect(actionReceipt["readOnly"] as? Bool == true)
+        #expect(actionReceipt["matchedCount"] as? Int == 1)
+        #expect((actionReceipt["matchedSourceRefs"] as? [String]) == ["note:\(note.entityID.uuidString)"])
+        #expect((actionReceipt["safeCommandRefs"] as? [String])?.contains("cider-cli item get note \(note.entityID.uuidString) --json") == true)
+    }
+
+    @Test("item get JSON includes read only action receipt for resolved item")
+    func itemGetJSONIncludesReadOnlyActionReceiptForResolvedItem() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(note, title: "Coveralls get note", relativePath: "Inbox/Notes/Coveralls get note.md", into: db)
+        let service = CiderItemContextService(database: db)
+        let bundle = try service.context(for: note)
+
+        let payload = CiderCLI.itemGetResponseToDict(bundle, requestedType: "note", requestedRef: note.entityID.uuidString)
+
+        let actionReceipt = try #require(payload["actionReceipt"] as? [String: Any])
+        #expect(actionReceipt["command"] as? String == "item.get")
+        #expect(actionReceipt["readOnly"] as? Bool == true)
+        #expect(actionReceipt["status"] as? String == "succeeded")
+        #expect((actionReceipt["matchedSourceRefs"] as? [String]) == ["note:\(note.entityID.uuidString)"])
+        #expect((actionReceipt["safeCommandRefs"] as? [String])?.contains("cider-cli item context note \(note.entityID.uuidString) --json") == true)
+    }
+
     @Test("search diagnostics filter low signal natural language expansions")
     func searchDiagnosticsFilterLowSignalNaturalLanguageExpansions() throws {
         let (db, url) = try makeTestDB()

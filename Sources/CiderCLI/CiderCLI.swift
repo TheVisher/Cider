@@ -5209,26 +5209,11 @@ struct CiderCLI {
                 let results = try contextService.search(query, limit: limit, inSpaceID: space?.id, scope: scope, sort: sort)
                 if jsonOutput {
                     if let space {
-                        outputJSON([
-                            "ok": true,
-                            "query": query,
-                            "searchScope": scope.rawValue,
-                            "searchSort": sort.rawValue,
-                            "sortExplanation": itemSearchSortExplanation(sort),
-                            "space": spaceToDict(space),
-                            "results": results.map(itemSearchResultToDict),
-                        ])
+                        outputJSON(itemSearchResponseToDict(query: query, scope: scope, sort: sort, space: space, results: results))
                     } else if parseFlag("--scope", from: args) != nil {
-                        outputJSON([
-                            "ok": true,
-                            "query": query,
-                            "searchScope": scope.rawValue,
-                            "searchSort": sort.rawValue,
-                            "sortExplanation": itemSearchSortExplanation(sort),
-                            "results": results.map(itemSearchResultToDict),
-                        ])
+                        outputJSON(itemSearchResponseToDict(query: query, scope: scope, sort: sort, space: nil, results: results))
                     } else {
-                        outputJSON(results.map(itemSearchResultToDict))
+                        outputJSON(unscopedItemSearchArrayPayload(results: results))
                     }
                 } else if results.isEmpty {
                     if let space {
@@ -5538,18 +5523,7 @@ struct CiderCLI {
                     }
                     let bundle = try contextService.context(for: ref)
                     if jsonOutput {
-                        var dict = itemContextBundleToDict(bundle)
-                        dict["ok"] = true
-                        dict["command"] = "item.get"
-                        dict["readOnly"] = true
-                        dict["changed"] = false
-                        dict["exists"] = true
-                        dict["ownerResolved"] = true
-                        dict["sourceRef"] = [
-                            "type": positional[0],
-                            "ref": positional[1],
-                        ]
-                        outputJSON(dict)
+                        outputJSON(itemGetResponseToDict(bundle, requestedType: positional[0], requestedRef: positional[1]))
                     } else {
                         print("\(bundle.item.type.rawValue):\(bundle.item.id.uuidString)")
                         print("  Title: \(bundle.item.title)")
@@ -5752,13 +5726,7 @@ struct CiderCLI {
                 }
                 let packet = try contextService.agentContext(for: ref, limits: itemAgentContextLimits(from: args))
                 if jsonOutput {
-                    var dict = itemAgentContextPacketToDict(packet)
-                    dict["ok"] = true
-                    dict["sourceRef"] = [
-                        "type": positional[0],
-                        "ref": positional[1],
-                    ]
-                    outputJSON(dict)
+                    outputJSON(itemAgentContextResponseToDict(packet, requestedType: positional[0], requestedRef: positional[1]))
                 } else {
                     print("\(packet.item.type.rawValue):\(packet.item.id.uuidString)")
                     print("  Title: \(packet.item.title)")
@@ -23633,6 +23601,116 @@ struct CiderCLI {
         )
     }
 
+    static func readOnlyActionReceiptToDict(
+        command: String,
+        matchedSourceRefs: [String],
+        safeCommandRefs: [String],
+        provenanceRefs: [String] = [],
+        status: String = "succeeded",
+        generatedAt: Date = Date()
+    ) -> [String: Any] {
+        let parts = command.split(separator: ".", maxSplits: 1).map(String.init)
+        return [
+            "command": command,
+            "commandFamily": parts.first ?? command,
+            "subcommand": parts.count > 1 ? parts[1] : command,
+            "readOnly": true,
+            "changed": false,
+            "status": status,
+            "resultStatus": status,
+            "timestamp": ISO8601DateFormatter().string(from: generatedAt),
+            "matchedCount": matchedSourceRefs.count,
+            "matchedSourceRefs": orderedUniqueStrings(matchedSourceRefs),
+            "provenanceRefs": orderedUniqueStrings(provenanceRefs),
+            "safeCommandRefs": orderedUniqueStrings(safeCommandRefs),
+            "verificationHint": "verify_with_safe_commands_and_source_refs",
+            "truthBoundary": "receipt_proves_command_execution_not_memory_truth",
+        ]
+    }
+
+    static func itemSearchResponseToDict(
+        query: String,
+        scope: CiderItemSearchScope,
+        sort: CiderItemSearchSort,
+        space: CiderSpace?,
+        results: [CiderItemSearchResult]
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "ok": true,
+            "query": query,
+            "searchScope": scope.rawValue,
+            "searchSort": sort.rawValue,
+            "sortExplanation": itemSearchSortExplanation(sort),
+            "results": results.map(itemSearchResultToDict),
+        ]
+        if let space {
+            payload["space"] = spaceToDict(space)
+        }
+        payload["actionReceipt"] = readOnlyActionReceiptToDict(
+            command: "item.search",
+            matchedSourceRefs: results.map(itemSearchReceiptSourceRef),
+            safeCommandRefs: results.flatMap(itemSearchReceiptSafeCommandRefs),
+            provenanceRefs: results.map(itemSearchReceiptSourceRef)
+        )
+        return payload
+    }
+
+    static func unscopedItemSearchArrayPayload(results: [CiderItemSearchResult]) -> [[String: Any]] {
+        results.map(itemSearchResultToDict)
+    }
+
+    static func itemAgentContextResponseToDict(
+        _ packet: CiderItemAgentContextPacket,
+        requestedType: String,
+        requestedRef: String
+    ) -> [String: Any] {
+        var dict = itemAgentContextPacketToDict(packet)
+        dict["ok"] = true
+        dict["sourceRef"] = [
+            "type": requestedType,
+            "ref": requestedRef,
+        ]
+        let sourceRef = "\(packet.item.type.rawValue):\(packet.item.id.uuidString)"
+        dict["actionReceipt"] = readOnlyActionReceiptToDict(
+            command: "item.context",
+            matchedSourceRefs: [sourceRef],
+            safeCommandRefs: orderedUniqueStrings(packet.safeCommands + [
+                "cider-cli item get \(packet.item.type.rawValue) \(packet.item.id.uuidString) --json",
+            ]),
+            provenanceRefs: [sourceRef]
+        )
+        return dict
+    }
+
+    static func itemGetResponseToDict(
+        _ bundle: CiderItemContextBundle,
+        requestedType: String,
+        requestedRef: String
+    ) -> [String: Any] {
+        var dict = itemContextBundleToDict(bundle)
+        dict["ok"] = true
+        dict["command"] = "item.get"
+        dict["readOnly"] = true
+        dict["changed"] = false
+        dict["exists"] = true
+        dict["ownerResolved"] = true
+        dict["sourceRef"] = [
+            "type": requestedType,
+            "ref": requestedRef,
+        ]
+        let sourceRef = "\(bundle.item.type.rawValue):\(bundle.item.id.uuidString)"
+        dict["actionReceipt"] = readOnlyActionReceiptToDict(
+            command: "item.get",
+            matchedSourceRefs: [sourceRef],
+            safeCommandRefs: [
+                "cider-cli item context \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
+                "cider-cli item get \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
+            ],
+            provenanceRefs: [sourceRef]
+        )
+        return dict
+    }
+
     static func itemAgentContextPacketToDict(_ packet: CiderItemAgentContextPacket) -> [String: Any] {
         var dict: [String: Any] = [
             "ok": true,
@@ -23839,6 +23917,23 @@ struct CiderCLI {
         return dict
     }
 
+    private static func itemSearchReceiptSourceRef(_ result: CiderItemSearchResult) -> String {
+        if let item = result.item,
+           result.owner.ownerType == item.type.rawValue,
+           result.owner.ownerID == item.id.uuidString {
+            return "\(item.type.rawValue):\(item.id.uuidString)"
+        }
+        return result.owner.canonicalRef
+    }
+
+    private static func itemSearchReceiptSafeCommandRefs(_ result: CiderItemSearchResult) -> [String] {
+        orderedUniqueStrings(
+            itemSearchResultContextCommands(result)
+                + itemSearchResultVerificationCommands(result)
+                + itemSearchResultSafeNextCommands(result)
+        )
+    }
+
     static func naturalPreferenceRecallResponseToDict(_ response: CiderNaturalPreferenceRecallResponse) -> [String: Any] {
         var intent: [String: Any] = [
             "originalQuery": response.intent.originalQuery,
@@ -23940,6 +24035,12 @@ struct CiderCLI {
             "verificationCommands": response.verificationCommands,
             "safeNextCommands": response.safeNextCommands,
         ]
+        payload["actionReceipt"] = readOnlyActionReceiptToDict(
+            command: response.command,
+            matchedSourceRefs: response.candidates.map(naturalPreferenceRecallReceiptSourceRef),
+            safeCommandRefs: naturalPreferenceRecallReceiptSafeCommandRefs(response),
+            provenanceRefs: response.citations.map(\.sourceRef)
+        )
         if let broaderSearchCommand = response.broaderSearchCommand {
             payload["broaderSearchCommand"] = broaderSearchCommand
             payload["fallback"] = [
@@ -23951,6 +24052,26 @@ struct CiderCLI {
             ]
         }
         return payload
+    }
+
+    private static func naturalPreferenceRecallReceiptSourceRef(_ candidate: CiderNaturalPreferenceRecallCandidate) -> String {
+        if let itemType = candidate.itemType, let itemID = candidate.itemID {
+            return "\(itemType):\(itemID)"
+        }
+        return candidate.provenance?.sourceRef ?? candidate.owner.canonicalRef
+    }
+
+    private static func naturalPreferenceRecallReceiptSafeCommandRefs(_ response: CiderNaturalPreferenceRecallResponse) -> [String] {
+        orderedUniqueStrings(
+            response.verificationCommands
+                + response.safeNextCommands
+                + response.candidates.flatMap { candidate in
+                    candidate.safeNextCommands
+                        + (candidate.provenance?.contextCommands ?? [])
+                        + (candidate.provenance?.verificationCommands ?? [])
+                }
+                + response.citations.flatMap(\.safeNextCommands)
+        )
     }
 
     static func naturalPreferenceRecallProvenanceToDict(_ provenance: CiderNaturalPreferenceRecallProvenance) -> [String: Any] {
