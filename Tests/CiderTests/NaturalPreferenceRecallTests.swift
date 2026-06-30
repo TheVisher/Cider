@@ -379,6 +379,95 @@ struct NaturalPreferenceRecallTests {
         #expect(response.changed == false)
     }
 
+    @Test("latest journal thing wording ranks newest Daily Journal source date before older stronger word hits")
+    func latestJournalThingWordingRanksNewestJournalSourceDateFirst() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let olderStrongJournalID = UUID()
+        let newestJournalID = UUID()
+        try insertJournal(
+            id: olderStrongJournalID,
+            title: "Daily Journal 2026-06-28",
+            body: """
+            Older journal wording trap: latest journal thing I said, latest journal thing I said, latest journal thing I said.
+            I said this older entry has many body-word hits, but it is not the newest Daily Journal source date.
+            """,
+            createdAt: Date(timeIntervalSince1970: 1_782_086_400),
+            into: db,
+            store: store
+        )
+        try insertJournal(
+            id: newestJournalID,
+            title: "Daily Journal 2026-06-30",
+            body: "Morning drive journal entry: source-backed note from the newest Daily Journal.",
+            createdAt: Date(timeIntervalSince1970: 1_782_950_400),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what is the latest journal thing I said?", limit: 5)
+        let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
+        let intent = try #require(payload["intent"] as? [String: Any])
+        let firstCandidate = try #require(response.candidates.first)
+
+        #expect(intent["temporalIntent"] as? String == "latest")
+        #expect(response.intent.searchQueries.first == "Daily Journal")
+        #expect(firstCandidate.owner.ownerID == newestJournalID.uuidString)
+        #expect(response.citations.first?.owner.ownerID == newestJournalID.uuidString)
+        #expect(response.candidates.contains { $0.owner.ownerID == olderStrongJournalID.uuidString })
+        #expect(firstCandidate.rankReason.contains("latest journal source-date match"))
+        #expect(firstCandidate.matchExplanation.contains("latest journal recall anchored to Daily Journal source date"))
+        #expect(response.rankingExplanation.contains("latest journal source date first"))
+        #expect(response.summary.contains("Daily Journal 2026-06-30"))
+        #expect(response.truthBoundary == "source_backed_observations_not_accepted_truth")
+    }
+
+    @Test("latest DCC recall can use recency but plain DCC recall keeps semantic ranking")
+    func latestDCCRecallCanUseRecencyWhilePlainDCCKeepsSemanticRanking() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let olderSemanticJournalID = UUID()
+        let newerMentionJournalID = UUID()
+        try insertJournal(
+            id: olderSemanticJournalID,
+            title: "Daily Journal 2026-06-28",
+            body: "I say Dungeon Crawler Carl is a funny, kinetic audiobook. Dungeon Crawler Carl keeps working because Carl and Donut make the dungeon premise feel specific.",
+            createdAt: Date(timeIntervalSince1970: 1_782_086_400),
+            into: db,
+            store: store
+        )
+        try insertJournal(
+            id: newerMentionJournalID,
+            title: "Daily Journal 2026-06-30",
+            body: "Latest drive note: still listening to Dungeon Crawler Carl.",
+            createdAt: Date(timeIntervalSince1970: 1_782_950_400),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let latestResponse = try service.answerMemory("what is the latest thing I said about Dungeon Crawler Carl?", limit: 5)
+        let plainResponse = try service.answerMemory("what did I say about Dungeon Crawler Carl?", limit: 5)
+
+        #expect(latestResponse.intent.temporalIntent == "latest")
+        #expect(latestResponse.candidates.first?.owner.ownerID == newerMentionJournalID.uuidString)
+        #expect(!latestResponse.candidates.first!.rankReason.contains("latest journal source-date match"))
+        #expect(plainResponse.intent.temporalIntent == nil)
+        #expect(plainResponse.candidates.first?.owner.ownerID == olderSemanticJournalID.uuidString)
+        #expect(plainResponse.rankingExplanation.contains("semantic term overlap"))
+    }
+
     @Test("CLI JSON formatter exposes natural memory recall contract")
     func cliJSONFormatterExposesNaturalMemoryRecallContract() throws {
         let (db, url) = try makeTestDB()

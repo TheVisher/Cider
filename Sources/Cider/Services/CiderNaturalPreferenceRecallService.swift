@@ -267,6 +267,9 @@ final class CiderNaturalPreferenceRecallService {
                     if shouldPreferGenericDateSourceAnchor(lhs: $0, rhs: $1, intent: intent) {
                         return sourceDateMatchesTemporalIntent($0.sortDate, intent: temporalIntent)
                     }
+                    if shouldPreferLatestJournalSourceDateAnchor(lhs: $0, rhs: $1, intent: intent) {
+                        return ($0.sortDate ?? .distantPast) > ($1.sortDate ?? .distantPast)
+                    }
                     if shouldPreferTemporalRecency(lhs: $0, rhs: $1, intent: temporalIntent) {
                         return ($0.sortDate ?? .distantPast) > ($1.sortDate ?? .distantPast)
                     }
@@ -285,6 +288,11 @@ final class CiderNaturalPreferenceRecallService {
                        let rhsCandidate,
                        shouldPreferGenericDateSourceAnchor(lhs: lhsCandidate, rhs: rhsCandidate, intent: intent) {
                         return sourceDateMatchesTemporalIntent(lhsCandidate.sortDate, intent: temporalIntent)
+                    }
+                    if let lhsCandidate,
+                       let rhsCandidate,
+                       shouldPreferLatestJournalSourceDateAnchor(lhs: lhsCandidate, rhs: rhsCandidate, intent: intent) {
+                        return (lhsCandidate.sortDate ?? .distantPast) > (rhsCandidate.sortDate ?? .distantPast)
                     }
                     if let lhsCandidate,
                        let rhsCandidate,
@@ -385,7 +393,10 @@ final class CiderNaturalPreferenceRecallService {
                 semanticTerms: semanticTerms,
                 mode: mode
             )
-            return orderedUnique([dateAnchor, focused, literal, broad, normalizedQuery].compactMap { $0 }.filter { !$0.isEmpty })
+            let latestJournalAnchor = isLatestJournalSourceRecall(normalizedQuery: normalizedQuery, semanticTerms: semanticTerms)
+                ? "Daily Journal"
+                : nil
+            return orderedUnique([dateAnchor, latestJournalAnchor, focused, literal, broad, normalizedQuery].compactMap { $0 }.filter { !$0.isEmpty })
         }
 
         if let subject, !subject.isEmpty {
@@ -468,7 +479,7 @@ final class CiderNaturalPreferenceRecallService {
     private var genericMemoryRecallTokens: Set<String> {
         [
             "ask", "asked", "capture", "captured", "did", "journal", "journaled", "log", "logged",
-            "mention", "mentioned", "note", "notes", "recall", "remember", "said", "say", "saying",
+            "in", "mention", "mentioned", "note", "notes", "recall", "remember", "said", "say", "saying",
             "tell", "thing", "things", "voice",
         ]
     }
@@ -621,6 +632,10 @@ final class CiderNaturalPreferenceRecallService {
                sourceDateMatchesTemporalIntent(sourceSortDate(bundle: bundle, result: result), intent: intent.temporalIntent) {
                 return true
             }
+            if isLatestJournalSourceRecall(intent: intent),
+               isDailyJournalSource(bundle: bundle, result: result) {
+                return true
+            }
             let tokens = intent.semanticQueryTerms
             let overlap = tokens.filter { searchable.contains($0) }.count
             return overlap >= min(2, max(1, tokens.count))
@@ -720,6 +735,10 @@ final class CiderNaturalPreferenceRecallService {
                sourceDateMatchesTemporalIntent(sortDate, intent: intent.temporalIntent) {
                 reasons.append("generic explicit-date source-date match")
             }
+            if isLatestJournalSourceRecall(intent: intent),
+               isDailyJournalSource(bundle: bundle, result: result) {
+                reasons.append("latest journal source-date match")
+            }
             return orderedUnique(reasons).joined(separator: "; ")
         }
         if let subject = intent.subject?.lowercased(), lower.contains(subject) {
@@ -767,6 +786,9 @@ final class CiderNaturalPreferenceRecallService {
         if isGenericExplicitDateRecall(intent: intent),
            sourceDateMatchesTemporalIntent(sortDate, intent: intent.temporalIntent) {
             return "Matched general_memory from generic explicit-date recall anchored to source date \(Self.localDayFormatter.string(from: sortDate ?? Date())); not accepted memory truth."
+        }
+        if isLatestJournalSourceRecall(intent: intent) {
+            return "Matched general_memory from latest journal recall anchored to Daily Journal source date \(Self.localDayFormatter.string(from: sortDate ?? Date())); not accepted memory truth."
         }
         let family = intent.factFamily ?? "general_memory"
         let target = intent.factTarget.map { " targeting \($0)" } ?? ""
@@ -986,6 +1008,9 @@ final class CiderNaturalPreferenceRecallService {
         if mode == .memory, isGenericExplicitDateRecall(intent: intent) {
             return "Ranked \(candidates.count) source-backed memory candidate(s)\(target) by explicit date intent first when source dates match, then semantic term overlap, chunk evidence, and source recency using terms: \(terms)."
         }
+        if mode == .memory, isLatestJournalSourceRecall(intent: intent) {
+            return "Ranked \(candidates.count) source-backed memory candidate(s)\(target) by latest journal source date first for Daily Journal evidence, then semantic term overlap and chunk evidence using terms: \(terms)."
+        }
         return "Ranked \(candidates.count) source-backed \(mode.noun) candidate(s)\(target) by semantic term overlap, chunk evidence, and source recency using terms: \(terms)."
     }
 
@@ -998,6 +1023,21 @@ final class CiderNaturalPreferenceRecallService {
         let lhsMatches = sourceDateMatchesTemporalIntent(lhs.sortDate, intent: intent.temporalIntent)
         let rhsMatches = sourceDateMatchesTemporalIntent(rhs.sortDate, intent: intent.temporalIntent)
         return lhsMatches != rhsMatches
+    }
+
+    private func shouldPreferLatestJournalSourceDateAnchor(
+        lhs: CiderNaturalPreferenceRecallCandidate,
+        rhs: CiderNaturalPreferenceRecallCandidate,
+        intent: CiderNaturalPreferenceRecallIntent
+    ) -> Bool {
+        guard isLatestJournalSourceRecall(intent: intent) else { return false }
+        let lhsIsJournal = lhs.title.lowercased().contains("daily journal")
+        let rhsIsJournal = rhs.title.lowercased().contains("daily journal")
+        if lhsIsJournal != rhsIsJournal {
+            return lhsIsJournal
+        }
+        guard lhsIsJournal, rhsIsJournal else { return false }
+        return lhs.sortDate != rhs.sortDate
     }
 
     private func shouldPreferTemporalRecency(
@@ -1035,6 +1075,31 @@ final class CiderNaturalPreferenceRecallService {
             !explicitDateTokens.contains(term) && !genericMemoryRecallTokens.contains(term)
         }
         return nonDateSignalTerms.count <= 1
+    }
+
+    private func isLatestJournalSourceRecall(intent: CiderNaturalPreferenceRecallIntent) -> Bool {
+        isLatestJournalSourceRecall(
+            normalizedQuery: intent.normalizedQuery,
+            semanticTerms: intent.semanticQueryTerms
+        )
+    }
+
+    private func isLatestJournalSourceRecall(normalizedQuery: String, semanticTerms: [String]) -> Bool {
+        guard normalizedQuery.contains("journal"),
+              temporalIntent(for: normalizedQuery, mode: .memory) == "latest"
+        else {
+            return false
+        }
+        let journalSourceTerms: Set<String> = ["daily", "entry", "journal", "journaled", "latest", "newest", "recent"]
+        let nonJournalSignalTerms = semanticTerms.filter { term in
+            !journalSourceTerms.contains(term) && !genericMemoryRecallTokens.contains(term)
+        }
+        return nonJournalSignalTerms.isEmpty
+    }
+
+    private func isDailyJournalSource(bundle: CiderItemContextBundle, result: CiderItemSearchResult) -> Bool {
+        [bundle.item.title, result.title]
+            .contains { $0.lowercased().contains("daily journal") }
     }
 
     private func sourceDateMatchesTemporalIntent(_ date: Date?, intent: String?) -> Bool {
