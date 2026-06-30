@@ -1,5 +1,6 @@
 import XCTest
 @testable import Cider
+@testable import CiderCLI
 
 final class CiderDueToSurfaceFeedServiceTests: XCTestCase {
     private var calendar: Calendar {
@@ -59,19 +60,41 @@ final class CiderDueToSurfaceFeedServiceTests: XCTestCase {
             evidenceRef: "source_evidence:e1",
             safeNextCommands: ["cider-cli item similarity note stale-note --json"]
         )
+        let acceptedFact = SecondBrainAcceptedMemoryFact(candidate: SecondBrainEnrichmentOutput(
+            id: "mem-accepted-1",
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: staleNoteID.uuidString),
+            chunkID: "chunk-accepted-1",
+            kind: "memory_candidate",
+            value: "Pine House is relevant to dinner planning",
+            normalizedValue: "pine house is relevant to dinner planning",
+            label: "Accepted memory",
+            evidence: "We went to Pine House.",
+            source: "item.memory-suggest",
+            confidence: 0.91,
+            reviewState: "accepted",
+            metadata: [
+                "memory_kind": "preference",
+                "memory_key": "pine-house.dinner",
+                "source_owner_ref": "note:\(staleNoteID.uuidString)",
+                "source_evidence_ref": "source_evidence:accepted-1",
+            ],
+            createdAt: now,
+            updatedAt: now
+        ))
 
         let feed = CiderDueToSurfaceFeedService.build(
             agenda: AgendaBriefingService.build(todos: [dueTodo, completedTodo], dateCards: [dueDateCard], now: now, calendar: calendar),
             reviewItems: [reviewItem],
             staleCaptures: [staleNote],
             linkedContext: [linked],
+            acceptedMemoryFacts: [acceptedFact],
             now: now,
             limit: 20
         )
 
         XCTAssertEqual(feed.command, "item.due-to-surface")
         XCTAssertFalse(feed.changed)
-        XCTAssertEqual(feed.candidates.count, 5)
+        XCTAssertEqual(feed.candidates.count, 6)
         XCTAssertTrue(feed.candidates.contains { $0.family == .agenda && $0.owner.ownerID == dueTodo.id.uuidString })
         let dateCardCandidate = try XCTUnwrap(feed.candidates.first { $0.family == .agenda && $0.owner.ownerID == dueDateCard.id.uuidString })
         XCTAssertEqual(dateCardCandidate.owner.ownerType, "dateCard")
@@ -82,6 +105,20 @@ final class CiderDueToSurfaceFeedServiceTests: XCTestCase {
         XCTAssertTrue(feed.candidates.contains { $0.family == .reviewItem && $0.reasonCodes.contains("reviewable_candidate") && $0.truthBoundary == "reviewable_candidate_not_truth" })
         XCTAssertTrue(feed.candidates.contains { $0.family == .staleCapture && $0.reasonCodes.contains("stale_capture") })
         XCTAssertTrue(feed.candidates.contains { $0.family == .linkedContext && $0.citedEvidence.contains { $0.ref == "source_evidence:e1" } })
+        let memoryFact = try XCTUnwrap(feed.candidates.first { $0.family == .acceptedMemoryFact })
+        XCTAssertEqual(memoryFact.factRef, "accepted_memory_fact:mem-accepted-1")
+        XCTAssertEqual(memoryFact.candidateRef, "memory_candidate:mem-accepted-1")
+        XCTAssertEqual(memoryFact.truthBoundary, "accepted_memory_fact")
+        XCTAssertEqual(memoryFact.candidateBoundary, "reviewable_memory_candidates_excluded")
+        XCTAssertTrue(memoryFact.reasonCodes.contains("follow_up_relevance"))
+        XCTAssertTrue(memoryFact.sourceRefs.contains("source_evidence:accepted-1"))
+        XCTAssertTrue(memoryFact.safeVerificationCommands.contains("cider-cli item memory-facts inspect mem-accepted-1 --json"))
+        let memoryFactDict = dueToSurfaceCandidateToDict(memoryFact, formatter: ISO8601DateFormatter())
+        let relevance = try XCTUnwrap(memoryFactDict["surfacingRelevance"] as? [String: Any])
+        XCTAssertEqual(relevance["truthBoundary"] as? String, "accepted_memory_fact")
+        XCTAssertEqual(relevance["candidateBoundary"] as? String, "reviewable_memory_candidates_excluded")
+        XCTAssertTrue((relevance["verificationCommands"] as? [String])?.contains("cider-cli item memory-facts inspect mem-accepted-1 --json") == true)
+        XCTAssertTrue(((relevance["relevanceReasons"] as? [[String: Any]]) ?? []).contains { $0["kind"] as? String == "follow_up_relevance" })
         XCTAssertTrue(feed.safeNextCommands.contains("cider-cli item due-to-surface --json"))
     }
 

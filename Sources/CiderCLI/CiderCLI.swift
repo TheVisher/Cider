@@ -18111,6 +18111,7 @@ struct CiderCLI {
         var contentBlocks: [[String: Any]] = []
         var relatedItems: [[String: Any]] = []
         var acceptedFacts: [[String: Any]] = []
+        var acceptedMemoryFacts: [[String: Any]] = []
         var reviewableCandidates: [[String: Any]] = []
         var actionHistory: [[String: Any]] = []
         var safeCommands: [String] = []
@@ -18181,10 +18182,11 @@ struct CiderCLI {
             surfacedRefs.append(contentsOf: accepted.compactMap { ($0["id"] as? String).map { "owner_relation:\($0)" } })
             acceptedFacts.append(contentsOf: accepted)
             let acceptedMemoryOutputs = bundle.enrichmentOutputs.filter { $0.kind == "memory_candidate" && $0.reviewState == "accepted" }
-            let acceptedMemoryFacts = acceptedMemoryOutputs.map { recallAcceptedMemoryFactToDict($0, scoringService: scoringService) }
-            reasonKinds.append(contentsOf: acceptedMemoryFacts.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
-            surfacedRefs.append(contentsOf: acceptedMemoryFacts.compactMap { $0["factRef"] as? String })
-            acceptedFacts.append(contentsOf: acceptedMemoryFacts)
+            let acceptedMemoryFactDicts = acceptedMemoryOutputs.map { recallAcceptedMemoryFactToDict($0, scoringService: scoringService) }
+            reasonKinds.append(contentsOf: acceptedMemoryFactDicts.flatMap { (($0["scoreReasons"] as? [[String: Any]]) ?? []).compactMap { $0["kind"] as? String } })
+            surfacedRefs.append(contentsOf: acceptedMemoryFactDicts.compactMap { $0["factRef"] as? String })
+            acceptedFacts.append(contentsOf: acceptedMemoryFactDicts)
+            acceptedMemoryFacts.append(contentsOf: acceptedMemoryFactDicts)
             let candidateOutputs = bundle.enrichmentOutputs.filter {
                 $0.kind == SecondBrainGraphCandidateContract.outputKind && ["suggested", "needs_review", "deferred"].contains($0.reviewState)
             }
@@ -18248,6 +18250,7 @@ struct CiderCLI {
             "contentBlocks": contentBlocks,
             "relatedItems": orderedUniqueDictionaries(relatedItems, key: "id"),
             "acceptedFacts": orderedUniqueDictionaries(acceptedFacts, key: "id"),
+            "acceptedMemoryFacts": orderedUniqueDictionaries(acceptedMemoryFacts, key: "id"),
             "reviewableCandidates": orderedUniqueDictionaries(reviewableCandidates, key: "id"),
             "derivedCalculations": derivedCalculations,
             "actionHistory": orderedUniqueDictionaries(actionHistory, key: "id"),
@@ -18478,6 +18481,11 @@ struct CiderCLI {
         let reasons = scoringService.candidateReasons(output: output, evidenceRecord: evidenceRecord, lifecycleHistory: lifecycle)
         dict["recallScore"] = scoringService.score(reasons)
         dict["scoreReasons"] = scoreReasonsToDict(reasons)
+        dict["surfacingRelevance"] = acceptedMemoryFactSurfacingRelevanceToDict(
+            fact: SecondBrainAcceptedMemoryFact(candidate: output),
+            relevanceReasons: scoreReasonsToDict(reasons),
+            context: "recall_context"
+        )
         dict["safetyBoundary"] = [
             "accepted_memory_fact_requires_explicit_accept",
             "reviewable_candidates_are_not_truth",
@@ -20137,6 +20145,13 @@ struct CiderCLI {
             "citation": recallCitation(owner: output.owner),
             "safeVerificationCommands": ["cider-cli item memory-facts inspect \(output.id) --json"],
             "safeNextCommands": acceptedMemoryFactSafeCommands(output),
+            "contextCommands": ["cider-cli item recall-context --item \(output.owner.ownerType) \(output.owner.ownerID) --json"],
+            "verificationCommands": [
+                "cider-cli item memory-facts inspect \(output.id) --json",
+                "cider-cli item action-ledger list --owner \(output.owner.canonicalRef) --command item.accept-memory-candidate --json",
+            ],
+            "sourceRefs": acceptedMemoryFactSourceRefs(fact),
+            "citations": acceptedMemoryFactCitations(output),
             "safetyBoundary": [
                 "accepted_memory_fact_requires_explicit_accept",
                 "reviewable_candidates_are_not_truth",
@@ -20177,12 +20192,85 @@ struct CiderCLI {
         if let reviewedAt = output.metadata["reviewed_at"] { dict["acceptedAt"] = reviewedAt; dict["reviewedAt"] = reviewedAt }
         if let reviewedBy = output.metadata["reviewed_by"] { dict["acceptedBy"] = reviewedBy; dict["reviewedBy"] = reviewedBy }
         if let evidenceRecord = sourceEvidenceRecordToDict(for: output) { dict["sourceEvidenceRecord"] = evidenceRecord }
+        dict["surfacingRelevance"] = acceptedMemoryFactSurfacingRelevanceToDict(
+            fact: fact,
+            relevanceReasons: [
+                [
+                    "kind": "accepted_memory_fact",
+                    "reason": "Explicitly accepted memory fact is eligible for resurfacing and follow-up context.",
+                ],
+                [
+                    "kind": "source_backed_evidence",
+                    "reason": "Fact includes preserved source quote and citation refs.",
+                ],
+            ],
+            context: "accepted_memory_fact"
+        )
         dict["actionIntentRefs"] = SecondBrainAcceptedMemoryFactActionIntentService.intentRefs(for: fact)
         let lifecycle = lifecycleHistoryToDict(for: output)
         if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
         let history = acceptedMemoryFactActionHistory(output)
         if !history.isEmpty { dict["actionHistory"] = history }
         return dict
+    }
+
+    static func acceptedMemoryFactSurfacingRelevanceToDict(
+        fact: SecondBrainAcceptedMemoryFact,
+        relevanceReasons: [[String: Any]],
+        context: String
+    ) -> [String: Any] {
+        let output = fact.candidate
+        return [
+            "context": context,
+            "factID": output.id,
+            "factRef": fact.factRef,
+            "candidateRef": fact.candidateRef,
+            "ownerRef": output.owner.canonicalRef,
+            "sourceRefs": acceptedMemoryFactSourceRefs(fact),
+            "citations": acceptedMemoryFactCitations(output),
+            "relevanceReasons": relevanceReasons,
+            "truthBoundary": "accepted_memory_fact",
+            "candidateBoundary": "reviewable_memory_candidates_excluded",
+            "contextCommands": ["cider-cli item recall-context --item \(output.owner.ownerType) \(output.owner.ownerID) --json"],
+            "verificationCommands": [
+                "cider-cli item memory-facts inspect \(output.id) --json",
+                "cider-cli item action-ledger list --owner \(output.owner.canonicalRef) --command item.accept-memory-candidate --json",
+            ],
+            "safeNextCommands": acceptedMemoryFactSafeCommands(output),
+        ]
+    }
+
+    static func acceptedMemoryFactSourceRefs(_ fact: SecondBrainAcceptedMemoryFact) -> [String] {
+        let output = fact.candidate
+        var refs = [
+            fact.factRef,
+            fact.candidateRef,
+            output.owner.canonicalRef,
+        ]
+        if let sourceOwnerRef = output.metadata["source_owner_ref"] {
+            refs.append(sourceOwnerRef)
+        }
+        if let evidenceRef = output.metadata["source_evidence_ref"] {
+            refs.append(evidenceRef)
+        }
+        refs.append(contentsOf: DatabaseHelpers.decodeStringArray(output.metadata["linked_owner_refs"]))
+        return orderedUniqueStrings(refs.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+    }
+
+    static func acceptedMemoryFactCitations(_ output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
+        var citations: [[String: Any]] = [[
+            "ref": output.metadata["source_owner_ref"] ?? output.owner.canonicalRef,
+            "ownerRef": output.owner.canonicalRef,
+            "quote": output.evidence,
+        ]]
+        if let evidenceRef = output.metadata["source_evidence_ref"] {
+            citations.append([
+                "ref": evidenceRef,
+                "ownerRef": output.owner.canonicalRef,
+                "quote": output.evidence,
+            ])
+        }
+        return citations
     }
 
     static func acceptedMemoryFactActionIntentToDict(_ intent: SecondBrainAcceptedMemoryFactActionIntent) -> [String: Any] {

@@ -2066,8 +2066,48 @@ func dueToSurfaceCandidateToDict(_ candidate: CiderDueToSurfaceCandidate, format
     } else if candidate.truthBoundary == "accepted_memory_fact" {
         dict["needsReview"] = false
         dict["acceptedTruth"] = true
+        dict["surfacingRelevance"] = acceptedMemoryDueToSurfaceRelevanceToDict(candidate)
     }
     return dict
+}
+
+func acceptedMemoryDueToSurfaceRelevanceToDict(_ candidate: CiderDueToSurfaceCandidate) -> [String: Any] {
+    var dict: [String: Any] = [
+        "context": "due_to_surface",
+        "factID": candidate.factRef?.replacingOccurrences(of: "accepted_memory_fact:", with: "") ?? candidate.id,
+        "factRef": candidate.factRef ?? candidate.id,
+        "ownerRef": candidate.owner.canonicalRef,
+        "sourceRefs": candidate.sourceRefs,
+        "citations": candidate.citedEvidence.map(dueToSurfaceEvidenceToDict),
+        "relevanceReasons": candidate.reasonCodes.map { code in
+            [
+                "kind": code,
+                "reason": acceptedMemoryDueToSurfaceReasonDescription(code),
+            ]
+        },
+        "truthBoundary": candidate.truthBoundary,
+        "candidateBoundary": candidate.candidateBoundary ?? "reviewable_memory_candidates_excluded",
+        "contextCommands": ["cider-cli item recall-context --item \(candidate.owner.ownerType) \(candidate.owner.ownerID) --json"],
+        "verificationCommands": candidate.safeVerificationCommands,
+        "safeNextCommands": candidate.safeNextCommands,
+    ]
+    if let candidateRef = candidate.candidateRef { dict["candidateRef"] = candidateRef }
+    return dict
+}
+
+func acceptedMemoryDueToSurfaceReasonDescription(_ code: String) -> String {
+    switch code {
+    case "accepted_memory_fact":
+        return "Fact was explicitly accepted as memory truth."
+    case "follow_up_relevance":
+        return "Accepted fact is eligible to appear in follow-up and resurfacing contexts."
+    case "has_memory_key":
+        return "Fact has a stable memory key for replay and deduplication."
+    case "has_linked_owners":
+        return "Fact is connected to one or more source or related owner refs."
+    default:
+        return "Accepted memory fact relevance signal: \(code)."
+    }
 }
 
 func dueToSurfaceWindowToDict(_ window: CiderDueToSurfaceWindow, formatter: ISO8601DateFormatter) -> [String: Any] {

@@ -1076,6 +1076,11 @@ struct CiderCLIAgentSafetyTests {
         #expect(inspectedFact["candidateRef"] as? String == "memory_candidate:\(acceptedCandidateID)")
         #expect(inspectedFact["sourceQuote"] as? String == "Erik prefers espresso in the morning.")
         #expect((inspectedFact["safeVerificationCommands"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedCandidateID) --json") == true)
+        let inspectedRelevance = try #require(inspectedFact["surfacingRelevance"] as? [String: Any])
+        #expect(inspectedRelevance["factRef"] as? String == "accepted_memory_fact:\(acceptedCandidateID)")
+        #expect(inspectedRelevance["truthBoundary"] as? String == "accepted_memory_fact")
+        #expect(inspectedRelevance["candidateBoundary"] as? String == "reviewable_memory_candidates_excluded")
+        #expect((inspectedRelevance["verificationCommands"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedCandidateID) --json") == true)
 
         let recall = try assertStrictProcessJSON(
             runCLI(args: ["item", "recall-context", "--item", "note", noteID, "--json"], vault: vault),
@@ -1087,6 +1092,17 @@ struct CiderCLIAgentSafetyTests {
                 && fact["candidateID"] as? String == acceptedCandidateID
                 && fact["truthBoundary"] as? String == "accepted_memory_fact"
         })
+        let acceptedMemoryFacts = try #require(recall["acceptedMemoryFacts"] as? [[String: Any]])
+        let recalledFact = try #require(acceptedMemoryFacts.first { $0["candidateID"] as? String == acceptedCandidateID })
+        let recallRelevance = try #require(recalledFact["surfacingRelevance"] as? [String: Any])
+        #expect(recallRelevance["context"] as? String == "recall_context")
+        #expect(recallRelevance["factRef"] as? String == "accepted_memory_fact:\(acceptedCandidateID)")
+        #expect(recallRelevance["truthBoundary"] as? String == "accepted_memory_fact")
+        #expect(recallRelevance["candidateBoundary"] as? String == "reviewable_memory_candidates_excluded")
+        #expect(((recallRelevance["sourceRefs"] as? [String]) ?? []).contains("memory_candidate:\(acceptedCandidateID)"))
+        #expect((recallRelevance["contextCommands"] as? [String])?.contains("cider-cli item recall-context --item note \(noteID) --json") == true)
+        #expect((recallRelevance["verificationCommands"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedCandidateID) --json") == true)
+        #expect(((recallRelevance["relevanceReasons"] as? [[String: Any]]) ?? []).isEmpty == false)
         let recallReceipt = try #require(recall["actionReceipt"] as? [String: Any])
         #expect(recallReceipt["command"] as? String == "item.recall-context")
         #expect(recallReceipt["readOnly"] as? Bool == true)
@@ -1200,13 +1216,23 @@ struct CiderCLIAgentSafetyTests {
         #expect(surfaced["sourceCitation"] != nil)
         #expect((surfaced["citedEvidence"] as? [[String: Any]])?.isEmpty == false)
         #expect((surfaced["safeVerificationCommands"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedID) --json") == true)
+        let surfacedRelevance = try #require(surfaced["surfacingRelevance"] as? [String: Any])
+        #expect(surfacedRelevance["context"] as? String == "due_to_surface")
+        #expect(surfacedRelevance["factRef"] as? String == "accepted_memory_fact:\(acceptedID)")
+        #expect(surfacedRelevance["truthBoundary"] as? String == "accepted_memory_fact")
+        #expect(surfacedRelevance["candidateBoundary"] as? String == "reviewable_memory_candidates_excluded")
+        #expect((surfacedRelevance["verificationCommands"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedID) --json") == true)
+        #expect(((surfacedRelevance["relevanceReasons"] as? [[String: Any]]) ?? []).contains { $0["kind"] as? String == "follow_up_relevance" })
 
         let due = try assertStrictProcessJSON(
             runCLI(args: ["item", "due-to-surface", "--limit", "10", "--stale-after-days", "999", "--json"], vault: vault),
             command: "item.due-to-surface"
         )
         let dueCandidates = try #require(due["candidates"] as? [[String: Any]])
-        #expect(dueCandidates.contains { $0["family"] as? String == "accepted_memory_fact" && $0["factRef"] as? String == "accepted_memory_fact:\(acceptedID)" })
+        let dueAccepted = try #require(dueCandidates.first { $0["family"] as? String == "accepted_memory_fact" && $0["factRef"] as? String == "accepted_memory_fact:\(acceptedID)" })
+        let dueRelevance = try #require(dueAccepted["surfacingRelevance"] as? [String: Any])
+        #expect(dueRelevance["truthBoundary"] as? String == "accepted_memory_fact")
+        #expect((dueRelevance["contextCommands"] as? [String])?.contains("cider-cli item recall-context --item note \(noteID) --json") == true)
         #expect(dueCandidates.contains { $0["candidateRef"] as? String == "memory_candidate:\(reviewableID)" && $0["family"] as? String == "accepted_memory_fact" } == false)
     }
 
