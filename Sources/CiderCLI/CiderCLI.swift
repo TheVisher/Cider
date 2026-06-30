@@ -1959,6 +1959,32 @@ struct CiderCLI {
                     bookmarkService: bookmarkService
                 )
                 printReviewRoutingActionResult(result)
+            } catch CiderRoutingDecisionError.itemReferenceNotFound(let ref) {
+                var payload = structuredActionReceiptFailurePayload(
+                    command: "review.routing.correct",
+                    action: "correct",
+                    actor: parseFlag("--actor", from: args) ?? "user",
+                    owner: nil,
+                    readOnly: false,
+                    errorCode: "item_not_found",
+                    error: "No item found matching '\(ref)'.",
+                    sourceRefs: [ref],
+                    safeVerificationCommands: [
+                        "cider-cli review list --json",
+                        "cider-cli item action-ledger list --command review.routing.correct --status failed --json",
+                    ],
+                    safeNextCommands: [
+                        "cider-cli review list --json",
+                    ]
+                )
+                if var receipt = payload["actionReceipt"] as? [String: Any] {
+                    receipt["subcommand"] = "correct"
+                    receipt["truthBoundary"] = "receipt_proves_command_execution_and_review_state_outcome_not_memory_truth"
+                    payload["actionReceipt"] = receipt
+                }
+                persistActionReceiptIfPresent(payload)
+                processExitCode = 1
+                if jsonOutput { outputJSON(payload) } else { print("Error: No item found matching '\(ref)'.") }
             } catch {
                 print("Error: \(error.localizedDescription)")
             }
@@ -13594,12 +13620,12 @@ struct CiderCLI {
     static func printReviewRoutingActionResult(_ result: CiderReviewRoutingActionResult) {
         if jsonOutput {
             var payload = result.toDictionary()
-            if result.action == "review.routing.defer" {
+            if result.action == "review.routing.defer" || result.action == "review.routing.correct" {
                 payload["ok"] = true
-                payload["command"] = "review.routing.defer"
+                payload["command"] = result.action
                 payload["readOnly"] = false
                 payload["changed"] = true
-                payload["actionReceipt"] = actionReceiptForReviewRoutingDefer(result)
+                payload["actionReceipt"] = actionReceiptForReviewRoutingAction(result)
                 persistActionReceiptIfPresent(payload)
             }
             outputJSON(payload)
@@ -13621,12 +13647,13 @@ struct CiderCLI {
         print("  Safe actions: \(result.safeActions.joined(separator: ", "))")
     }
 
-    static func actionReceiptForReviewRoutingDefer(_ result: CiderReviewRoutingActionResult) -> [String: Any] {
+    static func actionReceiptForReviewRoutingAction(_ result: CiderReviewRoutingActionResult) -> [String: Any] {
         let owner = SecondBrainOwnerRef(ownerType: result.itemType, ownerID: result.itemID.uuidString)
         let ownerRef = owner.canonicalRef
+        let subcommand = result.action.replacingOccurrences(of: "review.routing.", with: "")
         let receipt = agentActionReceiptToDict(
-            command: "review.routing.defer",
-            action: "defer",
+            command: result.action,
+            action: subcommand,
             actor: result.actor,
             owner: owner,
             sourceRefs: orderedUniqueStrings([
@@ -13649,17 +13676,17 @@ struct CiderCLI {
             ],
             safeVerificationCommands: [
                 "cider-cli review list --include-deferred --json",
-                "cider-cli item action-ledger list --owner \(ownerRef) --command review.routing.defer --json",
+                "cider-cli item action-ledger list --owner \(ownerRef) --command \(result.action) --json",
                 "cider-cli item context \(result.itemType) \(result.itemID.uuidString) --max-history 10 --json",
             ],
             safeNextCommands: [
                 "cider-cli review list --json",
                 "cider-cli review list --include-deferred --json",
-                "cider-cli item recall-context --item \(result.itemType) \(result.itemID.uuidString) --history-command review.routing.defer --json",
+                "cider-cli item recall-context --item \(result.itemType) \(result.itemID.uuidString) --history-command \(result.action) --json",
             ]
         )
         var adjusted = receipt
-        adjusted["subcommand"] = "defer"
+        adjusted["subcommand"] = subcommand
         adjusted["truthBoundary"] = "receipt_proves_command_execution_and_review_state_outcome_not_memory_truth"
         return adjusted
     }
