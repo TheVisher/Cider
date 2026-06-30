@@ -283,6 +283,64 @@ func actionReceiptRecordToDict(_ record: SecondBrainActionReceiptRecord) -> [Str
     return dict
 }
 
+@MainActor
+func actionReceiptRecapToDict(_ recap: SecondBrainActionReceiptRecap) -> [String: Any] {
+    [
+        "ok": true,
+        "command": "item.action-ledger.recap",
+        "readOnly": true,
+        "changed": false,
+        "count": recap.totalCount,
+        "groupCount": recap.groups.count,
+        "limit": recap.filter.limit,
+        "filters": CiderCLI.actionLedgerFilterToDict(recap.filter),
+        "truthBoundary": recap.truthBoundary,
+        "outcomeBoundary": recap.outcomeBoundary,
+        "safeVerificationCommands": recap.safeVerificationCommands,
+        "groups": recap.groups.map(actionReceiptRecapGroupToDict),
+    ]
+}
+
+func actionReceiptRecapGroupToDict(_ group: SecondBrainActionReceiptRecapGroup) -> [String: Any] {
+    [
+        "family": group.family,
+        "command": group.command,
+        "status": group.status,
+        "count": group.count,
+        "latestAt": ISO8601DateFormatter().string(from: group.latestAt),
+        "changedCount": group.changedCount,
+        "readOnlyCount": group.readOnlyCount,
+        "entries": group.entries.map(actionReceiptRecapEntryToDict),
+    ]
+}
+
+func actionReceiptRecapEntryToDict(_ entry: SecondBrainActionReceiptRecapEntry) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": entry.id,
+        "receiptRef": "action_receipt:\(entry.id)",
+        "command": entry.command,
+        "action": entry.action,
+        "status": entry.status,
+        "readOnly": entry.readOnly,
+        "changed": entry.changed,
+        "createdAt": ISO8601DateFormatter().string(from: entry.createdAt),
+        "sourceRefs": entry.sourceRefs,
+        "evidenceRefs": entry.evidenceRefs,
+        "safeVerificationCommands": entry.safeVerificationCommands,
+        "truthBoundary": entry.truthBoundary,
+        "outcomeBoundary": entry.outcomeBoundary,
+        "displaySummary": entry.displaySummary,
+    ]
+    if let receiptTruthBoundary = entry.receiptTruthBoundary {
+        dict["receiptTruthBoundary"] = receiptTruthBoundary
+    }
+    if let owner = entry.owner {
+        dict["owner"] = secondBrainOwnerRefToDict(owner)
+        dict["ownerRef"] = owner.canonicalRef
+    }
+    return dict
+}
+
 private func actionReceiptJSONDictionary(_ json: String) -> [String: Any]? {
     guard let data = json.data(using: .utf8),
           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

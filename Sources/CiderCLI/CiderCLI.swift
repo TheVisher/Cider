@@ -246,6 +246,7 @@ struct CiderCLI {
       cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
       cider-cli item why-surfaced <type> <id-or-ref> [--json]
       cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
+      cider-cli item action-ledger recap [--owner <type:id>|--owner-type <type> --owner-id <id>] [--family <command-family>] [--command <command>|--command-prefix <prefix>] [--action <action>|--action-prefix <prefix>] [--status <status>] [--source-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>|--until <iso|yyyy-mm-dd>] [--limit <n>] [--json]
       cider-cli item action-ledger inspect <receipt-id> [--json]
       cider-cli item capability-map [--json]
       cider-cli item graph-health [--json]
@@ -328,9 +329,15 @@ struct CiderCLI {
                 Usage: cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
                 Read-only durable action receipt history. Use inspect for one receipt.
                 """)
+            case "recap", "summary":
+                print("""
+                Usage: cider-cli item action-ledger recap [--owner <type:id>|--owner-type <type> --owner-id <id>] [--family <command-family>] [--command <command>|--command-prefix <prefix>] [--action <action>|--action-prefix <prefix>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>|--until <iso|yyyy-mm-dd>] [--limit <n>] [--json]
+                Read-only grouped recent action receipt recap for agent briefings. Receipt metadata proves command outcomes only; inspect source refs before treating anything as memory truth.
+                """)
             default:
                 print("""
                 Usage: cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
+                       cider-cli item action-ledger recap [--owner <type:id>|--owner-type <type> --owner-id <id>] [--family <command-family>] [--command <command>|--command-prefix <prefix>] [--action <action>|--action-prefix <prefix>] [--status <status>] [--source-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>|--until <iso|yyyy-mm-dd>] [--limit <n>] [--json]
                        cider-cli item action-ledger inspect <receipt-id> [--json]
                 Read-only durable action receipt history for replaying mutation and diagnostic outcomes.
                 """)
@@ -14823,13 +14830,16 @@ struct CiderCLI {
         return SecondBrainActionReceiptFilter(
             owner: owner,
             command: parseFlag("--command", from: args),
+            commandPrefix: parseFlag("--command-prefix", from: args),
+            family: parseFlag("--family", from: args) ?? parseFlag("--command-family", from: args),
             action: parseFlag("--action", from: args),
+            actionPrefix: parseFlag("--action-prefix", from: args),
             actor: parseFlag("--actor", from: args),
             status: parseFlag("--status", from: args),
             sourceRef: parseFlag("--source-ref", from: args) ?? parseFlag("--source", from: args),
             evidenceRef: parseFlag("--evidence-ref", from: args) ?? parseFlag("--evidence", from: args),
             since: parseFactValidityDate(parseFlag("--since", from: args)),
-            before: parseFactValidityDate(parseFlag("--before", from: args)),
+            before: parseFactValidityDate(parseFlag("--before", from: args) ?? parseFlag("--until", from: args)),
             limit: limit
         )
     }
@@ -14882,7 +14892,10 @@ struct CiderCLI {
             dict["ownerRef"] = owner.canonicalRef
         }
         if let command = filter.command { dict["command"] = command }
+        if let commandPrefix = filter.commandPrefix { dict["commandPrefix"] = commandPrefix }
+        if let family = filter.family { dict["family"] = family }
         if let action = filter.action { dict["action"] = action }
+        if let actionPrefix = filter.actionPrefix { dict["actionPrefix"] = actionPrefix }
         if let actor = filter.actor { dict["actor"] = actor }
         if let status = filter.status { dict["status"] = status }
         if let sourceRef = filter.sourceRef { dict["sourceRef"] = sourceRef }
@@ -14916,6 +14929,19 @@ struct CiderCLI {
                 } else {
                     for entry in entries {
                         print("\(entry.id) \(entry.command) \(entry.action) \(entry.status) changed=\(entry.changed)")
+                    }
+                }
+            case "recap", "summary":
+                let filter = actionLedgerFilter(from: args)
+                let recap = try service.recap(filter: filter)
+                if jsonOutput {
+                    outputJSON(actionReceiptRecapToDict(recap))
+                } else {
+                    for group in recap.groups {
+                        print("\(group.family) \(group.command) \(group.status) count=\(group.count) latest=\(ISO8601DateFormatter().string(from: group.latestAt))")
+                        for entry in group.entries.prefix(3) {
+                            print("  \(entry.id) \(entry.displaySummary)")
+                        }
                     }
                 }
             case "inspect", "get":
@@ -14957,7 +14983,7 @@ struct CiderCLI {
                     print("\(entry.id) \(entry.command) \(entry.action) \(entry.status)")
                 }
             default:
-                printCLIError("Unknown action-ledger command: \(action). Commands: list, inspect")
+                printCLIError("Unknown action-ledger command: \(action). Commands: list, recap, inspect")
             }
         } catch {
             printCLIError(error.localizedDescription)

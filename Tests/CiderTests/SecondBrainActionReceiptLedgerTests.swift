@@ -174,6 +174,63 @@ struct SecondBrainActionReceiptLedgerTests {
         #expect(limited.map(\.command) == ["item.entity-resolution.inspect", "item.fact-validity.accept"])
     }
 
+    @Test("service builds grouped recent action recap without promoting receipts to truth")
+    func serviceBuildsGroupedRecentActionRecapWithoutPromotingReceiptsToTruth() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let service = SecondBrainActionReceiptLedgerService(database: db)
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+
+        _ = try service.record(SecondBrainActionReceiptRecord(
+            command: "item.why-surfaced",
+            action: "inspect_surfacing",
+            actor: "cider-cli",
+            status: "succeeded",
+            owner: owner,
+            sourceRefs: [owner.canonicalRef],
+            evidenceRefs: [],
+            readOnly: true,
+            changed: false,
+            safeVerificationCommands: ["cider-cli item why-surfaced note \(owner.ownerID) --json"],
+            safeNextCommands: [],
+            receiptJSON: #"{"truthBoundary":"receipt_proves_command_execution_not_memory_truth"}"#,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_100)
+        ))
+        _ = try service.record(SecondBrainActionReceiptRecord(
+            command: "link.add",
+            action: "link",
+            actor: "cider-cli",
+            status: "succeeded",
+            owner: owner,
+            sourceRefs: [owner.canonicalRef],
+            evidenceRefs: ["note:target"],
+            readOnly: false,
+            changed: true,
+            safeVerificationCommands: ["cider-cli item action-ledger list --owner \(owner.canonicalRef) --command link.add --json"],
+            safeNextCommands: [],
+            receiptJSON: #"{"commandFamily":"link","truthBoundary":"receipt_proves_command_execution_and_mutation_outcome_not_memory_truth"}"#,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_200)
+        ))
+
+        let recap = try service.recap(filter: .init(owner: owner, commandPrefix: "item.", limit: 10))
+
+        #expect(recap.totalCount == 1)
+        #expect(recap.groups.count == 1)
+        let group = try #require(recap.groups.first)
+        #expect(group.family == "item")
+        #expect(group.command == "item.why-surfaced")
+        #expect(group.status == "succeeded")
+        #expect(group.count == 1)
+        let entry = try #require(group.entries.first)
+        #expect(entry.command == "item.why-surfaced")
+        #expect(entry.readOnly == true)
+        #expect(entry.changed == false)
+        #expect(entry.truthBoundary == "action_receipt_not_fact_truth")
+        #expect(entry.outcomeBoundary == "receipt_proves_command_outcome_only")
+        #expect(entry.displaySummary == "item.why-surfaced succeeded (read-only, unchanged)")
+        #expect(entry.safeVerificationCommands.contains("cider-cli item action-ledger inspect \(entry.id) --json"))
+    }
+
     @Test("ledger recording does not silently accept graph candidates")
     func ledgerRecordingDoesNotSilentlyAcceptGraphCandidates() throws {
         let (db, url) = try makeTempDB()

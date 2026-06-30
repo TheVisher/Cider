@@ -60,7 +60,9 @@ struct CiderCLIAgentSafetyTests {
             ]),
             (["item", "action-ledger", "--help"], [
                 "cider-cli item action-ledger list",
+                "cider-cli item action-ledger recap",
                 "--owner <type:id>",
+                "--command-prefix <prefix>",
                 "--command <command>",
                 "--source-ref <ref>",
                 "--evidence-ref <ref>",
@@ -73,6 +75,14 @@ struct CiderCLIAgentSafetyTests {
                 "--since <iso|yyyy-mm-dd>",
                 "--before <iso|yyyy-mm-dd>",
                 "--limit <n>",
+            ]),
+            (["item", "action-ledger", "recap", "--help"], [
+                "cider-cli item action-ledger recap",
+                "--family <command-family>",
+                "--command-prefix <prefix>",
+                "--action-prefix <prefix>",
+                "--source-ref <ref>",
+                "Read-only grouped recent action receipt recap",
             ]),
             (["item", "action-ledger", "inspect", "--help"], [
                 "cider-cli item action-ledger inspect <receipt-id> [--json]",
@@ -574,6 +584,66 @@ struct CiderCLIAgentSafetyTests {
         #expect(filters["evidenceRef"] as? String == "note:\(targetID)")
         #expect(filters["since"] as? String == beforeMutation)
         #expect(filters["before"] as? String == afterMutation)
+    }
+
+    @Test("action ledger CLI recap groups recent read-only and mutation receipts")
+    func actionLedgerCLIRecapGroupsRecentReadOnlyAndMutationReceipts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-action-ledger-recap-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let sourceID = try createNote(title: "Ledger Recap Source", content: "Source", vault: vault)
+        let targetID = try createNote(title: "Ledger Recap Target", content: "Target", vault: vault)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "why-surfaced", "note", sourceID, "--json"], vault: vault),
+            command: "item.why-surfaced"
+        )
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "link", "note", sourceID, "note", targetID, "--json"], vault: vault),
+            command: "link.add"
+        )
+
+        let recap = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "recap", "--owner", "note:\(sourceID)", "--limit", "10", "--json"], vault: vault),
+            command: "item.action-ledger.recap"
+        )
+        #expect(recap["readOnly"] as? Bool == true)
+        #expect(recap["changed"] as? Bool == false)
+        #expect(recap["truthBoundary"] as? String == "action_receipt_not_fact_truth")
+        let groups = try #require(recap["groups"] as? [[String: Any]])
+        #expect(groups.contains { group in
+            group["family"] as? String == "item"
+                && group["command"] as? String == "item.why-surfaced"
+                && group["status"] as? String == "succeeded"
+        })
+        #expect(groups.contains { group in
+            group["family"] as? String == "link"
+                && group["command"] as? String == "link.add"
+                && group["status"] as? String == "succeeded"
+        })
+        let allEntries = groups.flatMap { ($0["entries"] as? [[String: Any]]) ?? [] }
+        let readOnlyEntry = try #require(allEntries.first { $0["command"] as? String == "item.why-surfaced" })
+        #expect(readOnlyEntry["readOnly"] as? Bool == true)
+        #expect(readOnlyEntry["changed"] as? Bool == false)
+        #expect(readOnlyEntry["truthBoundary"] as? String == "action_receipt_not_fact_truth")
+        #expect(readOnlyEntry["outcomeBoundary"] as? String == "receipt_proves_command_outcome_only")
+        #expect(readOnlyEntry["displaySummary"] as? String == "item.why-surfaced succeeded (read-only, unchanged)")
+        let safeCommands = try #require(readOnlyEntry["safeVerificationCommands"] as? [String])
+        #expect(safeCommands.contains { $0.hasPrefix("cider-cli item action-ledger inspect ") })
+        #expect(safeCommands.contains("cider-cli item why-surfaced note \(sourceID) --json"))
+
+        let mutationEntry = try #require(allEntries.first { $0["command"] as? String == "link.add" })
+        #expect(mutationEntry["readOnly"] as? Bool == false)
+        #expect(mutationEntry["changed"] as? Bool == true)
+        #expect((mutationEntry["sourceRefs"] as? [String])?.contains("note:\(sourceID)") == true)
+
+        let filtered = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "recap", "--owner", "note:\(sourceID)", "--family", "link", "--limit", "10", "--json"], vault: vault),
+            command: "item.action-ledger.recap"
+        )
+        let filteredGroups = try #require(filtered["groups"] as? [[String: Any]])
+        #expect(filteredGroups.map { $0["family"] as? String } == ["link"])
     }
 
     @Test("fact validity inspect not found returns and persists structured failure receipt")

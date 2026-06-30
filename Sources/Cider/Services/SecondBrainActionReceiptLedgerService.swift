@@ -116,7 +116,10 @@ struct SecondBrainActionReceiptRecord: Identifiable, Equatable {
 struct SecondBrainActionReceiptFilter: Equatable {
     var owner: SecondBrainOwnerRef?
     var command: String?
+    var commandPrefix: String?
+    var family: String?
     var action: String?
+    var actionPrefix: String?
     var actor: String?
     var status: String?
     var sourceRef: String?
@@ -128,7 +131,10 @@ struct SecondBrainActionReceiptFilter: Equatable {
     init(
         owner: SecondBrainOwnerRef? = nil,
         command: String? = nil,
+        commandPrefix: String? = nil,
+        family: String? = nil,
         action: String? = nil,
+        actionPrefix: String? = nil,
         actor: String? = nil,
         status: String? = nil,
         sourceRef: String? = nil,
@@ -139,7 +145,10 @@ struct SecondBrainActionReceiptFilter: Equatable {
     ) {
         self.owner = owner
         self.command = command
+        self.commandPrefix = commandPrefix
+        self.family = family
         self.action = action
+        self.actionPrefix = actionPrefix
         self.actor = actor
         self.status = status
         self.sourceRef = sourceRef
@@ -148,6 +157,44 @@ struct SecondBrainActionReceiptFilter: Equatable {
         self.before = before
         self.limit = max(1, min(limit, 100))
     }
+}
+
+struct SecondBrainActionReceiptRecapEntry: Equatable {
+    var id: String
+    var command: String
+    var action: String
+    var status: String
+    var readOnly: Bool
+    var changed: Bool
+    var createdAt: Date
+    var sourceRefs: [String]
+    var evidenceRefs: [String]
+    var safeVerificationCommands: [String]
+    var truthBoundary: String
+    var outcomeBoundary: String
+    var receiptTruthBoundary: String?
+    var displaySummary: String
+    var owner: SecondBrainOwnerRef?
+}
+
+struct SecondBrainActionReceiptRecapGroup: Equatable {
+    var family: String
+    var command: String
+    var status: String
+    var count: Int
+    var latestAt: Date
+    var changedCount: Int
+    var readOnlyCount: Int
+    var entries: [SecondBrainActionReceiptRecapEntry]
+}
+
+struct SecondBrainActionReceiptRecap: Equatable {
+    var filter: SecondBrainActionReceiptFilter
+    var totalCount: Int
+    var groups: [SecondBrainActionReceiptRecapGroup]
+    var safeVerificationCommands: [String]
+    var truthBoundary: String = "action_receipt_not_fact_truth"
+    var outcomeBoundary: String = "receipt_proves_command_outcome_only"
 }
 
 @MainActor
@@ -211,9 +258,17 @@ final class SecondBrainActionReceiptLedgerService {
             clauses.append("command = ?")
             bindings.append(command)
         }
+        if let commandPrefix = filter.commandPrefix {
+            clauses.append("command LIKE ?")
+            bindings.append(Self.sqlPrefixPattern(commandPrefix))
+        }
         if let action = filter.action {
             clauses.append("action = ?")
             bindings.append(action)
+        }
+        if let actionPrefix = filter.actionPrefix {
+            clauses.append("action LIKE ?")
+            bindings.append(Self.sqlPrefixPattern(actionPrefix))
         }
         if let actor = filter.actor {
             clauses.append("actor = ?")
@@ -252,7 +307,49 @@ final class SecondBrainActionReceiptLedgerService {
         while try stmt.step() {
             records.append(Self.record(from: stmt))
         }
+        if let family = filter.family {
+            return records.filter { Self.commandFamily(for: $0) == family }
+        }
         return records
+    }
+
+    func recap(filter: SecondBrainActionReceiptFilter = .init()) throws -> SecondBrainActionReceiptRecap {
+        let records = try list(filter: filter)
+        let entries = records.map(Self.recapEntry(from:))
+        let grouped = Dictionary(grouping: entries) { entry in
+            "\(Self.commandFamily(command: entry.command, receiptJSON: records.first { $0.id == entry.id }?.receiptJSON))\u{1F}\(entry.command)\u{1F}\(entry.status)"
+        }
+        let groups = grouped.values.map { groupEntries -> SecondBrainActionReceiptRecapGroup in
+            let sortedEntries = groupEntries.sorted { $0.createdAt > $1.createdAt }
+            let first = sortedEntries[0]
+            let family = Self.commandFamily(command: first.command, receiptJSON: records.first { $0.id == first.id }?.receiptJSON)
+            return SecondBrainActionReceiptRecapGroup(
+                family: family,
+                command: first.command,
+                status: first.status,
+                count: sortedEntries.count,
+                latestAt: sortedEntries.map(\.createdAt).max() ?? first.createdAt,
+                changedCount: sortedEntries.filter(\.changed).count,
+                readOnlyCount: sortedEntries.filter(\.readOnly).count,
+                entries: sortedEntries
+            )
+        }.sorted {
+            if $0.latestAt != $1.latestAt { return $0.latestAt > $1.latestAt }
+            if $0.family != $1.family { return $0.family < $1.family }
+            if $0.command != $1.command { return $0.command < $1.command }
+            return $0.status < $1.status
+        }
+        let safeCommands = Self.orderedUniqueStrings(
+            groups.flatMap { group in
+                group.entries.prefix(2).flatMap(\.safeVerificationCommands)
+            }
+        )
+        return SecondBrainActionReceiptRecap(
+            filter: filter,
+            totalCount: entries.count,
+            groups: groups,
+            safeVerificationCommands: safeCommands
+        )
     }
 
     private static let selectSQL = """
@@ -268,6 +365,76 @@ final class SecondBrainActionReceiptLedgerService {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "%\"\(escaped)\"%"
+    }
+
+    private static func sqlPrefixPattern(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_") + "%"
+    }
+
+    private static func recapEntry(from record: SecondBrainActionReceiptRecord) -> SecondBrainActionReceiptRecapEntry {
+        var commands = [
+            "cider-cli item action-ledger inspect \(record.id) --json",
+        ] + record.safeVerificationCommands
+        if let owner = record.owner {
+            commands.append("cider-cli item context \(owner.ownerType) \(owner.ownerID) --max-history 10 --json")
+        }
+        let safeCommands = orderedUniqueStrings(commands)
+        return SecondBrainActionReceiptRecapEntry(
+            id: record.id,
+            command: record.command,
+            action: record.action,
+            status: record.status,
+            readOnly: record.readOnly,
+            changed: record.changed,
+            createdAt: record.createdAt,
+            sourceRefs: record.sourceRefs,
+            evidenceRefs: record.evidenceRefs,
+            safeVerificationCommands: safeCommands,
+            truthBoundary: "action_receipt_not_fact_truth",
+            outcomeBoundary: "receipt_proves_command_outcome_only",
+            receiptTruthBoundary: receiptMetadata(record.receiptJSON)["truthBoundary"] as? String,
+            displaySummary: displaySummary(for: record),
+            owner: record.owner
+        )
+    }
+
+    private static func displaySummary(for record: SecondBrainActionReceiptRecord) -> String {
+        let mode = record.readOnly ? "read-only" : "mutation"
+        let change = record.changed ? "changed" : "unchanged"
+        return "\(record.command) \(record.status) (\(mode), \(change))"
+    }
+
+    private static func commandFamily(for record: SecondBrainActionReceiptRecord) -> String {
+        commandFamily(command: record.command, receiptJSON: record.receiptJSON)
+    }
+
+    private static func commandFamily(command: String, receiptJSON: String?) -> String {
+        if let family = receiptMetadata(receiptJSON)["commandFamily"] as? String, !family.isEmpty {
+            return family
+        }
+        return command.split(separator: ".", maxSplits: 1).first.map(String.init) ?? command
+    }
+
+    private static func receiptMetadata(_ json: String?) -> [String: Any] {
+        guard let json,
+              let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return object
+    }
+
+    private static func orderedUniqueStrings(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values where !value.isEmpty && !seen.contains(value) {
+            seen.insert(value)
+            result.append(value)
+        }
+        return result
     }
 
     private static func record(from stmt: SQLStatement) -> SecondBrainActionReceiptRecord {
