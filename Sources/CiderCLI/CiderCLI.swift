@@ -224,67 +224,87 @@ struct CiderCLI {
         return true
     }
 
+    static let itemHelpText = """
+    Item graph commands:
+      cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--sort relevance|newest|oldest] [--space <space-id|name>] [--limit <n>] [--json]
+        Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files.
+        Use one scope value at a time; do not combine scope names.
+        Valid --sort values: relevance, newest, oldest. Default is relevance; newest/oldest use capture provenance timestamps when present, otherwise item updated/created timestamps.
+        Use newest/oldest only for recency-oriented recall or audit/debug.
+      cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]
+        Read-only source-backed natural preference/item recall over journaled and captured items.
+      cider-cli item memory-recall <natural question>|--query <natural question> [--limit <n>] [--json]
+        Read-only source-backed natural personal/work memory recall over Cider items.
+      cider-cli item search-debug <query> [--limit <n>] [--json]
+      cider-cli item get <type> <id-or-ref> [--json]
+      cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
+        Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
+      cider-cli item open <type> <id-or-ref> [--json]
+      cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--json]
+      cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
+      cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
+      cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
+      cider-cli item why-surfaced <type> <id-or-ref> [--json]
+      cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
+      cider-cli item action-ledger inspect <receipt-id> [--json]
+      cider-cli item capability-map [--json]
+      cider-cli item graph-health [--json]
+      cider-cli item entity list [--limit <n>] [--json]
+      cider-cli item entity inspect <entity-ref|name|alias> [--json]
+      cider-cli item fact-validity list|inspect|state|propose|accept|reject|defer ... [--json]
+      cider-cli item memory-facts list [--limit <n>] [--json]
+      cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
+      cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
+      cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
+      cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
+        Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
+      cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
+      cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
+      cider-cli item graph-candidate <candidate-id> [--json]
+      cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
+      cider-cli item reject-graph-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
+      cider-cli item delegate-graph-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
+      cider-cli item accept-memory-candidate <candidate-id> [--actor <name>] [--json]
+      cider-cli item reject-memory-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
+      cider-cli item defer-memory-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
+      cider-cli item correct-memory-candidate <candidate-id> [--value <text>] [--evidence <text>] [--kind <kind>] [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status <status>] [--actor <name>] [--json]
+      cider-cli item delegate-memory-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
+      cider-cli item related <type> <id-or-ref> [--json]
+      cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
+      cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
+      cider-cli item related-owners <owner-type> <owner-id-or-ref> [--json]
+      cider-cli item rebuild-references <note|card|board> <id-or-ref> [--json]
+      cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]
+      cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
+      cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind preference|pattern|project_context|relationship_context|agent_lesson --value <text> --evidence <text> [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status current|historical|superseded] [--source <source>] [--confidence <0-1>] [--json]
+      cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
+      cider-cli item similarity-health [<owner-type> <owner-id-or-ref>] [--json]
+      cider-cli item reconcile-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
+      cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
+      cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
+      cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
+      cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]
+      cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
+      cider-cli item daily-episode --date YYYY-MM-DD [--json]
+      cider-cli item weekly-chapter --week YYYY-MM-DD [--json]
+      cider-cli item monthly-chapter --month YYYY-MM [--json]
+      cider-cli item yearly-book --year YYYY [--json]
+      cider-cli item sync-project <project-id-or-name> [--json]
+      cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
+      cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]
+      cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
+        Do not pass artifact filenames such as Example.webloc to item move --path.
+      cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
+      cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]
+      cider-cli item rebuild-index [--json]
+      cider-cli item apply-intent <type> <id-or-ref> --intent space|project [--actor <name>] [--json]
+      cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
+      cider-cli item backfill-kanban [--board <name-or-id>] [--json]
+      cider-cli item doctor [--json]
+    """
+
     static func printItemEarlyHelp() {
-        print("""
-        Item graph commands:
-          cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--sort relevance|newest|oldest] [--space <space-id|name>] [--limit <n>] [--json]
-            Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files.
-            Use one scope value at a time; do not combine scope names.
-            Valid --sort values: relevance, newest, oldest. Default is relevance; newest/oldest use capture provenance timestamps when present, otherwise item updated/created timestamps.
-            Use newest/oldest only for recency-oriented recall or audit/debug.
-            Example: cider-cli item search "event" --scope personalMemory --json
-            Example: cider-cli item search "Panda Express" --sort newest --limit 5 --json
-          cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]
-            Read-only source-backed natural preference/item recall over journaled and captured items.
-          cider-cli item memory-recall <natural question>|--query <natural question> [--limit <n>] [--json]
-            Read-only source-backed natural personal/work memory recall over Cider items.
-          cider-cli item search-debug <query> [--limit <n>] [--json]
-          cider-cli item get <type> <id-or-ref> [--json]
-          cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
-            Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
-          cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--json]
-          cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
-          cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
-            Read-only source-backed recall bundle with anchors, accepted facts, reviewable candidates, action history, and safe follow-up commands.
-          cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
-          cider-cli item why-surfaced <type> <id-or-ref> [--json]
-          cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
-          cider-cli item action-ledger inspect <receipt-id> [--json]
-            Read-only durable action receipt history for replaying mutation and diagnostic outcomes.
-          cider-cli item capability-map [--json]
-            Read-only static capability contract for agents.
-          cider-cli item graph-health [--json]
-            Read-only graph readiness diagnostic for agents.
-          cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
-          cider-cli item daily-episode --date YYYY-MM-DD [--json]
-          cider-cli item weekly-chapter --week YYYY-MM-DD [--json]
-          cider-cli item monthly-chapter --month YYYY-MM [--json]
-          cider-cli item yearly-book --year YYYY [--json]
-          cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
-            Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
-          cider-cli item memory-facts list [--limit <n>] [--json]
-          cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
-          cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
-          cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
-
-        Read-only traversal commands:
-          cider-cli item related <type> <id-or-ref> [--json]
-          cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
-          cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
-          cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
-            Do not pass artifact filenames such as Example.webloc to item move --path.
-          cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]
-
-        Migration/backfill commands:
-          cider-cli item backfill-kanban [--board <name-or-id>] [--json]
-          cider-cli item rebuild-references <note|card|board> <id-or-ref> [--json]
-          cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]
-          cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
-          cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
-          cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
-          cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
-          cider-cli item sync-project <project-id-or-name> [--json]
-        """)
+        print(itemHelpText)
     }
 
     static func printItemSubcommandEarlyHelp(subcommand: String?, args: [String]) {
@@ -5266,84 +5286,7 @@ struct CiderCLI {
         let contextService = CiderItemContextService(database: .shared, secondBrainStore: store)
         switch subcommand {
         case nil, "help", "--help", "-h":
-            print("""
-            Item graph commands:
-              cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--sort relevance|newest|oldest] [--space <space-id|name>] [--limit <n>] [--json]
-                Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files.
-                Use one scope value at a time; do not combine scope names.
-                Valid --sort values: relevance, newest, oldest. Default is relevance; newest/oldest use capture provenance timestamps when present, otherwise item updated/created timestamps.
-                Use newest/oldest only for recency-oriented recall or audit/debug.
-              cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]
-                Read-only source-backed natural preference/item recall over journaled and captured items.
-              cider-cli item memory-recall <natural question>|--query <natural question> [--limit <n>] [--json]
-                Read-only source-backed natural personal/work memory recall over Cider items.
-              cider-cli item search-debug <query> [--limit <n>] [--json]
-              cider-cli item get <type> <id-or-ref> [--json]
-              cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
-                Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
-              cider-cli item open <type> <id-or-ref> [--json]
-              cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--json]
-              cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
-              cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
-              cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
-              cider-cli item why-surfaced <type> <id-or-ref> [--json]
-              cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
-              cider-cli item action-ledger inspect <receipt-id> [--json]
-              cider-cli item capability-map [--json]
-              cider-cli item graph-health [--json]
-              cider-cli item entity list [--limit <n>] [--json]
-              cider-cli item entity inspect <entity-ref|name|alias> [--json]
-              cider-cli item fact-validity list|inspect|state|propose|accept|reject|defer ... [--json]
-              cider-cli item memory-facts list [--limit <n>] [--json]
-              cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
-              cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
-              cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
-              cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
-                Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
-              cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
-              cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
-              cider-cli item graph-candidate <candidate-id> [--json]
-              cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
-              cider-cli item reject-graph-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
-              cider-cli item delegate-graph-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
-              cider-cli item accept-memory-candidate <candidate-id> [--actor <name>] [--json]
-              cider-cli item reject-memory-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
-              cider-cli item defer-memory-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
-              cider-cli item correct-memory-candidate <candidate-id> [--value <text>] [--evidence <text>] [--kind <kind>] [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status <status>] [--actor <name>] [--json]
-              cider-cli item delegate-memory-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
-              cider-cli item related <type> <id-or-ref> [--json]
-              cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
-              cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
-              cider-cli item related-owners <owner-type> <owner-id-or-ref> [--json]
-              cider-cli item rebuild-references <note|card|board> <id-or-ref> [--json]
-              cider-cli item rebuild-chunks <type|all> [id-or-ref] [--limit <n>] [--json]
-              cider-cli item rebuild-enrichment <owner-type> <owner-id-or-ref> [--json]
-              cider-cli item memory-suggest <owner-type> <owner-id-or-ref> --kind preference|pattern|project_context|relationship_context|agent_lesson --value <text> --evidence <text> [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status current|historical|superseded] [--source <source>] [--confidence <0-1>] [--json]
-              cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
-              cider-cli item similarity-health [<owner-type> <owner-id-or-ref>] [--json]
-              cider-cli item reconcile-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
-              cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
-              cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
-              cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
-              cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]
-              cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
-              cider-cli item daily-episode --date YYYY-MM-DD [--json]
-              cider-cli item weekly-chapter --week YYYY-MM-DD [--json]
-              cider-cli item monthly-chapter --month YYYY-MM [--json]
-              cider-cli item yearly-book --year YYYY [--json]
-              cider-cli item sync-project <project-id-or-name> [--json]
-              cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
-              cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]
-              cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
-                Do not pass artifact filenames such as Example.webloc to item move --path.
-              cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
-              cider-cli item delete <type> <id-or-ref> --reason <text> [--approve <token> --execute] [--actor <name>] [--source <source>] [--json]
-              cider-cli item rebuild-index [--json]
-              cider-cli item apply-intent <type> <id-or-ref> --intent space|project [--actor <name>] [--json]
-              cider-cli item route <type> <id-or-ref> --target-type <space|folder|board> [--target-id <id>] [--target-path <path>] --reason <text> [--confidence <0-1>] [--status accepted|needs_review] [--actor <name>] [--source <source>] [--json]
-              cider-cli item backfill-kanban [--board <name-or-id>] [--json]
-              cider-cli item doctor [--json]
-            """)
+            printItemEarlyHelp()
 
         case "search":
             if args.contains("--help") || args.contains("-h") {

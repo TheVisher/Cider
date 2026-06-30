@@ -23,6 +23,18 @@ private final class CLIOutputBuffer: @unchecked Sendable {
 @Suite("Cider CLI Agent Safety Tests", .serialized)
 @MainActor
 struct CiderCLIAgentSafetyTests {
+    @Test("item early and full plain help use the same canonical text")
+    func itemEarlyAndFullPlainHelpUseSameCanonicalText() throws {
+        let earlyHelp = try captureStandardOutput {
+            CiderCLI.printItemEarlyHelp()
+        }
+        let fullHelp = try captureStandardOutput {
+            CiderCLI.handleItem(subcommand: nil, args: [])
+        }
+
+        #expect(earlyHelp == fullHelp)
+    }
+
     @Test("item help advertises recall action diagnostic facts commands without vault side effects")
     func itemHelpAdvertisesRecallActionDiagnosticFactsCommandsWithoutVaultSideEffects() throws {
         let commandsAndExpectedStrings: [([String], [String])] = [
@@ -8510,6 +8522,30 @@ struct CiderCLIAgentSafetyTests {
         defer { try? FileManager.default.removeItem(at: vault) }
 
         return try runCLI(args: args, vault: vault, stdin: stdin)
+    }
+
+    private func captureStandardOutput(_ action: () throws -> Void) throws -> String {
+        fflush(stdout)
+        let originalStdout = dup(STDOUT_FILENO)
+        let pipe = Pipe()
+        dup2(pipe.fileHandleForWriting.fileDescriptor, STDOUT_FILENO)
+
+        do {
+            try action()
+            fflush(stdout)
+            try pipe.fileHandleForWriting.close()
+            dup2(originalStdout, STDOUT_FILENO)
+            close(originalStdout)
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            fflush(stdout)
+            try? pipe.fileHandleForWriting.close()
+            dup2(originalStdout, STDOUT_FILENO)
+            close(originalStdout)
+            _ = pipe.fileHandleForReading.readDataToEndOfFile()
+            throw error
+        }
     }
 
     private func runCLI(
