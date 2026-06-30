@@ -19721,6 +19721,7 @@ struct CiderCLI {
                         "safeVerificationCommands": ["cider-cli item memory-facts proposals inspect \(proposal.id) --json"],
                         "safeNextCommands": followUpProposalSafeCommands(proposal),
                     ]
+                    persistActionReceiptIfPresent(payload)
                     if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal created: \(proposal.id)") }
                 } catch let factError as SecondBrainAcceptedMemoryFactService.AcceptedMemoryFactError {
                     printAcceptedMemoryFactError(factError, rawID: rawFactID, command: "item.memory-facts.proposals.create", readOnly: false)
@@ -19776,6 +19777,7 @@ struct CiderCLI {
                         "safeVerificationCommands": ["cider-cli item memory-facts proposals preview \(preview.proposal.id) --json"],
                         "safeNextCommands": followUpExecutionPreviewSafeCommands(preview),
                     ]
+                    persistActionReceiptIfPresent(payload)
                     if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal execution preview: \(preview.proposal.id)") }
                 } catch let proposalError as SecondBrainFollowUpProposalService.FollowUpProposalError {
                     printFollowUpProposalError(proposalError, rawID: rawID, command: "item.memory-facts.proposals.preview", readOnly: true)
@@ -19822,6 +19824,7 @@ struct CiderCLI {
                             "safeVerificationCommands": ["cider-cli item memory-facts proposals execute \(preview.proposal.id) --json"],
                             "safeNextCommands": followUpExecutionResultSafeCommands(execution),
                         ]
+                        persistActionReceiptIfPresent(payload)
                         if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal executed: \(preview.proposal.id)") }
                     } catch let proposalError as SecondBrainFollowUpProposalService.FollowUpProposalError {
                         printFollowUpExecutionError(proposalError, rawID: rawID, preview: preview, command: "item.memory-facts.proposals.execute")
@@ -19862,6 +19865,7 @@ struct CiderCLI {
                         "actionReceipt": followUpProposalActionReceipt(command: "item.memory-facts.proposals.\(subaction)", action: "\(subaction)_follow_up_proposal", proposal: proposal, changed: true, readOnly: false),
                         "safeVerificationCommands": ["cider-cli item memory-facts proposals inspect \(proposal.id) --json"],
                     ]
+                    persistActionReceiptIfPresent(payload)
                     if jsonOutput { outputJSON(payload) } else { print("Follow-up proposal \(status): \(proposal.id)") }
                 } catch let proposalError as SecondBrainFollowUpProposalService.FollowUpProposalError {
                     printFollowUpProposalError(proposalError, rawID: rawID, command: "item.memory-facts.proposals.\(subaction)", readOnly: false)
@@ -19985,7 +19989,7 @@ struct CiderCLI {
             "status": "succeeded",
             "owner": ownerToDict(preview.proposal.owner),
             "ownerRef": preview.proposal.owner.canonicalRef,
-            "sourceRefs": DatabaseHelpers.decodeStringArray(preview.proposal.output.metadata["source_refs"]),
+            "sourceRefs": followUpProposalSourceRefs(preview.proposal),
             "evidenceRefs": DatabaseHelpers.decodeStringArray(preview.proposal.output.metadata["evidence_refs"]),
             "readOnly": true,
             "changed": false,
@@ -20042,7 +20046,7 @@ struct CiderCLI {
             "status": execution.status,
             "owner": ownerToDict(preview.proposal.owner),
             "ownerRef": preview.proposal.owner.canonicalRef,
-            "sourceRefs": DatabaseHelpers.decodeStringArray(preview.proposal.output.metadata["source_refs"]),
+            "sourceRefs": followUpProposalSourceRefs(preview.proposal),
             "evidenceRefs": DatabaseHelpers.decodeStringArray(preview.proposal.output.metadata["evidence_refs"]),
             "readOnly": execution.readOnly,
             "changed": execution.changed,
@@ -20063,7 +20067,7 @@ struct CiderCLI {
             "status": "succeeded",
             "owner": ownerToDict(proposal.owner),
             "ownerRef": proposal.owner.canonicalRef,
-            "sourceRefs": DatabaseHelpers.decodeStringArray(proposal.output.metadata["source_refs"]),
+            "sourceRefs": followUpProposalSourceRefs(proposal),
             "evidenceRefs": DatabaseHelpers.decodeStringArray(proposal.output.metadata["evidence_refs"]),
             "readOnly": readOnly,
             "changed": changed,
@@ -20071,6 +20075,46 @@ struct CiderCLI {
             "safeVerificationCommands": ["cider-cli item memory-facts proposals inspect \(proposal.id) --json"],
             "safeNextCommands": followUpProposalSafeCommands(proposal),
         ]
+    }
+
+    static func followUpProposalSourceRefs(_ proposal: SecondBrainFollowUpProposal) -> [String] {
+        orderedUniqueStrings([
+            proposal.proposalRef,
+            proposal.factRef,
+            proposal.candidateRef,
+            proposal.owner.canonicalRef,
+        ] + DatabaseHelpers.decodeStringArray(proposal.output.metadata["source_refs"]))
+    }
+
+    static func followUpProposalFailureActionReceipt(
+        command: String,
+        action: String,
+        proposal: SecondBrainFollowUpProposal?,
+        rawID: String?,
+        readOnly: Bool,
+        errorCode: String,
+        error: String,
+        safeVerificationCommands: [String],
+        safeNextCommands: [String]
+    ) -> [String: Any] {
+        let normalizedID = rawID?
+            .replacingOccurrences(of: "follow_up_proposal:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackRefs = normalizedID.flatMap { $0.isEmpty ? nil : "follow_up_proposal:\($0)" }.map { [$0] } ?? []
+        return agentActionReceiptToDict(
+            command: command,
+            action: action,
+            owner: proposal?.owner,
+            sourceRefs: proposal.map(followUpProposalSourceRefs) ?? fallbackRefs,
+            evidenceRefs: proposal.map { DatabaseHelpers.decodeStringArray($0.output.metadata["evidence_refs"]) } ?? [],
+            readOnly: readOnly,
+            changed: false,
+            status: "failed",
+            errorCode: errorCode,
+            error: error,
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: safeNextCommands
+        )
     }
 
     static func printFollowUpExecutionError(
@@ -20104,10 +20148,32 @@ struct CiderCLI {
             details["selector"] = ["proposalID": proposalID]
             details["confirmationPolicy"] = preview?.confirmationPolicy ?? "explicit_existing_command_required"
             details["requiredConfirmationToken"] = "execute:\(proposalID)"
+            details["actionReceipt"] = followUpProposalFailureActionReceipt(
+                command: command,
+                action: "execute_follow_up_proposal",
+                proposal: preview?.proposal,
+                rawID: proposalID,
+                readOnly: true,
+                errorCode: "follow_up_execution_confirmation_required",
+                error: error.localizedDescription,
+                safeVerificationCommands: ["cider-cli item memory-facts proposals preview \(proposalID) --json"],
+                safeNextCommands: details["safeNextCommands"] as? [String] ?? ["cider-cli item memory-facts proposals previews --json"]
+            )
         case .unsupportedExecutionFamily(let family):
             details["errorCode"] = "unsupported_follow_up_execution_family"
             details["unsupportedFamily"] = family
             details["supportedFamilies"] = ["recall_context"]
+            details["actionReceipt"] = followUpProposalFailureActionReceipt(
+                command: command,
+                action: "execute_follow_up_proposal",
+                proposal: preview?.proposal,
+                rawID: rawID,
+                readOnly: true,
+                errorCode: "unsupported_follow_up_execution_family",
+                error: error.localizedDescription,
+                safeVerificationCommands: preview.map { ["cider-cli item memory-facts proposals preview \($0.proposal.id) --json"] } ?? [],
+                safeNextCommands: details["safeNextCommands"] as? [String] ?? ["cider-cli item memory-facts proposals previews --json"]
+            )
         default:
             printFollowUpProposalError(error, rawID: rawID, command: command, readOnly: true)
             return

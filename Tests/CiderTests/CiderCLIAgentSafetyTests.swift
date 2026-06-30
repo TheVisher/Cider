@@ -1642,6 +1642,188 @@ struct CiderCLIAgentSafetyTests {
         #expect(receipt["outcomeBoundary"] as? String == "command_outcome_not_memory_truth")
     }
 
+    @Test("accepted memory follow-up proposal lifecycle and execution receipts persist to ledger and context")
+    func acceptedMemoryFollowUpProposalLifecycleAndExecutionReceiptsPersistToLedgerAndContext() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-follow-up-ledger-history-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Proposal Ledger Source", content: "Durable proposal receipts should explain the follow-up lifecycle.", vault: vault)
+        let suggested = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Durable proposal receipts should explain the follow-up lifecycle",
+                "--evidence", "Durable proposal receipts should explain the follow-up lifecycle.",
+                "--memory-key", "cid615.proposal.ledger",
+                "--confidence", "0.97",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let acceptedID = try #require((suggested["candidate"] as? [String: Any])?["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+
+        let created = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "create", "--fact", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.create"
+        )
+        let proposalID = try #require((created["proposal"] as? [String: Any])?["proposalID"] as? String)
+        let proposalRef = "follow_up_proposal:\(proposalID)"
+        let factRef = "accepted_memory_fact:\(acceptedID)"
+        let createReceipt = try #require(created["actionReceipt"] as? [String: Any])
+        #expect((createReceipt["sourceRefs"] as? [String])?.contains(proposalRef) == true)
+        #expect((createReceipt["sourceRefs"] as? [String])?.contains(factRef) == true)
+
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "accept", proposalID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.memory-facts.proposals.accept"
+        )
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "preview", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.preview"
+        )
+        _ = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-facts", "proposals", "execute", proposalID,
+                "--confirm-execution",
+                "--confirmation-token", "execute:\(proposalID)",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-facts.proposals.execute"
+        )
+
+        let ledgerByProposal = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(noteID)", "--source-ref", proposalRef, "--limit", "20", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledgerByProposal["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "item.memory-facts.proposals.create"
+                && entry["action"] as? String == "create_follow_up_proposal"
+                && entry["changed"] as? Bool == true
+                && (entry["sourceRefs"] as? [String])?.contains(factRef) == true
+        })
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "item.memory-facts.proposals.accept"
+                && entry["action"] as? String == "accept_follow_up_proposal"
+                && entry["changed"] as? Bool == true
+        })
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "item.memory-facts.proposals.preview"
+                && entry["action"] as? String == "preview_follow_up_proposal_execution"
+                && entry["readOnly"] as? Bool == true
+                && entry["changed"] as? Bool == false
+        })
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "item.memory-facts.proposals.execute"
+                && entry["action"] as? String == "execute_follow_up_proposal"
+                && entry["readOnly"] as? Bool == true
+                && entry["changed"] as? Bool == false
+        })
+
+        let previewLedger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--command", "item.memory-facts.proposals.preview", "--source-ref", proposalRef, "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        #expect((previewLedger["entries"] as? [[String: Any]])?.isEmpty == false)
+
+        let inspectedEntryID = try #require(entries.first { $0["command"] as? String == "item.memory-facts.proposals.execute" }?["id"] as? String)
+        let inspectedLedger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "inspect", inspectedEntryID, "--json"], vault: vault),
+            command: "item.action-ledger.inspect"
+        )
+        let inspectedEntry = try #require(inspectedLedger["entry"] as? [String: Any])
+        #expect((inspectedEntry["sourceRefs"] as? [String])?.contains(proposalRef) == true)
+        #expect((inspectedEntry["safeVerificationCommands"] as? [String])?.contains("cider-cli item recall-context --item note \(noteID) --json") == true)
+
+        let context = try assertStrictProcessJSON(
+            runCLI(args: ["item", "context", "note", noteID, "--max-history", "20", "--json"], vault: vault),
+            command: "item.context"
+        )
+        let recentHistory = try #require(context["recentHistory"] as? [[String: Any]])
+        #expect(recentHistory.contains { history in
+            history["kind"] as? String == "action_receipt"
+                && history["command"] as? String == "item.memory-facts.proposals.execute"
+                && (history["sourceRefs"] as? [String])?.contains(proposalRef) == true
+        })
+
+        let recall = try assertStrictProcessJSON(
+            runCLI(args: ["item", "recall-context", "--item", "note", noteID, "--history-limit", "20", "--action-history-source-ref", proposalRef, "--json"], vault: vault),
+            command: "item.recall-context"
+        )
+        let actionHistory = try #require(recall["actionHistory"] as? [[String: Any]])
+        #expect(actionHistory.contains { history in
+            history["kind"] as? String == "action_receipt"
+                && history["command"] as? String == "item.memory-facts.proposals.create"
+                && history["truthBoundary"] as? String == "action_receipt_not_fact_truth"
+        })
+    }
+
+    @Test("accepted memory follow-up proposal confirmation failures persist structured receipts")
+    func acceptedMemoryFollowUpProposalConfirmationFailuresPersistStructuredReceipts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-follow-up-failure-ledger-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Proposal Failure Ledger Source", content: "Confirmation failures should be durable action history.", vault: vault)
+        let suggested = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "memory-suggest", "note", noteID,
+                "--kind", "agent_lesson",
+                "--value", "Confirmation failures should be durable action history",
+                "--evidence", "Confirmation failures should be durable action history.",
+                "--memory-key", "cid615.proposal.failure",
+                "--confidence", "0.97",
+                "--json",
+            ], vault: vault),
+            command: "item.memory-suggest"
+        )
+        let acceptedID = try #require((suggested["candidate"] as? [String: Any])?["id"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
+            command: "item.accept-memory-candidate"
+        )
+        let created = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "create", "--fact", acceptedID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.create"
+        )
+        let proposalID = try #require((created["proposal"] as? [String: Any])?["proposalID"] as? String)
+        _ = try assertStrictProcessJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "accept", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.accept"
+        )
+
+        let refused = try assertStrictFailureJSON(
+            runCLI(args: ["item", "memory-facts", "proposals", "execute", proposalID, "--json"], vault: vault),
+            command: "item.memory-facts.proposals.execute",
+            errorCode: "follow_up_execution_confirmation_required"
+        )
+        let details = try #require(refused["details"] as? [String: Any])
+        let receipt = try #require(details["actionReceipt"] as? [String: Any])
+        #expect(receipt["status"] as? String == "failed")
+        #expect(receipt["errorCode"] as? String == "follow_up_execution_confirmation_required")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        #expect((receipt["sourceRefs"] as? [String])?.contains("follow_up_proposal:\(proposalID)") == true)
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(noteID)", "--status", "failed", "--source-ref", "follow_up_proposal:\(proposalID)", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.contains { entry in
+            entry["command"] as? String == "item.memory-facts.proposals.execute"
+                && entry["errorCode"] as? String == "follow_up_execution_confirmation_required"
+                && entry["changed"] as? Bool == false
+        })
+    }
+
     @Test("accepted memory follow-up proposal execution failures are structured")
     func acceptedMemoryFollowUpProposalExecutionFailuresAreStructured() throws {
         let vault = FileManager.default.temporaryDirectory
