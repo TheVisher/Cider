@@ -269,6 +269,7 @@ struct CiderCLI {
       cider-cli item defer-memory-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
       cider-cli item correct-memory-candidate <candidate-id> [--value <text>] [--evidence <text>] [--kind <kind>] [--linked-owner <type:id>] [--observed-date <date>] [--memory-key <key>] [--memory-status <status>] [--actor <name>] [--json]
       cider-cli item delegate-memory-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
+    Read-only traversal commands:
       cider-cli item related <type> <id-or-ref> [--json]
       cider-cli item relations <owner-type> <owner-id-or-ref> [--json]
       cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]
@@ -338,6 +339,8 @@ struct CiderCLI {
             print("Usage: cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]")
         case "why-surfaced", "why":
             print("Usage: cider-cli item why-surfaced <type> <id-or-ref> [--json]")
+        case "search":
+            print(itemSearchHelpText)
         case "capability-map", "capabilities":
             print("""
             Usage: cider-cli item capability-map [--json]
