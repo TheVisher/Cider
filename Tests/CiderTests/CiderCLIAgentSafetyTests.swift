@@ -3,6 +3,23 @@ import Testing
 @testable import Cider
 @testable import CiderCLI
 
+private final class CLIOutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = Data()
+
+    func set(_ data: Data) {
+        lock.lock()
+        stored = data
+        lock.unlock()
+    }
+
+    func data() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+}
+
 @Suite("Cider CLI Agent Safety Tests", .serialized)
 @MainActor
 struct CiderCLIAgentSafetyTests {
@@ -3134,6 +3151,22 @@ struct CiderCLIAgentSafetyTests {
                 && action["requiresApproval"] as? Bool == true
                 && action["mutationReason"] as? String == "rebuild_content_chunks"
         })
+
+        let receipt = try #require(dict["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.graph-health")
+        #expect(receipt["commandFamily"] as? String == "item")
+        #expect(receipt["subcommand"] as? String == "graph-health")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        #expect(receipt["status"] as? String == dict["status"] as? String)
+        #expect(receipt["resultStatus"] as? String == dict["status"] as? String)
+        #expect(receipt["diagnosticCount"] as? Int == components.count)
+        #expect((receipt["matchedSourceRefs"] as? [String])?.contains("graph-health:owner_relations") == true)
+        #expect((receipt["provenanceRefs"] as? [String])?.contains("schemaVersion:\(dict["schemaVersion"] as? Int ?? -1)") == true)
+        #expect((receipt["safeCommandRefs"] as? [String])?.contains("cider-cli item graph-health --json") == true)
+        #expect((receipt["safeCommandRefs"] as? [String])?.contains("cider-cli storage audit --json") == true)
+        #expect(receipt["verificationHint"] as? String == "verify_with_safe_commands_and_source_refs")
+        #expect(receipt["truthBoundary"] as? String == "receipt_proves_diagnostic_execution_not_graph_truth")
     }
 
     @Test("item graph health distinguishes unseeded intelligence stores")
@@ -8082,6 +8115,19 @@ struct CiderCLIAgentSafetyTests {
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
+        let outputGroup = DispatchGroup()
+        let stdoutBuffer = CLIOutputBuffer()
+        let stderrBuffer = CLIOutputBuffer()
+        outputGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            stdoutBuffer.set(stdout.fileHandleForReading.readDataToEndOfFile())
+            outputGroup.leave()
+        }
+        outputGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            stderrBuffer.set(stderr.fileHandleForReading.readDataToEndOfFile())
+            outputGroup.leave()
+        }
         if let stdin {
             let input = Pipe()
             process.standardInput = input
@@ -8092,10 +8138,11 @@ struct CiderCLIAgentSafetyTests {
             try process.run()
         }
         process.waitUntilExit()
+        outputGroup.wait()
 
         return (
-            String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
-            String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
+            String(data: stdoutBuffer.data(), encoding: .utf8) ?? "",
+            String(data: stderrBuffer.data(), encoding: .utf8) ?? "",
             process.terminationStatus
         )
     }

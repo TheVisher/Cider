@@ -16360,7 +16360,7 @@ struct CiderCLI {
             ],
         ]
 
-        return [
+        var payload: [String: Any] = [
             "ok": true,
             "purpose": "second_brain_agent_capability_map",
             "generatedBy": "cider-cli item capability-map",
@@ -16373,6 +16373,26 @@ struct CiderCLI {
             ],
             "relatedRoadmapCards": ["64cca3", "e4f102", "a07189", "c5b6cb", "288e23"],
         ]
+        let sourceRefs = areas.compactMap { area -> String? in
+            guard let id = area["id"] as? String else { return nil }
+            return "capability:\(id)"
+        }
+        var receipt = readOnlyActionReceiptToDict(
+            command: "item.capability-map",
+            matchedSourceRefs: sourceRefs,
+            safeCommandRefs: [
+                "cider-cli item capability-map --json",
+                "cider-cli item graph-health --json",
+                "cider-cli item search-debug <query> --json",
+            ],
+            provenanceRefs: [
+                "source:cider-cli:item.capability-map",
+                "source:static-second-brain-capability-contract",
+            ]
+        )
+        receipt["sourceRefs"] = sourceRefs
+        payload["actionReceipt"] = receipt
+        return payload
     }
 
     static func clippedText(_ value: String, limit: Int) -> String {
@@ -23621,10 +23641,12 @@ struct CiderCLI {
         safeCommandRefs: [String],
         provenanceRefs: [String] = [],
         status: String = "succeeded",
-        generatedAt: Date = Date()
+        generatedAt: Date = Date(),
+        diagnosticCount: Int? = nil,
+        truthBoundary: String = "receipt_proves_command_execution_not_memory_truth"
     ) -> [String: Any] {
         let parts = command.split(separator: ".", maxSplits: 1).map(String.init)
-        return [
+        var receipt: [String: Any] = [
             "command": command,
             "commandFamily": parts.first ?? command,
             "subcommand": parts.count > 1 ? parts[1] : command,
@@ -23638,8 +23660,12 @@ struct CiderCLI {
             "provenanceRefs": orderedUniqueStrings(provenanceRefs),
             "safeCommandRefs": orderedUniqueStrings(safeCommandRefs),
             "verificationHint": "verify_with_safe_commands_and_source_refs",
-            "truthBoundary": "receipt_proves_command_execution_not_memory_truth",
+            "truthBoundary": truthBoundary,
         ]
+        if let diagnosticCount {
+            receipt["diagnosticCount"] = diagnosticCount
+        }
+        return receipt
     }
 
     static func itemSearchResponseToDict(
@@ -24666,7 +24692,7 @@ struct CiderCLI {
         }
 
         let integrity = try db.integrityCheck()
-        return [
+        var payload: [String: Any] = [
             "ok": integrity.isHealthy && !states.contains("not_implemented"),
             "command": "item.graph-health",
             "readOnly": true,
@@ -24684,6 +24710,34 @@ struct CiderCLI {
             "suggestedCommands": suggestedCommands,
             "suggestedActions": suggestedActions,
         ]
+        let componentRefs = components.compactMap { component -> String? in
+            guard let id = component["id"] as? String else { return nil }
+            return "graph-health:\(id)"
+        }
+        var safeDiagnostics = [
+            "cider-cli item graph-health --json",
+            "cider-cli storage audit --json",
+            "cider-cli item doctor --json",
+        ]
+        safeDiagnostics += suggestedActions.compactMap { action in
+            guard action["readOnly"] as? Bool == true else { return nil }
+            return action["command"] as? String
+        }
+        var receipt = readOnlyActionReceiptToDict(
+            command: "item.graph-health",
+            matchedSourceRefs: componentRefs,
+            safeCommandRefs: safeDiagnostics,
+            provenanceRefs: [
+                "schemaVersion:\(DatabaseMigrations.latestVersion)",
+                "database:sqlite-integrity-check",
+            ],
+            status: status,
+            diagnosticCount: components.count,
+            truthBoundary: "receipt_proves_diagnostic_execution_not_graph_truth"
+        )
+        receipt["sourceRefs"] = componentRefs
+        payload["actionReceipt"] = receipt
+        return payload
     }
 
     private static func graphHealthSuggestedAction(for command: String) -> [String: Any] {

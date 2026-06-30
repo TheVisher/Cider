@@ -2543,6 +2543,21 @@ struct SecondBrainFoundationTests {
         })
         let nextActions = try #require(map["nextActions"] as? [String])
         #expect(nextActions.contains("Use item search/get/context/why-surfaced before reading files or scraping folders."))
+
+        let receipt = try #require(map["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.capability-map")
+        #expect(receipt["commandFamily"] as? String == "item")
+        #expect(receipt["subcommand"] as? String == "capability-map")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        #expect(receipt["status"] as? String == "succeeded")
+        #expect(receipt["resultStatus"] as? String == "succeeded")
+        #expect(receipt["matchedCount"] as? Int == areas.count)
+        #expect((receipt["matchedSourceRefs"] as? [String])?.contains("capability:retrieve") == true)
+        #expect((receipt["provenanceRefs"] as? [String])?.contains("source:cider-cli:item.capability-map") == true)
+        #expect((receipt["safeCommandRefs"] as? [String])?.contains("cider-cli item graph-health --json") == true)
+        #expect(receipt["verificationHint"] as? String == "verify_with_safe_commands_and_source_refs")
+        #expect(receipt["truthBoundary"] as? String == "receipt_proves_command_execution_not_memory_truth")
     }
 
     @Test("process CLI exposes roadmap next up on parent card inspect")
