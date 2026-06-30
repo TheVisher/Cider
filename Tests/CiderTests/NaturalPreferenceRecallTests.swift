@@ -313,4 +313,92 @@ struct NaturalPreferenceRecallTests {
         #expect(response.warnings == ["No source-backed item or chunk matches were found for this natural memory recall query."])
         #expect(response.safeNextCommands.contains("cider-cli item memory-recall \"what size coveralls fit me at work?\" --limit 5 --json"))
     }
+
+    @Test("memory recall synthesizes concise fact answer from source evidence")
+    func memoryRecallSynthesizesConciseFactAnswer() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let coverallsNoteID = UUID()
+        try insertJournal(
+            id: coverallsNoteID,
+            title: "Work coveralls size",
+            body: """
+            Context: older PPE note, not all of it is relevant to size recall.
+            Visher is 6'3, and Red Kap size 60-RG / 60 regular navy coveralls fit well for work.
+            Unrelated: ask facilities about replacement gloves next quarter.
+            """,
+            createdAt: Date(timeIntervalSince1970: 1_782_701_200),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what size coveralls fit me at work?", limit: 5)
+        let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
+        let answer = try #require(payload["answer"] as? [String: Any])
+
+        #expect(response.summary.contains("Red Kap size 60-RG / 60 regular navy coveralls fit well for work."))
+        #expect(!response.summary.contains("replacement gloves"))
+        #expect(answer["text"] as? String == response.summary)
+        #expect(response.candidates.first?.owner.ownerID == coverallsNoteID.uuidString)
+    }
+
+    @Test("memory recall coveralls variants use semantic query terms and keep source boundary")
+    func memoryRecallCoverallsVariantsUseSemanticQueryTerms() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let coverallsNoteID = UUID()
+        try insertJournal(
+            id: coverallsNoteID,
+            title: "Work coveralls size",
+            body: "Visher is 6'3, and Red Kap size 60-RG / 60 regular navy coveralls fit well for work.",
+            createdAt: Date(timeIntervalSince1970: 1_782_701_200),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what did I save about work coveralls?", limit: 5)
+        let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
+        let intent = try #require(payload["intent"] as? [String: Any])
+
+        #expect(response.candidates.first?.owner.ownerID == coverallsNoteID.uuidString)
+        #expect(response.summary.contains("Red Kap size 60-RG"))
+        #expect(response.intent.factTarget == "work_coveralls_size")
+        #expect(response.intent.semanticQueryTerms.contains("size"))
+        #expect(response.intent.semanticQueryTerms.contains("fit"))
+        #expect(intent["factTarget"] as? String == "work_coveralls_size")
+        #expect((intent["semanticQueryTerms"] as? [String])?.contains("coveralls") == true)
+        #expect(payload["rankingExplanation"] as? String == response.rankingExplanation)
+    }
+
+    @Test("memory recall miss includes broader search fallback metadata")
+    func memoryRecallMissIncludesBroaderSearchFallbackMetadata() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what did I save about lunar hiking boots?", limit: 3)
+        let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
+
+        #expect(response.candidates.isEmpty)
+        #expect(response.summary.contains("Try the broader source search fallback"))
+        #expect(response.broaderSearchCommand == "cider-cli item search \"lunar hiking boots\" --scope personalMemory --sort newest --limit 10 --json")
+        #expect(response.safeNextCommands.contains(response.broaderSearchCommand!))
+        #expect(payload["broaderSearchCommand"] as? String == response.broaderSearchCommand)
+    }
 }

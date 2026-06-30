@@ -23818,13 +23818,17 @@ struct CiderCLI {
         var intent: [String: Any] = [
             "originalQuery": response.intent.originalQuery,
             "normalizedQuery": response.intent.normalizedQuery,
+            "semanticQueryTerms": response.intent.semanticQueryTerms,
             "questionKind": response.intent.questionKind.rawValue,
             "searchQueries": response.intent.searchQueries,
         ]
+        if let factTarget = response.intent.factTarget {
+            intent["factTarget"] = factTarget
+        }
         if let subject = response.intent.subject {
             intent["subject"] = subject
         }
-        return [
+        var payload: [String: Any] = [
             "ok": response.ok,
             "command": response.command,
             "readOnly": response.readOnly,
@@ -23832,12 +23836,14 @@ struct CiderCLI {
             "intent": intent,
             "answer": [
                 "kind": response.command == "item.memory-recall" ? "natural_memory_recall" : "natural_preference_item_recall",
+                "text": response.summary,
                 "summary": response.summary,
                 "truthBoundary": response.truthBoundary,
                 "reviewRequired": response.reviewStatus.needsReview,
             ],
             "summary": response.summary,
             "truthBoundary": response.truthBoundary,
+            "rankingExplanation": response.rankingExplanation,
             "reviewStatus": [
                 "needsReview": response.reviewStatus.needsReview,
                 "copy": response.reviewStatus.copy,
@@ -23898,6 +23904,15 @@ struct CiderCLI {
             "warnings": response.warnings,
             "safeNextCommands": response.safeNextCommands,
         ]
+        if let broaderSearchCommand = response.broaderSearchCommand {
+            payload["broaderSearchCommand"] = broaderSearchCommand
+            payload["fallback"] = [
+                "kind": "broader_source_search",
+                "safeNextCommand": broaderSearchCommand,
+                "truthBoundary": "source_lookup_not_memory_truth",
+            ]
+        }
+        return payload
     }
 
     private static func itemSearchResultSafeNextCommands(_ result: CiderItemSearchResult) -> [String] {
