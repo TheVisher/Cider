@@ -195,6 +195,108 @@ struct CiderCLIAgentSafetyTests {
         })
     }
 
+    @Test("review approve persists action receipt and records missing item failure")
+    func reviewApprovePersistsActionReceiptAndRecordsMissingItemFailure() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-review-approve-action-ledger-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let bookmark = try assertStrictProcessJSON(
+            runCLI(args: [
+                "bookmark", "add", "https://example.com/review-approve-ledger",
+                "--no-wait",
+                "--json",
+            ], vault: vault),
+            command: "bookmark.add"
+        )
+        let bookmarkID = try #require(bookmark["id"] as? String)
+
+        let approvePayload = try assertStrictProcessJSON(
+            runCLI(args: [
+                "review", "approve", bookmarkID,
+                "--actor", "agent",
+                "--json",
+            ], vault: vault),
+            command: "review.routing.approve"
+        )
+        #expect(approvePayload["reviewState"] as? String == "accepted")
+        #expect(approvePayload["changed"] as? Bool == true)
+        let receipt = try #require(approvePayload["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "review.routing.approve")
+        #expect(receipt["commandFamily"] as? String == "review")
+        #expect(receipt["subcommand"] as? String == "approve")
+        #expect(receipt["action"] as? String == "approve")
+        #expect(receipt["actor"] as? String == "agent")
+        #expect(receipt["readOnly"] as? Bool == false)
+        #expect(receipt["changed"] as? Bool == true)
+        #expect(receipt["status"] as? String == "accepted")
+        #expect(receipt["resultStatus"] as? String == "accepted")
+        #expect(receipt["timestamp"] as? String != nil)
+        #expect(receipt["ownerRef"] as? String == "bookmark:\(bookmarkID)")
+        #expect((receipt["sourceRefs"] as? [String])?.contains("bookmark:\(bookmarkID)") == true)
+        #expect((receipt["evidenceRefs"] as? [String])?.contains("bookmark:\(bookmarkID)") == true)
+        #expect((receipt["safeVerificationCommands"] as? [String])?.contains("cider-cli item action-ledger list --owner bookmark:\(bookmarkID) --command review.routing.approve --json") == true)
+        #expect((receipt["safeCommandRefs"] as? [String])?.contains("cider-cli item context bookmark \(bookmarkID) --max-history 10 --json") == true)
+        #expect(receipt["verificationHint"] as? String == "verify_with_safe_commands_and_source_refs")
+        #expect(receipt["truthBoundary"] as? String == "receipt_proves_command_execution_and_review_state_outcome_not_memory_truth")
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--owner", "bookmark:\(bookmarkID)", "--command", "review.routing.approve", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        let entry = try #require(entries.first { $0["command"] as? String == "review.routing.approve" })
+        let entryID = try #require(entry["id"] as? String)
+        #expect(entry["action"] as? String == "approve")
+        #expect(entry["status"] as? String == "accepted")
+        #expect(entry["resultStatus"] as? String == "accepted")
+        #expect(entry["changed"] as? Bool == true)
+
+        let inspected = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "inspect", entryID, "--json"], vault: vault),
+            command: "item.action-ledger.inspect"
+        )
+        let inspectedEntry = try #require(inspected["entry"] as? [String: Any])
+        #expect(inspectedEntry["command"] as? String == "review.routing.approve")
+        #expect(inspectedEntry["ownerRef"] as? String == "bookmark:\(bookmarkID)")
+
+        let context = try assertStrictProcessJSON(
+            runCLI(args: ["item", "context", "bookmark", bookmarkID, "--max-history", "10", "--json"], vault: vault),
+            command: "item.context"
+        )
+        let recentHistory = try #require(context["recentHistory"] as? [[String: Any]])
+        #expect(recentHistory.contains { history in
+            history["kind"] as? String == "action_receipt"
+                && history["command"] as? String == "review.routing.approve"
+                && history["action"] as? String == "approve"
+                && history["changed"] as? Bool == true
+        })
+
+        let missing = try assertStrictFailureJSON(
+            runCLI(args: ["review", "approve", "missing-review-item", "--actor", "agent", "--json"], vault: vault),
+            command: "review.routing.approve",
+            errorCode: "item_not_found"
+        )
+        let missingReceipt = try #require(missing["actionReceipt"] as? [String: Any])
+        #expect(missingReceipt["subcommand"] as? String == "approve")
+        #expect(missingReceipt["readOnly"] as? Bool == false)
+        #expect(missingReceipt["changed"] as? Bool == false)
+        #expect(missingReceipt["status"] as? String == "failed")
+        #expect((missingReceipt["sourceRefs"] as? [String])?.contains("missing-review-item") == true)
+
+        let failedLedger = try assertStrictProcessJSON(
+            runCLI(args: ["item", "action-ledger", "list", "--command", "review.routing.approve", "--status", "failed", "--json"], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let failedEntries = try #require(failedLedger["entries"] as? [[String: Any]])
+        #expect(failedEntries.contains { failed in
+            failed["command"] as? String == "review.routing.approve"
+                && failed["resultStatus"] as? String == "failed"
+                && failed["changed"] as? Bool == false
+        })
+    }
+
     @Test("review correct persists action receipt and records missing item failure")
     func reviewCorrectPersistsActionReceiptAndRecordsMissingItemFailure() throws {
         let vault = FileManager.default.temporaryDirectory

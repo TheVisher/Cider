@@ -1907,13 +1907,40 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli review approve <item-id> [--actor user|agent] [--json]")
                 return
             }
+            let actor = parseFlag("--actor", from: args) ?? "user"
             do {
                 let itemID = try service.resolveItemID(ref: itemRef)
                 let result = try service.approve(
                     itemID: itemID,
-                    actor: parseFlag("--actor", from: args) ?? "user"
+                    actor: actor
                 )
                 printReviewRoutingActionResult(result)
+            } catch CiderRoutingDecisionError.itemReferenceNotFound(let ref) {
+                var payload = structuredActionReceiptFailurePayload(
+                    command: "review.routing.approve",
+                    action: "approve",
+                    actor: actor,
+                    owner: nil,
+                    readOnly: false,
+                    errorCode: "item_not_found",
+                    error: "No item found matching '\(ref)'.",
+                    sourceRefs: [ref],
+                    safeVerificationCommands: [
+                        "cider-cli review list --json",
+                        "cider-cli item action-ledger list --command review.routing.approve --status failed --json",
+                    ],
+                    safeNextCommands: [
+                        "cider-cli review list --json",
+                    ]
+                )
+                if var receipt = payload["actionReceipt"] as? [String: Any] {
+                    receipt["subcommand"] = "approve"
+                    receipt["truthBoundary"] = "receipt_proves_command_execution_and_review_state_outcome_not_memory_truth"
+                    payload["actionReceipt"] = receipt
+                }
+                persistActionReceiptIfPresent(payload)
+                processExitCode = 1
+                if jsonOutput { outputJSON(payload) } else { print("Error: No item found matching '\(ref)'.") }
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -13620,7 +13647,7 @@ struct CiderCLI {
     static func printReviewRoutingActionResult(_ result: CiderReviewRoutingActionResult) {
         if jsonOutput {
             var payload = result.toDictionary()
-            if result.action == "review.routing.defer" || result.action == "review.routing.correct" {
+            if result.action == "review.routing.approve" || result.action == "review.routing.defer" || result.action == "review.routing.correct" {
                 payload["ok"] = true
                 payload["command"] = result.action
                 payload["readOnly"] = false
