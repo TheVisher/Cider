@@ -213,6 +213,13 @@ func agentActionReceiptToDict(
         "safeVerificationCommands": safeVerificationCommands,
         "safeNextCommands": safeNextCommands,
     ]
+    let parts = command.split(separator: ".", maxSplits: 1).map(String.init)
+    dict["commandFamily"] = parts.first ?? command
+    dict["subcommand"] = parts.count > 1 ? parts[1] : command
+    dict["resultStatus"] = status
+    dict["timestamp"] = ISO8601DateFormatter().string(from: Date())
+    dict["safeCommandRefs"] = Array(NSOrderedSet(array: safeVerificationCommands + safeNextCommands)) as? [String] ?? safeVerificationCommands + safeNextCommands
+    dict["verificationHint"] = "verify_with_safe_commands_and_source_refs"
     if let owner {
         dict["owner"] = secondBrainOwnerRefToDict(owner)
         dict["ownerRef"] = owner.canonicalRef
@@ -223,17 +230,12 @@ func agentActionReceiptToDict(
     if let before { dict["before"] = before }
     if let after { dict["after"] = after }
     if readOnly {
-        let parts = command.split(separator: ".", maxSplits: 1).map(String.init)
-        dict["commandFamily"] = parts.first ?? command
-        dict["subcommand"] = parts.count > 1 ? parts[1] : command
-        dict["resultStatus"] = status
-        dict["timestamp"] = ISO8601DateFormatter().string(from: Date())
         dict["matchedCount"] = sourceRefs.count
         dict["matchedSourceRefs"] = sourceRefs
         dict["provenanceRefs"] = evidenceRefs.isEmpty ? sourceRefs : evidenceRefs
-        dict["safeCommandRefs"] = Array(NSOrderedSet(array: safeVerificationCommands + safeNextCommands)) as? [String] ?? safeVerificationCommands + safeNextCommands
-        dict["verificationHint"] = "verify_with_safe_commands_and_source_refs"
         dict["truthBoundary"] = "receipt_proves_command_execution_not_memory_truth"
+    } else {
+        dict["truthBoundary"] = "receipt_proves_command_execution_and_mutation_outcome_not_memory_truth"
     }
     return dict
 }
@@ -261,8 +263,32 @@ func actionReceiptRecordToDict(_ record: SecondBrainActionReceiptRecord) -> [Str
     if let afterJSON = record.afterJSON { dict["afterJSON"] = afterJSON }
     if let errorCode = record.errorCode { dict["errorCode"] = errorCode }
     if let correlationID = record.correlationID { dict["correlationID"] = correlationID }
-    if let receiptJSON = record.receiptJSON { dict["receiptJSON"] = receiptJSON }
+    if let receiptJSON = record.receiptJSON {
+        dict["receiptJSON"] = receiptJSON
+        if let receipt = actionReceiptJSONDictionary(receiptJSON) {
+            for key in ["commandFamily", "subcommand", "resultStatus", "timestamp", "safeCommandRefs", "verificationHint", "truthBoundary"] {
+                if dict[key] == nil, let value = receipt[key] {
+                    dict[key] = value
+                }
+            }
+        }
+    }
+    if dict["commandFamily"] == nil || dict["subcommand"] == nil {
+        let parts = record.command.split(separator: ".", maxSplits: 1).map(String.init)
+        dict["commandFamily"] = parts.first ?? record.command
+        dict["subcommand"] = parts.count > 1 ? parts[1] : record.command
+    }
+    if dict["resultStatus"] == nil { dict["resultStatus"] = record.status }
+    if dict["timestamp"] == nil { dict["timestamp"] = ISO8601DateFormatter().string(from: record.createdAt) }
     return dict
+}
+
+private func actionReceiptJSONDictionary(_ json: String) -> [String: Any]? {
+    guard let data = json.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return nil
+    }
+    return object
 }
 
 func reminderActionResultToDict(_ result: CiderReminderActionResult) -> [String: Any] {

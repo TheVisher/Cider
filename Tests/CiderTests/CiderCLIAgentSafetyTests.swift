@@ -69,15 +69,26 @@ struct CiderCLIAgentSafetyTests {
         #expect(link["readOnly"] as? Bool == false)
         #expect(link["changed"] as? Bool == true)
         let receipt = try #require(link["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "link.add")
+        #expect(receipt["commandFamily"] as? String == "link")
+        #expect(receipt["subcommand"] as? String == "add")
+        #expect(receipt["status"] as? String == "succeeded")
+        #expect(receipt["resultStatus"] as? String == "succeeded")
+        #expect(receipt["timestamp"] as? String != nil)
         #expect(receipt["action"] as? String == "link")
         #expect((receipt["sourceRefs"] as? [String])?.contains("note:\(sourceID)") == true)
         #expect((receipt["evidenceRefs"] as? [String])?.contains("note:\(targetID)") == true)
+        #expect((receipt["safeVerificationCommands"] as? [String])?.contains("cider-cli item action-ledger list --owner note:\(sourceID) --json") == true)
 
         let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(sourceID)", "--action", "link", "--json"], vault: vault).stdout)
         let entries = try #require(ledger["entries"] as? [[String: Any]])
         #expect(entries.contains { entry in
             entry["command"] as? String == "link.add"
+                && entry["commandFamily"] as? String == "link"
+                && entry["subcommand"] as? String == "add"
                 && entry["status"] as? String == "succeeded"
+                && entry["resultStatus"] as? String == "succeeded"
+                && entry["timestamp"] as? String != nil
                 && entry["changed"] as? Bool == true
                 && (entry["evidenceRefs"] as? [String])?.contains("note:\(targetID)") == true
         })
@@ -1365,18 +1376,46 @@ struct CiderCLIAgentSafetyTests {
         #expect((unsupported["supportedTypes"] as? [String])?.contains("note") == true)
         let unsupportedReceipt = try #require(unsupported["actionReceipt"] as? [String: Any])
         #expect(unsupportedReceipt["status"] as? String == "failed")
+        #expect(unsupportedReceipt["commandFamily"] as? String == "link")
+        #expect(unsupportedReceipt["subcommand"] as? String == "add")
+        #expect(unsupportedReceipt["resultStatus"] as? String == "failed")
+        #expect(unsupportedReceipt["timestamp"] as? String != nil)
         #expect(unsupportedReceipt["readOnly"] as? Bool == false)
         #expect(unsupportedReceipt["changed"] as? Bool == false)
 
+        let sourceID = try createNote(title: "Failed Link Source", content: "Source should remain unlinked.", vault: vault)
+        let backlinksBefore = try assertStrictProcessJSON(
+            runCLI(args: ["item", "backlinks", "note", sourceID, "--json"], vault: vault),
+            command: "item.backlinks"
+        )
+        let relationCountBefore = backlinksBefore["relationCount"] as? Int
         let missing = try assertStrictFailureJSON(
-            runCLI(args: ["item", "link", "note", "missing-source", "note", "missing-target", "--json"], vault: vault),
+            runCLI(args: ["item", "link", "note", sourceID, "note", "missing-target", "--json"], vault: vault),
             command: "link.add",
             errorCode: "item_not_found"
         )
         #expect(missing["readOnly"] as? Bool == false)
         #expect(missing["changed"] as? Bool == false)
         let missingReceipt = try #require(missing["actionReceipt"] as? [String: Any])
-        #expect((missingReceipt["sourceRefs"] as? [String])?.contains("note:missing-source") == true)
+        #expect((missingReceipt["sourceRefs"] as? [String])?.contains("note:\(sourceID)") == true)
+
+        let failedLedger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--command", "link.add", "--status", "failed", "--json"], vault: vault).stdout)
+        let failedEntries = try #require(failedLedger["entries"] as? [[String: Any]])
+        #expect(failedEntries.contains { entry in
+            entry["command"] as? String == "link.add"
+                && entry["commandFamily"] as? String == "link"
+                && entry["subcommand"] as? String == "add"
+                && entry["resultStatus"] as? String == "failed"
+                && entry["readOnly"] as? Bool == false
+                && entry["changed"] as? Bool == false
+                && (entry["sourceRefs"] as? [String])?.contains("note:\(sourceID)") == true
+        })
+
+        let backlinks = try assertStrictProcessJSON(
+            runCLI(args: ["item", "backlinks", "note", sourceID, "--json"], vault: vault),
+            command: "item.backlinks"
+        )
+        #expect(backlinks["relationCount"] as? Int == relationCountBefore)
     }
 
     @Test("recall context action history supports filters windows and selector echo")
