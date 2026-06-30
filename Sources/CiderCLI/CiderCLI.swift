@@ -23876,6 +23876,11 @@ struct CiderCLI {
                     "truthBoundary": candidate.truthBoundary,
                     "safeNextCommands": candidate.safeNextCommands,
                 ]
+                if let provenance = candidate.provenance {
+                    dict["provenance"] = naturalPreferenceRecallProvenanceToDict(provenance)
+                    dict["contextCommands"] = provenance.contextCommands
+                    dict["verificationCommands"] = provenance.verificationCommands
+                }
                 if let itemType = candidate.itemType { dict["itemType"] = itemType }
                 if let itemID = candidate.itemID {
                     dict["itemID"] = itemID
@@ -23907,6 +23912,7 @@ struct CiderCLI {
                 return dict
             },
             "warnings": response.warnings,
+            "verificationCommands": response.verificationCommands,
             "safeNextCommands": response.safeNextCommands,
         ]
         if let broaderSearchCommand = response.broaderSearchCommand {
@@ -23914,10 +23920,31 @@ struct CiderCLI {
             payload["fallback"] = [
                 "kind": "broader_source_search",
                 "safeNextCommand": broaderSearchCommand,
+                "safeNextCommands": [broaderSearchCommand],
+                "nextContextCommandShape": "cider-cli item context <type> <id-or-ref> --json",
                 "truthBoundary": "source_lookup_not_memory_truth",
             ]
         }
         return payload
+    }
+
+    static func naturalPreferenceRecallProvenanceToDict(_ provenance: CiderNaturalPreferenceRecallProvenance) -> [String: Any] {
+        var dict: [String: Any] = [
+            "sourceRef": provenance.sourceRef,
+            "sourceType": provenance.sourceType,
+            "sourceID": provenance.sourceID,
+            "sourceTitle": provenance.sourceTitle,
+            "evidenceKind": provenance.evidenceKind,
+            "evidenceExcerpt": provenance.evidenceExcerpt,
+            "evidenceSummary": provenance.evidenceSummary,
+            "citationRefs": provenance.citationRefs,
+            "contextCommands": provenance.contextCommands,
+            "verificationCommands": provenance.verificationCommands,
+        ]
+        if let sourceLocation = provenance.sourceLocation {
+            dict["sourceLocation"] = sourceLocation
+        }
+        return dict
     }
 
     private static func itemSearchResultSafeNextCommands(_ result: CiderItemSearchResult) -> [String] {

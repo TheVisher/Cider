@@ -65,6 +65,20 @@ struct CiderNaturalPreferenceRecallCitation: Identifiable, Codable, Equatable {
     var safeNextCommands: [String]
 }
 
+struct CiderNaturalPreferenceRecallProvenance: Codable, Equatable {
+    var sourceRef: String
+    var sourceType: String
+    var sourceID: String
+    var sourceTitle: String
+    var sourceLocation: String?
+    var evidenceKind: String
+    var evidenceExcerpt: String
+    var evidenceSummary: String
+    var citationRefs: [String]
+    var contextCommands: [String]
+    var verificationCommands: [String]
+}
+
 struct CiderNaturalPreferenceRecallCandidate: Identifiable, Codable, Equatable {
     var id: String
     var owner: SecondBrainOwnerRef
@@ -81,6 +95,7 @@ struct CiderNaturalPreferenceRecallCandidate: Identifiable, Codable, Equatable {
     var matchExplanation: String
     var truthBoundary: String
     var safeNextCommands: [String]
+    var provenance: CiderNaturalPreferenceRecallProvenance?
 }
 
 struct CiderNaturalPreferenceRecallReviewStatus: Codable, Equatable {
@@ -102,6 +117,7 @@ struct CiderNaturalPreferenceRecallResponse: Codable, Equatable {
     var citations: [CiderNaturalPreferenceRecallCitation]
     var rankingExplanation: String
     var broaderSearchCommand: String?
+    var verificationCommands: [String]
     var safeNextCommands: [String]
     var warnings: [String]
 }
@@ -157,6 +173,10 @@ final class CiderNaturalPreferenceRecallService {
                     "cider-cli item context \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
                     "cider-cli item search \"\(escapedCommandArgument(step.query))\" --scope \(step.scope.rawValue) --sort \(step.sort.rawValue) --limit \(step.limit) --json",
                 ]
+                let verificationCommands = [
+                    "cider-cli item context \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
+                    "cider-cli item get \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
+                ]
                 let sourceRef = "\(bundle.item.type.rawValue):\(bundle.item.id.uuidString)"
                 let score = evidenceScore(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode)
                 let rankReason = rankReason(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode)
@@ -172,6 +192,14 @@ final class CiderNaturalPreferenceRecallService {
                     candidate.matchedSemanticTerms = orderedUnique(candidate.matchedSemanticTerms + matchedTerms)
                     candidate.matchExplanation = mergeRankReasons(candidate.matchExplanation, matchExplanation)
                     candidate.safeNextCommands = orderedUnique(candidate.safeNextCommands + commands)
+                    if var provenance = candidate.provenance {
+                        provenance.evidenceExcerpt = mergeClaims(provenance.evidenceExcerpt, quote)
+                        provenance.evidenceSummary = mergeClaims(provenance.evidenceSummary, clipped(result.snippet, limit: 220))
+                        provenance.citationRefs = orderedUnique(provenance.citationRefs + [sourceRef])
+                        provenance.contextCommands = orderedUnique(provenance.contextCommands + commands)
+                        provenance.verificationCommands = orderedUnique(provenance.verificationCommands + verificationCommands)
+                        candidate.provenance = provenance
+                    }
                     if evidenceKind == "source_backed_candidate" {
                         candidate.evidenceKind = evidenceKind
                     }
@@ -192,7 +220,20 @@ final class CiderNaturalPreferenceRecallService {
                         matchedSemanticTerms: matchedTerms,
                         matchExplanation: matchExplanation,
                         truthBoundary: "source_backed_observations_not_accepted_truth",
-                        safeNextCommands: commands
+                        safeNextCommands: commands,
+                        provenance: CiderNaturalPreferenceRecallProvenance(
+                            sourceRef: sourceRef,
+                            sourceType: bundle.item.type.rawValue,
+                            sourceID: bundle.item.id.uuidString,
+                            sourceTitle: bundle.item.title,
+                            sourceLocation: safeSourceLocation(bundle.item.relativePath),
+                            evidenceKind: evidenceKind,
+                            evidenceExcerpt: quote,
+                            evidenceSummary: clipped(result.snippet, limit: 220),
+                            citationRefs: [sourceRef],
+                            contextCommands: commands,
+                            verificationCommands: verificationCommands
+                        )
                     )
                 }
                 if citationsByOwner[key] == nil {
@@ -231,6 +272,12 @@ final class CiderNaturalPreferenceRecallService {
         if let fallbackCommand {
             safeCommands.append(fallbackCommand)
         }
+        var verificationCommands = orderedUnique(candidates.flatMap { candidate in
+            candidate.provenance?.verificationCommands ?? candidate.safeNextCommands
+        })
+        if let fallbackCommand, verificationCommands.isEmpty {
+            verificationCommands.append(fallbackCommand)
+        }
         let warnings = citations.isEmpty
             ? ["No source-backed item or chunk matches were found for this natural \(mode.noun) recall query."]
             : []
@@ -251,6 +298,7 @@ final class CiderNaturalPreferenceRecallService {
             citations: citations,
             rankingExplanation: rankingExplanation(for: intent, candidates: candidates, mode: mode),
             broaderSearchCommand: fallbackCommand,
+            verificationCommands: verificationCommands,
             safeNextCommands: orderedUnique(safeCommands),
             warnings: warnings
         )
@@ -838,6 +886,17 @@ final class CiderNaturalPreferenceRecallService {
         let fallback = orderedUnique(fallbackTerms).joined(separator: " ")
         guard !fallback.isEmpty else { return nil }
         return "cider-cli item search \"\(escapedCommandArgument(fallback))\" --scope personalMemory --sort newest --limit \(limit) --json"
+    }
+
+    private func safeSourceLocation(_ relativePath: String?) -> String? {
+        guard let relativePath,
+              !relativePath.isEmpty,
+              !relativePath.hasPrefix("/"),
+              !relativePath.split(separator: "/").contains("..")
+        else {
+            return nil
+        }
+        return relativePath
     }
 
     private func clipped(_ value: String, limit: Int) -> String {
