@@ -271,6 +271,56 @@ struct NaturalPreferenceRecallTests {
         #expect(provenance.verificationCommands.contains("cider-cli item get note \(coverallsNoteID.uuidString) --json"))
     }
 
+    @Test("memory recall today intent ranks newest strong journal evidence before older vague Boeing notes")
+    func memoryRecallTodayIntentRanksNewestJournalEvidenceFirst() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let olderBoeingNoteID = UUID()
+        let todayJournalID = UUID()
+        try insertJournal(
+            id: olderBoeingNoteID,
+            title: "OneNote Boeing systems background",
+            body: "Background note: what happened with Boeing systems being down was discussed as a generic work risk, with no 40-system outage details.",
+            createdAt: Date(timeIntervalSince1970: 1_782_086_400),
+            into: db,
+            store: store
+        )
+        try insertJournal(
+            id: todayJournalID,
+            title: "Daily Journal 2026-06-30",
+            body: """
+            Today is Ryland's birthday; remember to wish her happy birthday.
+            Voice journal: Boeing had about 40 systems down today, so the outage was the thing I wanted to remember from the shift.
+            """,
+            createdAt: Date(timeIntervalSince1970: 1_782_950_400),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what happened with Boeing systems being down today?", limit: 3)
+        let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
+        let intent = try #require(payload["intent"] as? [String: Any])
+
+        #expect(response.candidates.first?.owner.ownerID == todayJournalID.uuidString)
+        #expect(response.citations.first?.owner.ownerID == todayJournalID.uuidString)
+        #expect(response.summary.contains("40 systems down today"))
+        #expect(response.summary.contains("not accepted memory truth"))
+        #expect(response.truthBoundary == "source_backed_observations_not_accepted_truth")
+        #expect(response.candidates.first?.truthBoundary == "source_backed_observations_not_accepted_truth")
+        #expect(response.candidates.first?.citationRefs == ["note:\(todayJournalID.uuidString)"])
+        #expect(response.candidates.first?.rankReason.contains("explicit temporal intent") == true)
+        #expect(response.candidates.contains { $0.owner.ownerID == olderBoeingNoteID.uuidString })
+        #expect(response.searchPlan.allSatisfy { $0.sort == .newest })
+        #expect(intent["temporalIntent"] as? String == "today")
+        #expect(response.safeNextCommands.contains("cider-cli item search \"boeing systems down today\" --scope personalMemory --sort newest --limit 3 --json"))
+    }
+
     @Test("CLI JSON formatter exposes natural memory recall contract")
     func cliJSONFormatterExposesNaturalMemoryRecallContract() throws {
         let (db, url) = try makeTestDB()

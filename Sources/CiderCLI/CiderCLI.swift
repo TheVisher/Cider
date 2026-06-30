@@ -24461,6 +24461,9 @@ struct CiderCLI {
         if let factTarget = response.intent.factTarget {
             intent["factTarget"] = factTarget
         }
+        if let temporalIntent = response.intent.temporalIntent {
+            intent["temporalIntent"] = temporalIntent
+        }
         if let subject = response.intent.subject {
             intent["subject"] = subject
         }
@@ -24509,6 +24512,9 @@ struct CiderCLI {
                     "truthBoundary": candidate.truthBoundary,
                     "safeNextCommands": candidate.safeNextCommands,
                 ]
+                if let sortDate = candidate.sortDate {
+                    dict["sortDate"] = ISO8601DateFormatter().string(from: sortDate)
+                }
                 if let provenance = candidate.provenance {
                     dict["provenance"] = naturalPreferenceRecallProvenanceToDict(provenance)
                     dict["contextCommands"] = provenance.contextCommands

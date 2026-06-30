@@ -40,6 +40,7 @@ struct CiderNaturalPreferenceRecallIntent: Codable, Equatable {
     var normalizedQuery: String
     var semanticQueryTerms: [String]
     var questionKind: CiderNaturalPreferenceRecallQuestionKind
+    var temporalIntent: String?
     var factFamily: String?
     var factTarget: String?
     var subject: String?
@@ -91,6 +92,7 @@ struct CiderNaturalPreferenceRecallCandidate: Identifiable, Codable, Equatable {
     var citationRefs: [String]
     var score: Int
     var rankReason: String
+    var sortDate: Date?
     var matchedSemanticTerms: [String]
     var matchExplanation: String
     var truthBoundary: String
@@ -183,12 +185,16 @@ final class CiderNaturalPreferenceRecallService {
                 let evidenceKind = evidenceKind(quote: quote, result: result, intent: intent, mode: mode)
                 let matchedTerms = matchedSemanticTerms(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode)
                 let matchExplanation = matchExplanation(matchedTerms: matchedTerms, intent: intent, result: result, mode: mode)
+                let sortDate = sourceSortDate(bundle: bundle, result: result)
                 if var candidate = candidatesByOwner[key] {
                     candidate.claim = mergeClaims(candidate.claim, quote)
                     candidate.snippet = mergeClaims(candidate.snippet, clipped(result.snippet, limit: 260))
                     candidate.citationRefs = orderedUnique(candidate.citationRefs + [sourceRef])
                     candidate.score = max(candidate.score, score)
                     candidate.rankReason = mergeRankReasons(candidate.rankReason, rankReason)
+                    if sortDate > (candidate.sortDate ?? .distantPast) {
+                        candidate.sortDate = sortDate
+                    }
                     candidate.matchedSemanticTerms = orderedUnique(candidate.matchedSemanticTerms + matchedTerms)
                     candidate.matchExplanation = mergeRankReasons(candidate.matchExplanation, matchExplanation)
                     candidate.safeNextCommands = orderedUnique(candidate.safeNextCommands + commands)
@@ -217,6 +223,7 @@ final class CiderNaturalPreferenceRecallService {
                         citationRefs: [sourceRef],
                         score: score,
                         rankReason: rankReason,
+                        sortDate: sortDate,
                         matchedSemanticTerms: matchedTerms,
                         matchExplanation: matchExplanation,
                         truthBoundary: "source_backed_observations_not_accepted_truth",
@@ -256,6 +263,11 @@ final class CiderNaturalPreferenceRecallService {
 
         let candidates = candidatesByOwner.values
             .sorted {
+                if let temporalIntent = intent.temporalIntent, mode == .memory {
+                    if shouldPreferTemporalRecency(lhs: $0, rhs: $1, intent: temporalIntent) {
+                        return ($0.sortDate ?? .distantPast) > ($1.sortDate ?? .distantPast)
+                    }
+                }
                 if $0.score != $1.score { return $0.score > $1.score }
                 return $0.title.localizedStandardCompare($1.title) == .orderedAscending
             }
@@ -263,6 +275,15 @@ final class CiderNaturalPreferenceRecallService {
             .map { $0 }
         let citations = citationsByOwner.values
             .sorted {
+                if let temporalIntent = intent.temporalIntent, mode == .memory {
+                    let lhsCandidate = candidatesByOwner[$0.citation.owner.canonicalRef]
+                    let rhsCandidate = candidatesByOwner[$1.citation.owner.canonicalRef]
+                    if let lhsCandidate,
+                       let rhsCandidate,
+                       shouldPreferTemporalRecency(lhs: lhsCandidate, rhs: rhsCandidate, intent: temporalIntent) {
+                        return (lhsCandidate.sortDate ?? .distantPast) > (rhsCandidate.sortDate ?? .distantPast)
+                    }
+                }
                 if $0.score != $1.score { return $0.score > $1.score }
                 return $0.citation.title.localizedStandardCompare($1.citation.title) == .orderedDescending
             }
@@ -309,6 +330,7 @@ final class CiderNaturalPreferenceRecallService {
         let normalized = query.lowercased()
         let subject = extractSubject(from: query)
         let semanticTerms = semanticQueryTerms(for: normalized, mode: mode)
+        let temporalIntent = temporalIntent(for: normalized, mode: mode)
         let factFamily = factFamily(for: normalized, semanticTerms: semanticTerms, mode: mode)
         let factTarget = factTarget(for: normalized, semanticTerms: semanticTerms, factFamily: factFamily, mode: mode)
         let kind: CiderNaturalPreferenceRecallQuestionKind
@@ -331,6 +353,7 @@ final class CiderNaturalPreferenceRecallService {
             normalizedQuery: normalized,
             semanticQueryTerms: semanticTerms,
             questionKind: kind,
+            temporalIntent: temporalIntent,
             factFamily: factFamily,
             factTarget: factTarget,
             subject: subject,
@@ -423,7 +446,25 @@ final class CiderNaturalPreferenceRecallService {
     }
 
     private var memoryRecallStopTokens: Set<String> {
-        ["about", "remember", "recall", "saved", "save", "note", "notes", "someone", "thing", "things"]
+        [
+            "about", "being", "happen", "happened", "remember", "recall", "saved", "save",
+            "note", "notes", "someone", "thing", "things",
+        ]
+    }
+
+    private func temporalIntent(for normalizedQuery: String, mode: CiderNaturalRecallMode) -> String? {
+        guard mode == .memory else { return nil }
+        let tokens = Set(significantQueryTokens(in: normalizedQuery))
+        if tokens.contains("today") || normalizedQuery.contains("right now") {
+            return "today"
+        }
+        if tokens.contains("latest") || tokens.contains("newest") || tokens.contains("recent") || normalizedQuery.contains("most recent") {
+            return "latest"
+        }
+        if normalizedQuery.range(of: #"\b20\d{2}-\d{2}-\d{2}\b"#, options: .regularExpression) != nil {
+            return "specific_date"
+        }
+        return nil
     }
 
     private func factFamily(for normalizedQuery: String, semanticTerms: [String], mode: CiderNaturalRecallMode) -> String? {
@@ -568,6 +609,9 @@ final class CiderNaturalPreferenceRecallService {
             total = tokens.filter { lower.contains($0) }.count * 4
             if result.kind == .chunk { total += 3 }
             if bundle.item.title.lowercased().contains("daily journal") { total += 2 }
+            if intent.temporalIntent != nil {
+                total += 4
+            }
             return total
         }
         if let subject = intent.subject?.lowercased(), lower.contains(subject) { total += 12 }
@@ -624,6 +668,9 @@ final class CiderNaturalPreferenceRecallService {
             }
             if bundle.item.title.lowercased().contains("daily journal") {
                 reasons.append("journal source")
+            }
+            if intent.temporalIntent != nil {
+                reasons.append("explicit temporal intent")
             }
             return orderedUnique(reasons).joined(separator: "; ")
         }
@@ -815,7 +862,7 @@ final class CiderNaturalPreferenceRecallService {
         let lead: String
         if mode == .memory {
             let facts = citations.prefix(3).map { citation in
-                let fact = synthesizedMemoryFact(from: citation.quote)
+                let fact = synthesizedMemoryFact(from: citation.quote, intent: intent)
                 return citation.title.isEmpty ? fact : "\(fact) (source: \(citation.title))"
             }
             return "Source-backed answer\(subjectCopy): \(facts.joined(separator: " ")) This is cited source evidence, not accepted memory truth."
@@ -837,15 +884,23 @@ final class CiderNaturalPreferenceRecallService {
         return "\(lead) These are observations from sources, not accepted memory truth:\n\(bullets)"
     }
 
-    private func synthesizedMemoryFact(from quote: String) -> String {
+    private func synthesizedMemoryFact(from quote: String, intent: CiderNaturalPreferenceRecallIntent) -> String {
         let lines = quote
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         let selected = lines.max { lhs, rhs in
-            memoryFactLineScore(lhs) < memoryFactLineScore(rhs)
+            memoryFactLineScore(lhs, intent: intent) < memoryFactLineScore(rhs, intent: intent)
         } ?? quote
         return clipped(selected, limit: 220)
+    }
+
+    private func memoryFactLineScore(_ line: String, intent: CiderNaturalPreferenceRecallIntent) -> Int {
+        let lower = line.lowercased()
+        let semanticScore = intent.semanticQueryTerms.reduce(0) { partial, term in
+            partial + (lower.contains(term) ? 10 : 0)
+        }
+        return semanticScore + memoryFactLineScore(line)
     }
 
     private func memoryFactLineScore(_ line: String) -> Int {
@@ -876,6 +931,27 @@ final class CiderNaturalPreferenceRecallService {
         }
         let target = intent.factTarget.map { " targeting \($0)" } ?? ""
         return "Ranked \(candidates.count) source-backed \(mode.noun) candidate(s)\(target) by semantic term overlap, chunk evidence, and source recency using terms: \(terms)."
+    }
+
+    private func shouldPreferTemporalRecency(
+        lhs: CiderNaturalPreferenceRecallCandidate,
+        rhs: CiderNaturalPreferenceRecallCandidate,
+        intent: String
+    ) -> Bool {
+        switch intent {
+        case "today", "latest", "specific_date":
+            let scoreGap = abs(lhs.score - rhs.score)
+            return scoreGap <= 8 && lhs.sortDate != rhs.sortDate
+        default:
+            return false
+        }
+    }
+
+    private func sourceSortDate(bundle: CiderItemContextBundle, result: CiderItemSearchResult) -> Date {
+        if let captureDate = result.captureProvenance.map(\.createdAt).max() {
+            return captureDate
+        }
+        return max(bundle.item.updatedAt, bundle.item.createdAt)
     }
 
     private func broaderSearchCommand(for intent: CiderNaturalPreferenceRecallIntent, limit: Int) -> String? {
