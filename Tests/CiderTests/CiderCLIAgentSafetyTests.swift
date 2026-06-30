@@ -23,6 +23,84 @@ private final class CLIOutputBuffer: @unchecked Sendable {
 @Suite("Cider CLI Agent Safety Tests", .serialized)
 @MainActor
 struct CiderCLIAgentSafetyTests {
+    @Test("item help advertises recall action diagnostic facts commands without vault side effects")
+    func itemHelpAdvertisesRecallActionDiagnosticFactsCommandsWithoutVaultSideEffects() throws {
+        let commandsAndExpectedStrings: [([String], [String])] = [
+            (["item", "--help"], [
+                "cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>)",
+                "cider-cli item action-ledger list",
+                "cider-cli item action-ledger inspect <receipt-id> [--json]",
+                "cider-cli item due-to-surface",
+                "cider-cli item why-surfaced <type> <id-or-ref> [--json]",
+                "cider-cli item capability-map [--json]",
+                "cider-cli item graph-health [--json]",
+                "cider-cli item memory-facts list [--limit <n>] [--json]",
+                "cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]",
+            ]),
+            (["item", "recall-context", "--help"], [
+                "cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>)",
+                "--history-command <command>",
+                "--history-status <status>",
+                "--history-source-ref <ref>",
+                "--history-evidence-ref <ref>",
+                "--history-limit <n>",
+                "Read-only source-backed recall bundle",
+            ]),
+            (["item", "action-ledger", "--help"], [
+                "cider-cli item action-ledger list",
+                "--owner <type:id>",
+                "--command <command>",
+                "--source-ref <ref>",
+                "--evidence-ref <ref>",
+                "cider-cli item action-ledger inspect <receipt-id> [--json]",
+                "Read-only durable action receipt history",
+            ]),
+            (["item", "action-ledger", "list", "--help"], [
+                "cider-cli item action-ledger list",
+                "--owner-type <type> --owner-id <id>",
+                "--since <iso|yyyy-mm-dd>",
+                "--before <iso|yyyy-mm-dd>",
+                "--limit <n>",
+            ]),
+            (["item", "action-ledger", "inspect", "--help"], [
+                "cider-cli item action-ledger inspect <receipt-id> [--json]",
+                "Read-only inspection of one durable action receipt",
+            ]),
+            (["item", "capability-map", "--help"], [
+                "cider-cli item capability-map [--json]",
+                "Read-only static capability contract",
+                "cider-cli item graph-health [--json]",
+            ]),
+            (["item", "graph-health", "--help"], [
+                "cider-cli item graph-health [--json]",
+                "Read-only graph readiness diagnostic",
+                "cider-cli item capability-map [--json]",
+            ]),
+            (["item", "memory-facts", "--help"], [
+                "cider-cli item memory-facts list [--limit <n>] [--json]",
+                "cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]",
+                "cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]",
+                "Read-only accepted memory fact commands",
+            ]),
+        ]
+
+        for (args, expectedStrings) in commandsAndExpectedStrings {
+            let vault = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cider-item-help-no-side-effects-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: vault) }
+
+            let result = try runCLI(args: args, vault: vault)
+
+            #expect(result.status == 0)
+            for expectedString in expectedStrings {
+                #expect(result.stdout.contains(expectedString), "Expected help for \(args.joined(separator: " ")) to contain \(expectedString)")
+            }
+            let vaultContents = try FileManager.default.contentsOfDirectory(atPath: vault.path)
+            #expect(vaultContents.isEmpty, "Help command \(args.joined(separator: " ")) should not create vault data")
+        }
+    }
+
     @Test("reminder mutation result exposes shared action receipt")
     func reminderMutationResultExposesSharedActionReceipt() throws {
         let id = UUID()

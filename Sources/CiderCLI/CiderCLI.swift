@@ -220,11 +220,7 @@ struct CiderCLI {
             return false
         }
 
-        if let usage = itemSubcommandUsage(for: subcommand) {
-            print("Usage: \(usage)")
-        } else {
-            printItemEarlyHelp()
-        }
+        printItemSubcommandEarlyHelp(subcommand: subcommand, args: args)
         return true
     }
 
@@ -238,12 +234,27 @@ struct CiderCLI {
             Use newest/oldest only for recency-oriented recall or audit/debug.
             Example: cider-cli item search "event" --scope personalMemory --json
             Example: cider-cli item search "Panda Express" --sort newest --limit 5 --json
+          cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]
+            Read-only source-backed natural preference/item recall over journaled and captured items.
+          cider-cli item memory-recall <natural question>|--query <natural question> [--limit <n>] [--json]
+            Read-only source-backed natural personal/work memory recall over Cider items.
+          cider-cli item search-debug <query> [--limit <n>] [--json]
           cider-cli item get <type> <id-or-ref> [--json]
           cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
             Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
           cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--json]
           cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
+          cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
+            Read-only source-backed recall bundle with anchors, accepted facts, reviewable candidates, action history, and safe follow-up commands.
+          cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
+          cider-cli item why-surfaced <type> <id-or-ref> [--json]
+          cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
+          cider-cli item action-ledger inspect <receipt-id> [--json]
+            Read-only durable action receipt history for replaying mutation and diagnostic outcomes.
+          cider-cli item capability-map [--json]
+            Read-only static capability contract for agents.
           cider-cli item graph-health [--json]
+            Read-only graph readiness diagnostic for agents.
           cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
           cider-cli item daily-episode --date YYYY-MM-DD [--json]
           cider-cli item weekly-chapter --week YYYY-MM-DD [--json]
@@ -251,6 +262,10 @@ struct CiderCLI {
           cider-cli item yearly-book --year YYYY [--json]
           cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
             Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
+          cider-cli item memory-facts list [--limit <n>] [--json]
+          cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
+          cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
+          cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
 
         Read-only traversal commands:
           cider-cli item related <type> <id-or-ref> [--json]
@@ -270,6 +285,66 @@ struct CiderCLI {
           cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
           cider-cli item sync-project <project-id-or-name> [--json]
         """)
+    }
+
+    static func printItemSubcommandEarlyHelp(subcommand: String?, args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        switch subcommand {
+        case "recall-context", "context-bundle", "recall-bundle":
+            print("""
+            Usage: cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
+            Read-only source-backed recall bundle with anchors, accepted facts, reviewable candidates, action history, safe follow-up commands, and read-only actionReceipt metadata.
+            """)
+        case "action-ledger", "actions", "activity":
+            switch positional.first {
+            case "inspect", "get":
+                print("""
+                Usage: cider-cli item action-ledger inspect <receipt-id> [--json]
+                Read-only inspection of one durable action receipt.
+                """)
+            case "list", "recent":
+                print("""
+                Usage: cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
+                Read-only durable action receipt history. Use inspect for one receipt.
+                """)
+            default:
+                print("""
+                Usage: cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
+                       cider-cli item action-ledger inspect <receipt-id> [--json]
+                Read-only durable action receipt history for replaying mutation and diagnostic outcomes.
+                """)
+            }
+        case "due-to-surface", "resurface", "resurfacing-feed":
+            print("Usage: cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]")
+        case "why-surfaced", "why":
+            print("Usage: cider-cli item why-surfaced <type> <id-or-ref> [--json]")
+        case "capability-map", "capabilities":
+            print("""
+            Usage: cider-cli item capability-map [--json]
+            Read-only static capability contract for agents.
+            Related diagnostic: cider-cli item graph-health [--json]
+            """)
+        case "graph-health", "health", "readiness":
+            print("""
+            Usage: cider-cli item graph-health [--json]
+            Read-only graph readiness diagnostic for agents.
+            Related diagnostic: cider-cli item capability-map [--json]
+            """)
+        case "memory-facts", "memory-fact", "accepted-memory-facts", "accepted-memory":
+            print("""
+            Usage: cider-cli item memory-facts list [--limit <n>] [--json]
+                   cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
+                   cider-cli item memory-facts resurface [--fact <candidate-id>] [--limit <n>] [--json]
+                   cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
+            Read-only accepted memory fact commands. Candidate mutation commands remain separate and explicit.
+            """)
+        default:
+            if let usage = itemSubcommandUsage(for: subcommand) {
+                print("Usage: \(usage)")
+            } else {
+                printItemEarlyHelp()
+            }
+        }
     }
 
     static func itemSubcommandUsage(for subcommand: String?) -> String? {
