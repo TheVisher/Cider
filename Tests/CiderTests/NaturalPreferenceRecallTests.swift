@@ -321,6 +321,64 @@ struct NaturalPreferenceRecallTests {
         #expect(response.safeNextCommands.contains("cider-cli item search \"boeing systems down today\" --scope personalMemory --sort newest --limit 3 --json"))
     }
 
+    @Test("generic today memory recall ranks current source date before stale today word matches")
+    func genericTodayMemoryRecallRanksCurrentSourceDateFirst() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let olderTodayWordNoteID = UUID()
+        let currentJournalID = UUID()
+        let now = Date()
+        let dayFormatter = DateFormatter()
+        dayFormatter.calendar = Calendar(identifier: .gregorian)
+        dayFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dayFormatter.timeZone = .current
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        let older = Calendar(identifier: .gregorian).date(byAdding: .day, value: -12, to: now) ?? Date(timeIntervalSince1970: 1_782_086_400)
+        try insertJournal(
+            id: olderTodayWordNoteID,
+            title: "Daily Journal stale today wording",
+            body: """
+            I said today was messy. Today I said the team should keep a generic today checklist.
+            This older note keeps saying today today today, but it is not from the current source date.
+            """,
+            createdAt: older,
+            into: db,
+            store: store
+        )
+        try insertJournal(
+            id: currentJournalID,
+            title: "Daily Journal \(dayFormatter.string(from: now))",
+            body: "Voice journal capture: Boeing had about 40 systems down during the shift, and Ryland's birthday came up.",
+            createdAt: now,
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what did I say today?", limit: 3)
+        let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
+        let intent = try #require(payload["intent"] as? [String: Any])
+        let candidates = try #require(payload["candidates"] as? [[String: Any]])
+        let firstCandidate = try #require(candidates.first)
+
+        #expect(intent["temporalIntent"] as? String == "today")
+        #expect(response.intent.semanticQueryTerms == ["say", "today"])
+        #expect(response.candidates.first?.owner.ownerID == currentJournalID.uuidString)
+        #expect(response.citations.first?.owner.ownerID == currentJournalID.uuidString)
+        #expect(response.candidates.contains { $0.owner.ownerID == olderTodayWordNoteID.uuidString })
+        #expect(response.candidates.first?.rankReason.contains("generic explicit-date source-date match") == true)
+        #expect(response.candidates.first?.matchExplanation.contains("generic explicit-date recall anchored to source date") == true)
+        #expect(firstCandidate["rankReason"] as? String == response.candidates.first?.rankReason)
+        #expect((firstCandidate["matchExplanation"] as? String)?.contains("generic explicit-date recall anchored to source date") == true)
+        #expect(response.truthBoundary == "source_backed_observations_not_accepted_truth")
+        #expect(response.changed == false)
+    }
+
     @Test("CLI JSON formatter exposes natural memory recall contract")
     func cliJSONFormatterExposesNaturalMemoryRecallContract() throws {
         let (db, url) = try makeTestDB()

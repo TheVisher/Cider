@@ -180,12 +180,12 @@ final class CiderNaturalPreferenceRecallService {
                     "cider-cli item get \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
                 ]
                 let sourceRef = "\(bundle.item.type.rawValue):\(bundle.item.id.uuidString)"
+                let sortDate = sourceSortDate(bundle: bundle, result: result)
                 let score = evidenceScore(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode)
-                let rankReason = rankReason(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode)
+                let rankReason = rankReason(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode, sortDate: sortDate)
                 let evidenceKind = evidenceKind(quote: quote, result: result, intent: intent, mode: mode)
                 let matchedTerms = matchedSemanticTerms(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode)
-                let matchExplanation = matchExplanation(matchedTerms: matchedTerms, intent: intent, result: result, mode: mode)
-                let sortDate = sourceSortDate(bundle: bundle, result: result)
+                let matchExplanation = matchExplanation(matchedTerms: matchedTerms, intent: intent, result: result, mode: mode, sortDate: sortDate)
                 if var candidate = candidatesByOwner[key] {
                     candidate.claim = mergeClaims(candidate.claim, quote)
                     candidate.snippet = mergeClaims(candidate.snippet, clipped(result.snippet, limit: 260))
@@ -264,6 +264,9 @@ final class CiderNaturalPreferenceRecallService {
         let candidates = candidatesByOwner.values
             .sorted {
                 if let temporalIntent = intent.temporalIntent, mode == .memory {
+                    if shouldPreferGenericDateSourceAnchor(lhs: $0, rhs: $1, intent: intent) {
+                        return sourceDateMatchesTemporalIntent($0.sortDate, intent: temporalIntent)
+                    }
                     if shouldPreferTemporalRecency(lhs: $0, rhs: $1, intent: temporalIntent) {
                         return ($0.sortDate ?? .distantPast) > ($1.sortDate ?? .distantPast)
                     }
@@ -278,6 +281,11 @@ final class CiderNaturalPreferenceRecallService {
                 if let temporalIntent = intent.temporalIntent, mode == .memory {
                     let lhsCandidate = candidatesByOwner[$0.citation.owner.canonicalRef]
                     let rhsCandidate = candidatesByOwner[$1.citation.owner.canonicalRef]
+                    if let lhsCandidate,
+                       let rhsCandidate,
+                       shouldPreferGenericDateSourceAnchor(lhs: lhsCandidate, rhs: rhsCandidate, intent: intent) {
+                        return sourceDateMatchesTemporalIntent(lhsCandidate.sortDate, intent: temporalIntent)
+                    }
                     if let lhsCandidate,
                        let rhsCandidate,
                        shouldPreferTemporalRecency(lhs: lhsCandidate, rhs: rhsCandidate, intent: temporalIntent) {
@@ -372,7 +380,12 @@ final class CiderNaturalPreferenceRecallService {
             let focused = semanticTerms.joined(separator: " ")
             let literal = significantQueryTokens(in: normalizedQuery).joined(separator: " ")
             let broad = broaderSearchTerms(for: semanticTerms).joined(separator: " ")
-            return orderedUnique([focused, literal, broad, normalizedQuery].filter { !$0.isEmpty })
+            let dateAnchor = genericExplicitDateAnchorSearchQuery(
+                normalizedQuery: normalizedQuery,
+                semanticTerms: semanticTerms,
+                mode: mode
+            )
+            return orderedUnique([dateAnchor, focused, literal, broad, normalizedQuery].compactMap { $0 }.filter { !$0.isEmpty })
         }
 
         if let subject, !subject.isEmpty {
@@ -452,6 +465,18 @@ final class CiderNaturalPreferenceRecallService {
         ]
     }
 
+    private var genericMemoryRecallTokens: Set<String> {
+        [
+            "ask", "asked", "capture", "captured", "did", "journal", "journaled", "log", "logged",
+            "mention", "mentioned", "note", "notes", "recall", "remember", "said", "say", "saying",
+            "tell", "thing", "things", "voice",
+        ]
+    }
+
+    private var explicitDateTokens: Set<String> {
+        ["today", "yesterday"]
+    }
+
     private func temporalIntent(for normalizedQuery: String, mode: CiderNaturalRecallMode) -> String? {
         guard mode == .memory else { return nil }
         let tokens = Set(significantQueryTokens(in: normalizedQuery))
@@ -465,6 +490,20 @@ final class CiderNaturalPreferenceRecallService {
             return "specific_date"
         }
         return nil
+    }
+
+    private func genericExplicitDateAnchorSearchQuery(
+        normalizedQuery: String,
+        semanticTerms: [String],
+        mode: CiderNaturalRecallMode
+    ) -> String? {
+        guard mode == .memory,
+              isGenericExplicitDateRecall(normalizedQuery: normalizedQuery, semanticTerms: semanticTerms),
+              temporalIntent(for: normalizedQuery, mode: mode) == "today"
+        else {
+            return nil
+        }
+        return "Daily Journal \(Self.localDayFormatter.string(from: Date()))"
     }
 
     private func factFamily(for normalizedQuery: String, semanticTerms: [String], mode: CiderNaturalRecallMode) -> String? {
@@ -578,6 +617,10 @@ final class CiderNaturalPreferenceRecallService {
             .joined(separator: "\n")
             .lowercased()
         if mode == .memory {
+            if isGenericExplicitDateRecall(intent: intent),
+               sourceDateMatchesTemporalIntent(sourceSortDate(bundle: bundle, result: result), intent: intent.temporalIntent) {
+                return true
+            }
             let tokens = intent.semanticQueryTerms
             let overlap = tokens.filter { searchable.contains($0) }.count
             return overlap >= min(2, max(1, tokens.count))
@@ -652,7 +695,8 @@ final class CiderNaturalPreferenceRecallService {
         bundle: CiderItemContextBundle,
         result: CiderItemSearchResult,
         intent: CiderNaturalPreferenceRecallIntent,
-        mode: CiderNaturalRecallMode
+        mode: CiderNaturalRecallMode,
+        sortDate: Date?
     ) -> String {
         var reasons: [String] = []
         let lower = quote.lowercased()
@@ -671,6 +715,10 @@ final class CiderNaturalPreferenceRecallService {
             }
             if intent.temporalIntent != nil {
                 reasons.append("explicit temporal intent")
+            }
+            if isGenericExplicitDateRecall(intent: intent),
+               sourceDateMatchesTemporalIntent(sortDate, intent: intent.temporalIntent) {
+                reasons.append("generic explicit-date source-date match")
             }
             return orderedUnique(reasons).joined(separator: "; ")
         }
@@ -712,9 +760,14 @@ final class CiderNaturalPreferenceRecallService {
         matchedTerms: [String],
         intent: CiderNaturalPreferenceRecallIntent,
         result: CiderItemSearchResult,
-        mode: CiderNaturalRecallMode
+        mode: CiderNaturalRecallMode,
+        sortDate: Date?
     ) -> String {
         guard mode == .memory else { return "" }
+        if isGenericExplicitDateRecall(intent: intent),
+           sourceDateMatchesTemporalIntent(sortDate, intent: intent.temporalIntent) {
+            return "Matched general_memory from generic explicit-date recall anchored to source date \(Self.localDayFormatter.string(from: sortDate ?? Date())); not accepted memory truth."
+        }
         let family = intent.factFamily ?? "general_memory"
         let target = intent.factTarget.map { " targeting \($0)" } ?? ""
         let source = result.kind == .chunk ? "chunk" : "item"
@@ -930,7 +983,21 @@ final class CiderNaturalPreferenceRecallService {
             return "No source-backed candidates met the bounded \(mode.noun) recall overlap check for semantic terms: \(terms)."
         }
         let target = intent.factTarget.map { " targeting \($0)" } ?? ""
+        if mode == .memory, isGenericExplicitDateRecall(intent: intent) {
+            return "Ranked \(candidates.count) source-backed memory candidate(s)\(target) by explicit date intent first when source dates match, then semantic term overlap, chunk evidence, and source recency using terms: \(terms)."
+        }
         return "Ranked \(candidates.count) source-backed \(mode.noun) candidate(s)\(target) by semantic term overlap, chunk evidence, and source recency using terms: \(terms)."
+    }
+
+    private func shouldPreferGenericDateSourceAnchor(
+        lhs: CiderNaturalPreferenceRecallCandidate,
+        rhs: CiderNaturalPreferenceRecallCandidate,
+        intent: CiderNaturalPreferenceRecallIntent
+    ) -> Bool {
+        guard isGenericExplicitDateRecall(intent: intent) else { return false }
+        let lhsMatches = sourceDateMatchesTemporalIntent(lhs.sortDate, intent: intent.temporalIntent)
+        let rhsMatches = sourceDateMatchesTemporalIntent(rhs.sortDate, intent: intent.temporalIntent)
+        return lhsMatches != rhsMatches
     }
 
     private func shouldPreferTemporalRecency(
@@ -952,6 +1019,35 @@ final class CiderNaturalPreferenceRecallService {
             return captureDate
         }
         return max(bundle.item.updatedAt, bundle.item.createdAt)
+    }
+
+    private func isGenericExplicitDateRecall(intent: CiderNaturalPreferenceRecallIntent) -> Bool {
+        isGenericExplicitDateRecall(
+            normalizedQuery: intent.normalizedQuery,
+            semanticTerms: intent.semanticQueryTerms
+        )
+    }
+
+    private func isGenericExplicitDateRecall(normalizedQuery: String, semanticTerms: [String]) -> Bool {
+        let dateTokens = explicitDateTokens.filter { normalizedQuery.contains($0) || semanticTerms.contains($0) }
+        guard !dateTokens.isEmpty else { return false }
+        let nonDateSignalTerms = semanticTerms.filter { term in
+            !explicitDateTokens.contains(term) && !genericMemoryRecallTokens.contains(term)
+        }
+        return nonDateSignalTerms.count <= 1
+    }
+
+    private func sourceDateMatchesTemporalIntent(_ date: Date?, intent: String?) -> Bool {
+        guard let date, let intent else { return false }
+        let calendar = Calendar.current
+        switch intent {
+        case "today":
+            return calendar.isDateInToday(date)
+        case "yesterday":
+            return calendar.isDateInYesterday(date)
+        default:
+            return false
+        }
     }
 
     private func broaderSearchCommand(for intent: CiderNaturalPreferenceRecallIntent, limit: Int) -> String? {
@@ -1007,4 +1103,13 @@ final class CiderNaturalPreferenceRecallService {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
+
+    private static let localDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 }
