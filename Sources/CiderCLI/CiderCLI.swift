@@ -1968,14 +1968,41 @@ struct CiderCLI {
                 print("Error: Usage: cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]")
                 return
             }
+            let actor = parseFlag("--actor", from: args) ?? "user"
             do {
                 let itemID = try service.resolveItemID(ref: itemRef)
                 let result = try service.deferReview(
                     itemID: itemID,
                     reason: parseFlag("--reason", from: args) ?? "Deferred from review queue.",
-                    actor: parseFlag("--actor", from: args) ?? "user"
+                    actor: actor
                 )
                 printReviewRoutingActionResult(result)
+            } catch CiderRoutingDecisionError.itemReferenceNotFound(let ref) {
+                var payload = structuredActionReceiptFailurePayload(
+                    command: "review.routing.defer",
+                    action: "defer",
+                    actor: actor,
+                    owner: nil,
+                    readOnly: false,
+                    errorCode: "item_not_found",
+                    error: "No item found matching '\(ref)'.",
+                    sourceRefs: [ref],
+                    safeVerificationCommands: [
+                        "cider-cli review list --json",
+                        "cider-cli item action-ledger list --command review.routing.defer --status failed --json",
+                    ],
+                    safeNextCommands: [
+                        "cider-cli review list --json",
+                    ]
+                )
+                if var receipt = payload["actionReceipt"] as? [String: Any] {
+                    receipt["subcommand"] = "defer"
+                    receipt["truthBoundary"] = "receipt_proves_command_execution_and_review_state_outcome_not_memory_truth"
+                    payload["actionReceipt"] = receipt
+                }
+                persistActionReceiptIfPresent(payload)
+                processExitCode = 1
+                if jsonOutput { outputJSON(payload) } else { print("Error: No item found matching '\(ref)'.") }
             } catch {
                 print("Error: \(error.localizedDescription)")
             }
@@ -13566,7 +13593,16 @@ struct CiderCLI {
 
     static func printReviewRoutingActionResult(_ result: CiderReviewRoutingActionResult) {
         if jsonOutput {
-            outputJSON(result.toDictionary())
+            var payload = result.toDictionary()
+            if result.action == "review.routing.defer" {
+                payload["ok"] = true
+                payload["command"] = "review.routing.defer"
+                payload["readOnly"] = false
+                payload["changed"] = true
+                payload["actionReceipt"] = actionReceiptForReviewRoutingDefer(result)
+                persistActionReceiptIfPresent(payload)
+            }
+            outputJSON(payload)
             return
         }
 
@@ -13583,6 +13619,49 @@ struct CiderCLI {
         print("  Remaining routing reviews: \(result.remainingActiveRoutingReviewCount)")
         print("  Message: \(result.message)")
         print("  Safe actions: \(result.safeActions.joined(separator: ", "))")
+    }
+
+    static func actionReceiptForReviewRoutingDefer(_ result: CiderReviewRoutingActionResult) -> [String: Any] {
+        let owner = SecondBrainOwnerRef(ownerType: result.itemType, ownerID: result.itemID.uuidString)
+        let ownerRef = owner.canonicalRef
+        let receipt = agentActionReceiptToDict(
+            command: "review.routing.defer",
+            action: "defer",
+            actor: result.actor,
+            owner: owner,
+            sourceRefs: orderedUniqueStrings([
+                ownerRef,
+                "routing_decision:\(result.routingDecisionID.uuidString)",
+                result.supersedesDecisionID.map { "routing_decision:\($0.uuidString)" },
+            ].compactMap { $0 }),
+            evidenceRefs: orderedUniqueStrings([
+                ownerRef,
+                result.supersedesDecisionID.map { "routing_decision:\($0.uuidString)" },
+            ].compactMap { $0 }),
+            readOnly: false,
+            changed: true,
+            status: result.status,
+            before: result.supersedesDecisionID.map { ["reviewState": "needs_review", "routingDecisionID": $0.uuidString] },
+            after: [
+                "reviewState": result.reviewState,
+                "routingDecisionID": result.routingDecisionID.uuidString,
+                "remainingActiveRoutingReviewCount": result.remainingActiveRoutingReviewCount,
+            ],
+            safeVerificationCommands: [
+                "cider-cli review list --include-deferred --json",
+                "cider-cli item action-ledger list --owner \(ownerRef) --command review.routing.defer --json",
+                "cider-cli item context \(result.itemType) \(result.itemID.uuidString) --max-history 10 --json",
+            ],
+            safeNextCommands: [
+                "cider-cli review list --json",
+                "cider-cli review list --include-deferred --json",
+                "cider-cli item recall-context --item \(result.itemType) \(result.itemID.uuidString) --history-command review.routing.defer --json",
+            ]
+        )
+        var adjusted = receipt
+        adjusted["subcommand"] = "defer"
+        adjusted["truthBoundary"] = "receipt_proves_command_execution_and_review_state_outcome_not_memory_truth"
+        return adjusted
     }
 
     static func printReviewQueueBatchEnrichmentResult(_ result: CiderReviewQueueBatchEnrichmentResult) {
