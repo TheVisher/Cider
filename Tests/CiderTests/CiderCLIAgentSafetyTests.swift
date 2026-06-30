@@ -6546,6 +6546,20 @@ struct CiderCLIAgentSafetyTests {
                 && (($0["item"] as? [String: Any])?["title"] as? String) == title
                 && ($0["title"] as? String) == title
         })
+        let noteSearchResult = try #require(search.first {
+            (($0["item"] as? [String: Any])?["id"] as? String) == noteID
+        })
+        let temporal = try #require(noteSearchResult["temporal"] as? [String: Any])
+        #expect(temporal["sortDate"] as? String != nil)
+        #expect(temporal["dateSource"] as? String != nil)
+        let provenance = try #require(noteSearchResult["provenance"] as? [String: Any])
+        #expect(provenance["sourceType"] as? String == "note")
+        #expect(provenance["sourceID"] as? String == noteID)
+        #expect(provenance["sourceTitle"] as? String == title)
+        #expect(provenance["sourceLocation"] as? String != nil)
+        #expect(provenance["evidenceExcerpt"] as? String != nil)
+        #expect((noteSearchResult["contextCommands"] as? [String]) == ["cider-cli item context note \(noteID) --json"])
+        #expect((noteSearchResult["verificationCommands"] as? [String]) == ["cider-cli item get note \(noteID) --json"])
 
         let cleanupResult = try runCLI(args: ["test-run", "cleanup", runID, "--dry-run", "--json"], vault: vault)
         let cleanup = try parseJSONObject(cleanupResult.stdout)

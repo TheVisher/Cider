@@ -5213,6 +5213,8 @@ struct CiderCLI {
                             "ok": true,
                             "query": query,
                             "searchScope": scope.rawValue,
+                            "searchSort": sort.rawValue,
+                            "sortExplanation": itemSearchSortExplanation(sort),
                             "space": spaceToDict(space),
                             "results": results.map(itemSearchResultToDict),
                         ])
@@ -5221,6 +5223,8 @@ struct CiderCLI {
                             "ok": true,
                             "query": query,
                             "searchScope": scope.rawValue,
+                            "searchSort": sort.rawValue,
+                            "sortExplanation": itemSearchSortExplanation(sort),
                             "results": results.map(itemSearchResultToDict),
                         ])
                     } else {
@@ -11913,6 +11917,17 @@ struct CiderCLI {
           cider-cli item search "event" --scope all --json
           cider-cli item search "Panda Express" --sort newest --limit 5 --json
         """
+    }
+
+    static func itemSearchSortExplanation(_ sort: CiderItemSearchSort) -> String {
+        switch sort {
+        case .relevance:
+            return "Default relevance-first ordering."
+        case .newest:
+            return "Newest-first ordering by per-result temporal.sortDate, preferring capture provenance timestamps when present, then item updated/created timestamps."
+        case .oldest:
+            return "Oldest-first ordering by per-result temporal.sortDate, preferring capture provenance timestamps when present, then item updated/created timestamps."
+        }
     }
 
     static func firstPositionalArgument(from args: [String], valueFlags: Set<String> = []) -> String? {
@@ -23807,6 +23822,16 @@ struct CiderCLI {
         if !result.captureProvenance.isEmpty {
             dict["captureProvenance"] = result.captureProvenance.map(captureProvenanceToDict)
         }
+        dict["temporal"] = itemSearchTemporalMetadata(result)
+        dict["provenance"] = itemSearchProvenanceMetadata(result)
+        let contextCommands = itemSearchResultContextCommands(result)
+        if !contextCommands.isEmpty {
+            dict["contextCommands"] = contextCommands
+        }
+        let verificationCommands = itemSearchResultVerificationCommands(result)
+        if !verificationCommands.isEmpty {
+            dict["verificationCommands"] = verificationCommands
+        }
         let safeNextCommands = itemSearchResultSafeNextCommands(result)
         if !safeNextCommands.isEmpty {
             dict["safeNextCommands"] = safeNextCommands
@@ -23959,6 +23984,98 @@ struct CiderCLI {
             "cider-cli item context \(item.type.rawValue) \(item.id.uuidString) --json",
             "cider-cli item hub \(item.type.rawValue) \(item.id.uuidString) --json",
         ]
+    }
+
+    private static func itemSearchResultContextCommands(_ result: CiderItemSearchResult) -> [String] {
+        guard let item = result.item,
+              LibraryEntityType.activeCases.contains(item.type),
+              result.owner.ownerType == item.type.rawValue,
+              result.owner.ownerID == item.id.uuidString
+        else {
+            return []
+        }
+        return ["cider-cli item context \(item.type.rawValue) \(item.id.uuidString) --json"]
+    }
+
+    private static func itemSearchResultVerificationCommands(_ result: CiderItemSearchResult) -> [String] {
+        guard let item = result.item,
+              LibraryEntityType.activeCases.contains(item.type),
+              result.owner.ownerType == item.type.rawValue,
+              result.owner.ownerID == item.id.uuidString
+        else {
+            return []
+        }
+        return ["cider-cli item get \(item.type.rawValue) \(item.id.uuidString) --json"]
+    }
+
+    private static func itemSearchTemporalMetadata(_ result: CiderItemSearchResult) -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        if let capturedAt = result.captureProvenance.map(\.createdAt).max() {
+            return [
+                "displayDate": formatter.string(from: capturedAt),
+                "sortDate": formatter.string(from: capturedAt),
+                "dateSource": "captureProvenance.createdAt",
+                "dateConfidence": "source_backed",
+            ]
+        }
+        if let item = result.item {
+            let selectedDate: Date
+            let source: String
+            if item.updatedAt >= item.createdAt {
+                selectedDate = item.updatedAt
+                source = "item.updatedAt"
+            } else {
+                selectedDate = item.createdAt
+                source = "item.createdAt"
+            }
+            return [
+                "displayDate": formatter.string(from: selectedDate),
+                "sortDate": formatter.string(from: selectedDate),
+                "dateSource": source,
+                "dateConfidence": "item_timestamp",
+                "createdAt": formatter.string(from: item.createdAt),
+                "updatedAt": formatter.string(from: item.updatedAt),
+            ]
+        }
+        return [
+            "dateSource": "unavailable",
+            "dateConfidence": "unknown",
+        ]
+    }
+
+    private static func itemSearchProvenanceMetadata(_ result: CiderItemSearchResult) -> [String: Any] {
+        var dict: [String: Any] = [
+            "sourceRef": result.owner.canonicalRef,
+            "sourceType": result.owner.ownerType,
+            "sourceID": result.owner.ownerID,
+            "sourceTitle": result.title,
+            "evidenceExcerpt": boundedItemSearchEvidenceExcerpt(result.snippet),
+            "evidenceSummary": boundedItemSearchEvidenceExcerpt(result.snippet),
+        ]
+        if let item = result.item {
+            dict["sourceRef"] = "\(item.type.rawValue):\(item.id.uuidString)"
+            dict["sourceType"] = item.type.rawValue
+            dict["sourceID"] = item.id.uuidString
+            dict["sourceTitle"] = item.title
+            if let relativePath = item.relativePath {
+                dict["sourceLocation"] = relativePath
+                dict["vaultRelativePath"] = relativePath
+            }
+        }
+        if !result.captureProvenance.isEmpty {
+            dict["captureEventIDs"] = result.captureProvenance.map(\.eventID)
+            dict["captureSourceKinds"] = orderedUniqueStrings(result.captureProvenance.map(\.sourceKind))
+        }
+        return dict
+    }
+
+    private static func boundedItemSearchEvidenceExcerpt(_ text: String, maxCharacters: Int = 240) -> String {
+        let normalized = text
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        guard normalized.count > maxCharacters else { return normalized }
+        let end = normalized.index(normalized.startIndex, offsetBy: maxCharacters)
+        return String(normalized[..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func itemSearchDiagnosticsReportToDict(_ report: CiderItemSearchDiagnosticsReport) -> [String: Any] {

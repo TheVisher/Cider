@@ -1158,6 +1158,83 @@ struct CiderItemContextServiceTests {
         #expect(dict["searchScope"] as? String == "personalMemory")
     }
 
+    @Test("item search JSON exposes compact temporal provenance and safe replay commands for notes")
+    func itemSearchJSONExposesTemporalProvenanceAndReplayCommandsForNotes() throws {
+        let noteID = UUID()
+        let created = Date(timeIntervalSince1970: 1_748_450_000)
+        let updated = Date(timeIntervalSince1970: 1_748_520_000)
+        let captureDate = Date(timeIntervalSince1970: 1_750_000_000)
+        let result = CiderItemSearchResult(
+            id: "item-\(noteID.uuidString)",
+            kind: .item,
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString),
+            item: CiderItemSummary(
+                id: noteID,
+                type: .note,
+                title: "Daily Journal 2026-06-13",
+                relativePath: "Journal/Daily Journal 2026-06-13.md",
+                folderID: nil,
+                createdAt: created,
+                updatedAt: updated
+            ),
+            title: "Daily Journal 2026-06-13",
+            snippet: "Dinner included Panda Express.",
+            rank: 200,
+            searchScope: .personalMemory,
+            captureProvenance: [
+                CiderItemCaptureProvenance(
+                    eventID: UUID().uuidString,
+                    owner: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: UUID().uuidString),
+                    sourceKind: "journal",
+                    surface: "cli",
+                    channel: "local",
+                    channelID: nil,
+                    threadID: nil,
+                    messageID: "daily-2026-06-13",
+                    senderID: "codex",
+                    senderName: "Codex",
+                    sourceURL: nil,
+                    sourceFile: nil,
+                    sourceText: "Panda Express journal capture",
+                    attachmentCount: 0,
+                    metadata: [:],
+                    createdAt: captureDate,
+                    relation: SecondBrainRelation(
+                        sourceOwner: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: UUID().uuidString),
+                        targetOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString),
+                        relationType: "produced_item",
+                        evidence: "Capture produced note.",
+                        source: "capture.add",
+                        actor: "system",
+                        confidence: 1,
+                        metadata: [:]
+                    )
+                )
+            ]
+        )
+
+        let dict = CiderCLI.itemSearchResultToDict(result)
+
+        let temporal = try #require(dict["temporal"] as? [String: Any])
+        #expect(temporal["displayDate"] as? String == "2025-06-15T15:06:40Z")
+        #expect(temporal["sortDate"] as? String == "2025-06-15T15:06:40Z")
+        #expect(temporal["dateSource"] as? String == "captureProvenance.createdAt")
+        #expect(temporal["dateConfidence"] as? String == "source_backed")
+
+        let provenance = try #require(dict["provenance"] as? [String: Any])
+        #expect(provenance["sourceType"] as? String == "note")
+        #expect(provenance["sourceID"] as? String == noteID.uuidString)
+        #expect(provenance["sourceTitle"] as? String == "Daily Journal 2026-06-13")
+        #expect(provenance["sourceLocation"] as? String == "Journal/Daily Journal 2026-06-13.md")
+        #expect(provenance["evidenceExcerpt"] as? String == "Dinner included Panda Express.")
+
+        let contextCommands = try #require(dict["contextCommands"] as? [String])
+        let verificationCommands = try #require(dict["verificationCommands"] as? [String])
+        #expect(contextCommands == ["cider-cli item context note \(noteID.uuidString) --json"])
+        #expect(verificationCommands == ["cider-cli item get note \(noteID.uuidString) --json"])
+        #expect((dict["safeNextCommands"] as? [String])?.contains("cider-cli item context note \(noteID.uuidString) --json") == true)
+    }
+
     @Test("search diagnostics filter low signal natural language expansions")
     func searchDiagnosticsFilterLowSignalNaturalLanguageExpansions() throws {
         let (db, url) = try makeTestDB()
@@ -1469,6 +1546,11 @@ struct CiderItemContextServiceTests {
             oldest.entityID,
         ])
         #expect(newestResults.first?.captureProvenance.first?.createdAt == newerCaptureDate)
+        let newestResult = try #require(newestResults.first)
+        let newestDict = CiderCLI.itemSearchResultToDict(newestResult)
+        let newestTemporal = try #require(newestDict["temporal"] as? [String: Any])
+        #expect(newestTemporal["sortDate"] as? String == "2025-06-15T15:06:40Z")
+        #expect(newestTemporal["dateSource"] as? String == "captureProvenance.createdAt")
 
         let oldestResults = try service.search("Panda Express", limit: 10, sort: .oldest)
         #expect(oldestResults.map(\.item?.id).prefix(3) == [
