@@ -671,6 +671,14 @@ struct CiderCLIAgentSafetyTests {
                 && fact["candidateID"] as? String == acceptedCandidateID
                 && fact["truthBoundary"] as? String == "accepted_memory_fact"
         })
+        let recallReceipt = try #require(recall["actionReceipt"] as? [String: Any])
+        #expect(recallReceipt["command"] as? String == "item.recall-context")
+        #expect(recallReceipt["readOnly"] as? Bool == true)
+        #expect(recallReceipt["changed"] as? Bool == false)
+        #expect(recallReceipt["status"] as? String == "succeeded")
+        #expect((recallReceipt["matchedSourceRefs"] as? [String])?.contains("note:\(noteID)") == true)
+        #expect((recallReceipt["safeCommandRefs"] as? [String])?.contains("cider-cli item context note \(noteID) --json") == true)
+        #expect(recallReceipt["truthBoundary"] as? String == "receipt_proves_command_execution_not_memory_truth")
         let reviewable = try #require(recall["reviewableCandidates"] as? [[String: Any]])
         #expect(reviewable.contains { candidate in
             candidate["id"] as? String == suggestedCandidateID
@@ -5749,6 +5757,14 @@ struct CiderCLIAgentSafetyTests {
         #expect(noMatch["warnings"] as? [[String: Any]] != nil)
         let commands = try #require(noMatch["safeNextCommands"] as? [String])
         #expect(commands.contains("cider-cli item search \"zzzz no such topic\" --json"))
+        let noMatchReceipt = try #require(noMatch["actionReceipt"] as? [String: Any])
+        #expect(noMatchReceipt["command"] as? String == "item.recall-context")
+        #expect(noMatchReceipt["readOnly"] as? Bool == true)
+        #expect(noMatchReceipt["changed"] as? Bool == false)
+        #expect(noMatchReceipt["status"] as? String == "failed")
+        #expect(noMatchReceipt["matchedCount"] as? Int == 0)
+        #expect((noMatchReceipt["safeCommandRefs"] as? [String])?.contains("cider-cli item search \"zzzz no such topic\" --json") == true)
+        #expect(noMatchReceipt["truthBoundary"] as? String == "receipt_proves_command_execution_not_memory_truth")
     }
 
     @Test("graph object candidates expose stable hub identity and conflicts")

@@ -222,6 +222,19 @@ func agentActionReceiptToDict(
     if let supportedTypes { dict["supportedTypes"] = supportedTypes }
     if let before { dict["before"] = before }
     if let after { dict["after"] = after }
+    if readOnly {
+        let parts = command.split(separator: ".", maxSplits: 1).map(String.init)
+        dict["commandFamily"] = parts.first ?? command
+        dict["subcommand"] = parts.count > 1 ? parts[1] : command
+        dict["resultStatus"] = status
+        dict["timestamp"] = ISO8601DateFormatter().string(from: Date())
+        dict["matchedCount"] = sourceRefs.count
+        dict["matchedSourceRefs"] = sourceRefs
+        dict["provenanceRefs"] = evidenceRefs.isEmpty ? sourceRefs : evidenceRefs
+        dict["safeCommandRefs"] = Array(NSOrderedSet(array: safeVerificationCommands + safeNextCommands)) as? [String] ?? safeVerificationCommands + safeNextCommands
+        dict["verificationHint"] = "verify_with_safe_commands_and_source_refs"
+        dict["truthBoundary"] = "receipt_proves_command_execution_not_memory_truth"
+    }
     return dict
 }
 

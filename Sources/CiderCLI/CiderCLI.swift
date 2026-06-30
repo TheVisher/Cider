@@ -18089,6 +18089,12 @@ struct CiderCLI {
             "warnings": warnings,
             "safeNextCommands": orderedUniqueStrings(safeCommands),
         ]
+        payload["actionReceipt"] = readOnlyActionReceiptToDict(
+            command: "item.recall-context",
+            matchedSourceRefs: bundles.map { $0.owner.canonicalRef },
+            safeCommandRefs: safeCommands,
+            provenanceRefs: surfacedRefs
+        )
         if let answer = recallAnswer(query: query, bundles: bundles, derivedCalculations: derivedCalculations) {
             payload["answer"] = answer
         }
@@ -18886,6 +18892,7 @@ struct CiderCLI {
             safeCommands = ["cider-cli item search <query> --json", "cider-cli item doctor --json"]
         }
         if jsonOutput {
+            let payloadSafeCommands = safeCommands
             outputJSON([
                 "ok": false,
                 "command": "item.recall-context",
@@ -18897,7 +18904,14 @@ struct CiderCLI {
                     "kind": "no_matches",
                     "message": error.localizedDescription,
                 ]] : [],
-                "safeNextCommands": safeCommands,
+                "safeNextCommands": payloadSafeCommands,
+                "actionReceipt": readOnlyActionReceiptToDict(
+                    command: "item.recall-context",
+                    matchedSourceRefs: [],
+                    safeCommandRefs: payloadSafeCommands,
+                    provenanceRefs: [],
+                    status: "failed"
+                ),
             ])
         } else {
             print("Error: \(error.localizedDescription)")
@@ -24201,7 +24215,7 @@ struct CiderCLI {
 
     static func itemSearchDiagnosticsReportToDict(_ report: CiderItemSearchDiagnosticsReport) -> [String: Any] {
         let rankedResults = report.exactMatches.map(itemSearchResultToDict)
-        return [
+        var payload: [String: Any] = [
             "ok": report.errors.isEmpty,
             "command": report.command,
             "readOnly": true,
@@ -24220,6 +24234,51 @@ struct CiderCLI {
             "errors": report.errors.map(itemSearchDiagnosticsWarningToDict),
             "safeNextCommands": report.safeNextCommands,
         ]
+        payload["actionReceipt"] = readOnlyActionReceiptToDict(
+            command: report.command,
+            matchedSourceRefs: itemSearchDiagnosticsReceiptSourceRefs(report),
+            safeCommandRefs: itemSearchDiagnosticsReceiptSafeCommandRefs(report),
+            provenanceRefs: itemSearchDiagnosticsReceiptProvenanceRefs(report),
+            status: report.errors.isEmpty ? "succeeded" : "failed",
+            generatedAt: report.generatedAt
+        )
+        return payload
+    }
+
+    private static func itemSearchDiagnosticsReceiptSourceRefs(_ report: CiderItemSearchDiagnosticsReport) -> [String] {
+        orderedUniqueStrings(
+            report.exactMatches.map(itemSearchReceiptSourceRef)
+                + report.matchedChunks.map { match in
+                    if let item = match.item { return "\(item.type.rawValue):\(item.id.uuidString)" }
+                    return match.chunk.owner.canonicalRef
+                }
+                + report.candidateItems.map { "\($0.type.rawValue):\($0.id.uuidString)" }
+                + report.indexWarnings.map(\.owner.canonicalRef)
+                + report.warnings.compactMap { $0.owner?.canonicalRef }
+                + report.errors.compactMap { $0.owner?.canonicalRef }
+        )
+    }
+
+    private static func itemSearchDiagnosticsReceiptProvenanceRefs(_ report: CiderItemSearchDiagnosticsReport) -> [String] {
+        var refs = itemSearchDiagnosticsReceiptSourceRefs(report)
+        for match in report.matchedChunks {
+            refs.append(contentsOf: match.routingDecisions.map { decision in "routing_decision:\(decision.id)" })
+            refs.append(contentsOf: match.captureProvenance.map { provenance in "capture_event:\(provenance.eventID)" })
+        }
+        return orderedUniqueStrings(refs)
+    }
+
+    private static func itemSearchDiagnosticsReceiptSafeCommandRefs(_ report: CiderItemSearchDiagnosticsReport) -> [String] {
+        var commands = report.safeNextCommands
+        for result in report.exactMatches {
+            commands.append(contentsOf: itemSearchReceiptSafeCommandRefs(result))
+        }
+        for match in report.matchedChunks {
+            commands.append(contentsOf: itemSearchReceiptSafeCommandRefs(match.searchResult))
+        }
+        commands.append(contentsOf: report.indexWarnings.map(\.safeRepairCommand))
+        commands.append(contentsOf: report.semanticStatus.safeNextCommands)
+        return orderedUniqueStrings(commands)
     }
 
     static func itemSearchFallbackStageToDict(_ stage: CiderItemSearchFallbackStage) -> [String: Any] {

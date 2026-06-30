@@ -725,6 +725,20 @@ struct CiderItemContextServiceTests {
         #expect((dict["matchedChunks"] as? [[String: Any]])?.isEmpty == false)
         #expect((dict["semanticStatus"] as? [String: Any])?["status"] as? String == "unavailable")
         #expect((dict["safeNextCommands"] as? [String])?.contains("cider-cli item rebuild-chunks note \(note.entityID.uuidString) --json") == true)
+        let receipt = try #require(dict["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.search-debug")
+        #expect(receipt["commandFamily"] as? String == "item")
+        #expect(receipt["subcommand"] as? String == "search-debug")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        #expect(receipt["status"] as? String == "succeeded")
+        #expect(receipt["matchedCount"] as? Int == 1)
+        #expect((receipt["matchedSourceRefs"] as? [String])?.contains("note:\(note.entityID.uuidString)") == true)
+        #expect((receipt["provenanceRefs"] as? [String])?.contains("note:\(note.entityID.uuidString)") == true)
+        #expect((receipt["safeCommandRefs"] as? [String])?.contains("cider-cli item get note \(note.entityID.uuidString) --json") == true)
+        #expect((receipt["safeCommandRefs"] as? [String])?.contains("cider-cli item rebuild-chunks note \(note.entityID.uuidString) --json") == true)
+        #expect(receipt["verificationHint"] as? String == "verify_with_safe_commands_and_source_refs")
+        #expect(receipt["truthBoundary"] as? String == "receipt_proves_command_execution_not_memory_truth")
     }
 
     @Test("search diagnostics explain unavailable semantic recall surface")
@@ -771,6 +785,17 @@ struct CiderItemContextServiceTests {
         #expect(report.matchedChunks.isEmpty)
         #expect(report.warnings.contains { $0.kind == "no_matches" })
         #expect(report.safeNextCommands.contains("cider-cli item search \"missing-zircon-token\" --limit 10 --json"))
+
+        let dict = CiderCLI.itemSearchDiagnosticsReportToDict(report)
+        let receipt = try #require(dict["actionReceipt"] as? [String: Any])
+        #expect(receipt["command"] as? String == "item.search-debug")
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        #expect(receipt["status"] as? String == "succeeded")
+        #expect(receipt["matchedCount"] as? Int == 0)
+        #expect((receipt["matchedSourceRefs"] as? [String])?.isEmpty == true)
+        #expect((receipt["safeCommandRefs"] as? [String])?.contains("cider-cli item search \"missing-zircon-token\" --limit 10 --json") == true)
+        #expect(receipt["truthBoundary"] as? String == "receipt_proves_command_execution_not_memory_truth")
     }
 
     @Test("search diagnostics identify missing and stale item chunk indexes")
