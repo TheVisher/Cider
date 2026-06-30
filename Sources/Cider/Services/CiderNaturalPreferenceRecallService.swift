@@ -41,6 +41,7 @@ struct CiderNaturalPreferenceRecallIntent: Codable, Equatable {
     var semanticQueryTerms: [String]
     var questionKind: CiderNaturalPreferenceRecallQuestionKind
     var temporalIntent: String?
+    var temporalDate: String?
     var factFamily: String?
     var factTarget: String?
     var subject: String?
@@ -143,12 +144,12 @@ final class CiderNaturalPreferenceRecallService {
     func answer(_ query: String, limit: Int = 8, mode: CiderNaturalRecallMode) throws -> CiderNaturalPreferenceRecallResponse {
         let boundedLimit = max(1, limit)
         let intent = interpret(query, mode: mode)
-        let searchPlan = intent.searchQueries.map {
+        let searchPlan = intent.searchQueries.map { query in
             CiderNaturalPreferenceRecallSearchStep(
-                query: $0,
+                query: query,
                 scope: .personalMemory,
-                sort: .newest,
-                limit: boundedLimit
+                sort: searchSort(for: query, intent: intent, mode: mode),
+                limit: searchLimit(for: query, intent: intent, mode: mode, requestedLimit: boundedLimit)
             )
         }
         var citationsByOwner: [String: (citation: CiderNaturalPreferenceRecallCitation, score: Int)] = [:]
@@ -264,6 +265,9 @@ final class CiderNaturalPreferenceRecallService {
         let candidates = candidatesByOwner.values
             .sorted {
                 if let temporalIntent = intent.temporalIntent, mode == .memory {
+                    if shouldPreferSpecificDateSourceAnchor(lhs: $0, rhs: $1, intent: intent) {
+                        return sourceDateMatchesTemporalIntent($0.sortDate, intent: intent)
+                    }
                     if shouldPreferGenericDateSourceAnchor(lhs: $0, rhs: $1, intent: intent) {
                         return sourceDateMatchesTemporalIntent($0.sortDate, intent: temporalIntent)
                     }
@@ -284,6 +288,11 @@ final class CiderNaturalPreferenceRecallService {
                 if let temporalIntent = intent.temporalIntent, mode == .memory {
                     let lhsCandidate = candidatesByOwner[$0.citation.owner.canonicalRef]
                     let rhsCandidate = candidatesByOwner[$1.citation.owner.canonicalRef]
+                    if let lhsCandidate,
+                       let rhsCandidate,
+                       shouldPreferSpecificDateSourceAnchor(lhs: lhsCandidate, rhs: rhsCandidate, intent: intent) {
+                        return sourceDateMatchesTemporalIntent(lhsCandidate.sortDate, intent: intent)
+                    }
                     if let lhsCandidate,
                        let rhsCandidate,
                        shouldPreferGenericDateSourceAnchor(lhs: lhsCandidate, rhs: rhsCandidate, intent: intent) {
@@ -347,6 +356,7 @@ final class CiderNaturalPreferenceRecallService {
         let subject = extractSubject(from: query)
         let semanticTerms = semanticQueryTerms(for: normalized, mode: mode)
         let temporalIntent = temporalIntent(for: normalized, mode: mode)
+        let temporalDate = specificDateAnchor(in: normalized)
         let factFamily = factFamily(for: normalized, semanticTerms: semanticTerms, mode: mode)
         let factTarget = factTarget(for: normalized, semanticTerms: semanticTerms, factFamily: factFamily, mode: mode)
         let kind: CiderNaturalPreferenceRecallQuestionKind
@@ -370,6 +380,7 @@ final class CiderNaturalPreferenceRecallService {
             semanticQueryTerms: semanticTerms,
             questionKind: kind,
             temporalIntent: temporalIntent,
+            temporalDate: temporalDate,
             factFamily: factFamily,
             factTarget: factTarget,
             subject: subject,
@@ -393,10 +404,11 @@ final class CiderNaturalPreferenceRecallService {
                 semanticTerms: semanticTerms,
                 mode: mode
             )
+            let specificDateAnchor = specificDateAnchorSearchQuery(normalizedQuery: normalizedQuery, mode: mode)
             let latestJournalAnchor = isLatestJournalSourceRecall(normalizedQuery: normalizedQuery, semanticTerms: semanticTerms)
                 ? "Daily Journal"
                 : nil
-            return orderedUnique([dateAnchor, latestJournalAnchor, focused, literal, broad, normalizedQuery].compactMap { $0 }.filter { !$0.isEmpty })
+            return orderedUnique([specificDateAnchor, dateAnchor, latestJournalAnchor, focused, literal, broad, normalizedQuery].compactMap { $0 }.filter { !$0.isEmpty })
         }
 
         if let subject, !subject.isEmpty {
@@ -420,6 +432,34 @@ final class CiderNaturalPreferenceRecallService {
             return ["worth ordering again food", "get it again liked food", "liked great restaurant cafeteria"]
         }
         return [normalizedQuery]
+    }
+
+    private func searchSort(
+        for query: String,
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode
+    ) -> CiderItemSearchSort {
+        if mode == .memory, isSpecificDateAnchorQuery(query, intent: intent) {
+            return .relevance
+        }
+        return .newest
+    }
+
+    private func searchLimit(
+        for query: String,
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode,
+        requestedLimit: Int
+    ) -> Int {
+        if mode == .memory, isSpecificDateAnchorQuery(query, intent: intent) {
+            return max(requestedLimit, 25)
+        }
+        return requestedLimit
+    }
+
+    private func isSpecificDateAnchorQuery(_ query: String, intent: CiderNaturalPreferenceRecallIntent) -> Bool {
+        guard let temporalDate = intent.temporalDate else { return false }
+        return query == "Daily Journal \(temporalDate)"
     }
 
     private func semanticQueryTerms(for normalizedQuery: String, mode: CiderNaturalRecallMode) -> [String] {
@@ -457,7 +497,15 @@ final class CiderNaturalPreferenceRecallService {
                 terms.append(contentsOf: ["dental", "toothpaste", "sensitive", "flossing"])
             }
         }
-        if normalizedQuery.contains("shift") || normalizedQuery.contains("schedule") || normalizedQuery.contains("pay") {
+        if normalizedQuery.contains("gas") || normalizedQuery.contains("fuel") || normalizedQuery.contains("fill-up") || normalizedQuery.contains("fill up") {
+            terms.append(contentsOf: ["gas", "fuel", "fill-up", "spending", "total", "gallons", "price", "cost"])
+            if normalizedQuery.contains("pay") || normalizedQuery.contains("paid") || normalizedQuery.contains("much") {
+                terms.append(contentsOf: ["paid", "amount"])
+            }
+        }
+        if normalizedQuery.contains("shift")
+            || normalizedQuery.contains("schedule")
+            || ((normalizedQuery.contains("pay") || normalizedQuery.contains("paid")) && containsWorkContext(normalizedQuery)) {
             terms.append(contentsOf: ["work", "schedule"])
             if normalizedQuery.contains("shift") {
                 terms.append(contentsOf: ["shift", "night"])
@@ -517,12 +565,27 @@ final class CiderNaturalPreferenceRecallService {
         return "Daily Journal \(Self.localDayFormatter.string(from: Date()))"
     }
 
+    private func specificDateAnchorSearchQuery(normalizedQuery: String, mode: CiderNaturalRecallMode) -> String? {
+        guard mode == .memory,
+              temporalIntent(for: normalizedQuery, mode: mode) == "specific_date",
+              let date = specificDateAnchor(in: normalizedQuery)
+        else {
+            return nil
+        }
+        return "Daily Journal \(date)"
+    }
+
     private func factFamily(for normalizedQuery: String, semanticTerms: [String], mode: CiderNaturalRecallMode) -> String? {
         guard mode == .memory else { return nil }
         if semanticTerms.contains("schedule")
             || semanticTerms.contains("shift")
-            || semanticTerms.contains("pay") {
+            || ((semanticTerms.contains("pay") || semanticTerms.contains("paid")) && containsWorkContext(normalizedQuery)) {
             return "work_schedule_fact"
+        }
+        if semanticTerms.contains("gas")
+            || semanticTerms.contains("fuel")
+            || semanticTerms.contains("gallons") {
+            return "spending_fact"
         }
         let asksClothingSizeOrFit = normalizedQuery.contains("size")
             || normalizedQuery.contains("fit")
@@ -543,6 +606,14 @@ final class CiderNaturalPreferenceRecallService {
             return "health_care_note"
         }
         return nil
+    }
+
+    private func containsWorkContext(_ normalizedQuery: String) -> Bool {
+        normalizedQuery.contains("work")
+            || normalizedQuery.contains("shift")
+            || normalizedQuery.contains("schedule")
+            || normalizedQuery.contains("boeing")
+            || normalizedQuery.contains("overtime")
     }
 
     private func factTarget(
@@ -630,6 +701,10 @@ final class CiderNaturalPreferenceRecallService {
         if mode == .memory {
             if isGenericExplicitDateRecall(intent: intent),
                sourceDateMatchesTemporalIntent(sourceSortDate(bundle: bundle, result: result), intent: intent.temporalIntent) {
+                return true
+            }
+            if isSpecificDateSourceRecall(intent: intent),
+               sourceDateMatchesTemporalIntent(sourceSortDate(bundle: bundle, result: result), intent: intent) {
                 return true
             }
             if isLatestJournalSourceRecall(intent: intent),
@@ -735,6 +810,10 @@ final class CiderNaturalPreferenceRecallService {
                sourceDateMatchesTemporalIntent(sortDate, intent: intent.temporalIntent) {
                 reasons.append("generic explicit-date source-date match")
             }
+            if isSpecificDateSourceRecall(intent: intent),
+               sourceDateMatchesTemporalIntent(sortDate, intent: intent) {
+                reasons.append("specific-date source-date match")
+            }
             if isLatestJournalSourceRecall(intent: intent),
                isDailyJournalSource(bundle: bundle, result: result) {
                 reasons.append("latest journal source-date match")
@@ -786,6 +865,10 @@ final class CiderNaturalPreferenceRecallService {
         if isGenericExplicitDateRecall(intent: intent),
            sourceDateMatchesTemporalIntent(sortDate, intent: intent.temporalIntent) {
             return "Matched general_memory from generic explicit-date recall anchored to source date \(Self.localDayFormatter.string(from: sortDate ?? Date())); not accepted memory truth."
+        }
+        if isSpecificDateSourceRecall(intent: intent),
+           sourceDateMatchesTemporalIntent(sortDate, intent: intent) {
+            return "Matched general_memory from specific-date recall anchored to source date \(Self.localDayFormatter.string(from: sortDate ?? Date())); not accepted memory truth."
         }
         if isLatestJournalSourceRecall(intent: intent) {
             return "Matched general_memory from latest journal recall anchored to Daily Journal source date \(Self.localDayFormatter.string(from: sortDate ?? Date())); not accepted memory truth."
@@ -841,6 +924,17 @@ final class CiderNaturalPreferenceRecallService {
             || text.contains("try for")
     }
 
+    private func containsSpendingSignal(_ text: String) -> Bool {
+        text.contains("$")
+            || text.contains("gallon")
+            || text.contains("total")
+            || text.contains("fuel amount")
+            || text.contains("effective price")
+            || text.contains("unit price")
+            || text.contains("paid")
+            || text.contains("cost")
+    }
+
     private func quoteLines(
         from text: String,
         tokens: [String],
@@ -853,6 +947,12 @@ final class CiderNaturalPreferenceRecallService {
             .filter { !$0.hasPrefix("{") && !$0.hasPrefix("[") }
             .filter { !isMetaRecallPlanningLine($0) }
             .compactMap(cleanRecallEvidenceLine)
+        if intent.factFamily == "spending_fact" {
+            let spendingLines = lines.filter { containsSpendingSignal($0.lowercased()) }
+            if !spendingLines.isEmpty {
+                return spendingLines.prefix(5).joined(separator: "\n")
+            }
+        }
         let matched = lines.filter { line in
             let lower = line.lowercased()
             if intent.normalizedQuery.contains("food") || intent.questionKind == .repeatSuggestion {
@@ -964,6 +1064,12 @@ final class CiderNaturalPreferenceRecallService {
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        if intent.factFamily == "spending_fact" {
+            let spendingLines = lines.filter { containsSpendingSignal($0.lowercased()) }
+            if !spendingLines.isEmpty {
+                return clipped(spendingLines.prefix(4).joined(separator: " "), limit: 220)
+            }
+        }
         let selected = lines.max { lhs, rhs in
             memoryFactLineScore(lhs, intent: intent) < memoryFactLineScore(rhs, intent: intent)
         } ?? quote
@@ -991,6 +1097,7 @@ final class CiderNaturalPreferenceRecallService {
         if lower.contains(" size ") { total += 4 }
         if lower.contains(" code") { total += 4 }
         if lower.contains("red kap") { total += 4 }
+        if containsSpendingSignal(lower) { total += 6 }
         if lower.contains("context:") || lower.contains("unrelated:") { total -= 8 }
         return total
     }
@@ -1008,6 +1115,9 @@ final class CiderNaturalPreferenceRecallService {
         if mode == .memory, isGenericExplicitDateRecall(intent: intent) {
             return "Ranked \(candidates.count) source-backed memory candidate(s)\(target) by explicit date intent first when source dates match, then semantic term overlap, chunk evidence, and source recency using terms: \(terms)."
         }
+        if mode == .memory, isSpecificDateSourceRecall(intent: intent) {
+            return "Ranked \(candidates.count) source-backed memory candidate(s)\(target) by specific source date first when source dates match, then semantic term overlap, chunk evidence, and source recency using terms: \(terms)."
+        }
         if mode == .memory, isLatestJournalSourceRecall(intent: intent) {
             return "Ranked \(candidates.count) source-backed memory candidate(s)\(target) by latest journal source date first for Daily Journal evidence, then semantic term overlap and chunk evidence using terms: \(terms)."
         }
@@ -1022,6 +1132,17 @@ final class CiderNaturalPreferenceRecallService {
         guard isGenericExplicitDateRecall(intent: intent) else { return false }
         let lhsMatches = sourceDateMatchesTemporalIntent(lhs.sortDate, intent: intent.temporalIntent)
         let rhsMatches = sourceDateMatchesTemporalIntent(rhs.sortDate, intent: intent.temporalIntent)
+        return lhsMatches != rhsMatches
+    }
+
+    private func shouldPreferSpecificDateSourceAnchor(
+        lhs: CiderNaturalPreferenceRecallCandidate,
+        rhs: CiderNaturalPreferenceRecallCandidate,
+        intent: CiderNaturalPreferenceRecallIntent
+    ) -> Bool {
+        guard isSpecificDateSourceRecall(intent: intent) else { return false }
+        let lhsMatches = sourceDateMatchesTemporalIntent(lhs.sortDate, intent: intent)
+        let rhsMatches = sourceDateMatchesTemporalIntent(rhs.sortDate, intent: intent)
         return lhsMatches != rhsMatches
     }
 
@@ -1055,10 +1176,25 @@ final class CiderNaturalPreferenceRecallService {
     }
 
     private func sourceSortDate(bundle: CiderItemContextBundle, result: CiderItemSearchResult) -> Date {
+        if let sourceDate = dailyJournalSourceDate(from: [bundle.item.title, result.title, bundle.item.relativePath].compactMap { $0 }) {
+            return sourceDate
+        }
         if let captureDate = result.captureProvenance.map(\.createdAt).max() {
             return captureDate
         }
         return max(bundle.item.updatedAt, bundle.item.createdAt)
+    }
+
+    private func dailyJournalSourceDate(from values: [String]) -> Date? {
+        for value in values {
+            let lower = value.lowercased()
+            guard lower.contains("daily journal") else { continue }
+            if let dateString = specificDateAnchor(in: lower),
+               let date = Self.localDayFormatter.date(from: dateString) {
+                return date
+            }
+        }
+        return nil
     }
 
     private func isGenericExplicitDateRecall(intent: CiderNaturalPreferenceRecallIntent) -> Bool {
@@ -1066,6 +1202,10 @@ final class CiderNaturalPreferenceRecallService {
             normalizedQuery: intent.normalizedQuery,
             semanticTerms: intent.semanticQueryTerms
         )
+    }
+
+    private func isSpecificDateSourceRecall(intent: CiderNaturalPreferenceRecallIntent) -> Bool {
+        intent.temporalIntent == "specific_date" && intent.temporalDate != nil
     }
 
     private func isGenericExplicitDateRecall(normalizedQuery: String, semanticTerms: [String]) -> Bool {
@@ -1113,6 +1253,23 @@ final class CiderNaturalPreferenceRecallService {
         default:
             return false
         }
+    }
+
+    private func sourceDateMatchesTemporalIntent(_ date: Date?, intent: CiderNaturalPreferenceRecallIntent) -> Bool {
+        guard let date,
+              intent.temporalIntent == "specific_date",
+              let temporalDate = intent.temporalDate
+        else {
+            return false
+        }
+        return Self.localDayFormatter.string(from: date) == temporalDate
+    }
+
+    private func specificDateAnchor(in normalizedQuery: String) -> String? {
+        guard let range = normalizedQuery.range(of: #"\b20\d{2}-\d{2}-\d{2}\b"#, options: .regularExpression) else {
+            return nil
+        }
+        return String(normalizedQuery[range])
     }
 
     private func broaderSearchCommand(for intent: CiderNaturalPreferenceRecallIntent, limit: Int) -> String? {

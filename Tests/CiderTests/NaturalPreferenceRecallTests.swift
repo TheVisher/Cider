@@ -24,6 +24,15 @@ struct NaturalPreferenceRecallTests {
         return (db, url)
     }
 
+    private func localDate(_ value: String) throws -> Date {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return try #require(formatter.date(from: value))
+    }
+
     private func insertJournal(
         id: UUID,
         title: String,
@@ -377,6 +386,103 @@ struct NaturalPreferenceRecallTests {
         #expect((firstCandidate["matchExplanation"] as? String)?.contains("generic explicit-date recall anchored to source date") == true)
         #expect(response.truthBoundary == "source_backed_observations_not_accepted_truth")
         #expect(response.changed == false)
+    }
+
+    @Test("specific historical date gas payment recall anchors to matching Daily Journal source date")
+    func specificHistoricalDateGasPaymentRecallAnchorsToSourceDate() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let june11JournalID = UUID()
+        let recentGasTrapID = UUID()
+        try insertJournal(
+            id: june11JournalID,
+            title: "Daily Journal 2026-06-11",
+            body: "Gas fill-up: I paid $81.07 for 12.87 gallons, roughly $6.30/gal.",
+            createdAt: try localDate("2026-06-11"),
+            into: db,
+            store: store
+        )
+        try insertJournal(
+            id: recentGasTrapID,
+            title: "Daily Journal 2026-06-30",
+            body: """
+            Newer gas wording trap: gas pay gas pay gas pay.
+            I mentioned expensive gas generally, but not the June 11 fill-up receipt.
+            """,
+            createdAt: try localDate("2026-06-30"),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("how much did I pay for gas on 2026-06-11?", limit: 5)
+
+        #expect(response.intent.temporalIntent == "specific_date")
+        #expect(response.intent.factFamily == "spending_fact")
+        #expect(response.intent.searchQueries.first == "Daily Journal 2026-06-11")
+        #expect(!response.intent.semanticQueryTerms.contains("work"))
+        #expect(!response.intent.semanticQueryTerms.contains("schedule"))
+        #expect(response.searchPlan.first?.sort == .relevance)
+        #expect(response.searchPlan.first?.limit == 25)
+        #expect(response.candidates.first?.owner.ownerID == june11JournalID.uuidString)
+        #expect(response.citations.first?.owner.ownerID == june11JournalID.uuidString)
+        #expect(response.candidates.contains { $0.owner.ownerID == recentGasTrapID.uuidString })
+        #expect(response.summary.contains("$81.07"))
+        #expect(response.summary.contains("12.87 gallons"))
+        #expect(response.summary.contains("$6.30/gal"))
+        #expect(response.candidates.first?.rankReason.contains("specific-date source-date match") == true)
+        #expect(response.candidates.first?.matchExplanation.contains("specific-date recall anchored to source date 2026-06-11") == true)
+        #expect(response.rankingExplanation.contains("specific source date first"))
+        #expect(response.truthBoundary == "source_backed_observations_not_accepted_truth")
+    }
+
+    @Test("specific historical journal date ranks matching Daily Journal before newer same word hits")
+    func specificHistoricalJournalDateRanksMatchingJournalBeforeNewerSameWordHits() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let june19JournalID = UUID()
+        let june25TrapID = UUID()
+        try insertJournal(
+            id: june19JournalID,
+            title: "Daily Journal 2026-06-19",
+            body: "Dentist reminder came up, and gas was expensive after the fill-up earlier this week.",
+            createdAt: try localDate("2026-06-19"),
+            into: db,
+            store: store
+        )
+        try insertJournal(
+            id: june25TrapID,
+            title: "Daily Journal 2026-06-25",
+            body: "Newer gas wording trap: journal gas journal gas journal gas, but this is not the requested source date.",
+            createdAt: try localDate("2026-06-25"),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what did I journal on 2026-06-19 about gas?", limit: 5)
+
+        #expect(response.intent.temporalIntent == "specific_date")
+        #expect(response.intent.searchQueries.first == "Daily Journal 2026-06-19")
+        #expect(response.searchPlan.first?.sort == .relevance)
+        #expect(response.searchPlan.first?.limit == 25)
+        #expect(response.candidates.first?.owner.ownerID == june19JournalID.uuidString)
+        #expect(response.citations.first?.owner.ownerID == june19JournalID.uuidString)
+        #expect(response.candidates.contains { $0.owner.ownerID == june25TrapID.uuidString })
+        #expect(response.summary.contains("gas was expensive"))
+        #expect(response.candidates.first?.rankReason.contains("specific-date source-date match") == true)
+        #expect(response.candidates.first?.matchExplanation.contains("specific-date recall anchored to source date 2026-06-19") == true)
+        #expect(response.truthBoundary == "source_backed_observations_not_accepted_truth")
     }
 
     @Test("latest journal thing wording ranks newest Daily Journal source date before older stronger word hits")

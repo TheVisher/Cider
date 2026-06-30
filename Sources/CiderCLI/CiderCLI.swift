@@ -24464,6 +24464,9 @@ struct CiderCLI {
         if let temporalIntent = response.intent.temporalIntent {
             intent["temporalIntent"] = temporalIntent
         }
+        if let temporalDate = response.intent.temporalDate {
+            intent["temporalDate"] = temporalDate
+        }
         if let subject = response.intent.subject {
             intent["subject"] = subject
         }
