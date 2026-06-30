@@ -40,6 +40,7 @@ struct CiderNaturalPreferenceRecallIntent: Codable, Equatable {
     var normalizedQuery: String
     var semanticQueryTerms: [String]
     var questionKind: CiderNaturalPreferenceRecallQuestionKind
+    var factFamily: String?
     var factTarget: String?
     var subject: String?
     var searchQueries: [String]
@@ -76,6 +77,8 @@ struct CiderNaturalPreferenceRecallCandidate: Identifiable, Codable, Equatable {
     var citationRefs: [String]
     var score: Int
     var rankReason: String
+    var matchedSemanticTerms: [String]
+    var matchExplanation: String
     var truthBoundary: String
     var safeNextCommands: [String]
 }
@@ -158,12 +161,16 @@ final class CiderNaturalPreferenceRecallService {
                 let score = evidenceScore(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode)
                 let rankReason = rankReason(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode)
                 let evidenceKind = evidenceKind(quote: quote, result: result, intent: intent, mode: mode)
+                let matchedTerms = matchedSemanticTerms(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode)
+                let matchExplanation = matchExplanation(matchedTerms: matchedTerms, intent: intent, result: result, mode: mode)
                 if var candidate = candidatesByOwner[key] {
                     candidate.claim = mergeClaims(candidate.claim, quote)
                     candidate.snippet = mergeClaims(candidate.snippet, clipped(result.snippet, limit: 260))
                     candidate.citationRefs = orderedUnique(candidate.citationRefs + [sourceRef])
                     candidate.score = max(candidate.score, score)
                     candidate.rankReason = mergeRankReasons(candidate.rankReason, rankReason)
+                    candidate.matchedSemanticTerms = orderedUnique(candidate.matchedSemanticTerms + matchedTerms)
+                    candidate.matchExplanation = mergeRankReasons(candidate.matchExplanation, matchExplanation)
                     candidate.safeNextCommands = orderedUnique(candidate.safeNextCommands + commands)
                     if evidenceKind == "source_backed_candidate" {
                         candidate.evidenceKind = evidenceKind
@@ -182,6 +189,8 @@ final class CiderNaturalPreferenceRecallService {
                         citationRefs: [sourceRef],
                         score: score,
                         rankReason: rankReason,
+                        matchedSemanticTerms: matchedTerms,
+                        matchExplanation: matchExplanation,
                         truthBoundary: "source_backed_observations_not_accepted_truth",
                         safeNextCommands: commands
                     )
@@ -252,7 +261,8 @@ final class CiderNaturalPreferenceRecallService {
         let normalized = query.lowercased()
         let subject = extractSubject(from: query)
         let semanticTerms = semanticQueryTerms(for: normalized, mode: mode)
-        let factTarget = factTarget(for: normalized, semanticTerms: semanticTerms, mode: mode)
+        let factFamily = factFamily(for: normalized, semanticTerms: semanticTerms, mode: mode)
+        let factTarget = factTarget(for: normalized, semanticTerms: semanticTerms, factFamily: factFamily, mode: mode)
         let kind: CiderNaturalPreferenceRecallQuestionKind
         if normalized.contains("eaten at") || normalized.contains("been to") || normalized.contains("before") {
             kind = .existence
@@ -273,6 +283,7 @@ final class CiderNaturalPreferenceRecallService {
             normalizedQuery: normalized,
             semanticQueryTerms: semanticTerms,
             questionKind: kind,
+            factFamily: factFamily,
             factTarget: factTarget,
             subject: subject,
             searchQueries: searchQueries(subject: subject, kind: kind, normalizedQuery: normalized, semanticTerms: semanticTerms, mode: mode)
@@ -328,6 +339,38 @@ final class CiderNaturalPreferenceRecallService {
                 terms.append(contentsOf: ["6'3", "60-rg", "60", "red", "kap"])
             }
         }
+        let asksSizeOrFit = normalizedQuery.contains("size") || normalizedQuery.contains("fit") || normalizedQuery.contains("fits")
+        if (asksSizeOrFit && (normalizedQuery.contains("boot") || normalizedQuery.contains("shoe")))
+            || normalizedQuery.contains("clothing")
+            || normalizedQuery.contains("shirt")
+            || normalizedQuery.contains("pants") {
+            terms.append(contentsOf: ["clothing", "size", "fit"])
+            if normalizedQuery.contains("boot") {
+                terms.append(contentsOf: ["boot", "boots", "wide", "workshop"])
+            }
+        }
+        let asksToolPreference = normalizedQuery.contains("prefer") || normalizedQuery.contains("preferred") || normalizedQuery.contains("kit") || normalizedQuery.contains("gadget") || normalizedQuery.contains("screwdriver")
+        if asksToolPreference {
+            terms.append(contentsOf: ["tool", "gadget", "preferred", "prefer", "kit"])
+            if normalizedQuery.contains("screwdriver") {
+                terms.append(contentsOf: ["screwdriver", "wera", "bits", "desk"])
+            }
+        }
+        if normalizedQuery.contains("dental") || normalizedQuery.contains("toothpaste") || normalizedQuery.contains("medication") || normalizedQuery.contains("medicine") || normalizedQuery.contains("care") {
+            terms.append(contentsOf: ["health", "care", "note"])
+            if normalizedQuery.contains("dental") || normalizedQuery.contains("toothpaste") {
+                terms.append(contentsOf: ["dental", "toothpaste", "sensitive", "flossing"])
+            }
+        }
+        if normalizedQuery.contains("shift") || normalizedQuery.contains("schedule") || normalizedQuery.contains("pay") {
+            terms.append(contentsOf: ["work", "schedule"])
+            if normalizedQuery.contains("shift") {
+                terms.append(contentsOf: ["shift", "night"])
+            }
+            if normalizedQuery.contains("pay") {
+                terms.append("pay")
+            }
+        }
         return orderedUnique(terms)
     }
 
@@ -335,10 +378,52 @@ final class CiderNaturalPreferenceRecallService {
         ["about", "remember", "recall", "saved", "save", "note", "notes", "someone", "thing", "things"]
     }
 
-    private func factTarget(for normalizedQuery: String, semanticTerms: [String], mode: CiderNaturalRecallMode) -> String? {
+    private func factFamily(for normalizedQuery: String, semanticTerms: [String], mode: CiderNaturalRecallMode) -> String? {
+        guard mode == .memory else { return nil }
+        if semanticTerms.contains("schedule")
+            || semanticTerms.contains("shift")
+            || semanticTerms.contains("pay") {
+            return "work_schedule_fact"
+        }
+        let asksClothingSizeOrFit = normalizedQuery.contains("size")
+            || normalizedQuery.contains("fit")
+            || normalizedQuery.contains("fits")
+        if normalizedQuery.contains("coverall")
+            || semanticTerms.contains("clothing")
+            || (asksClothingSizeOrFit && (semanticTerms.contains("boot") || semanticTerms.contains("boots") || semanticTerms.contains("shoe"))) {
+            return "clothing_size_fit"
+        }
+        if semanticTerms.contains("screwdriver")
+            || (semanticTerms.contains("tool") && (semanticTerms.contains("prefer") || semanticTerms.contains("preferred") || semanticTerms.contains("kit"))) {
+            return "tool_gadget_preference"
+        }
+        if semanticTerms.contains("dental")
+            || semanticTerms.contains("toothpaste")
+            || semanticTerms.contains("medication")
+            || semanticTerms.contains("medicine") {
+            return "health_care_note"
+        }
+        return nil
+    }
+
+    private func factTarget(
+        for normalizedQuery: String,
+        semanticTerms: [String],
+        factFamily: String?,
+        mode: CiderNaturalRecallMode
+    ) -> String? {
         guard mode == .memory else { return nil }
         if normalizedQuery.contains("coverall") && semanticTerms.contains("work") {
             return "work_coveralls_size"
+        }
+        if factFamily == "clothing_size_fit", semanticTerms.contains("boot"), semanticTerms.contains("workshop") {
+            return "workshop_boot_size"
+        }
+        if factFamily == "tool_gadget_preference", semanticTerms.contains("screwdriver"), semanticTerms.contains("desk") {
+            return "desk_screwdriver_kit_preference"
+        }
+        if factFamily == "health_care_note", semanticTerms.contains("dental"), semanticTerms.contains("toothpaste") {
+            return "dental_toothpaste_care_note"
         }
         if normalizedQuery.contains("locker") && normalizedQuery.contains("code") {
             return "work_locker_code"
@@ -512,6 +597,33 @@ final class CiderNaturalPreferenceRecallService {
             reasons.append("journal source")
         }
         return orderedUnique(reasons).joined(separator: "; ")
+    }
+
+    private func matchedSemanticTerms(
+        quote: String,
+        bundle: CiderItemContextBundle,
+        result: CiderItemSearchResult,
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode
+    ) -> [String] {
+        guard mode == .memory else { return [] }
+        let searchable = ([quote, result.title, result.snippet, bundle.item.title] + bundle.chunks.map(\.body))
+            .joined(separator: "\n")
+            .lowercased()
+        return intent.semanticQueryTerms.filter { searchable.contains($0) }
+    }
+
+    private func matchExplanation(
+        matchedTerms: [String],
+        intent: CiderNaturalPreferenceRecallIntent,
+        result: CiderItemSearchResult,
+        mode: CiderNaturalRecallMode
+    ) -> String {
+        guard mode == .memory else { return "" }
+        let family = intent.factFamily ?? "general_memory"
+        let target = intent.factTarget.map { " targeting \($0)" } ?? ""
+        let source = result.kind == .chunk ? "chunk" : "item"
+        return "Matched \(family)\(target) from source-backed terms [\(matchedTerms.joined(separator: ", "))] in \(source) evidence; not accepted memory truth."
     }
 
     private func evidenceTokens(for intent: CiderNaturalPreferenceRecallIntent, mode: CiderNaturalRecallMode) -> [String] {
@@ -692,7 +804,11 @@ final class CiderNaturalPreferenceRecallService {
         let lower = line.lowercased()
         var total = 0
         if lower.contains("coverall") { total += 8 }
+        if lower.contains("boot") || lower.contains("shoe") { total += 7 }
+        if lower.contains("screwdriver") || lower.contains("tool") || lower.contains("kit") { total += 7 }
+        if lower.contains("dental") || lower.contains("toothpaste") || lower.contains("medication") { total += 7 }
         if lower.contains(" fit") || lower.contains("fits") { total += 6 }
+        if lower.contains("preferred") || lower.contains("prefer") { total += 6 }
         if lower.contains("60-rg") || lower.contains("60 regular") { total += 6 }
         if lower.contains(" size ") { total += 4 }
         if lower.contains(" code") { total += 4 }

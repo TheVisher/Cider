@@ -382,6 +382,132 @@ struct NaturalPreferenceRecallTests {
         #expect(payload["rankingExplanation"] as? String == response.rankingExplanation)
     }
 
+    @Test("memory recall detects clothing size fact family beyond coveralls")
+    func memoryRecallDetectsClothingSizeFactFamilyBeyondCoveralls() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let bootNoteID = UUID()
+        try insertJournal(
+            id: bootNoteID,
+            title: "Workshop boot fit",
+            body: "For workshop boots, size 13 wide fit best with the thicker work socks.",
+            createdAt: Date(timeIntervalSince1970: 1_782_701_200),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what boot size did I save for workshop boots?", limit: 5)
+        let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
+        let intent = try #require(payload["intent"] as? [String: Any])
+        let candidates = try #require(payload["candidates"] as? [[String: Any]])
+        let candidate = try #require(candidates.first)
+
+        #expect(response.intent.factFamily == "clothing_size_fit")
+        #expect(response.intent.factTarget == "workshop_boot_size")
+        #expect(response.intent.semanticQueryTerms.contains("wide"))
+        #expect(intent["factFamily"] as? String == "clothing_size_fit")
+        #expect(intent["factTarget"] as? String == "workshop_boot_size")
+        #expect(response.candidates.first?.owner.ownerID == bootNoteID.uuidString)
+        #expect((candidate["matchedSemanticTerms"] as? [String])?.contains("workshop") == true)
+        #expect((candidate["matchExplanation"] as? String)?.contains("clothing_size_fit") == true)
+        #expect(response.summary.contains("size 13 wide fit best"))
+        #expect(response.truthBoundary == "source_backed_observations_not_accepted_truth")
+    }
+
+    @Test("memory recall detects tool preference fact family")
+    func memoryRecallDetectsToolPreferenceFactFamily() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let toolNoteID = UUID()
+        try insertJournal(
+            id: toolNoteID,
+            title: "Desk tool notes",
+            body: "For precise desk work, the Wera micro screwdriver kit is the preferred tool because the bits do not strip tiny screws.",
+            createdAt: Date(timeIntervalSince1970: 1_782_701_200),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what screwdriver kit do I prefer for desk work?", limit: 5)
+
+        #expect(response.intent.factFamily == "tool_gadget_preference")
+        #expect(response.intent.factTarget == "desk_screwdriver_kit_preference")
+        #expect(response.candidates.first?.owner.ownerID == toolNoteID.uuidString)
+        #expect(response.candidates.first?.matchedSemanticTerms.contains("screwdriver") == true)
+        #expect(response.candidates.first?.matchExplanation.contains("tool_gadget_preference") == true)
+        #expect(response.summary.contains("Wera micro screwdriver kit"))
+    }
+
+    @Test("memory recall detects health care note fact family without accepted truth promotion")
+    func memoryRecallDetectsHealthCareNoteFactFamily() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let dentalNoteID = UUID()
+        try insertJournal(
+            id: dentalNoteID,
+            title: "Dental care note",
+            body: "Dental care note: use the sensitive toothpaste at night after flossing, according to the saved care reminder.",
+            createdAt: Date(timeIntervalSince1970: 1_782_701_200),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what dental care note did I save about toothpaste?", limit: 5)
+
+        #expect(response.intent.factFamily == "health_care_note")
+        #expect(response.intent.factTarget == "dental_toothpaste_care_note")
+        #expect(response.candidates.first?.owner.ownerID == dentalNoteID.uuidString)
+        #expect(response.candidates.first?.matchedSemanticTerms.contains("dental") == true)
+        #expect(response.candidates.first?.matchExplanation.contains("source-backed terms") == true)
+        #expect(response.summary.contains("sensitive toothpaste"))
+        #expect(response.truthBoundary == "source_backed_observations_not_accepted_truth")
+    }
+
+    @Test("memory recall bounded fact families avoid false positive matches")
+    func memoryRecallBoundedFactFamiliesAvoidFalsePositiveMatches() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        try insertJournal(
+            id: UUID(),
+            title: "Dental care note",
+            body: "Dental care note: use the sensitive toothpaste at night after flossing.",
+            createdAt: Date(timeIntervalSince1970: 1_782_701_200),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what work tool did I save for night shift?", limit: 5)
+
+        #expect(response.candidates.isEmpty)
+        #expect(response.intent.factFamily == "work_schedule_fact")
+        #expect(response.broaderSearchCommand == "cider-cli item search \"work tool night shift schedule\" --scope personalMemory --sort newest --limit 10 --json")
+        #expect(response.safeNextCommands.contains(response.broaderSearchCommand!))
+    }
+
     @Test("memory recall miss includes broader search fallback metadata")
     func memoryRecallMissIncludesBroaderSearchFallbackMetadata() throws {
         let (db, url) = try makeTestDB()
@@ -396,6 +522,7 @@ struct NaturalPreferenceRecallTests {
         let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
 
         #expect(response.candidates.isEmpty)
+        #expect(response.intent.factFamily == nil)
         #expect(response.summary.contains("Try the broader source search fallback"))
         #expect(response.broaderSearchCommand == "cider-cli item search \"lunar hiking boots\" --scope personalMemory --sort newest --limit 10 --json")
         #expect(response.safeNextCommands.contains(response.broaderSearchCommand!))

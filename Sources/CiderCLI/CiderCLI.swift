@@ -23822,6 +23822,9 @@ struct CiderCLI {
             "questionKind": response.intent.questionKind.rawValue,
             "searchQueries": response.intent.searchQueries,
         ]
+        if let factFamily = response.intent.factFamily {
+            intent["factFamily"] = factFamily
+        }
         if let factTarget = response.intent.factTarget {
             intent["factTarget"] = factTarget
         }
@@ -23868,6 +23871,8 @@ struct CiderCLI {
                     "citationRefs": candidate.citationRefs,
                     "score": candidate.score,
                     "rankReason": candidate.rankReason,
+                    "matchedSemanticTerms": candidate.matchedSemanticTerms,
+                    "matchExplanation": candidate.matchExplanation,
                     "truthBoundary": candidate.truthBoundary,
                     "safeNextCommands": candidate.safeNextCommands,
                 ]
