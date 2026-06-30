@@ -1057,6 +1057,15 @@ struct CiderCLIAgentSafetyTests {
         )
         #expect(list["readOnly"] as? Bool == true)
         #expect(list["changed"] as? Bool == false)
+        let listReceipt = try #require(list["actionReceipt"] as? [String: Any])
+        #expect(listReceipt["command"] as? String == "item.memory-facts.list")
+        #expect(listReceipt["readOnly"] as? Bool == true)
+        #expect(listReceipt["changed"] as? Bool == false)
+        #expect(listReceipt["status"] as? String == "succeeded")
+        #expect(listReceipt["matchedCount"] as? Int == 1)
+        #expect((listReceipt["matchedSourceRefs"] as? [String])?.contains("memory_candidate:\(acceptedCandidateID)") == true)
+        #expect((listReceipt["safeCommandRefs"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedCandidateID) --json") == true)
+        #expect(listReceipt["truthBoundary"] as? String == "receipt_proves_command_execution_not_memory_truth")
         let facts = try #require(list["facts"] as? [[String: Any]])
         #expect(facts.count == 1)
         #expect(facts.first?["candidateID"] as? String == acceptedCandidateID)
@@ -1072,6 +1081,14 @@ struct CiderCLIAgentSafetyTests {
             runCLI(args: ["item", "memory-facts", "inspect", acceptedCandidateID, "--json"], vault: vault),
             command: "item.memory-facts.inspect"
         )
+        let inspectReceipt = try #require(inspect["actionReceipt"] as? [String: Any])
+        #expect(inspectReceipt["command"] as? String == "item.memory-facts.inspect")
+        #expect(inspectReceipt["readOnly"] as? Bool == true)
+        #expect(inspectReceipt["changed"] as? Bool == false)
+        #expect(inspectReceipt["status"] as? String == "succeeded")
+        #expect((inspectReceipt["matchedSourceRefs"] as? [String])?.contains("memory_candidate:\(acceptedCandidateID)") == true)
+        #expect((inspectReceipt["safeCommandRefs"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedCandidateID) --json") == true)
+        #expect(inspectReceipt["truthBoundary"] as? String == "receipt_proves_command_execution_not_memory_truth")
         let inspectedFact = try #require(inspect["fact"] as? [String: Any])
         #expect(inspectedFact["candidateRef"] as? String == "memory_candidate:\(acceptedCandidateID)")
         #expect(inspectedFact["sourceQuote"] as? String == "Erik prefers espresso in the morning.")
@@ -1133,6 +1150,13 @@ struct CiderCLIAgentSafetyTests {
         )
         #expect(missing["readOnly"] as? Bool == true)
         #expect(missing["changed"] as? Bool == false)
+        let missingReceipt = try #require(missing["actionReceipt"] as? [String: Any])
+        #expect(missingReceipt["command"] as? String == "item.memory-facts.inspect")
+        #expect(missingReceipt["readOnly"] as? Bool == true)
+        #expect(missingReceipt["changed"] as? Bool == false)
+        #expect(missingReceipt["status"] as? String == "failed")
+        #expect(missingReceipt["errorCode"] as? String == "accepted_memory_fact_not_found")
+        #expect(missingReceipt["truthBoundary"] as? String == "receipt_proves_command_execution_not_memory_truth")
         let selector = try #require(missing["selector"] as? [String: Any])
         #expect(selector["candidateID"] as? String == "missing-memory-fact")
 
@@ -1155,6 +1179,10 @@ struct CiderCLIAgentSafetyTests {
             errorCode: "memory_candidate_not_accepted"
         )
         #expect(unaccepted["reviewState"] as? String == "suggested")
+        let unacceptedReceipt = try #require(unaccepted["actionReceipt"] as? [String: Any])
+        #expect(unacceptedReceipt["command"] as? String == "item.memory-facts.inspect")
+        #expect(unacceptedReceipt["status"] as? String == "failed")
+        #expect(unacceptedReceipt["errorCode"] as? String == "memory_candidate_not_accepted")
         #expect((unaccepted["safeNextCommands"] as? [String])?.contains("cider-cli capture review-queue --kind memory_candidate --json") == true)
     }
 
@@ -1203,6 +1231,14 @@ struct CiderCLIAgentSafetyTests {
         )
         #expect(relevance["readOnly"] as? Bool == true)
         #expect(relevance["changed"] as? Bool == false)
+        let relevanceReceipt = try #require(relevance["actionReceipt"] as? [String: Any])
+        #expect(relevanceReceipt["command"] as? String == "item.memory-facts.resurface")
+        #expect(relevanceReceipt["readOnly"] as? Bool == true)
+        #expect(relevanceReceipt["changed"] as? Bool == false)
+        #expect(relevanceReceipt["status"] as? String == "succeeded")
+        #expect((relevanceReceipt["matchedSourceRefs"] as? [String])?.contains("memory_candidate:\(acceptedID)") == true)
+        #expect((relevanceReceipt["safeCommandRefs"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedID) --json") == true)
+        #expect(relevanceReceipt["truthBoundary"] as? String == "receipt_proves_command_execution_not_memory_truth")
         let candidates = try #require(relevance["candidates"] as? [[String: Any]])
         #expect(candidates.contains { candidate in
             candidate["family"] as? String == "accepted_memory_fact"
@@ -1228,6 +1264,13 @@ struct CiderCLIAgentSafetyTests {
             runCLI(args: ["item", "due-to-surface", "--limit", "10", "--stale-after-days", "999", "--json"], vault: vault),
             command: "item.due-to-surface"
         )
+        let dueReceipt = try #require(due["actionReceipt"] as? [String: Any])
+        #expect(dueReceipt["command"] as? String == "item.due-to-surface")
+        #expect(dueReceipt["readOnly"] as? Bool == true)
+        #expect(dueReceipt["changed"] as? Bool == false)
+        #expect(dueReceipt["status"] as? String == "succeeded")
+        #expect((dueReceipt["matchedSourceRefs"] as? [String])?.contains("memory_candidate:\(acceptedID)") == true)
+        #expect((dueReceipt["safeCommandRefs"] as? [String])?.contains("cider-cli item memory-facts inspect \(acceptedID) --json") == true)
         let dueCandidates = try #require(due["candidates"] as? [[String: Any]])
         let dueAccepted = try #require(dueCandidates.first { $0["family"] as? String == "accepted_memory_fact" && $0["factRef"] as? String == "accepted_memory_fact:\(acceptedID)" })
         let dueRelevance = try #require(dueAccepted["surfacingRelevance"] as? [String: Any])
@@ -1250,6 +1293,10 @@ struct CiderCLIAgentSafetyTests {
         )
         #expect(missing["readOnly"] as? Bool == true)
         #expect(missing["changed"] as? Bool == false)
+        let missingReceipt = try #require(missing["actionReceipt"] as? [String: Any])
+        #expect(missingReceipt["command"] as? String == "item.memory-facts.resurface")
+        #expect(missingReceipt["status"] as? String == "failed")
+        #expect(missingReceipt["errorCode"] as? String == "accepted_memory_fact_not_found")
 
         let badLimit = try assertStrictFailureJSON(
             runCLI(args: ["item", "memory-facts", "resurface", "--limit", "not-a-number", "--json"], vault: vault),

@@ -5771,6 +5771,7 @@ struct CiderCLI {
                         "staleAfterDays": staleAfterDays,
                         "includeSuppressed": includeSuppressed,
                     ]
+                    payload["actionReceipt"] = dueToSurfaceReadOnlyActionReceipt(feed: feed)
                     outputJSON(payload)
                 } else {
                     print("Due-to-surface candidates: \(feed.candidates.count)")
@@ -15028,6 +15029,30 @@ struct CiderCLI {
         return filters
     }
 
+    static func dueToSurfaceReadOnlyActionReceipt(feed: CiderDueToSurfaceFeed) -> [String: Any] {
+        let sourceRefs = feed.candidates.flatMap { candidate in
+            [candidate.candidateRef, candidate.factRef, candidate.owner.canonicalRef].compactMap { $0 } + candidate.sourceRefs
+        }
+        let safeCommands = feed.candidates.flatMap { candidate in
+            candidate.safeVerificationCommands + candidate.safeNextCommands
+        } + feed.safeNextCommands
+        var receipt = readOnlyActionReceiptToDict(
+            command: feed.command,
+            matchedSourceRefs: sourceRefs,
+            safeCommandRefs: safeCommands,
+            provenanceRefs: sourceRefs,
+            status: "succeeded",
+            generatedAt: feed.generatedAt,
+            truthBoundary: "receipt_proves_command_execution_not_memory_truth"
+        )
+        receipt["action"] = "read_due_to_surface_feed"
+        receipt["actor"] = "cider-cli"
+        receipt["sourceBoundary"] = "mixed_due_to_surface_read_model"
+        receipt["candidateBoundary"] = "mixed_reviewable_and_accepted_truth_boundaries"
+        receipt["countsByFamily"] = feed.countsByFamily
+        return receipt
+    }
+
     static func validateReviewFilterIfPresent(
         command: String,
         name: String,
@@ -19532,6 +19557,7 @@ struct CiderCLI {
             case "list", "ls":
                 let limit = max(1, min(parseFlag("--limit", from: args).flatMap(Int.init) ?? 50, 100))
                 let facts = try service.list(limit: limit)
+                let receipt = acceptedMemoryFactReadOnlyActionReceipt(command: "item.memory-facts.list", facts: facts)
                 let payload: [String: Any] = [
                     "ok": true,
                     "command": "item.memory-facts.list",
@@ -19541,6 +19567,8 @@ struct CiderCLI {
                     "candidateBoundary": "reviewable_memory_candidates_excluded",
                     "count": facts.count,
                     "facts": facts.map(acceptedMemoryFactToDict),
+                    "actionReceipt": receipt,
+                    "safeVerificationCommands": receipt["safeCommandRefs"] ?? [],
                     "safeNextCommands": [
                         "cider-cli item memory-facts list --json",
                         "cider-cli capture review-queue --kind memory_candidate --json",
@@ -19551,6 +19579,11 @@ struct CiderCLI {
                 let rawID = positional.dropFirst().first ?? parseFlag("--id", from: args) ?? parseFlag("--candidate", from: args)
                 do {
                     let fact = try service.inspect(rawID)
+                    let receipt = acceptedMemoryFactReadOnlyActionReceipt(
+                        command: "item.memory-facts.inspect",
+                        facts: [fact],
+                        selector: ["candidateID": fact.id, "factRef": fact.factRef, "candidateRef": fact.candidateRef]
+                    )
                     let payload: [String: Any] = [
                         "ok": true,
                         "command": "item.memory-facts.inspect",
@@ -19558,6 +19591,8 @@ struct CiderCLI {
                         "changed": false,
                         "selector": ["candidateID": fact.id, "factRef": fact.factRef, "candidateRef": fact.candidateRef],
                         "fact": acceptedMemoryFactToDict(fact),
+                        "actionReceipt": receipt,
+                        "safeVerificationCommands": receipt["safeCommandRefs"] ?? [],
                         "safeNextCommands": acceptedMemoryFactSafeCommands(fact.candidate),
                     ]
                     if jsonOutput { outputJSON(payload) } else { print("Accepted memory fact: \(fact.id)") }
@@ -19587,6 +19622,7 @@ struct CiderCLI {
                         "countsByFamily": CiderDueToSurfaceFeedService.groupedFamilyCounts(candidates),
                         "selector": rawFactID.map { ["candidateID": $0] } ?? [:],
                         "candidates": candidates.map { dueToSurfaceCandidateToDict($0, formatter: ISO8601DateFormatter()) },
+                        "actionReceipt": acceptedMemoryFactResurfaceActionReceipt(candidates: candidates, rawFactID: rawFactID),
                         "safeVerificationCommands": ["cider-cli item memory-facts resurface --json"],
                         "safeNextCommands": [
                             "cider-cli item memory-facts list --json",
@@ -20322,6 +20358,106 @@ struct CiderCLI {
         return receipt
     }
 
+    static func acceptedMemoryFactReadOnlyActionReceipt(
+        command: String,
+        facts: [SecondBrainAcceptedMemoryFact],
+        selector: [String: Any]? = nil,
+        status: String = "succeeded"
+    ) -> [String: Any] {
+        var safeCommands = facts.flatMap { acceptedMemoryFactSafeCommands($0.candidate) }
+        safeCommands.append("cider-cli item memory-facts list --json")
+        var receipt = readOnlyActionReceiptToDict(
+            command: command,
+            matchedSourceRefs: facts.flatMap(acceptedMemoryFactReceiptSourceRefs),
+            safeCommandRefs: safeCommands,
+            provenanceRefs: facts.flatMap { fact in
+                [fact.factRef, fact.candidateRef, fact.candidate.owner.canonicalRef]
+            },
+            status: status
+        )
+        receipt["action"] = acceptedMemoryFactReceiptAction(command)
+        receipt["actor"] = "cider-cli"
+        receipt["sourceBoundary"] = "accepted_memory_fact_read_model"
+        receipt["truthBoundary"] = "receipt_proves_command_execution_not_memory_truth"
+        receipt["candidateBoundary"] = "reviewable_memory_candidates_excluded"
+        if let selector { receipt["selector"] = selector }
+        if let first = facts.first {
+            receipt["factRef"] = first.factRef
+            receipt["candidateRef"] = first.candidateRef
+            receipt["owner"] = ownerToDict(first.candidate.owner)
+            receipt["ownerRef"] = first.candidate.owner.canonicalRef
+        }
+        return receipt
+    }
+
+    static func acceptedMemoryFactResurfaceActionReceipt(candidates: [CiderDueToSurfaceCandidate], rawFactID: String?) -> [String: Any] {
+        let safeCommands = candidates.flatMap { candidate in
+            candidate.safeVerificationCommands + candidate.safeNextCommands
+        } + ["cider-cli item memory-facts resurface --json", "cider-cli item memory-facts list --json"]
+        var receipt = readOnlyActionReceiptToDict(
+            command: "item.memory-facts.resurface",
+            matchedSourceRefs: candidates.flatMap(acceptedMemoryFactResurfaceReceiptSourceRefs),
+            safeCommandRefs: safeCommands,
+            provenanceRefs: candidates.flatMap { candidate in
+                [candidate.factRef, candidate.candidateRef, candidate.owner.canonicalRef].compactMap { $0 }
+            },
+            status: "succeeded"
+        )
+        receipt["action"] = "resurface_accepted_memory_facts"
+        receipt["actor"] = "cider-cli"
+        receipt["sourceBoundary"] = "accepted_memory_fact_read_model"
+        receipt["truthBoundary"] = "receipt_proves_command_execution_not_memory_truth"
+        receipt["candidateBoundary"] = "reviewable_memory_candidates_excluded"
+        if let rawFactID { receipt["selector"] = ["candidateID": rawFactID] }
+        return receipt
+    }
+
+    static func acceptedMemoryFactFailureActionReceipt(
+        command: String,
+        rawID: String?,
+        errorCode: String
+    ) -> [String: Any] {
+        let requested = (rawID ?? "")
+            .replacingOccurrences(of: "accepted_memory_fact:", with: "")
+            .replacingOccurrences(of: "memory_candidate:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var receipt = readOnlyActionReceiptToDict(
+            command: command,
+            matchedSourceRefs: requested.isEmpty ? [] : ["memory_candidate:\(requested)"],
+            safeCommandRefs: [
+                "cider-cli item memory-facts list --json",
+                "cider-cli capture review-queue --kind memory_candidate --json",
+            ],
+            provenanceRefs: requested.isEmpty ? [] : ["memory_candidate:\(requested)"],
+            status: "failed"
+        )
+        receipt["action"] = acceptedMemoryFactReceiptAction(command)
+        receipt["actor"] = "cider-cli"
+        receipt["errorCode"] = errorCode
+        receipt["selector"] = ["candidateID": requested]
+        receipt["sourceBoundary"] = "accepted_memory_fact_read_model"
+        receipt["truthBoundary"] = "receipt_proves_command_execution_not_memory_truth"
+        receipt["candidateBoundary"] = "reviewable_memory_candidates_excluded"
+        return receipt
+    }
+
+    static func acceptedMemoryFactReceiptSourceRefs(_ fact: SecondBrainAcceptedMemoryFact) -> [String] {
+        [fact.candidateRef]
+    }
+
+    static func acceptedMemoryFactResurfaceReceiptSourceRefs(_ candidate: CiderDueToSurfaceCandidate) -> [String] {
+        [candidate.candidateRef].compactMap { $0 }
+    }
+
+    static func acceptedMemoryFactReceiptAction(_ command: String) -> String {
+        switch command {
+        case "item.memory-facts.list": return "list_accepted_memory_facts"
+        case "item.memory-facts.inspect": return "inspect_accepted_memory_fact"
+        case "item.memory-facts.resurface": return "resurface_accepted_memory_facts"
+        default: return "read_accepted_memory_facts"
+        }
+    }
+
     static func acceptedMemoryFactActionHistory(_ output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
         do {
             let records = try SecondBrainActionReceiptLedgerService(database: .shared).list(filter: SecondBrainActionReceiptFilter(
@@ -20372,24 +20508,27 @@ struct CiderCLI {
                 "cider-cli capture review-queue --kind memory_candidate --json",
             ],
         ]
+        let errorCode: String
         switch error {
         case .missingID:
-            details["errorCode"] = "missing_accepted_memory_fact_selector"
+            errorCode = "missing_accepted_memory_fact_selector"
             details["usage"] = "cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> --json"
         case .notFound(let id):
-            details["errorCode"] = "accepted_memory_fact_not_found"
+            errorCode = "accepted_memory_fact_not_found"
             details["selector"] = ["candidateID": id]
         case .notAccepted(let candidateID, let reviewState):
-            details["errorCode"] = "memory_candidate_not_accepted"
+            errorCode = "memory_candidate_not_accepted"
             details["selector"] = ["candidateID": candidateID, "candidateRef": "memory_candidate:\(candidateID)"]
             details["reviewState"] = reviewState
             details["truthBoundary"] = "reviewable_candidate_not_truth"
         case .wrongKind(let candidateID, let kind):
-            details["errorCode"] = "not_memory_candidate"
+            errorCode = "not_memory_candidate"
             details["selector"] = ["candidateID": candidateID]
             details["actualKind"] = kind
             details["supportedKind"] = "memory_candidate"
         }
+        details["errorCode"] = errorCode
+        details["actionReceipt"] = acceptedMemoryFactFailureActionReceipt(command: command, rawID: rawID, errorCode: errorCode)
         printCLIError(error.localizedDescription, details: details)
     }
 
