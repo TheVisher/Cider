@@ -43,6 +43,7 @@ struct CiderNaturalPreferenceRecallIntent: Codable, Equatable {
     var temporalIntent: String?
     var temporalDate: String?
     var temporalRange: CiderNaturalPreferenceRecallTemporalRange?
+    var eventResolution: CiderNaturalPreferenceRecallEventResolution?
     var factFamily: String?
     var factTarget: String?
     var subject: String?
@@ -57,6 +58,30 @@ struct CiderNaturalPreferenceRecallTemporalRange: Codable, Equatable {
     var endDate: String
     var source: String
     var remainingSemanticQuery: String
+    var safeNextCommands: [String]
+    var eventResolution: CiderNaturalPreferenceRecallEventResolution?
+}
+
+struct CiderNaturalPreferenceRecallEventResolutionSource: Codable, Equatable {
+    var sourceRef: String
+    var sourceType: String
+    var sourceID: String
+    var title: String
+    var sourceKind: String
+    var dateSource: String
+    var evidence: String
+    var safeNextCommands: [String]
+}
+
+struct CiderNaturalPreferenceRecallEventResolution: Codable, Equatable {
+    var eventQuery: String
+    var recognizedText: String
+    var resolvedDate: String?
+    var confidence: String
+    var sourceKind: String
+    var truthBoundary: String
+    var fallbackReason: String?
+    var sources: [CiderNaturalPreferenceRecallEventResolutionSource]
     var safeNextCommands: [String]
 }
 
@@ -449,7 +474,16 @@ final class CiderNaturalPreferenceRecallService {
         let subject = extractSubject(from: query)
         let semanticTerms = semanticQueryTerms(for: normalized, mode: mode)
         let temporalDate = temporalDateAnchor(in: normalized, mode: mode)
-        let temporalRange = temporalRangeAnchor(in: normalized, originalQuery: query, mode: mode)
+        let eventPhrase = aroundEventPhrase(in: normalized)
+        let eventResolution = eventPhrase.map { phrase in
+            resolveAroundEvent(phrase: phrase.phrase, recognizedText: phrase.recognizedText)
+        }
+        let temporalRange = temporalRangeAnchor(
+            in: normalized,
+            originalQuery: query,
+            mode: mode,
+            eventResolution: eventResolution
+        )
         let temporalIntent = temporalRange == nil
             ? temporalIntent(for: normalized, mode: mode, temporalDate: temporalDate)
             : "date_range"
@@ -478,6 +512,7 @@ final class CiderNaturalPreferenceRecallService {
             temporalIntent: temporalIntent,
             temporalDate: temporalDate,
             temporalRange: temporalRange,
+            eventResolution: eventResolution,
             factFamily: factFamily,
             factTarget: factTarget,
             subject: subject,
@@ -657,7 +692,8 @@ final class CiderNaturalPreferenceRecallService {
     private func temporalRangeAnchor(
         in normalizedQuery: String,
         originalQuery: String,
-        mode: CiderNaturalRecallMode
+        mode: CiderNaturalRecallMode,
+        eventResolution: CiderNaturalPreferenceRecallEventResolution?
     ) -> CiderNaturalPreferenceRecallTemporalRange? {
         guard mode == .memory else { return nil }
         let calendar = Self.recallCalendar
@@ -725,7 +761,7 @@ final class CiderNaturalPreferenceRecallService {
             return monthRange
         }
 
-        return aroundRange(in: normalizedQuery, originalQuery: originalQuery)
+        return aroundRange(in: normalizedQuery, originalQuery: originalQuery, eventResolution: eventResolution)
     }
 
     private func namedMonthRange(
@@ -774,18 +810,15 @@ final class CiderNaturalPreferenceRecallService {
 
     private func aroundRange(
         in normalizedQuery: String,
-        originalQuery: String
+        originalQuery: String,
+        eventResolution: CiderNaturalPreferenceRecallEventResolution?
     ) -> CiderNaturalPreferenceRecallTemporalRange? {
-        guard let regex = try? NSRegularExpression(pattern: #"\baround\s+(.+?)(?:\?|$)"#),
-              let match = regex.firstMatch(in: normalizedQuery, range: NSRange(normalizedQuery.startIndex..., in: normalizedQuery)),
-              let phraseRange = Range(match.range(at: 1), in: normalizedQuery),
-              let fullRange = Range(match.range, in: normalizedQuery)
+        guard let phraseMatch = aroundEventPhrase(in: normalizedQuery)
         else {
             return nil
         }
-        let phrase = String(normalizedQuery[phraseRange])
-            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
-        let anchorDateString = specificDateAnchor(in: phrase) ?? knownEventDates[phrase]
+        let phrase = phraseMatch.phrase
+        let anchorDateString = specificDateAnchor(in: phrase) ?? knownEventDates[phrase] ?? eventResolution?.resolvedDate
         guard let anchorDateString,
               let anchorDate = Self.localDayFormatter.date(from: anchorDateString),
               let start = Self.recallCalendar.date(byAdding: .day, value: -3, to: anchorDate),
@@ -796,13 +829,203 @@ final class CiderNaturalPreferenceRecallService {
         return makeTemporalRange(
             originalQuery: originalQuery,
             normalizedQuery: normalizedQuery,
-            recognizedText: String(normalizedQuery[fullRange]).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)),
-            rangeType: knownEventDates[phrase] == anchorDateString ? "around_event" : "around_date",
+            recognizedText: phraseMatch.recognizedText,
+            rangeType: specificDateAnchor(in: phrase) == anchorDateString ? "around_date" : "around_event",
             start: start,
             end: end,
-            source: knownEventDates[phrase] == anchorDateString ? "known_event" : "deterministic_date_parse",
-            remainingOverride: phrase.replacingOccurrences(of: "'", with: " ")
+            source: aroundRangeSource(phrase: phrase, anchorDateString: anchorDateString, eventResolution: eventResolution),
+            remainingOverride: phrase.replacingOccurrences(of: "'", with: " "),
+            eventResolution: eventResolution?.resolvedDate == anchorDateString ? eventResolution : nil
         )
+    }
+
+    private func aroundEventPhrase(in normalizedQuery: String) -> (phrase: String, recognizedText: String)? {
+        guard let regex = try? NSRegularExpression(pattern: #"\baround\s+(.+?)(?:\?|$)"#),
+              let match = regex.firstMatch(in: normalizedQuery, range: NSRange(normalizedQuery.startIndex..., in: normalizedQuery)),
+              let phraseRange = Range(match.range(at: 1), in: normalizedQuery),
+              let fullRange = Range(match.range, in: normalizedQuery)
+        else {
+            return nil
+        }
+        let phrase = String(normalizedQuery[phraseRange])
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        let recognizedText = String(normalizedQuery[fullRange])
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !phrase.isEmpty else { return nil }
+        return (phrase, recognizedText)
+    }
+
+    private func aroundRangeSource(
+        phrase: String,
+        anchorDateString: String,
+        eventResolution: CiderNaturalPreferenceRecallEventResolution?
+    ) -> String {
+        if specificDateAnchor(in: phrase) == anchorDateString {
+            return "deterministic_date_parse"
+        }
+        if knownEventDates[phrase] == anchorDateString {
+            return "known_event"
+        }
+        if eventResolution?.resolvedDate == anchorDateString {
+            return "source_backed_event_observation"
+        }
+        return "unknown"
+    }
+
+    private func resolveAroundEvent(
+        phrase: String,
+        recognizedText: String
+    ) -> CiderNaturalPreferenceRecallEventResolution {
+        let cleanedPhrase = phrase.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        let searchQuery = cleanedPhrase.replacingOccurrences(of: "'", with: " ")
+        let fallbackCommands = [
+            "cider-cli item search \"\(escapedCommandArgument(searchQuery))\" --scope personalMemory --sort newest --limit 10 --json",
+            "cider-cli item search-debug \"\(escapedCommandArgument(searchQuery))\" --json",
+        ]
+        guard !searchQuery.isEmpty else {
+            return CiderNaturalPreferenceRecallEventResolution(
+                eventQuery: cleanedPhrase,
+                recognizedText: recognizedText,
+                resolvedDate: nil,
+                confidence: "unresolved",
+                sourceKind: "unresolved",
+                truthBoundary: "no_event_date_invented",
+                fallbackReason: "empty_event_query",
+                sources: [],
+                safeNextCommands: fallbackCommands
+            )
+        }
+
+        let results = (try? contextService.search(searchQuery, limit: 12, scope: .personalMemory, sort: .newest)) ?? []
+        let phraseTokens = significantQueryTokens(in: searchQuery)
+            .filter { !genericMemoryRecallTokens.contains($0) && $0 != "around" }
+        var candidates: [(date: Date, source: CiderNaturalPreferenceRecallEventResolutionSource, score: Int)] = []
+        for result in results {
+            guard let item = result.item else { continue }
+            let bundle = try? contextService.context(for: LibraryEntityRef(type: item.type, entityID: item.id))
+            let searchable = ((bundle?.chunks.map(\.body) ?? []) + (bundle?.sections.map(\.body) ?? []) + [result.title, result.snippet, item.title])
+                .joined(separator: "\n")
+            let lowerSearchable = searchable.lowercased()
+            guard eventEvidenceMatches(phraseTokens: phraseTokens, searchable: lowerSearchable) else { continue }
+            guard let resolved = eventEvidenceDate(searchable: searchable, bundle: bundle, result: result) else { continue }
+            let sourceRef = "\(item.type.rawValue):\(item.id.uuidString)"
+            let commands = [
+                "cider-cli item context \(item.type.rawValue) \(item.id.uuidString) --json",
+                "cider-cli item get \(item.type.rawValue) \(item.id.uuidString) --json",
+            ]
+            let source = CiderNaturalPreferenceRecallEventResolutionSource(
+                sourceRef: sourceRef,
+                sourceType: item.type.rawValue,
+                sourceID: item.id.uuidString,
+                title: item.title,
+                sourceKind: resolved.sourceKind,
+                dateSource: resolved.dateSource,
+                evidence: eventEvidenceExcerpt(from: searchable, phraseTokens: phraseTokens),
+                safeNextCommands: commands
+            )
+            candidates.append((resolved.date, source, eventResolutionScore(sourceKind: resolved.sourceKind, dateSource: resolved.dateSource, phraseTokens: phraseTokens, searchable: lowerSearchable)))
+        }
+
+        guard let best = candidates.sorted(by: { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            return lhs.date > rhs.date
+        }).first else {
+            return CiderNaturalPreferenceRecallEventResolution(
+                eventQuery: cleanedPhrase,
+                recognizedText: recognizedText,
+                resolvedDate: nil,
+                confidence: "unresolved",
+                sourceKind: "unresolved",
+                truthBoundary: "no_event_date_invented",
+                fallbackReason: "no_source_backed_event_date_found",
+                sources: [],
+                safeNextCommands: fallbackCommands
+            )
+        }
+
+        let matchingSources = candidates
+            .filter { Self.localDayFormatter.string(from: $0.date) == Self.localDayFormatter.string(from: best.date) }
+            .sorted { $0.score > $1.score }
+            .map(\.source)
+        return CiderNaturalPreferenceRecallEventResolution(
+            eventQuery: cleanedPhrase,
+            recognizedText: recognizedText,
+            resolvedDate: Self.localDayFormatter.string(from: best.date),
+            confidence: best.source.sourceKind == "accepted_event_date" ? "accepted_event_date" : "source_backed_observation",
+            sourceKind: best.source.sourceKind,
+            truthBoundary: best.source.sourceKind == "accepted_event_date" ? "accepted_event_date_item" : "source_backed_observation_not_accepted_memory_truth",
+            fallbackReason: nil,
+            sources: Array(matchingSources.prefix(3)),
+            safeNextCommands: orderedUnique(fallbackCommands + matchingSources.flatMap(\.safeNextCommands))
+        )
+    }
+
+    private func eventEvidenceMatches(phraseTokens: [String], searchable: String) -> Bool {
+        guard !phraseTokens.isEmpty else { return false }
+        let required = min(2, phraseTokens.count)
+        let overlap = phraseTokens.filter { searchable.contains($0) }.count
+        return overlap >= required
+    }
+
+    private func eventEvidenceDate(
+        searchable: String,
+        bundle: CiderItemContextBundle?,
+        result: CiderItemSearchResult
+    ) -> (date: Date, sourceKind: String, dateSource: String)? {
+        let lower = searchable.lowercased()
+        if result.item?.type == .dateCard {
+            if let dateString = specificDateAnchor(in: lower),
+               let date = Self.localDayFormatter.date(from: dateString) {
+                return (date, "accepted_event_date", "event_indexed_date")
+            }
+        }
+        if lower.contains("today") || lower.contains("birthday") || lower.contains("event") {
+            if let bundle {
+                return (sourceSortDate(bundle: bundle, result: result), "journal_observation", "source_date")
+            }
+            if let item = result.item {
+                return (max(item.updatedAt, item.createdAt), "item_observation", "item_timestamp")
+            }
+        }
+        if let explicitDate = specificDateAnchor(in: lower),
+           let date = Self.localDayFormatter.date(from: explicitDate) {
+            return (date, "journal_observation", "explicit_date_in_source")
+        }
+        return nil
+    }
+
+    private func eventResolutionScore(
+        sourceKind: String,
+        dateSource: String,
+        phraseTokens: [String],
+        searchable: String
+    ) -> Int {
+        var total = phraseTokens.filter { searchable.contains($0) }.count * 5
+        if sourceKind == "accepted_event_date" { total += 20 }
+        if dateSource == "source_date" { total += 8 }
+        if searchable.contains("today is") { total += 4 }
+        if searchable.contains("birthday") { total += 3 }
+        return total
+    }
+
+    private func eventEvidenceExcerpt(from searchable: String, phraseTokens: [String]) -> String {
+        let lines = searchable
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if let matched = lines.first(where: { line in
+            let lower = line.lowercased()
+            return phraseTokens.allSatisfy { lower.contains($0) }
+        }) {
+            return clipped(matched, limit: 240)
+        }
+        if let matched = lines.first(where: { line in
+            let lower = line.lowercased()
+            return phraseTokens.contains { lower.contains($0) }
+        }) {
+            return clipped(matched, limit: 240)
+        }
+        return clipped(searchable.trimmingCharacters(in: .whitespacesAndNewlines), limit: 240)
     }
 
     private func makeTemporalRange(
@@ -813,7 +1036,8 @@ final class CiderNaturalPreferenceRecallService {
         start: Date,
         end: Date,
         source: String,
-        remainingOverride: String? = nil
+        remainingOverride: String? = nil,
+        eventResolution: CiderNaturalPreferenceRecallEventResolution? = nil
     ) -> CiderNaturalPreferenceRecallTemporalRange {
         let startDate = Self.localDayFormatter.string(from: start)
         let endDate = Self.localDayFormatter.string(from: end)
@@ -835,7 +1059,8 @@ final class CiderNaturalPreferenceRecallService {
                 startDate: startDate,
                 endDate: endDate,
                 remainingSemanticQuery: remaining
-            )
+            ),
+            eventResolution: eventResolution
         )
     }
 

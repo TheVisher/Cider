@@ -707,6 +707,61 @@ struct NaturalPreferenceRecallTests {
         #expect(response.safeNextCommands.contains("cider-cli item daily-tracker --from 2026-06-27 --to 2026-07-03 --query \"ryland birthday\" --sort oldest --limit 5 --json"))
     }
 
+    @Test("around event recall resolves date from source backed journal evidence")
+    func aroundEventRecallResolvesDateFromSourceBackedJournalEvidence() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let birthdayJournalID = UUID()
+        let outsideJournalID = UUID()
+        try insertJournal(
+            id: birthdayJournalID,
+            title: "Daily Journal 2026-06-30",
+            body: "Today is Ryland's birthday; remember to wish her happy birthday. Boeing had about 40 systems down today.",
+            createdAt: try localDate("2026-06-30"),
+            into: db,
+            store: store
+        )
+        try insertJournal(
+            id: outsideJournalID,
+            title: "Daily Journal 2026-06-20",
+            body: "Ryland birthday wording trap outside the around-event window.",
+            createdAt: try localDate("2026-06-20"),
+            into: db,
+            store: store
+        )
+
+        let service = makeRecallService(db: db, store: store, currentDate: try localDate("2026-06-30"))
+
+        let response = try service.answerMemory("what was going on around Ryland's birthday?", limit: 5)
+        let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
+        let temporalRange = try #require(payload["temporalRange"] as? [String: Any])
+        let eventResolution = try #require(temporalRange["eventResolution"] as? [String: Any])
+        let sources = try #require(eventResolution["sources"] as? [[String: Any]])
+        let firstSource = try #require(sources.first)
+
+        #expect(response.intent.temporalIntent == "date_range")
+        #expect(response.intent.temporalRange?.recognizedText == "around ryland's birthday")
+        #expect(response.intent.temporalRange?.rangeType == "around_event")
+        #expect(response.intent.temporalRange?.source == "source_backed_event_observation")
+        #expect(response.intent.temporalRange?.startDate == "2026-06-27")
+        #expect(response.intent.temporalRange?.endDate == "2026-07-03")
+        #expect(response.intent.temporalRange?.remainingSemanticQuery == "ryland birthday")
+        #expect(eventResolution["eventQuery"] as? String == "ryland's birthday")
+        #expect(eventResolution["recognizedText"] as? String == "around ryland's birthday")
+        #expect(eventResolution["resolvedDate"] as? String == "2026-06-30")
+        #expect(eventResolution["confidence"] as? String == "source_backed_observation")
+        #expect(eventResolution["sourceKind"] as? String == "journal_observation")
+        #expect(eventResolution["truthBoundary"] as? String == "source_backed_observation_not_accepted_memory_truth")
+        #expect(firstSource["sourceRef"] as? String == "note:\(birthdayJournalID.uuidString)")
+        #expect(firstSource["title"] as? String == "Daily Journal 2026-06-30")
+        #expect((firstSource["evidence"] as? String)?.contains("Ryland's birthday") == true)
+        #expect(response.candidates.first?.owner.ownerID == birthdayJournalID.uuidString)
+        #expect(!response.candidates.contains { $0.owner.ownerID == outsideJournalID.uuidString })
+        #expect(response.safeNextCommands.contains("cider-cli item daily-tracker --from 2026-06-27 --to 2026-07-03 --query \"ryland birthday\" --sort oldest --limit 5 --json"))
+    }
+
     @Test("specific historical journal date ranks matching Daily Journal before newer same word hits")
     func specificHistoricalJournalDateRanksMatchingJournalBeforeNewerSameWordHits() throws {
         let (db, url) = try makeTestDB()

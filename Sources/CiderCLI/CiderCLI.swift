@@ -24470,6 +24470,9 @@ struct CiderCLI {
         if let temporalRange = response.intent.temporalRange {
             intent["temporalRange"] = naturalPreferenceRecallTemporalRangeToDict(temporalRange)
         }
+        if let eventResolution = response.intent.eventResolution {
+            intent["eventResolution"] = naturalPreferenceRecallEventResolutionToDict(eventResolution)
+        }
         if let subject = response.intent.subject {
             intent["subject"] = subject
         }
@@ -24622,7 +24625,7 @@ struct CiderCLI {
     }
 
     private static func naturalPreferenceRecallTemporalRangeToDict(_ range: CiderNaturalPreferenceRecallTemporalRange) -> [String: Any] {
-        [
+        var dict: [String: Any] = [
             "originalQuery": range.originalQuery,
             "recognizedText": range.recognizedText,
             "rangeType": range.rangeType,
@@ -24632,6 +24635,40 @@ struct CiderCLI {
             "remainingSemanticQuery": range.remainingSemanticQuery,
             "safeNextCommands": range.safeNextCommands,
         ]
+        if let eventResolution = range.eventResolution {
+            dict["eventResolution"] = naturalPreferenceRecallEventResolutionToDict(eventResolution)
+        }
+        return dict
+    }
+
+    private static func naturalPreferenceRecallEventResolutionToDict(_ resolution: CiderNaturalPreferenceRecallEventResolution) -> [String: Any] {
+        var dict: [String: Any] = [
+            "eventQuery": resolution.eventQuery,
+            "recognizedText": resolution.recognizedText,
+            "confidence": resolution.confidence,
+            "sourceKind": resolution.sourceKind,
+            "truthBoundary": resolution.truthBoundary,
+            "sources": resolution.sources.map { source in
+                [
+                    "sourceRef": source.sourceRef,
+                    "sourceType": source.sourceType,
+                    "sourceID": source.sourceID,
+                    "title": source.title,
+                    "sourceKind": source.sourceKind,
+                    "dateSource": source.dateSource,
+                    "evidence": source.evidence,
+                    "safeNextCommands": source.safeNextCommands,
+                ] as [String: Any]
+            },
+            "safeNextCommands": resolution.safeNextCommands,
+        ]
+        if let resolvedDate = resolution.resolvedDate {
+            dict["resolvedDate"] = resolvedDate
+        }
+        if let fallbackReason = resolution.fallbackReason {
+            dict["fallbackReason"] = fallbackReason
+        }
+        return dict
     }
 
     static func naturalPreferenceRecallProvenanceToDict(_ provenance: CiderNaturalPreferenceRecallProvenance) -> [String: Any] {
