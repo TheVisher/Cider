@@ -650,7 +650,8 @@ struct SecondBrainFoundationTests {
         let reviewActionCommands = try #require(candidate["reviewActionCommands"] as? [[String: Any]])
         #expect(reviewActionCommands.contains { action in
             action["action"] as? String == "accept"
-                && (action["command"] as? String)?.contains("accept-graph-candidate") == true
+                && ((action["command"] as? String)?.contains("review approve") == true
+                    || (action["command"] as? String)?.contains("accept-graph-candidate") == true)
                 && action["status"] as? String == "available"
         })
 
