@@ -891,6 +891,49 @@ struct CiderReviewRoutingActionResult: Equatable {
     }
 }
 
+struct CiderReviewCandidateQueueActionResult {
+    var command: String
+    var action: String
+    var candidateID: String
+    var candidateRef: String
+    var reviewFamily: String
+    var reviewState: String
+    var truthBoundary: String
+    var beforeState: String?
+    var afterState: String
+    var changed: Bool
+    var actor: String
+    var provenance: [String: Any]
+    var actionReceipt: [String: Any]
+    var safeVerificationCommands: [String]
+    var safeNextCommands: [String]
+
+    func toDictionary() -> [String: Any] {
+        var dictionary: [String: Any] = [
+            "ok": true,
+            "command": command,
+            "action": action,
+            "readOnly": false,
+            "changed": changed,
+            "candidateID": candidateID,
+            "candidateRef": candidateRef,
+            "reviewFamily": reviewFamily,
+            "reviewState": reviewState,
+            "truthBoundary": truthBoundary,
+            "afterState": afterState,
+            "actor": actor,
+            "provenance": provenance,
+            "actionReceipt": actionReceipt,
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": safeNextCommands,
+        ]
+        if let beforeState {
+            dictionary["beforeState"] = beforeState
+        }
+        return dictionary
+    }
+}
+
 struct CiderReviewQueueBatchEnrichmentFailure: Equatable {
     var itemID: UUID
     var itemType: String
@@ -1613,6 +1656,228 @@ final class CiderReviewQueueService {
     }
 
     @discardableResult
+    func approveMemoryCandidate(candidateID: String, actor: String = "user") throws -> CiderReviewCandidateQueueActionResult {
+        try reviewCandidateAction(
+            candidateID: candidateID,
+            reviewFamily: "memory_candidate",
+            command: "review.memory-candidates.approve",
+            action: "approve",
+            actor: actor
+        ) { service, id in
+            try service.acceptMemoryCandidate(id, actor: actor)
+        }
+    }
+
+    @discardableResult
+    func rejectMemoryCandidate(candidateID: String, reason: String, actor: String = "user") throws -> CiderReviewCandidateQueueActionResult {
+        try reviewCandidateAction(
+            candidateID: candidateID,
+            reviewFamily: "memory_candidate",
+            command: "review.memory-candidates.reject",
+            action: "reject",
+            actor: actor
+        ) { service, id in
+            try service.rejectMemoryCandidate(id, reason: reason, actor: actor)
+        }
+    }
+
+    @discardableResult
+    func deferMemoryCandidate(candidateID: String, reason: String, actor: String = "user") throws -> CiderReviewCandidateQueueActionResult {
+        try reviewCandidateAction(
+            candidateID: candidateID,
+            reviewFamily: "memory_candidate",
+            command: "review.memory-candidates.defer",
+            action: "defer",
+            actor: actor
+        ) { service, id in
+            try service.deferMemoryCandidate(id, reason: reason, actor: actor)
+        }
+    }
+
+    @discardableResult
+    func approveGraphCandidate(
+        candidateID: String,
+        actor: String = "user",
+        targetOwner: SecondBrainOwnerRef? = nil,
+        relationType: String? = nil
+    ) throws -> CiderReviewCandidateQueueActionResult {
+        try reviewCandidateAction(
+            candidateID: candidateID,
+            reviewFamily: "graph_candidate",
+            command: "review.graph-candidates.approve",
+            action: "approve",
+            actor: actor
+        ) { service, id in
+            try service.acceptGraphCandidateIfResolved(
+                id,
+                actor: actor,
+                targetOwner: targetOwner,
+                relationType: relationType
+            )
+        }
+    }
+
+    @discardableResult
+    func rejectGraphCandidate(candidateID: String, reason: String, actor: String = "user") throws -> CiderReviewCandidateQueueActionResult {
+        try reviewCandidateAction(
+            candidateID: candidateID,
+            reviewFamily: "graph_candidate",
+            command: "review.graph-candidates.reject",
+            action: "reject",
+            actor: actor
+        ) { service, id in
+            try service.rejectGraphCandidate(id, reason: reason, actor: actor)
+        }
+    }
+
+    @discardableResult
+    func deferGraphCandidate(candidateID: String, reason: String, actor: String = "user") throws -> CiderReviewCandidateQueueActionResult {
+        try reviewCandidateAction(
+            candidateID: candidateID,
+            reviewFamily: "graph_candidate",
+            command: "review.graph-candidates.defer",
+            action: "defer",
+            actor: actor
+        ) { service, id in
+            try service.deferGraphCandidate(id, reason: reason, actor: actor)
+        }
+    }
+
+    private func reviewCandidateAction(
+        candidateID rawID: String,
+        reviewFamily: String,
+        command: String,
+        action: String,
+        actor: String,
+        mutate: (CiderReviewCandidateActionService, String) throws -> CiderReviewCandidateActionResult
+    ) throws -> CiderReviewCandidateQueueActionResult {
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
+        let id = normalizedReviewCandidateID(rawID, reviewFamily: reviewFamily)
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        guard let before = try outputService.output(id: id) else {
+            throw CiderReviewCandidateActionService.ReviewCandidateActionError.candidateNotFound(id)
+        }
+        let beforeState = before.reviewState
+        _ = try mutate(CiderReviewCandidateActionService(database: db), id)
+        guard let after = try outputService.output(id: id) else {
+            throw CiderReviewCandidateActionService.ReviewCandidateActionError.candidateNotFound(id)
+        }
+        return reviewCandidateQueueActionResult(
+            command: command,
+            action: action,
+            actor: actor,
+            reviewFamily: reviewFamily,
+            before: before,
+            after: after,
+            changed: beforeState != after.reviewState
+        )
+    }
+
+    private func reviewCandidateQueueActionResult(
+        command: String,
+        action: String,
+        actor: String,
+        reviewFamily: String,
+        before: SecondBrainEnrichmentOutput,
+        after: SecondBrainEnrichmentOutput,
+        changed: Bool
+    ) -> CiderReviewCandidateQueueActionResult {
+        let candidateRef = "\(reviewFamily):\(after.id)"
+        let sourceRef = after.owner.canonicalRef
+        let evidenceRef = after.metadata["source_evidence_ref"] ?? after.metadata["source_evidence_id"].map { "source_evidence:\($0)" }
+        let beforeBoundary = truthBoundary(forReviewFamily: reviewFamily, reviewState: before.reviewState)
+        let afterBoundary = truthBoundary(forReviewFamily: reviewFamily, reviewState: after.reviewState)
+        let safeVerificationCommands = orderedUnique([
+            candidateInspectCommand(forReviewFamily: reviewFamily, candidateID: after.id),
+            "cider-cli item action-ledger list --owner \(sourceRef) --command \(command) --json",
+            "cider-cli capture review-queue --kind \(reviewFamily) --include-deferred --json",
+        ])
+        let safeNextCommands = orderedUnique([
+            candidateInspectCommand(forReviewFamily: reviewFamily, candidateID: after.id),
+            "cider-cli capture review-queue --kind \(reviewFamily) --json",
+            "cider-cli review summary --json",
+        ])
+        let provenance: [String: Any] = [
+            "sourceRef": sourceRef,
+            "candidateRef": candidateRef,
+            "evidenceRef": evidenceRef ?? "",
+            "storage": "enrichment_outputs",
+        ].filter { !($0.value as? String == "") }
+        let actionReceipt: [String: Any] = [
+            "command": command,
+            "action": action,
+            "actor": actor,
+            "owner": [
+                "ownerType": after.owner.ownerType,
+                "ownerID": after.owner.ownerID,
+                "ref": sourceRef,
+            ],
+            "ownerRef": sourceRef,
+            "sourceRefs": orderedUnique([sourceRef, candidateRef]),
+            "evidenceRefs": orderedUnique([sourceRef, evidenceRef].compactMap { $0 }),
+            "readOnly": false,
+            "changed": changed,
+            "status": "succeeded",
+            "truthBoundary": afterBoundary,
+            "before": [
+                "reviewState": before.reviewState,
+                "truthBoundary": beforeBoundary,
+            ],
+            "after": [
+                "reviewState": after.reviewState,
+                "truthBoundary": afterBoundary,
+            ],
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": safeNextCommands,
+        ]
+        return CiderReviewCandidateQueueActionResult(
+            command: command,
+            action: action,
+            candidateID: after.id,
+            candidateRef: candidateRef,
+            reviewFamily: reviewFamily,
+            reviewState: after.reviewState,
+            truthBoundary: afterBoundary,
+            beforeState: before.reviewState,
+            afterState: after.reviewState,
+            changed: changed,
+            actor: actor,
+            provenance: provenance,
+            actionReceipt: actionReceipt,
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: safeNextCommands
+        )
+    }
+
+    private func normalizedReviewCandidateID(_ rawID: String, reviewFamily: String) -> String {
+        rawID
+            .replacingOccurrences(of: "\(reviewFamily):", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func candidateInspectCommand(forReviewFamily reviewFamily: String, candidateID: String) -> String {
+        switch reviewFamily {
+        case "graph_candidate":
+            return "cider-cli item graph-candidate \(candidateID) --json"
+        case "memory_candidate":
+            return "cider-cli item memory-facts inspect \(candidateID) --json"
+        default:
+            return "cider-cli capture review-queue --kind \(reviewFamily) --json"
+        }
+    }
+
+    private func truthBoundary(forReviewFamily reviewFamily: String, reviewState: String) -> String {
+        switch (reviewFamily, reviewState) {
+        case ("graph_candidate", "accepted"):
+            return "accepted_graph_truth"
+        case ("memory_candidate", "accepted"):
+            return "accepted_memory_candidate"
+        default:
+            return "reviewable_candidate_not_truth"
+        }
+    }
+
+    @discardableResult
     func correctBookmark(
         itemID: UUID,
         target: CiderRoutingDecisionTarget,
@@ -2229,6 +2494,9 @@ final class CiderReviewQueueService {
         sourceItem: CiderRoutingItemSummary
     ) -> [String] {
         orderedUnique([
+            "cider-cli review approve \(output.id) --json",
+            "cider-cli review reject \(output.id) --reason <reason> --json",
+            "cider-cli review defer \(output.id) --reason <reason> --json",
             "cider-cli item graph-candidate \(output.id) --json",
             "cider-cli item graph-candidates \(output.owner.ownerType) \(output.owner.ownerID) --json",
             "cider-cli item context \(sourceItem.type) \(sourceItem.id.uuidString) --json",
@@ -2335,6 +2603,9 @@ final class CiderReviewQueueService {
         sourceItem: CiderRoutingItemSummary
     ) -> [String] {
         orderedUnique([
+            "cider-cli review approve \(output.id) --json",
+            "cider-cli review reject \(output.id) --reason <reason> --json",
+            "cider-cli review defer \(output.id) --reason <reason> --json",
             "cider-cli item context \(sourceItem.type) \(sourceItem.id.uuidString) --json",
             "cider-cli item get \(sourceItem.type) \(sourceItem.id.uuidString) --json",
             "cider-cli capture review-queue --kind memory_candidate --json",

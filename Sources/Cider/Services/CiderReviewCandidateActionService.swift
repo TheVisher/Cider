@@ -160,16 +160,19 @@ final class CiderReviewCandidateActionService {
     @discardableResult
     func acceptGraphCandidateIfResolved(
         _ candidateID: String?,
-        actor: String = "user"
+        actor: String = "user",
+        targetOwner overrideTargetOwner: SecondBrainOwnerRef? = nil,
+        relationType overrideRelationType: String? = nil
     ) throws -> CiderReviewCandidateActionResult {
         let output = try graphCandidateOutput(candidateID)
         let candidate = try SecondBrainGraphCandidateContract.validate(output)
         try requireReviewableGraphCandidate(candidate)
-        guard let targetOwner = candidate.acceptedTargetOwner else {
+        guard let targetOwner = overrideTargetOwner ?? candidate.acceptedTargetOwner else {
             throw ReviewCandidateActionError.graphAcceptNeedsResolvedTarget(output.id)
         }
 
-        let relationType = candidate.acceptedRelationType?.rawValue
+        let relationType = overrideRelationType
+            ?? candidate.acceptedRelationType?.rawValue
             ?? candidate.relationGuesses.first?.rawValue
             ?? SecondBrainGraphCandidateContract.RelationType.mentions.rawValue
         let relationSourceOwner = candidate.subjectOwner ?? output.owner
@@ -267,6 +270,50 @@ final class CiderReviewCandidateActionService {
         }
 
         return result(candidate: rejected, action: "reject", refPrefix: "graph_candidate")
+    }
+
+    @discardableResult
+    func deferGraphCandidate(
+        _ candidateID: String?,
+        reason: String = "Deferred from Home Review Queue.",
+        actor: String = "user"
+    ) throws -> CiderReviewCandidateActionResult {
+        let output = try graphCandidateOutput(candidateID)
+        let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        try requireReviewableGraphCandidate(candidate)
+
+        var deferred = output
+        deferred.reviewState = SecondBrainGraphCandidateContract.ReviewState.deferred.rawValue
+        deferred.metadata["reviewed_at"] = ISO8601DateFormatter().string(from: Date())
+        deferred.metadata["reviewed_by"] = actor
+        deferred.metadata["deferral_reason"] = normalizedReason(reason)
+        deferred.updatedAt = Date()
+        _ = try SecondBrainGraphCandidateContract.validate(deferred)
+
+        let action = SecondBrainAgentAction(
+            owner: output.owner,
+            itemID: itemID(for: output.owner),
+            toolName: "item.defer-graph-candidate",
+            actionType: "graph_candidate.defer",
+            source: "graph_candidate.defer",
+            status: "deferred",
+            summary: "Deferred graph candidate \(candidate.mentionText).",
+            argumentsJSON: DatabaseHelpers.encodeJSON([
+                "candidateID": output.id,
+                "actor": actor,
+                "reason": normalizedReason(reason),
+            ]),
+            resultJSON: DatabaseHelpers.encodeJSON([
+                "reviewState": deferred.reviewState,
+            ])
+        )
+
+        try database.withTransaction {
+            try outputService.record(deferred)
+            try store.recordAgentAction(action)
+        }
+
+        return result(candidate: deferred, action: "defer", refPrefix: "graph_candidate")
     }
 
     private func memoryCandidateOutput(_ rawID: String?) throws -> SecondBrainEnrichmentOutput {

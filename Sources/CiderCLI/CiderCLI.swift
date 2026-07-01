@@ -2010,7 +2010,7 @@ struct CiderCLI {
 
         case "approve":
             guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--actor"]) else {
-                printCLIError("Usage: cider-cli review approve <item-id> [--actor user|agent] [--json]")
+                printCLIError("Usage: cider-cli review approve <item-id|candidate-id> [--target-owner <type:id>|--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor user|agent] [--json]")
                 return
             }
             let actor = parseFlag("--actor", from: args) ?? "user"
@@ -2018,6 +2018,21 @@ struct CiderCLI {
                 if isEventDateFactCandidateRef(itemRef) {
                     let candidate = try service.approveEventDateFact(candidateID: itemRef, actor: actor)
                     printReviewEventDateFactActionResult(candidate, command: "review.event-date-facts.approve")
+                    return
+                }
+                if isGraphCandidateRef(itemRef) {
+                    let result = try service.approveGraphCandidate(
+                        candidateID: itemRef,
+                        actor: actor,
+                        targetOwner: graphReviewTargetOwner(from: args),
+                        relationType: parseFlag("--relation", from: args)
+                    )
+                    printReviewCandidateQueueActionResult(result)
+                    return
+                }
+                if isMemoryCandidateRef(itemRef) {
+                    let result = try service.approveMemoryCandidate(candidateID: itemRef, actor: actor)
+                    printReviewCandidateQueueActionResult(result)
                     return
                 }
                 let itemID = try service.resolveItemID(ref: itemRef)
@@ -2064,8 +2079,22 @@ struct CiderCLI {
             let actor = parseFlag("--actor", from: args) ?? "user"
             let reason = parseFlag("--reason", from: args) ?? "Rejected from review queue."
             do {
-                let candidate = try service.rejectEventDateFact(candidateID: candidateRef, reason: reason, actor: actor)
-                printReviewEventDateFactActionResult(candidate, command: "review.event-date-facts.reject")
+                if isEventDateFactCandidateRef(candidateRef) {
+                    let candidate = try service.rejectEventDateFact(candidateID: candidateRef, reason: reason, actor: actor)
+                    printReviewEventDateFactActionResult(candidate, command: "review.event-date-facts.reject")
+                    return
+                }
+                if isGraphCandidateRef(candidateRef) {
+                    let result = try service.rejectGraphCandidate(candidateID: candidateRef, reason: reason, actor: actor)
+                    printReviewCandidateQueueActionResult(result)
+                    return
+                }
+                if isMemoryCandidateRef(candidateRef) {
+                    let result = try service.rejectMemoryCandidate(candidateID: candidateRef, reason: reason, actor: actor)
+                    printReviewCandidateQueueActionResult(result)
+                    return
+                }
+                printCLIError("No review candidate found matching '\(candidateRef)'.")
             } catch {
                 printCLIError(error.localizedDescription)
             }
@@ -2155,6 +2184,24 @@ struct CiderCLI {
                         actor: actor
                     )
                     printReviewEventDateFactActionResult(candidate, command: "review.event-date-facts.defer")
+                    return
+                }
+                if isGraphCandidateRef(itemRef) {
+                    let result = try service.deferGraphCandidate(
+                        candidateID: itemRef,
+                        reason: parseFlag("--reason", from: args) ?? "Deferred from review queue.",
+                        actor: actor
+                    )
+                    printReviewCandidateQueueActionResult(result)
+                    return
+                }
+                if isMemoryCandidateRef(itemRef) {
+                    let result = try service.deferMemoryCandidate(
+                        candidateID: itemRef,
+                        reason: parseFlag("--reason", from: args) ?? "Deferred from review queue.",
+                        actor: actor
+                    )
+                    printReviewCandidateQueueActionResult(result)
                     return
                 }
                 let itemID = try service.resolveItemID(ref: itemRef)
@@ -2289,7 +2336,7 @@ struct CiderCLI {
               cider-cli review enrichment-reconcile-samples [--group <group-id>] [--limit <n>] [--json]
               cider-cli review enrichment-reconcile-apply [--group <group-id>] [--limit <n>] [--approve <token>] [--actor user|agent] [--execute] [--json]
               cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]
-              cider-cli review approve <item-id> [--actor user|agent] [--json]
+              cider-cli review approve <item-id|candidate-id> [--target-owner <type:id>|--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor user|agent] [--json]
               cider-cli review reject <candidate-id> --reason <text> [--actor user|agent] [--json]
               cider-cli review correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
               cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
@@ -21400,6 +21447,49 @@ struct CiderCLI {
         return candidate.candidate.metadata["candidate_family"] == "event_date_fact"
     }
 
+    static func isGraphCandidateRef(_ value: String) -> Bool {
+        isEnrichmentCandidateRef(value, prefix: "graph_candidate", kind: SecondBrainGraphCandidateContract.outputKind)
+    }
+
+    static func isMemoryCandidateRef(_ value: String) -> Bool {
+        isEnrichmentCandidateRef(value, prefix: "memory_candidate", kind: "memory_candidate")
+    }
+
+    static func graphReviewTargetOwner(from args: [String]) -> SecondBrainOwnerRef? {
+        if let canonical = parseFlag("--target-owner", from: args),
+           let owner = try? ownerRefFromCanonical(canonical) {
+            return owner
+        }
+        guard let type = parseFlag("--target-owner-type", from: args),
+              let id = parseFlag("--target-owner-id", from: args) else {
+            return nil
+        }
+        return SecondBrainOwnerRef(ownerType: type, ownerID: id)
+    }
+
+    static func isEnrichmentCandidateRef(_ value: String, prefix: String, kind: String) -> Bool {
+        let normalized = value
+            .replacingOccurrences(of: "\(prefix):", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        if value.hasPrefix("\(prefix):") { return true }
+        guard CiderDatabase.shared.isOpen,
+              let output = try? SecondBrainEnrichmentOutputService(database: .shared).output(id: normalized) else {
+            return false
+        }
+        return output.kind == kind
+    }
+
+    static func printReviewCandidateQueueActionResult(_ result: CiderReviewCandidateQueueActionResult) {
+        let payload = result.toDictionary()
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput {
+            outputJSON(payload)
+        } else {
+            print("Review candidate action: \(result.candidateRef) -> \(result.reviewState)")
+        }
+    }
+
     static func printReviewEventDateFactActionResult(
         _ candidate: SecondBrainEventDateFactCandidateView,
         command: String
@@ -26505,7 +26595,7 @@ struct CiderCLI {
           cider-cli review enrichment-reconcile-plan [--sample-limit <n>] [--json]
           cider-cli review enrichment-reconcile-samples [--group <group-id>] [--limit <n>] [--json]
           cider-cli review enrichment-reconcile-apply [--group <group-id>] [--limit <n>] [--approve <token>] [--actor user|agent] [--execute] [--json]
-          cider-cli review approve <item-id> [--actor user|agent] [--json]
+          cider-cli review approve <item-id|candidate-id> [--target-owner <type:id>|--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor user|agent] [--json]
           cider-cli review correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
           cider-cli review enrich <item-id> [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
