@@ -933,6 +933,90 @@ struct NaturalPreferenceRecallTests {
         #expect(firstSource.evidence.contains("Ryland birthday"))
     }
 
+    @Test("around event recall discovers possessive date card alias before journal fallback")
+    func aroundEventRecallDiscoversPossessiveDateCardAliasBeforeJournalFallback() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let dateCardID = UUID()
+        let journalID = UUID()
+        try insertDateCard(
+            id: dateCardID,
+            title: "Ryland birthday",
+            body: "Accepted structured date card.",
+            startAt: try localDate("2026-06-30"),
+            createdAt: try localDate("2026-06-01"),
+            into: db,
+            store: store
+        )
+        try insertJournal(
+            id: journalID,
+            title: "Daily Journal 2026-07-02",
+            body: "Today I mentioned Ryland's birthday again, but this is incidental journal wording after the structured date.",
+            createdAt: try localDate("2026-07-02"),
+            into: db,
+            store: store
+        )
+
+        let service = makeRecallService(db: db, store: store, currentDate: try localDate("2026-07-02"))
+
+        let response = try service.answerMemory("what was going on around Ryland's birthday?", limit: 5)
+        let eventResolution = try #require(response.intent.temporalRange?.eventResolution)
+        let firstSource = try #require(eventResolution.sources.first)
+
+        #expect(response.intent.temporalRange?.rangeType == "around_event")
+        #expect(eventResolution.resolvedDate == "2026-06-30")
+        #expect(eventResolution.sourceKind == "accepted_event_date")
+        #expect(eventResolution.truthBoundary == "accepted_event_date_item")
+        #expect(firstSource.sourceRef == "dateCard:\(dateCardID.uuidString)")
+        #expect(firstSource.dateSource == "events.start_at")
+        #expect(firstSource.evidence.contains("Ryland birthday"))
+        #expect(firstSource.safeNextCommands.contains("cider-cli item get dateCard \(dateCardID.uuidString) --json"))
+    }
+
+    @Test("around event recall discovers possessive contact birthday alias before journal fallback")
+    func aroundEventRecallDiscoversPossessiveContactBirthdayAliasBeforeJournalFallback() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let contactID = UUID()
+        let journalID = UUID()
+        try insertContact(
+            id: contactID,
+            displayName: "Ryland",
+            birthday: try localDate("2026-06-30"),
+            notes: "Family contact profile.",
+            createdAt: try localDate("2026-05-01"),
+            into: db,
+            store: store
+        )
+        try insertJournal(
+            id: journalID,
+            title: "Daily Journal 2026-07-02",
+            body: "Today I mentioned Ryland's birthday again, but this is incidental journal wording after the structured contact birthday.",
+            createdAt: try localDate("2026-07-02"),
+            into: db,
+            store: store
+        )
+
+        let service = makeRecallService(db: db, store: store, currentDate: try localDate("2026-07-02"))
+
+        let response = try service.answerMemory("what was going on around Ryland's birthday?", limit: 5)
+        let eventResolution = try #require(response.intent.temporalRange?.eventResolution)
+        let firstSource = try #require(eventResolution.sources.first)
+
+        #expect(response.intent.temporalRange?.rangeType == "around_event")
+        #expect(eventResolution.resolvedDate == "2026-06-30")
+        #expect(eventResolution.sourceKind == "contact_birthday")
+        #expect(eventResolution.truthBoundary == "accepted_contact_birthday")
+        #expect(firstSource.sourceRef == "contact:\(contactID.uuidString)")
+        #expect(firstSource.dateSource == "contacts.birthday")
+        #expect(firstSource.evidence.contains("Ryland birthday"))
+        #expect(firstSource.safeNextCommands.contains("cider-cli item get contact \(contactID.uuidString) --json"))
+    }
+
     @Test("around unresolved event recall does not invent dates")
     func aroundUnresolvedEventRecallDoesNotInventDates() throws {
         let (db, url) = try makeTestDB()

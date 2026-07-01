@@ -902,7 +902,7 @@ final class CiderNaturalPreferenceRecallService {
         let results = (try? contextService.search(searchQuery, limit: 12, scope: .personalMemory, sort: .newest)) ?? []
         let phraseTokens = significantQueryTokens(in: searchQuery)
             .filter { !genericMemoryRecallTokens.contains($0) && $0 != "around" }
-        var candidates: [(date: Date, source: CiderNaturalPreferenceRecallEventResolutionSource, score: Int)] = []
+        var candidates = normalizedEventDateAliasCandidates(cleanedPhrase: cleanedPhrase, phraseTokens: phraseTokens)
         for result in results {
             guard let item = result.item else { continue }
             let bundle = try? contextService.context(for: LibraryEntityRef(type: item.type, entityID: item.id))
@@ -950,6 +950,13 @@ final class CiderNaturalPreferenceRecallService {
             .filter { Self.localDayFormatter.string(from: $0.date) == Self.localDayFormatter.string(from: best.date) }
             .sorted { $0.score > $1.score }
             .map(\.source)
+        var seenSourceKeys: Set<String> = []
+        let uniqueMatchingSources = matchingSources.reduce(into: [CiderNaturalPreferenceRecallEventResolutionSource]()) { partial, source in
+            let key = "\(source.sourceRef)|\(source.sourceKind)|\(source.dateSource)"
+            if seenSourceKeys.insert(key).inserted {
+                partial.append(source)
+            }
+        }
         return CiderNaturalPreferenceRecallEventResolution(
             eventQuery: cleanedPhrase,
             recognizedText: recognizedText,
@@ -958,8 +965,8 @@ final class CiderNaturalPreferenceRecallService {
             sourceKind: best.source.sourceKind,
             truthBoundary: eventResolutionTruthBoundary(sourceKind: best.source.sourceKind),
             fallbackReason: nil,
-            sources: Array(matchingSources.prefix(3)),
-            safeNextCommands: orderedUnique(fallbackCommands + matchingSources.flatMap(\.safeNextCommands))
+            sources: Array(uniqueMatchingSources.prefix(3)),
+            safeNextCommands: orderedUnique(fallbackCommands + uniqueMatchingSources.flatMap(\.safeNextCommands))
         )
     }
 
@@ -1020,6 +1027,149 @@ final class CiderNaturalPreferenceRecallService {
             return (date, "journal_observation", "explicit_date_in_source")
         }
         return nil
+    }
+
+    private func normalizedEventDateAliasCandidates(
+        cleanedPhrase: String,
+        phraseTokens: [String]
+    ) -> [(date: Date, source: CiderNaturalPreferenceRecallEventResolutionSource, score: Int)] {
+        guard !phraseTokens.isEmpty else { return [] }
+        return normalizedDateCardAliasCandidates(phraseTokens: phraseTokens)
+            + normalizedContactBirthdayAliasCandidates(cleanedPhrase: cleanedPhrase, phraseTokens: phraseTokens)
+    }
+
+    private func normalizedDateCardAliasCandidates(
+        phraseTokens: [String]
+    ) -> [(date: Date, source: CiderNaturalPreferenceRecallEventResolutionSource, score: Int)] {
+        do {
+            let stmt = try database.prepare("""
+                SELECT i.id, i.title, e.start_at
+                FROM events e
+                JOIN items i ON i.id = e.item_id
+                WHERE i.type = 'event' AND e.start_at IS NOT NULL
+                ORDER BY e.start_at DESC
+                LIMIT 200;
+                """)
+            var candidates: [(date: Date, source: CiderNaturalPreferenceRecallEventResolutionSource, score: Int)] = []
+            while try stmt.step() {
+                guard let itemID = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+                let title = stmt.string(at: 1)
+                let aliasText = normalizedEventAliasSurface(title)
+                guard eventAliasMatches(phraseTokens: phraseTokens, aliasText: aliasText) else { continue }
+                let date = DatabaseHelpers.decodeDate(stmt.double(at: 2))
+                let sourceRef = "dateCard:\(itemID.uuidString)"
+                let commands = [
+                    "cider-cli item context dateCard \(itemID.uuidString) --json",
+                    "cider-cli item get dateCard \(itemID.uuidString) --json",
+                ]
+                let source = CiderNaturalPreferenceRecallEventResolutionSource(
+                    sourceRef: sourceRef,
+                    sourceType: "dateCard",
+                    sourceID: itemID.uuidString,
+                    title: title,
+                    sourceKind: "accepted_event_date",
+                    dateSource: "events.start_at",
+                    evidence: title,
+                    safeNextCommands: commands
+                )
+                candidates.append((date, source, eventAliasScore(sourceKind: "accepted_event_date", phraseTokens: phraseTokens, aliasText: aliasText)))
+            }
+            return candidates
+        } catch {
+            return []
+        }
+    }
+
+    private func normalizedContactBirthdayAliasCandidates(
+        cleanedPhrase: String,
+        phraseTokens: [String]
+    ) -> [(date: Date, source: CiderNaturalPreferenceRecallEventResolutionSource, score: Int)] {
+        guard phraseTokens.contains("birthday") else { return [] }
+        do {
+            let stmt = try database.prepare("""
+                SELECT i.id, i.title, c.birthday
+                FROM contacts c
+                JOIN items i ON i.id = c.item_id
+                WHERE i.type = 'contact' AND c.birthday IS NOT NULL
+                ORDER BY c.birthday DESC
+                LIMIT 200;
+                """)
+            var candidates: [(date: Date, source: CiderNaturalPreferenceRecallEventResolutionSource, score: Int)] = []
+            while try stmt.step() {
+                guard let itemID = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+                let title = stmt.string(at: 1)
+                let aliasText = normalizedBirthdayAliasSurface(for: title)
+                guard eventAliasMatches(phraseTokens: phraseTokens, aliasText: aliasText) else { continue }
+                let date = DatabaseHelpers.decodeDate(stmt.double(at: 2))
+                let sourceRef = "contact:\(itemID.uuidString)"
+                let commands = [
+                    "cider-cli item context contact \(itemID.uuidString) --json",
+                    "cider-cli item get contact \(itemID.uuidString) --json",
+                ]
+                let source = CiderNaturalPreferenceRecallEventResolutionSource(
+                    sourceRef: sourceRef,
+                    sourceType: "contact",
+                    sourceID: itemID.uuidString,
+                    title: title,
+                    sourceKind: "contact_birthday",
+                    dateSource: "contacts.birthday",
+                    evidence: "\(title) birthday",
+                    safeNextCommands: commands
+                )
+                candidates.append((date, source, eventAliasScore(sourceKind: "contact_birthday", phraseTokens: phraseTokens, aliasText: aliasText)))
+            }
+            return candidates
+        } catch {
+            return []
+        }
+    }
+
+    private func normalizedEventAliasSurface(_ title: String) -> String {
+        let aliases = title.lowercased().contains("birthday")
+            ? birthdayAliases(for: title)
+            : [title]
+        return normalizedAliasText(orderedUnique(aliases).joined(separator: " "))
+    }
+
+    private func normalizedBirthdayAliasSurface(for name: String) -> String {
+        normalizedAliasText(birthdayAliases(for: name).joined(separator: " "))
+    }
+
+    private func birthdayAliases(for name: String) -> [String] {
+        let trimmed = name.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !trimmed.isEmpty else { return [] }
+        let unpossessed = trimmed.replacingOccurrences(of: #"'s\b"#, with: "", options: .regularExpression)
+        let base = unpossessed.lowercased().contains("birthday") ? unpossessed : "\(unpossessed) birthday"
+        return orderedUnique([
+            trimmed,
+            base,
+            "\(unpossessed)'s birthday",
+            "birthday for \(unpossessed)",
+            "\(unpossessed) bday",
+        ])
+    }
+
+    private func normalizedAliasText(_ value: String) -> String {
+        value
+            .lowercased()
+            .replacingOccurrences(of: #"'s\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"[^a-z0-9-]+"#, with: " ", options: .regularExpression)
+    }
+
+    private func eventAliasMatches(phraseTokens: [String], aliasText: String) -> Bool {
+        let aliasTokens = Set(significantQueryTokens(in: aliasText))
+        let requiredTokens = phraseTokens.filter { $0 != "birthday" && $0 != "bday" }
+        guard !requiredTokens.isEmpty else { return false }
+        return requiredTokens.allSatisfy { aliasTokens.contains($0) }
+            && (!phraseTokens.contains("birthday") || aliasTokens.contains("birthday") || aliasTokens.contains("bday"))
+    }
+
+    private func eventAliasScore(sourceKind: String, phraseTokens: [String], aliasText: String) -> Int {
+        var total = phraseTokens.filter { aliasText.contains($0) }.count * 8
+        if sourceKind == "accepted_event_date" { total += 40 }
+        if sourceKind == "contact_birthday" { total += 38 }
+        if aliasText.contains("birthday") { total += 6 }
+        return total
     }
 
     private func normalizedEventDateFact(
