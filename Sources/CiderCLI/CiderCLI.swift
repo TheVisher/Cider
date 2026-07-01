@@ -23393,7 +23393,8 @@ struct CiderCLI {
                 output: output,
                 candidate: candidate,
                 sourceItemRef: output.owner.canonicalRef,
-                evidenceRef: output.metadata["source_evidence_ref"] ?? output.metadata["source_evidence_id"].map { "source_evidence:\($0)" }
+                evidenceRef: output.metadata["source_evidence_ref"] ?? output.metadata["source_evidence_id"].map { "source_evidence:\($0)" },
+                database: CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil
             )
             if !targetOptions.isEmpty {
                 dict["targetOptions"] = targetOptions.map { $0.toDictionary() }
@@ -23553,7 +23554,11 @@ struct CiderCLI {
 
     static func graphCandidateReviewActionCommands(for output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
         let optionCommand: String? = (try? SecondBrainGraphCandidateContract.validate(output)).flatMap { candidate in
-            CiderReviewQueueService.graphCandidateTargetOptions(output: output, candidate: candidate).first.map {
+            CiderReviewQueueService.graphCandidateTargetOptions(
+                output: output,
+                candidate: candidate,
+                database: CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil
+            ).first.map {
                 "cider-cli review approve \(output.id) --target-option \($0.optionRef) --json"
             }
         }

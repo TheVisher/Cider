@@ -118,6 +118,51 @@ struct CiderReviewQueueServiceTests {
         return id
     }
 
+    private func insertContact(
+        _ db: CiderDatabase,
+        id: UUID = UUID(),
+        name: String,
+        relationship: String = "",
+        notes: String = ""
+    ) throws -> UUID {
+        let itemID = try insertItem(
+            db,
+            id: id,
+            type: "contact",
+            title: name,
+            relativePath: "People/\(name).vcf"
+        )
+        let contact = try db.prepare("""
+            INSERT INTO contacts (item_id, relationship_label, birthday, notes, email, phone, address, has_avatar, custom_fields)
+            VALUES (?, ?, NULL, ?, '', '', '', 0, '[]');
+            """)
+        contact.bind(itemID.uuidString, at: 1)
+            .bind(relationship, at: 2)
+            .bind(notes, at: 3)
+        try contact.step()
+        return itemID
+    }
+
+    private func insertProjectedOwner(
+        _ db: CiderDatabase,
+        owner: SecondBrainOwnerRef,
+        title: String,
+        body: String,
+        confidence: Double = 0.84
+    ) throws {
+        try SecondBrainStore(database: db).upsertSection(SecondBrainSection(
+            id: "\(owner.canonicalRef):test-summary",
+            owner: owner,
+            itemID: nil,
+            sectionKey: "test_summary",
+            title: title,
+            body: body,
+            source: "test.seed",
+            confidence: confidence,
+            sortOrder: 0
+        ))
+    }
+
     @Test("review queue lists low-confidence routing once and exposes safe actions")
     func reviewQueueListsLowConfidenceRouting() throws {
         let (db, url) = try makeTempDB()
@@ -1150,6 +1195,135 @@ struct CiderReviewQueueServiceTests {
         #expect(corrected.actionReceipt["after"] as? [String: String] == ["reviewState": "accepted", "truthBoundary": "accepted_graph_truth"])
         #expect(try SecondBrainStore(database: db).outgoingRelations(for: owner).contains {
             $0.targetOwner == correctedTarget && $0.relationType == "watched"
+        })
+    }
+
+    @Test("graph candidate target options include ranked existing owners and fallback")
+    func graphCandidateTargetOptionsIncludeRankedExistingOwnersAndFallback() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Existing target lookup",
+            relativePath: "Daily/2026-06-15.md"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let mediaOwner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: "columbus-2017")
+        try insertProjectedOwner(
+            db,
+            owner: mediaOwner,
+            title: "Columbus",
+            body: "Title: Columbus\nType: movie\nYear: 2017\nSource-backed media item.",
+            confidence: 0.91
+        )
+        let contactID = try insertContact(
+            db,
+            name: "Avery Chen",
+            relationship: "friend",
+            notes: "Existing person target for journal graph lookup."
+        )
+        _ = try SecondBrainProjectGraphService(database: db).upsertProject(
+            id: "cider-graph-candidates",
+            title: "Graph Candidate Lookup",
+            subtitle: "Backend review options"
+        )
+
+        let mediaCandidate = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Columbus",
+            sourceQuote: "Watched Columbus and wanted to remember why it worked.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.9,
+            source: "test.graph.existing-media"
+        )
+        let personCandidate = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Avery Chen",
+            sourceQuote: "Talked with Avery Chen about the trip.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.person],
+            relationGuesses: [.mentions],
+            safeActions: [.inspectSource, .linkExisting, .correct, .reject],
+            confidence: 0.86,
+            source: "test.graph.existing-person"
+        )
+        let projectCandidate = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Graph Candidate Lookup",
+            sourceQuote: "Worked on Graph Candidate Lookup before lunch.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.project],
+            relationGuesses: [.mentions],
+            safeActions: [.inspectSource, .linkExisting, .correct, .reject],
+            confidence: 0.82,
+            source: "test.graph.existing-project"
+        )
+        let noMatchCandidate = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Zyzzqv Plorbnax",
+            sourceQuote: "Watched Zyzzqv Plorbnax.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.72,
+            source: "test.graph.no-existing"
+        )
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(mediaCandidate)
+        try outputService.record(personCandidate)
+        try outputService.record(projectCandidate)
+        try outputService.record(noMatchCandidate)
+
+        let queue = CiderReviewQueueService(database: db)
+        let items = try queue.list(kind: "graph_candidate").items
+        let mediaItem = try #require(items.first { $0.candidateID == mediaCandidate.id })
+        let mediaOptions = try #require(mediaItem.toDictionary()["targetOptions"] as? [[String: Any]])
+        let mediaExisting = try #require(mediaOptions.first)
+        let mediaFallback = try #require(mediaOptions.first { ($0["optionRef"] as? String)?.hasSuffix(":candidate-object") == true })
+        #expect(mediaExisting["optionRef"] as? String == "graph_target_option:\(mediaCandidate.id):existing-1")
+        #expect((mediaExisting["targetOwner"] as? [String: String])?["ref"] == mediaOwner.canonicalRef)
+        #expect(mediaExisting["targetKind"] as? String == "media")
+        #expect(mediaExisting["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((mediaExisting["evidenceRefs"] as? [String])?.contains("note:\(noteID.uuidString)") == true)
+        #expect((mediaFallback["targetOwner"] as? [String: String])?["ref"] == "graph_object:movie-columbus")
+        #expect(mediaItem.safeNextCommands.first == "cider-cli review approve \(mediaCandidate.id) --target-option graph_target_option:\(mediaCandidate.id):existing-1 --json")
+
+        let personOptions = try #require(items.first { $0.candidateID == personCandidate.id }?.toDictionary()["targetOptions"] as? [[String: Any]])
+        #expect((personOptions.first?["targetOwner"] as? [String: String])?["ref"] == "contact:\(contactID.uuidString)")
+        #expect(personOptions.contains { ($0["optionRef"] as? String)?.hasSuffix(":candidate-object") == true })
+
+        let projectOptions = try #require(items.first { $0.candidateID == projectCandidate.id }?.toDictionary()["targetOptions"] as? [[String: Any]])
+        #expect((projectOptions.first?["targetOwner"] as? [String: String])?["ref"] == "project:cider-graph-candidates")
+
+        let noMatchOptions = try #require(items.first { $0.candidateID == noMatchCandidate.id }?.toDictionary()["targetOptions"] as? [[String: Any]])
+        #expect(noMatchOptions.count == 1)
+        #expect(noMatchOptions.first?["optionRef"] as? String == "graph_target_option:\(noMatchCandidate.id):candidate-object")
+
+        #expect(throws: CiderReviewCandidateActionService.ReviewCandidateActionError.graphAcceptNeedsResolvedTarget(mediaCandidate.id)) {
+            _ = try queue.approveGraphCandidate(candidateID: mediaCandidate.id, actor: "reviewer")
+        }
+        let selected = try queue.approveGraphCandidate(
+            candidateID: mediaCandidate.id,
+            actor: "reviewer",
+            targetOptionRef: "graph_target_option:\(mediaCandidate.id):existing-1"
+        )
+        #expect(selected.changed == true)
+        #expect(selected.beforeState == "suggested")
+        #expect(selected.afterState == "accepted")
+        #expect(selected.truthBoundary == "accepted_graph_truth")
+        #expect(selected.actionReceipt["truthBoundary"] as? String == "accepted_graph_truth")
+        #expect(selected.provenance["evidenceRef"] != nil)
+        #expect(try SecondBrainStore(database: db).outgoingRelations(for: owner).contains {
+            $0.targetOwner == mediaOwner && $0.relationType == "watched"
         })
     }
 

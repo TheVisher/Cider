@@ -1803,7 +1803,7 @@ final class CiderReviewQueueService {
             )
         }
         if let targetOptionRef,
-           let option = Self.graphCandidateTargetOption(ref: targetOptionRef, output: output, candidate: candidate) {
+           let option = Self.graphCandidateTargetOption(ref: targetOptionRef, output: output, candidate: candidate, database: db) {
             return (option.targetOwner, correctedRelationType ?? relationType ?? option.relationType)
         }
         throw CiderReviewCandidateActionService.ReviewCandidateActionError.graphAcceptNeedsResolvedTarget(id)
@@ -2485,12 +2485,13 @@ final class CiderReviewQueueService {
         output: SecondBrainEnrichmentOutput,
         candidate: SecondBrainGraphCandidateContract.Candidate,
         sourceItemRef: String? = nil,
-        evidenceRef: String? = nil
+        evidenceRef: String? = nil,
+        database: CiderDatabase? = nil
     ) -> [CiderGraphCandidateTargetOption] {
         guard candidate.reviewState.isReviewable else { return [] }
         guard candidate.kind == .object || candidate.kind == .objectRelation else { return [] }
         let targetKind = candidate.objectTypeGuesses.first?.rawValue ?? "object"
-        let targetOwner = candidate.acceptedTargetOwner ?? SecondBrainOwnerRef(
+        let fallbackTargetOwner = candidate.acceptedTargetOwner ?? SecondBrainOwnerRef(
             ownerType: "graph_object",
             ownerID: "\(targetKind)-\(graphCandidateTargetSlug(candidate.mentionText))"
         )
@@ -2500,28 +2501,320 @@ final class CiderReviewQueueService {
         let sourceRef = sourceItemRef ?? output.owner.canonicalRef
         var seenRefs = Set<String>()
         let refs = [sourceRef, evidenceRef].compactMap { $0 }.filter { seenRefs.insert($0).inserted }
-        return [
-            CiderGraphCandidateTargetOption(
-                optionRef: "graph_target_option:\(output.id):candidate-object",
-                label: "\(candidate.mentionText) -> \(targetOwner.canonicalRef)",
-                targetOwner: targetOwner,
+        let existingOptions = existingGraphCandidateTargetOptions(
+            output: output,
+            candidate: candidate,
+            targetKind: targetKind,
+            relationType: relationType,
+            sourceRef: sourceRef,
+            evidenceRefs: refs,
+            database: database
+        )
+        let fallbackOption = CiderGraphCandidateTargetOption(
+            optionRef: "graph_target_option:\(output.id):candidate-object",
+            label: "\(candidate.mentionText) -> \(fallbackTargetOwner.canonicalRef)",
+            targetOwner: fallbackTargetOwner,
+            relationType: relationType,
+            targetKind: targetKind,
+            sourceQuote: candidate.sourceQuote,
+            sourceItemRef: sourceRef,
+            evidenceRefs: refs,
+            confidence: candidate.confidence
+        )
+        var seenOptionOwners = Set(existingOptions.map { "\($0.targetOwner.canonicalRef)|\($0.relationType)" })
+        let fallbackKey = "\(fallbackOption.targetOwner.canonicalRef)|\(fallbackOption.relationType)"
+        if seenOptionOwners.insert(fallbackKey).inserted {
+            return existingOptions + [fallbackOption]
+        }
+        return existingOptions
+    }
+
+    private struct ExistingGraphCandidateTargetMatch {
+        var owner: SecondBrainOwnerRef
+        var targetKind: String
+        var label: String
+        var searchableText: String
+        var baseConfidence: Double
+        var rankHint: Int
+    }
+
+    private static func existingGraphCandidateTargetOptions(
+        output: SecondBrainEnrichmentOutput,
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        targetKind: String,
+        relationType: String,
+        sourceRef: String,
+        evidenceRefs: [String],
+        database: CiderDatabase?
+    ) -> [CiderGraphCandidateTargetOption] {
+        guard let database else { return [] }
+        let matches = (try? existingGraphCandidateTargetMatches(in: database, candidate: candidate, targetKind: targetKind)) ?? []
+        var seen = Set<String>()
+        return matches.prefix(4).enumerated().compactMap { index, match in
+            guard seen.insert(match.owner.canonicalRef).inserted else { return nil }
+            return CiderGraphCandidateTargetOption(
+                optionRef: "graph_target_option:\(output.id):existing-\(index + 1)",
+                label: "\(candidate.mentionText) -> existing \(match.label) (\(match.owner.canonicalRef))",
+                targetOwner: match.owner,
                 relationType: relationType,
-                targetKind: targetKind,
+                targetKind: match.targetKind,
                 sourceQuote: candidate.sourceQuote,
                 sourceItemRef: sourceRef,
-                evidenceRefs: refs,
-                confidence: candidate.confidence
-            ),
-        ]
+                evidenceRefs: evidenceRefs,
+                confidence: min(0.99, match.baseConfidence)
+            )
+        }
+    }
+
+    private static func existingGraphCandidateTargetMatches(
+        in database: CiderDatabase,
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        targetKind: String
+    ) throws -> [ExistingGraphCandidateTargetMatch] {
+        let mention = candidate.mentionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !mention.isEmpty else { return [] }
+        let allowedOwnerTypes = graphCandidateAllowedExistingOwnerTypes(targetKind: targetKind, candidate: candidate)
+        var matches: [ExistingGraphCandidateTargetMatch] = []
+        matches.append(contentsOf: try contactTargetMatches(in: database))
+        matches.append(contentsOf: try projectTargetMatches(in: database))
+        matches.append(contentsOf: try projectedOwnerTargetMatches(in: database, allowedOwnerTypes: allowedOwnerTypes))
+        matches.append(contentsOf: try acceptedGraphObjectTargetMatches(in: database, allowedOwnerTypes: allowedOwnerTypes))
+
+        let mentionTokens = graphCandidateLookupTokens(mention)
+        let sourceTokens = graphCandidateLookupTokens(candidate.sourceQuote)
+        guard !mentionTokens.isEmpty else { return [] }
+        var bestByOwner: [SecondBrainOwnerRef: ExistingGraphCandidateTargetMatch] = [:]
+        for match in matches {
+            let score = graphCandidateTargetScore(
+                mention: mention,
+                mentionTokens: mentionTokens,
+                sourceTokens: sourceTokens,
+                match: match
+            )
+            guard score >= 0.52 else { continue }
+            var ranked = match
+            ranked.baseConfidence = score
+            if let current = bestByOwner[match.owner], current.baseConfidence >= score {
+                continue
+            }
+            bestByOwner[match.owner] = ranked
+        }
+        return bestByOwner.values.sorted { lhs, rhs in
+            if lhs.baseConfidence != rhs.baseConfidence { return lhs.baseConfidence > rhs.baseConfidence }
+            if lhs.rankHint != rhs.rankHint { return lhs.rankHint < rhs.rankHint }
+            return lhs.label.localizedCaseInsensitiveCompare(rhs.label) == .orderedAscending
+        }
+    }
+
+    private static func contactTargetMatches(in database: CiderDatabase) throws -> [ExistingGraphCandidateTargetMatch] {
+        let stmt = try database.prepare("""
+            SELECT i.id, i.title, c.relationship_label, c.notes, c.email
+            FROM contacts c
+            JOIN items i ON i.id = c.item_id
+            ORDER BY i.updated_at DESC
+            LIMIT 200;
+            """)
+        var matches: [ExistingGraphCandidateTargetMatch] = []
+        while try stmt.step() {
+            let title = stmt.string(at: 1)
+            let searchable = [title, stmt.string(at: 2), stmt.string(at: 3), stmt.string(at: 4)]
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            matches.append(ExistingGraphCandidateTargetMatch(
+                owner: SecondBrainOwnerRef(ownerType: "contact", ownerID: stmt.string(at: 0)),
+                targetKind: "person",
+                label: title,
+                searchableText: searchable,
+                baseConfidence: 0,
+                rankHint: 10
+            ))
+        }
+        return matches
+    }
+
+    private static func projectTargetMatches(in database: CiderDatabase) throws -> [ExistingGraphCandidateTargetMatch] {
+        let stmt = try database.prepare("""
+            SELECT id, title, subtitle, metadata
+            FROM projects
+            ORDER BY updated_at DESC
+            LIMIT 200;
+            """)
+        var matches: [ExistingGraphCandidateTargetMatch] = []
+        while try stmt.step() {
+            let title = stmt.string(at: 1)
+            let searchable = [title, stmt.string(at: 2), stmt.string(at: 3)]
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            matches.append(ExistingGraphCandidateTargetMatch(
+                owner: SecondBrainOwnerRef(ownerType: "project", ownerID: stmt.string(at: 0)),
+                targetKind: "project",
+                label: title,
+                searchableText: searchable,
+                baseConfidence: 0,
+                rankHint: 20
+            ))
+        }
+        return matches
+    }
+
+    private static func projectedOwnerTargetMatches(
+        in database: CiderDatabase,
+        allowedOwnerTypes: Set<String>
+    ) throws -> [ExistingGraphCandidateTargetMatch] {
+        let placeholders = Array(repeating: "?", count: allowedOwnerTypes.count).joined(separator: ",")
+        guard !placeholders.isEmpty else { return [] }
+        let stmt = try database.prepare("""
+            SELECT owner_type, owner_id, title, body, confidence
+            FROM item_sections
+            WHERE owner_type IN (\(placeholders))
+            ORDER BY updated_at DESC
+            LIMIT 300;
+            """)
+        for (index, ownerType) in allowedOwnerTypes.sorted().enumerated() {
+            stmt.bind(ownerType, at: Int32(index + 1))
+        }
+        var matches: [ExistingGraphCandidateTargetMatch] = []
+        while try stmt.step() {
+            let ownerType = stmt.string(at: 0)
+            let title = stmt.string(at: 2)
+            matches.append(ExistingGraphCandidateTargetMatch(
+                owner: SecondBrainOwnerRef(ownerType: ownerType, ownerID: stmt.string(at: 1)),
+                targetKind: graphCandidateTargetKind(ownerType: ownerType, fallback: ownerType),
+                label: title.isEmpty ? stmt.string(at: 1) : title,
+                searchableText: [title, stmt.string(at: 3)].joined(separator: " "),
+                baseConfidence: stmt.optionalDouble(at: 4) ?? 0,
+                rankHint: 30
+            ))
+        }
+        return matches
+    }
+
+    private static func acceptedGraphObjectTargetMatches(
+        in database: CiderDatabase,
+        allowedOwnerTypes: Set<String>
+    ) throws -> [ExistingGraphCandidateTargetMatch] {
+        let placeholders = Array(repeating: "?", count: allowedOwnerTypes.count).joined(separator: ",")
+        guard !placeholders.isEmpty else { return [] }
+        let stmt = try database.prepare("""
+            SELECT target_owner_type, target_owner_id, evidence, metadata, confidence
+            FROM owner_relations
+            WHERE target_owner_type IN (\(placeholders))
+            ORDER BY updated_at DESC
+            LIMIT 300;
+            """)
+        for (index, ownerType) in allowedOwnerTypes.sorted().enumerated() {
+            stmt.bind(ownerType, at: Int32(index + 1))
+        }
+        var matches: [ExistingGraphCandidateTargetMatch] = []
+        while try stmt.step() {
+            let ownerType = stmt.string(at: 0)
+            let ownerID = stmt.string(at: 1)
+            let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 3)) ?? [:]
+            let label = metadata["target_label"]
+                ?? metadata["mediaItemTitle"]
+                ?? metadata["candidate_mention_text"]
+                ?? ownerID
+            let searchable = [label, ownerID, stmt.string(at: 2), metadata.values.joined(separator: " ")]
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            matches.append(ExistingGraphCandidateTargetMatch(
+                owner: SecondBrainOwnerRef(ownerType: ownerType, ownerID: ownerID),
+                targetKind: graphCandidateTargetKind(ownerType: ownerType, fallback: ownerType),
+                label: label,
+                searchableText: searchable,
+                baseConfidence: stmt.optionalDouble(at: 4) ?? 0,
+                rankHint: 40
+            ))
+        }
+        return matches
+    }
+
+    private static func graphCandidateAllowedExistingOwnerTypes(
+        targetKind: String,
+        candidate: SecondBrainGraphCandidateContract.Candidate
+    ) -> Set<String> {
+        var types: Set<String> = ["graph_object", "media_item", "place", "project", "contact"]
+        let rawKinds = Set(candidate.objectTypeGuesses.map(\.rawValue) + [targetKind])
+        if rawKinds.contains("person") || rawKinds.contains("contact") {
+            types.formUnion(["contact", "person"])
+        }
+        if rawKinds.contains("project") {
+            types.insert("project")
+        }
+        if rawKinds.contains("movie") || rawKinds.contains("book") || rawKinds.contains("show") || rawKinds.contains("media") {
+            types.insert("media_item")
+        }
+        if rawKinds.contains("place") || rawKinds.contains("restaurant") {
+            types.insert("place")
+        }
+        return types
+    }
+
+    private static func graphCandidateTargetKind(ownerType: String, fallback: String) -> String {
+        switch ownerType {
+        case "contact", "person":
+            return "person"
+        case "media_item":
+            return "media"
+        default:
+            return fallback
+        }
+    }
+
+    private static func graphCandidateTargetScore(
+        mention: String,
+        mentionTokens: Set<String>,
+        sourceTokens: Set<String>,
+        match: ExistingGraphCandidateTargetMatch
+    ) -> Double {
+        let normalizedMention = graphCandidateLookupNormalized(mention)
+        let normalizedText = graphCandidateLookupNormalized(match.searchableText)
+        if normalizedText == normalizedMention {
+            return 0.96
+        }
+        if !normalizedMention.isEmpty && normalizedText.contains(normalizedMention) {
+            return 0.9
+        }
+        let normalizedLabel = graphCandidateLookupNormalized(match.label)
+        if normalizedLabel.count >= 4,
+           normalizedMention.contains(normalizedLabel) {
+            return 0.86
+        }
+        let matchTokens = graphCandidateLookupTokens(match.searchableText)
+        guard !matchTokens.isEmpty else { return 0 }
+        let overlap = mentionTokens.intersection(matchTokens)
+        let sourceOverlap = sourceTokens.intersection(matchTokens)
+        let mentionScore = Double(overlap.count) / Double(max(mentionTokens.count, 1))
+        let sourceScore = min(0.18, Double(sourceOverlap.count) * 0.03)
+        let storedConfidenceBoost = min(0.08, max(0, match.baseConfidence) * 0.08)
+        return min(0.88, mentionScore * 0.72 + sourceScore + storedConfidenceBoost)
+    }
+
+    private static func graphCandidateLookupTokens(_ value: String) -> Set<String> {
+        let stopwords: Set<String> = ["the", "a", "an", "and", "or", "to", "of", "for", "with", "in", "on", "at"]
+        return Set(graphCandidateLookupNormalized(value)
+            .split(separator: " ")
+            .map(String.init)
+            .filter { $0.count > 1 && !stopwords.contains($0) })
+    }
+
+    private static func graphCandidateLookupNormalized(_ value: String) -> String {
+        value
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     static func graphCandidateTargetOption(
         ref rawRef: String,
         output: SecondBrainEnrichmentOutput,
-        candidate: SecondBrainGraphCandidateContract.Candidate
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        database: CiderDatabase? = nil
     ) -> CiderGraphCandidateTargetOption? {
         let normalized = rawRef.trimmingCharacters(in: .whitespacesAndNewlines)
-        return graphCandidateTargetOptions(output: output, candidate: candidate).first { $0.optionRef == normalized }
+        return graphCandidateTargetOptions(output: output, candidate: candidate, database: database).first { $0.optionRef == normalized }
     }
 
     private static func graphCandidateTargetSlug(_ value: String) -> String {
@@ -2581,7 +2874,8 @@ final class CiderReviewQueueService {
                 output: output,
                 candidate: candidate,
                 sourceItemRef: sourceItemRef,
-                evidenceRef: sourceEvidenceRecord.map { "source_evidence:\($0.id)" }
+                evidenceRef: sourceEvidenceRecord.map { "source_evidence:\($0.id)" },
+                database: db
             )
 
             return CiderReviewQueueItem(
