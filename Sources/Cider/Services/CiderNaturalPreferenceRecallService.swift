@@ -128,9 +128,11 @@ struct CiderNaturalPreferenceRecallResponse: Codable, Equatable {
 @MainActor
 final class CiderNaturalPreferenceRecallService {
     private let contextService: CiderItemContextService
+    private let currentDate: Date?
 
-    init(contextService: CiderItemContextService = CiderItemContextService(database: .shared)) {
+    init(contextService: CiderItemContextService = CiderItemContextService(database: .shared), currentDate: Date? = nil) {
         self.contextService = contextService
+        self.currentDate = currentDate
     }
 
     func answer(_ query: String, limit: Int = 8) throws -> CiderNaturalPreferenceRecallResponse {
@@ -355,8 +357,8 @@ final class CiderNaturalPreferenceRecallService {
         let normalized = query.lowercased()
         let subject = extractSubject(from: query)
         let semanticTerms = semanticQueryTerms(for: normalized, mode: mode)
-        let temporalIntent = temporalIntent(for: normalized, mode: mode)
-        let temporalDate = specificDateAnchor(in: normalized)
+        let temporalDate = temporalDateAnchor(in: normalized, mode: mode)
+        let temporalIntent = temporalIntent(for: normalized, mode: mode, temporalDate: temporalDate)
         let factFamily = factFamily(for: normalized, semanticTerms: semanticTerms, mode: mode)
         let factTarget = factTarget(for: normalized, semanticTerms: semanticTerms, factFamily: factFamily, mode: mode)
         let kind: CiderNaturalPreferenceRecallQuestionKind
@@ -536,17 +538,20 @@ final class CiderNaturalPreferenceRecallService {
         ["today", "yesterday"]
     }
 
-    private func temporalIntent(for normalizedQuery: String, mode: CiderNaturalRecallMode) -> String? {
+    private func temporalIntent(for normalizedQuery: String, mode: CiderNaturalRecallMode, temporalDate: String? = nil) -> String? {
         guard mode == .memory else { return nil }
         let tokens = Set(significantQueryTokens(in: normalizedQuery))
         if tokens.contains("today") || normalizedQuery.contains("right now") {
             return "today"
         }
+        if tokens.contains("yesterday") {
+            return "yesterday"
+        }
+        if temporalDate != nil || normalizedQuery.range(of: #"\b20\d{2}-\d{2}-\d{2}\b"#, options: .regularExpression) != nil {
+            return "specific_date"
+        }
         if tokens.contains("latest") || tokens.contains("newest") || tokens.contains("recent") || normalizedQuery.contains("most recent") {
             return "latest"
-        }
-        if normalizedQuery.range(of: #"\b20\d{2}-\d{2}-\d{2}\b"#, options: .regularExpression) != nil {
-            return "specific_date"
         }
         return nil
     }
@@ -558,17 +563,19 @@ final class CiderNaturalPreferenceRecallService {
     ) -> String? {
         guard mode == .memory,
               isGenericExplicitDateRecall(normalizedQuery: normalizedQuery, semanticTerms: semanticTerms),
-              temporalIntent(for: normalizedQuery, mode: mode) == "today"
+              let intent = temporalIntent(for: normalizedQuery, mode: mode),
+              ["today", "yesterday"].contains(intent),
+              let date = temporalDateAnchor(in: normalizedQuery, mode: mode)
         else {
             return nil
         }
-        return "Daily Journal \(Self.localDayFormatter.string(from: Date()))"
+        return "Daily Journal \(date)"
     }
 
     private func specificDateAnchorSearchQuery(normalizedQuery: String, mode: CiderNaturalRecallMode) -> String? {
         guard mode == .memory,
-              temporalIntent(for: normalizedQuery, mode: mode) == "specific_date",
-              let date = specificDateAnchor(in: normalizedQuery)
+              let date = temporalDateAnchor(in: normalizedQuery, mode: mode),
+              temporalIntent(for: normalizedQuery, mode: mode, temporalDate: date) == "specific_date"
         else {
             return nil
         }
@@ -1247,9 +1254,10 @@ final class CiderNaturalPreferenceRecallService {
         let calendar = Calendar.current
         switch intent {
         case "today":
-            return calendar.isDateInToday(date)
+            return Self.localDayFormatter.string(from: date) == Self.localDayFormatter.string(from: referenceDate())
         case "yesterday":
-            return calendar.isDateInYesterday(date)
+            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: referenceDate()) else { return false }
+            return Self.localDayFormatter.string(from: date) == Self.localDayFormatter.string(from: yesterday)
         default:
             return false
         }
@@ -1265,11 +1273,85 @@ final class CiderNaturalPreferenceRecallService {
         return Self.localDayFormatter.string(from: date) == temporalDate
     }
 
+    private func temporalDateAnchor(in normalizedQuery: String, mode: CiderNaturalRecallMode) -> String? {
+        guard mode == .memory else { return nil }
+        let tokens = Set(significantQueryTokens(in: normalizedQuery))
+        if tokens.contains("today") || normalizedQuery.contains("right now") {
+            return Self.localDayFormatter.string(from: referenceDate())
+        }
+        if tokens.contains("yesterday"),
+           let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: referenceDate()) {
+            return Self.localDayFormatter.string(from: yesterday)
+        }
+        return specificDateAnchor(in: normalizedQuery)
+    }
+
     private func specificDateAnchor(in normalizedQuery: String) -> String? {
-        guard let range = normalizedQuery.range(of: #"\b20\d{2}-\d{2}-\d{2}\b"#, options: .regularExpression) else {
+        if let range = normalizedQuery.range(of: #"\b20\d{2}-\d{2}-\d{2}\b"#, options: .regularExpression) {
+            return String(normalizedQuery[range])
+        }
+        if let slashDate = slashDateAnchor(in: normalizedQuery) {
+            return slashDate
+        }
+        return naturalMonthDateAnchor(in: normalizedQuery)
+    }
+
+    private func slashDateAnchor(in normalizedQuery: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: #"\b(\d{1,2})/(\d{1,2})/(20\d{2})\b"#),
+              let match = regex.firstMatch(in: normalizedQuery, range: NSRange(normalizedQuery.startIndex..., in: normalizedQuery)),
+              let monthRange = Range(match.range(at: 1), in: normalizedQuery),
+              let dayRange = Range(match.range(at: 2), in: normalizedQuery),
+              let yearRange = Range(match.range(at: 3), in: normalizedQuery),
+              let month = Int(normalizedQuery[monthRange]),
+              let day = Int(normalizedQuery[dayRange]),
+              let year = Int(normalizedQuery[yearRange])
+        else {
             return nil
         }
-        return String(normalizedQuery[range])
+        return formattedDate(year: year, month: month, day: day)
+    }
+
+    private func naturalMonthDateAnchor(in normalizedQuery: String) -> String? {
+        let monthPattern = Self.monthNameToNumber.keys.sorted { $0.count > $1.count }.joined(separator: "|")
+        guard let regex = try? NSRegularExpression(pattern: #"\b("# + monthPattern + #")\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(20\d{2}))?\b"#),
+              let match = regex.firstMatch(in: normalizedQuery, range: NSRange(normalizedQuery.startIndex..., in: normalizedQuery)),
+              let monthRange = Range(match.range(at: 1), in: normalizedQuery),
+              let dayRange = Range(match.range(at: 2), in: normalizedQuery),
+              let month = Self.monthNameToNumber[String(normalizedQuery[monthRange])],
+              let day = Int(normalizedQuery[dayRange])
+        else {
+            return nil
+        }
+        let year: Int
+        if match.range(at: 3).location != NSNotFound,
+           let yearRange = Range(match.range(at: 3), in: normalizedQuery),
+           let parsedYear = Int(normalizedQuery[yearRange]) {
+            year = parsedYear
+        } else {
+            year = Calendar.current.component(.year, from: referenceDate())
+        }
+        return formattedDate(year: year, month: month, day: day)
+    }
+
+    private func formattedDate(year: Int, month: Int, day: Int) -> String? {
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = .current
+        components.year = year
+        components.month = month
+        components.day = day
+        guard let date = components.date,
+              components.calendar?.component(.year, from: date) == year,
+              components.calendar?.component(.month, from: date) == month,
+              components.calendar?.component(.day, from: date) == day
+        else {
+            return nil
+        }
+        return Self.localDayFormatter.string(from: date)
+    }
+
+    private func referenceDate() -> Date {
+        currentDate ?? Date()
     }
 
     private func broaderSearchCommand(for intent: CiderNaturalPreferenceRecallIntent, limit: Int) -> String? {
@@ -1334,4 +1416,19 @@ final class CiderNaturalPreferenceRecallService {
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
+
+    private static let monthNameToNumber: [String: Int] = [
+        "january": 1, "jan": 1,
+        "february": 2, "feb": 2,
+        "march": 3, "mar": 3,
+        "april": 4, "apr": 4,
+        "may": 5,
+        "june": 6, "jun": 6,
+        "july": 7, "jul": 7,
+        "august": 8, "aug": 8,
+        "september": 9, "sept": 9, "sep": 9,
+        "october": 10, "oct": 10,
+        "november": 11, "nov": 11,
+        "december": 12, "dec": 12,
+    ]
 }
