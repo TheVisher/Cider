@@ -59,7 +59,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
         var explicitMediaCandidates: [SecondBrainEnrichmentOutput] = []
         if sentence.range(of: #"(?i)\bAvatar:\s*The Last Airbender\b"#, options: .regularExpression) != nil,
            sentence.range(of: #"(?i)\b(watched|watching|finished watching)\b"#, options: .regularExpression) != nil,
-           let candidate = makeCandidate(
+           var candidate = makeCandidate(
                 sourceOwner: sourceOwner,
                 candidateKind: .objectRelation,
                 mentionText: "Avatar: The Last Airbender",
@@ -70,6 +70,11 @@ struct SecondBrainJournalGraphCandidateExtractor {
                 confidence: 0.82,
                 confidenceReason: "Journal sentence names a watched media title."
            ) {
+            candidate.metadata.merge(mediaProgressMetadata(
+                title: "Avatar: The Last Airbender",
+                mediaType: "show",
+                sentence: sentence
+            )) { _, new in new }
             explicitMediaCandidates.append(candidate)
         }
         let sentenceClauses = candidateClauses(from: sentence)
@@ -1429,6 +1434,55 @@ struct SecondBrainJournalGraphCandidateExtractor {
             subjectText: subjectText,
             source: "graph_candidate.journal_capture"
         )
+    }
+
+    private func mediaProgressMetadata(
+        title: String,
+        mediaType: String,
+        sentence: String
+    ) -> [String: String] {
+        var metadata: [String: String] = [
+            SecondBrainGraphCandidateContract.MetadataKey.mediaTitle: title,
+            SecondBrainGraphCandidateContract.MetadataKey.mediaType: mediaType,
+        ]
+        if let season = firstCapture(pattern: #"(?i)\bseason\s+([0-9]+)\b"#, in: sentence) {
+            metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaSeasonNumber] = season
+        }
+        if let platform = firstCapture(pattern: #"(?i)\bon\s+(Netflix|Hulu|Disney\+|Max|Prime Video|Apple TV\+)\b"#, in: sentence) {
+            metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaPlatform] = platform
+        }
+        if let rawEpisodeCount = firstCapture(
+            pattern: #"(?i)\bthrough\s+((?:[0-9]+)|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))\s+episodes?\b"#,
+            in: sentence
+        ),
+           let episodeCount = normalizedEpisodeCount(rawEpisodeCount) {
+            metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaProgressKind] = "season_episode_progress"
+            metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaEpisodeCount] = episodeCount
+            metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaEpisodeProgress] = "through \(episodeCount) episodes"
+        } else if metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaSeasonNumber] != nil {
+            metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaProgressKind] = "season_progress"
+        }
+        return metadata
+    }
+
+    private func normalizedEpisodeCount(_ rawValue: String) -> String? {
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if Int(normalized) != nil { return normalized }
+        let numberWords = [
+            "one": "1",
+            "two": "2",
+            "three": "3",
+            "four": "4",
+            "five": "5",
+            "six": "6",
+            "seven": "7",
+            "eight": "8",
+            "nine": "9",
+            "ten": "10",
+            "eleven": "11",
+            "twelve": "12",
+        ]
+        return numberWords[normalized]
     }
 
     private func makeMemoryCandidate(

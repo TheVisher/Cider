@@ -114,6 +114,14 @@ enum SecondBrainGraphCandidateContract {
         static let subjectText = "subject_text"
         static let subjectOwnerType = "subject_owner_type"
         static let subjectOwnerID = "subject_owner_id"
+        static let truthBoundary = "truth_boundary"
+        static let mediaTitle = "media_title"
+        static let mediaType = "media_type"
+        static let mediaProgressKind = "media_progress_kind"
+        static let mediaSeasonNumber = "media_season_number"
+        static let mediaEpisodeProgress = "media_episode_progress"
+        static let mediaEpisodeCount = "media_episode_count"
+        static let mediaPlatform = "media_platform"
         static let acceptedTargetOwnerType = "accepted_target_owner_type"
         static let acceptedTargetOwnerID = "accepted_target_owner_id"
         static let acceptedRelationType = "accepted_relation_type"
@@ -216,6 +224,7 @@ enum SecondBrainGraphCandidateContract {
             MetadataKey.relationGuesses: encodeStringArray(relationGuesses.map(\.rawValue)),
             MetadataKey.actionGuesses: encodeStringArray(actionGuesses),
             MetadataKey.safeActions: encodeStringArray(safeActions.map(\.rawValue)),
+            MetadataKey.truthBoundary: "reviewable_candidate_not_truth",
         ]
         metadata[MetadataKey.sourceKind] = sourceKind.flatMap(trimmedNonEmpty)
         metadata[MetadataKey.confidenceReason] = confidenceReason.flatMap(trimmedNonEmpty)

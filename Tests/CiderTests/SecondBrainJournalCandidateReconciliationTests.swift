@@ -255,6 +255,19 @@ struct SecondBrainJournalCandidateReconciliationTests {
         let report = try SecondBrainJournalCandidateReconciliationService(database: db)
             .diagnose(owner: owner, rawContent: rawContent)
 
+        let currentOutputs = SecondBrainJournalGraphCandidateExtractor()
+            .extract(sourceOwner: owner, rawContent: rawContent)
+            .outputs
+            .filter { $0.kind == SecondBrainGraphCandidateContract.outputKind }
+        let currentAvatar = try #require(currentOutputs.first { $0.value == "Avatar: The Last Airbender" })
+        #expect(currentAvatar.metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaTitle] == "Avatar: The Last Airbender")
+        #expect(currentAvatar.metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaType] == "show")
+        #expect(currentAvatar.metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaSeasonNumber] == "2")
+        #expect(currentAvatar.metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaEpisodeProgress] == "through 7 episodes")
+        #expect(currentAvatar.metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaPlatform] == "Netflix")
+        #expect(currentAvatar.metadata[SecondBrainGraphCandidateContract.MetadataKey.truthBoundary] == "reviewable_candidate_not_truth")
+        #expect(!currentOutputs.map(\.value).contains("through seven episodes"))
+
         #expect(report.readOnly)
         #expect(!report.changed)
         #expect(report.candidates.map(\.candidateID) == [bareProgress.id])
