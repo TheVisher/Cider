@@ -165,6 +165,11 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var observedDate: String? = nil
     var memoryKey: String? = nil
     var memoryStatus: String? = nil
+    var proposedDate: String? = nil
+    var eventLabel: String? = nil
+    var factKind: String? = nil
+    var targetRef: String? = nil
+    var factConfidence: String? = nil
     var reviewFamily: String? = nil
     var sourceItemRef: String? = nil
     var sourceItemTitle: String? = nil
@@ -257,6 +262,11 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
         if let memoryStatus {
             dictionary["memoryStatus"] = memoryStatus
         }
+        if let proposedDate { dictionary["proposedDate"] = proposedDate }
+        if let eventLabel { dictionary["eventLabel"] = eventLabel }
+        if let factKind { dictionary["factKind"] = factKind }
+        if let targetRef { dictionary["targetRef"] = targetRef }
+        if let factConfidence { dictionary["factConfidence"] = factConfidence }
         if let reviewFamily { dictionary["reviewFamily"] = reviewFamily }
         if let sourceItemRef { dictionary["sourceItemRef"] = sourceItemRef }
         if let sourceItemTitle { dictionary["sourceItemTitle"] = sourceItemTitle }
@@ -304,6 +314,8 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
             recommendedAction = "review_graph_candidate"
         case "memory_candidate":
             recommendedAction = "review_memory_candidate"
+        case "event_date_fact":
+            recommendedAction = "review_event_date_fact"
         default:
             recommendedAction = needsReview ? "review_route" : "inspect_item"
         }
@@ -700,6 +712,11 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var observedDate: String? = nil
     var memoryKey: String? = nil
     var memoryStatus: String? = nil
+    var proposedDate: String? = nil
+    var eventLabel: String? = nil
+    var factKind: String? = nil
+    var targetRef: String? = nil
+    var factConfidence: String? = nil
     var safeNextCommands: [String] = []
     var reviewFamily: String? = nil
     var sourceItemRef: String? = nil
@@ -781,6 +798,11 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         if let memoryStatus {
             dictionary["memoryStatus"] = memoryStatus
         }
+        if let proposedDate { dictionary["proposedDate"] = proposedDate }
+        if let eventLabel { dictionary["eventLabel"] = eventLabel }
+        if let factKind { dictionary["factKind"] = factKind }
+        if let targetRef { dictionary["targetRef"] = targetRef }
+        if let factConfidence { dictionary["factConfidence"] = factConfidence }
         if let reviewFamily { dictionary["reviewFamily"] = reviewFamily }
         if let sourceItemRef { dictionary["sourceItemRef"] = sourceItemRef }
         if let sourceItemTitle { dictionary["sourceItemTitle"] = sourceItemTitle }
@@ -1098,6 +1120,11 @@ final class CiderReviewQueueService {
             includeDeferred: includeDeferred
         ))
         reviewItems.append(contentsOf: try memoryCandidateReviewItems(
+            in: db,
+            itemsByID: itemsByID,
+            includeDeferred: includeDeferred
+        ))
+        reviewItems.append(contentsOf: try eventDateFactReviewItems(
             in: db,
             itemsByID: itemsByID,
             includeDeferred: includeDeferred
@@ -1556,6 +1583,33 @@ final class CiderReviewQueueService {
             before: before,
             after: after
         )
+    }
+
+    @discardableResult
+    func approveEventDateFact(candidateID: String, actor: String = "user") throws -> SecondBrainEventDateFactCandidateView {
+        var view = try SecondBrainEventDateFactReviewService(database: resolvedDatabase ?? .shared)
+            .accept(candidateID: candidateID, actor: actor, decisionNote: "Approved from review queue.")
+        view.actionReceipt["command"] = "review.event-date-facts.approve"
+        view.actionReceipt["action"] = "approve"
+        return view
+    }
+
+    @discardableResult
+    func rejectEventDateFact(candidateID: String, reason: String, actor: String = "user") throws -> SecondBrainEventDateFactCandidateView {
+        var view = try SecondBrainEventDateFactReviewService(database: resolvedDatabase ?? .shared)
+            .reject(candidateID: candidateID, actor: actor, reason: reason)
+        view.actionReceipt["command"] = "review.event-date-facts.reject"
+        view.actionReceipt["action"] = "reject"
+        return view
+    }
+
+    @discardableResult
+    func deferEventDateFact(candidateID: String, reason: String, actor: String = "user") throws -> SecondBrainEventDateFactCandidateView {
+        var view = try SecondBrainEventDateFactReviewService(database: resolvedDatabase ?? .shared)
+            .deferReview(candidateID: candidateID, actor: actor, reason: reason)
+        view.actionReceipt["command"] = "review.event-date-facts.defer"
+        view.actionReceipt["action"] = "defer"
+        return view
     }
 
     @discardableResult
@@ -2288,6 +2342,108 @@ final class CiderReviewQueueService {
         ])
     }
 
+    private func eventDateFactReviewItems(
+        in db: CiderDatabase,
+        itemsByID: [UUID: CiderRoutingItemSummary],
+        includeDeferred: Bool
+    ) throws -> [CiderReviewQueueItem] {
+        let states = includeDeferred
+            ? ["suggested", "needs_review", "deferred"]
+            : ["suggested", "needs_review"]
+        let candidates = try SecondBrainFactValidityService(database: db).candidates(reviewStates: states)
+
+        return candidates.compactMap { candidate in
+            let metadata = candidate.candidate.metadata
+            guard metadata["candidate_family"] == "event_date_fact",
+                  let sourceItemID = UUID(uuidString: candidate.candidate.sourceOwner.ownerID),
+                  let item = itemsByID[sourceItemID] else {
+                return nil
+            }
+
+            let factKind = metadata["fact_kind"] ?? "event_date"
+            let eventLabel = metadata["event_label"] ?? candidate.targetRef
+            let proposedDate = metadata["proposed_date"]
+            let sourceItemRef = "\(item.type):\(item.id.uuidString)"
+            let confidence = metadata["confidence"] ?? "source_backed_observation"
+            let acceptedBoundary = factKind == "contact_birthday" ? "accepted_contact_birthday" : "accepted_event_date"
+            let sourceEvidenceRecord = candidate.sourceEvidenceRecord.map(CiderReviewQueueSourceEvidenceRecord.init)
+            let lifecycleHistory = candidate.lifecycleHistory
+                .sorted { $0.createdAt < $1.createdAt }
+                .map(CiderReviewQueueLifecycleEventRecord.init)
+
+            return CiderReviewQueueItem(
+                id: "review-event-date-fact-\(candidate.id)",
+                kind: "event_date_fact",
+                source: "fact_validity_candidate",
+                itemID: sourceItemID,
+                itemType: item.type,
+                title: eventLabel,
+                relativePath: item.relativePath,
+                reason: candidate.candidate.reason,
+                reasonCodes: ["event_date_fact_review"],
+                suggestedAction: "Review event/date fact",
+                reviewState: candidate.reviewState,
+                confidence: nil,
+                confidenceReason: confidence,
+                routingDecisionID: nil,
+                target: nil,
+                createdAt: candidate.candidate.createdAt,
+                safeActions: ["accept", "reject", "defer"],
+                candidateID: candidate.id,
+                candidateRef: candidate.candidate.candidateRef,
+                sourceQuote: candidate.candidate.sourceQuote,
+                proposedDate: proposedDate,
+                eventLabel: eventLabel,
+                factKind: factKind,
+                targetRef: candidate.targetRef,
+                factConfidence: confidence,
+                safeNextCommands: eventDateFactSafeNextCommands(candidate: candidate, sourceItem: item),
+                reviewFamily: "event_date_fact",
+                sourceItemRef: sourceItemRef,
+                sourceItemTitle: item.title,
+                sourceItemDate: reviewSourceItemDate(from: item) ?? proposedDate,
+                extractionReason: "Cider extracted a source-backed \(factKind.replacingOccurrences(of: "_", with: " ")) candidate for \(eventLabel); it remains reviewable and is not accepted truth until approved.",
+                proposedChange: [
+                    "changeType": "event_date_fact",
+                    "factKind": factKind,
+                    "eventLabel": eventLabel,
+                    "targetRef": candidate.targetRef,
+                    "proposedDate": proposedDate ?? "",
+                    "truthState": "reviewable_candidate_not_truth",
+                ].filter { !$0.value.isEmpty },
+                storage: [
+                    "table": "fact_validity_candidates",
+                    "service": "SecondBrainEventDateFactReviewService",
+                    "candidateFamily": "event_date_fact",
+                    "readModels": "CiderReviewQueueService.eventDateFactReviewItems; cider-cli item event-date-facts; cider-cli review list",
+                ],
+                truthState: candidate.reviewState == "accepted" ? acceptedBoundary : "reviewable_candidate_not_truth",
+                acceptEffect: "Accepting creates or updates \(acceptedBoundary) structured truth; extraction alone never mutates contacts or date cards.",
+                rejectEffect: "Rejecting marks the event/date fact candidate rejected while preserving source evidence and audit history.",
+                candidateQualityLevel: "needs_review",
+                candidateQualityCodes: ["requires_explicit_event_date_fact_review"],
+                candidateQualityExplanation: "Event/date facts are source-backed candidates only. Approve only after the proposed date and source quote match.",
+                sourceEvidenceRecord: sourceEvidenceRecord,
+                lifecycleHistory: lifecycleHistory
+            )
+        }
+    }
+
+    private func eventDateFactSafeNextCommands(
+        candidate: SecondBrainFactValidityCandidateView,
+        sourceItem: CiderRoutingItemSummary
+    ) -> [String] {
+        orderedUnique([
+            "cider-cli item context \(sourceItem.type) \(sourceItem.id.uuidString) --json",
+            "cider-cli item event-date-facts inspect \(candidate.id) --json",
+            "cider-cli item fact-validity inspect \(candidate.id) --json",
+            "cider-cli review approve \(candidate.id) --json",
+            "cider-cli review reject \(candidate.id) --reason <reason> --json",
+            "cider-cli review defer \(candidate.id) --reason <reason> --json",
+            "cider-cli review list --kind event_date_fact --json",
+        ])
+    }
+
     private func enrichmentReasonCodes(status: String?, lastEnrichedAt: Date?) -> [String] {
         if status == "failed" || status == "error" {
             return ["enrichment_failed"]
@@ -2585,6 +2741,11 @@ final class CiderReviewQueueService {
             observedDate: item.observedDate,
             memoryKey: item.memoryKey,
             memoryStatus: item.memoryStatus,
+            proposedDate: item.proposedDate,
+            eventLabel: item.eventLabel,
+            factKind: item.factKind,
+            targetRef: item.targetRef,
+            factConfidence: item.factConfidence,
             reviewFamily: item.reviewFamily,
             sourceItemRef: item.sourceItemRef,
             sourceItemTitle: item.sourceItemTitle,
@@ -2829,18 +2990,20 @@ final class CiderReviewQueueService {
             return 0
         case "memory_candidate":
             return 1
-        case "low_confidence_routing":
+        case "event_date_fact":
             return 2
-        case "enrichment":
+        case "low_confidence_routing":
             return 3
-        case "duplicate_candidate":
+        case "enrichment":
             return 4
-        case "inbox_backlog":
+        case "duplicate_candidate":
             return 5
-        case "deferred_routing":
+        case "inbox_backlog":
             return 6
-        default:
+        case "deferred_routing":
             return 7
+        default:
+            return 8
         }
     }
 
@@ -2934,6 +3097,8 @@ final class CiderReviewQueueService {
             return "graph_candidate_requires_review"
         case "memory_candidate":
             return "memory_candidate_requires_review"
+        case "event_date_fact":
+            return "event_date_fact_requires_review"
         case "inbox_backlog":
             return "manual_routing_required"
         case "duplicate_candidate":
@@ -2947,6 +3112,9 @@ final class CiderReviewQueueService {
     }
 
     private func primarySafeAction(for item: CiderReviewQueueItem) -> String {
+        if item.kind == "event_date_fact", item.safeActions.contains("accept") {
+            return "accept"
+        }
         for action in ["enrich", "approve", "inspect_source", "correct", "defer"] where item.safeActions.contains(action) {
             return action
         }
@@ -2961,16 +3129,18 @@ final class CiderReviewQueueService {
             return 1
         case "memory_candidate":
             return 2
+        case "event_date_fact":
+            return 3
         case "enrichment":
-            return group.reviewState == "needs_review" ? 3 : 4
+            return group.reviewState == "needs_review" ? 4 : 5
         case "duplicate_candidate":
-            return 5
-        case "inbox_backlog":
             return 6
-        case "deferred_routing":
+        case "inbox_backlog":
             return 7
-        default:
+        case "deferred_routing":
             return 8
+        default:
+            return 9
         }
     }
 

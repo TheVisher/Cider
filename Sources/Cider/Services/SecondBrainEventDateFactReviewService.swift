@@ -221,6 +221,25 @@ final class SecondBrainEventDateFactReviewService {
         )
     }
 
+    func deferReview(candidateID rawID: String, actor: String, reason: String) throws -> SecondBrainEventDateFactCandidateView {
+        let id = normalizedCandidateID(rawID)
+        guard let existing = try factValidity.candidate(id: id) else {
+            throw EventDateFactReviewError.candidateNotFound(id)
+        }
+        _ = try requireEventDateCandidate(existing)
+        let deferred = existing.reviewState == "deferred"
+            ? existing
+            : try factValidity.deferReview(candidateID: id, actor: actor, reason: reason)
+        return try view(
+            deferred,
+            command: "item.event-date-facts.defer",
+            action: "defer",
+            actor: actor,
+            changed: existing.reviewState != deferred.reviewState,
+            beforeState: existing.reviewState
+        )
+    }
+
     private func view(
         _ candidate: SecondBrainFactValidityCandidateView,
         command: String,
@@ -511,6 +530,9 @@ final class SecondBrainEventDateFactReviewService {
         if ["suggested", "needs_review", "deferred"].contains(reviewState) {
             commands.append("cider-cli item event-date-facts accept \(candidateID) --reason <reason> --json")
             commands.append("cider-cli item event-date-facts reject \(candidateID) --reason <reason> --json")
+            commands.append("cider-cli review approve \(candidateID) --json")
+            commands.append("cider-cli review reject \(candidateID) --reason <reason> --json")
+            commands.append("cider-cli review defer \(candidateID) --reason <reason> --json")
         }
         return commands
     }

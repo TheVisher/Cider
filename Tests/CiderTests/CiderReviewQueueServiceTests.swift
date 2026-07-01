@@ -5,6 +5,15 @@ import Testing
 @Suite("Cider Review Queue Service Tests")
 @MainActor
 struct CiderReviewQueueServiceTests {
+    private static let localDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     private func makeTempDB() throws -> (CiderDatabase, URL) {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-review-queue-test-\(UUID().uuidString).db")
@@ -559,6 +568,149 @@ struct CiderReviewQueueServiceTests {
         #expect(worklistDictionary["recommendedNextAction"] as? String == "review_memory_candidate")
         #expect(worklistDictionary["candidateRef"] as? String == "memory_candidate:\(result.candidate.id)")
         #expect(worklistDictionary["linkedOwnerRefs"] as? [String] == ["contact:alex", "project:cider"])
+    }
+
+    @Test("review queue surfaces event date fact candidates in summary list and drilldown")
+    func reviewQueueSurfacesEventDateFactCandidates() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Daily Journal 2026-06-30",
+            relativePath: "Daily/2026-06-30.md"
+        )
+        let sourceOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let candidate = try SecondBrainEventDateFactReviewService(database: db).proposeFromSourceObservation(
+            sourceOwner: sourceOwner,
+            sourceQuote: "Today is Ryland's birthday; remember to wish her happy birthday.",
+            sourceDate: try #require(Self.localDayFormatter.date(from: "2026-06-30")),
+            targetKind: .contactBirthday,
+            actor: "test",
+            reason: "Review Ryland birthday before accepting structured truth."
+        )
+
+        let queue = CiderReviewQueueService(database: db)
+        let result = try queue.list(kind: "event_date_fact")
+
+        #expect(result.command == "review.list")
+        #expect(result.items.count == 1)
+        let item = try #require(result.items.first)
+        #expect(item.kind == "event_date_fact")
+        #expect(item.source == "fact_validity_candidate")
+        #expect(item.itemID == noteID)
+        #expect(item.itemType == "note")
+        #expect(item.title == "Ryland birthday")
+        #expect(item.reviewState == "suggested")
+        #expect(item.candidateID == candidate.id)
+        #expect(item.candidateRef == candidate.candidateRef)
+        #expect(item.sourceQuote == "Today is Ryland's birthday; remember to wish her happy birthday.")
+        #expect(item.reviewFamily == "event_date_fact")
+        #expect(item.sourceItemRef == "note:\(noteID.uuidString)")
+        #expect(item.proposedDate == "2026-06-30")
+        #expect(item.eventLabel == "Ryland birthday")
+        #expect(item.factKind == "contact_birthday")
+        #expect(item.targetRef == candidate.targetRef)
+        #expect(item.truthState == "reviewable_candidate_not_truth")
+        #expect(item.acceptEffect == "Accepting creates or updates accepted_contact_birthday structured truth; extraction alone never mutates contacts or date cards.")
+        #expect(item.rejectEffect == "Rejecting marks the event/date fact candidate rejected while preserving source evidence and audit history.")
+        #expect(item.safeActions == ["accept", "reject", "defer"])
+        #expect(item.safeNextCommands.contains("cider-cli review approve \(candidate.id) --json"))
+        #expect(item.safeNextCommands.contains("cider-cli review reject \(candidate.id) --reason <reason> --json"))
+        #expect(item.safeNextCommands.contains("cider-cli review defer \(candidate.id) --reason <reason> --json"))
+
+        let dictionary = item.toDictionary()
+        #expect(dictionary["proposedDate"] as? String == "2026-06-30")
+        #expect(dictionary["eventLabel"] as? String == "Ryland birthday")
+        #expect(dictionary["factKind"] as? String == "contact_birthday")
+        #expect(dictionary["targetRef"] as? String == candidate.targetRef)
+        #expect(dictionary["truthState"] as? String == "reviewable_candidate_not_truth")
+
+        let summary = try queue.summary()
+        #expect(summary.countsByKind["event_date_fact"] == 1)
+        #expect(summary.countsBySafeAction["accept"] == 1)
+        #expect(summary.countsBySafeAction["reject"] == 1)
+        #expect(summary.countsBySafeAction["defer"] == 1)
+        let group = try #require(summary.groups.first { $0.kind == "event_date_fact" })
+        #expect(group.id == "event_date_fact:suggested:accept:note")
+
+        let drilldown = try queue.drilldown(groupID: group.id)
+        #expect(drilldown.totalCount == 1)
+        #expect(drilldown.items.first?.candidateID == candidate.id)
+        #expect(drilldown.items.first?.proposedDate == "2026-06-30")
+
+        let worklist = try queue.captureReviewWorklist(limit: 10, kind: "event_date_fact")
+        let worklistItem = try #require(worklist.items.first { $0.candidateID == candidate.id })
+        #expect(worklistItem.kind == "event_date_fact")
+        #expect(worklistItem.proposedDate == "2026-06-30")
+        #expect(worklistItem.eventLabel == "Ryland birthday")
+        #expect(worklistItem.truthState == "reviewable_candidate_not_truth")
+    }
+
+    @Test("review queue actions approve reject and defer event date fact candidates")
+    func reviewQueueActionsMutateEventDateFactCandidates() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Daily Journal 2026-06-30",
+            relativePath: "Daily/2026-06-30.md"
+        )
+        let sourceOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let service = SecondBrainEventDateFactReviewService(database: db)
+        let acceptCandidate = try service.proposeFromSourceObservation(
+            sourceOwner: sourceOwner,
+            sourceQuote: "Today is Ryland's birthday; remember to wish her happy birthday.",
+            sourceDate: try #require(Self.localDayFormatter.date(from: "2026-06-30")),
+            targetKind: .contactBirthday,
+            actor: "test",
+            reason: "Accept candidate."
+        )
+        let rejectCandidate = try service.proposeFromSourceObservation(
+            sourceOwner: sourceOwner,
+            sourceQuote: "Today is Mara's birthday; remember to text.",
+            sourceDate: try #require(Self.localDayFormatter.date(from: "2026-07-01")),
+            targetKind: .dateCard,
+            actor: "test",
+            reason: "Reject candidate."
+        )
+        let deferCandidate = try service.proposeFromSourceObservation(
+            sourceOwner: sourceOwner,
+            sourceQuote: "Today is Lina's birthday; verify later.",
+            sourceDate: try #require(Self.localDayFormatter.date(from: "2026-07-02")),
+            targetKind: .contactBirthday,
+            actor: "test",
+            reason: "Defer candidate."
+        )
+
+        let queue = CiderReviewQueueService(database: db)
+        let accepted = try queue.approveEventDateFact(candidateID: acceptCandidate.id, actor: "reviewer")
+        let rejected = try queue.rejectEventDateFact(candidateID: rejectCandidate.id, reason: "Wrong date.", actor: "reviewer")
+        let deferred = try queue.deferEventDateFact(candidateID: deferCandidate.id, reason: "Verify with source.", actor: "reviewer")
+
+        #expect(accepted.reviewState == "accepted")
+        #expect(accepted.truthBoundary == "accepted_contact_birthday")
+        #expect(accepted.structuredFactRef?.hasPrefix("contact:") == true)
+        #expect(accepted.actionReceipt["command"] as? String == "review.event-date-facts.approve")
+        #expect(accepted.actionReceipt["actor"] as? String == "reviewer")
+        #expect(accepted.actionReceipt["changed"] as? Bool == true)
+        #expect(accepted.provenance["sourceRef"] as? String == "note:\(noteID.uuidString)")
+
+        #expect(rejected.reviewState == "rejected")
+        #expect(rejected.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(rejected.actionReceipt["command"] as? String == "review.event-date-facts.reject")
+        #expect(rejected.actionReceipt["changed"] as? Bool == true)
+
+        #expect(deferred.reviewState == "deferred")
+        #expect(deferred.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(deferred.actionReceipt["command"] as? String == "review.event-date-facts.defer")
+        #expect(deferred.actionReceipt["changed"] as? Bool == true)
+
+        let visible = try queue.list(includeDeferred: true, kind: "event_date_fact")
+        #expect(visible.items.map(\.candidateID).contains(rejected.id) == false)
+        #expect(visible.items.map(\.candidateID).contains(accepted.id) == false)
+        #expect(visible.items.map(\.candidateID).contains(deferred.id) == true)
     }
 
     @Test("candidate action service accepts rejects and defers memory candidates")
