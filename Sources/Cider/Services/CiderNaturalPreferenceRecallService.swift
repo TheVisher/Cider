@@ -179,15 +179,18 @@ struct CiderNaturalPreferenceRecallResponse: Codable, Equatable {
 @MainActor
 final class CiderNaturalPreferenceRecallService {
     private let contextService: CiderItemContextService
+    private let database: CiderDatabase
     private let currentDate: Date?
     private let knownEventDates: [String: String]
 
     init(
         contextService: CiderItemContextService = CiderItemContextService(database: .shared),
+        database: CiderDatabase = .shared,
         currentDate: Date? = nil,
         knownEventDates: [String: String] = [:]
     ) {
         self.contextService = contextService
+        self.database = database
         self.currentDate = currentDate
         self.knownEventDates = knownEventDates
     }
@@ -951,13 +954,35 @@ final class CiderNaturalPreferenceRecallService {
             eventQuery: cleanedPhrase,
             recognizedText: recognizedText,
             resolvedDate: Self.localDayFormatter.string(from: best.date),
-            confidence: best.source.sourceKind == "accepted_event_date" ? "accepted_event_date" : "source_backed_observation",
+            confidence: eventResolutionConfidence(sourceKind: best.source.sourceKind),
             sourceKind: best.source.sourceKind,
-            truthBoundary: best.source.sourceKind == "accepted_event_date" ? "accepted_event_date_item" : "source_backed_observation_not_accepted_memory_truth",
+            truthBoundary: eventResolutionTruthBoundary(sourceKind: best.source.sourceKind),
             fallbackReason: nil,
             sources: Array(matchingSources.prefix(3)),
             safeNextCommands: orderedUnique(fallbackCommands + matchingSources.flatMap(\.safeNextCommands))
         )
+    }
+
+    private func eventResolutionConfidence(sourceKind: String) -> String {
+        switch sourceKind {
+        case "accepted_event_date":
+            return "accepted_event_date"
+        case "contact_birthday":
+            return "contact_birthday"
+        default:
+            return "source_backed_observation"
+        }
+    }
+
+    private func eventResolutionTruthBoundary(sourceKind: String) -> String {
+        switch sourceKind {
+        case "accepted_event_date":
+            return "accepted_event_date_item"
+        case "contact_birthday":
+            return "accepted_contact_birthday"
+        default:
+            return "source_backed_observation_not_accepted_memory_truth"
+        }
     }
 
     private func eventEvidenceMatches(phraseTokens: [String], searchable: String) -> Bool {
@@ -973,6 +998,9 @@ final class CiderNaturalPreferenceRecallService {
         result: CiderItemSearchResult
     ) -> (date: Date, sourceKind: String, dateSource: String)? {
         let lower = searchable.lowercased()
+        if let normalized = normalizedEventDateFact(result: result, searchable: lower) {
+            return normalized
+        }
         if result.item?.type == .dateCard {
             if let dateString = specificDateAnchor(in: lower),
                let date = Self.localDayFormatter.date(from: dateString) {
@@ -994,6 +1022,61 @@ final class CiderNaturalPreferenceRecallService {
         return nil
     }
 
+    private func normalizedEventDateFact(
+        result: CiderItemSearchResult,
+        searchable: String
+    ) -> (date: Date, sourceKind: String, dateSource: String)? {
+        guard let item = result.item else { return nil }
+        switch item.type {
+        case .dateCard:
+            guard let startAt = normalizedDateCardStartDate(itemID: item.id) else { return nil }
+            return (startAt, "accepted_event_date", "events.start_at")
+        case .contact:
+            guard searchable.contains("birthday"),
+                  let birthday = normalizedContactBirthday(itemID: item.id)
+            else { return nil }
+            return (birthday, "contact_birthday", "contacts.birthday")
+        default:
+            return nil
+        }
+    }
+
+    private func normalizedDateCardStartDate(itemID: UUID) -> Date? {
+        do {
+            let stmt = try database.prepare("""
+                SELECT e.start_at
+                FROM events e
+                JOIN items i ON i.id = e.item_id
+                WHERE e.item_id = ? AND i.type = 'event'
+                LIMIT 1;
+                """)
+            stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+            guard try stmt.step() else { return nil }
+            return DatabaseHelpers.decodeDate(stmt.double(at: 0))
+        } catch {
+            return nil
+        }
+    }
+
+    private func normalizedContactBirthday(itemID: UUID) -> Date? {
+        do {
+            let stmt = try database.prepare("""
+                SELECT c.birthday
+                FROM contacts c
+                JOIN items i ON i.id = c.item_id
+                WHERE c.item_id = ? AND i.type = 'contact' AND c.birthday IS NOT NULL
+                LIMIT 1;
+                """)
+            stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+            guard try stmt.step(),
+                  let rawBirthday = stmt.optionalDouble(at: 0)
+            else { return nil }
+            return DatabaseHelpers.decodeDate(rawBirthday)
+        } catch {
+            return nil
+        }
+    }
+
     private func eventResolutionScore(
         sourceKind: String,
         dateSource: String,
@@ -1002,7 +1085,9 @@ final class CiderNaturalPreferenceRecallService {
     ) -> Int {
         var total = phraseTokens.filter { searchable.contains($0) }.count * 5
         if sourceKind == "accepted_event_date" { total += 20 }
+        if sourceKind == "contact_birthday" { total += 18 }
         if dateSource == "source_date" { total += 8 }
+        if dateSource == "events.start_at" || dateSource == "contacts.birthday" { total += 10 }
         if searchable.contains("today is") { total += 4 }
         if searchable.contains("birthday") { total += 3 }
         return total

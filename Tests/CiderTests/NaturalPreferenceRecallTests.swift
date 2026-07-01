@@ -65,6 +65,87 @@ struct NaturalPreferenceRecallTests {
         ])
     }
 
+    private func insertDateCard(
+        id: UUID,
+        title: String,
+        body: String,
+        startAt: Date,
+        createdAt: Date,
+        into db: CiderDatabase,
+        store: SecondBrainStore
+    ) throws {
+        let itemStmt = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'event', ?, ?, ?, NULL, ?);
+            """)
+        itemStmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(title, at: 2)
+            .bind(DatabaseHelpers.encode(createdAt), at: 3)
+            .bind(DatabaseHelpers.encode(createdAt), at: 4)
+            .bind("Inbox/DateCards/\(title).ics", at: 5)
+        try itemStmt.step()
+
+        let eventStmt = try db.prepare("""
+            INSERT INTO events (item_id, details, start_at, end_at, all_day, location, amount, recurrence_rule, is_completed, completed_at, surfacing_rules, action_url, snoozed_until)
+            VALUES (?, '', ?, NULL, 1, '', NULL, NULL, 0, NULL, NULL, NULL, NULL);
+            """)
+        eventStmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(DatabaseHelpers.encode(startAt), at: 2)
+        try eventStmt.step()
+
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "dateCard", ownerID: id.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: id.uuidString,
+                source: "item_index.event",
+                title: title,
+                body: body,
+                chunkIndex: 0
+            )
+        ])
+    }
+
+    private func insertContact(
+        id: UUID,
+        displayName: String,
+        birthday: Date,
+        notes: String,
+        createdAt: Date,
+        into db: CiderDatabase,
+        store: SecondBrainStore
+    ) throws {
+        let itemStmt = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'contact', ?, ?, ?, NULL, ?);
+            """)
+        itemStmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(displayName, at: 2)
+            .bind(DatabaseHelpers.encode(createdAt), at: 3)
+            .bind(DatabaseHelpers.encode(createdAt), at: 4)
+            .bind("Inbox/Contacts/\(displayName).vcf", at: 5)
+        try itemStmt.step()
+
+        let contactStmt = try db.prepare("""
+            INSERT INTO contacts (item_id, relationship_label, birthday, notes, email, phone, address, has_avatar, custom_fields)
+            VALUES (?, '', ?, ?, '', '', '', 0, '[]');
+            """)
+        contactStmt.bind(DatabaseHelpers.encode(id), at: 1)
+            .bind(DatabaseHelpers.encode(birthday), at: 2)
+            .bind(notes, at: 3)
+        try contactStmt.step()
+
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "contact", ownerID: id.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: id.uuidString,
+                source: "item_index.contact",
+                title: displayName,
+                body: notes,
+                chunkIndex: 0
+            )
+        ])
+    }
+
     private func makeRecallService(
         db: CiderDatabase,
         store: SecondBrainStore,
@@ -72,6 +153,7 @@ struct NaturalPreferenceRecallTests {
     ) -> CiderNaturalPreferenceRecallService {
         CiderNaturalPreferenceRecallService(
             contextService: CiderItemContextService(database: db, secondBrainStore: store),
+            database: db,
             currentDate: currentDate
         )
     }
@@ -760,6 +842,130 @@ struct NaturalPreferenceRecallTests {
         #expect(response.candidates.first?.owner.ownerID == birthdayJournalID.uuidString)
         #expect(!response.candidates.contains { $0.owner.ownerID == outsideJournalID.uuidString })
         #expect(response.safeNextCommands.contains("cider-cli item daily-tracker --from 2026-06-27 --to 2026-07-03 --query \"ryland birthday\" --sort oldest --limit 5 --json"))
+    }
+
+    @Test("around event recall prefers accepted date card start date over journal observation")
+    func aroundEventRecallPrefersAcceptedDateCardDateOverJournalObservation() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let dateCardID = UUID()
+        let journalID = UUID()
+        try insertDateCard(
+            id: dateCardID,
+            title: "Ryland birthday",
+            body: "Accepted date card for Ryland birthday.",
+            startAt: try localDate("2026-06-30"),
+            createdAt: try localDate("2026-06-01"),
+            into: db,
+            store: store
+        )
+        try insertJournal(
+            id: journalID,
+            title: "Daily Journal 2026-07-02",
+            body: "Today I mentioned Ryland's birthday again, but this is incidental journal wording after the structured date.",
+            createdAt: try localDate("2026-07-02"),
+            into: db,
+            store: store
+        )
+
+        let service = makeRecallService(db: db, store: store, currentDate: try localDate("2026-07-02"))
+
+        let response = try service.answerMemory("what was going on around Ryland's birthday?", limit: 5)
+        let eventResolution = try #require(response.intent.temporalRange?.eventResolution)
+        let firstSource = try #require(eventResolution.sources.first)
+
+        #expect(response.intent.temporalRange?.rangeType == "around_event")
+        #expect(response.intent.temporalRange?.source == "source_backed_event_observation")
+        #expect(response.intent.temporalRange?.startDate == "2026-06-27")
+        #expect(response.intent.temporalRange?.endDate == "2026-07-03")
+        #expect(eventResolution.resolvedDate == "2026-06-30")
+        #expect(eventResolution.confidence == "accepted_event_date")
+        #expect(eventResolution.sourceKind == "accepted_event_date")
+        #expect(eventResolution.truthBoundary == "accepted_event_date_item")
+        #expect(firstSource.sourceRef == "dateCard:\(dateCardID.uuidString)")
+        #expect(firstSource.dateSource == "events.start_at")
+        #expect(firstSource.evidence.contains("Ryland birthday"))
+    }
+
+    @Test("around event recall prefers contact birthday over journal observation")
+    func aroundEventRecallPrefersContactBirthdayOverJournalObservation() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let contactID = UUID()
+        let journalID = UUID()
+        try insertContact(
+            id: contactID,
+            displayName: "Ryland",
+            birthday: try localDate("2026-06-30"),
+            notes: "Ryland birthday contact profile.",
+            createdAt: try localDate("2026-05-01"),
+            into: db,
+            store: store
+        )
+        try insertJournal(
+            id: journalID,
+            title: "Daily Journal 2026-07-02",
+            body: "Today I mentioned Ryland's birthday again, but this is incidental journal wording after the structured contact birthday.",
+            createdAt: try localDate("2026-07-02"),
+            into: db,
+            store: store
+        )
+
+        let service = makeRecallService(db: db, store: store, currentDate: try localDate("2026-07-02"))
+
+        let response = try service.answerMemory("what was going on around Ryland's birthday?", limit: 5)
+        let eventResolution = try #require(response.intent.temporalRange?.eventResolution)
+        let firstSource = try #require(eventResolution.sources.first)
+
+        #expect(response.intent.temporalRange?.rangeType == "around_event")
+        #expect(response.intent.temporalRange?.startDate == "2026-06-27")
+        #expect(response.intent.temporalRange?.endDate == "2026-07-03")
+        #expect(eventResolution.resolvedDate == "2026-06-30")
+        #expect(eventResolution.confidence == "contact_birthday")
+        #expect(eventResolution.sourceKind == "contact_birthday")
+        #expect(eventResolution.truthBoundary == "accepted_contact_birthday")
+        #expect(firstSource.sourceRef == "contact:\(contactID.uuidString)")
+        #expect(firstSource.dateSource == "contacts.birthday")
+        #expect(firstSource.evidence.contains("Ryland birthday"))
+    }
+
+    @Test("around unresolved event recall does not invent dates")
+    func aroundUnresolvedEventRecallDoesNotInventDates() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let unrelatedID = UUID()
+        try insertJournal(
+            id: unrelatedID,
+            title: "Daily Journal 2026-06-30",
+            body: "Ordinary day note about errands, lunch, and work.",
+            createdAt: try localDate("2026-06-30"),
+            into: db,
+            store: store
+        )
+
+        let service = makeRecallService(db: db, store: store, currentDate: try localDate("2026-06-30"))
+
+        let response = try service.answerMemory("what was going on around the mystery gala?", limit: 5)
+        let eventResolution = try #require(response.intent.eventResolution)
+
+        #expect(response.intent.temporalRange == nil)
+        #expect(eventResolution.eventQuery == "the mystery gala")
+        #expect(eventResolution.recognizedText == "around the mystery gala")
+        #expect(eventResolution.resolvedDate == nil)
+        #expect(eventResolution.confidence == "unresolved")
+        #expect(eventResolution.sourceKind == "unresolved")
+        #expect(eventResolution.truthBoundary == "no_event_date_invented")
+        #expect(eventResolution.fallbackReason == "no_source_backed_event_date_found")
+        #expect(eventResolution.sources.isEmpty)
+        #expect(eventResolution.safeNextCommands.contains("cider-cli item search \"the mystery gala\" --scope personalMemory --sort newest --limit 10 --json"))
+        #expect(response.safeNextCommands.contains("cider-cli item search-debug \"what was going on around the mystery gala?\" --json"))
+        #expect(response.broaderSearchCommand != nil)
     }
 
     @Test("specific historical journal date ranks matching Daily Journal before newer same word hits")

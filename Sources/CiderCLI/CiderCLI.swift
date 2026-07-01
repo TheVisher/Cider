@@ -5351,7 +5351,7 @@ struct CiderCLI {
             }
             let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 8
             do {
-                let service = CiderNaturalPreferenceRecallService(contextService: contextService)
+                let service = CiderNaturalPreferenceRecallService(contextService: contextService, database: .shared)
                 let response = try subcommand == "memory-recall"
                     ? service.answerMemory(query, limit: limit)
                     : service.answer(query, limit: limit)
