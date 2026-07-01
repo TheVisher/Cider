@@ -2009,8 +2009,22 @@ struct CiderCLI {
             }
 
         case "approve":
-            guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--actor"]) else {
-                printCLIError("Usage: cider-cli review approve <item-id|candidate-id> [--target-owner <type:id>|--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor user|agent] [--json]")
+            guard let itemRef = firstPositionalArgument(
+                from: args,
+                valueFlags: [
+                    "--actor",
+                    "--target-option",
+                    "--corrected-target-owner",
+                    "--corrected-target-owner-type",
+                    "--corrected-target-owner-id",
+                    "--corrected-relation",
+                    "--target-owner",
+                    "--target-owner-type",
+                    "--target-owner-id",
+                    "--relation",
+                ]
+            ) else {
+                printCLIError("Usage: cider-cli review approve <item-id|candidate-id> [--target-option <option-ref>|--corrected-target-owner <type:id>|--corrected-target-owner-type <type> --corrected-target-owner-id <id>|--target-owner <type:id>|--target-owner-type <type> --target-owner-id <id>] [--corrected-relation <type>|--relation <type>] [--actor user|agent] [--json]")
                 return
             }
             let actor = parseFlag("--actor", from: args) ?? "user"
@@ -2024,6 +2038,9 @@ struct CiderCLI {
                     let result = try service.approveGraphCandidate(
                         candidateID: itemRef,
                         actor: actor,
+                        targetOptionRef: parseFlag("--target-option", from: args),
+                        correctedTargetOwner: graphReviewCorrectedTargetOwner(from: args),
+                        correctedRelationType: parseFlag("--corrected-relation", from: args),
                         targetOwner: graphReviewTargetOwner(from: args),
                         relationType: parseFlag("--relation", from: args)
                     )
@@ -21467,6 +21484,18 @@ struct CiderCLI {
         return SecondBrainOwnerRef(ownerType: type, ownerID: id)
     }
 
+    static func graphReviewCorrectedTargetOwner(from args: [String]) -> SecondBrainOwnerRef? {
+        if let canonical = parseFlag("--corrected-target-owner", from: args),
+           let owner = try? ownerRefFromCanonical(canonical) {
+            return owner
+        }
+        guard let type = parseFlag("--corrected-target-owner-type", from: args),
+              let id = parseFlag("--corrected-target-owner-id", from: args) else {
+            return nil
+        }
+        return SecondBrainOwnerRef(ownerType: type, ownerID: id)
+    }
+
     static func isEnrichmentCandidateRef(_ value: String, prefix: String, kind: String) -> Bool {
         let normalized = value
             .replacingOccurrences(of: "\(prefix):", with: "")
@@ -23360,6 +23389,15 @@ struct CiderCLI {
                 "explanation": quality.explanation,
             ] as [String: Any]
             dict["qualityFlags"] = quality.codes
+            let targetOptions = CiderReviewQueueService.graphCandidateTargetOptions(
+                output: output,
+                candidate: candidate,
+                sourceItemRef: output.owner.canonicalRef,
+                evidenceRef: output.metadata["source_evidence_ref"] ?? output.metadata["source_evidence_id"].map { "source_evidence:\($0)" }
+            )
+            if !targetOptions.isEmpty {
+                dict["targetOptions"] = targetOptions.map { $0.toDictionary() }
+            }
             if let subjectText = candidate.subjectText { dict["subjectText"] = subjectText }
             if let subjectOwner = candidate.subjectOwner { dict["subjectOwner"] = ownerToDict(subjectOwner) }
             if let acceptedTargetOwner = candidate.acceptedTargetOwner { dict["acceptedTargetOwner"] = ownerToDict(acceptedTargetOwner) }
@@ -23514,16 +23552,27 @@ struct CiderCLI {
     }
 
     static func graphCandidateReviewActionCommands(for output: SecondBrainEnrichmentOutput) -> [[String: Any]] {
-        [
+        let optionCommand: String? = (try? SecondBrainGraphCandidateContract.validate(output)).flatMap { candidate in
+            CiderReviewQueueService.graphCandidateTargetOptions(output: output, candidate: candidate).first.map {
+                "cider-cli review approve \(output.id) --target-option \($0.optionRef) --json"
+            }
+        }
+        return [
             [
                 "action": "accept",
+                "command": optionCommand ?? "cider-cli review approve \(output.id) --json",
+                "readOnly": false,
+                "status": "available",
+            ],
+            [
+                "action": "accept_legacy_item_path",
                 "command": "cider-cli item accept-graph-candidate \(output.id) --json",
                 "readOnly": false,
                 "status": "available",
             ],
             [
                 "action": "reject",
-                "command": "cider-cli item reject-graph-candidate \(output.id) --json",
+                "command": "cider-cli review reject \(output.id) --reason <reason> --json",
                 "readOnly": false,
                 "status": "available",
             ],

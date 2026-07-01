@@ -1031,6 +1031,128 @@ struct CiderReviewQueueServiceTests {
         #expect(visible.items.map(\.candidateID).contains(deferred.candidateID) == true)
     }
 
+    @Test("graph candidate review rows expose target options without accepting truth")
+    func graphCandidateReviewRowsExposeTargetOptions() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Candidate options",
+            relativePath: "Daily/2026-06-13.md"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Columbus",
+            sourceQuote: "Watched Columbus and loved the architecture.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .deferCandidate],
+            confidence: 0.87,
+            source: "test.graph.options"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+
+        let queue = CiderReviewQueueService(database: db)
+        let listItem = try #require(try queue.list(kind: "graph_candidate").items.first)
+        let listJSON = listItem.toDictionary()
+        let targetOptions = try #require(listJSON["targetOptions"] as? [[String: Any]])
+        let firstOption = try #require(targetOptions.first)
+
+        #expect(listItem.truthState == "reviewable_candidate_not_truth")
+        #expect(firstOption["optionRef"] as? String == "graph_target_option:\(output.id):candidate-object")
+        #expect((firstOption["targetOwner"] as? [String: String])?["ref"] == "graph_object:movie-columbus")
+        #expect(firstOption["relationType"] as? String == "watched")
+        #expect(firstOption["sourceQuote"] as? String == "Watched Columbus and loved the architecture.")
+        #expect(firstOption["sourceItemRef"] as? String == "note:\(noteID.uuidString)")
+        #expect((firstOption["evidenceRefs"] as? [String])?.contains("note:\(noteID.uuidString)") == true)
+        #expect((firstOption["reviewSafety"] as? [String])?.contains("reviewable_candidate_not_truth") == true)
+        #expect(listItem.safeNextCommands.contains("cider-cli review approve \(output.id) --target-option graph_target_option:\(output.id):candidate-object --json"))
+
+        let groupID = "graph_candidate:suggested:inspect_source:note"
+        let drilldownItem = try #require(try queue.drilldown(groupID: groupID).items.first)
+        #expect((drilldownItem.toDictionary()["targetOptions"] as? [[String: Any]])?.first?["optionRef"] as? String == "graph_target_option:\(output.id):candidate-object")
+        #expect(try SecondBrainStore(database: db).outgoingRelations(for: owner).isEmpty)
+    }
+
+    @Test("general review graph approve accepts target option and corrected target but refuses hidden guess")
+    func generalReviewGraphApproveAcceptsTargetOptionAndCorrection() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Graph correction",
+            relativePath: "Daily/2026-06-14.md"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let optionCandidate = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Columbus",
+            sourceQuote: "Watched Columbus again.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.92,
+            source: "test.graph.option-approve"
+        )
+        let correctedCandidate = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Frances Ha",
+            sourceQuote: "Watched Frances Ha after dinner.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.9,
+            source: "test.graph.corrected-approve"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(optionCandidate)
+        try SecondBrainEnrichmentOutputService(database: db).record(correctedCandidate)
+
+        let queue = CiderReviewQueueService(database: db)
+        #expect(throws: CiderReviewCandidateActionService.ReviewCandidateActionError.graphAcceptNeedsResolvedTarget(optionCandidate.id)) {
+            _ = try queue.approveGraphCandidate(candidateID: optionCandidate.id, actor: "reviewer")
+        }
+
+        let selected = try queue.approveGraphCandidate(
+            candidateID: optionCandidate.id,
+            actor: "reviewer",
+            targetOptionRef: "graph_target_option:\(optionCandidate.id):candidate-object"
+        )
+        #expect(selected.changed == true)
+        #expect(selected.truthBoundary == "accepted_graph_truth")
+        #expect(selected.beforeState == "suggested")
+        #expect(selected.afterState == "accepted")
+        #expect(selected.actionReceipt["command"] as? String == "review.graph-candidates.approve")
+        #expect(selected.actionReceipt["truthBoundary"] as? String == "accepted_graph_truth")
+        #expect(selected.provenance["sourceRef"] as? String == "note:\(noteID.uuidString)")
+        #expect(try SecondBrainStore(database: db).outgoingRelations(for: owner).contains {
+            $0.targetOwner == SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "movie-columbus")
+                && $0.relationType == "watched"
+        })
+
+        let correctedTarget = SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "movie-frances-ha-1995")
+        let corrected = try queue.approveGraphCandidate(
+            candidateID: correctedCandidate.id,
+            actor: "reviewer",
+            correctedTargetOwner: correctedTarget,
+            correctedRelationType: "watched"
+        )
+        #expect(corrected.changed == true)
+        #expect(corrected.truthBoundary == "accepted_graph_truth")
+        #expect(corrected.actionReceipt["after"] as? [String: String] == ["reviewState": "accepted", "truthBoundary": "accepted_graph_truth"])
+        #expect(try SecondBrainStore(database: db).outgoingRelations(for: owner).contains {
+            $0.targetOwner == correctedTarget && $0.relationType == "watched"
+        })
+    }
+
     @Test("review queue filters by kind and required safe action")
     func reviewQueueFiltersByKindAndRequiredSafeAction() throws {
         let (db, url) = try makeTempDB()

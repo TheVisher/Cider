@@ -131,6 +131,49 @@ struct CiderReviewQueueLifecycleEventRecord: Equatable {
     }
 }
 
+struct CiderGraphCandidateTargetOption: Equatable {
+    var optionRef: String
+    var label: String
+    var targetOwner: SecondBrainOwnerRef
+    var relationType: String
+    var targetKind: String
+    var sourceQuote: String
+    var sourceItemRef: String
+    var evidenceRefs: [String]
+    var confidence: Double?
+    var selectionRequired: Bool = true
+    var correctionAllowed: Bool = true
+
+    func toDictionary() -> [String: Any] {
+        var dictionary: [String: Any] = [
+            "optionRef": optionRef,
+            "label": label,
+            "targetOwner": [
+                "ownerType": targetOwner.ownerType,
+                "ownerID": targetOwner.ownerID,
+                "ref": targetOwner.canonicalRef,
+            ],
+            "relationType": relationType,
+            "targetKind": targetKind,
+            "sourceQuote": sourceQuote,
+            "sourceItemRef": sourceItemRef,
+            "evidenceRefs": evidenceRefs,
+            "selectionRequired": selectionRequired,
+            "correctionAllowed": correctionAllowed,
+            "truthState": "reviewable_candidate_not_truth",
+            "reviewSafety": [
+                "reviewable_candidate_not_truth",
+                "accept_requires_explicit_target_option_or_correction",
+                "no_hidden_guess_promotion",
+            ],
+        ]
+        if let confidence {
+            dictionary["confidence"] = confidence
+        }
+        return dictionary
+    }
+}
+
 struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var id: String
     var kind: String
@@ -185,6 +228,7 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var candidateQualityExplanation: String? = nil
     var sourceEvidenceRecord: CiderReviewQueueSourceEvidenceRecord? = nil
     var lifecycleHistory: [CiderReviewQueueLifecycleEventRecord] = []
+    var targetOptions: [CiderGraphCandidateTargetOption] = []
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -276,6 +320,7 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
         if !storage.isEmpty { dictionary["storage"] = storage }
         if let sourceEvidenceRecord { dictionary["sourceEvidenceRecord"] = sourceEvidenceRecord.toDictionary() }
         if !lifecycleHistory.isEmpty { dictionary["lifecycleHistory"] = lifecycleHistory.map { $0.toDictionary() } }
+        if !targetOptions.isEmpty { dictionary["targetOptions"] = targetOptions.map { $0.toDictionary() } }
         if let truthState { dictionary["truthState"] = truthState }
         if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
         if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
@@ -733,6 +778,7 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var candidateQualityExplanation: String? = nil
     var sourceEvidenceRecord: CiderReviewQueueSourceEvidenceRecord? = nil
     var lifecycleHistory: [CiderReviewQueueLifecycleEventRecord] = []
+    var targetOptions: [CiderGraphCandidateTargetOption] = []
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -812,6 +858,7 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         if !storage.isEmpty { dictionary["storage"] = storage }
         if let sourceEvidenceRecord { dictionary["sourceEvidenceRecord"] = sourceEvidenceRecord.toDictionary() }
         if !lifecycleHistory.isEmpty { dictionary["lifecycleHistory"] = lifecycleHistory.map { $0.toDictionary() } }
+        if !targetOptions.isEmpty { dictionary["targetOptions"] = targetOptions.map { $0.toDictionary() } }
         if let truthState { dictionary["truthState"] = truthState }
         if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
         if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
@@ -1657,7 +1704,7 @@ final class CiderReviewQueueService {
 
     @discardableResult
     func approveMemoryCandidate(candidateID: String, actor: String = "user") throws -> CiderReviewCandidateQueueActionResult {
-        try reviewCandidateAction(
+        return try reviewCandidateAction(
             candidateID: candidateID,
             reviewFamily: "memory_candidate",
             command: "review.memory-candidates.approve",
@@ -1670,7 +1717,7 @@ final class CiderReviewQueueService {
 
     @discardableResult
     func rejectMemoryCandidate(candidateID: String, reason: String, actor: String = "user") throws -> CiderReviewCandidateQueueActionResult {
-        try reviewCandidateAction(
+        return try reviewCandidateAction(
             candidateID: candidateID,
             reviewFamily: "memory_candidate",
             command: "review.memory-candidates.reject",
@@ -1683,7 +1730,7 @@ final class CiderReviewQueueService {
 
     @discardableResult
     func deferMemoryCandidate(candidateID: String, reason: String, actor: String = "user") throws -> CiderReviewCandidateQueueActionResult {
-        try reviewCandidateAction(
+        return try reviewCandidateAction(
             candidateID: candidateID,
             reviewFamily: "memory_candidate",
             command: "review.memory-candidates.defer",
@@ -1698,10 +1745,21 @@ final class CiderReviewQueueService {
     func approveGraphCandidate(
         candidateID: String,
         actor: String = "user",
+        targetOptionRef: String? = nil,
+        correctedTargetOwner: SecondBrainOwnerRef? = nil,
+        correctedRelationType: String? = nil,
         targetOwner: SecondBrainOwnerRef? = nil,
         relationType: String? = nil
     ) throws -> CiderReviewCandidateQueueActionResult {
-        try reviewCandidateAction(
+        let resolvedSelection = try graphCandidateApprovalSelection(
+            candidateID: candidateID,
+            targetOptionRef: targetOptionRef,
+            correctedTargetOwner: correctedTargetOwner,
+            correctedRelationType: correctedRelationType,
+            targetOwner: targetOwner,
+            relationType: relationType
+        )
+        return try reviewCandidateAction(
             candidateID: candidateID,
             reviewFamily: "graph_candidate",
             command: "review.graph-candidates.approve",
@@ -1711,15 +1769,49 @@ final class CiderReviewQueueService {
             try service.acceptGraphCandidateIfResolved(
                 id,
                 actor: actor,
-                targetOwner: targetOwner,
-                relationType: relationType
+                targetOwner: resolvedSelection.targetOwner,
+                relationType: resolvedSelection.relationType
             )
         }
     }
 
+    private func graphCandidateApprovalSelection(
+        candidateID rawID: String,
+        targetOptionRef: String?,
+        correctedTargetOwner: SecondBrainOwnerRef?,
+        correctedRelationType: String?,
+        targetOwner: SecondBrainOwnerRef?,
+        relationType: String?
+    ) throws -> (targetOwner: SecondBrainOwnerRef?, relationType: String?) {
+        guard targetOptionRef != nil || correctedTargetOwner != nil else {
+            return (targetOwner, relationType)
+        }
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
+        let id = normalizedReviewCandidateID(rawID, reviewFamily: "graph_candidate")
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        guard let output = try outputService.output(id: id) else {
+            throw CiderReviewCandidateActionService.ReviewCandidateActionError.candidateNotFound(id)
+        }
+        let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        if let correctedTargetOwner {
+            return (
+                correctedTargetOwner,
+                correctedRelationType
+                    ?? relationType
+                    ?? candidate.relationGuesses.first?.rawValue
+                    ?? SecondBrainGraphCandidateContract.RelationType.mentions.rawValue
+            )
+        }
+        if let targetOptionRef,
+           let option = Self.graphCandidateTargetOption(ref: targetOptionRef, output: output, candidate: candidate) {
+            return (option.targetOwner, correctedRelationType ?? relationType ?? option.relationType)
+        }
+        throw CiderReviewCandidateActionService.ReviewCandidateActionError.graphAcceptNeedsResolvedTarget(id)
+    }
+
     @discardableResult
     func rejectGraphCandidate(candidateID: String, reason: String, actor: String = "user") throws -> CiderReviewCandidateQueueActionResult {
-        try reviewCandidateAction(
+        return try reviewCandidateAction(
             candidateID: candidateID,
             reviewFamily: "graph_candidate",
             command: "review.graph-candidates.reject",
@@ -1732,7 +1824,7 @@ final class CiderReviewQueueService {
 
     @discardableResult
     func deferGraphCandidate(candidateID: String, reason: String, actor: String = "user") throws -> CiderReviewCandidateQueueActionResult {
-        try reviewCandidateAction(
+        return try reviewCandidateAction(
             candidateID: candidateID,
             reviewFamily: "graph_candidate",
             command: "review.graph-candidates.defer",
@@ -2389,6 +2481,59 @@ final class CiderReviewQueueService {
         return (level, codes, explanation)
     }
 
+    static func graphCandidateTargetOptions(
+        output: SecondBrainEnrichmentOutput,
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        sourceItemRef: String? = nil,
+        evidenceRef: String? = nil
+    ) -> [CiderGraphCandidateTargetOption] {
+        guard candidate.reviewState.isReviewable else { return [] }
+        guard candidate.kind == .object || candidate.kind == .objectRelation else { return [] }
+        let targetKind = candidate.objectTypeGuesses.first?.rawValue ?? "object"
+        let targetOwner = candidate.acceptedTargetOwner ?? SecondBrainOwnerRef(
+            ownerType: "graph_object",
+            ownerID: "\(targetKind)-\(graphCandidateTargetSlug(candidate.mentionText))"
+        )
+        let relationType = candidate.acceptedRelationType?.rawValue
+            ?? candidate.relationGuesses.first?.rawValue
+            ?? SecondBrainGraphCandidateContract.RelationType.mentions.rawValue
+        let sourceRef = sourceItemRef ?? output.owner.canonicalRef
+        var seenRefs = Set<String>()
+        let refs = [sourceRef, evidenceRef].compactMap { $0 }.filter { seenRefs.insert($0).inserted }
+        return [
+            CiderGraphCandidateTargetOption(
+                optionRef: "graph_target_option:\(output.id):candidate-object",
+                label: "\(candidate.mentionText) -> \(targetOwner.canonicalRef)",
+                targetOwner: targetOwner,
+                relationType: relationType,
+                targetKind: targetKind,
+                sourceQuote: candidate.sourceQuote,
+                sourceItemRef: sourceRef,
+                evidenceRefs: refs,
+                confidence: candidate.confidence
+            ),
+        ]
+    }
+
+    static func graphCandidateTargetOption(
+        ref rawRef: String,
+        output: SecondBrainEnrichmentOutput,
+        candidate: SecondBrainGraphCandidateContract.Candidate
+    ) -> CiderGraphCandidateTargetOption? {
+        let normalized = rawRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        return graphCandidateTargetOptions(output: output, candidate: candidate).first { $0.optionRef == normalized }
+    }
+
+    private static func graphCandidateTargetSlug(_ value: String) -> String {
+        let slug = value
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        return slug.isEmpty ? "object" : String(slug.prefix(80))
+    }
+
     private func reviewSourceItemDate(from item: CiderRoutingItemSummary) -> String? {
         let pattern = #"\b\d{4}-\d{2}-\d{2}\b"#
         if let relativePath = item.relativePath,
@@ -2431,6 +2576,13 @@ final class CiderReviewQueueService {
             let quality = Self.candidateQualitySignal(mentionText: candidate.mentionText, sourceQuote: candidate.sourceQuote)
             let sourceItemRef = "\(item.type):\(item.id.uuidString)"
             let relation = possibleRelations.first ?? "mentions"
+            let sourceEvidenceRecord = SecondBrainSourceEvidenceService.recordFromOutput(output).map(CiderReviewQueueSourceEvidenceRecord.init)
+            let targetOptions = Self.graphCandidateTargetOptions(
+                output: output,
+                candidate: candidate,
+                sourceItemRef: sourceItemRef,
+                evidenceRef: sourceEvidenceRecord.map { "source_evidence:\($0.id)" }
+            )
 
             return CiderReviewQueueItem(
                 id: "review-graph-candidate-\(output.id)",
@@ -2458,7 +2610,7 @@ final class CiderReviewQueueService {
                 possibleTypes: possibleTypes,
                 possibleRelations: possibleRelations,
                 candidateActions: candidate.actionGuesses,
-                safeNextCommands: graphCandidateSafeNextCommands(output: output, sourceItem: item),
+                safeNextCommands: graphCandidateSafeNextCommands(output: output, sourceItem: item, targetOptions: targetOptions),
                 reviewFamily: "graph_candidate",
                 sourceItemRef: sourceItemRef,
                 sourceItemTitle: item.title,
@@ -2483,17 +2635,21 @@ final class CiderReviewQueueService {
                 candidateQualityLevel: quality.level,
                 candidateQualityCodes: quality.codes,
                 candidateQualityExplanation: quality.explanation,
-                sourceEvidenceRecord: SecondBrainSourceEvidenceService.recordFromOutput(output).map(CiderReviewQueueSourceEvidenceRecord.init),
-                lifecycleHistory: lifecycleHistoryRecords(for: output, in: db)
+                sourceEvidenceRecord: sourceEvidenceRecord,
+                lifecycleHistory: lifecycleHistoryRecords(for: output, in: db),
+                targetOptions: targetOptions
             )
         }
     }
 
     private func graphCandidateSafeNextCommands(
         output: SecondBrainEnrichmentOutput,
-        sourceItem: CiderRoutingItemSummary
+        sourceItem: CiderRoutingItemSummary,
+        targetOptions: [CiderGraphCandidateTargetOption] = []
     ) -> [String] {
         orderedUnique([
+            targetOptions.first.map { "cider-cli review approve \(output.id) --target-option \($0.optionRef) --json" }
+                ?? "cider-cli review approve \(output.id) --json",
             "cider-cli review approve \(output.id) --json",
             "cider-cli review reject \(output.id) --reason <reason> --json",
             "cider-cli review defer \(output.id) --reason <reason> --json",
@@ -3030,7 +3186,8 @@ final class CiderReviewQueueService {
             candidateQualityLevel: item.candidateQualityLevel,
             candidateQualityCodes: item.candidateQualityCodes,
             candidateQualityExplanation: item.candidateQualityExplanation,
-            sourceEvidenceRecord: item.sourceEvidenceRecord
+            sourceEvidenceRecord: item.sourceEvidenceRecord,
+            targetOptions: item.targetOptions
         )
     }
 
