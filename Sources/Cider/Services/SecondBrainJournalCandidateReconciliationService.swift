@@ -6,6 +6,7 @@ struct SecondBrainJournalCandidateReconciliationCandidate: Codable, Equatable {
     var kind: String
     var value: String
     var evidence: String
+    var metadata: [String: String]
     var previousReviewState: String
     var proposedReviewState: String
     var reasonCodes: [String]
@@ -231,6 +232,7 @@ final class SecondBrainJournalCandidateReconciliationService {
             kind: output.kind,
             value: output.value,
             evidence: output.evidence,
+            metadata: output.metadata,
             previousReviewState: output.reviewState,
             proposedReviewState: "superseded",
             reasonCodes: reasonCodes,
@@ -299,11 +301,38 @@ final class SecondBrainJournalCandidateReconciliationService {
         let titledMediaReplacement = candidate.reasonCodes.contains("bare_media_progress_span")
             && output.metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaTitle] != nil
             && (outputEvidence.contains(candidateValue) || candidateEvidence.contains(candidateValue))
-        guard sharesEvidence || titledMediaReplacement else { return false }
+        let metadataBoundedReplacement = isMetadataBoundedReplacement(output, for: candidate)
+        guard sharesEvidence || titledMediaReplacement || metadataBoundedReplacement else { return false }
         return candidate.reasonCodes.contains("not_emitted_by_current_extractor")
             || candidate.reasonCodes.contains("bare_media_progress_span")
             || candidate.reasonCodes.contains("noisy_clause_span")
             || candidate.reasonCodes.contains("community_support_outage_span")
+            || candidate.reasonCodes.contains("low_confidence_stored_candidate")
+    }
+
+    private func isMetadataBoundedReplacement(
+        _ output: SecondBrainEnrichmentOutput,
+        for candidate: SecondBrainJournalCandidateReconciliationCandidate
+    ) -> Bool {
+        guard candidate.reasonCodes.contains("not_emitted_by_current_extractor") else { return false }
+        guard normalized(output.metadata["source_kind"] ?? "") == "journal",
+              normalized(candidate.metadata["source_kind"] ?? "") == "journal" else { return false }
+
+        for key in metadataReplacementKeys {
+            let outputValue = normalized(output.metadata[key] ?? "")
+            let candidateValue = normalized(candidate.metadata[key] ?? "")
+            if !outputValue.isEmpty && outputValue == candidateValue {
+                return true
+            }
+        }
+        return false
+    }
+
+    private var metadataReplacementKeys: [String] {
+        [
+            "memory_key",
+            SecondBrainGraphCandidateContract.MetadataKey.mediaTitle,
+        ]
     }
 
     private func previewRef(for output: SecondBrainEnrichmentOutput, index: Int) -> String {

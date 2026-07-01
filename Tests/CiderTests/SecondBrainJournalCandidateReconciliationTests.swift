@@ -296,4 +296,112 @@ struct SecondBrainJournalCandidateReconciliationTests {
         #expect(stored.first { $0.id == avatar.id }?.reviewState == "suggested")
         #expect(stored.first { $0.id == preference.id }?.reviewState == "suggested")
     }
+
+    @Test("dry run previews bounded non-overlap replacements when metadata links stale and current candidates")
+    func dryRunPreviewsBoundedNonOverlapReplacementsWhenMetadataLinksStaleAndCurrentCandidates() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let rawContent = """
+        - She was buying random things at the mall.
+        - Money seemed more useful than guessing a gift.
+        """
+        var stale = SecondBrainEnrichmentOutput(
+            owner: owner,
+            chunkID: nil,
+            kind: "memory_candidate",
+            value: "She was buying random things at the mall.",
+            normalizedValue: "she was buying random things at the mall.",
+            label: "Memory candidate: gift preference",
+            evidence: "- She was buying random things at the mall.",
+            source: "memory_candidate.journal_capture.v0",
+            confidence: 0.32,
+            reviewState: "suggested",
+            metadata: [
+                "candidate_kind": "gift_preference",
+                "memory_kind": "gift_preference",
+                "memory_key": "money-more-useful-than-guessing-gift",
+                "source_kind": "journal",
+                "source_owner_ref": owner.canonicalRef,
+                "source_quote": "- She was buying random things at the mall.",
+                "truth_boundary": "reviewable_candidate_not_truth",
+            ]
+        )
+        stale.metadata["candidate_ref"] = "memory_candidate:\(stale.id)"
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(stale)
+
+        let report = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .diagnose(owner: owner, rawContent: rawContent)
+
+        #expect(report.readOnly)
+        #expect(!report.changed)
+        #expect(report.candidates.map(\.candidateID) == [stale.id])
+        let candidate = try #require(report.candidates.first)
+        #expect(candidate.reasonCodes.contains("not_emitted_by_current_extractor"))
+        #expect(candidate.reasonCodes.contains("noisy_clause_span"))
+        #expect(candidate.reasonCodes.contains("low_confidence_stored_candidate"))
+
+        let preview = try #require(report.currentExtractionReplacementPreviews.first)
+        #expect(report.currentExtractionReplacementPreviewCount == 1)
+        #expect(preview.replacementForCandidateIDs == [stale.id])
+        #expect(preview.kind == "memory_candidate")
+        #expect(preview.value == "Money seemed more useful than guessing a gift.")
+        #expect(preview.evidence == "- Money seemed more useful than guessing a gift")
+        #expect(preview.metadata["memory_key"] == "money-more-useful-than-guessing-gift")
+        #expect(preview.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(!preview.acceptedAsTruth)
+        #expect(preview.sourceRefs.contains(owner.canonicalRef))
+
+        let stored = try outputService.output(id: stale.id)
+        #expect(stored?.reviewState == "suggested")
+    }
+
+    @Test("dry run fails closed for ambiguous non-overlap candidates without metadata links")
+    func dryRunFailsClosedForAmbiguousNonOverlapCandidatesWithoutMetadataLinks() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let rawContent = """
+        - She was buying random things at the mall.
+        - Money seemed more useful than guessing a gift.
+        - Visher took PTO for Ryland's birthday and worked overtime around it.
+        """
+        var stale = SecondBrainEnrichmentOutput(
+            owner: owner,
+            chunkID: nil,
+            kind: "memory_candidate",
+            value: "She was buying random things at the mall.",
+            normalizedValue: "she was buying random things at the mall.",
+            label: "Memory candidate: stale noisy span",
+            evidence: "- She was buying random things at the mall.",
+            source: "memory_candidate.journal_capture.v0",
+            confidence: 0.32,
+            reviewState: "suggested",
+            metadata: [
+                "candidate_kind": "stale_noisy_span",
+                "source_kind": "journal",
+                "source_owner_ref": owner.canonicalRef,
+                "source_quote": "- She was buying random things at the mall.",
+                "truth_boundary": "reviewable_candidate_not_truth",
+            ]
+        )
+        stale.metadata["candidate_ref"] = "memory_candidate:\(stale.id)"
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(stale)
+
+        let report = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .diagnose(owner: owner, rawContent: rawContent)
+
+        #expect(report.readOnly)
+        #expect(!report.changed)
+        #expect(report.candidates.map(\.candidateID) == [stale.id])
+        #expect(report.currentExtractionReplacementPreviewCount == 0)
+        #expect(report.currentExtractionReplacementPreviews.isEmpty)
+
+        let stored = try outputService.output(id: stale.id)
+        #expect(stored?.reviewState == "suggested")
+    }
 }
