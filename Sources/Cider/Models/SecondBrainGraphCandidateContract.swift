@@ -20,6 +20,8 @@ enum SecondBrainGraphCandidateContract {
         case suggested
         case needsReview = "needs_review"
         case deferred
+        case superseded
+        case hidden
         case accepted
         case rejected
 
@@ -27,7 +29,7 @@ enum SecondBrainGraphCandidateContract {
             switch self {
             case .suggested, .needsReview, .deferred:
                 return true
-            case .accepted, .rejected:
+            case .superseded, .hidden, .accepted, .rejected:
                 return false
             }
         }
@@ -314,7 +316,7 @@ enum SecondBrainGraphCandidateContract {
         switch current {
         case .suggested, .needsReview, .deferred:
             return current != next
-        case .accepted, .rejected:
+        case .superseded, .hidden, .accepted, .rejected:
             return false
         }
     }

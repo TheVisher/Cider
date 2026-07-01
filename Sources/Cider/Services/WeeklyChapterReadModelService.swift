@@ -236,6 +236,8 @@ final class WeeklyChapterReadModelService {
                     acceptedCount += 1
                 case .rejected:
                     rejectedCount += 1
+                case .superseded, .hidden:
+                    filteredOtherStateCount += 1
                 }
             } catch let error as SecondBrainGraphCandidateContract.ValidationError {
                 switch error {

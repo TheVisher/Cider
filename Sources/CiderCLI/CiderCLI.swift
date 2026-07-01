@@ -263,6 +263,7 @@ struct CiderCLI {
       cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
       cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
       cider-cli item graph-candidate <candidate-id> [--json]
+      cider-cli item journal-candidate-reconcile <owner-type> <owner-id-or-ref> [--dry-run] [--apply --candidate <id>] [--text-file <path>] [--date YYYY-MM-DD] [--time HH:mm] [--json]
       cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
       cider-cli item reject-graph-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
       cider-cli item delegate-graph-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
@@ -694,6 +695,9 @@ struct CiderCLI {
         case "dev-fixture", "fixture":
             return true
         case "item":
+            if subcommand == "journal-candidate-reconcile" || subcommand == "reconcile-journal-candidates" {
+                return args.contains("--apply")
+            }
             return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "backfill-journals", "journal-backfill", "accept-similarity", "accept-graph-candidate", "reject-graph-candidate", "delegate-graph-candidate", "accept-memory-candidate", "reject-memory-candidate", "defer-memory-candidate", "correct-memory-candidate", "delegate-memory-candidate", "sync-project", "project-sync"])
         case "test-run", "testrun":
             return isMutationSubcommand(subcommand, in: ["cleanup"])
@@ -818,7 +822,7 @@ struct CiderCLI {
         case nil, "help", "--help", "-h":
             print("""
             Dev fixture commands:
-              cider-cli dev-fixture graph-candidate-smoke --allow-temp-vault-fixture [--label <text>] [--owner-id <id>] [--external-id provider=value] [--json]
+              cider-cli dev-fixture graph-candidate-smoke --allow-temp-vault-fixture [--label <text>] [--source-kind <kind>] [--owner-id <id>] [--external-id provider=value] [--json]
 
             Fixture commands are backend smoke helpers for disposable temp vaults. They create reviewable candidates, not accepted truth.
             """)
@@ -833,6 +837,7 @@ struct CiderCLI {
         let ownerID = normalizedFlag("--owner-id", from: args) ?? "dev-fixture-\(slug(label))"
         let relation = normalizedFlag("--relation", from: args) ?? SecondBrainGraphCandidateContract.RelationType.watched.rawValue
         let externalIDs = parseExternalIDFlags(from: args)
+        let sourceKind = normalizedFlag("--source-kind", from: args) ?? "dev_fixture_note"
         let sourceQuote = normalizedFlag("--source-quote", from: args)
             ?? "Watched \(label) and want the graph candidate smoke to stay source-backed."
         let sourceTitle = normalizedFlag("--source-title", from: args) ?? "Dev Fixture Graph Candidate Smoke"
@@ -893,7 +898,7 @@ struct CiderCLI {
             candidateKind: .objectRelation,
             mentionText: label,
             sourceQuote: sourceQuote,
-            sourceKind: "dev_fixture_note",
+            sourceKind: sourceKind,
             objectTypeGuesses: [.movie, .media],
             relationGuesses: [SecondBrainGraphCandidateContract.RelationType(rawValue: relation) ?? .watched],
             safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .deferCandidate],
@@ -6298,6 +6303,9 @@ struct CiderCLI {
 
         case "graph-candidates", "graph-candidate", "graph-candidate-inspect":
             handleGraphCandidateReadCommand(subcommand: subcommand ?? "graph-candidates", args: args)
+
+        case "journal-candidate-reconcile", "reconcile-journal-candidates":
+            handleJournalCandidateReconciliationCommand(args: args)
 
         case "accept-graph-candidate", "graph-candidate-accept":
             handleGraphCandidateMutationCommand(action: "accept", args: args, store: store)
@@ -22142,6 +22150,220 @@ struct CiderCLI {
             "cider-cli item graph-candidates --json",
             "cider-cli capture review-queue --json",
         ]
+    }
+
+    static func handleJournalCandidateReconciliationCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        guard positional.count >= 2 else {
+            printCLIError("Usage: cider-cli item journal-candidate-reconcile <owner-type> <owner-id-or-ref> [--dry-run] [--apply --candidate <id>] [--text-file <path>] [--date YYYY-MM-DD] [--time HH:mm] [--json]")
+            return
+        }
+
+        let owner = normalizedOwner(type: positional[0], ref: positional[1])
+        let apply = args.contains("--apply")
+        let selectedCandidateIDs = Set(parseFlagAll("--candidate", from: args) + parseFlagAll("--candidate-id", from: args))
+        if apply && selectedCandidateIDs.isEmpty {
+            printJournalCandidateReconciliationError(
+                message: "Apply requires one or more explicit --candidate IDs.",
+                owner: owner,
+                readOnly: false,
+                errorCode: "journal_candidate_reconciliation_requires_selected_candidates"
+            )
+            return
+        }
+
+        do {
+            let rawContent = try journalCandidateReconciliationRawContent(owner: owner, args: args)
+            let service = SecondBrainJournalCandidateReconciliationService(database: .shared)
+            let report: SecondBrainJournalCandidateReconciliationReport
+            if apply {
+                report = try service.apply(
+                    owner: owner,
+                    rawContent: rawContent,
+                    selectedCandidateIDs: selectedCandidateIDs,
+                    actor: normalizedFlag("--actor", from: args) ?? "cider-cli",
+                    reason: normalizedFlag("--reason", from: args),
+                    date: normalizedFlag("--date", from: args),
+                    time: normalizedFlag("--time", from: args),
+                    limit: boundedGraphCandidateLimit(from: args)
+                )
+            } else {
+                report = try service.diagnose(
+                    owner: owner,
+                    rawContent: rawContent,
+                    date: normalizedFlag("--date", from: args),
+                    time: normalizedFlag("--time", from: args),
+                    limit: boundedGraphCandidateLimit(from: args)
+                )
+            }
+            printJournalCandidateReconciliationReport(report)
+        } catch {
+            printJournalCandidateReconciliationError(
+                message: error.localizedDescription,
+                owner: owner,
+                readOnly: !apply,
+                errorCode: "journal_candidate_reconciliation_failed"
+            )
+        }
+    }
+
+    static func journalCandidateReconciliationRawContent(owner: SecondBrainOwnerRef, args: [String]) throws -> String {
+        if let textFile = normalizedFlag("--text-file", from: args) {
+            return try String(contentsOfFile: textFile, encoding: .utf8)
+        }
+        guard owner.ownerType == "note" else {
+            throw GraphCandidateMutationCLIError(
+                command: "item.journal-candidate-reconcile",
+                errorCode: "journal_candidate_reconciliation_requires_note_or_text_file",
+                message: "Journal candidate reconciliation can read stored content only for note owners; pass --text-file for fixture content.",
+                candidateID: owner.ownerID,
+                blockingIssues: ["owner_type_not_note"],
+                safeNextCommands: ["cider-cli item journal-candidate-reconcile note <id> --dry-run --json"]
+            )
+        }
+        let stmt = try CiderDatabase.shared.prepare("""
+            SELECT content
+            FROM notes
+            WHERE item_id = ?
+            LIMIT 1;
+            """)
+        stmt.bind(owner.ownerID, at: 1)
+        guard try stmt.step() else {
+            throw GraphCandidateMutationCLIError(
+                command: "item.journal-candidate-reconcile",
+                errorCode: "journal_candidate_reconciliation_source_not_found",
+                message: "No note content found for \(owner.canonicalRef).",
+                candidateID: owner.ownerID,
+                blockingIssues: ["missing_note_content"],
+                safeNextCommands: ["cider-cli item get note \(owner.ownerID) --json"]
+            )
+        }
+        return stmt.string(at: 0)
+    }
+
+    static func printJournalCandidateReconciliationReport(_ report: SecondBrainJournalCandidateReconciliationReport) {
+        var sourceRefs = [report.owner.canonicalRef]
+        sourceRefs.append(contentsOf: report.candidates.flatMap(\.sourceRefs))
+        let safeVerificationCommands = [
+            "cider-cli item journal-candidate-reconcile \(report.owner.ownerType) \(report.owner.ownerID) --dry-run --json",
+            "cider-cli item graph-candidates \(report.owner.ownerType) \(report.owner.ownerID) --include-reviewed --json",
+        ]
+        let receipt = agentActionReceiptToDict(
+            command: "item.journal-candidate-reconcile",
+            action: report.readOnly ? "diagnose_journal_candidates" : "supersede_journal_candidates",
+            actor: "cider-cli",
+            owner: report.owner,
+            sourceRefs: Array(NSOrderedSet(array: sourceRefs)) as? [String] ?? sourceRefs,
+            evidenceRefs: report.candidates.compactMap(\.sourceEvidenceRef),
+            readOnly: report.readOnly,
+            changed: report.changed,
+            before: ["activeCandidateCount": report.totalStoredCandidateCount],
+            after: [
+                "candidateCount": report.candidateCount,
+                "appliedCandidateIDs": report.appliedCandidateIDs,
+                "truthBoundary": report.truthBoundary,
+            ],
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: report.safeNextCommands
+        )
+        let payload: [String: Any] = [
+            "ok": true,
+            "command": "item.journal-candidate-reconcile",
+            "readOnly": report.readOnly,
+            "changed": report.changed,
+            "owner": secondBrainOwnerRefToDict(report.owner),
+            "totalStoredCandidateCount": report.totalStoredCandidateCount,
+            "currentExtractionCandidateCount": report.currentExtractionCandidateCount,
+            "candidateCount": report.candidateCount,
+            "candidates": report.candidates.map(journalCandidateReconciliationCandidateToDict),
+            "appliedCandidateIDs": report.appliedCandidateIDs,
+            "truthBoundary": report.truthBoundary,
+            "policy": [
+                "autoAcceptsTruth": false,
+                "dryRunDefault": true,
+                "applyRequiresExplicitCandidateIDs": true,
+                "sourceHistoryDeleted": false,
+            ],
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": report.safeNextCommands,
+            "actionReceipt": receipt,
+        ]
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput {
+            outputJSON(payload)
+        } else {
+            print("Journal candidate reconciliation: \(report.candidateCount) candidate(s)")
+            print("  Read-only: \(report.readOnly)")
+            print("  Changed: \(report.changed)")
+            for candidate in report.candidates {
+                print("  [\(candidate.proposedReviewState)] \(candidate.value)")
+                print("    \(candidate.candidateRef)")
+                print("    Reasons: \(candidate.reasonCodes.joined(separator: ", "))")
+            }
+        }
+    }
+
+    static func journalCandidateReconciliationCandidateToDict(_ candidate: SecondBrainJournalCandidateReconciliationCandidate) -> [String: Any] {
+        var dict: [String: Any] = [
+            "candidateID": candidate.candidateID,
+            "candidateRef": candidate.candidateRef,
+            "kind": candidate.kind,
+            "value": candidate.value,
+            "evidence": candidate.evidence,
+            "previousReviewState": candidate.previousReviewState,
+            "proposedReviewState": candidate.proposedReviewState,
+            "reasonCodes": candidate.reasonCodes,
+            "sourceRefs": candidate.sourceRefs,
+            "truthBoundary": "reviewable_candidate_not_truth",
+        ]
+        if let sourceEvidenceRef = candidate.sourceEvidenceRef {
+            dict["sourceEvidenceRef"] = sourceEvidenceRef
+        }
+        return dict
+    }
+
+    static func printJournalCandidateReconciliationError(
+        message: String,
+        owner: SecondBrainOwnerRef,
+        readOnly: Bool,
+        errorCode: String
+    ) {
+        processExitCode = 1
+        let safeCommands = [
+            "cider-cli item journal-candidate-reconcile \(owner.ownerType) \(owner.ownerID) --dry-run --json",
+        ]
+        let receipt = agentActionReceiptToDict(
+            command: "item.journal-candidate-reconcile",
+            action: readOnly ? "diagnose_journal_candidates" : "supersede_journal_candidates",
+            actor: "cider-cli",
+            owner: owner,
+            sourceRefs: [owner.canonicalRef],
+            readOnly: readOnly,
+            changed: false,
+            status: "failed",
+            errorCode: errorCode,
+            error: message,
+            safeVerificationCommands: safeCommands,
+            safeNextCommands: safeCommands
+        )
+        let payload: [String: Any] = [
+            "ok": false,
+            "command": "item.journal-candidate-reconcile",
+            "readOnly": readOnly,
+            "changed": false,
+            "owner": secondBrainOwnerRefToDict(owner),
+            "errorCode": errorCode,
+            "error": message,
+            "safeVerificationCommands": safeCommands,
+            "safeNextCommands": safeCommands,
+            "actionReceipt": receipt,
+        ]
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput {
+            outputJSON(payload)
+        } else {
+            print("Error: \(message)")
+        }
     }
 
     static func handleGraphCandidateReadCommand(subcommand: String, args: [String]) {
