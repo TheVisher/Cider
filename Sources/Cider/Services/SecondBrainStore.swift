@@ -130,6 +130,7 @@ final class SecondBrainStore {
             .bind(createdAt, at: 12)
             .bind(updatedAt, at: 13)
         try stmt.step()
+        _ = try SecondBrainOwnerLabelIndexService(database: database).refreshProjectedOwner(owner: section.owner)
     }
 
     func sections(for owner: SecondBrainOwnerRef) throws -> [SecondBrainSection] {
@@ -219,6 +220,7 @@ final class SecondBrainStore {
             }
 
             try deleteSections(for: owner, keeping: sectionKeys)
+            _ = try SecondBrainOwnerLabelIndexService(database: database).refreshProjectedOwner(owner: owner)
 
             let deleteChunks = try database.prepare("""
                 DELETE FROM content_chunks
@@ -265,6 +267,12 @@ final class SecondBrainStore {
                 .bind(likePrefix, at: 2)
             try deleteSections.step()
 
+            try SecondBrainOwnerLabelIndexService(database: database).markDeleted(
+                ownerType: ownerType,
+                ownerIDLike: likePrefix,
+                labelSource: "owner_label_index.incremental.owner_footprint.delete_prefix"
+            )
+
             try deleteOwnerSidecars(ownerType: ownerType, ownerIDLike: likePrefix)
         }
     }
@@ -285,6 +293,10 @@ final class SecondBrainStore {
         deleteSections.bind(owner.ownerType, at: 1)
             .bind(owner.ownerID, at: 2)
         try deleteSections.step()
+        _ = try SecondBrainOwnerLabelIndexService(database: database).markDeleted(
+            owner: owner,
+            labelSource: "owner_label_index.incremental.owner_footprint.delete"
+        )
     }
 
     private func deleteOwnerSidecars(for owner: SecondBrainOwnerRef) throws {
@@ -607,6 +619,7 @@ final class SecondBrainStore {
             .bind(createdAt, at: 12)
             .bind(updatedAt, at: 13)
         try stmt.step()
+        _ = try SecondBrainOwnerLabelIndexService(database: database).refreshAcceptedRelationTarget(relation)
         if let evidenceRecord {
             let evidenceService = SecondBrainSourceEvidenceService(database: database)
             try evidenceService.record(evidenceRecord)

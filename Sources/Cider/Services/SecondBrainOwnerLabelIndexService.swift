@@ -100,6 +100,175 @@ final class SecondBrainOwnerLabelIndexService {
         )
     }
 
+    @discardableResult
+    func markDeleted(owner: SecondBrainOwnerRef, labelSource: String) throws -> SecondBrainOwnerLabelIndexRecord {
+        try upsertLabel(
+            owner: owner,
+            ownerKind: ownerKind(ownerType: owner.ownerType, body: ""),
+            canonicalLabel: owner.ownerID,
+            sourceRefs: [owner.canonicalRef],
+            labelSource: labelSource,
+            confidence: 0,
+            isDeleted: true
+        )
+    }
+
+    func markDeleted(ownerType: String, ownerIDLike: String, labelSource: String) throws {
+        let now = Date().timeIntervalSince1970
+        let stmt = try database.prepare("""
+            UPDATE owner_label_index
+            SET is_deleted = 1,
+                label_source = ?,
+                updated_at = ?
+            WHERE owner_type = ? AND owner_id LIKE ? ESCAPE '\\';
+            """)
+        stmt.bind(labelSource, at: 1)
+            .bind(now, at: 2)
+            .bind(ownerType, at: 3)
+            .bind(ownerIDLike, at: 4)
+        try stmt.step()
+    }
+
+    @discardableResult
+    func refreshContact(ownerID: String) throws -> SecondBrainOwnerLabelIndexRecord? {
+        let stmt = try database.prepare("""
+            SELECT i.id, i.title, c.relationship_label, c.notes, c.email, i.relative_path
+            FROM contacts c
+            JOIN items i ON i.id = c.item_id
+            WHERE i.id = ?
+            LIMIT 1;
+            """)
+        stmt.bind(ownerID, at: 1)
+        guard try stmt.step() else {
+            return try markDeleted(
+                owner: SecondBrainOwnerRef(ownerType: "contact", ownerID: ownerID),
+                labelSource: "owner_label_index.incremental.contact.delete"
+            )
+        }
+        let owner = SecondBrainOwnerRef(ownerType: "contact", ownerID: stmt.string(at: 0))
+        return try upsertLabel(
+            owner: owner,
+            ownerKind: "person",
+            canonicalLabel: stmt.string(at: 1),
+            aliases: [stmt.string(at: 2), stmt.string(at: 4)].filter { !$0.isEmpty },
+            sourceRefs: [owner.canonicalRef, stmt.optionalString(at: 5)].compactMap { $0 },
+            labelSource: "owner_label_index.incremental.contacts",
+            confidence: 0.88
+        )
+    }
+
+    @discardableResult
+    func refreshProject(id rawID: String) throws -> SecondBrainOwnerLabelIndexRecord? {
+        let id = SecondBrainProjectGraphService.normalizedProjectID(rawID)
+        let stmt = try database.prepare("""
+            SELECT id, title, subtitle, metadata
+            FROM projects
+            WHERE id = ?
+            LIMIT 1;
+            """)
+        stmt.bind(id, at: 1)
+        guard try stmt.step() else {
+            return try markDeleted(
+                owner: SecondBrainOwnerRef(ownerType: "project", ownerID: id),
+                labelSource: "owner_label_index.incremental.project.delete"
+            )
+        }
+        let owner = SecondBrainOwnerRef(ownerType: "project", ownerID: stmt.string(at: 0))
+        let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 3)) ?? [:]
+        return try upsertLabel(
+            owner: owner,
+            ownerKind: "project",
+            canonicalLabel: stmt.string(at: 1),
+            aliases: uniqueStrings([stmt.string(at: 2)] + metadata.values),
+            sourceRefs: [owner.canonicalRef],
+            labelSource: "owner_label_index.incremental.projects",
+            confidence: 0.9
+        )
+    }
+
+    @discardableResult
+    func refreshProjectedOwner(owner: SecondBrainOwnerRef) throws -> SecondBrainOwnerLabelIndexRecord? {
+        guard ["media_item", "place", "graph_object"].contains(owner.ownerType) else { return nil }
+        let stmt = try database.prepare("""
+            SELECT title, body, source, confidence, metadata
+            FROM item_sections
+            WHERE owner_type = ? AND owner_id = ?
+            ORDER BY sort_order ASC, updated_at DESC;
+            """)
+        stmt.bind(owner.ownerType, at: 1)
+            .bind(owner.ownerID, at: 2)
+        var titles: [String] = []
+        var bodies: [String] = []
+        var sources: [String] = []
+        var metadataValues: [String] = []
+        var provenance: [String] = []
+        var confidence: Double?
+        while try stmt.step() {
+            titles.append(stmt.string(at: 0))
+            bodies.append(stmt.string(at: 1))
+            sources.append(stmt.string(at: 2))
+            confidence = max(confidence ?? 0, stmt.optionalDouble(at: 3) ?? 0)
+            let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 4)) ?? [:]
+            metadataValues.append(contentsOf: metadata.values)
+            provenance.append(contentsOf: metadata.compactMap { key, value in
+                key.lowercased().contains("evidence") || key.lowercased().contains("provenance") ? value : nil
+            })
+        }
+        let body = bodies.joined(separator: "\n")
+        guard !titles.isEmpty || !body.isEmpty else {
+            return try markDeleted(
+                owner: owner,
+                labelSource: "owner_label_index.incremental.item_sections.delete"
+            )
+        }
+        let title = uniqueStrings(titles).first ?? owner.ownerID
+        return try upsertLabel(
+            owner: owner,
+            ownerKind: ownerKind(ownerType: owner.ownerType, body: body),
+            canonicalLabel: title,
+            aliases: uniqueStrings(aliases(from: body) + metadataValues),
+            externalIDs: externalIDs(from: body),
+            provenanceRefs: provenance,
+            sourceRefs: uniqueStrings([owner.canonicalRef] + sources),
+            labelSource: "owner_label_index.incremental.item_sections",
+            confidence: confidence
+        )
+    }
+
+    @discardableResult
+    func refreshAcceptedRelationTarget(_ relation: SecondBrainRelation) throws -> SecondBrainOwnerLabelIndexRecord? {
+        if let existingSource = try existingLabelSource(owner: relation.targetOwner),
+           !existingSource.contains("owner_relations"),
+           !existingSource.contains("accepted_relation") {
+            return nil
+        }
+        let metadata = relation.metadata
+        let label = metadata["target_label"]
+            ?? metadata["mediaItemTitle"]
+            ?? metadata["candidate_mention_text"]
+            ?? relation.targetOwner.ownerID
+        let provenance = uniqueStrings(metadata.compactMap { key, value in
+            let normalizedKey = key.lowercased()
+            if normalizedKey.contains("source_evidence_ref") || normalizedKey.contains("provenance") {
+                return value
+            }
+            if normalizedKey.contains("source_evidence_id") {
+                return "source_evidence:\(value)"
+            }
+            return nil
+        })
+        return try upsertLabel(
+            owner: relation.targetOwner,
+            ownerKind: ownerKind(ownerType: relation.targetOwner.ownerType, body: metadata.values.joined(separator: " ")),
+            canonicalLabel: label,
+            aliases: [relation.evidence, metadata["candidate_mention_text"]].compactMap { $0 }.filter { !$0.isEmpty },
+            provenanceRefs: provenance,
+            sourceRefs: [relation.targetOwner.canonicalRef, relation.sourceOwner.canonicalRef],
+            labelSource: "owner_label_index.incremental.owner_relations",
+            confidence: relation.confidence
+        )
+    }
+
     func search(
         query: String,
         ownerKinds: Set<String>,
@@ -155,6 +324,19 @@ final class SecondBrainOwnerLabelIndexService {
             records.append(record(from: stmt))
         }
         return records
+    }
+
+    private func existingLabelSource(owner: SecondBrainOwnerRef) throws -> String? {
+        let stmt = try database.prepare("""
+            SELECT label_source
+            FROM owner_label_index
+            WHERE owner_type = ? AND owner_id = ? AND is_deleted = 0
+            LIMIT 1;
+            """)
+        stmt.bind(owner.ownerType, at: 1)
+            .bind(owner.ownerID, at: 2)
+        guard try stmt.step() else { return nil }
+        return stmt.string(at: 0)
     }
 
     private func record(from stmt: SQLStatement) -> SecondBrainOwnerLabelIndexRecord {

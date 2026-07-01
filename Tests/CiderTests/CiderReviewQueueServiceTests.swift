@@ -189,6 +189,44 @@ struct CiderReviewQueueServiceTests {
         )
     }
 
+    private func ownerLabelIndexRow(
+        _ db: CiderDatabase,
+        owner: SecondBrainOwnerRef
+    ) throws -> [String: Any]? {
+        let stmt = try db.prepare("""
+            SELECT owner_kind, canonical_label, aliases_json, normalized_aliases_json,
+                   external_ids_json, provenance_refs_json, source_refs_json, label_source, is_deleted
+            FROM owner_label_index
+            WHERE owner_type = ? AND owner_id = ?;
+            """)
+        stmt.bind(owner.ownerType, at: 1)
+            .bind(owner.ownerID, at: 2)
+        guard try stmt.step() else { return nil }
+        return [
+            "ownerKind": stmt.string(at: 0),
+            "canonicalLabel": stmt.string(at: 1),
+            "aliases": DatabaseHelpers.decodeStringArray(stmt.optionalString(at: 2)),
+            "normalizedAliases": DatabaseHelpers.decodeStringArray(stmt.optionalString(at: 3)),
+            "externalIDs": DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 4)) ?? [:],
+            "provenanceRefs": DatabaseHelpers.decodeStringArray(stmt.optionalString(at: 5)),
+            "sourceRefs": DatabaseHelpers.decodeStringArray(stmt.optionalString(at: 6)),
+            "labelSource": stmt.string(at: 7),
+            "isDeleted": stmt.int(at: 8) == 1,
+        ]
+    }
+
+    private func targetOwnerRefs(
+        db: CiderDatabase,
+        output: SecondBrainEnrichmentOutput
+    ) throws -> [String] {
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+        let item = try #require(try CiderReviewQueueService(database: db).list(kind: "graph_candidate").items.first {
+            $0.candidateID == output.id
+        })
+        let options = try #require(item.toDictionary()["targetOptions"] as? [[String: Any]])
+        return options.compactMap { ($0["targetOwner"] as? [String: String])?["ref"] }
+    }
+
     @Test("review queue lists low-confidence routing once and exposes safe actions")
     func reviewQueueListsLowConfidenceRouting() throws {
         let (db, url) = try makeTempDB()
@@ -1492,6 +1530,178 @@ struct CiderReviewQueueServiceTests {
         #expect(selected.truthBoundary == "accepted_graph_truth")
         #expect(selected.actionReceipt["truthBoundary"] as? String == "accepted_graph_truth")
         #expect(selected.provenance["sourceRef"] as? String == owner.canonicalRef)
+    }
+
+    @Test("project and contact writes incrementally refresh owner label index")
+    func projectAndContactWritesIncrementallyRefreshOwnerLabelIndex() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+
+        let projectService = SecondBrainProjectGraphService(database: db)
+        _ = try projectService.upsertProject(
+            id: "cid-633-owner-index",
+            title: "Owner Index Alpha",
+            subtitle: "First searchable subtitle"
+        )
+        let projectOwner = SecondBrainOwnerRef(ownerType: "project", ownerID: "cid-633-owner-index")
+        var projectRow = try #require(try ownerLabelIndexRow(db, owner: projectOwner))
+        #expect(projectRow["canonicalLabel"] as? String == "Owner Index Alpha")
+        #expect((projectRow["aliases"] as? [String])?.contains("First searchable subtitle") == true)
+        #expect(projectRow["isDeleted"] as? Bool == false)
+
+        _ = try projectService.upsertProject(
+            id: "cid-633-owner-index",
+            title: "Owner Index Beta",
+            subtitle: "Replacement searchable subtitle"
+        )
+        projectRow = try #require(try ownerLabelIndexRow(db, owner: projectOwner))
+        #expect(projectRow["canonicalLabel"] as? String == "Owner Index Beta")
+        #expect((projectRow["aliases"] as? [String])?.contains("Replacement searchable subtitle") == true)
+        #expect((projectRow["aliases"] as? [String])?.contains("First searchable subtitle") == false)
+
+        let contactStorage = ContactStorage(database: db)
+        var contact = ContactCard(
+            displayName: "Avery Oldname",
+            relationshipLabel: "friend",
+            notes: "Met through Cider QA",
+            email: "avery-old@example.com"
+        )
+        contactStorage.persistContactToDatabase(db, contact: contact)
+        let contactOwner = SecondBrainOwnerRef(ownerType: "contact", ownerID: contact.id.uuidString)
+        var contactRow = try #require(try ownerLabelIndexRow(db, owner: contactOwner))
+        #expect(contactRow["canonicalLabel"] as? String == "Avery Oldname")
+        #expect((contactRow["aliases"] as? [String])?.contains("friend") == true)
+        #expect((contactRow["aliases"] as? [String])?.contains("avery-old@example.com") == true)
+
+        contact.displayName = "Avery Newname"
+        contact.relationshipLabel = "collaborator"
+        contact.email = "avery-new@example.com"
+        contact.updatedAt = Date()
+        contactStorage.persistContactToDatabase(db, contact: contact)
+        contactRow = try #require(try ownerLabelIndexRow(db, owner: contactOwner))
+        #expect(contactRow["canonicalLabel"] as? String == "Avery Newname")
+        #expect((contactRow["aliases"] as? [String])?.contains("collaborator") == true)
+        #expect((contactRow["aliases"] as? [String])?.contains("avery-new@example.com") == true)
+        #expect((contactRow["aliases"] as? [String])?.contains("avery-old@example.com") == false)
+
+        contactStorage.deleteContactFromDatabase(db, contactID: contact.id)
+        contactRow = try #require(try ownerLabelIndexRow(db, owner: contactOwner))
+        #expect(contactRow["isDeleted"] as? Bool == true)
+    }
+
+    @Test("projected owner writes refresh labels and graph target options without rebuild")
+    func projectedOwnerWritesRefreshLabelsAndGraphTargetOptionsWithoutRebuild() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let store = SecondBrainStore(database: db)
+        let mediaOwner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: "cid633-columbus")
+
+        try store.upsertSection(SecondBrainSection(
+            id: "\(mediaOwner.canonicalRef):summary",
+            owner: mediaOwner,
+            itemID: nil,
+            sectionKey: "summary",
+            title: "Columbus",
+            body: "Title: Columbus\nAlias: Columbus 2017\nExternal ID: tmdb:414425",
+            source: "test.projected-owner",
+            confidence: 0.92,
+            sortOrder: 0
+        ))
+
+        var row = try #require(try ownerLabelIndexRow(db, owner: mediaOwner))
+        #expect(row["canonicalLabel"] as? String == "Columbus")
+        #expect((row["externalIDs"] as? [String: String])?["tmdb"] == "414425")
+        #expect((row["sourceRefs"] as? [String])?.contains("test.projected-owner") == true)
+
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Incremental target lookup",
+            relativePath: "Daily/2026-07-01.md"
+        )
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString),
+            candidateKind: .objectRelation,
+            mentionText: "Columbus 2017",
+            sourceQuote: "Watched Columbus 2017 and logged the source-backed label.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.91,
+            source: "test.graph.incremental-projected"
+        )
+        #expect(try targetOwnerRefs(db: db, output: output).first == mediaOwner.canonicalRef)
+
+        try store.upsertSection(SecondBrainSection(
+            id: "\(mediaOwner.canonicalRef):summary",
+            owner: mediaOwner,
+            itemID: nil,
+            sectionKey: "summary",
+            title: "After Yang",
+            body: "Title: After Yang\nAlias: Kogonada After Yang\nExternal ID: tmdb:585378",
+            source: "test.projected-owner.rename",
+            confidence: 0.93,
+            sortOrder: 0
+        ))
+        row = try #require(try ownerLabelIndexRow(db, owner: mediaOwner))
+        #expect(row["canonicalLabel"] as? String == "After Yang")
+        #expect((row["normalizedAliases"] as? [String])?.contains("columbus 2017") == false)
+        #expect((row["externalIDs"] as? [String: String])?["tmdb"] == "585378")
+
+        try store.deleteProjection(for: mediaOwner)
+        row = try #require(try ownerLabelIndexRow(db, owner: mediaOwner))
+        #expect(row["isDeleted"] as? Bool == true)
+    }
+
+    @Test("accepted relation target writes incrementally seed graph object labels")
+    func acceptedRelationTargetWritesIncrementallySeedGraphObjectLabels() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Accepted relation source",
+            relativePath: "Daily/2026-07-01 accepted relation.md"
+        )
+        let source = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let target = SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "movie-columbus")
+        try SecondBrainStore(database: db).recordRelation(SecondBrainRelation(
+            sourceOwner: source,
+            targetOwner: target,
+            relationType: "watched",
+            evidence: "Watched Columbus again.",
+            source: "graph_candidate.accept",
+            actor: "reviewer",
+            confidence: 0.9,
+            metadata: [
+                "target_label": "Columbus",
+                "candidate_mention_text": "Columbus 2017",
+                "source_evidence_ref": "source_evidence:cid633-columbus",
+                "provenance_ref": "source_evidence:cid633-columbus",
+            ]
+        ))
+
+        let row = try #require(try ownerLabelIndexRow(db, owner: target))
+        #expect(row["ownerKind"] as? String == "graph_object")
+        #expect(row["canonicalLabel"] as? String == "Columbus")
+        #expect((row["aliases"] as? [String])?.contains("Watched Columbus again.") == true)
+        #expect((row["aliases"] as? [String])?.contains("Columbus 2017") == true)
+        #expect((row["provenanceRefs"] as? [String])?.contains("source_evidence:cid633-columbus") == true)
+
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: source,
+            candidateKind: .objectRelation,
+            mentionText: "Columbus 2017",
+            sourceQuote: "Thinking about Columbus 2017 again.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie],
+            relationGuesses: [.mentions],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.83,
+            source: "test.graph.incremental-relation"
+        )
+        #expect(try targetOwnerRefs(db: db, output: output).first == target.canonicalRef)
     }
 
     @Test("review queue filters by kind and required safe action")

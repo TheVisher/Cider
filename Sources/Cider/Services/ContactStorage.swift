@@ -1152,6 +1152,8 @@ final class ContactStorage: ObservableObject {
                 .bind(target, at: 4)
             try insLink.step()
         }
+
+        _ = try SecondBrainOwnerLabelIndexService(database: db).refreshContact(ownerID: itemID)
     }
 
     /// Delete a contact from the database by ID. CASCADE handles detail + join tables.

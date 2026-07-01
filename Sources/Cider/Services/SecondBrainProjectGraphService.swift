@@ -79,24 +79,27 @@ final class SecondBrainProjectGraphService {
             updatedAt: now
         )
 
-        let stmt = try database.prepare("""
-            INSERT INTO projects (id, title, subtitle, status, metadata, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                title = excluded.title,
-                subtitle = excluded.subtitle,
-                status = excluded.status,
-                metadata = excluded.metadata,
-                updated_at = excluded.updated_at;
-            """)
-        stmt.bind(project.id, at: 1)
-            .bind(project.title, at: 2)
-            .bind(project.subtitle, at: 3)
-            .bind(project.status, at: 4)
-            .bind(DatabaseHelpers.encodeJSON(project.metadata) ?? "{}", at: 5)
-            .bind(DatabaseHelpers.encode(project.createdAt), at: 6)
-            .bind(DatabaseHelpers.encode(project.updatedAt), at: 7)
-        try stmt.step()
+        try database.withTransaction {
+            let stmt = try database.prepare("""
+                INSERT INTO projects (id, title, subtitle, status, metadata, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title,
+                    subtitle = excluded.subtitle,
+                    status = excluded.status,
+                    metadata = excluded.metadata,
+                    updated_at = excluded.updated_at;
+                """)
+            stmt.bind(project.id, at: 1)
+                .bind(project.title, at: 2)
+                .bind(project.subtitle, at: 3)
+                .bind(project.status, at: 4)
+                .bind(DatabaseHelpers.encodeJSON(project.metadata) ?? "{}", at: 5)
+                .bind(DatabaseHelpers.encode(project.createdAt), at: 6)
+                .bind(DatabaseHelpers.encode(project.updatedAt), at: 7)
+            try stmt.step()
+            _ = try SecondBrainOwnerLabelIndexService(database: database).refreshProject(id: project.id)
+        }
         return project
     }
 
