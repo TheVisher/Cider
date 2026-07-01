@@ -43,6 +43,35 @@ struct SecondBrainJournalCandidateReconciliationReport: Codable, Equatable {
     var safeNextCommands: [String]
 }
 
+struct SecondBrainJournalCandidateSourceSpanAudit: Codable, Equatable {
+    var candidateID: String
+    var candidateRef: String
+    var sourceOwnerRef: String
+    var sourceQuote: String
+    var currentSpanState: String
+    var currentSpanStart: Int?
+    var currentSpanEnd: Int?
+    var recoveredSpanStart: Int?
+    var recoveredSpanEnd: Int?
+    var recoveryStatus: String
+    var ambiguityReason: String?
+    var readOnly: Bool
+    var changed: Bool
+    var truthBoundary: String
+    var safeNextCommands: [String]
+}
+
+struct SecondBrainJournalCandidateSourceSpanAuditReport: Codable, Equatable {
+    var owner: SecondBrainOwnerRef
+    var readOnly: Bool
+    var changed: Bool
+    var totalStoredCandidateCount: Int
+    var auditCount: Int
+    var audits: [SecondBrainJournalCandidateSourceSpanAudit]
+    var truthBoundary: String
+    var safeNextCommands: [String]
+}
+
 @MainActor
 final class SecondBrainJournalCandidateReconciliationService {
     enum ReconciliationError: LocalizedError, Equatable {
@@ -82,6 +111,27 @@ final class SecondBrainJournalCandidateReconciliationService {
             actor: "system",
             reason: nil,
             limit: limit
+        )
+    }
+
+    func auditMissingSourceSpans(
+        owner: SecondBrainOwnerRef,
+        rawContent: String,
+        limit: Int = 100
+    ) throws -> SecondBrainJournalCandidateSourceSpanAuditReport {
+        let stored = try storedJournalGraphCandidates(owner: owner)
+        let audits = stored
+            .prefix(max(0, limit))
+            .map { sourceSpanAudit(for: $0, rawContent: rawContent) }
+        return SecondBrainJournalCandidateSourceSpanAuditReport(
+            owner: owner,
+            readOnly: true,
+            changed: false,
+            totalStoredCandidateCount: stored.count,
+            auditCount: audits.count,
+            audits: audits,
+            truthBoundary: "reviewable_candidate_not_truth",
+            safeNextCommands: sourceSpanAuditSafeNextCommands(owner: owner, audits: audits)
         )
     }
 
@@ -193,6 +243,131 @@ final class SecondBrainJournalCandidateReconciliationService {
             (output.kind == SecondBrainGraphCandidateContract.outputKind || output.kind == "memory_candidate")
                 && (output.metadata["source_kind"] == "journal" || output.source.localizedCaseInsensitiveContains("journal"))
         }
+    }
+
+    private func storedJournalGraphCandidates(owner: SecondBrainOwnerRef) throws -> [SecondBrainEnrichmentOutput] {
+        try outputService.outputs(for: owner).filter { output in
+            output.kind == SecondBrainGraphCandidateContract.outputKind
+                && (output.metadata["source_kind"] == "journal" || output.source.localizedCaseInsensitiveContains("journal"))
+        }
+    }
+
+    private func sourceSpanAudit(
+        for output: SecondBrainEnrichmentOutput,
+        rawContent: String
+    ) -> SecondBrainJournalCandidateSourceSpanAudit {
+        let quote = sourceQuote(for: output)
+        let currentStart = output.metadata["source_span_start"].flatMap(Int.init)
+        let currentEnd = output.metadata["source_span_end"].flatMap(Int.init)
+        let validExistingSpan = explicitSourceSpan(
+            start: output.metadata["source_span_start"],
+            end: output.metadata["source_span_end"],
+            quote: quote,
+            rawContent: rawContent
+        )
+
+        let currentSpanState: String
+        let recoveryStatus: String
+        let recoveredStart: Int?
+        let recoveredEnd: Int?
+        let ambiguityReason: String?
+
+        if let validExistingSpan {
+            currentSpanState = "present"
+            recoveryStatus = "unchanged"
+            recoveredStart = nil
+            recoveredEnd = nil
+            ambiguityReason = nil
+            return makeSourceSpanAudit(
+                output: output,
+                quote: quote,
+                currentSpanState: currentSpanState,
+                currentSpanStart: validExistingSpan.start,
+                currentSpanEnd: validExistingSpan.end,
+                recoveredSpanStart: recoveredStart,
+                recoveredSpanEnd: recoveredEnd,
+                recoveryStatus: recoveryStatus,
+                ambiguityReason: ambiguityReason
+            )
+        }
+
+        currentSpanState = (currentStart != nil || currentEnd != nil) ? "invalid" : "missing"
+        let matches = exactQuoteMatches(quote, in: rawContent)
+        if matches.count == 1, let match = matches.first {
+            recoveryStatus = "recoverable"
+            recoveredStart = match.start
+            recoveredEnd = match.end
+            ambiguityReason = nil
+        } else if matches.isEmpty {
+            recoveryStatus = "unrecoverable"
+            recoveredStart = nil
+            recoveredEnd = nil
+            ambiguityReason = "source_quote_not_found"
+        } else {
+            recoveryStatus = "ambiguous"
+            recoveredStart = nil
+            recoveredEnd = nil
+            ambiguityReason = "source_quote_occurs_\(matches.count)_times"
+        }
+
+        return makeSourceSpanAudit(
+            output: output,
+            quote: quote,
+            currentSpanState: currentSpanState,
+            currentSpanStart: currentStart,
+            currentSpanEnd: currentEnd,
+            recoveredSpanStart: recoveredStart,
+            recoveredSpanEnd: recoveredEnd,
+            recoveryStatus: recoveryStatus,
+            ambiguityReason: ambiguityReason
+        )
+    }
+
+    private func makeSourceSpanAudit(
+        output: SecondBrainEnrichmentOutput,
+        quote: String,
+        currentSpanState: String,
+        currentSpanStart: Int?,
+        currentSpanEnd: Int?,
+        recoveredSpanStart: Int?,
+        recoveredSpanEnd: Int?,
+        recoveryStatus: String,
+        ambiguityReason: String?
+    ) -> SecondBrainJournalCandidateSourceSpanAudit {
+        let candidateRef = candidateRef(for: output)
+        return SecondBrainJournalCandidateSourceSpanAudit(
+            candidateID: output.id,
+            candidateRef: candidateRef,
+            sourceOwnerRef: output.owner.canonicalRef,
+            sourceQuote: quote,
+            currentSpanState: currentSpanState,
+            currentSpanStart: currentSpanStart,
+            currentSpanEnd: currentSpanEnd,
+            recoveredSpanStart: recoveredSpanStart,
+            recoveredSpanEnd: recoveredSpanEnd,
+            recoveryStatus: recoveryStatus,
+            ambiguityReason: ambiguityReason,
+            readOnly: true,
+            changed: false,
+            truthBoundary: "reviewable_candidate_not_truth",
+            safeNextCommands: ["cider-cli item graph-candidate \(output.id) --json"]
+        )
+    }
+
+    private func exactQuoteMatches(_ quote: String, in rawContent: String) -> [(start: Int, end: Int)] {
+        let trimmedQuote = quote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuote.isEmpty else { return [] }
+        var matches: [(start: Int, end: Int)] = []
+        var searchStart = rawContent.startIndex
+        while searchStart < rawContent.endIndex,
+              let range = rawContent.range(of: trimmedQuote, range: searchStart..<rawContent.endIndex) {
+            matches.append((
+                start: rawContent.distance(from: rawContent.startIndex, to: range.lowerBound),
+                end: rawContent.distance(from: rawContent.startIndex, to: range.upperBound)
+            ))
+            searchStart = range.upperBound
+        }
+        return matches
     }
 
     private func reconciliationReasons(
@@ -728,5 +903,18 @@ final class SecondBrainJournalCandidateReconciliationService {
             }
         }
         return commands
+    }
+
+    private func sourceSpanAuditSafeNextCommands(
+        owner: SecondBrainOwnerRef,
+        audits: [SecondBrainJournalCandidateSourceSpanAudit]
+    ) -> [String] {
+        var commands = [
+            "cider-cli item journal-candidate-source-span-audit \(owner.ownerType) \(owner.ownerID) --json",
+            "cider-cli item graph-candidates \(owner.ownerType) \(owner.ownerID) --include-reviewed --json",
+        ]
+        commands.append(contentsOf: audits.prefix(5).map { "cider-cli item graph-candidate \($0.candidateID) --json" })
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
     }
 }

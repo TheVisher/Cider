@@ -609,4 +609,167 @@ struct SecondBrainJournalCandidateReconciliationTests {
         let stored = try outputService.output(id: stale.id)
         #expect(stored?.reviewState == "suggested")
     }
+
+    @Test("span audit recovers a missing graph candidate span when source quote is unique")
+    func spanAuditRecoversMissingGraphCandidateSpanWhenSourceQuoteIsUnique() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let sourceQuote = "- Visher watched Avatar: The Last Airbender on Netflix."
+        let rawContent = """
+        - Visher drank coffee before work.
+        \(sourceQuote)
+        - Visher logged a reminder about lunch.
+        """
+        let candidate = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Avatar: The Last Airbender",
+            sourceQuote: sourceQuote,
+            sourceKind: "journal",
+            objectTypeGuesses: [.show, .media],
+            relationGuesses: [.watched],
+            confidence: 0.78,
+            confidenceReason: "Pre-span stored candidate fixture.",
+            source: "journal_graph_candidate.v0"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(candidate)
+
+        let report = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .auditMissingSourceSpans(owner: owner, rawContent: rawContent)
+
+        #expect(report.readOnly)
+        #expect(!report.changed)
+        #expect(report.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(report.auditCount == 1)
+        let audit = try #require(report.audits.first)
+        let expected = try #require(rawContent.range(of: sourceQuote))
+        #expect(audit.candidateID == candidate.id)
+        #expect(audit.candidateRef == "graph_candidate:\(candidate.id)")
+        #expect(audit.sourceOwnerRef == owner.canonicalRef)
+        #expect(audit.sourceQuote == sourceQuote)
+        #expect(audit.currentSpanState == "missing")
+        #expect(audit.recoveryStatus == "recoverable")
+        #expect(audit.recoveredSpanStart == rawContent.distance(from: rawContent.startIndex, to: expected.lowerBound))
+        #expect(audit.recoveredSpanEnd == rawContent.distance(from: rawContent.startIndex, to: expected.upperBound))
+        #expect(audit.ambiguityReason == nil)
+        #expect(audit.truthBoundary == "reviewable_candidate_not_truth")
+    }
+
+    @Test("span audit fails closed when the source quote is duplicated")
+    func spanAuditFailsClosedWhenSourceQuoteIsDuplicated() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let sourceQuote = "- Visher bought a Diet Coke."
+        let rawContent = """
+        \(sourceQuote)
+        - Visher bought sparkling water.
+        \(sourceQuote)
+        """
+        let candidate = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Diet Coke",
+            sourceQuote: sourceQuote,
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            relationGuesses: [.drank],
+            confidence: 0.72,
+            confidenceReason: "Duplicate quote fixture.",
+            source: "journal_graph_candidate.v0"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(candidate)
+
+        let report = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .auditMissingSourceSpans(owner: owner, rawContent: rawContent)
+
+        let audit = try #require(report.audits.first)
+        #expect(audit.currentSpanState == "missing")
+        #expect(audit.recoveryStatus == "ambiguous")
+        #expect(audit.recoveredSpanStart == nil)
+        #expect(audit.recoveredSpanEnd == nil)
+        #expect(audit.ambiguityReason == "source_quote_occurs_2_times")
+        #expect(report.safeNextCommands.contains("cider-cli item graph-candidate \(candidate.id) --json"))
+    }
+
+    @Test("span audit leaves graph candidates with existing valid spans unchanged")
+    func spanAuditLeavesGraphCandidatesWithExistingValidSpansUnchanged() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let sourceQuote = "- Visher liked the sea salt foam black tea."
+        let rawContent = """
+        - Visher ordered dumplings.
+        \(sourceQuote)
+        """
+        var candidate = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "sea salt foam black tea",
+            sourceQuote: sourceQuote,
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            relationGuesses: [.likesDrink],
+            confidence: 0.74,
+            confidenceReason: "Already-spanned fixture.",
+            source: "journal_graph_candidate.v1"
+        )
+        let expected = try #require(rawContent.range(of: sourceQuote))
+        candidate.metadata["source_span_start"] = "\(rawContent.distance(from: rawContent.startIndex, to: expected.lowerBound))"
+        candidate.metadata["source_span_end"] = "\(rawContent.distance(from: rawContent.startIndex, to: expected.upperBound))"
+        try SecondBrainEnrichmentOutputService(database: db).record(candidate)
+
+        let report = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .auditMissingSourceSpans(owner: owner, rawContent: rawContent)
+
+        let audit = try #require(report.audits.first)
+        #expect(audit.currentSpanState == "present")
+        #expect(audit.recoveryStatus == "unchanged")
+        #expect(audit.recoveredSpanStart == nil)
+        #expect(audit.recoveredSpanEnd == nil)
+        #expect(audit.currentSpanStart == rawContent.distance(from: rawContent.startIndex, to: expected.lowerBound))
+        #expect(audit.currentSpanEnd == rawContent.distance(from: rawContent.startIndex, to: expected.upperBound))
+        #expect(!report.changed)
+    }
+
+    @Test("span audit CLI dictionary keeps candidates reviewable and exposes safe commands")
+    func spanAuditCLIDictionaryKeepsCandidatesReviewableAndExposesSafeCommands() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let audit = SecondBrainJournalCandidateSourceSpanAudit(
+            candidateID: "candidate-1",
+            candidateRef: "graph_candidate:candidate-1",
+            sourceOwnerRef: owner.canonicalRef,
+            sourceQuote: "- Visher watched Avatar.",
+            currentSpanState: "missing",
+            currentSpanStart: nil,
+            currentSpanEnd: nil,
+            recoveredSpanStart: 12,
+            recoveredSpanEnd: 36,
+            recoveryStatus: "recoverable",
+            ambiguityReason: nil,
+            readOnly: true,
+            changed: false,
+            truthBoundary: "reviewable_candidate_not_truth",
+            safeNextCommands: ["cider-cli item graph-candidate candidate-1 --json"]
+        )
+
+        let dict = CiderCLI.journalCandidateSourceSpanAuditToDict(audit)
+
+        #expect(dict["candidateID"] as? String == "candidate-1")
+        #expect(dict["candidateRef"] as? String == "graph_candidate:candidate-1")
+        #expect(dict["sourceOwnerRef"] as? String == owner.canonicalRef)
+        #expect(dict["sourceQuote"] as? String == "- Visher watched Avatar.")
+        #expect(dict["currentSpanState"] as? String == "missing")
+        #expect(dict["recoveredSpanStart"] as? Int == 12)
+        #expect(dict["recoveredSpanEnd"] as? Int == 36)
+        #expect(dict["recoveryStatus"] as? String == "recoverable")
+        #expect(dict["readOnly"] as? Bool == true)
+        #expect(dict["changed"] as? Bool == false)
+        #expect(dict["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect((dict["safeNextCommands"] as? [String]) == ["cider-cli item graph-candidate candidate-1 --json"])
+    }
 }
