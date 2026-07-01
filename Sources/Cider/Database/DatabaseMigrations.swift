@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 27
+    static let latestVersion: Int = 28
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -135,7 +135,27 @@ enum DatabaseMigrations {
         }
         if currentVersion < 27 {
             try migrateToV27(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 28 {
+            try migrateToV28(db)
+        }
+    }
+
+    // MARK: - V27 -> V28: Owner label search index
+
+    private static func migrateToV28(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 28...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createOwnerLabelIndex)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_owner_label_index_lookup ON owner_label_index(owner_kind, normalized_label, updated_at) WHERE is_deleted = 0;")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_owner_label_index_owner ON owner_label_index(owner_type, owner_id) WHERE is_deleted = 0;")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (28);")
+        }
+
+        logger.info("Migration to v28 complete")
     }
 
     // MARK: - V26 -> V27: Durable action receipt ledger

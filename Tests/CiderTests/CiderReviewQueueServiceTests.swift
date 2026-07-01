@@ -163,6 +163,32 @@ struct CiderReviewQueueServiceTests {
         ))
     }
 
+    private func insertOwnerLabel(
+        _ db: CiderDatabase,
+        owner: SecondBrainOwnerRef,
+        ownerKind: String,
+        canonicalLabel: String,
+        aliases: [String] = [],
+        externalIDs: [String: String] = [:],
+        provenanceRefs: [String] = [],
+        sourceRefs: [String] = [],
+        confidence: Double = 0.9,
+        isDeleted: Bool = false
+    ) throws {
+        try SecondBrainOwnerLabelIndexService(database: db).upsertLabel(
+            owner: owner,
+            ownerKind: ownerKind,
+            canonicalLabel: canonicalLabel,
+            aliases: aliases,
+            externalIDs: externalIDs,
+            provenanceRefs: provenanceRefs,
+            sourceRefs: sourceRefs,
+            labelSource: "test.seed",
+            confidence: confidence,
+            isDeleted: isDeleted
+        )
+    }
+
     @Test("review queue lists low-confidence routing once and exposes safe actions")
     func reviewQueueListsLowConfidenceRouting() throws {
         let (db, url) = try makeTempDB()
@@ -1325,6 +1351,147 @@ struct CiderReviewQueueServiceTests {
         #expect(try SecondBrainStore(database: db).outgoingRelations(for: owner).contains {
             $0.targetOwner == mediaOwner && $0.relationType == "watched"
         })
+    }
+
+    @Test("graph candidate target options rank owner label index aliases with provenance before fallback")
+    func graphCandidateTargetOptionsRankOwnerLabelIndexAliasesWithProvenance() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Indexed target lookup",
+            relativePath: "Daily/2026-06-16.md"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let expectedMediaOwner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: "columbus-2017-indexed")
+        let wrongMediaOwner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: "columbus-ohio-travel")
+        try insertOwnerLabel(
+            db,
+            owner: expectedMediaOwner,
+            ownerKind: "media",
+            canonicalLabel: "Columbus",
+            aliases: ["Columbus 2017", "Kogonada Columbus"],
+            externalIDs: ["tmdb": "414425"],
+            provenanceRefs: ["source_evidence:media-columbus-2017"],
+            sourceRefs: ["media_item:columbus-2017-indexed", "bookmark:letterboxd-columbus"],
+            confidence: 0.94
+        )
+        try insertOwnerLabel(
+            db,
+            owner: wrongMediaOwner,
+            ownerKind: "place",
+            canonicalLabel: "Columbus",
+            aliases: ["Columbus Ohio"],
+            externalIDs: ["wikidata": "Q16567"],
+            provenanceRefs: ["source_evidence:place-columbus-ohio"],
+            sourceRefs: ["place:columbus-ohio-travel"],
+            confidence: 0.9
+        )
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Columbus 2017",
+            sourceQuote: "Watched Columbus 2017 again and still loved the architecture.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.91,
+            source: "test.graph.indexed-media"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+
+        let item = try #require(try CiderReviewQueueService(database: db).list(kind: "graph_candidate").items.first)
+        let options = try #require(item.toDictionary()["targetOptions"] as? [[String: Any]])
+        let indexed = try #require(options.first)
+
+        #expect(indexed["optionRef"] as? String == "graph_target_option:\(output.id):existing-1")
+        #expect((indexed["targetOwner"] as? [String: String])?["ref"] == expectedMediaOwner.canonicalRef)
+        #expect(indexed["targetKind"] as? String == "media")
+        #expect(indexed["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((indexed["provenanceRefs"] as? [String])?.contains("source_evidence:media-columbus-2017") == true)
+        #expect((indexed["sourceRefs"] as? [String])?.contains("bookmark:letterboxd-columbus") == true)
+        #expect((indexed["externalIDs"] as? [String: String])?["tmdb"] == "414425")
+        #expect(options.contains { ($0["optionRef"] as? String)?.hasSuffix(":candidate-object") == true })
+        #expect(try SecondBrainStore(database: db).outgoingRelations(for: owner).isEmpty)
+    }
+
+    @Test("owner label index rebuild updates stale rows and ambiguous approvals stay explicit")
+    func ownerLabelIndexRebuildUpdatesStaleRowsAndAmbiguousApprovalsStayExplicit() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let noteID = try insertItem(
+            db,
+            type: "note",
+            title: "Ambiguous indexed target lookup",
+            relativePath: "Daily/2026-06-17.md"
+        )
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let staleOwner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: "stale-columbus")
+        let mediaOwner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: "columbus-rebuilt")
+        let alternateOwner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: "columbus-alt")
+        try insertOwnerLabel(
+            db,
+            owner: staleOwner,
+            ownerKind: "media",
+            canonicalLabel: "Columbus",
+            aliases: ["Columbus"],
+            provenanceRefs: ["source_evidence:stale"],
+            sourceRefs: ["media_item:stale-columbus"],
+            isDeleted: true
+        )
+        try insertProjectedOwner(
+            db,
+            owner: mediaOwner,
+            title: "Columbus",
+            body: "Title: Columbus\nAlias: Columbus movie\nExternal ID: tmdb:414425",
+            confidence: 0.89
+        )
+        try insertProjectedOwner(
+            db,
+            owner: alternateOwner,
+            title: "Columbus",
+            body: "Title: Columbus\nAlias: Columbus documentary",
+            confidence: 0.81
+        )
+        let rebuild = try SecondBrainOwnerLabelIndexService(database: db).rebuild()
+        #expect(rebuild.indexedCount >= 2)
+
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Columbus",
+            sourceQuote: "Watched Columbus and compared it with the other Columbus note.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.84,
+            source: "test.graph.indexed-ambiguous"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(output)
+
+        let queue = CiderReviewQueueService(database: db)
+        let item = try #require(try queue.list(kind: "graph_candidate").items.first)
+        let options = try #require(item.toDictionary()["targetOptions"] as? [[String: Any]])
+        let ownerRefs = options.compactMap { ($0["targetOwner"] as? [String: String])?["ref"] }
+        #expect(ownerRefs.contains(staleOwner.canonicalRef) == false)
+        #expect(ownerRefs.contains(mediaOwner.canonicalRef))
+        #expect(ownerRefs.contains(alternateOwner.canonicalRef))
+        #expect(throws: CiderReviewCandidateActionService.ReviewCandidateActionError.graphAcceptNeedsResolvedTarget(output.id)) {
+            _ = try queue.approveGraphCandidate(candidateID: output.id, actor: "reviewer")
+        }
+
+        let selected = try queue.approveGraphCandidate(
+            candidateID: output.id,
+            actor: "reviewer",
+            targetOptionRef: "graph_target_option:\(output.id):existing-1"
+        )
+        #expect(selected.changed == true)
+        #expect(selected.truthBoundary == "accepted_graph_truth")
+        #expect(selected.actionReceipt["truthBoundary"] as? String == "accepted_graph_truth")
+        #expect(selected.provenance["sourceRef"] as? String == owner.canonicalRef)
     }
 
     @Test("review queue filters by kind and required safe action")

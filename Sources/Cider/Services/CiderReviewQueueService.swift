@@ -141,6 +141,9 @@ struct CiderGraphCandidateTargetOption: Equatable {
     var sourceItemRef: String
     var evidenceRefs: [String]
     var confidence: Double?
+    var provenanceRefs: [String] = []
+    var sourceRefs: [String] = []
+    var externalIDs: [String: String] = [:]
     var selectionRequired: Bool = true
     var correctionAllowed: Bool = true
 
@@ -169,6 +172,15 @@ struct CiderGraphCandidateTargetOption: Equatable {
         ]
         if let confidence {
             dictionary["confidence"] = confidence
+        }
+        if !provenanceRefs.isEmpty {
+            dictionary["provenanceRefs"] = provenanceRefs
+        }
+        if !sourceRefs.isEmpty {
+            dictionary["sourceRefs"] = sourceRefs
+        }
+        if !externalIDs.isEmpty {
+            dictionary["externalIDs"] = externalIDs
         }
         return dictionary
     }
@@ -2536,6 +2548,9 @@ final class CiderReviewQueueService {
         var searchableText: String
         var baseConfidence: Double
         var rankHint: Int
+        var provenanceRefs: [String] = []
+        var sourceRefs: [String] = []
+        var externalIDs: [String: String] = [:]
     }
 
     private static func existingGraphCandidateTargetOptions(
@@ -2560,8 +2575,11 @@ final class CiderReviewQueueService {
                 targetKind: match.targetKind,
                 sourceQuote: candidate.sourceQuote,
                 sourceItemRef: sourceRef,
-                evidenceRefs: evidenceRefs,
-                confidence: min(0.99, match.baseConfidence)
+                evidenceRefs: uniqueReviewRefs(evidenceRefs + match.provenanceRefs),
+                confidence: min(0.99, match.baseConfidence),
+                provenanceRefs: match.provenanceRefs,
+                sourceRefs: match.sourceRefs,
+                externalIDs: match.externalIDs
             )
         }
     }
@@ -2574,7 +2592,14 @@ final class CiderReviewQueueService {
         let mention = candidate.mentionText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !mention.isEmpty else { return [] }
         let allowedOwnerTypes = graphCandidateAllowedExistingOwnerTypes(targetKind: targetKind, candidate: candidate)
+        let allowedOwnerKinds = graphCandidateAllowedExistingOwnerKinds(targetKind: targetKind, candidate: candidate)
         var matches: [ExistingGraphCandidateTargetMatch] = []
+        matches.append(contentsOf: try indexedOwnerTargetMatches(
+            in: database,
+            candidate: candidate,
+            allowedOwnerKinds: allowedOwnerKinds,
+            allowedOwnerTypes: allowedOwnerTypes
+        ))
         matches.append(contentsOf: try contactTargetMatches(in: database))
         matches.append(contentsOf: try projectTargetMatches(in: database))
         matches.append(contentsOf: try projectedOwnerTargetMatches(in: database, allowedOwnerTypes: allowedOwnerTypes))
@@ -2603,6 +2628,32 @@ final class CiderReviewQueueService {
             if lhs.baseConfidence != rhs.baseConfidence { return lhs.baseConfidence > rhs.baseConfidence }
             if lhs.rankHint != rhs.rankHint { return lhs.rankHint < rhs.rankHint }
             return lhs.label.localizedCaseInsensitiveCompare(rhs.label) == .orderedAscending
+        }
+    }
+
+    private static func indexedOwnerTargetMatches(
+        in database: CiderDatabase,
+        candidate: SecondBrainGraphCandidateContract.Candidate,
+        allowedOwnerKinds: Set<String>,
+        allowedOwnerTypes: Set<String>
+    ) throws -> [ExistingGraphCandidateTargetMatch] {
+        try SecondBrainOwnerLabelIndexService(database: database).search(
+            query: candidate.mentionText,
+            ownerKinds: allowedOwnerKinds,
+            ownerTypes: allowedOwnerTypes,
+            limit: 8
+        ).enumerated().map { index, record in
+            ExistingGraphCandidateTargetMatch(
+                owner: record.owner,
+                targetKind: graphCandidateTargetKind(ownerType: record.owner.ownerType, ownerKind: record.ownerKind, fallback: record.ownerKind),
+                label: record.canonicalLabel,
+                searchableText: ([record.canonicalLabel] + record.aliases + record.externalIDs.values).joined(separator: " "),
+                baseConfidence: record.confidence ?? 0.88,
+                rankHint: index,
+                provenanceRefs: record.provenanceRefs,
+                sourceRefs: record.sourceRefs,
+                externalIDs: record.externalIDs
+            )
         }
     }
 
@@ -2761,6 +2812,32 @@ final class CiderReviewQueueService {
         }
     }
 
+    private static func graphCandidateTargetKind(ownerType: String, ownerKind: String, fallback: String) -> String {
+        if ownerKind == "media" { return "media" }
+        if ownerKind == "person" { return "person" }
+        if ownerKind == "place" { return "place" }
+        if ownerKind == "project" { return "project" }
+        return graphCandidateTargetKind(ownerType: ownerType, fallback: fallback)
+    }
+
+    private static func graphCandidateAllowedExistingOwnerKinds(
+        targetKind: String,
+        candidate: SecondBrainGraphCandidateContract.Candidate
+    ) -> Set<String> {
+        let rawKinds = Set(candidate.objectTypeGuesses.map(\.rawValue) + [targetKind])
+        var kinds: Set<String> = ["media", "place", "project", "person", "graph_object", "object"]
+        if rawKinds.contains("movie") || rawKinds.contains("book") || rawKinds.contains("show") || rawKinds.contains("media") {
+            kinds = ["media"]
+        } else if rawKinds.contains("place") || rawKinds.contains("restaurant") {
+            kinds = ["place"]
+        } else if rawKinds.contains("person") || rawKinds.contains("contact") {
+            kinds = ["person"]
+        } else if rawKinds.contains("project") {
+            kinds = ["project"]
+        }
+        return kinds
+    }
+
     private static func graphCandidateTargetScore(
         mention: String,
         mentionTokens: Set<String>,
@@ -2805,6 +2882,11 @@ final class CiderReviewQueueService {
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+
+    private static func uniqueReviewRefs(_ refs: [String]) -> [String] {
+        var seen = Set<String>()
+        return refs.filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
     static func graphCandidateTargetOption(

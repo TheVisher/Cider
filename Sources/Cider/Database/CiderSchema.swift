@@ -244,6 +244,27 @@ enum CiderSchema {
         );
         """
 
+    static let createOwnerLabelIndex = """
+        CREATE TABLE IF NOT EXISTS owner_label_index (
+            owner_type              TEXT NOT NULL,
+            owner_id                TEXT NOT NULL,
+            owner_kind              TEXT NOT NULL,
+            canonical_label         TEXT NOT NULL,
+            normalized_label        TEXT NOT NULL,
+            aliases_json            TEXT NOT NULL DEFAULT '[]',
+            normalized_aliases_json TEXT NOT NULL DEFAULT '[]',
+            external_ids_json       TEXT NOT NULL DEFAULT '{}',
+            provenance_refs_json    TEXT NOT NULL DEFAULT '[]',
+            source_refs_json        TEXT NOT NULL DEFAULT '[]',
+            label_source            TEXT NOT NULL DEFAULT '',
+            confidence              REAL,
+            is_deleted              INTEGER NOT NULL DEFAULT 0,
+            created_at              REAL NOT NULL,
+            updated_at              REAL NOT NULL,
+            PRIMARY KEY (owner_type, owner_id)
+        );
+        """
+
     static let createCaptureEvents = """
         CREATE TABLE IF NOT EXISTS capture_events (
             id               TEXT PRIMARY KEY,
@@ -706,6 +727,8 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_owner_relations_target ON owner_relations(target_owner_type, target_owner_id, relation_type, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_owner_relations_type ON owner_relations(relation_type, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_owner_label_index_lookup ON owner_label_index(owner_kind, normalized_label, updated_at) WHERE is_deleted = 0;",
+        "CREATE INDEX IF NOT EXISTS idx_owner_label_index_owner ON owner_label_index(owner_type, owner_id) WHERE is_deleted = 0;",
         "CREATE INDEX IF NOT EXISTS idx_capture_events_source ON capture_events(source_kind, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_capture_events_channel ON capture_events(channel, channel_id, message_id);",
         "CREATE INDEX IF NOT EXISTS idx_capture_attachments_event ON capture_attachments(capture_event_id, attachment_index);",
@@ -782,6 +805,7 @@ enum CiderSchema {
         createItemLinks,
         createOwnerRelations,
         createProjects,
+        createOwnerLabelIndex,
         createCaptureEvents,
         createCaptureAttachments,
         createEnrichmentOutputs,

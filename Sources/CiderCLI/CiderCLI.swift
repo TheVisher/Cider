@@ -6023,6 +6023,9 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "owner-label-index":
+            handleOwnerLabelIndexCommand(args: args)
+
         case "entity-resolution", "entity-resolution-candidate", "entity-resolution-candidates":
             handleEntityResolutionCommand(args: args)
 
@@ -21925,6 +21928,54 @@ struct CiderCLI {
                 outputs = Array(outputs.filter { $0.owner == owner }.prefix(limit))
             }
             printGraphCandidateList(outputs, owner: owner, includeReviewed: includeReviewed, limit: limit)
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func handleOwnerLabelIndexCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first?.lowercased() ?? "status"
+        let service = SecondBrainOwnerLabelIndexService(database: .shared)
+        do {
+            switch action {
+            case "rebuild":
+                let result = try service.rebuild()
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.owner-label-index.rebuild",
+                    "readOnly": false,
+                    "changed": true,
+                    "indexedCount": result.indexedCount,
+                    "deletedCount": result.deletedCount,
+                    "truthBoundary": "read_model_only_not_graph_truth",
+                    "safeNextCommands": [
+                        "cider-cli review list --kind graph_candidate --limit 5 --json",
+                        "cider-cli item graph-candidates --json",
+                    ],
+                ]
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Rebuilt owner label index: \(result.indexedCount) owners indexed.")
+                }
+            default:
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.owner-label-index",
+                    "readOnly": true,
+                    "changed": false,
+                    "safeNextCommands": [
+                        "cider-cli item owner-label-index rebuild --json",
+                    ],
+                ]
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Owner label index commands:")
+                    print("  cider-cli item owner-label-index rebuild --json")
+                }
+            }
         } catch {
             printCLIError(error.localizedDescription)
         }
