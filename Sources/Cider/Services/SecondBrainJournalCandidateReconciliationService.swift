@@ -273,12 +273,21 @@ final class SecondBrainJournalCandidateReconciliationService {
             metadata["accepted_as_truth"] = "false"
             metadata["preview_only"] = "true"
             metadata["replacement_preview"] = "true"
-            if let proximityMatch = replacementMatches.first(where: { $0.basis == "source_quote_proximity" }) {
+            if let proximityMatch = replacementMatches.first(where: { $0.basis == "source_span_proximity" })
+                ?? replacementMatches.first(where: { $0.basis == "source_quote_proximity" }) {
                 metadata["replacement_pairing_basis"] = proximityMatch.basis
                 metadata["replacement_pairing_owner_ref"] = owner.canonicalRef
                 metadata["replacement_pairing_stale_source_quote"] = proximityMatch.staleSourceQuote
                 metadata["replacement_pairing_current_source_quote"] = proximityMatch.currentSourceQuote
-                metadata["replacement_pairing_source_quote_distance"] = "\(proximityMatch.sourceQuoteDistance)"
+                if proximityMatch.basis == "source_span_proximity" {
+                    metadata["replacement_pairing_stale_source_span_start"] = "\(proximityMatch.staleSourceSpanStart ?? 0)"
+                    metadata["replacement_pairing_stale_source_span_end"] = "\(proximityMatch.staleSourceSpanEnd ?? 0)"
+                    metadata["replacement_pairing_current_source_span_start"] = "\(proximityMatch.currentSourceSpanStart ?? 0)"
+                    metadata["replacement_pairing_current_source_span_end"] = "\(proximityMatch.currentSourceSpanEnd ?? 0)"
+                    metadata["replacement_pairing_source_span_line_distance"] = "\(proximityMatch.sourceQuoteDistance)"
+                } else {
+                    metadata["replacement_pairing_source_quote_distance"] = "\(proximityMatch.sourceQuoteDistance)"
+                }
             }
 
             previews.append(
@@ -306,6 +315,10 @@ final class SecondBrainJournalCandidateReconciliationService {
         var staleSourceQuote: String
         var currentSourceQuote: String
         var sourceQuoteDistance: Int
+        var staleSourceSpanStart: Int? = nil
+        var staleSourceSpanEnd: Int? = nil
+        var currentSourceSpanStart: Int? = nil
+        var currentSourceSpanEnd: Int? = nil
     }
 
     private func replacementPreviewMatch(
@@ -325,6 +338,15 @@ final class SecondBrainJournalCandidateReconciliationService {
             )
         }
         guard !diagnosed.contains(where: { isReplacementPreview(output, for: $0) }) else { return nil }
+        if let proximity = sourceSpanProximityBoundedReplacement(
+            output,
+            for: candidate,
+            rawContent: rawContent,
+            current: current,
+            diagnosed: diagnosed
+        ) {
+            return proximity
+        }
         if let proximity = sourceQuoteProximityBoundedReplacement(
             output,
             for: candidate,
@@ -378,6 +400,88 @@ final class SecondBrainJournalCandidateReconciliationService {
             }
         }
         return false
+    }
+
+    private struct SourceSpanEvidence {
+        var start: Int
+        var end: Int
+        var lineIndex: Int
+        var quote: String
+    }
+
+    private func sourceSpanProximityBoundedReplacement(
+        _ output: SecondBrainEnrichmentOutput,
+        for candidate: SecondBrainJournalCandidateReconciliationCandidate,
+        rawContent: String,
+        current: [SecondBrainEnrichmentOutput],
+        diagnosed: [SecondBrainJournalCandidateReconciliationCandidate]
+    ) -> ReplacementPreviewMatch? {
+        guard candidate.reasonCodes.contains("not_emitted_by_current_extractor"),
+              candidate.reasonCodes.contains(where: isNoiseReason) else { return nil }
+        guard normalized(output.metadata["source_kind"] ?? "") == "journal",
+              normalized(candidate.metadata["source_kind"] ?? "") == "journal" else { return nil }
+        guard !hasSharedMetadataReplacementKey(output, candidate: candidate) else { return nil }
+        guard let candidateSpan = explicitSourceSpan(
+            start: candidate.metadata["source_span_start"],
+            end: candidate.metadata["source_span_end"],
+            quote: sourceQuote(for: candidate),
+            rawContent: rawContent
+        ),
+              let outputSpan = explicitSourceSpan(
+                start: output.metadata["source_span_start"],
+                end: output.metadata["source_span_end"],
+                quote: sourceQuote(for: output),
+                rawContent: rawContent
+              ) else { return nil }
+
+        let currentDistances = current.compactMap { currentOutput -> (id: String, distance: Int)? in
+            guard normalized(currentOutput.metadata["source_kind"] ?? "") == "journal",
+                  !hasSharedMetadataReplacementKey(currentOutput, candidate: candidate),
+                  let span = explicitSourceSpan(
+                    start: currentOutput.metadata["source_span_start"],
+                    end: currentOutput.metadata["source_span_end"],
+                    quote: sourceQuote(for: currentOutput),
+                    rawContent: rawContent
+                  ) else {
+                return nil
+            }
+            return (currentOutput.id, abs(span.lineIndex - candidateSpan.lineIndex))
+        }
+        guard let nearestCurrentDistance = currentDistances.map(\.distance).min(),
+              nearestCurrentDistance > 0,
+              nearestCurrentDistance <= 1,
+              currentDistances.filter({ $0.distance == nearestCurrentDistance }).count == 1,
+              currentDistances.first(where: { $0.id == output.id })?.distance == nearestCurrentDistance else {
+            return nil
+        }
+
+        let diagnosedDistances = diagnosed.compactMap { diagnosedCandidate -> (id: String, distance: Int)? in
+            guard diagnosedCandidate.candidateID != candidate.candidateID,
+                  normalized(diagnosedCandidate.metadata["source_kind"] ?? "") == "journal",
+                  let span = explicitSourceSpan(
+                    start: diagnosedCandidate.metadata["source_span_start"],
+                    end: diagnosedCandidate.metadata["source_span_end"],
+                    quote: sourceQuote(for: diagnosedCandidate),
+                    rawContent: rawContent
+                  ) else {
+                return nil
+            }
+            return (diagnosedCandidate.candidateID, abs(span.lineIndex - outputSpan.lineIndex))
+        }
+        let targetDistance = abs(outputSpan.lineIndex - candidateSpan.lineIndex)
+        guard diagnosedDistances.filter({ $0.distance == targetDistance }).isEmpty else { return nil }
+
+        return ReplacementPreviewMatch(
+            candidate: candidate,
+            basis: "source_span_proximity",
+            staleSourceQuote: candidateSpan.quote,
+            currentSourceQuote: outputSpan.quote,
+            sourceQuoteDistance: targetDistance,
+            staleSourceSpanStart: candidateSpan.start,
+            staleSourceSpanEnd: candidateSpan.end,
+            currentSourceSpanStart: outputSpan.start,
+            currentSourceSpanEnd: outputSpan.end
+        )
     }
 
     private func sourceQuoteProximityBoundedReplacement(
@@ -443,6 +547,31 @@ final class SecondBrainJournalCandidateReconciliationService {
             let candidateValue = normalized(candidate.metadata[key] ?? "")
             return !outputValue.isEmpty && outputValue == candidateValue
         }
+    }
+
+    private func explicitSourceSpan(
+        start rawStart: String?,
+        end rawEnd: String?,
+        quote: String,
+        rawContent: String
+    ) -> SourceSpanEvidence? {
+        guard let start = rawStart.flatMap(Int.init),
+              let end = rawEnd.flatMap(Int.init),
+              start >= 0,
+              end > start,
+              end <= rawContent.count else {
+            return nil
+        }
+        let lower = rawContent.index(rawContent.startIndex, offsetBy: start)
+        let upper = rawContent.index(rawContent.startIndex, offsetBy: end)
+        let spanQuote = String(rawContent[lower..<upper])
+        guard normalized(spanQuote) == normalized(quote) else { return nil }
+        return SourceSpanEvidence(
+            start: start,
+            end: end,
+            lineIndex: rawContent[..<lower].filter { $0 == "\n" }.count,
+            quote: spanQuote
+        )
     }
 
     private func sourceQuote(for output: SecondBrainEnrichmentOutput) -> String {

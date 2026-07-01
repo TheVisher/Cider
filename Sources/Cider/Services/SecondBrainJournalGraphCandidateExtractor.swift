@@ -47,6 +47,13 @@ struct SecondBrainJournalGraphCandidateExtractor {
             var output = output
             output.metadata["journal_date"] = date.flatMap(trimmedNonEmpty)
             output.metadata["journal_time"] = time.flatMap(trimmedNonEmpty)
+            if output.metadata["source_kind"] == "journal",
+               output.metadata["source_span_start"] == nil,
+               output.metadata["source_span_end"] == nil {
+                let span = sourceSpan(for: output.evidence, in: rawContent)
+                output.metadata["source_span_start"] = String(span.start)
+                output.metadata["source_span_end"] = String(span.end)
+            }
             return output
         }
         return SecondBrainJournalGraphCandidateExtractionResult(outputs: enriched)

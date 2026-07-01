@@ -414,6 +414,95 @@ struct SecondBrainJournalCandidateReconciliationTests {
         #expect(stored?.reviewState == "suggested")
     }
 
+    @Test("journal extraction persists source spans for graph and memory candidates")
+    func journalExtractionPersistsSourceSpansForGraphAndMemoryCandidates() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let rawContent = """
+        - Jami loved the pineapple coconut drink.
+        - Money seemed more useful than guessing a gift.
+        """
+
+        let outputs = SecondBrainJournalGraphCandidateExtractor()
+            .extract(sourceOwner: owner, rawContent: rawContent)
+            .outputs
+        let graph = try #require(outputs.first { $0.kind == SecondBrainGraphCandidateContract.outputKind && $0.value == "pineapple coconut drink" })
+        let memory = try #require(outputs.first { $0.kind == "memory_candidate" && $0.metadata["memory_key"] == "money-more-useful-than-guessing-gift" })
+
+        for output in [graph, memory] {
+            let start = try #require(output.metadata["source_span_start"].flatMap(Int.init))
+            let end = try #require(output.metadata["source_span_end"].flatMap(Int.init))
+            #expect(start >= 0)
+            #expect(end > start)
+            #expect(end <= rawContent.count)
+            let lower = rawContent.index(rawContent.startIndex, offsetBy: start)
+            let upper = rawContent.index(rawContent.startIndex, offsetBy: end)
+            #expect(String(rawContent[lower..<upper]) == output.metadata["source_quote"])
+            #expect(output.metadata["source_owner_ref"] == owner.canonicalRef)
+            #expect(output.metadata["source_kind"] == "journal")
+        }
+    }
+
+    @Test("dry run prefers explicit source spans for no-key replacement pairing")
+    func dryRunPrefersExplicitSourceSpansForNoKeyReplacementPairing() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let rawContent = """
+        - She was buying random things at the mall.
+        - Money seemed more useful than guessing a gift.
+        """
+        let staleQuote = "- She was buying random things at the mall."
+        let staleStart = try #require(rawContent.range(of: staleQuote)).lowerBound
+        let staleSpanStart = rawContent.distance(from: rawContent.startIndex, to: staleStart)
+        var stale = SecondBrainEnrichmentOutput(
+            owner: owner,
+            chunkID: nil,
+            kind: "memory_candidate",
+            value: "She was buying random things at the mall.",
+            normalizedValue: "she was buying random things at the mall.",
+            label: "Memory candidate: stale nearby gift context",
+            evidence: staleQuote,
+            source: "memory_candidate.journal_capture.v0",
+            confidence: 0.32,
+            reviewState: "suggested",
+            metadata: [
+                "candidate_kind": "stale_nearby_gift_context",
+                "source_kind": "journal",
+                "source_owner_ref": owner.canonicalRef,
+                "source_quote": staleQuote,
+                "source_span_start": "\(staleSpanStart)",
+                "source_span_end": "\(staleSpanStart + staleQuote.count)",
+                "truth_boundary": "reviewable_candidate_not_truth",
+            ]
+        )
+        stale.metadata["candidate_ref"] = "memory_candidate:\(stale.id)"
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(stale)
+
+        let report = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .diagnose(owner: owner, rawContent: rawContent)
+
+        #expect(report.readOnly)
+        #expect(!report.changed)
+        let preview = try #require(report.currentExtractionReplacementPreviews.first)
+        #expect(report.currentExtractionReplacementPreviewCount == 1)
+        #expect(preview.replacementForCandidateIDs == [stale.id])
+        #expect(preview.value == "Money seemed more useful than guessing a gift.")
+        #expect(preview.metadata["replacement_pairing_basis"] == "source_span_proximity")
+        #expect(preview.metadata["replacement_pairing_owner_ref"] == owner.canonicalRef)
+        #expect(preview.metadata["replacement_pairing_stale_source_quote"] == staleQuote)
+        #expect(preview.metadata["replacement_pairing_current_source_quote"] == "- Money seemed more useful than guessing a gift")
+        #expect(preview.metadata["replacement_pairing_stale_source_span_start"] == "\(staleSpanStart)")
+        #expect(preview.metadata["replacement_pairing_stale_source_span_end"] == "\(staleSpanStart + staleQuote.count)")
+        #expect(preview.metadata["replacement_pairing_current_source_span_start"] != nil)
+        #expect(preview.metadata["replacement_pairing_current_source_span_end"] != nil)
+        #expect(preview.metadata["replacement_pairing_source_span_line_distance"] == "1")
+        #expect(preview.metadata["replacement_pairing_source_quote_distance"] == nil)
+        #expect(preview.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(!preview.acceptedAsTruth)
+    }
+
     @Test("dry run does not add proximity targets when an output already has an exact replacement")
     func dryRunDoesNotAddProximityTargetsWhenOutputAlreadyHasExactReplacement() throws {
         let (db, url) = try makeTestDB()
