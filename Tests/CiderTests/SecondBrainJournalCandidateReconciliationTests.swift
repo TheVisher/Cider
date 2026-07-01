@@ -141,4 +141,131 @@ struct SecondBrainJournalCandidateReconciliationTests {
         let events = try SecondBrainReviewLifecycleService(database: db).events(candidateRef: "graph_candidate:\(noisy.id)")
         #expect(events.contains { $0.eventKind == "superseded" && $0.lifecycleState == "superseded" })
     }
+
+    @Test("dry run diagnoses community outage spans without superseding real work life facts")
+    func dryRunDiagnosesCommunityOutageSpansWithoutSupersedingRealWorkLifeFacts() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let rawContent = """
+        - Visher saw on r/Boeing that the CMS/outage left about 40 systems down during the shift.
+        - Visher took PTO for Ryland's birthday and worked overtime around it.
+        """
+        let outage = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "r/Boeing that the CMS/outage left about 40 systems down during the shift",
+            sourceQuote: "- Visher saw on r/Boeing that the CMS/outage left about 40 systems down during the shift.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.topic],
+            relationGuesses: [.mentions],
+            safeActions: [.inspectSource, .correct, .reject, .delegateEnrichment],
+            confidence: 0.34,
+            confidenceReason: "Historical extractor over-captured a community support/outage report.",
+            source: "journal_graph_candidate.v0"
+        )
+        let work = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "PTO for Ryland's birthday and worked overtime",
+            sourceQuote: "- Visher took PTO for Ryland's birthday and worked overtime around it.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.event],
+            relationGuesses: [.mentions],
+            safeActions: [.inspectSource, .correct, .reject, .delegateEnrichment],
+            confidence: 0.72,
+            confidenceReason: "Journal sentence records concrete PTO/overtime life context.",
+            source: "journal_graph_candidate.v1"
+        )
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(outage)
+        try outputService.record(work)
+
+        let report = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .diagnose(owner: owner, rawContent: rawContent)
+
+        #expect(report.readOnly)
+        #expect(!report.changed)
+        #expect(report.candidates.map(\.candidateID) == [outage.id])
+        let candidate = try #require(report.candidates.first)
+        #expect(candidate.reasonCodes.contains("not_emitted_by_current_extractor"))
+        #expect(candidate.reasonCodes.contains("community_support_outage_span"))
+        #expect(candidate.sourceRefs.contains(owner.canonicalRef))
+
+        let stored = try outputService.outputs(for: owner)
+        #expect(stored.first { $0.id == outage.id }?.reviewState == "suggested")
+        #expect(stored.first { $0.id == work.id }?.reviewState == "suggested")
+    }
+
+    @Test("dry run diagnoses bare media progress spans without superseding consumed media or preferences")
+    func dryRunDiagnosesBareMediaProgressSpansWithoutSupersedingConsumedMediaOrPreferences() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let rawContent = """
+        - Visher finished watching season 2 of the live-action Avatar: The Last Airbender on Netflix, or at least watched through seven episodes.
+        - Visher did not really want to watch The Way Way Back because it seemed like a chick-flick type movie, but watched it with her and thought it was actually pretty decent.
+        """
+        let bareProgress = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "through seven episodes",
+            sourceQuote: "- Visher finished watching season 2 of the live-action Avatar: The Last Airbender on Netflix, or at least watched through seven episodes.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.media],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .correct, .reject, .delegateEnrichment],
+            confidence: 0.36,
+            confidenceReason: "Historical extractor emitted a fragment without the canonical media title.",
+            source: "journal_graph_candidate.v0"
+        )
+        let avatar = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Avatar: The Last Airbender",
+            sourceQuote: "- Visher finished watching season 2 of the live-action Avatar: The Last Airbender on Netflix, or at least watched through seven episodes.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.show, .media],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.78,
+            confidenceReason: "Journal sentence names the show and watch progress.",
+            source: "journal_graph_candidate.v1"
+        )
+        let preference = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "The Way Way Back",
+            sourceQuote: "- Visher did not really want to watch The Way Way Back because it seemed like a chick-flick type movie, but watched it with her and thought it was actually pretty decent.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [.watched, .likes],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject],
+            confidence: 0.8,
+            confidenceReason: "Journal sentence names the movie and a positive reaction.",
+            source: "journal_graph_candidate.v1"
+        )
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(bareProgress)
+        try outputService.record(avatar)
+        try outputService.record(preference)
+
+        let report = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .diagnose(owner: owner, rawContent: rawContent)
+
+        #expect(report.readOnly)
+        #expect(!report.changed)
+        #expect(report.candidates.map(\.candidateID) == [bareProgress.id])
+        let candidate = try #require(report.candidates.first)
+        #expect(candidate.reasonCodes.contains("not_emitted_by_current_extractor"))
+        #expect(candidate.reasonCodes.contains("bare_media_progress_span"))
+        #expect(candidate.reasonCodes.contains("episode_count_span"))
+
+        let stored = try outputService.outputs(for: owner)
+        #expect(stored.first { $0.id == bareProgress.id }?.reviewState == "suggested")
+        #expect(stored.first { $0.id == avatar.id }?.reviewState == "suggested")
+        #expect(stored.first { $0.id == preference.id }?.reviewState == "suggested")
+    }
 }

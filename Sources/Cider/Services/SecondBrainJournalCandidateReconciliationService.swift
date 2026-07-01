@@ -188,6 +188,8 @@ final class SecondBrainJournalCandidateReconciliationService {
         let text = "\(output.value) \(output.evidence)"
         if isNoisyClauseSpan(text) { reasons.append("noisy_clause_span") }
         if isEpisodeCountSpan(text) { reasons.append("episode_count_span") }
+        if isCommunitySupportOutageSpan(text) { reasons.append("community_support_outage_span") }
+        if isBareMediaProgressSpan(output) { reasons.append("bare_media_progress_span") }
         if output.confidence.map({ $0 < 0.4 }) == true { reasons.append("low_confidence_stored_candidate") }
         return reasons
     }
@@ -238,7 +240,12 @@ final class SecondBrainJournalCandidateReconciliationService {
     }
 
     private func isNoiseReason(_ reason: String) -> Bool {
-        ["noisy_clause_span", "episode_count_span", "low_confidence_stored_candidate"].contains(reason)
+        [
+            "noisy_clause_span",
+            "community_support_outage_span",
+            "bare_media_progress_span",
+            "low_confidence_stored_candidate",
+        ].contains(reason)
     }
 
     private func isNoisyClauseSpan(_ text: String) -> Bool {
@@ -250,7 +257,46 @@ final class SecondBrainJournalCandidateReconciliationService {
     }
 
     private func isEpisodeCountSpan(_ text: String) -> Bool {
-        text.range(of: #"(?i)\b(?:through|at least)\s+(?:\w+\s+)?\d+\s+episodes?\b"#, options: .regularExpression) != nil
+        text.range(
+            of: #"(?i)\b(?:through|at least)\s+(?:\w+\s+)?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+episodes?\b"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private func isCommunitySupportOutageSpan(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let hasCommunitySource = lower.range(of: #"\br/[a-z0-9_]+\b"#, options: .regularExpression) != nil
+            || lower.contains("forum")
+            || lower.contains("community")
+            || lower.contains("support")
+        let hasOutageSignal = lower.contains("outage")
+            || lower.contains("systems down")
+            || lower.contains("system down")
+            || lower.contains("cms/")
+            || lower.contains("/cms")
+        return hasCommunitySource && hasOutageSignal
+    }
+
+    private func isBareMediaProgressSpan(_ output: SecondBrainEnrichmentOutput) -> Bool {
+        let text = "\(output.value) \(output.evidence)"
+        guard isEpisodeCountSpan(text) else { return false }
+        let value = normalized(output.value)
+        let objectTypes = DatabaseHelpers.decodeStringArray(
+            output.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses]
+        )
+        let relationGuesses = DatabaseHelpers.decodeStringArray(
+            output.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses]
+        )
+        let looksMediaRelated = objectTypes.contains("media")
+            || objectTypes.contains("movie")
+            || objectTypes.contains("show")
+            || objectTypes.contains("video")
+            || relationGuesses.contains("watched")
+            || relationGuesses.contains("read")
+            || relationGuesses.contains("listened_to")
+        guard looksMediaRelated else { return false }
+        let bareProgressPattern = #"(?i)^(?:watched\s+)?(?:through|at least)\s+(?:\w+\s+)?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+episodes?$"#
+        return value.range(of: bareProgressPattern, options: .regularExpression) != nil
     }
 
     private func normalized(_ value: String) -> String {
