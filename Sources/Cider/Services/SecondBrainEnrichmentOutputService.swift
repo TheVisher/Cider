@@ -151,12 +151,13 @@ final class SecondBrainEnrichmentOutputService {
         let createdAt = DatabaseHelpers.encode(output.createdAt)
         let updatedAt = DatabaseHelpers.encode(output.updatedAt > output.createdAt ? output.updatedAt : now)
         let metadata = DatabaseHelpers.encodeJSON(output.metadata) ?? "{}"
+        let occurrenceKey = Self.occurrenceKey(for: output)
         let stmt = try database.prepare("""
             INSERT INTO enrichment_outputs (
                 id, owner_type, owner_id, chunk_id, kind, value, normalized_value,
-                label, evidence, source, confidence, review_state, metadata, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(owner_type, owner_id, kind, normalized_value, source)
+                label, evidence, source, occurrence_key, confidence, review_state, metadata, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(owner_type, owner_id, kind, normalized_value, source, occurrence_key)
             DO UPDATE SET
                 chunk_id = excluded.chunk_id,
                 value = excluded.value,
@@ -177,11 +178,12 @@ final class SecondBrainEnrichmentOutputService {
             .bind(output.label, at: 8)
             .bind(output.evidence, at: 9)
             .bind(output.source, at: 10)
-            .bind(output.confidence, at: 11)
-            .bind(output.reviewState, at: 12)
-            .bind(metadata, at: 13)
-            .bind(createdAt, at: 14)
-            .bind(updatedAt, at: 15)
+            .bind(occurrenceKey, at: 11)
+            .bind(output.confidence, at: 12)
+            .bind(output.reviewState, at: 13)
+            .bind(metadata, at: 14)
+            .bind(createdAt, at: 15)
+            .bind(updatedAt, at: 16)
         try stmt.step()
         if let evidenceRecord {
             let evidenceService = SecondBrainSourceEvidenceService(database: database)
@@ -222,6 +224,16 @@ final class SecondBrainEnrichmentOutputService {
             chunks.append(ChunkSource(id: stmt.string(at: 0), title: stmt.string(at: 1), body: stmt.string(at: 2), source: stmt.string(at: 3)))
         }
         return chunks
+    }
+
+    private static func occurrenceKey(for output: SecondBrainEnrichmentOutput) -> String {
+        guard let start = output.metadata["source_span_start"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let end = output.metadata["source_span_end"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !start.isEmpty,
+              !end.isEmpty else {
+            return ""
+        }
+        return "\(start)..\(end)"
     }
 
     private func extractOutputs(owner: SecondBrainOwnerRef, chunk: ChunkSource) -> [SecondBrainEnrichmentOutput] {

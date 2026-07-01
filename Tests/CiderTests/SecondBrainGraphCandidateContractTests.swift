@@ -181,6 +181,45 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(result.outputs.map(\.value) == ["pineapple coconut drink", "tacos"])
     }
 
+    @Test("journal extractor preserves occurrence-exact spans for duplicate identical lines")
+    func journalExtractorPreservesOccurrenceExactSpansForDuplicateIdenticalLines() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let duplicatedLine = "- Jami loved that pineapple coconut drink"
+        let rawContent = """
+        Breakfast notes.
+        \(duplicatedLine)
+        Later notes.
+        \(duplicatedLine)
+        """
+
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: rawContent
+        )
+
+        let candidates = result.outputs.filter {
+            $0.kind == "graph_candidate" && $0.value == "pineapple coconut drink"
+        }
+        #expect(candidates.count == 2)
+
+        var expectedStarts: [Int] = []
+        var searchStart = rawContent.startIndex
+        while let range = rawContent.range(of: duplicatedLine, range: searchStart..<rawContent.endIndex) {
+            expectedStarts.append(rawContent.distance(from: rawContent.startIndex, to: range.lowerBound))
+            searchStart = range.upperBound
+        }
+        let actualStarts = candidates.compactMap { $0.metadata["source_span_start"].flatMap(Int.init) }
+        #expect(actualStarts == expectedStarts)
+
+        for candidate in candidates {
+            let start = try #require(candidate.metadata["source_span_start"].flatMap(Int.init))
+            let end = try #require(candidate.metadata["source_span_end"].flatMap(Int.init))
+            #expect(String(rawContent[rawContent.index(rawContent.startIndex, offsetBy: start)..<rawContent.index(rawContent.startIndex, offsetBy: end)]) == duplicatedLine)
+            #expect(candidate.metadata[SecondBrainGraphCandidateContract.MetadataKey.sourceQuote] == candidate.evidence)
+            #expect(candidate.metadata["truth_boundary"] == "reviewable_candidate_not_truth")
+        }
+    }
+
     @Test("journal extractor suppresses noisy dogfood false positives")
     func journalExtractorSuppressesNoisyDogfoodFalsePositives() throws {
         let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)

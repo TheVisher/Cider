@@ -35,12 +35,16 @@ struct SecondBrainJournalGraphCandidateExtractor {
             time: time
         ))
         for sentence in sentences {
-            outputs.append(contentsOf: watchedCandidates(sourceOwner: sourceOwner, sentence: sentence))
-            outputs.append(contentsOf: preferenceCandidates(sourceOwner: sourceOwner, sentence: sentence))
-            outputs.append(contentsOf: visitedCandidates(sourceOwner: sourceOwner, sentence: sentence))
-            outputs.append(contentsOf: consumptionCandidates(sourceOwner: sourceOwner, sentence: sentence))
-            outputs.append(contentsOf: wantsCandidates(sourceOwner: sourceOwner, sentence: sentence))
-            outputs.append(contentsOf: memoryCandidates(sourceOwner: sourceOwner, sentence: sentence))
+            var sentenceOutputs: [SecondBrainEnrichmentOutput] = []
+            sentenceOutputs.append(contentsOf: watchedCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
+            sentenceOutputs.append(contentsOf: preferenceCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
+            sentenceOutputs.append(contentsOf: visitedCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
+            sentenceOutputs.append(contentsOf: consumptionCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
+            sentenceOutputs.append(contentsOf: wantsCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
+            sentenceOutputs.append(contentsOf: memoryCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
+            outputs.append(contentsOf: sentenceOutputs.map { output in
+                outputWithSourceSpan(output, start: sentence.start, end: sentence.end)
+            })
         }
 
         let enriched = unique(outputs).map { output -> SecondBrainEnrichmentOutput in
@@ -343,17 +347,18 @@ struct SecondBrainJournalGraphCandidateExtractor {
     ) -> [SecondBrainEnrichmentOutput] {
         let context = payrollRateContext(in: rawContent)
         return candidateSentences(from: rawContent).flatMap { sentence in
-            payrollRateMatches(in: sentence).compactMap { match in
-                guard let kind = payrollRateKind(for: sentence, rateRange: match.range) else { return nil }
+            payrollRateMatches(in: sentence.text).compactMap { match in
+                guard let kind = payrollRateKind(for: sentence.text, rateRange: match.range) else { return nil }
                 return makePayrollRateMemoryCandidate(
                     sourceOwner: sourceOwner,
-                    sentence: sentence,
+                    sentence: sentence.text,
                     rawContent: rawContent,
                     date: date,
                     time: time,
                     context: context,
                     rate: match.rate,
-                    kind: kind
+                    kind: kind,
+                    span: (sentence.start, sentence.end)
                 )
             }
         }
@@ -384,11 +389,12 @@ struct SecondBrainJournalGraphCandidateExtractor {
         time: String?,
         context: PayrollRateContext,
         rate: String,
-        kind: PayrollRateKind
+        kind: PayrollRateKind,
+        span explicitSpan: (start: Int, end: Int)? = nil
     ) -> SecondBrainEnrichmentOutput? {
         let normalizedDate = date.flatMap(trimmedNonEmpty)
         let normalizedTime = time.flatMap(trimmedNonEmpty)
-        let span = sourceSpan(for: sentence, in: rawContent)
+        let span = explicitSpan ?? sourceSpan(for: sentence, in: rawContent)
         let value = "Visher's \(kind.displayName) rate is $\(rate)/hr."
         var reviewTerms = kind.queryTerms + ["$\(rate)", "pay rate", "wage rate", "hourly wage", "gross pay"]
         if kind.key == "straight_time" { reviewTerms.append("what is my hourly rate") }
@@ -591,10 +597,11 @@ struct SecondBrainJournalGraphCandidateExtractor {
         candidateSentences(from: rawContent).compactMap { sentence in
             makeProseSpendingMemoryCandidate(
                 sourceOwner: sourceOwner,
-                sentence: sentence,
+                sentence: sentence.text,
                 rawContent: rawContent,
                 date: date,
-                time: time
+                time: time,
+                span: (sentence.start, sentence.end)
             )
         }
     }
@@ -604,7 +611,8 @@ struct SecondBrainJournalGraphCandidateExtractor {
         sentence: String,
         rawContent: String,
         date: String?,
-        time: String?
+        time: String?,
+        span explicitSpan: (start: Int, end: Int)? = nil
     ) -> SecondBrainEnrichmentOutput? {
         let lower = sentence.lowercased()
         guard let amount = firstCapture(pattern: #"\$\s*([0-9]+(?:\.[0-9]{1,2})?)"#, in: sentence) else { return nil }
@@ -628,7 +636,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
             value = "Visher spent \(qualifierPhrase)$\(amount) on \(category.displayName)\(datePhrase)."
         }
 
-        let span = sourceSpan(for: sentence, in: rawContent)
+        let span = explicitSpan ?? sourceSpan(for: sentence, in: rawContent)
         let categorySlug = category.key.replacingOccurrences(of: "_", with: "-")
         var output = SecondBrainEnrichmentOutput(
             owner: sourceOwner,
@@ -835,6 +843,18 @@ struct SecondBrainJournalGraphCandidateExtractor {
             return (start, end)
         }
         return (0, sentence.count)
+    }
+
+    private func outputWithSourceSpan(_ output: SecondBrainEnrichmentOutput, start: Int, end: Int) -> SecondBrainEnrichmentOutput {
+        guard output.metadata["source_kind"] == "journal",
+              output.metadata["source_span_start"] == nil,
+              output.metadata["source_span_end"] == nil else {
+            return output
+        }
+        var output = output
+        output.metadata["source_span_start"] = String(start)
+        output.metadata["source_span_end"] = String(end)
+        return output
     }
 
     private func gasSpendingConfidence(quantity: String?, unitPrice: String?, fuelGrade: String?) -> Double {
@@ -1062,33 +1082,32 @@ struct SecondBrainJournalGraphCandidateExtractor {
         }
 
         for sentence in candidateSentences(from: rawContent) {
-            let span = sourceSpan(for: sentence, in: rawContent)
             outputs.append(genericHomeMealCandidate(
                 sourceOwner: sourceOwner,
-                sentence: sentence,
+                sentence: sentence.text,
                 date: normalizedDate,
                 time: normalizedTime,
                 keyDate: keyDate,
-                spanStart: span.start,
-                spanEnd: span.end
+                spanStart: sentence.start,
+                spanEnd: sentence.end
             ))
             outputs.append(familyFoodPreferenceCandidate(
                 sourceOwner: sourceOwner,
-                sentence: sentence,
+                sentence: sentence.text,
                 date: normalizedDate,
                 time: normalizedTime,
                 keyDate: keyDate,
-                spanStart: span.start,
-                spanEnd: span.end
+                spanStart: sentence.start,
+                spanEnd: sentence.end
             ))
             outputs.append(routineSignalCandidate(
                 sourceOwner: sourceOwner,
-                sentence: sentence,
+                sentence: sentence.text,
                 date: normalizedDate,
                 time: normalizedTime,
                 keyDate: keyDate,
-                spanStart: span.start,
-                spanEnd: span.end
+                spanStart: sentence.start,
+                spanEnd: sentence.end
             ))
         }
 
@@ -1609,16 +1628,25 @@ struct SecondBrainJournalGraphCandidateExtractor {
         return .likes
     }
 
-    private func splitSentences(_ text: String) -> [String] {
-        let decimalSentinel = "<cider-decimal-point>"
-        let protected = text.replacingOccurrences(
-            of: #"(\d)\.(\d)"#,
-            with: "$1\(decimalSentinel)$2",
-            options: .regularExpression
-        )
-        return protected.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
-            .map { $0.replacingOccurrences(of: decimalSentinel, with: ".") }
-            .compactMap(trimmedNonEmpty)
+    private func splitSentences(_ line: JournalTextLine) -> [JournalTextLine] {
+        var sentences: [JournalTextLine] = []
+        var fragmentStart = line.text.startIndex
+        var cursor = line.text.startIndex
+        while cursor < line.text.endIndex {
+            let character = line.text[cursor]
+            let next = line.text.index(after: cursor)
+            if ".!?".contains(character), !isDecimalPoint(at: cursor, in: line.text) {
+                if let sentence = trimmedLine(in: line, from: fragmentStart, to: cursor) {
+                    sentences.append(sentence)
+                }
+                fragmentStart = next
+            }
+            cursor = next
+        }
+        if let sentence = trimmedLine(in: line, from: fragmentStart, to: line.text.endIndex) {
+            sentences.append(sentence)
+        }
+        return sentences
     }
 
     private func candidateClauses(from sentence: String) -> [String] {
@@ -1627,24 +1655,24 @@ struct SecondBrainJournalGraphCandidateExtractor {
             .compactMap(trimmedNonEmpty)
     }
 
-    private func candidateSentences(from text: String) -> [String] {
-        var sentences: [String] = []
+    private func candidateSentences(from text: String) -> [JournalTextLine] {
+        var sentences: [JournalTextLine] = []
         var recentlySawCiderCandidateContext = false
         var suppressingCiderExampleBlock = false
 
-        for rawLine in text.components(separatedBy: .newlines) {
-            guard let line = trimmedNonEmpty(rawLine) else {
+        for rawLine in indexedLines(in: text) {
+            guard let line = trimmedLine(in: rawLine, from: rawLine.text.startIndex, to: rawLine.text.endIndex) else {
                 recentlySawCiderCandidateContext = false
                 suppressingCiderExampleBlock = false
                 continue
             }
 
-            if isCiderCandidateContextLine(line) {
+            if isCiderCandidateContextLine(line.text) {
                 recentlySawCiderCandidateContext = true
                 continue
             }
 
-            if isCandidateExampleContextLine(line),
+            if isCandidateExampleContextLine(line.text),
                recentlySawCiderCandidateContext || suppressingCiderExampleBlock {
                 recentlySawCiderCandidateContext = false
                 suppressingCiderExampleBlock = true
@@ -1653,7 +1681,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
 
             let lineSentences = splitSentences(line)
             if suppressingCiderExampleBlock {
-                if lineSentences.allSatisfy(isLikelyCandidateExampleLine) {
+                if lineSentences.allSatisfy({ isLikelyCandidateExampleLine($0.text) }) {
                     continue
                 }
                 suppressingCiderExampleBlock = false
@@ -1664,6 +1692,35 @@ struct SecondBrainJournalGraphCandidateExtractor {
         }
 
         return sentences
+    }
+
+    private func isDecimalPoint(at index: String.Index, in text: String) -> Bool {
+        guard text[index] == "." else { return false }
+        let previous = index > text.startIndex ? text[text.index(before: index)] : nil
+        let nextIndex = text.index(after: index)
+        let next = nextIndex < text.endIndex ? text[nextIndex] : nil
+        return previous?.isNumber == true && next?.isNumber == true
+    }
+
+    private func trimmedLine(in line: JournalTextLine, from rawStart: String.Index, to rawEnd: String.Index) -> JournalTextLine? {
+        var start = rawStart
+        var end = rawEnd
+        while start < end, line.text[start].isWhitespace {
+            start = line.text.index(after: start)
+        }
+        while start < end {
+            let previous = line.text.index(before: end)
+            guard line.text[previous].isWhitespace else { break }
+            end = previous
+        }
+        guard start < end else { return nil }
+        let relativeStart = line.text.distance(from: line.text.startIndex, to: start)
+        let relativeEnd = line.text.distance(from: line.text.startIndex, to: end)
+        return JournalTextLine(
+            text: String(line.text[start..<end]),
+            start: line.start + relativeStart,
+            end: line.start + relativeEnd
+        )
     }
 
     private func isCiderCandidateContextLine(_ text: String) -> Bool {
@@ -1840,7 +1897,14 @@ struct SecondBrainJournalGraphCandidateExtractor {
         var seen = Set<String>()
         var result: [SecondBrainEnrichmentOutput] = []
         for output in outputs {
-            let key = "\(output.normalizedValue)|\(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] ?? "")|\(output.evidence.lowercased())"
+            let spanKey: String
+            if let start = output.metadata["source_span_start"],
+               let end = output.metadata["source_span_end"] {
+                spanKey = "\(start)..\(end)"
+            } else {
+                spanKey = "no-span"
+            }
+            let key = "\(output.normalizedValue)|\(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] ?? "")|\(output.evidence.lowercased())|\(spanKey)"
             guard seen.insert(key).inserted else { continue }
             result.append(output)
         }

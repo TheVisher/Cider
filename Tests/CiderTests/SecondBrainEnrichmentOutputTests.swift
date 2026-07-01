@@ -125,6 +125,63 @@ struct SecondBrainEnrichmentOutputTests {
         #expect(bundle.enrichmentOutputs.contains { $0.kind == "link" && $0.value == "https://example.com/context" })
     }
 
+    @Test("record preserves duplicate journal candidates at distinct source spans")
+    func recordPreservesDuplicateJournalCandidatesAtDistinctSourceSpans() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        try insertNoteItem(owner: owner, into: db)
+        let service = SecondBrainEnrichmentOutputService(database: db)
+
+        var first = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "pineapple coconut drink",
+            sourceQuote: "- Jami loved that pineapple coconut drink",
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            relationGuesses: [.likesDrink],
+            actionGuesses: ["liked"],
+            safeActions: [.inspectSource, .correct, .reject],
+            confidence: 0.72,
+            source: "graph_candidate.journal_capture"
+        )
+        first.metadata["source_span_start"] = "17"
+        first.metadata["source_span_end"] = "58"
+
+        var second = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "pineapple coconut drink",
+            sourceQuote: "- Jami loved that pineapple coconut drink",
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            relationGuesses: [.likesDrink],
+            actionGuesses: ["liked"],
+            safeActions: [.inspectSource, .correct, .reject],
+            confidence: 0.72,
+            source: "graph_candidate.journal_capture"
+        )
+        second.metadata["source_span_start"] = "73"
+        second.metadata["source_span_end"] = "114"
+
+        try service.record(first)
+        try service.record(second)
+
+        let outputs = try service.outputs(for: owner).filter { $0.value == "pineapple coconut drink" }
+        #expect(outputs.count == 2)
+        #expect(outputs.compactMap { $0.metadata["source_span_start"] }.sorted() == ["17", "73"])
+        #expect(outputs.allSatisfy { $0.metadata["truth_boundary"] == "reviewable_candidate_not_truth" })
+
+        let evidenceRecords = try outputs.map { output in
+            try #require(try SecondBrainSourceEvidenceService(database: db).record(
+                derivedOwner: SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: output.id)
+            ))
+        }
+        #expect(evidenceRecords.compactMap(\.spanStart).sorted() == [17, 73])
+    }
+
     private func insertNoteItem(owner: SecondBrainOwnerRef, into db: CiderDatabase) throws {
         let now = DatabaseHelpers.encode(Date())
         let itemStmt = try db.prepare("""

@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 28
+    static let latestVersion: Int = 29
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -139,7 +139,70 @@ enum DatabaseMigrations {
         }
         if currentVersion < 28 {
             try migrateToV28(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 29 {
+            try migrateToV29(db)
+        }
+    }
+
+    // MARK: - V28 -> V29: Enrichment output occurrence keys
+
+    private static func migrateToV29(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 29...")
+
+        try withTransaction(db) {
+            try runOnDB(db, """
+                CREATE TABLE IF NOT EXISTS enrichment_outputs_v29 (
+                    id               TEXT PRIMARY KEY,
+                    owner_type       TEXT NOT NULL,
+                    owner_id         TEXT NOT NULL,
+                    chunk_id         TEXT,
+                    kind             TEXT NOT NULL,
+                    value            TEXT NOT NULL,
+                    normalized_value TEXT NOT NULL,
+                    label            TEXT NOT NULL DEFAULT '',
+                    evidence         TEXT NOT NULL DEFAULT '',
+                    source           TEXT NOT NULL,
+                    occurrence_key   TEXT NOT NULL DEFAULT '',
+                    confidence       REAL,
+                    review_state     TEXT NOT NULL DEFAULT 'suggested',
+                    metadata         TEXT NOT NULL DEFAULT '{}',
+                    created_at       REAL NOT NULL,
+                    updated_at       REAL NOT NULL,
+                    UNIQUE(owner_type, owner_id, kind, normalized_value, source, occurrence_key)
+                );
+                """)
+            try runOnDB(db, """
+                INSERT OR REPLACE INTO enrichment_outputs_v29 (
+                    id, owner_type, owner_id, chunk_id, kind, value, normalized_value,
+                    label, evidence, source, occurrence_key, confidence, review_state,
+                    metadata, created_at, updated_at
+                )
+                SELECT
+                    id, owner_type, owner_id, chunk_id, kind, value, normalized_value,
+                    label, evidence, source,
+                    COALESCE(
+                        CASE
+                            WHEN json_extract(metadata, '$.source_span_start') IS NOT NULL
+                             AND json_extract(metadata, '$.source_span_end') IS NOT NULL
+                            THEN json_extract(metadata, '$.source_span_start') || '..' || json_extract(metadata, '$.source_span_end')
+                            ELSE ''
+                        END,
+                        ''
+                    ) AS occurrence_key,
+                    confidence, review_state, metadata, created_at, updated_at
+                FROM enrichment_outputs;
+                """)
+            try runOnDB(db, "DROP TABLE enrichment_outputs;")
+            try runOnDB(db, "ALTER TABLE enrichment_outputs_v29 RENAME TO enrichment_outputs;")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_owner ON enrichment_outputs(owner_type, owner_id, kind, review_state);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_enrichment_outputs_kind ON enrichment_outputs(kind, normalized_value);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (29);")
+        }
+
+        logger.info("Migration to v29 complete")
     }
 
     // MARK: - V27 -> V28: Owner label search index

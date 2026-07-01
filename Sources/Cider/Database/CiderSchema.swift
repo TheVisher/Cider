@@ -315,12 +315,13 @@ enum CiderSchema {
             label            TEXT NOT NULL DEFAULT '',
             evidence         TEXT NOT NULL DEFAULT '',
             source           TEXT NOT NULL,
+            occurrence_key   TEXT NOT NULL DEFAULT '',
             confidence       REAL,
             review_state     TEXT NOT NULL DEFAULT 'suggested',
             metadata         TEXT NOT NULL DEFAULT '{}',
             created_at       REAL NOT NULL,
             updated_at       REAL NOT NULL,
-            UNIQUE(owner_type, owner_id, kind, normalized_value, source)
+            UNIQUE(owner_type, owner_id, kind, normalized_value, source, occurrence_key)
         );
         """
 
