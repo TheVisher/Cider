@@ -24480,10 +24480,14 @@ struct CiderCLI {
                 "kind": response.command == "item.memory-recall" ? "natural_memory_recall" : "natural_preference_item_recall",
                 "text": response.summary,
                 "summary": response.summary,
+                "confidenceBand": response.answerExplanation.confidenceBand,
+                "explanation": naturalPreferenceRecallExplanationToDict(response.answerExplanation),
                 "truthBoundary": response.truthBoundary,
                 "reviewRequired": response.reviewStatus.needsReview,
             ],
             "summary": response.summary,
+            "confidenceBand": response.answerExplanation.confidenceBand,
+            "answerExplanation": naturalPreferenceRecallExplanationToDict(response.answerExplanation),
             "truthBoundary": response.truthBoundary,
             "rankingExplanation": response.rankingExplanation,
             "reviewStatus": [
@@ -24512,6 +24516,9 @@ struct CiderCLI {
                     "rankReason": candidate.rankReason,
                     "matchedSemanticTerms": candidate.matchedSemanticTerms,
                     "matchExplanation": candidate.matchExplanation,
+                    "explanationReasons": candidate.explanationReasons,
+                    "evidenceRole": candidate.evidenceRole,
+                    "confidenceBand": candidate.confidenceBand,
                     "truthBoundary": candidate.truthBoundary,
                     "safeNextCommands": candidate.safeNextCommands,
                 ]
@@ -24594,6 +24601,18 @@ struct CiderCLI {
                 }
                 + response.citations.flatMap(\.safeNextCommands)
         )
+    }
+
+    private static func naturalPreferenceRecallExplanationToDict(_ explanation: CiderNaturalPreferenceRecallExplanation) -> [String: Any] {
+        [
+            "confidenceBand": explanation.confidenceBand,
+            "reasons": explanation.reasons,
+            "primaryEvidenceRefs": explanation.primaryEvidenceRefs,
+            "relatedEvidenceRefs": explanation.relatedEvidenceRefs,
+            "weakEvidenceRefs": explanation.weakEvidenceRefs,
+            "copy": explanation.copy,
+            "safeNextCommands": explanation.safeNextCommands,
+        ]
     }
 
     static func naturalPreferenceRecallProvenanceToDict(_ provenance: CiderNaturalPreferenceRecallProvenance) -> [String: Any] {

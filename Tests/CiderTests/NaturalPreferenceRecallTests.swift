@@ -491,6 +491,14 @@ struct NaturalPreferenceRecallTests {
         #expect(response.summary.contains("12.87 gallons"))
         #expect(response.candidates.first?.rankReason.contains("specific-date source-date match") == true)
         #expect(response.candidates.first?.matchExplanation.contains("specific-date recall anchored to source date 2026-06-11") == true)
+        #expect(response.answerExplanation.confidenceBand == "strong")
+        #expect(response.answerExplanation.reasons.contains("source_date_match"))
+        #expect(response.answerExplanation.reasons.contains("temporal_date_match"))
+        #expect(response.answerExplanation.primaryEvidenceRefs == ["note:\(june11JournalID.uuidString)"])
+        #expect(response.answerExplanation.relatedEvidenceRefs.contains("note:\(recentGasTrapID.uuidString)"))
+        #expect(response.candidates.first?.evidenceRole == "primary")
+        #expect(response.candidates.first?.confidenceBand == "strong")
+        #expect(response.candidates.first?.explanationReasons.contains("source_date_match") == true)
     }
 
     @Test("slash date gas recall anchors to matching Daily Journal source date")
@@ -617,7 +625,7 @@ struct NaturalPreferenceRecallTests {
 
         #expect(workResponse.intent.temporalDate == "2026-06-19")
         #expect(workResponse.candidates.first?.owner.ownerID == june19JournalID.uuidString)
-        #expect(workResponse.summary.contains("Work note"))
+        #expect(workResponse.summary.contains("gas was expensive after the fill-up"))
 
         #expect(nonDateResponse.intent.temporalIntent == nil)
         #expect(nonDateResponse.intent.temporalDate == nil)
@@ -663,6 +671,9 @@ struct NaturalPreferenceRecallTests {
         #expect(response.citations.first?.owner.ownerID == yesterdayJournalID.uuidString)
         #expect(response.candidates.first?.rankReason.contains("generic explicit-date source-date match") == true)
         #expect(response.candidates.first?.matchExplanation.contains("generic explicit-date recall anchored to source date 2026-06-29") == true)
+        #expect(response.answerExplanation.confidenceBand == "strong")
+        #expect(response.answerExplanation.primaryEvidenceRefs == ["note:\(yesterdayJournalID.uuidString)"])
+        #expect(response.answerExplanation.reasons.contains("temporal_date_match"))
     }
 
     @Test("latest journal thing wording ranks newest Daily Journal source date before older stronger word hits")
@@ -712,6 +723,9 @@ struct NaturalPreferenceRecallTests {
         #expect(response.rankingExplanation.contains("latest journal source date first"))
         #expect(response.summary.contains("Daily Journal 2026-06-30"))
         #expect(response.truthBoundary == "source_backed_observations_not_accepted_truth")
+        #expect(response.answerExplanation.confidenceBand == "strong")
+        #expect(response.answerExplanation.reasons.contains("latest_match"))
+        #expect(response.answerExplanation.primaryEvidenceRefs == ["note:\(newestJournalID.uuidString)"])
     }
 
     @Test("latest DCC recall can use recency but plain DCC recall keeps semantic ranking")
@@ -752,6 +766,9 @@ struct NaturalPreferenceRecallTests {
         #expect(plainResponse.intent.temporalIntent == nil)
         #expect(plainResponse.candidates.first?.owner.ownerID == olderSemanticJournalID.uuidString)
         #expect(plainResponse.rankingExplanation.contains("semantic term overlap"))
+        #expect(plainResponse.answerExplanation.confidenceBand == "strong")
+        #expect(plainResponse.answerExplanation.primaryEvidenceRefs == ["note:\(olderSemanticJournalID.uuidString)"])
+        #expect(plainResponse.candidates.first?.explanationReasons.contains("semantic_chunk_match") == true)
     }
 
     @Test("CLI JSON formatter exposes natural memory recall contract")
@@ -793,10 +810,17 @@ struct NaturalPreferenceRecallTests {
         let answer = try #require(payload["answer"] as? [String: Any])
         #expect(answer["kind"] as? String == "natural_memory_recall")
         #expect(answer["truthBoundary"] as? String == "source_backed_observations_not_accepted_truth")
+        #expect(answer["confidenceBand"] as? String == "strong")
+        let answerExplanation = try #require(payload["answerExplanation"] as? [String: Any])
+        #expect(answerExplanation["confidenceBand"] as? String == "strong")
+        #expect((answerExplanation["primaryEvidenceRefs"] as? [String])?.contains("note:\(lockerNoteID.uuidString)") == true)
         let candidates = try #require(payload["candidates"] as? [[String: Any]])
         let candidate = try #require(candidates.first)
         #expect(candidate["evidenceKind"] as? String == "source_backed_memory_observation")
         #expect((candidate["claim"] as? String)?.contains("2468") == true)
+        #expect(candidate["evidenceRole"] as? String == "primary")
+        #expect(candidate["confidenceBand"] as? String == "strong")
+        #expect((candidate["explanationReasons"] as? [String])?.contains("query_fact_match") == true)
         let provenance = try #require(candidate["provenance"] as? [String: Any])
         #expect(provenance["sourceRef"] as? String == "note:\(lockerNoteID.uuidString)")
         #expect(provenance["sourceType"] as? String == "note")
@@ -1041,15 +1065,75 @@ struct NaturalPreferenceRecallTests {
 
         #expect(response.candidates.isEmpty)
         #expect(response.intent.factFamily == nil)
-        #expect(response.summary.contains("Try the broader source search fallback"))
+        #expect(response.summary.contains("source-backed exact answer"))
         #expect(response.broaderSearchCommand == "cider-cli item search \"lunar hiking boots\" --scope personalMemory --sort newest --limit 10 --json")
         #expect(response.safeNextCommands.contains(response.broaderSearchCommand!))
         #expect(response.verificationCommands.contains(response.broaderSearchCommand!))
+        #expect(response.answerExplanation.confidenceBand == "none")
+        #expect(response.answerExplanation.reasons.contains("no_source_backed_exact_answer"))
+        #expect(response.answerExplanation.primaryEvidenceRefs.isEmpty)
         #expect(payload["broaderSearchCommand"] as? String == response.broaderSearchCommand)
         let fallback = try #require(payload["fallback"] as? [String: Any])
         #expect(fallback["truthBoundary"] as? String == "source_lookup_not_memory_truth")
         #expect(fallback["safeNextCommand"] as? String == response.broaderSearchCommand)
         #expect(fallback["nextContextCommandShape"] as? String == "cider-cli item context <type> <id-or-ref> --json")
         #expect((fallback["safeNextCommands"] as? [String])?.contains(response.broaderSearchCommand!) == true)
+    }
+
+    @Test("contact style Chris and Jacob memory recall exposes person match explanation")
+    func contactStyleChrisAndJacobMemoryRecallExposesPersonMatchExplanation() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let contactNoteID = UUID()
+        try insertJournal(
+            id: contactNoteID,
+            title: "People context",
+            body: "Chris is the coworker who knows the DCC audiobook context. Jacob prefers contact by text for shift swaps.",
+            createdAt: Date(timeIntervalSince1970: 1_782_701_200),
+            into: db,
+            store: store
+        )
+
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("who is Chris and what did I say about Jacob?", limit: 5)
+
+        #expect(response.candidates.first?.owner.ownerID == contactNoteID.uuidString)
+        #expect(response.summary.contains("Chris"))
+        #expect(response.summary.contains("Jacob"))
+        #expect(response.answerExplanation.confidenceBand == "strong")
+        #expect(response.answerExplanation.reasons.contains("entity_person_match"))
+        #expect(response.answerExplanation.primaryEvidenceRefs == ["note:\(contactNoteID.uuidString)"])
+        #expect(response.candidates.first?.explanationReasons.contains("entity_person_match") == true)
+        #expect(response.candidates.first?.evidenceRole == "primary")
+    }
+
+    @Test("nonsense dated memory recall reports no exact source backed answer with actionable fallback")
+    func nonsenseDatedMemoryRecallReportsNoExactAnswerWithFallback() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let service = CiderNaturalPreferenceRecallService(
+            contextService: CiderItemContextService(database: db, secondBrainStore: store)
+        )
+
+        let response = try service.answerMemory("what did I say about purple submarine pancakes on 1999-01-02?", limit: 5)
+        let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
+
+        #expect(response.candidates.isEmpty)
+        #expect(response.answerExplanation.confidenceBand == "none")
+        #expect(response.answerExplanation.reasons.contains("no_source_backed_exact_answer"))
+        #expect(response.answerExplanation.primaryEvidenceRefs.isEmpty)
+        #expect(response.broaderSearchCommand == "cider-cli item search \"purple submarine pancakes 1999-01-02\" --scope personalMemory --sort newest --limit 10 --json")
+        #expect(response.safeNextCommands.contains("cider-cli item search-debug \"what did I say about purple submarine pancakes on 1999-01-02?\" --json"))
+        #expect(response.safeNextCommands.contains(response.broaderSearchCommand!))
+        let answerExplanation = try #require(payload["answerExplanation"] as? [String: Any])
+        #expect(answerExplanation["confidenceBand"] as? String == "none")
+        #expect((answerExplanation["safeNextCommands"] as? [String])?.contains(response.broaderSearchCommand!) == true)
     }
 }

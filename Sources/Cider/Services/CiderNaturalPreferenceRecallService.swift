@@ -96,9 +96,22 @@ struct CiderNaturalPreferenceRecallCandidate: Identifiable, Codable, Equatable {
     var sortDate: Date?
     var matchedSemanticTerms: [String]
     var matchExplanation: String
+    var explanationReasons: [String]
+    var evidenceRole: String
+    var confidenceBand: String
     var truthBoundary: String
     var safeNextCommands: [String]
     var provenance: CiderNaturalPreferenceRecallProvenance?
+}
+
+struct CiderNaturalPreferenceRecallExplanation: Codable, Equatable {
+    var confidenceBand: String
+    var reasons: [String]
+    var primaryEvidenceRefs: [String]
+    var relatedEvidenceRefs: [String]
+    var weakEvidenceRefs: [String]
+    var copy: String
+    var safeNextCommands: [String]
 }
 
 struct CiderNaturalPreferenceRecallReviewStatus: Codable, Equatable {
@@ -113,6 +126,7 @@ struct CiderNaturalPreferenceRecallResponse: Codable, Equatable {
     var changed: Bool
     var intent: CiderNaturalPreferenceRecallIntent
     var summary: String
+    var answerExplanation: CiderNaturalPreferenceRecallExplanation
     var truthBoundary: String
     var reviewStatus: CiderNaturalPreferenceRecallReviewStatus
     var searchPlan: [CiderNaturalPreferenceRecallSearchStep]
@@ -158,6 +172,7 @@ final class CiderNaturalPreferenceRecallService {
         var candidatesByOwner: [String: CiderNaturalPreferenceRecallCandidate] = [:]
         var safeCommands: [String] = [
             "cider-cli item \(mode.command.replacingOccurrences(of: "item.", with: "")) \"\(escapedCommandArgument(intent.originalQuery))\" --limit \(boundedLimit) --json",
+            "cider-cli item search-debug \"\(escapedCommandArgument(intent.originalQuery))\" --json",
         ]
 
         for step in searchPlan {
@@ -200,6 +215,12 @@ final class CiderNaturalPreferenceRecallService {
                     }
                     candidate.matchedSemanticTerms = orderedUnique(candidate.matchedSemanticTerms + matchedTerms)
                     candidate.matchExplanation = mergeRankReasons(candidate.matchExplanation, matchExplanation)
+                    candidate.explanationReasons = orderedUnique(candidate.explanationReasons + explanationReasons(
+                        rankReason: rankReason,
+                        matchedTerms: matchedTerms,
+                        intent: intent,
+                        mode: mode
+                    ))
                     candidate.safeNextCommands = orderedUnique(candidate.safeNextCommands + commands)
                     if var provenance = candidate.provenance {
                         provenance.evidenceExcerpt = mergeClaims(provenance.evidenceExcerpt, quote)
@@ -229,6 +250,14 @@ final class CiderNaturalPreferenceRecallService {
                         sortDate: sortDate,
                         matchedSemanticTerms: matchedTerms,
                         matchExplanation: matchExplanation,
+                        explanationReasons: explanationReasons(
+                            rankReason: rankReason,
+                            matchedTerms: matchedTerms,
+                            intent: intent,
+                            mode: mode
+                        ),
+                        evidenceRole: "unclassified",
+                        confidenceBand: "weak",
                         truthBoundary: "source_backed_observations_not_accepted_truth",
                         safeNextCommands: commands,
                         provenance: CiderNaturalPreferenceRecallProvenance(
@@ -264,7 +293,7 @@ final class CiderNaturalPreferenceRecallService {
             }
         }
 
-        let candidates = candidatesByOwner.values
+        let rankedCandidates = candidatesByOwner.values
             .sorted {
                 if let temporalIntent = intent.temporalIntent, mode == .memory {
                     if shouldPreferSpecificDateSourceAnchor(lhs: $0, rhs: $1, intent: intent) {
@@ -285,6 +314,7 @@ final class CiderNaturalPreferenceRecallService {
             }
             .prefix(boundedLimit)
             .map { $0 }
+        let candidates = classifiedCandidates(rankedCandidates, intent: intent, mode: mode)
         let citations = citationsByOwner.values
             .sorted {
                 if let temporalIntent = intent.temporalIntent, mode == .memory {
@@ -326,6 +356,12 @@ final class CiderNaturalPreferenceRecallService {
         if let fallbackCommand, verificationCommands.isEmpty {
             verificationCommands.append(fallbackCommand)
         }
+        let answerExplanation = explanation(
+            for: intent,
+            candidates: candidates,
+            fallbackCommand: fallbackCommand,
+            mode: mode
+        )
         let warnings = citations.isEmpty
             ? ["No source-backed item or chunk matches were found for this natural \(mode.noun) recall query."]
             : []
@@ -335,7 +371,8 @@ final class CiderNaturalPreferenceRecallService {
             readOnly: true,
             changed: false,
             intent: intent,
-            summary: summary(for: intent, citations: citations, mode: mode),
+            summary: summary(for: intent, citations: citations, candidates: candidates, mode: mode),
+            answerExplanation: answerExplanation,
             truthBoundary: "source_backed_observations_not_accepted_truth",
             reviewStatus: CiderNaturalPreferenceRecallReviewStatus(
                 needsReview: false,
@@ -649,7 +686,10 @@ final class CiderNaturalPreferenceRecallService {
     }
 
     private func broaderSearchTerms(for semanticTerms: [String]) -> [String] {
-        semanticTerms.filter { !["size", "fit", "clothing", "regular", "rg", "red", "kap", "60", "60-rg"].contains($0) }
+        semanticTerms.filter {
+            !["size", "fit", "clothing", "regular", "rg", "red", "kap", "60", "60-rg"].contains($0)
+                && !genericMemoryRecallTokens.contains($0)
+        }
     }
 
     private func extractSubject(from query: String) -> String? {
@@ -886,6 +926,161 @@ final class CiderNaturalPreferenceRecallService {
         return "Matched \(family)\(target) from source-backed terms [\(matchedTerms.joined(separator: ", "))] in \(source) evidence; not accepted memory truth."
     }
 
+    private func explanationReasons(
+        rankReason: String,
+        matchedTerms: [String],
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode
+    ) -> [String] {
+        let lower = rankReason.lowercased()
+        var reasons: [String] = []
+        if lower.contains("specific-date source-date match") {
+            reasons.append("source_date_match")
+            reasons.append("temporal_date_match")
+        }
+        if lower.contains("generic explicit-date source-date match") {
+            reasons.append("source_date_match")
+            reasons.append("temporal_date_match")
+        }
+        if lower.contains("latest journal source-date match") {
+            reasons.append("latest_match")
+            reasons.append("journal_source")
+        }
+        if lower.contains("journal source") {
+            reasons.append("journal_source")
+        }
+        if lower.contains("query fact match") {
+            reasons.append("query_fact_match")
+        }
+        if lower.contains("source-backed chunk evidence") {
+            reasons.append("semantic_chunk_match")
+        }
+        if lower.contains("specific subject match") {
+            reasons.append("entity_person_match")
+        }
+        if !matchedTerms.isEmpty {
+            reasons.append("semantic_term_match")
+        }
+        if mode == .memory,
+           intent.semanticQueryTerms.contains(where: { ["chris", "jacob"].contains($0) }) {
+            reasons.append("entity_person_match")
+        }
+        return orderedUnique(reasons)
+    }
+
+    private func classifiedCandidates(
+        _ candidates: [CiderNaturalPreferenceRecallCandidate],
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode
+    ) -> [CiderNaturalPreferenceRecallCandidate] {
+        candidates.enumerated().map { index, candidate in
+            var copy = candidate
+            let strong = isStrongEvidence(candidate, intent: intent, mode: mode)
+            let related = !strong && isRelatedEvidence(candidate, intent: intent, mode: mode)
+            if index == 0 && strong {
+                copy.evidenceRole = "primary"
+                copy.confidenceBand = "strong"
+            } else if strong || related {
+                copy.evidenceRole = index == 0 ? "primary" : "related"
+                copy.confidenceBand = index == 0 && strong ? "strong" : "related"
+                if copy.evidenceRole == "related" {
+                    copy.explanationReasons = orderedUnique(copy.explanationReasons + ["fallback_related_match"])
+                }
+            } else {
+                copy.evidenceRole = "weak"
+                copy.confidenceBand = "weak"
+                copy.explanationReasons = orderedUnique(copy.explanationReasons + ["fallback_related_match"])
+            }
+            return copy
+        }
+    }
+
+    private func isStrongEvidence(
+        _ candidate: CiderNaturalPreferenceRecallCandidate,
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode
+    ) -> Bool {
+        if candidate.explanationReasons.contains("source_date_match") { return true }
+        if candidate.explanationReasons.contains("latest_match") { return true }
+        if mode == .memory {
+            let nonGenericTerms = intent.semanticQueryTerms.filter { !genericMemoryRecallTokens.contains($0) && !explicitDateTokens.contains($0) }
+            let required = min(2, max(1, nonGenericTerms.count))
+            let matchedNonGeneric = candidate.matchedSemanticTerms.filter { nonGenericTerms.contains($0) }
+            return matchedNonGeneric.count >= required && candidate.score >= 8
+        }
+        return candidate.score >= 8
+    }
+
+    private func isRelatedEvidence(
+        _ candidate: CiderNaturalPreferenceRecallCandidate,
+        intent: CiderNaturalPreferenceRecallIntent,
+        mode: CiderNaturalRecallMode
+    ) -> Bool {
+        if mode == .memory {
+            return !candidate.matchedSemanticTerms.isEmpty || candidate.score >= 4
+        }
+        return candidate.score >= 4
+    }
+
+    private func explanation(
+        for intent: CiderNaturalPreferenceRecallIntent,
+        candidates: [CiderNaturalPreferenceRecallCandidate],
+        fallbackCommand: String?,
+        mode: CiderNaturalRecallMode
+    ) -> CiderNaturalPreferenceRecallExplanation {
+        let primaryRefs = candidates
+            .filter { $0.evidenceRole == "primary" }
+            .flatMap(\.citationRefs)
+        let relatedRefs = candidates
+            .filter { $0.evidenceRole == "related" }
+            .flatMap(\.citationRefs)
+        let weakRefs = candidates
+            .filter { $0.evidenceRole == "weak" }
+            .flatMap(\.citationRefs)
+        let band: String
+        if !primaryRefs.isEmpty {
+            band = candidates.first?.confidenceBand ?? "strong"
+        } else if !relatedRefs.isEmpty {
+            band = "related"
+        } else if !weakRefs.isEmpty {
+            band = "weak"
+        } else {
+            band = "none"
+        }
+        var reasons = orderedUnique(candidates.flatMap(\.explanationReasons))
+        if band == "none" {
+            reasons.append("no_source_backed_exact_answer")
+        } else if primaryRefs.isEmpty {
+            reasons.append("related_matches_only")
+        }
+        var commands = orderedUnique(candidates.flatMap { candidate in
+            candidate.provenance?.contextCommands ?? candidate.safeNextCommands
+        })
+        if let fallbackCommand {
+            commands.append(fallbackCommand)
+        }
+        let copy: String
+        switch band {
+        case "strong":
+            copy = "Primary evidence is source-backed and ranked ahead of related matches; observations remain outside accepted memory truth."
+        case "related":
+            copy = "Only related source-backed matches were found; use the context commands before treating this as an answer."
+        case "weak":
+            copy = "Only weak source-backed matches were found; no exact answer is supported by the current evidence."
+        default:
+            copy = "No source-backed exact answer was found for this \(mode.noun) recall query."
+        }
+        return CiderNaturalPreferenceRecallExplanation(
+            confidenceBand: band,
+            reasons: orderedUnique(reasons),
+            primaryEvidenceRefs: orderedUnique(primaryRefs),
+            relatedEvidenceRefs: orderedUnique(relatedRefs),
+            weakEvidenceRefs: orderedUnique(weakRefs),
+            copy: copy,
+            safeNextCommands: orderedUnique(commands)
+        )
+    }
+
     private func evidenceTokens(for intent: CiderNaturalPreferenceRecallIntent, mode: CiderNaturalRecallMode) -> [String] {
         if mode == .memory {
             return intent.semanticQueryTerms
@@ -970,6 +1165,9 @@ final class CiderNaturalPreferenceRecallService {
         if !matched.isEmpty {
             return matched.prefix(5).joined(separator: "\n")
         }
+        if !lines.isEmpty {
+            return lines.prefix(5).joined(separator: "\n")
+        }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -979,10 +1177,26 @@ final class CiderNaturalPreferenceRecallService {
         if lower.hasPrefix("title:") || lower.hasPrefix("path:") {
             return nil
         }
+        if lower.hasPrefix("#") {
+            return nil
+        }
+        if isJournalScaffoldEvidenceLine(lower) {
+            return nil
+        }
         for prefix in ["Content:", "Capture source text:"] where line.localizedCaseInsensitiveContains(prefix) {
             if let range = line.range(of: prefix, options: .caseInsensitive) {
                 line = String(line[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
             }
+        }
+        let strippedLower = line.lowercased()
+        if strippedLower.hasPrefix("title:") || strippedLower.hasPrefix("path:") {
+            return nil
+        }
+        if strippedLower.hasPrefix("#") {
+            return nil
+        }
+        if isJournalScaffoldEvidenceLine(strippedLower) {
+            return nil
         }
         for marker in [". Source image:", " Source image:"] {
             if let range = line.range(of: marker, options: .caseInsensitive) {
@@ -997,6 +1211,12 @@ final class CiderNaturalPreferenceRecallService {
             }
         }
         return line.isEmpty ? nil : line
+    }
+
+    private func isJournalScaffoldEvidenceLine(_ lowercasedLine: String) -> Bool {
+        lowercasedLine.contains("voice journal addendum")
+            || lowercasedLine.contains("voice journal entry")
+            || lowercasedLine.contains("daily journal entry")
     }
 
     private func significantQueryTokens(in text: String) -> [String] {
@@ -1032,18 +1252,22 @@ final class CiderNaturalPreferenceRecallService {
     private func summary(
         for intent: CiderNaturalPreferenceRecallIntent,
         citations: [CiderNaturalPreferenceRecallCitation],
+        candidates: [CiderNaturalPreferenceRecallCandidate],
         mode: CiderNaturalRecallMode
     ) -> String {
         guard !citations.isEmpty else {
             if mode == .memory, let command = broaderSearchCommand(for: intent, limit: 10) {
-                return "I did not find source-backed journal or captured-item evidence for this memory recall question. Try the broader source search fallback: \(command)"
+                return "I did not find a source-backed exact answer for this memory recall question. Try the broader source search fallback: \(command)"
             }
             return "I did not find source-backed journal or captured-item evidence for this \(mode.noun) recall question."
         }
         let subjectCopy = intent.subject.map { " for \($0)" } ?? ""
         let lead: String
         if mode == .memory {
-            let facts = citations.prefix(3).map { citation in
+            let primaryRefs = Set(candidates.filter { $0.evidenceRole == "primary" }.flatMap(\.citationRefs))
+            let primaryCitations = citations.filter { primaryRefs.contains($0.sourceRef) }
+            let selectedCitations = primaryCitations.isEmpty ? Array(citations.prefix(1)) : primaryCitations
+            let facts = selectedCitations.prefix(3).map { citation in
                 let fact = synthesizedMemoryFact(from: citation.quote, intent: intent)
                 return citation.title.isEmpty ? fact : "\(fact) (source: \(citation.title))"
             }
