@@ -545,6 +545,8 @@ struct CiderCLI {
         }
 
         switch command {
+        case "dev-fixture", "fixture":
+            await handleDevFixture(subcommand: subcommand, args: remaining, notesStorage: notesStorage)
         case "capture":
             await handleCapture(subcommand: subcommand, args: remaining, bookmarkService: bookmarkService)
         case "review":
@@ -689,6 +691,8 @@ struct CiderCLI {
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "rerun"])
         case "review":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
+        case "dev-fixture", "fixture":
+            return true
         case "item":
             return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "backfill-journals", "journal-backfill", "accept-similarity", "accept-graph-candidate", "reject-graph-candidate", "delegate-graph-candidate", "accept-memory-candidate", "reject-memory-candidate", "defer-memory-candidate", "correct-memory-candidate", "delegate-memory-candidate", "sync-project", "project-sync"])
         case "test-run", "testrun":
@@ -758,6 +762,260 @@ struct CiderCLI {
         for group in groups {
             print("    \(group.key): \(group.count)")
         }
+    }
+
+    static func handleDevFixture(subcommand: String?, args: [String], notesStorage: NotesStorage) async {
+        switch subcommand {
+        case "graph-candidate-smoke":
+            guard args.contains("--allow-temp-vault-fixture") else {
+                printCLIError(
+                    "Dev fixture commands require --allow-temp-vault-fixture and should only be used with --vault pointing at a disposable temp vault.",
+                    details: [
+                        "command": "dev-fixture.graph-candidate-smoke",
+                        "readOnly": false,
+                        "changed": false,
+                        "errorCode": "fixture_requires_explicit_temp_vault_allowance",
+                        "policyNote": "Use a temp/sandbox vault. Do not run fixture commands against the live vault.",
+                        "safeNextCommands": [
+                            "cider-cli --vault <temp-vault> dev-fixture graph-candidate-smoke --allow-temp-vault-fixture --json",
+                        ],
+                    ]
+                )
+                return
+            }
+            guard isTemporaryFixtureVault(StoragePaths.cachedVaultDirectoryURL) else {
+                printCLIError(
+                    "Dev fixture commands are limited to disposable temp vault paths.",
+                    details: [
+                        "command": "dev-fixture.graph-candidate-smoke",
+                        "readOnly": false,
+                        "changed": false,
+                        "errorCode": "fixture_requires_temp_vault",
+                        "policyNote": "Use --vault with a directory under the system temporary directory or /tmp.",
+                        "safeNextCommands": [
+                            "tmp=$(mktemp -d /tmp/cider-graph-fixture.XXXXXX)",
+                            "cider-cli --vault \"$tmp\" dev-fixture graph-candidate-smoke --allow-temp-vault-fixture --json",
+                        ],
+                    ]
+                )
+                return
+            }
+
+            do {
+                outputJSON(try createGraphCandidateSmokeFixture(args: args, notesStorage: notesStorage))
+            } catch {
+                printCLIError(
+                    error.localizedDescription,
+                    details: [
+                        "command": "dev-fixture.graph-candidate-smoke",
+                        "readOnly": false,
+                        "changed": false,
+                        "errorCode": "fixture_graph_candidate_smoke_failed",
+                    ]
+                )
+            }
+
+        case nil, "help", "--help", "-h":
+            print("""
+            Dev fixture commands:
+              cider-cli dev-fixture graph-candidate-smoke --allow-temp-vault-fixture [--label <text>] [--owner-id <id>] [--external-id provider=value] [--json]
+
+            Fixture commands are backend smoke helpers for disposable temp vaults. They create reviewable candidates, not accepted truth.
+            """)
+
+        default:
+            printCLIError("Unknown dev fixture command: \(subcommand ?? "nil"). Commands: graph-candidate-smoke")
+        }
+    }
+
+    static func createGraphCandidateSmokeFixture(args: [String], notesStorage: NotesStorage) throws -> [String: Any] {
+        let label = normalizedFlag("--label", from: args) ?? "After Yang"
+        let ownerID = normalizedFlag("--owner-id", from: args) ?? "dev-fixture-\(slug(label))"
+        let relation = normalizedFlag("--relation", from: args) ?? SecondBrainGraphCandidateContract.RelationType.watched.rawValue
+        let externalIDs = parseExternalIDFlags(from: args)
+        let sourceQuote = normalizedFlag("--source-quote", from: args)
+            ?? "Watched \(label) and want the graph candidate smoke to stay source-backed."
+        let sourceTitle = normalizedFlag("--source-title", from: args) ?? "Dev Fixture Graph Candidate Smoke"
+        let sourceContent = """
+        \(sourceQuote)
+
+        Fixture marker: dev-fixture.graph-candidate-smoke
+        Candidate label: \(label)
+        """
+
+        let capture = try CiderCaptureService(notesStorage: notesStorage, database: CiderDatabase.shared).addNoteCapture(
+            title: sourceTitle,
+            content: sourceContent,
+            folderID: nil,
+            sourceContext: CaptureSourceContext(
+                surface: "cider-cli",
+                channel: "dev-fixture",
+                channelID: nil,
+                threadID: nil,
+                messageID: nil,
+                senderID: "codex",
+                senderName: "Codex",
+                originalText: sourceContent,
+                attachments: [],
+                metadata: ["fixture": "graph-candidate-smoke"]
+            )
+        )
+        let sourceOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: capture.item.id.uuidString)
+        let projectedOwner = SecondBrainOwnerRef(ownerType: "media_item", ownerID: ownerID)
+        let evidenceID = "dev-fixture-\(ownerID)"
+        let projectionBody = ([
+            "Title: \(label)",
+            "Type: movie",
+            "Alias: \(label)",
+        ] + externalIDs.map { key, value in
+            "External ID: \(key): \(value)"
+        }).joined(separator: "\n")
+
+        try SecondBrainStore(database: CiderDatabase.shared).upsertSection(SecondBrainSection(
+            id: "\(projectedOwner.canonicalRef):dev-fixture-summary",
+            owner: projectedOwner,
+            itemID: capture.item.id.uuidString,
+            sectionKey: "dev_fixture_summary",
+            title: label,
+            body: projectionBody,
+            source: "dev-fixture.graph-candidate-smoke",
+            confidence: 0.91,
+            metadata: [
+                "source_evidence_ref": "source_evidence:\(evidenceID)",
+                "provenance_ref": sourceOwner.canonicalRef,
+                "fixture": "graph-candidate-smoke",
+            ],
+            sortOrder: 0
+        ))
+
+        let output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: sourceOwner,
+            candidateKind: .objectRelation,
+            mentionText: label,
+            sourceQuote: sourceQuote,
+            sourceKind: "dev_fixture_note",
+            objectTypeGuesses: [.movie, .media],
+            relationGuesses: [SecondBrainGraphCandidateContract.RelationType(rawValue: relation) ?? .watched],
+            safeActions: [.inspectSource, .linkExisting, .createObject, .correct, .reject, .deferCandidate],
+            confidence: 0.9,
+            confidenceReason: "Disposable CLI fixture generated exact source quote and projected owner for graph candidate smoke testing.",
+            source: "dev-fixture.graph-candidate-smoke"
+        )
+        try SecondBrainEnrichmentOutputService(database: CiderDatabase.shared).record(output)
+
+        let ownerLabel = try SecondBrainOwnerLabelIndexService(database: CiderDatabase.shared)
+            .refreshProjectedOwner(owner: projectedOwner)
+        let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        let targetOptions = CiderReviewQueueService.graphCandidateTargetOptions(
+            output: output,
+            candidate: candidate,
+            sourceItemRef: sourceOwner.canonicalRef,
+            evidenceRef: "source_evidence:\(evidenceID)",
+            database: CiderDatabase.shared
+        )
+
+        return [
+            "ok": true,
+            "command": "dev-fixture.graph-candidate-smoke",
+            "readOnly": false,
+            "changed": true,
+            "fixtureSafety": [
+                "temp_vault_only",
+                "reviewable_candidate_not_truth",
+                "accept_requires_explicit_target_option",
+            ],
+            "sourceItem": [
+                "type": capture.item.type,
+                "id": capture.item.id.uuidString,
+                "ref": sourceOwner.canonicalRef,
+                "title": capture.item.title,
+                "relativePath": capture.item.relativePath as Any,
+            ],
+            "projectedOwner": [
+                "ownerType": projectedOwner.ownerType,
+                "ownerID": projectedOwner.ownerID,
+                "ref": projectedOwner.canonicalRef,
+                "label": label,
+            ],
+            "ownerLabelIndex": ownerLabel.map(ownerLabelIndexRecordToDict) ?? [:],
+            "candidate": [
+                "id": output.id,
+                "ref": "graph_candidate:\(output.id)",
+                "reviewState": output.reviewState,
+                "truthState": "reviewable_candidate_not_truth",
+                "sourceRef": sourceOwner.canonicalRef,
+                "sourceQuote": sourceQuote,
+            ],
+            "targetOptions": targetOptions.map { $0.toDictionary() },
+            "safeNextCommands": [
+                "cider-cli review list --kind graph_candidate --limit 5 --json",
+                targetOptions.first.map { "cider-cli review approve \(output.id) --target-option \($0.optionRef) --json" }
+                    ?? "cider-cli review approve \(output.id) --json",
+                "cider-cli item graph-candidate \(output.id) --json",
+            ],
+        ]
+    }
+
+    static func ownerLabelIndexRecordToDict(_ record: SecondBrainOwnerLabelIndexRecord) -> [String: Any] {
+        var dict: [String: Any] = [
+            "owner": [
+                "ownerType": record.owner.ownerType,
+                "ownerID": record.owner.ownerID,
+                "ref": record.owner.canonicalRef,
+            ],
+            "ownerKind": record.ownerKind,
+            "canonicalLabel": record.canonicalLabel,
+            "normalizedLabel": record.normalizedLabel,
+            "aliases": record.aliases,
+            "normalizedAliases": record.normalizedAliases,
+            "externalIDs": record.externalIDs,
+            "provenanceRefs": record.provenanceRefs,
+            "sourceRefs": record.sourceRefs,
+            "labelSource": record.labelSource,
+        ]
+        if let confidence = record.confidence {
+            dict["confidence"] = confidence
+        }
+        return dict
+    }
+
+    static func parseExternalIDFlags(from args: [String]) -> [String: String] {
+        var ids: [String: String] = [:]
+        for (index, arg) in args.enumerated() where arg == "--external-id" && index + 1 < args.count {
+            let parts = args[index + 1].split(separator: "=", maxSplits: 1).map(String.init)
+            if parts.count == 2 {
+                let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !key.isEmpty && !value.isEmpty {
+                    ids[key] = value
+                }
+            }
+        }
+        return ids
+    }
+
+    static func isTemporaryFixtureVault(_ url: URL) -> Bool {
+        let vaultPath = url.standardizedFileURL.path
+        let tempPath = FileManager.default.temporaryDirectory.standardizedFileURL.path
+        return vaultPath == tempPath
+            || vaultPath.hasPrefix(tempPath.hasSuffix("/") ? tempPath : "\(tempPath)/")
+            || vaultPath == "/tmp"
+            || vaultPath.hasPrefix("/tmp/")
+    }
+
+    static func normalizedFlag(_ flag: String, from args: [String]) -> String? {
+        let value = parseFlag(flag, from: args)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    static func slug(_ value: String) -> String {
+        let slug = value
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        return slug.isEmpty ? "fixture" : slug
     }
 
     static func commandDescription(command: String, subcommand: String?) -> String {

@@ -35,6 +35,83 @@ struct CiderCLIAgentSafetyTests {
         #expect(earlyHelp == fullHelp)
     }
 
+    @Test("dev fixture creates graph candidate smoke data through CLI review path")
+    func devFixtureCreatesGraphCandidateSmokeDataThroughCLIReviewPath() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-dev-fixture-graph-candidate-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let blockedResult = try runCLI(args: [
+            "dev-fixture", "graph-candidate-smoke",
+            "--label", "After Yang",
+            "--json",
+        ], vault: vault)
+        let blocked = try parseJSONObject(blockedResult.stdout)
+        #expect(blocked["ok"] as? Bool == false)
+        #expect(blocked["errorCode"] as? String == "fixture_requires_explicit_temp_vault_allowance")
+
+        let fixtureResult = try runCLI(args: [
+            "dev-fixture", "graph-candidate-smoke",
+            "--allow-temp-vault-fixture",
+            "--label", "After Yang",
+            "--owner-id", "cid634-after-yang",
+            "--external-id", "tmdb=585378",
+            "--json",
+        ], vault: vault)
+        let fixture = try parseJSONObject(fixtureResult.stdout)
+        #expect(fixtureResult.status == 0)
+        #expect(fixture["ok"] as? Bool == true)
+        #expect(fixture["command"] as? String == "dev-fixture.graph-candidate-smoke")
+        #expect(fixture["changed"] as? Bool == true)
+        #expect(fixture["fixtureSafety"] as? [String] == [
+            "temp_vault_only",
+            "reviewable_candidate_not_truth",
+            "accept_requires_explicit_target_option",
+        ])
+
+        let sourceItem = try #require(fixture["sourceItem"] as? [String: Any])
+        let projectedOwner = try #require(fixture["projectedOwner"] as? [String: Any])
+        let candidate = try #require(fixture["candidate"] as? [String: Any])
+        #expect(sourceItem["type"] as? String == "note")
+        #expect(projectedOwner["ref"] as? String == "media_item:cid634-after-yang")
+        #expect(candidate["truthState"] as? String == "reviewable_candidate_not_truth")
+        let candidateID = try #require(candidate["id"] as? String)
+
+        let reviewList = try parseJSONObject(try runCLI(args: [
+            "review", "list",
+            "--kind", "graph_candidate",
+            "--limit", "5",
+            "--json",
+        ], vault: vault).stdout)
+        #expect(reviewList["command"] as? String == "review.list")
+        let items = try #require(reviewList["items"] as? [[String: Any]])
+        let reviewItem = try #require(items.first { $0["candidateID"] as? String == candidateID })
+        let targetOptions = try #require(reviewItem["targetOptions"] as? [[String: Any]])
+        let existing = try #require(targetOptions.first)
+        let optionRef = try #require(existing["optionRef"] as? String)
+        #expect(optionRef == "graph_target_option:\(candidateID):existing-1")
+        #expect((existing["targetOwner"] as? [String: String])?["ref"] == "media_item:cid634-after-yang")
+        #expect(existing["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect((existing["externalIDs"] as? [String: String])?["tmdb"] == "585378")
+        #expect((existing["sourceRefs"] as? [String])?.contains("media_item:cid634-after-yang") == true)
+        #expect((existing["provenanceRefs"] as? [String])?.contains("source_evidence:dev-fixture-cid634-after-yang") == true)
+
+        let approved = try parseJSONObject(try runCLI(args: [
+            "review", "approve", candidateID,
+            "--target-option", optionRef,
+            "--actor", "codex",
+            "--json",
+        ], vault: vault).stdout)
+        #expect(approved["changed"] as? Bool == true)
+        #expect(approved["truthBoundary"] as? String == "accepted_graph_truth")
+        let receipt = try #require(approved["actionReceipt"] as? [String: Any])
+        #expect(receipt["truthBoundary"] as? String == "accepted_graph_truth")
+        let provenance = try #require(approved["provenance"] as? [String: Any])
+        #expect(provenance["sourceRef"] as? String == "note:\(sourceItem["id"] as? String ?? "")")
+        #expect(provenance["targetOwnerRef"] as? String == "media_item:cid634-after-yang")
+    }
+
     @Test("item help advertises recall action diagnostic facts commands without vault side effects")
     func itemHelpAdvertisesRecallActionDiagnosticFactsCommandsWithoutVaultSideEffects() throws {
         let commandsAndExpectedStrings: [([String], [String])] = [

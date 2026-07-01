@@ -1242,6 +1242,7 @@ struct CiderReviewQueueServiceTests {
         #expect(selected.actionReceipt["command"] as? String == "review.graph-candidates.approve")
         #expect(selected.actionReceipt["truthBoundary"] as? String == "accepted_graph_truth")
         #expect(selected.provenance["sourceRef"] as? String == "note:\(noteID.uuidString)")
+        #expect(selected.provenance["targetOwnerRef"] as? String == "graph_object:movie-columbus")
         #expect(try SecondBrainStore(database: db).outgoingRelations(for: owner).contains {
             $0.targetOwner == SecondBrainOwnerRef(ownerType: "graph_object", ownerID: "movie-columbus")
                 && $0.relationType == "watched"
@@ -1256,7 +1257,12 @@ struct CiderReviewQueueServiceTests {
         )
         #expect(corrected.changed == true)
         #expect(corrected.truthBoundary == "accepted_graph_truth")
-        #expect(corrected.actionReceipt["after"] as? [String: String] == ["reviewState": "accepted", "truthBoundary": "accepted_graph_truth"])
+        let correctedAfter = try #require(corrected.actionReceipt["after"] as? [String: Any])
+        #expect(correctedAfter["reviewState"] as? String == "accepted")
+        #expect(correctedAfter["truthBoundary"] as? String == "accepted_graph_truth")
+        #expect(correctedAfter["acceptedTargetOwnerRef"] as? String == correctedTarget.canonicalRef)
+        #expect(correctedAfter["acceptedRelationType"] as? String == "watched")
+        #expect(corrected.provenance["targetOwnerRef"] as? String == correctedTarget.canonicalRef)
         #expect(try SecondBrainStore(database: db).outgoingRelations(for: owner).contains {
             $0.targetOwner == correctedTarget && $0.relationType == "watched"
         })
@@ -1385,6 +1391,7 @@ struct CiderReviewQueueServiceTests {
         #expect(selected.afterState == "accepted")
         #expect(selected.truthBoundary == "accepted_graph_truth")
         #expect(selected.actionReceipt["truthBoundary"] as? String == "accepted_graph_truth")
+        #expect(selected.provenance["targetOwnerRef"] as? String == mediaOwner.canonicalRef)
         #expect(selected.provenance["evidenceRef"] != nil)
         #expect(try SecondBrainStore(database: db).outgoingRelations(for: owner).contains {
             $0.targetOwner == mediaOwner && $0.relationType == "watched"

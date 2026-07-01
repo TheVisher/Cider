@@ -1889,6 +1889,14 @@ final class CiderReviewQueueService {
         let candidateRef = "\(reviewFamily):\(after.id)"
         let sourceRef = after.owner.canonicalRef
         let evidenceRef = after.metadata["source_evidence_ref"] ?? after.metadata["source_evidence_id"].map { "source_evidence:\($0)" }
+        let acceptedTargetOwner = SecondBrainOwnerRef(
+            ownerType: after.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerType] ?? "",
+            ownerID: after.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerID] ?? ""
+        )
+        let acceptedTargetOwnerRef = acceptedTargetOwner.ownerType.isEmpty || acceptedTargetOwner.ownerID.isEmpty
+            ? nil
+            : acceptedTargetOwner.canonicalRef
+        let acceptedRelationType = after.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedRelationType]
         let beforeBoundary = truthBoundary(forReviewFamily: reviewFamily, reviewState: before.reviewState)
         let afterBoundary = truthBoundary(forReviewFamily: reviewFamily, reviewState: after.reviewState)
         let safeVerificationCommands = orderedUnique([
@@ -1905,8 +1913,20 @@ final class CiderReviewQueueService {
             "sourceRef": sourceRef,
             "candidateRef": candidateRef,
             "evidenceRef": evidenceRef ?? "",
+            "targetOwnerRef": acceptedTargetOwnerRef ?? "",
+            "relationType": acceptedRelationType ?? "",
             "storage": "enrichment_outputs",
         ].filter { !($0.value as? String == "") }
+        var afterReceipt: [String: Any] = [
+            "reviewState": after.reviewState,
+            "truthBoundary": afterBoundary,
+        ]
+        if let acceptedTargetOwnerRef {
+            afterReceipt["acceptedTargetOwnerRef"] = acceptedTargetOwnerRef
+        }
+        if let acceptedRelationType {
+            afterReceipt["acceptedRelationType"] = acceptedRelationType
+        }
         let actionReceipt: [String: Any] = [
             "command": command,
             "action": action,
@@ -1927,10 +1947,7 @@ final class CiderReviewQueueService {
                 "reviewState": before.reviewState,
                 "truthBoundary": beforeBoundary,
             ],
-            "after": [
-                "reviewState": after.reviewState,
-                "truthBoundary": afterBoundary,
-            ],
+            "after": afterReceipt,
             "safeVerificationCommands": safeVerificationCommands,
             "safeNextCommands": safeNextCommands,
         ]
