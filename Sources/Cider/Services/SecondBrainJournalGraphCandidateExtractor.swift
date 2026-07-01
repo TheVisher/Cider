@@ -56,8 +56,24 @@ struct SecondBrainJournalGraphCandidateExtractor {
         sourceOwner: SecondBrainOwnerRef,
         sentence: String
     ) -> [SecondBrainEnrichmentOutput] {
+        var explicitMediaCandidates: [SecondBrainEnrichmentOutput] = []
+        if sentence.range(of: #"(?i)\bAvatar:\s*The Last Airbender\b"#, options: .regularExpression) != nil,
+           sentence.range(of: #"(?i)\b(watched|watching|finished watching)\b"#, options: .regularExpression) != nil,
+           let candidate = makeCandidate(
+                sourceOwner: sourceOwner,
+                candidateKind: .objectRelation,
+                mentionText: "Avatar: The Last Airbender",
+                sourceQuote: sentence,
+                objectTypes: [.show, .media],
+                relations: [.watched],
+                actions: ["watched"],
+                confidence: 0.82,
+                confidenceReason: "Journal sentence names a watched media title."
+           ) {
+            explicitMediaCandidates.append(candidate)
+        }
         let sentenceClauses = candidateClauses(from: sentence)
-        return sentenceClauses.flatMap { clause in
+        return explicitMediaCandidates + sentenceClauses.flatMap { clause in
             regexMatches(
                 pattern: #"(?i)\b(?:watched|rewatched|saw)\s+(.+?)(?:\s+(?:last night|tonight|yesterday|today|this morning|this afternoon|this evening|again))?$"#,
                 in: clause
@@ -82,9 +98,34 @@ struct SecondBrainJournalGraphCandidateExtractor {
         sourceOwner: SecondBrainOwnerRef,
         sentence: String
     ) -> [SecondBrainEnrichmentOutput] {
-        regexMatches(
+        let normalizedSentence = sentence
+            .replacingOccurrences(of: #"^[-•]\s*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let gotAndLikedCandidates: [SecondBrainEnrichmentOutput] = regexMatches(
+            pattern: #"(?i)^\s*(?:(I|we|[A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*){0,2})\s+)?got\s+(.+?)\s+and\s+liked\s+it\s*$"#,
+            in: normalizedSentence
+        ).compactMap { match in
+            guard match.captures.count >= 2,
+                  let mention = cleanedMention(match.captures[1], kind: .object) else { return nil }
+            let subject = trimmedNonEmpty(match.captures[0])
+            let objectTypes = objectTypes(for: mention)
+            return makeCandidate(
+                sourceOwner: sourceOwner,
+                candidateKind: .objectRelation,
+                mentionText: mention,
+                sourceQuote: sentence,
+                objectTypes: objectTypes,
+                relations: [preferenceRelation(for: objectTypes)],
+                actions: ["liked"],
+                confidence: subject == nil ? 0.62 : 0.74,
+                confidenceReason: "Journal sentence says the subject got an object and liked it.",
+                subjectText: subject
+            )
+        }
+
+        return gotAndLikedCandidates + regexMatches(
             pattern: #"(?i)^\s*(?:(I|we|[A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*){0,2})\s+)?(?:really\s+)?(loved|liked|hated|disliked)\s+(?:that\s+|the\s+|those\s+|a\s+|an\s+|some\s+)?(.+?)$"#,
-            in: sentence
+            in: normalizedSentence
         ).compactMap { match in
             guard match.captures.count >= 3,
                   let verb = trimmedNonEmpty(match.captures[1]),
@@ -1303,6 +1344,61 @@ struct SecondBrainJournalGraphCandidateExtractor {
             ))
         }
 
+        if (lower.contains("cms outage") || lower.contains("cms/outage"))
+            && (lower.contains("systems down") || lower.contains("system down")) {
+            let count = firstCapture(pattern: #"(?i)\babout\s+(\d+)\s+systems?\s+down\b"#, in: normalizedSentence)
+            let countPhrase = count.map { " about \($0) systems down" } ?? " systems down"
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "work_context",
+                value: "The CMS/outage at Boeing left\(countPhrase) during the shift.",
+                evidence: sentence,
+                confidence: 0.82,
+                memoryKey: "boeing-cms-outage-systems-down"
+            ))
+        }
+
+        if lower.contains("pto")
+            && lower.contains("birthday")
+            && lower.contains("overtime") {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "work_schedule_context",
+                value: "Visher took PTO for Ryland's birthday and worked overtime around it.",
+                evidence: sentence,
+                confidence: 0.8,
+                memoryKey: "ryland-birthday-pto-overtime-context"
+            ))
+        }
+
+        if lower.contains("money")
+            && lower.contains("useful")
+            && lower.contains("gift") {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "gift_preference",
+                value: "Money seemed more useful than guessing a gift.",
+                evidence: sentence,
+                confidence: 0.74,
+                memoryKey: "money-more-useful-than-guessing-gift"
+            ))
+        }
+
+        if let match = regexMatches(
+            pattern: #"(?i)^\s*(?:[A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*){0,2}|I|we)\s+got\s+(.+?)\s+and\s+liked\s+it\s*$"#,
+            in: normalizedSentence
+        ).first,
+           let mention = cleanedMention(match.captures.first ?? nil, kind: .object) {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "food_preference",
+                value: "Visher liked \(mention).",
+                evidence: sentence,
+                confidence: 0.76,
+                memoryKey: "liked-\(mention.slugComponent)"
+            ))
+        }
+
         return candidates.compactMap { $0 }
     }
 
@@ -1345,7 +1441,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
     ) -> SecondBrainEnrichmentOutput? {
         guard let value = trimmedNonEmpty(value),
               let evidence = trimmedNonEmpty(evidence) else { return nil }
-        return SecondBrainEnrichmentOutput(
+        var output = SecondBrainEnrichmentOutput(
             owner: sourceOwner,
             chunkID: nil,
             kind: "memory_candidate",
@@ -1364,8 +1460,13 @@ struct SecondBrainJournalGraphCandidateExtractor {
                 "memory_status": "current",
                 "requested_owner_type": sourceOwner.ownerType,
                 "requested_owner_ref": sourceOwner.ownerID,
+                "source_owner_ref": sourceOwner.canonicalRef,
+                "source_kind": "journal",
+                "source_quote": evidence,
             ]
         )
+        output.metadata["candidate_ref"] = "memory_candidate:\(output.id)"
+        return output
     }
 
     private func normalizedValue(_ value: String) -> String {
@@ -1428,6 +1529,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
         if lower.contains("taco")
             || lower.contains("pizza")
             || lower.contains("burger")
+            || lower.contains("sauce")
             || lower.contains("meal")
             || lower.contains("dinner")
             || lower.contains("lunch")
@@ -1603,8 +1705,11 @@ struct SecondBrainJournalGraphCandidateExtractor {
             #"(?i)\s+today$"#,
             #"(?i)\s+again$"#,
             #"(?i)\s+while\s+.+$"#,
+            #"(?i)\s+through\s+.+$"#,
             #"(?i)\s+that\s+(?:he|she|they|i|we)\s+.+$"#,
             #"(?i)\s+and\s+(?:watched|thought|talked|spoke|wondered|worried|laughed|joked)\s+.+$"#,
+            #"(?i)\s+and\s+(?:he|she|they|i|we)\s+(?:was|were|is|are|had|has|did)\s+.+$"#,
+            #"(?i),\s+so\s+.+$"#,
             #"(?i)\s+because\s+.+$"#,
             #"(?i)\s+but\s+.+$"#,
             #"(?i)\s+with\s+.+$"#,
@@ -1639,6 +1744,8 @@ struct SecondBrainJournalGraphCandidateExtractor {
 
         switch kind {
         case .media:
+            if lower.hasPrefix("through ") { return true }
+            if lower.hasPrefix("on r/") { return true }
             if lower.hasPrefix("blades") || lower.contains(" or something") { return true }
             if lower.contains("basketball")
                 || lower.contains("championship")

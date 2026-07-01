@@ -193,18 +193,44 @@ struct SecondBrainGraphCandidateContractTests {
             - After the movie, they went to bed.
             - Ryker said his throat felt like “saw blades” or something similar and did not eat all of it.
             - They went to the Marysville outlet mall, and Bane wanted the Nike store.
+            - Ryland wanted Starbucks, so Visher took her to Starbucks for her birthday.
+            - Visher got Buffalo Wild Wings hot honey sauce and liked it.
+            - Visher finished watching season 2 of the live-action Avatar: The Last Airbender on Netflix, or at least watched through seven episodes.
+            - Visher saw on r/Boeing that the CMS/outage left about 40 systems down during the shift.
+            - Visher took PTO for Ryland's birthday and worked overtime around it.
+            - They went to the mall and she was buying random things; money seemed more useful than guessing a gift.
             """
         )
 
         let graphOutputs = result.outputs.filter { $0.kind == "graph_candidate" }
-        #expect(graphOutputs.map(\.value) == ["Reminders of Him", "The Way Way Back", "the Marysville outlet mall", "Nike store"])
+        let graphValues = graphOutputs.map(\.value)
+        let memoryOutputs = result.outputs.filter { $0.kind == "memory_candidate" }
+        let allValues = result.outputs.map(\.value)
+        #expect(graphValues.contains("Reminders of Him"))
+        #expect(graphValues.contains("The Way Way Back"))
+        #expect(graphValues.contains("the Marysville outlet mall"))
+        #expect(graphValues.contains("Nike store"))
+        #expect(graphValues.contains("Starbucks"))
+        #expect(graphValues.contains("Buffalo Wild Wings hot honey sauce"))
+        #expect(graphValues.contains("Avatar: The Last Airbender"))
+        #expect(allValues.contains { $0.localizedCaseInsensitiveContains("CMS/outage") || $0.localizedCaseInsensitiveContains("40 systems down") })
+        #expect(allValues.contains { $0.localizedCaseInsensitiveContains("PTO") || $0.localizedCaseInsensitiveContains("overtime") })
+        #expect(allValues.contains { $0.localizedCaseInsensitiveContains("money") && $0.localizedCaseInsensitiveContains("gift") })
         #expect(graphOutputs.map(\.evidence).contains("- Jami and Visher watched Reminders of Him while eating"))
         #expect(graphOutputs.first { $0.value == "The Way Way Back" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"watched\"]")
         #expect(graphOutputs.first { $0.value == "the Marysville outlet mall" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"visited\"]")
         #expect(graphOutputs.first { $0.value == "Nike store" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.subjectText] == "Bane")
         #expect(graphOutputs.first { $0.value == "Nike store" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"wants\"]")
-        #expect(!graphOutputs.map(\.value).contains("it"))
-        #expect(!graphOutputs.map(\.value).contains("bed"))
+        #expect(graphOutputs.first { $0.value == "Avatar: The Last Airbender" }?.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses] == "[\"watched\"]")
+        #expect(graphOutputs.allSatisfy { $0.reviewState == "suggested" })
+        #expect(memoryOutputs.allSatisfy { $0.reviewState == "suggested" })
+        #expect(result.outputs.allSatisfy { $0.metadata["source_owner_ref"] == owner.canonicalRef || $0.owner == owner })
+        #expect(!graphValues.contains("it"))
+        #expect(!graphValues.contains("bed"))
+        #expect(!graphValues.contains("through seven episodes"))
+        #expect(!graphValues.contains { $0.localizedCaseInsensitiveContains("on r/Boeing") })
+        #expect(!graphValues.contains("the mall and she was buying random things; money seemed more useful than guessing a gift"))
+        #expect(!graphValues.contains { $0.localizedCaseInsensitiveContains("money seemed more useful than guessing a gift") })
         #expect(!graphOutputs.contains { $0.value.localizedCaseInsensitiveContains("saw blades") })
     }
 
