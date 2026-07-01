@@ -146,6 +146,12 @@ struct NaturalPreferenceRecallTests {
         ])
     }
 
+    private func factValidityCandidateCount(in db: CiderDatabase) throws -> Int {
+        let stmt = try db.prepare("SELECT count(*) FROM fact_validity_candidates;")
+        guard try stmt.step() else { return 0 }
+        return Int(stmt.int64(at: 0))
+    }
+
     private func makeRecallService(
         db: CiderDatabase,
         store: SecondBrainStore,
@@ -1015,6 +1021,151 @@ struct NaturalPreferenceRecallTests {
         #expect(firstSource.dateSource == "contacts.birthday")
         #expect(firstSource.evidence.contains("Ryland birthday"))
         #expect(firstSource.safeNextCommands.contains("cider-cli item get contact \(contactID.uuidString) --json"))
+    }
+
+    @Test("review backed contact birthday candidate accepts into structured contact truth")
+    func reviewBackedContactBirthdayCandidateAcceptsIntoStructuredTruth() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let journalID = UUID()
+        try insertJournal(
+            id: journalID,
+            title: "Daily Journal 2026-06-30",
+            body: "Today is Ryland's birthday; remember to wish her happy birthday. Boeing had about 40 systems down today.",
+            createdAt: try localDate("2026-06-30"),
+            into: db,
+            store: store
+        )
+
+        let recall = makeRecallService(db: db, store: store, currentDate: try localDate("2026-07-02"))
+        let before = try recall.answerMemory("what was going on around Ryland's birthday?", limit: 5)
+        let sourceResolution = try #require(before.intent.temporalRange?.eventResolution)
+        let source = try #require(sourceResolution.sources.first)
+
+        #expect(sourceResolution.sourceKind == "journal_observation")
+        #expect(sourceResolution.truthBoundary == "source_backed_observation_not_accepted_memory_truth")
+        #expect(try factValidityCandidateCount(in: db) == 0)
+        #expect(source.safeNextCommands.contains { command in
+            command.contains("cider-cli item event-date-facts propose")
+                && command.contains("--source-owner note:\(journalID.uuidString)")
+                && command.contains("--target-kind contactBirthday")
+        })
+
+        let service = SecondBrainEventDateFactReviewService(database: db)
+        let proposal = try service.proposeFromSourceObservation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: journalID.uuidString),
+            sourceQuote: source.evidence,
+            sourceDate: try localDate("2026-06-30"),
+            targetKind: .contactBirthday,
+            actor: "test",
+            reason: "User approved Ryland birthday from the cited journal source."
+        )
+
+        #expect(proposal.candidateRef.hasPrefix("fact_validity_candidate:"))
+        #expect(proposal.factKind == "contact_birthday")
+        #expect(proposal.eventLabel == "Ryland birthday")
+        #expect(proposal.proposedDate == "2026-06-30")
+        #expect(proposal.sourceItemRefs == ["note:\(journalID.uuidString)"])
+        #expect(proposal.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(proposal.actionReceipt["changed"] as? Bool == true)
+        #expect(proposal.provenance["sourceRef"] as? String == "note:\(journalID.uuidString)")
+        #expect(proposal.safeVerificationCommands.contains("cider-cli item event-date-facts inspect \(proposal.id) --json"))
+
+        let stillReadOnly = try recall.answerMemory("what was going on around Ryland's birthday?", limit: 5)
+        #expect(stillReadOnly.intent.temporalRange?.eventResolution?.sourceKind == "journal_observation")
+
+        let accepted = try service.accept(candidateID: proposal.id, actor: "reviewer", decisionNote: "Approved as Ryland's birthday.")
+        #expect(accepted.reviewState == "accepted")
+        #expect(accepted.truthBoundary == "accepted_contact_birthday")
+        #expect(accepted.structuredFactRef?.hasPrefix("contact:") == true)
+        #expect(accepted.actionReceipt["changed"] as? Bool == true)
+
+        let after = try recall.answerMemory("what was going on around Ryland's birthday?", limit: 5)
+        let eventResolution = try #require(after.intent.temporalRange?.eventResolution)
+        let firstSource = try #require(eventResolution.sources.first)
+
+        #expect(eventResolution.resolvedDate == "2026-06-30")
+        #expect(eventResolution.sourceKind == "contact_birthday")
+        #expect(eventResolution.truthBoundary == "accepted_contact_birthday")
+        #expect(firstSource.sourceRef == accepted.structuredFactRef)
+        #expect(firstSource.dateSource == "contacts.birthday")
+    }
+
+    @Test("review backed date card candidate accepts into structured event truth")
+    func reviewBackedDateCardCandidateAcceptsIntoStructuredTruth() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let journalID = UUID()
+        try insertJournal(
+            id: journalID,
+            title: "Daily Journal 2026-06-30",
+            body: "Today is Ryland's birthday; remember to wish her happy birthday.",
+            createdAt: try localDate("2026-06-30"),
+            into: db,
+            store: store
+        )
+
+        let service = SecondBrainEventDateFactReviewService(database: db)
+        let proposal = try service.proposeFromSourceObservation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: journalID.uuidString),
+            sourceQuote: "Today is Ryland's birthday; remember to wish her happy birthday.",
+            sourceDate: try localDate("2026-06-30"),
+            targetKind: .dateCard,
+            actor: "test",
+            reason: "Create an approved dateCard from the cited birthday observation."
+        )
+        let accepted = try service.accept(candidateID: proposal.id, actor: "reviewer", decisionNote: "Approved date card.")
+
+        #expect(accepted.factKind == "event_date")
+        #expect(accepted.truthBoundary == "accepted_event_date")
+        #expect(accepted.structuredFactRef?.hasPrefix("dateCard:") == true)
+
+        let recall = makeRecallService(db: db, store: store, currentDate: try localDate("2026-07-02"))
+        let after = try recall.answerMemory("what was going on around Ryland's birthday?", limit: 5)
+        let eventResolution = try #require(after.intent.temporalRange?.eventResolution)
+        let firstSource = try #require(eventResolution.sources.first)
+
+        #expect(eventResolution.sourceKind == "accepted_event_date")
+        #expect(eventResolution.truthBoundary == "accepted_event_date_item")
+        #expect(firstSource.sourceRef == accepted.structuredFactRef)
+        #expect(firstSource.dateSource == "events.start_at")
+    }
+
+    @Test("review backed event date proposals reject ambiguous or unresolved observations")
+    func reviewBackedEventDateProposalsRejectAmbiguousOrUnresolvedObservations() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = SecondBrainEventDateFactReviewService(database: db)
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+
+        #expect(throws: SecondBrainEventDateFactReviewService.EventDateFactReviewError.self) {
+            _ = try service.proposeFromSourceObservation(
+                sourceOwner: owner,
+                sourceQuote: "Today is Ryland's birthday and Harper's birthday.",
+                sourceDate: try localDate("2026-06-30"),
+                targetKind: .contactBirthday,
+                actor: "test",
+                reason: "Ambiguous source should not create a candidate."
+            )
+        }
+
+        #expect(throws: SecondBrainEventDateFactReviewService.EventDateFactReviewError.self) {
+            _ = try service.proposeFromSourceObservation(
+                sourceOwner: owner,
+                sourceQuote: "Today was a regular work day.",
+                sourceDate: try localDate("2026-06-30"),
+                targetKind: .dateCard,
+                actor: "test",
+                reason: "Unresolved source should not create a candidate."
+            )
+        }
+
+        #expect(try factValidityCandidateCount(in: db) == 0)
     }
 
     @Test("around unresolved event recall does not invent dates")

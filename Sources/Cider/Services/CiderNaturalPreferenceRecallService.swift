@@ -912,10 +912,19 @@ final class CiderNaturalPreferenceRecallService {
             guard eventEvidenceMatches(phraseTokens: phraseTokens, searchable: lowerSearchable) else { continue }
             guard let resolved = eventEvidenceDate(searchable: searchable, bundle: bundle, result: result) else { continue }
             let sourceRef = "\(item.type.rawValue):\(item.id.uuidString)"
-            let commands = [
+            var commands = [
                 "cider-cli item context \(item.type.rawValue) \(item.id.uuidString) --json",
                 "cider-cli item get \(item.type.rawValue) \(item.id.uuidString) --json",
             ]
+            if resolved.sourceKind == "journal_observation" {
+                commands.append(eventDateFactProposalCommand(
+                    sourceType: item.type.rawValue,
+                    sourceID: item.id.uuidString,
+                    sourceQuote: eventEvidenceExcerpt(from: searchable, phraseTokens: phraseTokens),
+                    sourceDate: Self.localDayFormatter.string(from: resolved.date),
+                    targetKind: cleanedPhrase.contains("birthday") ? "contactBirthday" : "dateCard"
+                ))
+            }
             let source = CiderNaturalPreferenceRecallEventResolutionSource(
                 sourceRef: sourceRef,
                 sourceType: item.type.rawValue,
@@ -968,6 +977,16 @@ final class CiderNaturalPreferenceRecallService {
             sources: Array(uniqueMatchingSources.prefix(3)),
             safeNextCommands: orderedUnique(fallbackCommands + uniqueMatchingSources.flatMap(\.safeNextCommands))
         )
+    }
+
+    private func eventDateFactProposalCommand(
+        sourceType: String,
+        sourceID: String,
+        sourceQuote: String,
+        sourceDate: String,
+        targetKind: String
+    ) -> String {
+        "cider-cli item event-date-facts propose --source-owner \(sourceType):\(sourceID) --source-date \(sourceDate) --target-kind \(targetKind) --quote \"\(escapedCommandArgument(sourceQuote))\" --json"
     }
 
     private func eventResolutionConfidence(sourceKind: String) -> String {

@@ -252,6 +252,7 @@ struct CiderCLI {
       cider-cli item graph-health [--json]
       cider-cli item entity list [--limit <n>] [--json]
       cider-cli item entity inspect <entity-ref|name|alias> [--json]
+      cider-cli item event-date-facts list|inspect|propose|accept|reject ... [--json]
       cider-cli item fact-validity list|inspect|state|propose|accept|reject|defer ... [--json]
       cider-cli item memory-facts list [--limit <n>] [--json]
       cider-cli item memory-facts inspect <candidate-id|accepted_memory_fact:id|memory_candidate:id> [--json]
@@ -5937,6 +5938,9 @@ struct CiderCLI {
 
         case "fact-validity", "fact-invalidation", "fact-supersession":
             handleFactValidityCommand(args: args)
+
+        case "event-date-facts", "event-date-fact", "date-facts", "date-fact":
+            handleEventDateFactsCommand(args: args)
 
         case "graph-candidates", "graph-candidate", "graph-candidate-inspect":
             handleGraphCandidateReadCommand(subcommand: subcommand ?? "graph-candidates", args: args)
@@ -21184,6 +21188,172 @@ struct CiderCLI {
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: message]
         )
+    }
+
+    static func handleEventDateFactsCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first ?? "list"
+        let service = SecondBrainEventDateFactReviewService(database: .shared)
+        do {
+            switch action {
+            case "list", "candidates":
+                let states = parseFlag("--state", from: args)
+                    .map { $0.split(separator: ",").map(String.init) }
+                    ?? ["suggested", "needs_review", "deferred"]
+                let candidates = try service.candidates(reviewStates: states)
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.event-date-facts.list",
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "reviewable_candidate_not_truth",
+                    "count": candidates.count,
+                    "candidates": candidates.map(eventDateFactCandidateToDict),
+                    "safeNextCommands": ["cider-cli item event-date-facts list --json"],
+                ]
+                if jsonOutput { outputJSON(payload) } else { print("Event/date fact candidates: \(candidates.count)") }
+
+            case "inspect", "get":
+                guard positional.count >= 2 else { throw eventDateFactError("Usage: cider-cli item event-date-facts inspect <candidate-id> [--json]") }
+                let candidate = try service.inspect(candidateID: positional[1])
+                var payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.event-date-facts.inspect",
+                    "readOnly": true,
+                    "changed": false,
+                    "candidate": eventDateFactCandidateToDict(candidate),
+                    "candidateID": candidate.id,
+                    "candidateRef": candidate.candidateRef,
+                    "truthBoundary": candidate.truthBoundary,
+                    "provenance": candidate.provenance,
+                    "actionReceipt": candidate.actionReceipt,
+                    "safeVerificationCommands": candidate.safeVerificationCommands,
+                    "safeNextCommands": candidate.safeNextCommands,
+                ]
+                if let structuredFactRef = candidate.structuredFactRef { payload["structuredFactRef"] = structuredFactRef }
+                persistActionReceiptIfPresent(payload)
+                if jsonOutput { outputJSON(payload) } else { print("Event/date fact candidate: \(candidate.id)") }
+
+            case "propose":
+                guard let sourceOwnerRef = parseFlag("--source-owner", from: args),
+                      let sourceOwner = ownerRef(from: sourceOwnerRef) else {
+                    throw eventDateFactError("Missing or invalid --source-owner <type:id>")
+                }
+                let quote = parseFlag("--quote", from: args) ?? parseFlag("--source-quote", from: args) ?? ""
+                guard !quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw eventDateFactError("Missing --quote <source quote>")
+                }
+                guard let sourceDate = parseFactValidityDate(parseFlag("--source-date", from: args) ?? parseFlag("--date", from: args)) else {
+                    throw eventDateFactError("Missing or invalid --source-date yyyy-MM-dd")
+                }
+                let targetKind = try eventDateFactTargetKind(parseFlag("--target-kind", from: args) ?? "contactBirthday")
+                let targetItemID = parseFlag("--target-id", from: args).flatMap(UUID.init(uuidString:))
+                let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+                let candidate = try service.proposeFromSourceObservation(
+                    sourceOwner: sourceOwner,
+                    sourceQuote: quote,
+                    sourceDate: sourceDate,
+                    targetKind: targetKind,
+                    actor: actor,
+                    reason: parseFlag("--reason", from: args) ?? "Review-backed structured event/date fact proposed from source observation.",
+                    targetItemID: targetItemID
+                )
+                let payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.event-date-facts.propose",
+                    "readOnly": false,
+                    "changed": true,
+                    "candidate": eventDateFactCandidateToDict(candidate),
+                    "candidateID": candidate.id,
+                    "candidateRef": candidate.candidateRef,
+                    "truthBoundary": candidate.truthBoundary,
+                    "sourceItemRefs": candidate.sourceItemRefs,
+                    "proposedDate": candidate.proposedDate,
+                    "confidence": candidate.confidence,
+                    "reason": candidate.reason,
+                    "provenance": candidate.provenance,
+                    "actionReceipt": candidate.actionReceipt,
+                    "safeVerificationCommands": candidate.safeVerificationCommands,
+                    "safeNextCommands": candidate.safeNextCommands,
+                ]
+                persistActionReceiptIfPresent(payload)
+                if jsonOutput { outputJSON(payload) } else { print("Proposed event/date fact candidate: \(candidate.id)") }
+
+            case "accept", "approve", "reject":
+                guard positional.count >= 2 else { throw eventDateFactError("Usage: cider-cli item event-date-facts \(action) <candidate-id> --reason <reason> [--json]") }
+                let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+                let reason = parseFlag("--reason", from: args) ?? parseFlag("--decision-note", from: args) ?? "Event/date fact review action."
+                let commandAction = action == "approve" ? "accept" : action
+                let candidate = commandAction == "reject"
+                    ? try service.reject(candidateID: positional[1], actor: actor, reason: reason)
+                    : try service.accept(candidateID: positional[1], actor: actor, decisionNote: reason)
+                var payload: [String: Any] = [
+                    "ok": true,
+                    "command": "item.event-date-facts.\(commandAction)",
+                    "readOnly": false,
+                    "changed": candidate.actionReceipt["changed"] as? Bool ?? true,
+                    "candidate": eventDateFactCandidateToDict(candidate),
+                    "candidateID": candidate.id,
+                    "candidateRef": candidate.candidateRef,
+                    "truthBoundary": candidate.truthBoundary,
+                    "sourceItemRefs": candidate.sourceItemRefs,
+                    "proposedDate": candidate.proposedDate,
+                    "provenance": candidate.provenance,
+                    "actionReceipt": candidate.actionReceipt,
+                    "safeVerificationCommands": candidate.safeVerificationCommands,
+                    "safeNextCommands": candidate.safeNextCommands,
+                ]
+                if let structuredFactRef = candidate.structuredFactRef { payload["structuredFactRef"] = structuredFactRef }
+                persistActionReceiptIfPresent(payload)
+                if jsonOutput { outputJSON(payload) } else { print("Event/date fact \(commandAction): \(candidate.id)") }
+
+            default:
+                throw eventDateFactError("Usage: cider-cli item event-date-facts list|inspect|propose|accept|reject ... [--json]")
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func eventDateFactTargetKind(_ raw: String) throws -> SecondBrainEventDateFactReviewService.TargetKind {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "-", with: "_").lowercased() {
+        case "contactbirthday", "contact_birthday", "birthday", "contact":
+            return .contactBirthday
+        case "datecard", "date_card", "event", "event_date":
+            return .dateCard
+        default:
+            throw eventDateFactError("Unsupported --target-kind '\(raw)'. Use contactBirthday or dateCard.")
+        }
+    }
+
+    static func eventDateFactCandidateToDict(_ view: SecondBrainEventDateFactCandidateView) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": view.id,
+            "candidateID": view.id,
+            "candidateRef": view.candidateRef,
+            "targetRef": view.targetRef,
+            "factKind": view.factKind,
+            "eventLabel": view.eventLabel,
+            "proposedDate": view.proposedDate,
+            "confidence": view.confidence,
+            "reason": view.reason,
+            "reviewState": view.reviewState,
+            "truthBoundary": view.truthBoundary,
+            "sourceItemRefs": view.sourceItemRefs,
+            "provenance": view.provenance,
+            "actionReceipt": view.actionReceipt,
+            "safeVerificationCommands": view.safeVerificationCommands,
+            "safeNextCommands": view.safeNextCommands,
+            "factValidityCandidate": factValidityCandidateToDict(view.candidate),
+        ]
+        if let structuredFactRef = view.structuredFactRef {
+            dict["structuredFactRef"] = structuredFactRef
+        }
+        return dict
+    }
+
+    static func eventDateFactError(_ message: String) -> NSError {
+        NSError(domain: "CiderCLI.EventDateFacts", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 
     static func handleFactValidityCommand(args: [String]) {
