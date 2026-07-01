@@ -152,6 +152,54 @@ final class SecondBrainEnrichmentOutputService {
         let updatedAt = DatabaseHelpers.encode(output.updatedAt > output.createdAt ? output.updatedAt : now)
         let metadata = DatabaseHelpers.encodeJSON(output.metadata) ?? "{}"
         let occurrenceKey = Self.occurrenceKey(for: output)
+        if previous != nil {
+            let updateStmt = try database.prepare("""
+                UPDATE enrichment_outputs
+                SET chunk_id = ?,
+                    kind = ?,
+                    value = ?,
+                    normalized_value = ?,
+                    label = ?,
+                    evidence = ?,
+                    source = ?,
+                    occurrence_key = ?,
+                    confidence = ?,
+                    review_state = ?,
+                    metadata = ?,
+                    updated_at = ?
+                WHERE id = ?;
+                """)
+            updateStmt.bind(output.chunkID, at: 1)
+                .bind(output.kind, at: 2)
+                .bind(output.value, at: 3)
+                .bind(output.normalizedValue, at: 4)
+                .bind(output.label, at: 5)
+                .bind(output.evidence, at: 6)
+                .bind(output.source, at: 7)
+                .bind(occurrenceKey, at: 8)
+                .bind(output.confidence, at: 9)
+                .bind(output.reviewState, at: 10)
+                .bind(metadata, at: 11)
+                .bind(updatedAt, at: 12)
+                .bind(output.id, at: 13)
+            try updateStmt.step()
+            if let evidenceRecord {
+                let evidenceService = SecondBrainSourceEvidenceService(database: database)
+                try evidenceService.record(evidenceRecord)
+                let storedEvidence = try evidenceService.record(derivedOwner: evidenceRecord.derivedOwner, evidenceKind: evidenceRecord.evidenceKind) ?? evidenceRecord
+                _ = try SecondBrainReviewLifecycleService(database: database).recordEnrichmentLifecycle(
+                    previous: previous,
+                    current: output,
+                    sourceEvidence: storedEvidence
+                )
+            } else {
+                _ = try SecondBrainReviewLifecycleService(database: database).recordEnrichmentLifecycle(
+                    previous: previous,
+                    current: output
+                )
+            }
+            return
+        }
         let stmt = try database.prepare("""
             INSERT INTO enrichment_outputs (
                 id, owner_type, owner_id, chunk_id, kind, value, normalized_value,

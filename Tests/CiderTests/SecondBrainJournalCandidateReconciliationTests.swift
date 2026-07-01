@@ -772,4 +772,229 @@ struct SecondBrainJournalCandidateReconciliationTests {
         #expect(dict["truthBoundary"] as? String == "reviewable_candidate_not_truth")
         #expect((dict["safeNextCommands"] as? [String]) == ["cider-cli item graph-candidate candidate-1 --json"])
     }
+
+    @Test("source span backfill applies only selected recoverable candidates without accepting truth")
+    func sourceSpanBackfillAppliesOnlySelectedRecoverableCandidatesWithoutAcceptingTruth() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let selectedQuote = "- Visher finished Avatar season 2."
+        let untouchedQuote = "- Visher liked the sea salt foam black tea."
+        let rawContent = """
+        \(selectedQuote)
+        \(untouchedQuote)
+        """
+        var selected = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Avatar season 2",
+            sourceQuote: selectedQuote,
+            sourceKind: "journal",
+            objectTypeGuesses: [.media],
+            relationGuesses: [.watched],
+            confidence: 0.72,
+            confidenceReason: "Legacy pre-span fixture.",
+            source: "journal_graph_candidate.v0"
+        )
+        selected.metadata.removeValue(forKey: "source_span_start")
+        selected.metadata.removeValue(forKey: "source_span_end")
+        selected.metadata["truth_boundary"] = "reviewable_candidate_not_truth"
+        selected.metadata["accepted_as_truth"] = "false"
+        var untouched = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "sea salt foam black tea",
+            sourceQuote: untouchedQuote,
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            relationGuesses: [.likesDrink],
+            confidence: 0.74,
+            confidenceReason: "Legacy pre-span fixture.",
+            source: "journal_graph_candidate.v0.untouched"
+        )
+        untouched.metadata.removeValue(forKey: "source_span_start")
+        untouched.metadata.removeValue(forKey: "source_span_end")
+        untouched.metadata["truth_boundary"] = "reviewable_candidate_not_truth"
+        untouched.metadata["accepted_as_truth"] = "false"
+
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(selected)
+        try outputService.record(untouched)
+
+        let expected = try #require(rawContent.range(of: selectedQuote))
+        let expectedStart = rawContent.distance(from: rawContent.startIndex, to: expected.lowerBound)
+        let expectedEnd = rawContent.distance(from: rawContent.startIndex, to: expected.upperBound)
+
+        let report = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .applyMissingSourceSpans(
+                owner: owner,
+                rawContent: rawContent,
+                selectedCandidateRefs: [selected.id],
+                actor: "codex-test",
+                reason: "Approved source span backfill test."
+            )
+
+        #expect(!report.readOnly)
+        #expect(report.changed)
+        #expect(report.selectedCandidateRefs == [selected.id])
+        #expect(report.changedCandidateIDs == [selected.id])
+        #expect(report.truthBoundary == "reviewable_candidate_not_truth")
+        let applied = try #require(report.candidates.first)
+        #expect(applied.candidateID == selected.id)
+        #expect(applied.beforeSpanStart == nil)
+        #expect(applied.beforeSpanEnd == nil)
+        #expect(applied.afterSpanStart == expectedStart)
+        #expect(applied.afterSpanEnd == expectedEnd)
+        #expect(applied.status == "applied")
+        #expect(applied.changed)
+
+        let storedSelected = try #require(try outputService.output(id: selected.id))
+        #expect(storedSelected.metadata["source_span_start"] == "\(expectedStart)")
+        #expect(storedSelected.metadata["source_span_end"] == "\(expectedEnd)")
+        #expect(storedSelected.reviewState == "suggested")
+        #expect(storedSelected.metadata["truth_boundary"] == "reviewable_candidate_not_truth")
+        #expect(storedSelected.metadata["accepted_as_truth"] == "false")
+
+        let evidenceRecord = try #require(try SecondBrainSourceEvidenceService(database: db)
+            .record(derivedOwner: SecondBrainOwnerRef(ownerType: "enrichment_output", ownerID: selected.id)))
+        #expect(evidenceRecord.spanStart == expectedStart)
+        #expect(evidenceRecord.spanEnd == expectedEnd)
+
+        let storedUntouched = try #require(try outputService.output(id: untouched.id))
+        #expect(storedUntouched.metadata["source_span_start"] == nil)
+        #expect(storedUntouched.metadata["source_span_end"] == nil)
+    }
+
+    @Test("source span backfill fails closed when selected quote is ambiguous")
+    func sourceSpanBackfillFailsClosedWhenSelectedQuoteIsAmbiguous() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let quote = "- Visher watched Avatar."
+        let rawContent = """
+        \(quote)
+        \(quote)
+        """
+        var candidate = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "Avatar",
+            sourceQuote: quote,
+            sourceKind: "journal",
+            objectTypeGuesses: [.media],
+            relationGuesses: [.watched],
+            source: "journal_graph_candidate.v0"
+        )
+        candidate.metadata.removeValue(forKey: "source_span_start")
+        candidate.metadata.removeValue(forKey: "source_span_end")
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(candidate)
+
+        #expect(throws: SecondBrainJournalCandidateReconciliationService.SourceSpanBackfillError.selectedCandidateNotRecoverable(candidate.id, "ambiguous")) {
+            _ = try SecondBrainJournalCandidateReconciliationService(database: db)
+                .applyMissingSourceSpans(
+                    owner: owner,
+                    rawContent: rawContent,
+                    selectedCandidateRefs: [candidate.id],
+                    actor: "codex-test",
+                    reason: nil
+                )
+        }
+
+        let stored = try #require(try outputService.output(id: candidate.id))
+        #expect(stored.metadata["source_span_start"] == nil)
+        #expect(stored.metadata["source_span_end"] == nil)
+    }
+
+    @Test("source span backfill leaves already spanned candidates unchanged and idempotent")
+    func sourceSpanBackfillLeavesAlreadySpannedCandidatesUnchangedAndIdempotent() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let quote = "- Visher liked the sea salt foam black tea."
+        let rawContent = quote
+        let range = try #require(rawContent.range(of: quote))
+        let start = rawContent.distance(from: rawContent.startIndex, to: range.lowerBound)
+        let end = rawContent.distance(from: rawContent.startIndex, to: range.upperBound)
+        var candidate = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "sea salt foam black tea",
+            sourceQuote: quote,
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            relationGuesses: [.likesDrink],
+            source: "journal_graph_candidate.v1"
+        )
+        candidate.metadata["source_span_start"] = "\(start)"
+        candidate.metadata["source_span_end"] = "\(end)"
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(candidate)
+
+        let first = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .applyMissingSourceSpans(
+                owner: owner,
+                rawContent: rawContent,
+                selectedCandidateRefs: [candidate.id],
+                actor: "codex-test",
+                reason: nil
+            )
+        let second = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .applyMissingSourceSpans(
+                owner: owner,
+                rawContent: rawContent,
+                selectedCandidateRefs: [candidate.id],
+                actor: "codex-test",
+                reason: nil
+            )
+
+        #expect(!first.readOnly)
+        #expect(!first.changed)
+        #expect(first.candidates.first?.status == "unchanged")
+        #expect(first.candidates.first?.beforeSpanStart == start)
+        #expect(first.candidates.first?.afterSpanStart == start)
+        #expect(!second.changed)
+        let stored = try #require(try outputService.output(id: candidate.id))
+        #expect(stored.metadata["source_span_start"] == "\(start)")
+        #expect(stored.metadata["source_span_end"] == "\(end)")
+    }
+
+    @Test("source span backfill CLI dictionary exposes provenance receipt inputs")
+    func sourceSpanBackfillCLIDictionaryExposesProvenanceReceiptInputs() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let result = SecondBrainJournalCandidateSourceSpanBackfillCandidate(
+            candidateID: "candidate-1",
+            candidateRef: "graph_candidate:candidate-1",
+            sourceOwnerRef: owner.canonicalRef,
+            sourceQuote: "- Visher watched Avatar.",
+            status: "applied",
+            beforeSpanStart: nil,
+            beforeSpanEnd: nil,
+            afterSpanStart: 12,
+            afterSpanEnd: 36,
+            recoveryStatus: "recoverable",
+            ambiguityReason: nil,
+            sourceEvidenceRef: "source_evidence:evidence-1",
+            readOnly: false,
+            changed: true,
+            truthBoundary: "reviewable_candidate_not_truth",
+            safeNextCommands: ["cider-cli item graph-candidate candidate-1 --json"]
+        )
+
+        let dict = CiderCLI.journalCandidateSourceSpanBackfillCandidateToDict(result)
+
+        #expect(dict["candidateID"] as? String == "candidate-1")
+        #expect(dict["candidateRef"] as? String == "graph_candidate:candidate-1")
+        #expect(dict["status"] as? String == "applied")
+        #expect(dict["afterSpanStart"] as? Int == 12)
+        #expect(dict["afterSpanEnd"] as? Int == 36)
+        #expect(dict["sourceEvidenceRef"] as? String == "source_evidence:evidence-1")
+        #expect(dict["readOnly"] as? Bool == false)
+        #expect(dict["changed"] as? Bool == true)
+        #expect(dict["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect((dict["safeNextCommands"] as? [String]) == ["cider-cli item graph-candidate candidate-1 --json"])
+    }
 }

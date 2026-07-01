@@ -72,6 +72,38 @@ struct SecondBrainJournalCandidateSourceSpanAuditReport: Codable, Equatable {
     var safeNextCommands: [String]
 }
 
+struct SecondBrainJournalCandidateSourceSpanBackfillCandidate: Codable, Equatable {
+    var candidateID: String
+    var candidateRef: String
+    var sourceOwnerRef: String
+    var sourceQuote: String
+    var status: String
+    var beforeSpanStart: Int?
+    var beforeSpanEnd: Int?
+    var afterSpanStart: Int?
+    var afterSpanEnd: Int?
+    var recoveryStatus: String
+    var ambiguityReason: String?
+    var sourceEvidenceRef: String?
+    var readOnly: Bool
+    var changed: Bool
+    var truthBoundary: String
+    var safeNextCommands: [String]
+}
+
+struct SecondBrainJournalCandidateSourceSpanBackfillReport: Codable, Equatable {
+    var owner: SecondBrainOwnerRef
+    var readOnly: Bool
+    var changed: Bool
+    var totalStoredCandidateCount: Int
+    var selectedCandidateRefs: [String]
+    var changedCandidateIDs: [String]
+    var candidateCount: Int
+    var candidates: [SecondBrainJournalCandidateSourceSpanBackfillCandidate]
+    var truthBoundary: String
+    var safeNextCommands: [String]
+}
+
 @MainActor
 final class SecondBrainJournalCandidateReconciliationService {
     enum ReconciliationError: LocalizedError, Equatable {
@@ -84,6 +116,26 @@ final class SecondBrainJournalCandidateReconciliationService {
                 return "Apply requires at least one explicit candidate ID."
             case .selectedCandidateNotDiagnosed(let id):
                 return "Candidate '\(id)' was not diagnosed as safely supersedable for this journal source."
+            }
+        }
+    }
+
+    enum SourceSpanBackfillError: LocalizedError, Equatable {
+        case noSelectedCandidates
+        case selectedCandidateNotFound(String)
+        case selectedCandidateNotReviewable(String)
+        case selectedCandidateNotRecoverable(String, String)
+
+        var errorDescription: String? {
+            switch self {
+            case .noSelectedCandidates:
+                return "Source span backfill requires at least one explicit candidate ID or ref."
+            case .selectedCandidateNotFound(let ref):
+                return "Candidate '\(ref)' was not found in this journal source span audit."
+            case .selectedCandidateNotReviewable(let ref):
+                return "Candidate '\(ref)' is not a reviewable journal graph candidate and cannot be source-span backfilled."
+            case .selectedCandidateNotRecoverable(let ref, let status):
+                return "Candidate '\(ref)' is not safely recoverable for source span backfill (status: \(status))."
             }
         }
     }
@@ -132,6 +184,103 @@ final class SecondBrainJournalCandidateReconciliationService {
             audits: audits,
             truthBoundary: "reviewable_candidate_not_truth",
             safeNextCommands: sourceSpanAuditSafeNextCommands(owner: owner, audits: audits)
+        )
+    }
+
+    func applyMissingSourceSpans(
+        owner: SecondBrainOwnerRef,
+        rawContent: String,
+        selectedCandidateRefs: [String],
+        actor: String,
+        reason: String?,
+        limit: Int = 100
+    ) throws -> SecondBrainJournalCandidateSourceSpanBackfillReport {
+        let selected = selectedCandidateRefs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !selected.isEmpty else { throw SourceSpanBackfillError.noSelectedCandidates }
+
+        let stored = try storedJournalGraphCandidates(owner: owner)
+        let outputsByID = Dictionary(uniqueKeysWithValues: stored.map { ($0.id, $0) })
+        let audits = stored
+            .prefix(max(0, limit))
+            .map { sourceSpanAudit(for: $0, rawContent: rawContent) }
+        let auditsByID = Dictionary(uniqueKeysWithValues: audits.map { ($0.candidateID, $0) })
+        let auditsByRef = Dictionary(uniqueKeysWithValues: audits.map { ($0.candidateRef, $0) })
+
+        var results: [SecondBrainJournalCandidateSourceSpanBackfillCandidate] = []
+        var changedCandidateIDs: [String] = []
+
+        for selectedRef in selected {
+            guard let audit = auditsByID[selectedRef] ?? auditsByRef[selectedRef] ?? auditsByID[normalizedGraphCandidateID(from: selectedRef)] else {
+                throw SourceSpanBackfillError.selectedCandidateNotFound(selectedRef)
+            }
+            guard var output = outputsByID[audit.candidateID], isReviewable(output.reviewState) else {
+                throw SourceSpanBackfillError.selectedCandidateNotReviewable(selectedRef)
+            }
+
+            if audit.recoveryStatus == "unchanged" {
+                let result = sourceSpanBackfillCandidate(
+                    audit: audit,
+                    status: "unchanged",
+                    beforeSpanStart: audit.currentSpanStart,
+                    beforeSpanEnd: audit.currentSpanEnd,
+                    afterSpanStart: audit.currentSpanStart,
+                    afterSpanEnd: audit.currentSpanEnd,
+                    sourceEvidenceRef: output.metadata["source_evidence_ref"],
+                    changed: false
+                )
+                results.append(result)
+                continue
+            }
+
+            guard audit.recoveryStatus == "recoverable",
+                  let recoveredStart = audit.recoveredSpanStart,
+                  let recoveredEnd = audit.recoveredSpanEnd else {
+                throw SourceSpanBackfillError.selectedCandidateNotRecoverable(selectedRef, audit.recoveryStatus)
+            }
+
+            let beforeStart = audit.currentSpanStart
+            let beforeEnd = audit.currentSpanEnd
+            output.metadata["source_span_start"] = "\(recoveredStart)"
+            output.metadata["source_span_end"] = "\(recoveredEnd)"
+            output.metadata["source_span_backfilled_at"] = ISO8601DateFormatter().string(from: Date())
+            output.metadata["source_span_backfilled_by"] = trimmed(actor) ?? "system"
+            if let reason = trimmed(reason) {
+                output.metadata["source_span_backfill_reason"] = reason
+            }
+            output.metadata["truth_boundary"] = "reviewable_candidate_not_truth"
+            output.metadata["review_boundary"] = "reviewable_candidate_not_truth"
+            output.metadata["accepted_as_truth"] = "false"
+            output.updatedAt = Date()
+            try outputService.record(output)
+            let storedOutput = try outputService.output(id: output.id) ?? output
+            changedCandidateIDs.append(output.id)
+            results.append(
+                sourceSpanBackfillCandidate(
+                    audit: audit,
+                    status: "applied",
+                    beforeSpanStart: beforeStart,
+                    beforeSpanEnd: beforeEnd,
+                    afterSpanStart: recoveredStart,
+                    afterSpanEnd: recoveredEnd,
+                    sourceEvidenceRef: storedOutput.metadata["source_evidence_ref"],
+                    changed: true
+                )
+            )
+        }
+
+        return SecondBrainJournalCandidateSourceSpanBackfillReport(
+            owner: owner,
+            readOnly: false,
+            changed: !changedCandidateIDs.isEmpty,
+            totalStoredCandidateCount: stored.count,
+            selectedCandidateRefs: selected,
+            changedCandidateIDs: changedCandidateIDs,
+            candidateCount: results.count,
+            candidates: results,
+            truthBoundary: "reviewable_candidate_not_truth",
+            safeNextCommands: sourceSpanBackfillSafeNextCommands(owner: owner, candidates: results)
         )
     }
 
@@ -916,5 +1065,52 @@ final class SecondBrainJournalCandidateReconciliationService {
         commands.append(contentsOf: audits.prefix(5).map { "cider-cli item graph-candidate \($0.candidateID) --json" })
         var seen = Set<String>()
         return commands.filter { seen.insert($0).inserted }
+    }
+
+    private func sourceSpanBackfillCandidate(
+        audit: SecondBrainJournalCandidateSourceSpanAudit,
+        status: String,
+        beforeSpanStart: Int?,
+        beforeSpanEnd: Int?,
+        afterSpanStart: Int?,
+        afterSpanEnd: Int?,
+        sourceEvidenceRef: String?,
+        changed: Bool
+    ) -> SecondBrainJournalCandidateSourceSpanBackfillCandidate {
+        SecondBrainJournalCandidateSourceSpanBackfillCandidate(
+            candidateID: audit.candidateID,
+            candidateRef: audit.candidateRef,
+            sourceOwnerRef: audit.sourceOwnerRef,
+            sourceQuote: audit.sourceQuote,
+            status: status,
+            beforeSpanStart: beforeSpanStart,
+            beforeSpanEnd: beforeSpanEnd,
+            afterSpanStart: afterSpanStart,
+            afterSpanEnd: afterSpanEnd,
+            recoveryStatus: audit.recoveryStatus,
+            ambiguityReason: audit.ambiguityReason,
+            sourceEvidenceRef: sourceEvidenceRef,
+            readOnly: false,
+            changed: changed,
+            truthBoundary: "reviewable_candidate_not_truth",
+            safeNextCommands: ["cider-cli item graph-candidate \(audit.candidateID) --json"]
+        )
+    }
+
+    private func sourceSpanBackfillSafeNextCommands(
+        owner: SecondBrainOwnerRef,
+        candidates: [SecondBrainJournalCandidateSourceSpanBackfillCandidate]
+    ) -> [String] {
+        var commands = [
+            "cider-cli item journal-candidate-source-span-audit \(owner.ownerType) \(owner.ownerID) --json",
+            "cider-cli item graph-candidates \(owner.ownerType) \(owner.ownerID) --include-reviewed --json",
+        ]
+        commands.append(contentsOf: candidates.prefix(5).map { "cider-cli item graph-candidate \($0.candidateID) --json" })
+        var seen = Set<String>()
+        return commands.filter { seen.insert($0).inserted }
+    }
+
+    private func normalizedGraphCandidateID(from ref: String) -> String {
+        ref.hasPrefix("graph_candidate:") ? String(ref.dropFirst("graph_candidate:".count)) : ref
     }
 }

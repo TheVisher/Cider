@@ -265,6 +265,7 @@ struct CiderCLI {
       cider-cli item graph-candidate <candidate-id> [--json]
       cider-cli item journal-candidate-reconcile <owner-type> <owner-id-or-ref> [--dry-run] [--apply --candidate <id>] [--text-file <path>] [--date YYYY-MM-DD] [--time HH:mm] [--json]
       cider-cli item journal-candidate-source-span-audit <owner-type> <owner-id-or-ref> [--text-file <path>] [--limit <n>] [--json]
+      cider-cli item journal-candidate-source-span-backfill <owner-type> <owner-id-or-ref> --candidate <id-or-ref> [--text-file <path>] [--actor <name>] [--reason <text>] [--json]
       cider-cli item accept-graph-candidate <candidate-id> [--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor <name>] [--json]
       cider-cli item reject-graph-candidate <candidate-id> [--reason <text>] [--actor <name>] [--json]
       cider-cli item delegate-graph-candidate <candidate-id> [--task-kind <kind>|--instructions <text>] [--actor <name>] [--json]
@@ -6310,6 +6311,9 @@ struct CiderCLI {
 
         case "journal-candidate-source-span-audit", "journal-candidate-span-audit", "audit-journal-candidate-source-spans":
             handleJournalCandidateSourceSpanAuditCommand(args: args)
+
+        case "journal-candidate-source-span-backfill", "journal-candidate-source-span-apply", "backfill-journal-candidate-source-spans":
+            handleJournalCandidateSourceSpanBackfillCommand(args: args)
 
         case "accept-graph-candidate", "graph-candidate-accept":
             handleGraphCandidateMutationCommand(action: "accept", args: args, store: store)
@@ -22236,6 +22240,45 @@ struct CiderCLI {
         }
     }
 
+    static func handleJournalCandidateSourceSpanBackfillCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        guard positional.count >= 2 else {
+            printCLIError("Usage: cider-cli item journal-candidate-source-span-backfill <owner-type> <owner-id-or-ref> --candidate <id-or-ref> [--text-file <path>] [--actor <name>] [--reason <text>] [--json]")
+            return
+        }
+
+        let owner = normalizedOwner(type: positional[0], ref: positional[1])
+        let selectedCandidateRefs = parseFlagAll("--candidate", from: args) + parseFlagAll("--candidate-id", from: args)
+        if selectedCandidateRefs.isEmpty {
+            printJournalCandidateSourceSpanBackfillError(
+                message: "Source span backfill requires one or more explicit --candidate IDs or refs.",
+                owner: owner,
+                errorCode: "journal_candidate_source_span_backfill_requires_selected_candidates"
+            )
+            return
+        }
+
+        do {
+            let rawContent = try journalCandidateReconciliationRawContent(owner: owner, args: args)
+            let report = try SecondBrainJournalCandidateReconciliationService(database: .shared)
+                .applyMissingSourceSpans(
+                    owner: owner,
+                    rawContent: rawContent,
+                    selectedCandidateRefs: selectedCandidateRefs,
+                    actor: normalizedFlag("--actor", from: args) ?? "cider-cli",
+                    reason: normalizedFlag("--reason", from: args),
+                    limit: boundedGraphCandidateLimit(from: args)
+                )
+            printJournalCandidateSourceSpanBackfillReport(report)
+        } catch {
+            printJournalCandidateSourceSpanBackfillError(
+                message: error.localizedDescription,
+                owner: owner,
+                errorCode: "journal_candidate_source_span_backfill_failed"
+            )
+        }
+    }
+
     static func journalCandidateReconciliationRawContent(owner: SecondBrainOwnerRef, args: [String]) throws -> String {
         if let textFile = normalizedFlag("--text-file", from: args) {
             return try String(contentsOfFile: textFile, encoding: .utf8)
@@ -22386,6 +22429,154 @@ struct CiderCLI {
             "owner": secondBrainOwnerRefToDict(owner),
             "errorCode": errorCode,
             "error": message,
+            "safeVerificationCommands": safeCommands,
+            "safeNextCommands": safeCommands,
+            "actionReceipt": receipt,
+        ]
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput {
+            outputJSON(payload)
+        } else {
+            print("Error: \(message)")
+        }
+    }
+
+    static func printJournalCandidateSourceSpanBackfillReport(_ report: SecondBrainJournalCandidateSourceSpanBackfillReport) {
+        let safeVerificationCommands = [
+            "cider-cli item journal-candidate-source-span-audit \(report.owner.ownerType) \(report.owner.ownerID) --json",
+            "cider-cli item graph-candidates \(report.owner.ownerType) \(report.owner.ownerID) --include-reviewed --json",
+        ]
+        var sourceRefs = [report.owner.canonicalRef]
+        sourceRefs.append(contentsOf: report.candidates.map(\.candidateRef))
+        let evidenceRefs = report.candidates.compactMap(\.sourceEvidenceRef)
+        let receipt = agentActionReceiptToDict(
+            command: "item.journal-candidate-source-span-backfill",
+            action: "backfill_journal_candidate_source_spans",
+            actor: "cider-cli",
+            owner: report.owner,
+            sourceRefs: Array(NSOrderedSet(array: sourceRefs)) as? [String] ?? sourceRefs,
+            evidenceRefs: Array(NSOrderedSet(array: evidenceRefs)) as? [String] ?? evidenceRefs,
+            readOnly: false,
+            changed: report.changed,
+            before: [
+                "storedGraphCandidateCount": report.totalStoredCandidateCount,
+                "selectedCandidateRefs": report.selectedCandidateRefs,
+                "candidateSpans": report.candidates.map {
+                    [
+                        "candidateID": $0.candidateID,
+                        "spanStart": $0.beforeSpanStart as Any,
+                        "spanEnd": $0.beforeSpanEnd as Any,
+                    ]
+                },
+            ],
+            after: [
+                "candidateCount": report.candidateCount,
+                "changedCandidateIDs": report.changedCandidateIDs,
+                "candidateSpans": report.candidates.map {
+                    [
+                        "candidateID": $0.candidateID,
+                        "spanStart": $0.afterSpanStart as Any,
+                        "spanEnd": $0.afterSpanEnd as Any,
+                        "status": $0.status,
+                    ]
+                },
+                "truthBoundary": report.truthBoundary,
+            ],
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: report.safeNextCommands
+        )
+        let payload: [String: Any] = [
+            "ok": true,
+            "command": "item.journal-candidate-source-span-backfill",
+            "readOnly": false,
+            "changed": report.changed,
+            "owner": secondBrainOwnerRefToDict(report.owner),
+            "totalStoredCandidateCount": report.totalStoredCandidateCount,
+            "selectedCandidateRefs": report.selectedCandidateRefs,
+            "changedCandidateIDs": report.changedCandidateIDs,
+            "candidateCount": report.candidateCount,
+            "candidates": report.candidates.map(journalCandidateSourceSpanBackfillCandidateToDict),
+            "truthBoundary": report.truthBoundary,
+            "policy": [
+                "autoAcceptsTruth": false,
+                "requiresExplicitCandidateSelection": true,
+                "readOnlyDefault": false,
+                "ambiguousQuotesFailClosed": true,
+            ],
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": report.safeNextCommands,
+            "actionReceipt": receipt,
+        ]
+        persistActionReceiptIfPresent(payload)
+        if jsonOutput {
+            outputJSON(payload)
+        } else {
+            print("Journal candidate source span backfill: \(report.candidateCount) selected candidate(s)")
+            print("  Read-only: false")
+            print("  Changed: \(report.changed)")
+            for candidate in report.candidates {
+                print("  [\(candidate.status)] \(candidate.candidateRef)")
+                if let start = candidate.afterSpanStart, let end = candidate.afterSpanEnd {
+                    print("    Span: \(start)..\(end)")
+                }
+            }
+        }
+    }
+
+    static func journalCandidateSourceSpanBackfillCandidateToDict(_ candidate: SecondBrainJournalCandidateSourceSpanBackfillCandidate) -> [String: Any] {
+        var dict: [String: Any] = [
+            "candidateID": candidate.candidateID,
+            "candidateRef": candidate.candidateRef,
+            "sourceOwnerRef": candidate.sourceOwnerRef,
+            "sourceQuote": candidate.sourceQuote,
+            "status": candidate.status,
+            "recoveryStatus": candidate.recoveryStatus,
+            "readOnly": candidate.readOnly,
+            "changed": candidate.changed,
+            "truthBoundary": candidate.truthBoundary,
+            "safeNextCommands": candidate.safeNextCommands,
+        ]
+        if let beforeSpanStart = candidate.beforeSpanStart { dict["beforeSpanStart"] = beforeSpanStart }
+        if let beforeSpanEnd = candidate.beforeSpanEnd { dict["beforeSpanEnd"] = beforeSpanEnd }
+        if let afterSpanStart = candidate.afterSpanStart { dict["afterSpanStart"] = afterSpanStart }
+        if let afterSpanEnd = candidate.afterSpanEnd { dict["afterSpanEnd"] = afterSpanEnd }
+        if let ambiguityReason = candidate.ambiguityReason { dict["ambiguityReason"] = ambiguityReason }
+        if let sourceEvidenceRef = candidate.sourceEvidenceRef { dict["sourceEvidenceRef"] = sourceEvidenceRef }
+        return dict
+    }
+
+    static func printJournalCandidateSourceSpanBackfillError(
+        message: String,
+        owner: SecondBrainOwnerRef,
+        errorCode: String
+    ) {
+        processExitCode = 1
+        let safeCommands = [
+            "cider-cli item journal-candidate-source-span-audit \(owner.ownerType) \(owner.ownerID) --json",
+        ]
+        let receipt = agentActionReceiptToDict(
+            command: "item.journal-candidate-source-span-backfill",
+            action: "backfill_journal_candidate_source_spans",
+            actor: "cider-cli",
+            owner: owner,
+            sourceRefs: [owner.canonicalRef],
+            readOnly: false,
+            changed: false,
+            status: "failed",
+            errorCode: errorCode,
+            error: message,
+            safeVerificationCommands: safeCommands,
+            safeNextCommands: safeCommands
+        )
+        let payload: [String: Any] = [
+            "ok": false,
+            "command": "item.journal-candidate-source-span-backfill",
+            "readOnly": false,
+            "changed": false,
+            "owner": secondBrainOwnerRefToDict(owner),
+            "errorCode": errorCode,
+            "error": message,
+            "truthBoundary": "reviewable_candidate_not_truth",
             "safeVerificationCommands": safeCommands,
             "safeNextCommands": safeCommands,
             "actionReceipt": receipt,
