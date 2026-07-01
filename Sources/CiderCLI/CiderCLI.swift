@@ -22244,22 +22244,26 @@ struct CiderCLI {
     static func printJournalCandidateReconciliationReport(_ report: SecondBrainJournalCandidateReconciliationReport) {
         var sourceRefs = [report.owner.canonicalRef]
         sourceRefs.append(contentsOf: report.candidates.flatMap(\.sourceRefs))
+        sourceRefs.append(contentsOf: report.currentExtractionReplacementPreviews.flatMap(\.sourceRefs))
         let safeVerificationCommands = [
             "cider-cli item journal-candidate-reconcile \(report.owner.ownerType) \(report.owner.ownerID) --dry-run --json",
             "cider-cli item graph-candidates \(report.owner.ownerType) \(report.owner.ownerID) --include-reviewed --json",
         ]
+        let evidenceRefs = report.candidates.compactMap(\.sourceEvidenceRef)
+            + report.currentExtractionReplacementPreviews.compactMap(\.sourceEvidenceRef)
         let receipt = agentActionReceiptToDict(
             command: "item.journal-candidate-reconcile",
             action: report.readOnly ? "diagnose_journal_candidates" : "supersede_journal_candidates",
             actor: "cider-cli",
             owner: report.owner,
             sourceRefs: Array(NSOrderedSet(array: sourceRefs)) as? [String] ?? sourceRefs,
-            evidenceRefs: report.candidates.compactMap(\.sourceEvidenceRef),
+            evidenceRefs: Array(NSOrderedSet(array: evidenceRefs)) as? [String] ?? evidenceRefs,
             readOnly: report.readOnly,
             changed: report.changed,
             before: ["activeCandidateCount": report.totalStoredCandidateCount],
             after: [
                 "candidateCount": report.candidateCount,
+                "currentExtractionReplacementPreviewCount": report.currentExtractionReplacementPreviewCount,
                 "appliedCandidateIDs": report.appliedCandidateIDs,
                 "truthBoundary": report.truthBoundary,
             ],
@@ -22274,8 +22278,10 @@ struct CiderCLI {
             "owner": secondBrainOwnerRefToDict(report.owner),
             "totalStoredCandidateCount": report.totalStoredCandidateCount,
             "currentExtractionCandidateCount": report.currentExtractionCandidateCount,
+            "currentExtractionReplacementPreviewCount": report.currentExtractionReplacementPreviewCount,
             "candidateCount": report.candidateCount,
             "candidates": report.candidates.map(journalCandidateReconciliationCandidateToDict),
+            "currentExtractionReplacementPreviews": report.currentExtractionReplacementPreviews.map(journalCandidateReplacementPreviewToDict),
             "appliedCandidateIDs": report.appliedCandidateIDs,
             "truthBoundary": report.truthBoundary,
             "policy": [
@@ -22300,6 +22306,11 @@ struct CiderCLI {
                 print("    \(candidate.candidateRef)")
                 print("    Reasons: \(candidate.reasonCodes.joined(separator: ", "))")
             }
+            for preview in report.currentExtractionReplacementPreviews {
+                print("  [current preview] \(preview.value)")
+                print("    \(preview.previewRef)")
+                print("    Replaces: \(preview.replacementForCandidateRefs.joined(separator: ", "))")
+            }
         }
     }
 
@@ -22317,6 +22328,26 @@ struct CiderCLI {
             "truthBoundary": "reviewable_candidate_not_truth",
         ]
         if let sourceEvidenceRef = candidate.sourceEvidenceRef {
+            dict["sourceEvidenceRef"] = sourceEvidenceRef
+        }
+        return dict
+    }
+
+    static func journalCandidateReplacementPreviewToDict(_ preview: SecondBrainJournalCandidateReplacementPreview) -> [String: Any] {
+        var dict: [String: Any] = [
+            "previewRef": preview.previewRef,
+            "kind": preview.kind,
+            "value": preview.value,
+            "evidence": preview.evidence,
+            "metadata": preview.metadata,
+            "replacementForCandidateIDs": preview.replacementForCandidateIDs,
+            "replacementForCandidateRefs": preview.replacementForCandidateRefs,
+            "sourceRefs": preview.sourceRefs,
+            "truthBoundary": preview.truthBoundary,
+            "acceptedAsTruth": preview.acceptedAsTruth,
+            "previewOnly": true,
+        ]
+        if let sourceEvidenceRef = preview.sourceEvidenceRef {
             dict["sourceEvidenceRef"] = sourceEvidenceRef
         }
         return dict

@@ -13,14 +13,30 @@ struct SecondBrainJournalCandidateReconciliationCandidate: Codable, Equatable {
     var sourceEvidenceRef: String?
 }
 
+struct SecondBrainJournalCandidateReplacementPreview: Codable, Equatable {
+    var previewRef: String
+    var kind: String
+    var value: String
+    var evidence: String
+    var metadata: [String: String]
+    var replacementForCandidateIDs: [String]
+    var replacementForCandidateRefs: [String]
+    var sourceRefs: [String]
+    var sourceEvidenceRef: String?
+    var truthBoundary: String
+    var acceptedAsTruth: Bool
+}
+
 struct SecondBrainJournalCandidateReconciliationReport: Codable, Equatable {
     var owner: SecondBrainOwnerRef
     var readOnly: Bool
     var changed: Bool
     var totalStoredCandidateCount: Int
     var currentExtractionCandidateCount: Int
+    var currentExtractionReplacementPreviewCount: Int
     var candidateCount: Int
     var candidates: [SecondBrainJournalCandidateReconciliationCandidate]
+    var currentExtractionReplacementPreviews: [SecondBrainJournalCandidateReplacementPreview]
     var appliedCandidateIDs: [String]
     var truthBoundary: String
     var safeNextCommands: [String]
@@ -125,8 +141,13 @@ final class SecondBrainJournalCandidateReconciliationService {
             guard reasons.contains(where: isNoiseReason) else { return nil }
             return candidateView(for: output, reasonCodes: reasons)
         }
-        .prefix(max(0, limit))
-        .map { $0 }
+            .prefix(max(0, limit))
+            .map { $0 }
+        let replacementPreviews = currentExtractionReplacementPreviews(
+            owner: owner,
+            current: current,
+            diagnosed: diagnosed
+        )
 
         var applied: [String] = []
         if apply {
@@ -155,8 +176,10 @@ final class SecondBrainJournalCandidateReconciliationService {
             changed: !applied.isEmpty,
             totalStoredCandidateCount: stored.count,
             currentExtractionCandidateCount: current.count,
+            currentExtractionReplacementPreviewCount: replacementPreviews.count,
             candidateCount: diagnosed.count,
             candidates: diagnosed,
+            currentExtractionReplacementPreviews: replacementPreviews,
             appliedCandidateIDs: applied,
             truthBoundary: "reviewable_candidate_not_truth",
             safeNextCommands: safeNextCommands(owner: owner, candidates: diagnosed)
@@ -214,6 +237,81 @@ final class SecondBrainJournalCandidateReconciliationService {
             sourceRefs: Array(NSOrderedSet(array: sourceRefs)) as? [String] ?? sourceRefs,
             sourceEvidenceRef: output.metadata["source_evidence_ref"]
         )
+    }
+
+    private func currentExtractionReplacementPreviews(
+        owner: SecondBrainOwnerRef,
+        current: [SecondBrainEnrichmentOutput],
+        diagnosed: [SecondBrainJournalCandidateReconciliationCandidate]
+    ) -> [SecondBrainJournalCandidateReplacementPreview] {
+        guard !diagnosed.isEmpty else { return [] }
+
+        var previews: [SecondBrainJournalCandidateReplacementPreview] = []
+        for output in current {
+            let replacementTargets = diagnosed.filter { diagnosedCandidate in
+                isReplacementPreview(output, for: diagnosedCandidate)
+            }
+            guard !replacementTargets.isEmpty else { continue }
+
+            var sourceRefs = [owner.canonicalRef, previewRef(for: output, index: previews.count)]
+            if let sourceEvidenceRef = output.metadata["source_evidence_ref"] {
+                sourceRefs.append(sourceEvidenceRef)
+            }
+
+            var metadata = output.metadata
+            metadata[SecondBrainGraphCandidateContract.MetadataKey.truthBoundary] = "reviewable_candidate_not_truth"
+            metadata["accepted_as_truth"] = "false"
+            metadata["preview_only"] = "true"
+            metadata["replacement_preview"] = "true"
+
+            previews.append(
+                SecondBrainJournalCandidateReplacementPreview(
+                    previewRef: previewRef(for: output, index: previews.count),
+                    kind: output.kind,
+                    value: output.value,
+                    evidence: output.evidence,
+                    metadata: metadata,
+                    replacementForCandidateIDs: replacementTargets.map(\.candidateID),
+                    replacementForCandidateRefs: replacementTargets.map(\.candidateRef),
+                    sourceRefs: Array(NSOrderedSet(array: sourceRefs)) as? [String] ?? sourceRefs,
+                    sourceEvidenceRef: output.metadata["source_evidence_ref"],
+                    truthBoundary: "reviewable_candidate_not_truth",
+                    acceptedAsTruth: false
+                )
+            )
+        }
+        return previews
+    }
+
+    private func isReplacementPreview(
+        _ output: SecondBrainEnrichmentOutput,
+        for candidate: SecondBrainJournalCandidateReconciliationCandidate
+    ) -> Bool {
+        let outputEvidence = normalized(output.evidence)
+        let candidateEvidence = normalized(candidate.evidence)
+        let outputValue = normalized(output.value)
+        let candidateValue = normalized(candidate.value)
+        guard outputValue != candidateValue else { return false }
+        let sharesEvidence = !outputEvidence.isEmpty && !candidateEvidence.isEmpty
+            && (outputEvidence == candidateEvidence
+                || outputEvidence.contains(candidateEvidence)
+                || candidateEvidence.contains(outputEvidence))
+        let titledMediaReplacement = candidate.reasonCodes.contains("bare_media_progress_span")
+            && output.metadata[SecondBrainGraphCandidateContract.MetadataKey.mediaTitle] != nil
+            && (outputEvidence.contains(candidateValue) || candidateEvidence.contains(candidateValue))
+        guard sharesEvidence || titledMediaReplacement else { return false }
+        return candidate.reasonCodes.contains("not_emitted_by_current_extractor")
+            || candidate.reasonCodes.contains("bare_media_progress_span")
+            || candidate.reasonCodes.contains("noisy_clause_span")
+            || candidate.reasonCodes.contains("community_support_outage_span")
+    }
+
+    private func previewRef(for output: SecondBrainEnrichmentOutput, index: Int) -> String {
+        let value = normalized(output.value)
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let suffix = value.isEmpty ? "\(index + 1)" : value
+        return "current_extraction_preview:\(output.owner.ownerType):\(output.owner.ownerID):\(suffix)"
     }
 
     private func requiredOutput(id: String) throws -> SecondBrainEnrichmentOutput {
