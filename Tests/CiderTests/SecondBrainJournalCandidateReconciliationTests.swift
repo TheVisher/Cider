@@ -358,8 +358,8 @@ struct SecondBrainJournalCandidateReconciliationTests {
         #expect(stored?.reviewState == "suggested")
     }
 
-    @Test("dry run fails closed for ambiguous non-overlap candidates without metadata links")
-    func dryRunFailsClosedForAmbiguousNonOverlapCandidatesWithoutMetadataLinks() throws {
+    @Test("dry run previews no-key replacements when source quote proximity bounds the pair")
+    func dryRunPreviewsNoKeyReplacementsWhenSourceQuoteProximityBoundsThePair() throws {
         let (db, url) = try makeTestDB()
         defer { db.close(); cleanup(url) }
 
@@ -367,6 +367,115 @@ struct SecondBrainJournalCandidateReconciliationTests {
         let rawContent = """
         - She was buying random things at the mall.
         - Money seemed more useful than guessing a gift.
+        """
+        var stale = SecondBrainEnrichmentOutput(
+            owner: owner,
+            chunkID: nil,
+            kind: "memory_candidate",
+            value: "She was buying random things at the mall.",
+            normalizedValue: "she was buying random things at the mall.",
+            label: "Memory candidate: stale nearby gift context",
+            evidence: "- She was buying random things at the mall.",
+            source: "memory_candidate.journal_capture.v0",
+            confidence: 0.32,
+            reviewState: "suggested",
+            metadata: [
+                "candidate_kind": "stale_nearby_gift_context",
+                "source_kind": "journal",
+                "source_owner_ref": owner.canonicalRef,
+                "source_quote": "- She was buying random things at the mall.",
+                "truth_boundary": "reviewable_candidate_not_truth",
+            ]
+        )
+        stale.metadata["candidate_ref"] = "memory_candidate:\(stale.id)"
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(stale)
+
+        let report = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .diagnose(owner: owner, rawContent: rawContent)
+
+        #expect(report.readOnly)
+        #expect(!report.changed)
+        #expect(report.candidates.map(\.candidateID) == [stale.id])
+        let preview = try #require(report.currentExtractionReplacementPreviews.first)
+        #expect(report.currentExtractionReplacementPreviewCount == 1)
+        #expect(preview.replacementForCandidateIDs == [stale.id])
+        #expect(preview.value == "Money seemed more useful than guessing a gift.")
+        #expect(preview.metadata["replacement_pairing_basis"] == "source_quote_proximity")
+        #expect(preview.metadata["replacement_pairing_owner_ref"] == owner.canonicalRef)
+        #expect(preview.metadata["replacement_pairing_stale_source_quote"] == "- She was buying random things at the mall.")
+        #expect(preview.metadata["replacement_pairing_current_source_quote"] == "- Money seemed more useful than guessing a gift")
+        #expect(preview.metadata["replacement_pairing_source_quote_distance"] == "1")
+        #expect(preview.metadata["replacement_preview"] == "true")
+        #expect(preview.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(!preview.acceptedAsTruth)
+
+        let stored = try outputService.output(id: stale.id)
+        #expect(stored?.reviewState == "suggested")
+    }
+
+    @Test("dry run does not add proximity targets when an output already has an exact replacement")
+    func dryRunDoesNotAddProximityTargetsWhenOutputAlreadyHasExactReplacement() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let rawContent = """
+        - Visher saw on r/Boeing that the CMS/outage stopped around 5 PM, meaning the outage lasted more than 24 hours.
+        - Visher finished watching season 2 of the live-action Avatar: The Last Airbender on Netflix, or at least watched through seven episodes.
+        """
+        let outage = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "on r/Boeing that the CMS/outage stopped around 5 PM, meaning the outage lasted more than 24 hours",
+            sourceQuote: "- Visher saw on r/Boeing that the CMS/outage stopped around 5 PM, meaning the outage lasted more than 24 hours.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.topic],
+            relationGuesses: [.mentions],
+            safeActions: [.inspectSource, .correct, .reject, .delegateEnrichment],
+            confidence: 0.34,
+            confidenceReason: "Historical extractor over-captured a community support/outage report.",
+            source: "journal_graph_candidate.v0"
+        )
+        let bareProgress = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: owner,
+            candidateKind: .objectRelation,
+            mentionText: "through seven episodes",
+            sourceQuote: "- Visher finished watching season 2 of the live-action Avatar: The Last Airbender on Netflix, or at least watched through seven episodes.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.media],
+            relationGuesses: [.watched],
+            safeActions: [.inspectSource, .correct, .reject, .delegateEnrichment],
+            confidence: 0.36,
+            confidenceReason: "Historical extractor emitted a fragment without the canonical media title.",
+            source: "journal_graph_candidate.v0"
+        )
+        let outputService = SecondBrainEnrichmentOutputService(database: db)
+        try outputService.record(outage)
+        try outputService.record(bareProgress)
+
+        let report = try SecondBrainJournalCandidateReconciliationService(database: db)
+            .diagnose(owner: owner, rawContent: rawContent)
+
+        #expect(report.readOnly)
+        #expect(!report.changed)
+        #expect(Set(report.candidates.map(\.candidateID)) == Set([outage.id, bareProgress.id]))
+        let avatarPreview = try #require(report.currentExtractionReplacementPreviews.first { $0.value == "Avatar: The Last Airbender" })
+        #expect(avatarPreview.replacementForCandidateIDs == [bareProgress.id])
+        #expect(avatarPreview.metadata["replacement_pairing_basis"] == nil)
+        #expect(avatarPreview.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(!avatarPreview.acceptedAsTruth)
+    }
+
+    @Test("dry run fails closed for ambiguous non-overlap candidates without metadata links")
+    func dryRunFailsClosedForAmbiguousNonOverlapCandidatesWithoutMetadataLinks() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let rawContent = """
+        - Money seemed more useful than guessing a gift.
+        - She was buying random things at the mall.
         - Visher took PTO for Ryland's birthday and worked overtime around it.
         """
         var stale = SecondBrainEnrichmentOutput(

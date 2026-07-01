@@ -146,6 +146,7 @@ final class SecondBrainJournalCandidateReconciliationService {
             .map { $0 }
         let replacementPreviews = currentExtractionReplacementPreviews(
             owner: owner,
+            rawContent: rawContent,
             current: current,
             diagnosed: diagnosed
         )
@@ -243,6 +244,7 @@ final class SecondBrainJournalCandidateReconciliationService {
 
     private func currentExtractionReplacementPreviews(
         owner: SecondBrainOwnerRef,
+        rawContent: String,
         current: [SecondBrainEnrichmentOutput],
         diagnosed: [SecondBrainJournalCandidateReconciliationCandidate]
     ) -> [SecondBrainJournalCandidateReplacementPreview] {
@@ -250,10 +252,16 @@ final class SecondBrainJournalCandidateReconciliationService {
 
         var previews: [SecondBrainJournalCandidateReplacementPreview] = []
         for output in current {
-            let replacementTargets = diagnosed.filter { diagnosedCandidate in
-                isReplacementPreview(output, for: diagnosedCandidate)
+            let replacementMatches = diagnosed.compactMap { diagnosedCandidate in
+                replacementPreviewMatch(
+                    output,
+                    for: diagnosedCandidate,
+                    rawContent: rawContent,
+                    current: current,
+                    diagnosed: diagnosed
+                )
             }
-            guard !replacementTargets.isEmpty else { continue }
+            guard !replacementMatches.isEmpty else { continue }
 
             var sourceRefs = [owner.canonicalRef, previewRef(for: output, index: previews.count)]
             if let sourceEvidenceRef = output.metadata["source_evidence_ref"] {
@@ -265,6 +273,13 @@ final class SecondBrainJournalCandidateReconciliationService {
             metadata["accepted_as_truth"] = "false"
             metadata["preview_only"] = "true"
             metadata["replacement_preview"] = "true"
+            if let proximityMatch = replacementMatches.first(where: { $0.basis == "source_quote_proximity" }) {
+                metadata["replacement_pairing_basis"] = proximityMatch.basis
+                metadata["replacement_pairing_owner_ref"] = owner.canonicalRef
+                metadata["replacement_pairing_stale_source_quote"] = proximityMatch.staleSourceQuote
+                metadata["replacement_pairing_current_source_quote"] = proximityMatch.currentSourceQuote
+                metadata["replacement_pairing_source_quote_distance"] = "\(proximityMatch.sourceQuoteDistance)"
+            }
 
             previews.append(
                 SecondBrainJournalCandidateReplacementPreview(
@@ -273,8 +288,8 @@ final class SecondBrainJournalCandidateReconciliationService {
                     value: output.value,
                     evidence: output.evidence,
                     metadata: metadata,
-                    replacementForCandidateIDs: replacementTargets.map(\.candidateID),
-                    replacementForCandidateRefs: replacementTargets.map(\.candidateRef),
+                    replacementForCandidateIDs: replacementMatches.map(\.candidate.candidateID),
+                    replacementForCandidateRefs: replacementMatches.map(\.candidate.candidateRef),
                     sourceRefs: Array(NSOrderedSet(array: sourceRefs)) as? [String] ?? sourceRefs,
                     sourceEvidenceRef: output.metadata["source_evidence_ref"],
                     truthBoundary: "reviewable_candidate_not_truth",
@@ -283,6 +298,43 @@ final class SecondBrainJournalCandidateReconciliationService {
             )
         }
         return previews
+    }
+
+    private struct ReplacementPreviewMatch {
+        var candidate: SecondBrainJournalCandidateReconciliationCandidate
+        var basis: String
+        var staleSourceQuote: String
+        var currentSourceQuote: String
+        var sourceQuoteDistance: Int
+    }
+
+    private func replacementPreviewMatch(
+        _ output: SecondBrainEnrichmentOutput,
+        for candidate: SecondBrainJournalCandidateReconciliationCandidate,
+        rawContent: String,
+        current: [SecondBrainEnrichmentOutput],
+        diagnosed: [SecondBrainJournalCandidateReconciliationCandidate]
+    ) -> ReplacementPreviewMatch? {
+        if isReplacementPreview(output, for: candidate) {
+            return ReplacementPreviewMatch(
+                candidate: candidate,
+                basis: "existing_candidate_evidence_or_metadata",
+                staleSourceQuote: "",
+                currentSourceQuote: "",
+                sourceQuoteDistance: 0
+            )
+        }
+        guard !diagnosed.contains(where: { isReplacementPreview(output, for: $0) }) else { return nil }
+        if let proximity = sourceQuoteProximityBoundedReplacement(
+            output,
+            for: candidate,
+            rawContent: rawContent,
+            current: current,
+            diagnosed: diagnosed
+        ) {
+            return proximity
+        }
+        return nil
     }
 
     private func isReplacementPreview(
@@ -326,6 +378,99 @@ final class SecondBrainJournalCandidateReconciliationService {
             }
         }
         return false
+    }
+
+    private func sourceQuoteProximityBoundedReplacement(
+        _ output: SecondBrainEnrichmentOutput,
+        for candidate: SecondBrainJournalCandidateReconciliationCandidate,
+        rawContent: String,
+        current: [SecondBrainEnrichmentOutput],
+        diagnosed: [SecondBrainJournalCandidateReconciliationCandidate]
+    ) -> ReplacementPreviewMatch? {
+        guard candidate.reasonCodes.contains("not_emitted_by_current_extractor"),
+              candidate.reasonCodes.contains(where: isNoiseReason) else { return nil }
+        guard normalized(output.metadata["source_kind"] ?? "") == "journal",
+              normalized(candidate.metadata["source_kind"] ?? "") == "journal" else { return nil }
+        guard !hasSharedMetadataReplacementKey(output, candidate: candidate) else { return nil }
+
+        let candidateQuote = sourceQuote(for: candidate)
+        let outputQuote = sourceQuote(for: output)
+        guard let candidateLine = sourceQuoteLineIndex(candidateQuote, in: rawContent),
+              let outputLine = sourceQuoteLineIndex(outputQuote, in: rawContent) else { return nil }
+
+        let currentDistances = current.compactMap { currentOutput -> (id: String, distance: Int)? in
+            guard normalized(currentOutput.metadata["source_kind"] ?? "") == "journal",
+                  !hasSharedMetadataReplacementKey(currentOutput, candidate: candidate),
+                  let line = sourceQuoteLineIndex(sourceQuote(for: currentOutput), in: rawContent) else {
+                return nil
+            }
+            return (currentOutput.id, abs(line - candidateLine))
+        }
+        guard let nearestCurrentDistance = currentDistances.map(\.distance).min(),
+              nearestCurrentDistance > 0,
+              nearestCurrentDistance <= 1,
+              currentDistances.filter({ $0.distance == nearestCurrentDistance }).count == 1,
+              currentDistances.first(where: { $0.id == output.id })?.distance == nearestCurrentDistance else {
+            return nil
+        }
+
+        let diagnosedDistances = diagnosed.compactMap { diagnosedCandidate -> (id: String, distance: Int)? in
+            guard diagnosedCandidate.candidateID != candidate.candidateID,
+                  normalized(diagnosedCandidate.metadata["source_kind"] ?? "") == "journal",
+                  let line = sourceQuoteLineIndex(sourceQuote(for: diagnosedCandidate), in: rawContent) else {
+                return nil
+            }
+            return (diagnosedCandidate.candidateID, abs(line - outputLine))
+        }
+        let targetDistance = abs(outputLine - candidateLine)
+        guard diagnosedDistances.filter({ $0.distance == targetDistance }).isEmpty else { return nil }
+
+        return ReplacementPreviewMatch(
+            candidate: candidate,
+            basis: "source_quote_proximity",
+            staleSourceQuote: candidateQuote,
+            currentSourceQuote: outputQuote,
+            sourceQuoteDistance: targetDistance
+        )
+    }
+
+    private func hasSharedMetadataReplacementKey(
+        _ output: SecondBrainEnrichmentOutput,
+        candidate: SecondBrainJournalCandidateReconciliationCandidate
+    ) -> Bool {
+        metadataReplacementKeys.contains { key in
+            let outputValue = normalized(output.metadata[key] ?? "")
+            let candidateValue = normalized(candidate.metadata[key] ?? "")
+            return !outputValue.isEmpty && outputValue == candidateValue
+        }
+    }
+
+    private func sourceQuote(for output: SecondBrainEnrichmentOutput) -> String {
+        output.metadata[SecondBrainGraphCandidateContract.MetadataKey.sourceQuote]
+            ?? output.metadata["source_quote"]
+            ?? output.evidence
+    }
+
+    private func sourceQuote(for candidate: SecondBrainJournalCandidateReconciliationCandidate) -> String {
+        candidate.metadata[SecondBrainGraphCandidateContract.MetadataKey.sourceQuote]
+            ?? candidate.metadata["source_quote"]
+            ?? candidate.evidence
+    }
+
+    private func sourceQuoteLineIndex(_ quote: String, in rawContent: String) -> Int? {
+        let normalizedQuote = normalized(quote)
+        guard !normalizedQuote.isEmpty else { return nil }
+        let lines = rawContent.components(separatedBy: .newlines)
+        for (index, line) in lines.enumerated() {
+            let normalizedLine = normalized(line)
+            guard !normalizedLine.isEmpty else { continue }
+            if normalizedLine == normalizedQuote
+                || normalizedLine.contains(normalizedQuote)
+                || normalizedQuote.contains(normalizedLine) {
+                return index
+            }
+        }
+        return nil
     }
 
     private var metadataReplacementKeys: [String] {
