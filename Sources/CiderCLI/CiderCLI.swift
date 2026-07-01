@@ -20682,8 +20682,7 @@ struct CiderCLI {
         if let dateContext = output.metadata["date_context"] { dict["dateContext"] = dateContext }
         if let timeContext = output.metadata["time_context"] { dict["timeContext"] = timeContext }
         if let sourceOwnerRef = output.metadata["source_owner_ref"] { dict["sourceOwnerRef"] = sourceOwnerRef }
-        if let sourceSpanStart = output.metadata["source_span_start"] { dict["sourceSpanStart"] = Int(sourceSpanStart) ?? sourceSpanStart }
-        if let sourceSpanEnd = output.metadata["source_span_end"] { dict["sourceSpanEnd"] = Int(sourceSpanEnd) ?? sourceSpanEnd }
+        mergeSourceSpanFields(from: output.metadata, into: &dict)
         if let observedDate = output.metadata["observed_date"] { dict["observedDate"] = observedDate }
         if let memoryKey = output.metadata["memory_key"] { dict["memoryKey"] = memoryKey }
         if let memoryStatus = output.metadata["memory_status"] { dict["memoryStatus"] = memoryStatus }
@@ -22330,6 +22329,7 @@ struct CiderCLI {
         if let sourceEvidenceRef = candidate.sourceEvidenceRef {
             dict["sourceEvidenceRef"] = sourceEvidenceRef
         }
+        mergeSourceSpanFields(from: candidate.metadata, into: &dict)
         return dict
     }
 
@@ -22350,6 +22350,7 @@ struct CiderCLI {
         if let sourceEvidenceRef = preview.sourceEvidenceRef {
             dict["sourceEvidenceRef"] = sourceEvidenceRef
         }
+        mergeSourceSpanFields(from: preview.metadata, into: &dict)
         return dict
     }
 
@@ -22912,7 +22913,7 @@ struct CiderCLI {
             sourceItem["createdAt"] = ISO8601DateFormatter().string(from: note.createdAt)
             sourceItem["updatedAt"] = ISO8601DateFormatter().string(from: note.modifiedAt)
         }
-        return [
+        var dict: [String: Any] = [
             "candidateID": output.id,
             "candidateRef": "graph_candidate:\(output.id)",
             "sourceOwner": ownerToDict(sourceOwner),
@@ -22925,6 +22926,8 @@ struct CiderCLI {
             "confidence": output.confidence as Any,
             "safeNextCommands": graphCandidateSafeCommands(for: output),
         ]
+        mergeSourceSpanFields(from: output.metadata, into: &dict)
+        return dict
     }
 
     static func entityReviewableCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
@@ -23908,6 +23911,7 @@ struct CiderCLI {
         if let chunkID = output.chunkID { dict["chunkID"] = chunkID }
         if let confidence = output.confidence { dict["confidence"] = confidence }
         if let evidenceRecord = sourceEvidenceRecordToDict(for: output) { dict["sourceEvidenceRecord"] = evidenceRecord }
+        mergeSourceSpanFields(from: output.metadata, into: &dict)
         let lifecycle = lifecycleHistoryToDict(for: output)
         if !lifecycle.isEmpty { dict["lifecycleHistory"] = lifecycle }
 
@@ -24057,7 +24061,7 @@ struct CiderCLI {
     static func graphObjectSourceEvidence(from outputs: [SecondBrainEnrichmentOutput]) -> [[String: Any]] {
         outputs.compactMap { output in
             guard let candidate = try? SecondBrainGraphCandidateContract.validate(output) else { return nil }
-            return [
+            var dict: [String: Any] = [
                 "candidateID": output.id,
                 "candidateRef": "graph_candidate:\(output.id)",
                 "sourceOwner": ownerToDict(output.owner),
@@ -24066,7 +24070,23 @@ struct CiderCLI {
                 "reviewState": candidate.reviewState.rawValue,
                 "possibleTypes": candidate.objectTypeGuesses.map(\.rawValue),
             ]
+            mergeSourceSpanFields(from: output.metadata, into: &dict)
+            return dict
         }
+    }
+
+    static func mergeSourceSpanFields(from metadata: [String: String], into dict: inout [String: Any]) {
+        if let sourceSpanStart = sourceSpanValue(metadata["source_span_start"]) {
+            dict["sourceSpanStart"] = sourceSpanStart
+        }
+        if let sourceSpanEnd = sourceSpanValue(metadata["source_span_end"]) {
+            dict["sourceSpanEnd"] = sourceSpanEnd
+        }
+    }
+
+    static func sourceSpanValue(_ rawValue: String?) -> Any? {
+        guard let rawValue, !rawValue.isEmpty else { return nil }
+        return Int(rawValue) ?? rawValue
     }
 
     static func graphObjectStableKey(for mentionText: String) -> String {

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Cider
+@testable import CiderCLI
 
 @Suite("Second Brain Journal Candidate Reconciliation Tests")
 @MainActor
@@ -501,6 +502,12 @@ struct SecondBrainJournalCandidateReconciliationTests {
         #expect(preview.metadata["replacement_pairing_source_quote_distance"] == nil)
         #expect(preview.truthBoundary == "reviewable_candidate_not_truth")
         #expect(!preview.acceptedAsTruth)
+
+        let previewDict = CiderCLI.journalCandidateReplacementPreviewToDict(preview)
+        #expect(previewDict["sourceSpanStart"] as? Int != nil)
+        #expect(previewDict["sourceSpanEnd"] as? Int != nil)
+        #expect(previewDict["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect(previewDict["acceptedAsTruth"] as? Bool == false)
     }
 
     @Test("dry run does not add proximity targets when an output already has an exact replacement")

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Cider
+@testable import CiderCLI
 
 @Suite("Second Brain Graph Candidate Contract Tests")
 @MainActor
@@ -218,6 +219,50 @@ struct SecondBrainGraphCandidateContractTests {
             #expect(candidate.metadata[SecondBrainGraphCandidateContract.MetadataKey.sourceQuote] == candidate.evidence)
             #expect(candidate.metadata["truth_boundary"] == "reviewable_candidate_not_truth")
         }
+    }
+
+    @Test("CLI graph candidate JSON promotes source spans beside source quote")
+    func cliGraphCandidateJSONPromotesSourceSpansBesideSourceQuote() throws {
+        let sourceOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        var output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: sourceOwner,
+            candidateKind: .object,
+            mentionText: "pineapple coconut drink",
+            sourceQuote: "- Jami loved that pineapple coconut drink",
+            sourceKind: "journal",
+            objectTypeGuesses: [.drink],
+            safeActions: [.inspectSource, .accept, .reject],
+            source: "graph_candidate.test"
+        )
+        output.metadata["source_span_start"] = "17"
+        output.metadata["source_span_end"] = "55"
+
+        let listCandidate = CiderCLI.graphCandidateToDict(output)
+        #expect(listCandidate["sourceQuote"] as? String == "- Jami loved that pineapple coconut drink")
+        #expect(listCandidate["sourceSpanStart"] as? Int == 17)
+        #expect(listCandidate["sourceSpanEnd"] as? Int == 55)
+        #expect((listCandidate["metadata"] as? [String: String])?["source_span_start"] == "17")
+        #expect((listCandidate["metadata"] as? [String: String])?["source_span_end"] == "55")
+        #expect((listCandidate["sourceEvidenceRecord"] as? [String: Any])?["spanStart"] as? Int == 17)
+        #expect((listCandidate["sourceEvidenceRecord"] as? [String: Any])?["spanEnd"] as? Int == 55)
+        #expect(listCandidate["truthState"] as? String == "reviewable_candidate_not_truth")
+
+        let inspectPayload: [String: Any] = [
+            "ok": true,
+            "command": "item.graph-candidate",
+            "readOnly": true,
+            "changed": false,
+            "exists": true,
+            "candidate": CiderCLI.graphCandidateToDict(output),
+        ]
+        let inspectedCandidate = try #require(inspectPayload["candidate"] as? [String: Any])
+        #expect(inspectedCandidate["sourceSpanStart"] as? Int == 17)
+        #expect(inspectedCandidate["sourceSpanEnd"] as? Int == 55)
+
+        let sourceEvidence = try #require(CiderCLI.graphObjectSourceEvidence(from: [output]).first)
+        #expect(sourceEvidence["sourceQuote"] as? String == "- Jami loved that pineapple coconut drink")
+        #expect(sourceEvidence["sourceSpanStart"] as? Int == 17)
+        #expect(sourceEvidence["sourceSpanEnd"] as? Int == 55)
     }
 
     @Test("journal extractor suppresses noisy dogfood false positives")
