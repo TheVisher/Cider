@@ -24467,6 +24467,9 @@ struct CiderCLI {
         if let temporalDate = response.intent.temporalDate {
             intent["temporalDate"] = temporalDate
         }
+        if let temporalRange = response.intent.temporalRange {
+            intent["temporalRange"] = naturalPreferenceRecallTemporalRangeToDict(temporalRange)
+        }
         if let subject = response.intent.subject {
             intent["subject"] = subject
         }
@@ -24564,6 +24567,9 @@ struct CiderCLI {
             "verificationCommands": response.verificationCommands,
             "safeNextCommands": response.safeNextCommands,
         ]
+        if let temporalRange = response.intent.temporalRange {
+            payload["temporalRange"] = naturalPreferenceRecallTemporalRangeToDict(temporalRange)
+        }
         payload["actionReceipt"] = readOnlyActionReceiptToDict(
             command: response.command,
             matchedSourceRefs: response.candidates.map(naturalPreferenceRecallReceiptSourceRef),
@@ -24612,6 +24618,19 @@ struct CiderCLI {
             "weakEvidenceRefs": explanation.weakEvidenceRefs,
             "copy": explanation.copy,
             "safeNextCommands": explanation.safeNextCommands,
+        ]
+    }
+
+    private static func naturalPreferenceRecallTemporalRangeToDict(_ range: CiderNaturalPreferenceRecallTemporalRange) -> [String: Any] {
+        [
+            "originalQuery": range.originalQuery,
+            "recognizedText": range.recognizedText,
+            "rangeType": range.rangeType,
+            "startDate": range.startDate,
+            "endDate": range.endDate,
+            "source": range.source,
+            "remainingSemanticQuery": range.remainingSemanticQuery,
+            "safeNextCommands": range.safeNextCommands,
         ]
     }
 
