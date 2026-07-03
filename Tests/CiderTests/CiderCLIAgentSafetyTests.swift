@@ -858,6 +858,112 @@ struct CiderCLIAgentSafetyTests {
         #expect(suppressed.contains { $0["itemID"] as? String == id && $0["duplicateKey"] as? String == duplicateKey })
     }
 
+    @Test("reminder ping dry run CLI summarizes no-send worker pass without receipts")
+    func reminderPingDryRunCLISummarizesNoSendWorkerPassWithoutReceipts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-reminder-ping-dry-run-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let dueDate = Self.relativeDateString(daysFromToday: -1)
+
+        let help = try runCLI(args: ["item", "reminder-ping-dry-run", "--help"], vault: vault)
+        #expect(help.status == 0)
+        #expect(help.stdout.contains("reminder-ping-dry-run"))
+        #expect(help.stdout.contains("reminder-ping-delivery-preview"))
+
+        let capture = try assertStrictProcessJSON(
+            runCLI(args: [
+                "capture", "add", "--kind", "todo",
+                "--content", "Reminder ping dry run CLI todo",
+                "--date", dueDate,
+                "--json",
+            ], vault: vault),
+            command: "capture.add"
+        )
+        let item = try #require(capture["item"] as? [String: Any])
+        let id = try #require(item["id"] as? String)
+
+        let before = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-dry-run",
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-dry-run"
+        )
+        #expect(before["readOnly"] as? Bool == true)
+        #expect(before["changed"] as? Bool == false)
+        #expect(before["truthBoundary"] as? String == "cider_items_plus_action_receipts_remain_source_of_truth_no_send_dry_run")
+        #expect(before["transport"] as? String == "discord")
+        #expect(before["surface"] as? String == "agent-chat")
+        #expect(before["runKey"] as? String != nil)
+        let counts = try #require(before["counts"] as? [String: Any])
+        #expect(counts["eligible"] as? Int == 1)
+        #expect(counts["planned"] as? Int == 1)
+        #expect(counts["suppressed"] as? Int == 0)
+        #expect(counts["duplicates"] as? Int == 0)
+        let refs = try #require(before["eligibleEnvelopeRefs"] as? [String])
+        #expect(refs.count == 1)
+        let planned = try #require(before["planned"] as? [[String: Any]])
+        let plannedPing = try #require(planned.first)
+        #expect(plannedPing["wouldSend"] as? Bool == false)
+        #expect(plannedPing["readOnly"] as? Bool == true)
+        #expect(plannedPing["changed"] as? Bool == false)
+        let envelope = try #require(plannedPing["envelope"] as? [String: Any])
+        #expect(envelope["itemID"] as? String == id)
+        let duplicateKey = try #require(envelope["duplicateKey"] as? String)
+        let safeRecordCommands = try #require(before["safeRecordPingCommands"] as? [String])
+        #expect(safeRecordCommands == ["cider-cli item ping-receipt record todo \(id) --transport discord --surface agent-chat --json"])
+        let actionReceipt = try #require(before["actionReceipt"] as? [String: Any])
+        #expect(actionReceipt["readOnly"] as? Bool == true)
+        #expect(actionReceipt["changed"] as? Bool == false)
+        #expect(actionReceipt["transportBoundary"] as? String == "no_transport_send")
+        #expect(actionReceipt["pendingEnvelopeCount"] as? Int == 1)
+
+        let afterDryRunLedger = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "action-ledger", "list",
+                "--owner", "todo:\(id)",
+                "--action", "record_ping_surface",
+                "--limit", "5",
+                "--json",
+            ], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        #expect((afterDryRunLedger["entries"] as? [[String: Any]])?.isEmpty == true)
+
+        _ = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "ping-receipt", "record", "todo", id,
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--delivery-id", "discord-message-1",
+                "--json",
+            ], vault: vault),
+            command: "item.ping-receipt.record"
+        )
+        let after = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-dry-run",
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-dry-run"
+        )
+        #expect((after["planned"] as? [[String: Any]])?.isEmpty == true)
+        let afterCounts = try #require(after["counts"] as? [String: Any])
+        #expect(afterCounts["planned"] as? Int == 0)
+        #expect(afterCounts["suppressed"] as? Int == 1)
+        let suppressed = try #require(after["suppressed"] as? [[String: Any]])
+        #expect(suppressed.contains { $0["itemID"] as? String == id && $0["duplicateKey"] as? String == duplicateKey })
+    }
+
     @Test("action ledger CLI filters by command refs and time windows")
     func actionLedgerCLIFiltersByCommandRefsAndTimeWindows() throws {
         let vault = FileManager.default.temporaryDirectory

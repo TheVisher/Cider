@@ -168,6 +168,94 @@ struct CiderReminderPingEligibilityServiceTests {
         #expect(preview.suppressed.first?.reason == "matching_record_ping_surface_receipt")
     }
 
+    @Test("scheduler dry run summarizes preview envelopes without recording receipts")
+    func schedulerDryRunSummarizesPreviewEnvelopesWithoutRecordingReceipts() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let ledger = SecondBrainActionReceiptLedgerService(database: db)
+        let now = date(2026, 7, 13)
+        let todo = TodoCard(title: "Dry run scheduler todo", dueDate: now)
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [todo], dateCards: [], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+        let intents = try CiderReminderPingEligibilityService.pendingIntents(from: feed, ledger: ledger)
+        let preview = CiderReminderPingDeliveryPreviewService.preview(
+            from: intents,
+            transport: "discord",
+            surface: "agent-chat"
+        )
+
+        let run = CiderReminderPingDryRunService.run(from: preview)
+
+        #expect(run.command == "item.reminder-ping-dry-run")
+        #expect(run.generatedAt == preview.generatedAt)
+        #expect(run.readOnly == true)
+        #expect(run.changed == false)
+        #expect(run.transport == "discord")
+        #expect(run.surface == "agent-chat")
+        #expect(run.truthBoundary == "cider_items_plus_action_receipts_remain_source_of_truth_no_send_dry_run")
+        #expect(run.counts.eligible == 1)
+        #expect(run.counts.planned == 1)
+        #expect(run.counts.suppressed == 0)
+        #expect(run.counts.duplicates == 0)
+        let planned = try #require(run.planned.first)
+        #expect(run.eligibleEnvelopeRefs == [planned.envelope.id])
+        #expect(run.safeRecordPingCommands == ["cider-cli item ping-receipt record todo \(todo.id.uuidString) --transport discord --surface agent-chat --json"])
+        #expect(run.safeVerificationCommands.contains("cider-cli item reminder-ping-delivery-preview --transport discord --surface agent-chat --json"))
+        #expect(planned.envelope.owner == SecondBrainOwnerRef(ownerType: "todo", ownerID: todo.id.uuidString))
+        #expect(planned.wouldSend == false)
+        #expect(planned.readOnly == true)
+        #expect(planned.changed == false)
+        #expect(planned.noSendReason == "dry_run_preview_only")
+        #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
+
+        let secondRun = CiderReminderPingDryRunService.run(from: preview)
+        #expect(secondRun.runKey == run.runKey)
+    }
+
+    @Test("scheduler dry run carries receipt suppression after matching ping receipt")
+    func schedulerDryRunCarriesReceiptSuppressionAfterMatchingPingReceipt() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let ledger = SecondBrainActionReceiptLedgerService(database: db)
+        let now = date(2026, 7, 13)
+        let todo = TodoCard(title: "Dry run suppressed todo", dueDate: now)
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [todo], dateCards: [], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+        let duplicateKey = "todo:\(todo.id.uuidString):\(now.timeIntervalSince1970):surface"
+        try recordPingReceipt(
+            ledger: ledger,
+            owner: SecondBrainOwnerRef(ownerType: "todo", ownerID: todo.id.uuidString),
+            action: "record_ping_surface",
+            duplicateKey: duplicateKey
+        )
+        let intents = try CiderReminderPingEligibilityService.pendingIntents(from: feed, ledger: ledger)
+        let preview = CiderReminderPingDeliveryPreviewService.preview(from: intents, transport: "discord", surface: "agent-chat")
+
+        let run = CiderReminderPingDryRunService.run(from: preview)
+
+        #expect(run.planned.isEmpty)
+        #expect(run.eligibleEnvelopeRefs.isEmpty)
+        #expect(run.counts.eligible == 0)
+        #expect(run.counts.planned == 0)
+        #expect(run.counts.suppressed == 1)
+        let suppressed = try #require(run.suppressed.first)
+        #expect(suppressed.duplicateKey == duplicateKey)
+        #expect(suppressed.reason == "matching_record_ping_surface_receipt")
+        #expect(run.safeVerificationCommands.contains("cider-cli item action-ledger list --owner todo:\(todo.id.uuidString) --action record_ping_surface --json"))
+    }
+
     private func recordPingReceipt(
         ledger: SecondBrainActionReceiptLedgerService,
         owner: SecondBrainOwnerRef,

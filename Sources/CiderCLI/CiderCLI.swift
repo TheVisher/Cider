@@ -246,6 +246,7 @@ struct CiderCLI {
       cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
       cider-cli item reminder-ping-intents [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item reminder-ping-delivery-preview [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
+      cider-cli item reminder-ping-dry-run [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]
       cider-cli item why-surfaced <type> <id-or-ref> [--json]
       cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
@@ -355,6 +356,11 @@ struct CiderCLI {
             print("Usage: cider-cli item reminder-ping-intents [--limit <n>] [--stale-after-days <n>] [--json]")
         case "reminder-ping-delivery-preview", "reminder-ping-preview", "reminder-ping-envelopes":
             print("Usage: cider-cli item reminder-ping-delivery-preview [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]")
+        case "reminder-ping-dry-run", "reminder-ping-scheduler-dry-run", "reminder-ping-worker-dry-run":
+            print("""
+            Usage: cider-cli item reminder-ping-dry-run [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
+            Read-only no-send worker pass summary built from item reminder-ping-delivery-preview. Does not send pings or record receipts.
+            """)
         case "ping-receipt", "ping-receipts":
             print("Usage: cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]")
         case "why-surfaced", "why":
@@ -6210,6 +6216,41 @@ struct CiderCLI {
                 } else {
                     print("Reminder ping delivery preview envelopes: \(result.envelopes.count)")
                     for envelope in result.envelopes {
+                        print("  [\(envelope.kind)] \(envelope.title) — \(envelope.transport)/\(envelope.surface)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "reminder-ping-dry-run", "reminder-ping-scheduler-dry-run", "reminder-ping-worker-dry-run":
+            do {
+                guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: "item.reminder-ping-dry-run", minimum: 1) else { return }
+                guard let parsedStaleAfterDays = parsePositiveIntFlag("--stale-after-days", from: args, command: "item.reminder-ping-dry-run", minimum: 0) else { return }
+                let limit = parsedLimit ?? 20
+                let staleAfterDays = parsedStaleAfterDays ?? 3
+                let transport = parseFlag("--transport", from: args) ?? CiderReminderPingDeliveryPreviewService.defaultTransport
+                let surface = parseFlag("--surface", from: args) ?? CiderReminderPingDeliveryPreviewService.defaultSurface
+                let result = try reminderPingDryRunPayload(
+                    limit: limit,
+                    staleAfterDays: staleAfterDays,
+                    transport: transport,
+                    surface: surface
+                )
+                if jsonOutput {
+                    var payload = reminderPingDryRunResultToDict(result)
+                    payload["filters"] = [
+                        "limit": limit,
+                        "staleAfterDays": staleAfterDays,
+                        "transport": result.transport,
+                        "surface": result.surface,
+                    ]
+                    payload["actionReceipt"] = reminderPingDryRunReadOnlyActionReceipt(result: result)
+                    outputJSON(payload)
+                } else {
+                    print("Reminder ping dry-run planned no-send pings: \(result.planned.count)")
+                    for planned in result.planned {
+                        let envelope = planned.envelope
                         print("  [\(envelope.kind)] \(envelope.title) — \(envelope.transport)/\(envelope.surface)")
                     }
                 }
@@ -15784,6 +15825,31 @@ struct CiderCLI {
         return receipt
     }
 
+    static func reminderPingDryRunReadOnlyActionReceipt(result: CiderReminderPingDryRunResult) -> [String: Any] {
+        let sourceRefs = result.planned.flatMap { $0.envelope.sourceRefs } + result.suppressed.map { $0.owner.canonicalRef }
+        let safeCommands = result.safeVerificationCommands + result.safeNextCommands + result.safeRecordPingCommands
+        var receipt = readOnlyActionReceiptToDict(
+            command: result.command,
+            matchedSourceRefs: sourceRefs,
+            safeCommandRefs: safeCommands,
+            provenanceRefs: sourceRefs,
+            status: "succeeded",
+            generatedAt: result.generatedAt,
+            truthBoundary: "receipt_proves_command_execution_not_delivery_truth"
+        )
+        receipt["action"] = "dry_run_reminder_ping_worker"
+        receipt["actor"] = "cider-cli"
+        receipt["sourceBoundary"] = result.truthBoundary
+        receipt["transportBoundary"] = "no_transport_send"
+        receipt["runKey"] = result.runKey
+        receipt["transport"] = result.transport
+        receipt["surface"] = result.surface
+        receipt["pendingEnvelopeCount"] = result.counts.planned
+        receipt["suppressedCount"] = result.counts.suppressed
+        receipt["duplicateCount"] = result.counts.duplicates
+        return receipt
+    }
+
     static func validateReviewFilterIfPresent(
         command: String,
         name: String,
@@ -18674,6 +18740,21 @@ struct CiderCLI {
             transport: transport,
             surface: surface
         )
+    }
+
+    static func reminderPingDryRunPayload(
+        limit: Int,
+        staleAfterDays: Int = 3,
+        transport: String = CiderReminderPingDeliveryPreviewService.defaultTransport,
+        surface: String = CiderReminderPingDeliveryPreviewService.defaultSurface
+    ) throws -> CiderReminderPingDryRunResult {
+        let preview = try reminderPingDeliveryPreviewPayload(
+            limit: limit,
+            staleAfterDays: staleAfterDays,
+            transport: transport,
+            surface: surface
+        )
+        return CiderReminderPingDryRunService.run(from: preview)
     }
 
     static func isCompletedReminderOwner(itemType: String, itemID: UUID) -> Bool {

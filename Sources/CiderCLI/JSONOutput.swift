@@ -1463,6 +1463,39 @@ func reminderPingDeliveryPreviewResultToDict(_ result: CiderReminderPingDelivery
     ]
 }
 
+func reminderPingDryRunResultToDict(_ result: CiderReminderPingDryRunResult) -> [String: Any] {
+    let formatter = ISO8601DateFormatter()
+    return [
+        "ok": true,
+        "command": result.command,
+        "runKey": result.runKey,
+        "generatedAt": formatter.string(from: result.generatedAt),
+        "readOnly": result.readOnly,
+        "changed": result.changed,
+        "truthBoundary": result.truthBoundary,
+        "transport": result.transport,
+        "surface": result.surface,
+        "count": result.counts.planned,
+        "counts": reminderPingDryRunCountsToDict(result.counts),
+        "eligibleEnvelopeRefs": result.eligibleEnvelopeRefs,
+        "planned": result.planned.map { reminderPingDryRunPlannedPingToDict($0, formatter: formatter) },
+        "suppressed": result.suppressed.map { reminderPingSuppressedIntentToDict($0) },
+        "duplicates": result.duplicates.map { reminderPingDryRunDuplicateToDict($0, formatter: formatter) },
+        "safeRecordPingCommands": result.safeRecordPingCommands,
+        "safeNextCommands": result.safeNextCommands,
+        "safeVerificationCommands": result.safeVerificationCommands,
+    ]
+}
+
+func reminderPingDryRunCountsToDict(_ counts: CiderReminderPingDryRunCounts) -> [String: Any] {
+    [
+        "eligible": counts.eligible,
+        "planned": counts.planned,
+        "suppressed": counts.suppressed,
+        "duplicates": counts.duplicates,
+    ]
+}
+
 func dailyEpisodePreviewToDict(_ preview: DailyEpisodePreview) -> [String: Any] {
     var dict: [String: Any] = [
         "ok": true,
@@ -2263,6 +2296,39 @@ func reminderPingDeliveryEnvelopeToDict(_ envelope: CiderReminderPingDeliveryEnv
         dict["due"] = due
     }
     return dict
+}
+
+func reminderPingDryRunPlannedPingToDict(_ planned: CiderReminderPingDryRunPlannedPing, formatter: ISO8601DateFormatter) -> [String: Any] {
+    [
+        "id": planned.id,
+        "envelopeRef": planned.envelope.id,
+        "owner": secondBrainOwnerRefToDict(planned.envelope.owner),
+        "itemID": planned.envelope.owner.ownerID,
+        "title": planned.envelope.title,
+        "transport": planned.envelope.transport,
+        "surface": planned.envelope.surface,
+        "deliveryKey": planned.envelope.deliveryKey,
+        "duplicateKey": planned.envelope.duplicateKey,
+        "wouldSend": planned.wouldSend,
+        "readOnly": planned.readOnly,
+        "changed": planned.changed,
+        "noSendReason": planned.noSendReason,
+        "safeRecordPingCommand": planned.envelope.safeRecordPingCommand,
+        "safeVerificationCommands": planned.envelope.safeVerificationCommands,
+        "envelope": reminderPingDeliveryEnvelopeToDict(planned.envelope, formatter: formatter),
+    ]
+}
+
+func reminderPingDryRunDuplicateToDict(_ duplicate: CiderReminderPingDryRunDuplicate, formatter: ISO8601DateFormatter) -> [String: Any] {
+    [
+        "id": duplicate.id,
+        "envelopeRef": duplicate.envelope.id,
+        "duplicateOfEnvelopeID": duplicate.duplicateOfEnvelopeID,
+        "reason": duplicate.reason,
+        "deliveryKey": duplicate.envelope.deliveryKey,
+        "duplicateKey": duplicate.envelope.duplicateKey,
+        "envelope": reminderPingDeliveryEnvelopeToDict(duplicate.envelope, formatter: formatter),
+    ]
 }
 
 func reminderPingSuppressedIntentToDict(_ suppressed: CiderReminderPingSuppressedIntent) -> [String: Any] {
