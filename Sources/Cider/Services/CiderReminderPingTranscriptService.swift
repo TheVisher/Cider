@@ -691,6 +691,264 @@ enum CiderReminderPingDeliveredTranscriptValidationService {
     }
 }
 
+struct CiderReminderPingRunStatusCounts: Equatable {
+    var plannedRows: Int
+    var deliveredRows: Int
+    var validationValid: Int
+    var validationFailed: Int
+    var validationSkipped: Int
+    var existingReceiptMatches: Int
+    var missingReceipts: Int
+    var duplicateOrImportSkippedRows: Int
+}
+
+struct CiderReminderPingRunStatusRow: Equatable {
+    var status: String
+    var receiptStatus: String
+    var itemType: String
+    var itemID: String
+    var ownerRef: String
+    var transport: String
+    var surface: String
+    var plannedPingID: String
+    var duplicateKey: String
+    var deliveryID: String?
+    var messageID: String?
+    var matchingReceiptID: String?
+    var validationStatus: String?
+    var validationErrorCode: String?
+    var validationError: String?
+    var safeVerificationCommands: [String]
+}
+
+struct CiderReminderPingRunStatusResult: Equatable {
+    var ok: Bool
+    var command: String = "item.reminder-ping-status"
+    var readOnly: Bool = true
+    var changed: Bool = false
+    var runState: String
+    var truthBoundary: String = "planned_transcript_and_action_receipts_are_evidence_not_human_seen_truth"
+    var transportBoundary: String = "status_replay_only_no_send_no_receipts"
+    var counts: CiderReminderPingRunStatusCounts
+    var rows: [CiderReminderPingRunStatusRow]
+    var validation: CiderReminderPingDeliveredTranscriptValidationResult?
+    var safeNextCommands: [String]
+    var safeVerificationCommands: [String]
+}
+
+@MainActor
+enum CiderReminderPingRunStatusService {
+    static func summarize(
+        plannedTranscriptJSONL: String,
+        deliveredTranscriptJSONL: String?,
+        ledger: SecondBrainActionReceiptLedgerService
+    ) throws -> CiderReminderPingRunStatusResult {
+        let plannedRows = try CiderReminderPingTranscriptService.parseRows(
+            plannedTranscriptJSONL,
+            errorDomain: "CiderReminderPingRunStatusService"
+        )
+        let deliveredRows = try deliveredTranscriptJSONL.map {
+            try CiderReminderPingTranscriptService.parseRows(
+                $0,
+                errorDomain: "CiderReminderPingRunStatusService"
+            )
+        } ?? []
+        let validation = try deliveredTranscriptJSONL.map {
+            try CiderReminderPingDeliveredTranscriptValidationService.validate(
+                deliveredTranscriptJSONL: $0,
+                plannedTranscriptJSONL: plannedTranscriptJSONL
+            )
+        }
+
+        var validationByKey: [String: CiderReminderPingDeliveredTranscriptValidationRow] = [:]
+        for row in validation?.rows ?? [] {
+            let key = validationKey(itemType: row.itemType, itemID: row.itemID, transport: row.transport, surface: row.surface, plannedPingID: row.plannedPingID)
+            if validationByKey[key] == nil {
+                validationByKey[key] = row
+            }
+        }
+        var deliveredByKey: [String: CiderReminderPingTranscriptRow] = [:]
+        for row in deliveredRows where deliveredByKey[selectorKey(row)] == nil {
+            deliveredByKey[selectorKey(row)] = row
+        }
+        let evidenceRows = deliveredRows.isEmpty ? plannedRows : plannedRows.map { planned in
+            deliveredByKey[selectorKey(planned)] ?? planned
+        }
+
+        var statusRows: [CiderReminderPingRunStatusRow] = []
+        var receiptMatchCount = 0
+        var missingReceiptCount = 0
+        var duplicateOrImportSkippedCount = 0
+
+        for row in evidenceRows {
+            let receipt = try matchingReceipt(for: row, ledger: ledger)
+            let validationRow = validationByKey[selectorKey(row)]
+            let hasReceipt = receipt != nil
+            if hasReceipt {
+                receiptMatchCount += 1
+                if isDelivered(row) {
+                    duplicateOrImportSkippedCount += 1
+                }
+            } else {
+                missingReceiptCount += 1
+            }
+            let receiptStatus = hasReceipt ? "receipt_exists" : "missing_receipt"
+            let status: String
+            if let validationRow, validationRow.status == "failed" {
+                status = "validation_failed"
+            } else if hasReceipt {
+                status = "imported_or_duplicate_suppressed"
+            } else if isDelivered(row) {
+                status = "delivered_not_imported"
+            } else {
+                status = "planned_not_delivered"
+            }
+            statusRows.append(CiderReminderPingRunStatusRow(
+                status: status,
+                receiptStatus: receiptStatus,
+                itemType: row.itemType,
+                itemID: row.itemID,
+                ownerRef: row.owner.canonicalRef,
+                transport: row.transport,
+                surface: row.surface,
+                plannedPingID: row.plannedPingID,
+                duplicateKey: row.duplicateKey,
+                deliveryID: row.deliveryID,
+                messageID: row.messageID,
+                matchingReceiptID: receipt?.id,
+                validationStatus: validationRow?.status,
+                validationErrorCode: validationRow?.errorCode,
+                validationError: validationRow?.error,
+                safeVerificationCommands: safeVerificationCommands(for: row, receiptID: receipt?.id)
+            ))
+        }
+
+        let validationFailed = validation?.counts.failed ?? 0
+        let counts = CiderReminderPingRunStatusCounts(
+            plannedRows: plannedRows.count,
+            deliveredRows: deliveredRows.count,
+            validationValid: validation?.counts.valid ?? 0,
+            validationFailed: validationFailed,
+            validationSkipped: validation?.counts.skipped ?? 0,
+            existingReceiptMatches: receiptMatchCount,
+            missingReceipts: missingReceiptCount,
+            duplicateOrImportSkippedRows: duplicateOrImportSkippedCount
+        )
+        let runState: String
+        if validationFailed > 0 {
+            runState = "blocked_by_validation"
+        } else if deliveredRows.isEmpty {
+            runState = "planned_not_delivered"
+        } else if missingReceiptCount == 0 {
+            runState = "imported"
+        } else if receiptMatchCount > 0 {
+            runState = "partially_imported"
+        } else {
+            runState = "delivered_not_imported"
+        }
+
+        let safeNextCommands = orderedUniqueStrings([
+            "cider-cli item reminder-ping-validate-delivered --file <delivered-transcript.jsonl> --planned-file <planned-transcript.jsonl> --json",
+            "cider-cli item reminder-ping-transport-worker --file <planned-transcript.jsonl> --output <delivered-transcript.jsonl> --config-file <worker-config.yaml> --json",
+            "cider-cli item reminder-ping-import-ack --file <delivered-transcript.jsonl> --planned-file <planned-transcript.jsonl> --json",
+            "cider-cli item action-ledger list --action record_ping_surface --json",
+        ])
+        let safeVerificationCommands = orderedUniqueStrings(
+            statusRows.flatMap(\.safeVerificationCommands) + [
+                "cider-cli item reminder-ping-status --planned-file <planned-transcript.jsonl> --delivered-file <delivered-transcript.jsonl> --json",
+                "cider-cli item reminder-ping-validate-delivered --file <delivered-transcript.jsonl> --planned-file <planned-transcript.jsonl> --json",
+                "cider-cli item action-ledger list --action record_ping_surface --json",
+            ]
+        )
+
+        return CiderReminderPingRunStatusResult(
+            ok: validationFailed == 0,
+            runState: runState,
+            counts: counts,
+            rows: statusRows,
+            validation: validation,
+            safeNextCommands: safeNextCommands,
+            safeVerificationCommands: safeVerificationCommands
+        )
+    }
+
+    private static func matchingReceipt(
+        for row: CiderReminderPingTranscriptRow,
+        ledger: SecondBrainActionReceiptLedgerService
+    ) throws -> SecondBrainActionReceiptRecord? {
+        let receipts = try ledger.list(filter: .init(
+            owner: row.owner,
+            action: "record_ping_surface",
+            status: "succeeded",
+            limit: 100
+        ))
+        return receipts.first { receipt in
+            receiptDuplicateKey(receipt) == row.duplicateKey
+        }
+    }
+
+    private static func receiptDuplicateKey(_ receipt: SecondBrainActionReceiptRecord) -> String? {
+        for json in [receipt.receiptJSON, receipt.afterJSON] {
+            guard let json,
+                  let data = json.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let duplicateKey = object["duplicateKey"] as? String,
+                  !duplicateKey.isEmpty else { continue }
+            return duplicateKey
+        }
+        return nil
+    }
+
+    private static func selectorKey(_ row: CiderReminderPingTranscriptRow) -> String {
+        validationKey(
+            itemType: row.itemType,
+            itemID: row.itemID,
+            transport: row.transport,
+            surface: row.surface,
+            plannedPingID: row.plannedPingID
+        )
+    }
+
+    private static func validationKey(
+        itemType: String,
+        itemID: String,
+        transport: String,
+        surface: String,
+        plannedPingID: String
+    ) -> String {
+        if !plannedPingID.isEmpty { return "plannedPingID:\(plannedPingID)" }
+        return "owner:\(itemType):\(itemID):\(transport):\(surface)"
+    }
+
+    private static func isDelivered(_ row: CiderReminderPingTranscriptRow) -> Bool {
+        ["delivered", "confirmed", "sent", "ok", "success"].contains(row.status.lowercased())
+            || ["delivered", "confirmed", "sent", "ok", "success"].contains(row.deliveryStatus.lowercased())
+            || !(row.deliveryID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            || !(row.messageID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
+    private static func safeVerificationCommands(for row: CiderReminderPingTranscriptRow, receiptID: String?) -> [String] {
+        var commands = [
+            "cider-cli item action-ledger list --owner \(row.owner.canonicalRef) --action record_ping_surface --json",
+            "cider-cli item context \(row.owner.ownerType) \(row.owner.ownerID) --max-history 10 --json",
+        ]
+        if let receiptID {
+            commands.insert("cider-cli item action-ledger inspect \(receiptID) --json", at: 0)
+        }
+        return commands
+    }
+
+    private static func orderedUniqueStrings(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values where !value.isEmpty && !seen.contains(value) {
+            seen.insert(value)
+            result.append(value)
+        }
+        return result
+    }
+}
+
 private extension CiderReminderPingDeliveredTranscriptValidationRow {
     func with(status: String) -> CiderReminderPingDeliveredTranscriptValidationRow {
         var copy = self
