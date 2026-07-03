@@ -1615,10 +1615,10 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             "saw blades"
         )
 
-        XCTAssertEqual(graphCandidate.detailExtractedValueLabel, "movie, media")
+        XCTAssertEqual(graphCandidate.detailExtractedValueLabel, "Proposes mentions → Movie link")
         XCTAssertNil(graphCandidate.detailOwnerRefsLabel)
-        XCTAssertEqual(graphCandidate.detailCorrectionActionLabel, "Delegate / inspect")
-        XCTAssertEqual(graphCandidate.detailCorrectionHelp, "Delegate / inspect before accepting this graph relation")
+        XCTAssertEqual(graphCandidate.detailCorrectionActionLabel, "Resolve / correct target")
+        XCTAssertEqual(graphCandidate.detailCorrectionHelp, "Resolve / correct target before accepting this graph relation")
         XCTAssertEqual(graphCandidate.sourceEvidenceFindQuery, "Watched The Way Way Back tonight")
         XCTAssertEqual(HomeReviewCockpitAction.openSource.helpLabel(for: graphCandidate), "Open source evidence")
         XCTAssertEqual(HomeReviewCockpitAction.accept.helpLabel(for: graphCandidate), "Accept graph candidate")
