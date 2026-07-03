@@ -1,4 +1,5 @@
 import Foundation
+import Yams
 
 struct CiderReminderPingTranscriptCounts: Equatable {
     var rows: Int
@@ -331,9 +332,108 @@ enum CiderReminderPingFakeTransportSenderService {
 }
 
 struct CiderReminderPingTransportWorkerConfiguration: Equatable {
+    var schemaVersion: Int = 1
     var workerID: String
     var senderID: String
     var transport: String
+    var senderMetadataDefaults: [String: String] = [:]
+
+    static func parseConfigFile(_ input: String, fileName: String) throws -> CiderReminderPingTransportWorkerConfiguration {
+        let object: Any
+        if fileName.lowercased().hasSuffix(".json") {
+            guard let data = input.data(using: .utf8) else {
+                throw configError("Transport worker config file is not valid UTF-8.")
+            }
+            object = try JSONSerialization.jsonObject(with: data)
+        } else {
+            object = try Yams.load(yaml: input) as Any
+        }
+        guard let dict = object as? [String: Any] else {
+            throw configError("Transport worker config must be a top-level object.")
+        }
+        let allowedKeys: Set<String> = [
+            "schemaVersion",
+            "transport",
+            "workerID",
+            "senderID",
+            "senderMetadataDefaults",
+        ]
+        if let unknown = dict.keys.first(where: { !allowedKeys.contains($0) }) {
+            throw configError("Transport worker config contains unsupported field \(unknown).")
+        }
+        guard let schemaVersion = dict["schemaVersion"] as? Int else {
+            throw configError("Transport worker config is missing required schemaVersion.")
+        }
+        guard schemaVersion == 1 else {
+            throw configError("Unsupported transport worker config schemaVersion \(schemaVersion).")
+        }
+        let transport = try requiredString("transport", in: dict)
+        let workerID = try requiredString("workerID", in: dict)
+        let senderID = try requiredString("senderID", in: dict)
+        var metadata: [String: String] = [:]
+        if let rawMetadata = dict["senderMetadataDefaults"] {
+            guard let metadataDict = rawMetadata as? [String: Any] else {
+                throw configError("Transport worker config senderMetadataDefaults must be an object of string values.")
+            }
+            for (key, value) in metadataDict {
+                guard !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      let stringValue = value as? String,
+                      !stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw configError("Transport worker config senderMetadataDefaults must use non-empty string keys and values.")
+                }
+                metadata[key] = stringValue
+            }
+        }
+        return CiderReminderPingTransportWorkerConfiguration(
+            schemaVersion: schemaVersion,
+            workerID: workerID,
+            senderID: senderID,
+            transport: transport,
+            senderMetadataDefaults: metadata
+        )
+    }
+
+    static func resolve(
+        config: CiderReminderPingTransportWorkerConfiguration?,
+        transport cliTransport: String?,
+        workerID cliWorkerID: String?,
+        senderID cliSenderID: String?
+    ) throws -> CiderReminderPingTransportWorkerConfiguration {
+        if let config {
+            try assertNoConflict(field: "transport", configValue: config.transport, cliValue: cliTransport)
+            try assertNoConflict(field: "workerID", configValue: config.workerID, cliValue: cliWorkerID)
+            try assertNoConflict(field: "senderID", configValue: config.senderID, cliValue: cliSenderID)
+            return config
+        }
+        guard let cliTransport, let cliWorkerID, let cliSenderID else {
+            throw configError("Usage: cider-cli item reminder-ping-transport-worker --file <planned-jsonl> --output <delivered-jsonl> (--config-file <json-or-yaml>|--transport <name> --worker-id <id> --sender-id <id>) [--limit <n>] [--json]")
+        }
+        return CiderReminderPingTransportWorkerConfiguration(
+            workerID: cliWorkerID,
+            senderID: cliSenderID,
+            transport: cliTransport
+        )
+    }
+
+    private static func requiredString(_ key: String, in dict: [String: Any]) throws -> String {
+        guard let value = dict[key] as? String,
+              !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw configError("Transport worker config is missing required \(key).")
+        }
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func assertNoConflict(field: String, configValue: String, cliValue: String?) throws {
+        guard let cliValue = cliValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !cliValue.isEmpty else { return }
+        guard cliValue == configValue else {
+            throw configError("Transport worker CLI \(field) conflicts with config-file \(field).")
+        }
+    }
+
+    private static func configError(_ message: String) -> NSError {
+        NSError(domain: "CiderReminderPingTransportWorkerConfiguration", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    }
 }
 
 struct CiderReminderPingTransportWorkerContractResult: Equatable {
@@ -351,6 +451,7 @@ struct CiderReminderPingTransportWorkerContractResult: Equatable {
     ]
     var safeVerificationCommands: [String] = [
         "cider-cli item action-ledger list --action record_ping_surface --json",
+        "cider-cli item reminder-ping-import-ack --file <transport-worker-delivered.jsonl> --json",
         "cider-cli item reminder-ping-dry-run --json",
     ]
 
@@ -408,7 +509,8 @@ enum CiderReminderPingTransportWorkerContractService {
             next.noSendReason = "transport_worker_contract_stub_no_real_send"
             next.deliveryID = "transport-worker:\(workerID):\(row.envelopeID)"
             next.messageID = "transport-worker-message:\(workerID):\(row.envelopeID)"
-            next.senderMetadata = [
+            var metadata = configuration.senderMetadataDefaults
+            metadata.merge([
                 "adapter": "cider_transport_worker_contract_stub",
                 "noRealSend": "true",
                 "senderID": senderID,
@@ -416,7 +518,8 @@ enum CiderReminderPingTransportWorkerContractService {
                 "transport": transport,
                 "transportWorkerContract": "stub",
                 "workerID": workerID,
-            ]
+            ]) { _, new in new }
+            next.senderMetadata = metadata
             return next
         }
         let counts = CiderReminderPingTranscriptCounts(

@@ -1540,6 +1540,7 @@ struct CiderCLIAgentSafetyTests {
         let help = try runCLI(args: ["item", "reminder-ping-transport-worker", "--help"], vault: vault)
         #expect(help.status == 0)
         #expect(help.stdout.contains("reminder-ping-transport-worker"))
+        #expect(help.stdout.contains("--config-file"))
         #expect(help.stdout.contains("--worker-id"))
         #expect(help.stdout.contains("no real send"))
 
@@ -1641,6 +1642,144 @@ struct CiderCLIAgentSafetyTests {
             command: "item.action-ledger.list"
         )
         #expect((afterImportLedger["entries"] as? [[String: Any]])?.count == 1)
+    }
+
+    @Test("reminder ping transport worker CLI loads config file and fails closed on identity conflicts")
+    func reminderPingTransportWorkerCLILoadsConfigFileAndFailsClosedOnIdentityConflicts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-reminder-ping-transport-worker-config-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let dueDate = Self.relativeDateString(daysFromToday: -1)
+
+        let capture = try assertStrictProcessJSON(
+            runCLI(args: [
+                "capture", "add", "--kind", "todo",
+                "--content", "Reminder ping transport worker config todo",
+                "--date", dueDate,
+                "--json",
+            ], vault: vault),
+            command: "capture.add"
+        )
+        let item = try #require(capture["item"] as? [String: Any])
+        let itemID = try #require(item["id"] as? String)
+
+        let plannedFile = vault.appendingPathComponent("planned-reminder-pings.jsonl")
+        _ = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-transcript",
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--file", plannedFile.path,
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-transcript"
+        )
+
+        let configFile = vault.appendingPathComponent("worker.yaml")
+        try """
+        schemaVersion: 1
+        transport: discord
+        workerID: discord-reminder-worker
+        senderID: discord-bot-local-stub
+        senderMetadataDefaults:
+          workspace: local-dev
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let deliveredFile = vault.appendingPathComponent("worker-delivered-reminder-pings.jsonl")
+        let delivered = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-transport-worker",
+                "--file", plannedFile.path,
+                "--output", deliveredFile.path,
+                "--config-file", configFile.path,
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-transport-worker"
+        )
+        #expect(delivered["readOnly"] as? Bool == true)
+        #expect(delivered["changed"] as? Bool == false)
+        #expect(delivered["noRealSend"] as? Bool == true)
+        #expect((delivered["safeNextCommands"] as? [String])?.contains("cider-cli item reminder-ping-import-ack --file <transport-worker-delivered.jsonl> --json") == true)
+
+        let worker = try #require(delivered["worker"] as? [String: Any])
+        #expect(worker["configFile"] as? String == configFile.path)
+        #expect(worker["transport"] as? String == "discord")
+        #expect(worker["workerID"] as? String == "discord-reminder-worker")
+
+        let deliveredLine = try #require(String(contentsOf: deliveredFile, encoding: .utf8)
+            .split(separator: "\n")
+            .map(String.init)
+            .first)
+        let deliveredRow = try parseJSONObject(deliveredLine)
+        #expect(deliveredRow["itemID"] as? String == itemID)
+        let metadata = try #require(deliveredRow["senderMetadata"] as? [String: Any])
+        #expect(metadata["workspace"] as? String == "local-dev")
+        #expect(metadata["noRealSend"] as? String == "true")
+
+        let beforeImportLedger = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "action-ledger", "list",
+                "--owner", "todo:\(itemID)",
+                "--action", "record_ping_surface",
+                "--limit", "5",
+                "--json",
+            ], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        #expect((beforeImportLedger["entries"] as? [[String: Any]])?.isEmpty == true)
+
+        let conflict = try parseJSONObject(
+            runCLI(args: [
+                "item", "reminder-ping-transport-worker",
+                "--file", plannedFile.path,
+                "--output", deliveredFile.path,
+                "--config-file", configFile.path,
+                "--transport", "telegram",
+                "--json",
+            ], vault: vault).stdout
+        )
+        #expect(conflict["ok"] as? Bool == false)
+        #expect(conflict["readOnly"] as? Bool == true)
+        #expect(conflict["changed"] as? Bool == false)
+        #expect(conflict["noRealSend"] as? Bool == true)
+        #expect((conflict["error"] as? String)?.contains("conflicts") == true)
+        #expect((conflict["safeNextCommands"] as? [String])?.contains("cider-cli item reminder-ping-import-ack --file <transport-worker-delivered.jsonl> --json") == true)
+    }
+
+    @Test("reminder ping transport worker CLI rejects invalid config with agent safe JSON")
+    func reminderPingTransportWorkerCLIRejectsInvalidConfigWithAgentSafeJSON() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-reminder-ping-transport-worker-invalid-config-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let plannedFile = vault.appendingPathComponent("planned-reminder-pings.jsonl")
+        try "".write(to: plannedFile, atomically: true, encoding: .utf8)
+        let outputFile = vault.appendingPathComponent("worker-delivered-reminder-pings.jsonl")
+        let configFile = vault.appendingPathComponent("worker.json")
+        try #"{"schemaVersion":99,"transport":"discord","workerID":"worker","senderID":"sender"}"#
+            .write(to: configFile, atomically: true, encoding: .utf8)
+
+        let invalid = try parseJSONObject(
+            runCLI(args: [
+                "item", "reminder-ping-transport-worker",
+                "--file", plannedFile.path,
+                "--output", outputFile.path,
+                "--config-file", configFile.path,
+                "--json",
+            ], vault: vault).stdout
+        )
+
+        #expect(invalid["ok"] as? Bool == false)
+        #expect(invalid["readOnly"] as? Bool == true)
+        #expect(invalid["changed"] as? Bool == false)
+        #expect(invalid["noRealSend"] as? Bool == true)
+        #expect((invalid["error"] as? String)?.contains("Unsupported transport worker config schemaVersion") == true)
+        #expect((invalid["safeNextCommands"] as? [String])?.contains("cider-cli item reminder-ping-import-ack --file <transport-worker-delivered.jsonl> --json") == true)
+        #expect(FileManager.default.fileExists(atPath: outputFile.path) == false)
     }
 
     @Test("action ledger CLI filters by command refs and time windows")

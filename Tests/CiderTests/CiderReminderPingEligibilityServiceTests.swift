@@ -426,6 +426,106 @@ struct CiderReminderPingEligibilityServiceTests {
         #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
     }
 
+    @Test("transport worker config file parses JSON and YAML with sender metadata defaults")
+    func transportWorkerConfigFileParsesJSONAndYAMLWithSenderMetadataDefaults() throws {
+        let jsonConfig = """
+        {
+          "schemaVersion": 1,
+          "transport": "discord",
+          "workerID": "discord-reminder-worker",
+          "senderID": "discord-bot-local-stub",
+          "senderMetadataDefaults": {
+            "workspace": "local-dev",
+            "botName": "Cider Reminder"
+          }
+        }
+        """
+        let yamlConfig = """
+        schemaVersion: 1
+        transport: discord
+        workerID: discord-reminder-worker
+        senderID: discord-bot-local-stub
+        senderMetadataDefaults:
+          workspace: local-dev
+          botName: Cider Reminder
+        """
+
+        let json = try CiderReminderPingTransportWorkerConfiguration.parseConfigFile(
+            jsonConfig,
+            fileName: "worker.json"
+        )
+        let yaml = try CiderReminderPingTransportWorkerConfiguration.parseConfigFile(
+            yamlConfig,
+            fileName: "worker.yaml"
+        )
+
+        #expect(json == yaml)
+        #expect(json.schemaVersion == 1)
+        #expect(json.transport == "discord")
+        #expect(json.workerID == "discord-reminder-worker")
+        #expect(json.senderID == "discord-bot-local-stub")
+        #expect(json.senderMetadataDefaults["workspace"] == "local-dev")
+
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let ledger = SecondBrainActionReceiptLedgerService(database: db)
+        let now = date(2026, 7, 13)
+        let todo = TodoCard(title: "Worker config todo", dueDate: now)
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [todo], dateCards: [], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+        let intents = try CiderReminderPingEligibilityService.pendingIntents(from: feed, ledger: ledger)
+        let preview = CiderReminderPingDeliveryPreviewService.preview(
+            from: intents,
+            transport: "discord",
+            surface: "agent-chat"
+        )
+        let transcript = CiderReminderPingTranscriptService.produce(from: CiderReminderPingDryRunService.run(from: preview))
+
+        let worker = try CiderReminderPingTransportWorkerContractService.deliver(
+            transcriptJSONL: transcript.jsonl(),
+            configuration: yaml
+        )
+
+        let deliveredRow = try #require(worker.rows.first)
+        #expect(deliveredRow.senderMetadata["workspace"] == "local-dev")
+        #expect(deliveredRow.senderMetadata["botName"] == "Cider Reminder")
+        #expect(deliveredRow.senderMetadata["noRealSend"] == "true")
+        #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
+
+        #expect(throws: (any Error).self) {
+            _ = try CiderReminderPingTransportWorkerContractService.deliver(
+                transcriptJSONL: transcript.jsonl(),
+                configuration: .init(
+                    workerID: "telegram-reminder-worker",
+                    senderID: "telegram-bot-local-stub",
+                    transport: "telegram"
+                )
+            )
+        }
+    }
+
+    @Test("transport worker config rejects missing required fields and unsupported schema versions")
+    func transportWorkerConfigRejectsMissingRequiredFieldsAndUnsupportedSchemaVersions() throws {
+        #expect(throws: (any Error).self) {
+            _ = try CiderReminderPingTransportWorkerConfiguration.parseConfigFile(
+                #"{"schemaVersion":1,"transport":"discord","senderID":"sender"}"#,
+                fileName: "missing-worker.json"
+            )
+        }
+        #expect(throws: (any Error).self) {
+            _ = try CiderReminderPingTransportWorkerConfiguration.parseConfigFile(
+                #"{"schemaVersion":2,"transport":"discord","workerID":"worker","senderID":"sender"}"#,
+                fileName: "unsupported.json"
+            )
+        }
+    }
+
     private func recordPingReceipt(
         ledger: SecondBrainActionReceiptLedgerService,
         owner: SecondBrainOwnerRef,
