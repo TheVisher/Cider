@@ -3480,6 +3480,37 @@ struct CiderCLIAgentSafetyTests {
         #expect((dict["error"] as? String)?.contains("Usage: cider-cli capture add") == true)
     }
 
+    @Test("capture add content flag creates dated todo")
+    func captureAddContentFlagCreatesDatedTodo() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-capture-content-todo-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "todo",
+                "--content", "Hermes due-date smoke test",
+                "--date", "2026-07-13",
+                "--json",
+            ],
+            vault: vault
+        )
+
+        let dict = try parseJSONObject(result.stdout)
+        #expect(result.status == 0)
+        #expect(dict["ok"] as? Bool != false)
+        let item = try #require(dict["item"] as? [String: Any])
+        #expect(item["title"] as? String == "Hermes due-date smoke test")
+        #expect(item["type"] as? String == "todo")
+        let relativePath = try #require(item["relativePath"] as? String)
+        let icsURL = vault.appendingPathComponent(relativePath)
+        let ics = try String(contentsOf: icsURL, encoding: .utf8)
+        #expect(ics.contains("SUMMARY:Hermes due-date smoke test"))
+        #expect(ics.contains("DUE;VALUE=DATE:20260713"))
+    }
+
     @Test("capture add help prints usage before source validation")
     func captureAddHelpPrintsUsageBeforeSourceValidation() throws {
         let result = try runCLI(args: ["capture", "add", "--help"])

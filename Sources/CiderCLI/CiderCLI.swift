@@ -12852,8 +12852,10 @@ struct CiderCLI {
     static func rawCaptureText(from args: [String]) throws -> String? {
         let wantsStdin = args.contains("--stdin")
         let textFile = parseFlag("--text-file", from: args)
-        if wantsStdin, textFile != nil {
-            throw CaptureAddArgumentError.message("Use only one raw text source: --stdin or --text-file.")
+        let content = parseFlag("--content", from: args)
+        let sourceCount = (wantsStdin ? 1 : 0) + (textFile == nil ? 0 : 1) + (content == nil ? 0 : 1)
+        if sourceCount > 1 {
+            throw CaptureAddArgumentError.message("Use only one raw text source: --content, --stdin, or --text-file.")
         }
         if wantsStdin {
             let data = FileHandle.standardInput.readDataToEndOfFile()
@@ -12871,6 +12873,13 @@ struct CiderCLI {
             } catch {
                 throw CaptureAddArgumentError.message("Could not read UTF-8 text file: \(textFile)")
             }
+        }
+        if let content {
+            let raw = content
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\t", with: "\t")
+            guard !raw.isEmpty else { throw CiderCaptureError.missingSource }
+            return raw
         }
         return nil
     }

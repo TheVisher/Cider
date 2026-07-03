@@ -88,7 +88,7 @@ struct FileBackedDomainContractsTests {
             "`--kind note|todo|bookmark|file|event|contact|journal`",
             "`--stdin` reads exact raw source text from standard input.",
             "`--text-file <path>` reads exact raw source text from a file.",
-            "`--content <text>` is accepted for journal capture",
+            "`--content <text>` reads exact raw source text inline for capture kinds that accept text",
             "`--url <url>` is the explicit bookmark source.",
             "`--path <source-file-path>` is the explicit file source for `capture add`.",
             "`--folder <target-folder-path>` is the destination folder selector for `capture add`",

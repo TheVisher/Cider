@@ -44,7 +44,7 @@ Core capture flags:
 - `--kind note|todo|bookmark|file|event|contact|journal` selects the item kind explicitly. Do not rely on inference when the kind is known.
 - `--stdin` reads exact raw source text from standard input.
 - `--text-file <path>` reads exact raw source text from a file.
-- `--content <text>` is accepted for journal capture and daily append helpers when stdin is awkward.
+- `--content <text>` reads exact raw source text inline for capture kinds that accept text, and remains accepted for daily append helpers when stdin is awkward.
 - `--url <url>` is the explicit bookmark source.
 - `--path <source-file-path>` is the explicit file source for `capture add`.
 - `--folder <target-folder-path>` is the destination folder selector for `capture add`; examples include `Inbox/Notes`, `Inbox/Bookmarks`, and project or topic folders.
