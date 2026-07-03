@@ -3869,6 +3869,97 @@ struct CiderCLIAgentSafetyTests {
         }
     }
 
+    @Test("top level project artifact help is discoverable and side effect free")
+    func topLevelProjectArtifactHelpIsDiscoverableAndSideEffectFree() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-project-artifact-help-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let before = try vaultRelativeFileList(vault)
+        let result = try runCLI(args: ["project-artifact", "--help"], vault: vault)
+        let after = try vaultRelativeFileList(vault)
+
+        #expect(result.status == 0)
+        #expect(result.stdout.contains("Project artifact commands:"))
+        #expect(result.stdout.contains("cider-cli project-artifact create"))
+        #expect(result.stdout.contains("cider-cli project-artifact list"))
+        #expect(result.stdout.contains("Compatibility: cider-cli note project-artifact"))
+        #expect(after == before)
+
+        let beforeSubcommandHelp = try vaultRelativeFileList(vault)
+        let subcommandHelp = try runCLI(args: ["project-artifact", "create", "--help"], vault: vault)
+        let afterSubcommandHelp = try vaultRelativeFileList(vault)
+
+        #expect(subcommandHelp.status == 0)
+        #expect(subcommandHelp.stdout.contains("cider-cli project-artifact create"))
+        #expect(afterSubcommandHelp == beforeSubcommandHelp)
+    }
+
+    @Test("root help advertises top level project artifact namespace")
+    func rootHelpAdvertisesTopLevelProjectArtifactNamespace() throws {
+        let result = try runCLI(args: ["help"])
+
+        #expect(result.status == 0)
+        #expect(result.stdout.contains("PROJECT ARTIFACT"))
+        #expect(result.stdout.contains("cider-cli project-artifact create"))
+        #expect(result.stdout.contains("cider-cli project-artifact get <note-id-prefix> [--json]"))
+    }
+
+    @Test("top level project artifact namespace delegates to project artifact implementation")
+    func topLevelProjectArtifactNamespaceDelegatesToProjectArtifactImplementation() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-project-artifact-flow-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let create = try parseJSONObject(try runCLI(args: [
+            "project-artifact", "create",
+            "--project", "cider",
+            "--type", "qa",
+            "--title", "Top Level Artifact QA",
+            "--content", "Initial finding.",
+            "--json",
+        ], vault: vault).stdout)
+        #expect(create["ok"] as? Bool == true)
+        #expect(create["command"] as? String == "project-artifact.create")
+        #expect(create["compatibilityAlias"] as? String == "note.project-artifact.create")
+        let artifactID = try #require(create["id"] as? String)
+
+        let list = try parseJSONObject(try runCLI(args: [
+            "project-artifact", "list",
+            "--project", "cider",
+            "--json",
+        ], vault: vault).stdout)
+        #expect(list["ok"] as? Bool == true)
+        #expect(list["command"] as? String == "project-artifact.list")
+        let notes = try #require(list["notes"] as? [[String: Any]])
+        #expect(notes.map { $0["id"] as? String }.contains(artifactID))
+
+        let get = try parseJSONObject(try runCLI(args: [
+            "project-artifact", "get", artifactID,
+            "--json",
+        ], vault: vault).stdout)
+        #expect(get["command"] as? String == "project-artifact.get")
+        #expect(get["content"] as? String == "Initial finding.")
+
+        let append = try parseJSONObject(try runCLI(args: [
+            "project-artifact", "append", artifactID,
+            "--content", "Follow-up evidence.",
+            "--json",
+        ], vault: vault).stdout)
+        #expect(append["ok"] as? Bool == true)
+        #expect(append["command"] as? String == "project-artifact.append")
+        #expect((append["content"] as? String)?.contains("Initial finding.\n\nFollow-up evidence.") == true)
+
+        let legacyGet = try parseJSONObject(try runCLI(args: [
+            "note", "project-artifact", "get", artifactID,
+            "--json",
+        ], vault: vault).stdout)
+        #expect(legacyGet["command"] as? String == "note.project-artifact.get")
+        #expect((legacyGet["content"] as? String)?.contains("Follow-up evidence.") == true)
+    }
+
     @Test("project artifact CLI relation targets use stable relation names")
     func projectArtifactCLIRelationTargetsUseStableRelationNames() throws {
         let targets = CiderCLI.projectArtifactRelationTargets(from: [
@@ -10837,6 +10928,19 @@ struct CiderCLIAgentSafetyTests {
             String(data: stderrBuffer.data(), encoding: .utf8) ?? "",
             process.terminationStatus
         )
+    }
+
+    private func vaultRelativeFileList(_ vault: URL) throws -> [String] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: vault,
+            includingPropertiesForKeys: nil
+        ) else {
+            return []
+        }
+        return enumerator.compactMap { item in
+            guard let url = item as? URL else { return nil }
+            return String(url.path.dropFirst(vault.path.count + 1))
+        }.sorted()
     }
 
     private func runCLIConcurrently(

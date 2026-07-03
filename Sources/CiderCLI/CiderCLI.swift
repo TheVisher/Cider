@@ -207,6 +207,14 @@ struct CiderCLI {
             return true
         }
 
+        if command == "project-artifact" || command == "artifact" {
+            if subcommand == nil || subcommand == "help" || subcommand == "--help" || subcommand == "-h" || hasHelpArg(args) {
+                printProjectArtifactHelp(commandPrefix: "cider-cli project-artifact", includeCompatibility: true)
+                return true
+            }
+            return false
+        }
+
         guard command == "item" else {
             return false
         }
@@ -620,6 +628,8 @@ struct CiderCLI {
             await handleBookmark(subcommand: subcommand, args: remaining, service: bookmarkService)
         case "note":
             await handleNote(subcommand: subcommand, args: remaining, storage: notesStorage)
+        case "project-artifact", "artifact":
+            handleProjectArtifactCommand(args: Array(args.dropFirst()), storage: notesStorage)
         case "todo":
             await handleTodo(subcommand: subcommand, args: remaining, storage: todoStorage)
         case "event", "datecard":
@@ -729,6 +739,8 @@ struct CiderCLI {
             )
         case "note":
             return isMutationSubcommand(subcommand, in: ["create", "move", "delete", "rm", "update", "rename"])
+        case "project-artifact", "artifact":
+            return isMutationSubcommand(subcommand, in: ["create", "link", "append"])
         case "todo", "todos", "task", "tasks":
             return isMutationSubcommand(
                 subcommand,
@@ -4238,23 +4250,59 @@ struct CiderCLI {
         twentyFourHourTimeFormatter.date(from: value).map { twentyFourHourTimeFormatter.string(from: $0) == value } ?? false
     }
 
+    static func handleProjectArtifactCommand(args: [String], storage: NotesStorage) {
+        handleProjectArtifactCommand(
+            args: args,
+            storage: storage,
+            commandPrefix: "cider-cli project-artifact",
+            commandNamespace: "project-artifact",
+            compatibilityNamespace: "note.project-artifact",
+            includeCompatibilityHelp: true
+        )
+    }
+
     static func handleProjectArtifactNoteCommand(args: [String], storage: NotesStorage) {
+        handleProjectArtifactCommand(
+            args: args,
+            storage: storage,
+            commandPrefix: "cider-cli note project-artifact",
+            commandNamespace: "note.project-artifact",
+            compatibilityNamespace: nil,
+            includeCompatibilityHelp: false
+        )
+    }
+
+    static func printProjectArtifactHelp(commandPrefix: String, includeCompatibility: Bool) {
+        print("""
+        Project artifact commands:
+          \(commandPrefix) create --project <project-id-or-name> --type note|plan|handoff|decision|qa --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--card-id <id>] [--decided-from-card <id>] [--decided-from-note <id>] [--source-card <id>] [--source-note <id>] [--validates-card <id>] [--validates-note <id>] [--found-bug-in-card <id>] [--found-bug-in-note <id>] [--json]
+          \(commandPrefix) link <note-id-prefix> --card <id|display-key|board/card> [--board <board>] [--relation documents|validates|found-bug-in|decided-from] [--json]
+          \(commandPrefix) append <note-id-prefix> (--stdin|--text-file <path>|--content <text>) [--json]
+          \(commandPrefix) list --project <project-id-or-name> [--type note|plan|handoff|decision|decisions|qa|audit|qa-audits|plans-handoffs] [--status active|parked|template] [--category <name>] [--dogfood-status <status>] [--source <card>] [--json]
+          \(commandPrefix) get <note-id-prefix> [--json]
+        """)
+        if includeCompatibility {
+            print("Compatibility: cider-cli note project-artifact remains supported with the same subcommands and JSON fields.")
+        }
+    }
+
+    static func handleProjectArtifactCommand(
+        args: [String],
+        storage: NotesStorage,
+        commandPrefix: String,
+        commandNamespace: String,
+        compatibilityNamespace: String?,
+        includeCompatibilityHelp: Bool
+    ) {
         let subcommand = args.first
         let rest = Array(args.dropFirst())
         switch subcommand {
         case nil, "help", "--help", "-h":
-            print("""
-            Project artifact note commands:
-              cider-cli note project-artifact create --project <project-id-or-name> --type note|plan|handoff|decision|qa --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--card-id <id>] [--decided-from-card <id>] [--decided-from-note <id>] [--source-card <id>] [--source-note <id>] [--validates-card <id>] [--validates-note <id>] [--found-bug-in-card <id>] [--found-bug-in-note <id>] [--json]
-              cider-cli note project-artifact link <note-id-prefix> --card <id|display-key|board/card> [--board <board>] [--relation documents|validates|found-bug-in|decided-from] [--json]
-              cider-cli note project-artifact append <note-id-prefix> (--stdin|--text-file <path>|--content <text>) [--json]
-              cider-cli note project-artifact list --project <project-id-or-name> [--type note|plan|handoff|decision|decisions|qa|audit|qa-audits|plans-handoffs] [--status active|parked|template] [--category <name>] [--dogfood-status <status>] [--source <card>] [--json]
-              cider-cli note project-artifact get <note-id-prefix> [--json]
-            """)
+            printProjectArtifactHelp(commandPrefix: commandPrefix, includeCompatibility: includeCompatibilityHelp)
 
         case "create":
             guard let project = parseFlag("--project", from: rest) ?? parseFlag("--project-id", from: rest) else {
-                printCLIError("Usage: cider-cli note project-artifact create --project <project-id-or-name> --type <type> --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--decided-from-card <id>] [--validates-card <id>] [--found-bug-in-card <id>] [--json]")
+                printCLIError("Usage: \(commandPrefix) create --project <project-id-or-name> --type <type> --title <title> (--stdin|--text-file <path>|--content <text>) [--card <id>] [--decided-from-card <id>] [--validates-card <id>] [--found-bug-in-card <id>] [--json]")
                 return
             }
             let type = parseFlag("--type", from: rest) ?? parseFlag("--artifact-type", from: rest) ?? "handoff"
@@ -4272,7 +4320,10 @@ struct CiderCLI {
             if jsonOutput {
                 var dict = noteToDict(note)
                 dict["ok"] = true
-                dict["command"] = "note.project-artifact.create"
+                dict["command"] = "\(commandNamespace).create"
+                if let compatibilityNamespace {
+                    dict["compatibilityAlias"] = "\(compatibilityNamespace).create"
+                }
                 dict["content"] = storage.loadContent(for: note)
                 dict["linkedRelations"] = linkedRelations.map(relationToDict)
                 dict["linkedCards"] = linkedRelations
@@ -4292,7 +4343,7 @@ struct CiderCLI {
             guard let idPrefix = positional.first,
                   let note = findNote(idPrefix, in: storage),
                   let cardRef = parseFlag("--card", from: rest) ?? parseFlag("--card-id", from: rest) else {
-                printCLIError("Usage: cider-cli note project-artifact link <note-id-prefix> --card <id|display-key|board/card> [--board <board>] [--relation documents|validates|found-bug-in|decided-from] [--json]")
+                printCLIError("Usage: \(commandPrefix) link <note-id-prefix> --card <id|display-key|board/card> [--board <board>] [--relation documents|validates|found-bug-in|decided-from] [--json]")
                 return
             }
             guard let resolvedCard = resolveKanbanCardRef(cardRef, boardRef: parseFlag("--board", from: rest)) else { return }
@@ -4314,16 +4365,20 @@ struct CiderCLI {
                 return
             }
             if jsonOutput {
-                outputJSON([
+                var payload: [String: Any] = [
                     "ok": true,
-                    "command": "note.project-artifact.link",
+                    "command": "\(commandNamespace).link",
                     "artifact": noteToDict(note),
                     "target": [
                         "board": ["id": resolvedCard.board.id, "name": resolvedCard.board.name],
                         "card": boardCardSummaryToDict(board: resolvedCard.board, card: resolvedCard.card),
                     ],
                     "relation": relationToDict(relation),
-                ])
+                ]
+                if let compatibilityNamespace {
+                    payload["compatibilityAlias"] = "\(compatibilityNamespace).link"
+                }
+                outputJSON(payload)
             } else {
                 print("Linked project artifact '\(note.title)' to card \(resolvedCard.board.displayKey(for: resolvedCard.card))")
             }
@@ -4331,7 +4386,7 @@ struct CiderCLI {
         case "append":
             let positional = leadingPositionalArgs(from: rest)
             guard let idPrefix = positional.first, let note = findNote(idPrefix, in: storage) else {
-                printCLIError("Usage: cider-cli note project-artifact append <note-id-prefix> (--stdin|--text-file <path>|--content <text>) [--json]")
+                printCLIError("Usage: \(commandPrefix) append <note-id-prefix> (--stdin|--text-file <path>|--content <text>) [--json]")
                 return
             }
             guard let addition = projectArtifactContent(from: rest) else { return }
@@ -4344,7 +4399,10 @@ struct CiderCLI {
             if jsonOutput {
                 var dict = noteToDict(current)
                 dict["ok"] = true
-                dict["command"] = "note.project-artifact.append"
+                dict["command"] = "\(commandNamespace).append"
+                if let compatibilityNamespace {
+                    dict["compatibilityAlias"] = "\(compatibilityNamespace).append"
+                }
                 dict["content"] = storage.loadContent(for: current)
                 outputJSON(dict)
             } else {
@@ -4354,7 +4412,7 @@ struct CiderCLI {
 
         case "list", "ls":
             guard let project = parseFlag("--project", from: rest) ?? parseFlag("--project-id", from: rest) else {
-                printCLIError("Usage: cider-cli note project-artifact list --project <project-id-or-name> [--type <type>] [--json]")
+                printCLIError("Usage: \(commandPrefix) list --project <project-id-or-name> [--type <type>] [--json]")
                 return
             }
             let projectID = SecondBrainProjectGraphService.normalizedProjectID(project)
@@ -4389,13 +4447,17 @@ struct CiderCLI {
                 return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
             }
             if jsonOutput {
-                outputJSON([
+                var payload: [String: Any] = [
                     "ok": true,
-                    "command": "note.project-artifact.list",
+                    "command": "\(commandNamespace).list",
                     "projectID": projectID,
                     "count": notes.count,
                     "notes": notes.map(noteToDict),
-                ])
+                ]
+                if let compatibilityNamespace {
+                    payload["compatibilityAlias"] = "\(compatibilityNamespace).list"
+                }
+                outputJSON(payload)
             } else {
                 print("Project artifacts for \(projectID) (\(notes.count)):")
                 for note in notes {
@@ -4406,13 +4468,16 @@ struct CiderCLI {
         case "get", "show":
             let positional = leadingPositionalArgs(from: rest)
             guard let idPrefix = positional.first, let note = findNote(idPrefix, in: storage) else {
-                printCLIError("Usage: cider-cli note project-artifact get <note-id-prefix> [--json]")
+                printCLIError("Usage: \(commandPrefix) get <note-id-prefix> [--json]")
                 return
             }
             if jsonOutput {
                 var dict = noteToDict(note)
                 dict["ok"] = true
-                dict["command"] = "note.project-artifact.get"
+                dict["command"] = "\(commandNamespace).get"
+                if let compatibilityNamespace {
+                    dict["compatibilityAlias"] = "\(compatibilityNamespace).get"
+                }
                 dict["content"] = storage.loadContent(for: note)
                 dict["relations"] = projectArtifactRelations(for: note).map(relationToDict)
                 outputJSON(dict)
@@ -29411,6 +29476,14 @@ struct CiderCLI {
           cider-cli export card <board-id/card-id|card-id> --format json|md [--json]
           cider-cli export project <project-id-or-name> --format json|md [--limit <n>] [--json]
             Whole-vault export is intentionally refused; export bounded scopes.
+
+        PROJECT ARTIFACT
+          cider-cli project-artifact create --project <project-id-or-name> --type note|plan|handoff|decision|qa --title <title> (--stdin|--text-file <path>|--content <text>) [--json]
+          cider-cli project-artifact list --project <project-id-or-name> [--type <type>] [--json]
+          cider-cli project-artifact get <note-id-prefix> [--json]
+          cider-cli project-artifact append <note-id-prefix> (--stdin|--text-file <path>|--content <text>) [--json]
+          cider-cli project-artifact link <note-id-prefix> --card <id|display-key|board/card> [--board <board>] [--relation documents|validates|found-bug-in|decided-from] [--json]
+            Compatibility: cider-cli note project-artifact remains supported.
 
         REVIEW
           cider-cli review list [--include-deferred] [--limit <n>] [--json]
