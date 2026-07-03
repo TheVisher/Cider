@@ -22,7 +22,11 @@ enum ICalendarSerializer {
             lines.append("DESCRIPTION:\(escapeICalText(todo.details))")
         }
         if let dueDate = todo.dueDate {
-            lines.append("DUE:\(dateTimeFormatter.string(from: dueDate))")
+            if isLocalStartOfDay(dueDate) {
+                lines.append("DUE;VALUE=DATE:\(CiderLocalDate.formatCompact(dueDate))")
+            } else {
+                lines.append("DUE:\(dateTimeFormatter.string(from: dueDate))")
+            }
         }
         if let priority = todo.priority {
             // RFC 5545: 1-4 = high, 5 = medium, 6-9 = low
@@ -114,7 +118,9 @@ enum ICalendarSerializer {
             case "DESCRIPTION":
                 details = unescapeICalText(value)
             case "DUE":
-                dueDate = parseDateTime(value)
+                dueDate = key.contains("VALUE=DATE")
+                    ? CiderLocalDate.parseCompact(value)
+                    : parseDateTime(value)
             case "PRIORITY":
                 if let p = Int(value) {
                     if p >= 1, p <= 4 { priority = .high }
@@ -461,6 +467,11 @@ enum ICalendarSerializer {
     static func parseDateTime(_ value: String) -> Date? {
         dateTimeFormatter.date(from: value)
             ?? CiderLocalDate.parseCompact(value)
+    }
+
+    static func isLocalStartOfDay(_ date: Date) -> Bool {
+        let calendar = Calendar.autoupdatingCurrent
+        return date == calendar.startOfDay(for: date)
     }
 
     // iCalendar uses yyyyMMdd'T'HHmmss'Z' (UTC)

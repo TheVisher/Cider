@@ -1908,7 +1908,7 @@ struct CiderCLI {
                     result = try service.addTodoCapture(
                         title: title ?? service.derivedTodoTitle(from: raw),
                         sourceText: raw,
-                        dueDate: nil,
+                        dueDate: try resolveCaptureAddTodoDueDate(from: args),
                         priority: nil,
                         folderID: targetFolder?.id,
                         titleState: title == nil ? "derived" : "manual",
@@ -12422,6 +12422,13 @@ struct CiderCLI {
                 raw
             }
         }
+
+        var todoRawText: String? {
+            switch self {
+            case .todo(let raw): raw
+            default: nil
+            }
+        }
     }
 
     struct CaptureAddEventInput {
@@ -12806,6 +12813,20 @@ struct CiderCLI {
             allDay: allDay,
             location: parseFlag("--location", from: args)
         )
+    }
+
+    static func resolveCaptureAddTodoDueDate(from args: [String]) throws -> Date? {
+        guard let dateString = parseFlag("--date", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !dateString.isEmpty else {
+            return nil
+        }
+        let normalized = dateString.localizedLowercase == "today"
+            ? localDateFormatter.string(from: Date())
+            : dateString
+        guard let dueDate = resolveEventStartAt(dateString: normalized, timeString: parseFlag("--time", from: args)) else {
+            throw CaptureAddArgumentError.message("Invalid todo due date/time. Use --date yyyy-MM-dd and optional --time \"h:mm a\" or \"HH:mm\".")
+        }
+        return dueDate
     }
 
     static func resolveCaptureAddContactInput(from args: [String], rawText: String?) throws -> CaptureAddContactInput {
@@ -25536,6 +25557,10 @@ struct CiderCLI {
             "ref": requestedRef,
         ]
         let sourceRef = "\(bundle.item.type.rawValue):\(bundle.item.id.uuidString)"
+        if bundle.item.type == .todo,
+           let todo = TodoCardStorage.shared.todoCard(for: bundle.item.id) {
+            dict["todo"] = todoToDict(todo)
+        }
         dict["actionReceipt"] = readOnlyActionReceiptToDict(
             command: "item.get",
             matchedSourceRefs: [sourceRef],

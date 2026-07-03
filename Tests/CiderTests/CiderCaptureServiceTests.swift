@@ -482,6 +482,48 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("todo capture add date persists date-only due field in generated ics")
+    func todoCaptureAddDatePersistsDateOnlyDueFieldInGeneratedICS() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db
+            )
+            let args = [
+                "--kind", "todo",
+                "--date", "2026-07-13",
+                "--title", "Contact physical therapy about knee pain",
+                "Call the physical therapy office about knee pain follow-up."
+            ]
+
+            let source = try CiderCLI.resolveCaptureAddSource(from: args)
+            let raw = try #require(source.todoRawText)
+            let resolvedDueDate = try CiderCLI.resolveCaptureAddTodoDueDate(from: args)
+            let dueDate = try #require(resolvedDueDate)
+            let result = try service.addTodoCapture(
+                title: CiderCLI.parseFlag("--title", from: args) ?? service.derivedTodoTitle(from: raw),
+                sourceText: raw,
+                dueDate: dueDate,
+                priority: nil,
+                folderID: nil,
+                titleState: "manual"
+            )
+
+            let relativePath = try #require(result.item.relativePath)
+            let icsURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(relativePath)
+            let ics = try String(contentsOf: icsURL, encoding: .utf8)
+            #expect(ics.contains("BEGIN:VTODO"))
+            #expect(ics.contains("DUE;VALUE=DATE:20260713"))
+            #expect(!ics.contains("DTSTART"))
+
+            let stored = try #require(todos.todoCards.first(where: { $0.id == result.item.id }))
+            #expect(Calendar.current.isDate(stored.dueDate ?? .distantPast, inSameDayAs: dueDate))
+        }
+    }
+
     @Test("capture result dictionary refreshes bookmark enrichment from final stored item")
     func captureResultDictionaryRefreshesBookmarkEnrichment() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in
