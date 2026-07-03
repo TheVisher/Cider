@@ -196,6 +196,34 @@ enum CiderItemSearchSort: String, Codable, CaseIterable, Equatable {
     case oldest
 }
 
+struct CiderItemSearchMatchProvenance: Codable, Equatable {
+    var currentContentMatched: Bool = false
+    var historicalProvenanceMatched: Bool = false
+    var currentFields: [String] = []
+    var historicalSources: [String] = []
+
+    var isHistoricalOnly: Bool {
+        historicalProvenanceMatched && !currentContentMatched
+    }
+
+    var isNonCurrentMatch: Bool {
+        !currentContentMatched
+    }
+
+    var matchClass: String {
+        if currentContentMatched && historicalProvenanceMatched {
+            return "current_and_historical"
+        }
+        if currentContentMatched {
+            return "current_content"
+        }
+        if historicalProvenanceMatched {
+            return "historical_provenance_only"
+        }
+        return "non_current_or_fallback_only"
+    }
+}
+
 struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var id: String
     var kind: CiderItemSearchResultKind
@@ -209,6 +237,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var rankFactors: [String]
     var searchScope: CiderItemSearchScope
     var captureProvenance: [CiderItemCaptureProvenance]
+    var matchProvenance: CiderItemSearchMatchProvenance
 
     init(
         id: String,
@@ -222,7 +251,8 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         matchedQuery: String? = nil,
         rankFactors: [String] = [],
         searchScope: CiderItemSearchScope = .all,
-        captureProvenance: [CiderItemCaptureProvenance] = []
+        captureProvenance: [CiderItemCaptureProvenance] = [],
+        matchProvenance: CiderItemSearchMatchProvenance = CiderItemSearchMatchProvenance()
     ) {
         self.id = id
         self.kind = kind
@@ -236,6 +266,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         self.rankFactors = rankFactors
         self.searchScope = searchScope
         self.captureProvenance = captureProvenance
+        self.matchProvenance = matchProvenance
     }
 }
 
@@ -618,20 +649,33 @@ final class CiderItemContextService {
                 let routing = (try? secondBrainStore.routingDecisions(for: result.owner)) ?? []
                 let backlinks = (try? secondBrainStore.backlinks(for: result.owner)) ?? []
                 let provenance = (try? captureProvenance(from: backlinks)) ?? []
+                var searchResult = CiderItemSearchResult(
+                    id: "chunk-\(result.id)",
+                    kind: .chunk,
+                    owner: result.owner,
+                    item: item,
+                    title: result.title,
+                    snippet: result.snippet,
+                    rank: result.rank,
+                    stage: "chunk_fts",
+                    matchedQuery: trimmed,
+                    rankFactors: ["original_chunk_fts"],
+                    captureProvenance: provenance
+                )
+                searchResult.matchProvenance = searchMatchProvenance(for: searchResult, query: trimmed)
+                if searchResult.matchProvenance.isHistoricalOnly {
+                    searchResult.rankFactors = orderedUnique(searchResult.rankFactors + [
+                        "historical_provenance_only_match",
+                        "non_current_match",
+                    ])
+                } else if searchResult.matchProvenance.isNonCurrentMatch {
+                    searchResult.rankFactors = orderedUnique(searchResult.rankFactors + [
+                        "non_current_match",
+                    ])
+                }
                 matchedChunks.append(
                     CiderItemSearchDiagnosticsChunkMatch(
-                        searchResult: CiderItemSearchResult(
-                            id: "chunk-\(result.id)",
-                            kind: .chunk,
-                            owner: result.owner,
-                            item: item,
-                            title: result.title,
-                            snippet: result.snippet,
-                            rank: result.rank,
-                            stage: "chunk_fts",
-                            matchedQuery: trimmed,
-                            rankFactors: ["original_chunk_fts"]
-                        ),
+                        searchResult: searchResult,
                         chunk: chunk,
                         item: item,
                         routingDecisions: routing,
@@ -1197,6 +1241,25 @@ final class CiderItemContextService {
             var scoped = result
             scoped.searchScope = scope
             scoped.captureProvenance = captureProvenance(for: result.owner)
+            scoped.matchProvenance = searchMatchProvenance(
+                for: scoped,
+                query: originalQuery
+            )
+            if scoped.matchProvenance.isHistoricalOnly {
+                scoped.rank -= 500
+                scoped.rankFactors = orderedUnique(scoped.rankFactors + [
+                    "historical_provenance_only_match",
+                    "non_current_match",
+                ])
+            } else if scoped.matchProvenance.isNonCurrentMatch {
+                scoped.rankFactors = orderedUnique(scoped.rankFactors + [
+                    "non_current_match",
+                ])
+            } else if scoped.matchProvenance.currentContentMatched {
+                scoped.rankFactors = orderedUnique(scoped.rankFactors + [
+                    "current_content_match",
+                ])
+            }
             return scoped
         }
 
@@ -1230,9 +1293,151 @@ final class CiderItemContextService {
     }
 
     private func relevanceSorted(_ lhs: CiderItemSearchResult, before rhs: CiderItemSearchResult) -> Bool {
+        if lhs.matchProvenance.isHistoricalOnly != rhs.matchProvenance.isHistoricalOnly {
+            return !lhs.matchProvenance.isHistoricalOnly
+        }
         if lhs.rank != rhs.rank { return lhs.rank > rhs.rank }
         if (lhs.item != nil) != (rhs.item != nil) { return lhs.item != nil }
         return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+    }
+
+    private func searchMatchProvenance(
+        for result: CiderItemSearchResult,
+        query: String
+    ) -> CiderItemSearchMatchProvenance {
+        let tokens = distinctiveMatchTokens(in: query)
+        guard !tokens.isEmpty else {
+            return CiderItemSearchMatchProvenance()
+        }
+
+        var currentFields: [String] = []
+        if queryTokens(tokens, match: result.item?.title ?? result.title) {
+            currentFields.append("item_title")
+        }
+        if queryTokens(tokens, match: result.item?.relativePath ?? "") {
+            currentFields.append("relative_path")
+        }
+
+        let chunks = (try? chunks(for: result.owner)) ?? []
+        for chunk in chunks {
+            if queryTokens(tokens, match: chunk.title) {
+                currentFields.append("chunk_title")
+            }
+            let currentBody = currentContentText(fromChunkBody: chunk.body)
+            if queryTokensMatchAnyLine(tokens, in: currentBody) {
+                currentFields.append("chunk_body")
+            }
+        }
+
+        if currentFields.isEmpty,
+           result.kind == .chunk,
+           queryTokensMatchAnyLine(tokens, in: currentContentText(fromChunkBody: result.snippet)) {
+            currentFields.append("snippet")
+        }
+
+        var historicalSources: [String] = []
+        let historicalChunkText = chunks
+            .map { historicalProvenanceText(fromChunkBody: $0.body) }
+            .joined(separator: "\n")
+        if queryTokens(tokens, match: historicalChunkText) {
+            historicalSources.append("content_chunk_provenance")
+        }
+
+        let captureText = result.captureProvenance.map { provenance in
+            [
+                provenance.sourceText,
+                provenance.sourceURL,
+                provenance.sourceFile,
+                provenance.messageID,
+                provenance.relation.evidence,
+            ]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+        }
+        .joined(separator: "\n")
+        if queryTokens(tokens, match: captureText) {
+            historicalSources.append("capture_provenance")
+        }
+
+        let actionText = (try? agentActionHistoryText(for: result.owner)) ?? ""
+        if queryTokens(tokens, match: actionText) {
+            historicalSources.append("action_history")
+        }
+
+        return CiderItemSearchMatchProvenance(
+            currentContentMatched: !currentFields.isEmpty,
+            historicalProvenanceMatched: !historicalSources.isEmpty,
+            currentFields: orderedUnique(currentFields),
+            historicalSources: orderedUnique(historicalSources)
+        )
+    }
+
+    private func distinctiveMatchTokens(in query: String) -> [String] {
+        return orderedUnique(recallTokens(query).map(normalizedRecallToken))
+            .filter { token in
+                token.count >= 3 && !isLowSignalRecallExpansion(token)
+            }
+    }
+
+    private func queryTokens(_ tokens: [String], match text: String) -> Bool {
+        guard !tokens.isEmpty else { return false }
+        let textTokens = Set(recallTokens(text).map(normalizedRecallToken))
+        guard !textTokens.isEmpty else { return false }
+        return tokens.allSatisfy(textTokens.contains)
+    }
+
+    private func queryTokensMatchAnyLine(_ tokens: [String], in text: String) -> Bool {
+        text
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .contains { queryTokens(tokens, match: String($0)) }
+    }
+
+    private func currentContentText(fromChunkBody body: String) -> String {
+        body
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !isHistoricalProvenanceLine(String($0)) }
+            .joined(separator: "\n")
+    }
+
+    private func historicalProvenanceText(fromChunkBody body: String) -> String {
+        body
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { isHistoricalProvenanceLine(String($0)) }
+            .joined(separator: "\n")
+    }
+
+    private func isHistoricalProvenanceLine(_ line: String) -> Bool {
+        let lowercased = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return lowercased.hasPrefix("capture ")
+            || lowercased.hasPrefix("capture:")
+            || lowercased.hasPrefix("action history")
+            || lowercased.hasPrefix("agent action")
+    }
+
+    private func agentActionHistoryText(for owner: SecondBrainOwnerRef) throws -> String {
+        let stmt = try database.prepare("""
+            SELECT tool_name, action_type, source, status, summary, arguments_json, result_json
+            FROM agent_actions
+            WHERE owner_type = ? AND owner_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20;
+            """)
+        stmt.bind(owner.ownerType, at: 1)
+            .bind(owner.ownerID, at: 2)
+
+        var lines: [String] = []
+        while try stmt.step() {
+            lines.append([
+                stmt.string(at: 0),
+                stmt.string(at: 1),
+                stmt.string(at: 2),
+                stmt.string(at: 3),
+                stmt.string(at: 4),
+                stmt.optionalString(at: 5),
+                stmt.optionalString(at: 6),
+            ].compactMap { $0 }.joined(separator: " "))
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func searchTemporalDate(for result: CiderItemSearchResult) -> Date {

@@ -27418,6 +27418,7 @@ struct CiderCLI {
         if !result.captureProvenance.isEmpty {
             dict["captureProvenance"] = result.captureProvenance.map(captureProvenanceToDict)
         }
+        dict["matchProvenance"] = itemSearchMatchProvenanceToDict(result.matchProvenance)
         dict["temporal"] = itemSearchTemporalMetadata(result)
         dict["provenance"] = itemSearchProvenanceMetadata(result)
         let contextCommands = itemSearchResultContextCommands(result)
@@ -27435,6 +27436,23 @@ struct CiderCLI {
             dict["safeNextCommands"] = safeNextCommands
         }
         return dict
+    }
+
+    private static func itemSearchMatchProvenanceToDict(_ provenance: CiderItemSearchMatchProvenance) -> [String: Any] {
+        [
+            "matchClass": provenance.matchClass,
+            "currentContentMatched": provenance.currentContentMatched,
+            "historicalProvenanceMatched": provenance.historicalProvenanceMatched,
+            "isHistoricalOnly": provenance.isHistoricalOnly,
+            "isNonCurrentMatch": provenance.isNonCurrentMatch,
+            "currentFields": provenance.currentFields,
+            "historicalSources": provenance.historicalSources,
+            "truthBoundary": provenance.isHistoricalOnly
+                ? "matched_historical_provenance_not_current_item_content"
+                : (provenance.currentContentMatched
+                    ? "matched_current_item_or_chunk_content"
+                    : "matched_fallback_terms_without_current_full_query_match"),
+        ]
     }
 
     private static func itemSearchReceiptSourceRef(_ result: CiderItemSearchResult) -> String {

@@ -748,6 +748,98 @@ struct CiderItemContextServiceTests {
         #expect(receipt["truthBoundary"] as? String == "receipt_proves_command_execution_not_memory_truth")
     }
 
+    @Test("item search marks repaired bookmark hits that only match historical capture provenance")
+    func itemSearchMarksRepairedBookmarkHitsThatOnlyMatchHistoricalCaptureProvenance() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let bookmarkID = UUID(uuidString: "D6098B9A-5D26-4C43-9925-E59A3921F970") ?? UUID()
+        let bookmark = LibraryEntityRef(type: .bookmark, entityID: bookmarkID)
+        try insertItem(
+            bookmark,
+            title: "Save 10% on Paralives on Steam",
+            relativePath: "[Media]/[Games]/Save 10% on Paralives on Steam.webloc",
+            into: db
+        )
+
+        let store = SecondBrainStore(database: db)
+        let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmarkID.uuidString)
+        try store.replaceChunks(owner: owner, chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: bookmarkID.uuidString,
+                source: "item_index.bookmark",
+                title: "Save 10% on Paralives on Steam",
+                body: """
+                Title: Save 10% on Paralives on Steam
+                URL: https://store.steampowered.com/app/1118520/Paralives/
+                Provider: Steam
+                Media category: game
+                Path: [Media]/[Games]/Save 10% on Paralives on Steam.webloc
+                Capture source text: Original path Inbox/Bookmarks/Store.Steampowered.Com (3).webloc
+                """,
+                chunkIndex: 0,
+                metadata: ["source": "sqlite_detail_tables"]
+            )
+        ])
+
+        let eventID = UUID()
+        try insertCaptureEvent(
+            id: eventID,
+            sourceKind: "bookmark",
+            surface: "cli",
+            channel: "local",
+            messageID: "paralives-steam",
+            sourceText: "Original path Inbox/Bookmarks/Store.Steampowered.Com (3).webloc",
+            createdAt: Date(timeIntervalSince1970: 1_782_701_200),
+            into: db
+        )
+        try store.recordRelation(SecondBrainRelation(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString),
+            targetOwner: owner,
+            relationType: "produced_item",
+            evidence: "Capture produced the original Steam bookmark.",
+            source: "capture.add",
+            actor: "system",
+            confidence: 1,
+            metadata: ["command": "capture.add"]
+        ))
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let oldPathResults = try service.search("Store.Steampowered.Com (3).webloc", limit: 10)
+        let oldPathResult = try #require(oldPathResults.first { $0.item?.id == bookmarkID })
+
+        #expect(oldPathResult.matchProvenance.isHistoricalOnly)
+        #expect(oldPathResult.matchProvenance.currentContentMatched == false)
+        #expect(oldPathResult.matchProvenance.historicalProvenanceMatched == true)
+        #expect(oldPathResult.matchProvenance.historicalSources.contains("capture_provenance"))
+
+        let oldPathDict = CiderCLI.itemSearchResultToDict(oldPathResult)
+        let matchProvenance = try #require(oldPathDict["matchProvenance"] as? [String: Any])
+        #expect(matchProvenance["currentContentMatched"] as? Bool == false)
+        #expect(matchProvenance["historicalProvenanceMatched"] as? Bool == true)
+        #expect(matchProvenance["isHistoricalOnly"] as? Bool == true)
+        #expect(matchProvenance["matchClass"] as? String == "historical_provenance_only")
+
+        let currentResults = try service.search("Save 10% on Paralives on Steam", limit: 10)
+        let currentResult = try #require(currentResults.first { $0.item?.id == bookmarkID })
+        #expect(currentResult.matchProvenance.currentContentMatched == true)
+        #expect(currentResult.matchProvenance.isHistoricalOnly == false)
+
+        let currentDict = CiderCLI.itemSearchResultToDict(currentResult)
+        let currentMatchProvenance = try #require(currentDict["matchProvenance"] as? [String: Any])
+        #expect(currentMatchProvenance["currentContentMatched"] as? Bool == true)
+        #expect(currentMatchProvenance["isHistoricalOnly"] as? Bool == false)
+
+        let debugReport = try service.searchDiagnostics("Store.Steampowered.Com (3).webloc", limit: 10)
+        let debugPayload = CiderCLI.itemSearchDiagnosticsReportToDict(debugReport)
+        let debugResults = try #require(debugPayload["rankedResults"] as? [[String: Any]])
+        let debugSearchResult = try #require(debugResults.first { ($0["itemID"] as? String) == bookmarkID.uuidString })
+        let debugMatchProvenance = try #require(debugSearchResult["matchProvenance"] as? [String: Any])
+        #expect(debugMatchProvenance["isHistoricalOnly"] as? Bool == true)
+        #expect(debugMatchProvenance["matchClass"] as? String == "historical_provenance_only")
+    }
+
     @Test("search diagnostics explain unavailable semantic recall surface")
     func searchDiagnosticsExplainUnavailableSemanticRecallSurface() throws {
         let (db, url) = try makeTestDB()
