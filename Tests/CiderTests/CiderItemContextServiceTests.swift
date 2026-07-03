@@ -594,6 +594,9 @@ struct CiderItemContextServiceTests {
             "type": "note",
             "ref": dentist.entityID.uuidString,
         ])
+        #expect(noteResultDict["sourceSelector"] as? String == "note:\(dentist.entityID.uuidString)")
+        #expect(noteResultDict["itemType"] as? String == "note")
+        #expect(noteResultDict["itemID"] as? String == dentist.entityID.uuidString)
         #expect(noteResultDict["owner"] as? [String: String] == [
             "ownerType": "note",
             "ownerID": dentist.entityID.uuidString,
@@ -608,6 +611,10 @@ struct CiderItemContextServiceTests {
         #expect(safeNextCommands == [
             "cider-cli item context note \(dentist.entityID.uuidString) --json",
             "cider-cli item hub note \(dentist.entityID.uuidString) --json",
+        ])
+        #expect(noteResultDict["safeContextCommand"] as? String == "cider-cli item context note \(dentist.entityID.uuidString) --json")
+        #expect(noteResultDict["safeVerificationCommands"] as? [String] == [
+            "cider-cli item get note \(dentist.entityID.uuidString) --json",
         ])
         #expect(!safeNextCommands.contains { command in
             command.contains(" delete ")
@@ -1873,6 +1880,13 @@ struct CiderItemContextServiceTests {
             let firstDict = CiderCLI.itemSearchResultToDict(first)
             let rankFactors = try #require(firstDict["rankFactors"] as? [String])
             #expect(rankFactors.contains("tag_filter:topic/ADHD"))
+            #expect(firstDict["sourceSelector"] as? String == "vaultFile:\(target.entityID.uuidString)")
+            #expect(firstDict["itemType"] as? String == "vaultFile")
+            #expect(firstDict["itemID"] as? String == target.entityID.uuidString)
+            #expect(firstDict["safeContextCommand"] as? String == "cider-cli item context vaultFile \(target.entityID.uuidString) --json")
+            #expect(firstDict["safeVerificationCommands"] as? [String] == [
+                "cider-cli item get vaultFile \(target.entityID.uuidString) --json",
+            ])
             #expect((firstDict["safeNextCommands"] as? [String])?.contains("cider-cli item context vaultFile \(target.entityID.uuidString) --json") == true)
         }
 

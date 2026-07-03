@@ -27389,6 +27389,9 @@ struct CiderCLI {
         ]
         if let item = result.item {
             dict["item"] = itemSummaryToDict(item)
+            dict["itemType"] = item.type.rawValue
+            dict["itemID"] = item.id.uuidString
+            dict["sourceSelector"] = "\(item.type.rawValue):\(item.id.uuidString)"
             dict["createdAt"] = ISO8601DateFormatter().string(from: item.createdAt)
             dict["updatedAt"] = ISO8601DateFormatter().string(from: item.updatedAt)
             dict["sourceRef"] = [
@@ -27420,10 +27423,12 @@ struct CiderCLI {
         let contextCommands = itemSearchResultContextCommands(result)
         if !contextCommands.isEmpty {
             dict["contextCommands"] = contextCommands
+            dict["safeContextCommand"] = contextCommands[0]
         }
         let verificationCommands = itemSearchResultVerificationCommands(result)
         if !verificationCommands.isEmpty {
             dict["verificationCommands"] = verificationCommands
+            dict["safeVerificationCommands"] = verificationCommands
         }
         let safeNextCommands = itemSearchResultSafeNextCommands(result)
         if !safeNextCommands.isEmpty {
