@@ -250,8 +250,9 @@ struct CiderCLI {
       cider-cli item reminder-ping-transcript [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--file <jsonl>] [--json]
       cider-cli item reminder-ping-fake-send --file <planned-jsonl> --output <delivered-jsonl> [--limit <n>] [--json]
       cider-cli item reminder-ping-transport-worker --file <planned-jsonl> --output <delivered-jsonl> (--config-file <json-or-yaml>|--transport <name> --worker-id <id> --sender-id <id>) [--limit <n>] [--json]
+      cider-cli item reminder-ping-validate-delivered --file <delivered-jsonl> --planned-file <planned-jsonl> [--json]
       cider-cli item reminder-ping-confirm-delivery <todo|dateCard> <id-or-ref> --transport <name> --surface <name> --delivery-id <id> [--limit <n>] [--stale-after-days <n>] [--json]
-      cider-cli item reminder-ping-import-ack (--file <json-or-jsonl>|--stdin) [--limit <n>] [--stale-after-days <n>] [--json]
+      cider-cli item reminder-ping-import-ack (--file <json-or-jsonl>|--stdin) [--planned-file <planned-jsonl>] [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]
       cider-cli item why-surfaced <type> <id-or-ref> [--json]
       cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
@@ -381,6 +382,11 @@ struct CiderCLI {
             Usage: cider-cli item reminder-ping-transport-worker --file <planned-jsonl> --output <delivered-jsonl> (--config-file <json-or-yaml>|--transport <name> --worker-id <id> --sender-id <id>) [--limit <n>] [--json]
             Transport-worker contract stub for reminder ping transcripts. Validates sender config and delivery proof shape with no real send and records no Cider receipts.
             """)
+        case "reminder-ping-validate-delivered", "reminder-ping-validate-ack", "reminder-ping-validate-transcript":
+            print("""
+            Usage: cider-cli item reminder-ping-validate-delivered --file <delivered-jsonl> --planned-file <planned-jsonl> [--json]
+            read-only no-send validation. Proves delivered transcript rows match planned row selectors before import-ack records receipts.
+            """)
         case "reminder-ping-confirm-delivery", "reminder-ping-confirm", "reminder-ping-delivered":
             print("""
             Usage: cider-cli item reminder-ping-confirm-delivery <todo|dateCard> <id-or-ref> --transport <name> --surface <name> --delivery-id <id> [--limit <n>] [--stale-after-days <n>] [--json]
@@ -388,8 +394,8 @@ struct CiderCLI {
             """)
         case "reminder-ping-import-ack", "reminder-ping-ack-import", "reminder-ping-import-acks":
             print("""
-            Usage: cider-cli item reminder-ping-import-ack (--file <json-or-jsonl>|--stdin) [--limit <n>] [--stale-after-days <n>] [--json]
-            Imports a saved no-send transport transcript. Input may be JSONL rows or JSON {rows:[...]} / [...] with delivered reminder ping fields: itemType, itemID, transport, surface, deliveryID or messageID.
+            Usage: cider-cli item reminder-ping-import-ack (--file <json-or-jsonl>|--stdin) [--planned-file <planned-jsonl>] [--limit <n>] [--stale-after-days <n>] [--json]
+            Imports a saved no-send transport transcript from JSONL rows or JSON. Use --planned-file to fail closed on selector mismatches before receipts are written.
             """)
         case "ping-receipt", "ping-receipts":
             print("Usage: cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]")
@@ -6296,6 +6302,9 @@ struct CiderCLI {
 
         case "reminder-ping-transport-worker", "reminder-ping-worker-contract", "reminder-ping-transport-worker-stub":
             handleReminderPingTransportWorkerCommand(args: args)
+
+        case "reminder-ping-validate-delivered", "reminder-ping-validate-ack", "reminder-ping-validate-transcript":
+            handleReminderPingValidateDeliveredCommand(args: args)
 
         case "reminder-ping-confirm-delivery", "reminder-ping-confirm", "reminder-ping-delivered":
             handleReminderPingConfirmDeliveryCommand(args: args)
@@ -16024,6 +16033,64 @@ struct CiderCLI {
         }
     }
 
+    static func handleReminderPingValidateDeliveredCommand(args: [String]) {
+        let command = "item.reminder-ping-validate-delivered"
+        let deliveredPath = parseFlag("--file", from: args)
+        let plannedPath = parseFlag("--planned-file", from: args)
+        guard let deliveredPath, let plannedPath else {
+            processExitCode = 1
+            let payload = reminderPingDeliveredValidationFailurePayload(
+                command: command,
+                errorCode: "missing_input",
+                error: "Usage: cider-cli item reminder-ping-validate-delivered --file <delivered-jsonl> --planned-file <planned-jsonl> [--json]",
+                source: ["kind": "missing"]
+            )
+            if jsonOutput { outputJSON(payload) } else { print("Error: \(payload["error"] ?? "")") }
+            return
+        }
+
+        do {
+            let delivered = try String(contentsOfFile: deliveredPath, encoding: .utf8)
+            let planned = try String(contentsOfFile: plannedPath, encoding: .utf8)
+            let result = try CiderReminderPingDeliveredTranscriptValidationService.validate(
+                deliveredTranscriptJSONL: delivered,
+                plannedTranscriptJSONL: planned
+            )
+            var payload = reminderPingDeliveredValidationResultToDict(result)
+            payload["source"] = [
+                "kind": "file",
+                "path": deliveredPath,
+                "lastPathComponent": URL(fileURLWithPath: deliveredPath).lastPathComponent,
+                "format": "jsonl",
+            ]
+            payload["plannedSource"] = [
+                "kind": "file",
+                "path": plannedPath,
+                "lastPathComponent": URL(fileURLWithPath: plannedPath).lastPathComponent,
+                "format": "jsonl",
+            ]
+            if !result.ok {
+                processExitCode = 1
+                payload["errorCode"] = "delivered_transcript_validation_failed"
+                payload["error"] = "Delivered transcript validation failed; no receipts were written."
+            }
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("Validated delivered reminder ping transcript: valid=\(result.counts.valid), failed=\(result.counts.failed), skipped=\(result.counts.skipped)")
+            }
+        } catch {
+            processExitCode = 1
+            let payload = reminderPingDeliveredValidationFailurePayload(
+                command: command,
+                errorCode: "input_read_or_parse_failed",
+                error: error.localizedDescription,
+                source: ["kind": "file", "path": deliveredPath]
+            )
+            if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
+        }
+    }
+
     static func handleReminderPingImportAckCommand(args: [String]) {
         let command = "item.reminder-ping-import-ack"
         let actor = parseFlag("--actor", from: args) ?? "cider-cli"
@@ -16033,6 +16100,7 @@ struct CiderCLI {
         let staleAfterDays = parsedStaleAfterDays ?? 3
 
         let filePath = parseFlag("--file", from: args)
+        let plannedPath = parseFlag("--planned-file", from: args)
         let wantsStdin = args.contains("--stdin")
         guard (filePath != nil) != wantsStdin else {
             var payload = reminderPingImportAckBasePayload(
@@ -16068,6 +16136,38 @@ struct CiderCLI {
                 source = ["kind": "stdin"]
             }
 
+            var validationPayload: [String: Any]? = nil
+            if let plannedPath {
+                let planned = try String(contentsOfFile: plannedPath, encoding: .utf8)
+                let validation = try CiderReminderPingDeliveredTranscriptValidationService.validate(
+                    deliveredTranscriptJSONL: input,
+                    plannedTranscriptJSONL: planned
+                )
+                validationPayload = reminderPingDeliveredValidationResultToDict(validation)
+                if !validation.ok {
+                    var payload = reminderPingImportAckBasePayload(
+                        actor: actor,
+                        rows: [],
+                        source: source,
+                        counts: ["changed": 0, "duplicates": 0, "failed": validation.counts.failed, "skipped": validation.counts.skipped, "total": validation.counts.total]
+                    )
+                    payload["ok"] = false
+                    payload["changed"] = false
+                    payload["errorCode"] = "delivered_transcript_validation_failed"
+                    payload["error"] = "Delivered transcript validation failed; no receipts were written."
+                    payload["plannedSource"] = [
+                        "kind": "file",
+                        "path": plannedPath,
+                        "lastPathComponent": URL(fileURLWithPath: plannedPath).lastPathComponent,
+                        "format": "jsonl",
+                    ]
+                    payload["validation"] = validationPayload
+                    processExitCode = 1
+                    if jsonOutput { outputJSON(payload) } else { print("Error: Delivered transcript validation failed; no receipts were written.") }
+                    return
+                }
+            }
+
             let parsedRows = reminderPingImportAckParseRows(input)
             let rowResults = parsedRows.rows.map { row in
                 reminderPingImportAckProcessRow(
@@ -16089,6 +16189,17 @@ struct CiderCLI {
                 source: sourceMetadata,
                 counts: counts
             )
+            if let plannedPath {
+                payload["plannedSource"] = [
+                    "kind": "file",
+                    "path": plannedPath,
+                    "lastPathComponent": URL(fileURLWithPath: plannedPath).lastPathComponent,
+                    "format": "jsonl",
+                ]
+            }
+            if let validationPayload {
+                payload["validation"] = validationPayload
+            }
             payload["changed"] = (counts["changed"] ?? 0) > 0
             if jsonOutput {
                 outputJSON(payload)
@@ -16135,6 +16246,68 @@ struct CiderCLI {
             "safeNextCommands": [
                 "cider-cli item reminder-ping-import-ack --file <transport-transcript.jsonl> --json",
                 "cider-cli item reminder-ping-dry-run --json",
+            ],
+        ]
+    }
+
+    static func reminderPingDeliveredValidationResultToDict(_ result: CiderReminderPingDeliveredTranscriptValidationResult) -> [String: Any] {
+        [
+            "ok": result.ok,
+            "command": result.command,
+            "readOnly": result.readOnly,
+            "changed": result.changed,
+            "truthBoundary": result.truthBoundary,
+            "transportBoundary": result.transportBoundary,
+            "counts": [
+                "total": result.counts.total,
+                "valid": result.counts.valid,
+                "failed": result.counts.failed,
+                "skipped": result.counts.skipped,
+            ],
+            "rows": result.rows.map { row in
+                var dict: [String: Any] = [
+                    "status": row.status,
+                    "changed": row.changed,
+                    "itemType": row.itemType,
+                    "itemID": row.itemID,
+                    "transport": row.transport,
+                    "surface": row.surface,
+                    "plannedPingID": row.plannedPingID,
+                ]
+                if let deliveryID = row.deliveryID { dict["deliveryID"] = deliveryID }
+                if let messageID = row.messageID { dict["messageID"] = messageID }
+                if let errorCode = row.errorCode { dict["errorCode"] = errorCode }
+                if let error = row.error { dict["error"] = error }
+                return dict
+            },
+            "safeNextCommands": result.safeNextCommands,
+            "safeVerificationCommands": result.safeVerificationCommands,
+        ]
+    }
+
+    static func reminderPingDeliveredValidationFailurePayload(
+        command: String,
+        errorCode: String,
+        error: String,
+        source: [String: Any]
+    ) -> [String: Any] {
+        [
+            "ok": false,
+            "command": command,
+            "readOnly": true,
+            "changed": false,
+            "truthBoundary": "planned_reminder_ping_transcript_selectors_gate_delivery_receipts",
+            "transportBoundary": "validation_only_no_send_no_receipts",
+            "errorCode": errorCode,
+            "error": error,
+            "source": source,
+            "counts": ["total": 0, "valid": 0, "failed": 1, "skipped": 0],
+            "rows": [],
+            "safeNextCommands": [
+                "cider-cli item reminder-ping-validate-delivered --file <delivered-transcript.jsonl> --planned-file <planned-transcript.jsonl> --json",
+            ],
+            "safeVerificationCommands": [
+                "cider-cli item action-ledger list --action record_ping_surface --json",
             ],
         ]
     }

@@ -258,9 +258,11 @@ struct CiderReminderPingFakeTransportSenderResult: Equatable {
     var counts: CiderReminderPingTranscriptCounts
     var rows: [CiderReminderPingTranscriptRow]
     var safeNextCommands: [String] = [
+        "cider-cli item reminder-ping-validate-delivered --file <delivered-transcript.jsonl> --planned-file <planned-transcript.jsonl> --json",
         "cider-cli item reminder-ping-import-ack --file <delivered-transcript.jsonl> --json",
     ]
     var safeVerificationCommands: [String] = [
+        "cider-cli item reminder-ping-validate-delivered --file <delivered-transcript.jsonl> --planned-file <planned-transcript.jsonl> --json",
         "cider-cli item action-ledger list --action record_ping_surface --json",
         "cider-cli item reminder-ping-dry-run --json",
     ]
@@ -447,9 +449,11 @@ struct CiderReminderPingTransportWorkerContractResult: Equatable {
     var counts: CiderReminderPingTranscriptCounts
     var rows: [CiderReminderPingTranscriptRow]
     var safeNextCommands: [String] = [
+        "cider-cli item reminder-ping-validate-delivered --file <transport-worker-delivered.jsonl> --planned-file <planned-transcript.jsonl> --json",
         "cider-cli item reminder-ping-import-ack --file <transport-worker-delivered.jsonl> --json",
     ]
     var safeVerificationCommands: [String] = [
+        "cider-cli item reminder-ping-validate-delivered --file <transport-worker-delivered.jsonl> --planned-file <planned-transcript.jsonl> --json",
         "cider-cli item action-ledger list --action record_ping_surface --json",
         "cider-cli item reminder-ping-import-ack --file <transport-worker-delivered.jsonl> --json",
         "cider-cli item reminder-ping-dry-run --json",
@@ -558,5 +562,147 @@ enum CiderReminderPingTransportWorkerContractService {
         guard row.transport == transport else {
             throw NSError(domain: "CiderReminderPingTransportWorkerContractService", code: 21, userInfo: [NSLocalizedDescriptionKey: "Transcript row transport \(row.transport) does not match worker transport \(transport)."])
         }
+    }
+}
+
+struct CiderReminderPingDeliveredTranscriptValidationCounts: Equatable {
+    var total: Int
+    var valid: Int
+    var failed: Int
+    var skipped: Int
+}
+
+struct CiderReminderPingDeliveredTranscriptValidationRow: Equatable {
+    var status: String
+    var changed: Bool = false
+    var itemType: String
+    var itemID: String
+    var transport: String
+    var surface: String
+    var plannedPingID: String
+    var deliveryID: String?
+    var messageID: String?
+    var errorCode: String?
+    var error: String?
+}
+
+struct CiderReminderPingDeliveredTranscriptValidationResult: Equatable {
+    var command: String = "item.reminder-ping-validate-delivered"
+    var ok: Bool
+    var readOnly: Bool = true
+    var changed: Bool = false
+    var truthBoundary: String = "planned_reminder_ping_transcript_selectors_gate_delivery_receipts"
+    var transportBoundary: String = "validation_only_no_send_no_receipts"
+    var counts: CiderReminderPingDeliveredTranscriptValidationCounts
+    var rows: [CiderReminderPingDeliveredTranscriptValidationRow]
+    var safeNextCommands: [String] = [
+        "cider-cli item reminder-ping-import-ack --file <delivered-transcript.jsonl> --planned-file <planned-transcript.jsonl> --json",
+    ]
+    var safeVerificationCommands: [String] = [
+        "cider-cli item reminder-ping-validate-delivered --file <delivered-transcript.jsonl> --planned-file <planned-transcript.jsonl> --json",
+        "cider-cli item action-ledger list --action record_ping_surface --json",
+    ]
+}
+
+enum CiderReminderPingDeliveredTranscriptValidationService {
+    static func validate(
+        deliveredTranscriptJSONL: String,
+        plannedTranscriptJSONL: String
+    ) throws -> CiderReminderPingDeliveredTranscriptValidationResult {
+        let deliveredRows = try CiderReminderPingTranscriptService.parseRows(
+            deliveredTranscriptJSONL,
+            errorDomain: "CiderReminderPingDeliveredTranscriptValidationService"
+        )
+        let plannedRows = try CiderReminderPingTranscriptService.parseRows(
+            plannedTranscriptJSONL,
+            errorDomain: "CiderReminderPingDeliveredTranscriptValidationService"
+        )
+        let plannedByKey = Dictionary(uniqueKeysWithValues: plannedRows.map { (selectorKey($0), $0) })
+        var seenDeliveredKeys = Set<String>()
+        let validationRows = deliveredRows.map { delivered -> CiderReminderPingDeliveredTranscriptValidationRow in
+            let key = selectorKey(delivered)
+            let base = validationBase(delivered)
+            guard isDelivered(delivered) else {
+                return base.with(status: "skipped")
+            }
+            guard hasDeliveryProof(delivered) else {
+                return base.failed(code: "missing_delivery_proof", error: "Delivered transcript row requires deliveryID or messageID before import.")
+            }
+            guard !seenDeliveredKeys.contains(key) else {
+                return base.failed(code: "duplicate_delivered_row", error: "Delivered transcript contains duplicate or ambiguous rows for the same planned selector.")
+            }
+            seenDeliveredKeys.insert(key)
+            guard let planned = plannedByKey[key] else {
+                return base.failed(code: "planned_row_not_found", error: "Delivered transcript row is not present in the supplied planned transcript.")
+            }
+            guard delivered.itemType == planned.itemType,
+                  delivered.itemID == planned.itemID,
+                  delivered.owner == planned.owner else {
+                return base.failed(code: "item_selector_mismatch", error: "Delivered row item selector does not match the planned transcript row.")
+            }
+            guard delivered.transport == planned.transport,
+                  delivered.surface == planned.surface else {
+                return base.failed(code: "transport_surface_mismatch", error: "Delivered row transport or surface does not match the planned transcript row.")
+            }
+            return base.with(status: "valid")
+        }
+        let counts = CiderReminderPingDeliveredTranscriptValidationCounts(
+            total: validationRows.count,
+            valid: validationRows.filter { $0.status == "valid" }.count,
+            failed: validationRows.filter { $0.status == "failed" }.count,
+            skipped: validationRows.filter { $0.status == "skipped" }.count
+        )
+        return CiderReminderPingDeliveredTranscriptValidationResult(
+            ok: counts.failed == 0,
+            counts: counts,
+            rows: validationRows
+        )
+    }
+
+    private static func selectorKey(_ row: CiderReminderPingTranscriptRow) -> String {
+        if !row.plannedPingID.isEmpty { return "plannedPingID:\(row.plannedPingID)" }
+        if !row.envelopeID.isEmpty { return "envelopeID:\(row.envelopeID)" }
+        if !row.deliveryKey.isEmpty { return "deliveryKey:\(row.deliveryKey)" }
+        return "owner:\(row.owner.canonicalRef):\(row.transport):\(row.surface)"
+    }
+
+    private static func isDelivered(_ row: CiderReminderPingTranscriptRow) -> Bool {
+        ["delivered", "confirmed", "sent", "ok", "success"].contains(row.status.lowercased())
+            || ["delivered", "confirmed", "sent", "ok", "success"].contains(row.deliveryStatus.lowercased())
+            || hasDeliveryProof(row)
+    }
+
+    private static func hasDeliveryProof(_ row: CiderReminderPingTranscriptRow) -> Bool {
+        !(row.deliveryID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            || !(row.messageID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
+    private static func validationBase(_ row: CiderReminderPingTranscriptRow) -> CiderReminderPingDeliveredTranscriptValidationRow {
+        CiderReminderPingDeliveredTranscriptValidationRow(
+            status: "valid",
+            itemType: row.itemType,
+            itemID: row.itemID,
+            transport: row.transport,
+            surface: row.surface,
+            plannedPingID: row.plannedPingID,
+            deliveryID: row.deliveryID,
+            messageID: row.messageID
+        )
+    }
+}
+
+private extension CiderReminderPingDeliveredTranscriptValidationRow {
+    func with(status: String) -> CiderReminderPingDeliveredTranscriptValidationRow {
+        var copy = self
+        copy.status = status
+        return copy
+    }
+
+    func failed(code: String, error: String) -> CiderReminderPingDeliveredTranscriptValidationRow {
+        var copy = self
+        copy.status = "failed"
+        copy.errorCode = code
+        copy.error = error
+        return copy
     }
 }

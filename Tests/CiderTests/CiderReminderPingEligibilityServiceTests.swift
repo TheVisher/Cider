@@ -426,6 +426,105 @@ struct CiderReminderPingEligibilityServiceTests {
         #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
     }
 
+    @Test("delivered transcript validation accepts planned worker rows without receipts")
+    func deliveredTranscriptValidationAcceptsPlannedWorkerRowsWithoutReceipts() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let ledger = SecondBrainActionReceiptLedgerService(database: db)
+        let now = date(2026, 7, 14)
+        let todo = TodoCard(title: "Delivered validation todo", dueDate: now)
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [todo], dateCards: [], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+        let intents = try CiderReminderPingEligibilityService.pendingIntents(from: feed, ledger: ledger)
+        let preview = CiderReminderPingDeliveryPreviewService.preview(from: intents, transport: "discord", surface: "agent-chat")
+        let transcript = CiderReminderPingTranscriptService.produce(from: CiderReminderPingDryRunService.run(from: preview))
+        let worker = try CiderReminderPingTransportWorkerContractService.deliver(
+            transcriptJSONL: transcript.jsonl(),
+            configuration: .init(workerID: "discord-reminder-worker", senderID: "discord-bot-local-stub", transport: "discord")
+        )
+
+        let validation = try CiderReminderPingDeliveredTranscriptValidationService.validate(
+            deliveredTranscriptJSONL: worker.jsonl(),
+            plannedTranscriptJSONL: transcript.jsonl()
+        )
+
+        #expect(validation.command == "item.reminder-ping-validate-delivered")
+        #expect(validation.readOnly == true)
+        #expect(validation.changed == false)
+        #expect(validation.ok == true)
+        #expect(validation.counts.valid == 1)
+        #expect(validation.counts.failed == 0)
+        #expect(validation.rows.first?.status == "valid")
+        #expect(validation.safeNextCommands.contains("cider-cli item reminder-ping-import-ack --file <delivered-transcript.jsonl> --planned-file <planned-transcript.jsonl> --json"))
+        #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
+    }
+
+    @Test("delivered transcript validation rejects mismatches missing proof duplicates and unplanned rows")
+    func deliveredTranscriptValidationRejectsMismatchesMissingProofDuplicatesAndUnplannedRows() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let ledger = SecondBrainActionReceiptLedgerService(database: db)
+        let now = date(2026, 7, 14)
+        let first = TodoCard(title: "Delivered validation first", dueDate: now)
+        let second = TodoCard(title: "Delivered validation second", dueDate: now)
+        let third = TodoCard(title: "Delivered validation third", dueDate: now)
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [first, second, third], dateCards: [], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+        let intents = try CiderReminderPingEligibilityService.pendingIntents(from: feed, ledger: ledger)
+        let preview = CiderReminderPingDeliveryPreviewService.preview(from: intents, transport: "discord", surface: "agent-chat")
+        let transcript = CiderReminderPingTranscriptService.produce(from: CiderReminderPingDryRunService.run(from: preview))
+        let worker = try CiderReminderPingTransportWorkerContractService.deliver(
+            transcriptJSONL: transcript.jsonl(),
+            configuration: .init(workerID: "discord-reminder-worker", senderID: "discord-bot-local-stub", transport: "discord")
+        )
+        let validRow = try #require(worker.rows.first { $0.status == "delivered" })
+        var duplicate = validRow
+        duplicate.deliveryID = "transport-worker:discord-reminder-worker:duplicate"
+        var wrongSurface = try #require(worker.rows.first { $0.itemID == second.id.uuidString })
+        wrongSurface.surface = "wrong-chat"
+        var missingProof = try #require(transcript.rows.first { $0.itemID == third.id.uuidString })
+        missingProof.status = "delivered"
+        missingProof.deliveryStatus = "delivered"
+        var unplanned = validRow
+        unplanned.id = "transcript:unplanned-row"
+        unplanned.plannedPingID = "unplanned-row"
+        unplanned.itemID = UUID().uuidString
+        unplanned.owner = SecondBrainOwnerRef(ownerType: "todo", ownerID: unplanned.itemID)
+        let deliveredJSONL = [validRow, duplicate, wrongSurface, missingProof, unplanned]
+            .map { CiderReminderPingTranscriptService.rowDictionary($0) }
+            .map { object -> String in
+                let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+                return String(data: data, encoding: .utf8) ?? "{}"
+            }
+            .joined(separator: "\n")
+
+        let validation = try CiderReminderPingDeliveredTranscriptValidationService.validate(
+            deliveredTranscriptJSONL: deliveredJSONL,
+            plannedTranscriptJSONL: transcript.jsonl()
+        )
+
+        #expect(validation.ok == false)
+        #expect(validation.counts.valid == 1)
+        #expect(validation.counts.failed == 4)
+        #expect(validation.rows.contains { $0.errorCode == "duplicate_delivered_row" })
+        #expect(validation.rows.contains { $0.errorCode == "planned_row_not_found" })
+        #expect(validation.rows.contains { $0.errorCode == "missing_delivery_proof" })
+        #expect(validation.rows.contains { $0.errorCode == "item_selector_mismatch" || $0.errorCode == "transport_surface_mismatch" })
+        #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
+    }
+
     @Test("transport worker config file parses JSON and YAML with sender metadata defaults")
     func transportWorkerConfigFileParsesJSONAndYAMLWithSenderMetadataDefaults() throws {
         let jsonConfig = """
