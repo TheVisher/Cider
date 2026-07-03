@@ -1443,6 +1443,26 @@ func reminderPingEligibilityResultToDict(_ result: CiderReminderPingEligibilityR
     ]
 }
 
+func reminderPingDeliveryPreviewResultToDict(_ result: CiderReminderPingDeliveryPreviewResult) -> [String: Any] {
+    let formatter = ISO8601DateFormatter()
+    return [
+        "ok": true,
+        "command": result.command,
+        "generatedAt": formatter.string(from: result.generatedAt),
+        "readOnly": result.readOnly,
+        "changed": result.changed,
+        "truthBoundary": result.truthBoundary,
+        "transport": result.transport,
+        "surface": result.surface,
+        "count": result.envelopes.count,
+        "suppressedCount": result.suppressed.count,
+        "envelopes": result.envelopes.map { reminderPingDeliveryEnvelopeToDict($0, formatter: formatter) },
+        "suppressed": result.suppressed.map { reminderPingSuppressedIntentToDict($0) },
+        "safeNextCommands": result.safeNextCommands,
+        "safeVerificationCommands": result.safeVerificationCommands,
+    ]
+}
+
 func dailyEpisodePreviewToDict(_ preview: DailyEpisodePreview) -> [String: Any] {
     var dict: [String: Any] = [
         "ok": true,
@@ -2197,6 +2217,49 @@ func reminderPingIntentToDict(_ intent: CiderReminderPingIntent, formatter: ISO8
         if let dueStatus = intent.dueStatus { due["status"] = dueStatus }
         if let dueAt = intent.dueAt { due["at"] = formatter.string(from: dueAt) }
         due["window"] = dueToSurfaceWindowToDict(intent.window, formatter: formatter)
+        dict["due"] = due
+    }
+    return dict
+}
+
+func reminderPingDeliveryEnvelopeToDict(_ envelope: CiderReminderPingDeliveryEnvelope, formatter: ISO8601DateFormatter) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": envelope.id,
+        "itemID": envelope.owner.ownerID,
+        "kind": envelope.kind,
+        "owner": secondBrainOwnerRefToDict(envelope.owner),
+        "title": envelope.title,
+        "itemType": envelope.itemType,
+        "duplicateKey": envelope.duplicateKey,
+        "transport": envelope.transport,
+        "surface": envelope.surface,
+        "deliveryKey": envelope.deliveryKey,
+        "deliveryKeyGuidance": envelope.idempotencyGuidance,
+        "idempotencyGuidance": envelope.idempotencyGuidance,
+        "message": envelope.humanSafeMessage,
+        "humanSafeMessage": envelope.humanSafeMessage,
+        "sourceIntentID": envelope.sourceIntentID,
+        "sourceCandidateID": envelope.sourceCandidateID,
+        "sourceRefs": envelope.sourceRefs,
+        "safeRecordPingCommand": envelope.safeRecordPingCommand,
+        "safeVerificationCommands": envelope.safeVerificationCommands,
+        "readOnly": true,
+        "changed": false,
+        "truthBoundary": "cider_items_plus_action_receipts_no_send_preview",
+        "window": dueToSurfaceWindowToDict(envelope.window, formatter: formatter),
+        "ping": [
+            "sourceOfTruth": "cider_item",
+            "transportBoundary": "transport_records_delivery_only_after_confirmed_delivery",
+            "duplicateKey": envelope.duplicateKey,
+            "deliveryKey": envelope.deliveryKey,
+            "recordCommand": envelope.safeRecordPingCommand,
+        ],
+    ]
+    if envelope.dueAt != nil || envelope.dueStatus != nil {
+        var due: [String: Any] = [:]
+        if let dueStatus = envelope.dueStatus { due["status"] = dueStatus }
+        if let dueAt = envelope.dueAt { due["at"] = formatter.string(from: dueAt) }
+        due["window"] = dueToSurfaceWindowToDict(envelope.window, formatter: formatter)
         dict["due"] = due
     }
     return dict

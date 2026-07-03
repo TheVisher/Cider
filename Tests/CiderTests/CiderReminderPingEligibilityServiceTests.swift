@@ -96,6 +96,78 @@ struct CiderReminderPingEligibilityServiceTests {
         #expect(afterMatchingReceipt.suppressed.first?.reason == "matching_record_ping_surface_receipt")
     }
 
+    @Test("delivery preview turns pending intents into no-send envelopes without receipts")
+    func deliveryPreviewTurnsPendingIntentsIntoNoSendEnvelopesWithoutReceipts() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let ledger = SecondBrainActionReceiptLedgerService(database: db)
+        let now = date(2026, 7, 13)
+        let todo = TodoCard(title: "Preview delivery todo", dueDate: now)
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [todo], dateCards: [], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+        let intents = try CiderReminderPingEligibilityService.pendingIntents(from: feed, ledger: ledger)
+
+        let preview = CiderReminderPingDeliveryPreviewService.preview(
+            from: intents,
+            transport: "discord",
+            surface: "agent-chat"
+        )
+
+        #expect(preview.readOnly == true)
+        #expect(preview.changed == false)
+        #expect(preview.truthBoundary == "cider_items_plus_action_receipts_no_send_preview")
+        let envelope = try #require(preview.envelopes.first)
+        #expect(envelope.owner == SecondBrainOwnerRef(ownerType: "todo", ownerID: todo.id.uuidString))
+        #expect(envelope.title == "Preview delivery todo")
+        #expect(envelope.transport == "discord")
+        #expect(envelope.surface == "agent-chat")
+        #expect(envelope.duplicateKey == "todo:\(todo.id.uuidString):\(now.timeIntervalSince1970):surface")
+        #expect(envelope.deliveryKey == "todo:\(todo.id.uuidString):\(now.timeIntervalSince1970):surface:discord:agent-chat")
+        #expect(envelope.humanSafeMessage.contains("Preview delivery todo"))
+        #expect(envelope.idempotencyGuidance.contains(envelope.duplicateKey))
+        #expect(envelope.safeRecordPingCommand == "cider-cli item ping-receipt record todo \(todo.id.uuidString) --transport discord --surface agent-chat --json")
+        #expect(envelope.safeVerificationCommands.contains("cider-cli item action-ledger list --owner todo:\(todo.id.uuidString) --action record_ping_surface --json"))
+        #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
+    }
+
+    @Test("delivery preview carries suppression through after matching receipt")
+    func deliveryPreviewCarriesSuppressionThroughAfterMatchingReceipt() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let ledger = SecondBrainActionReceiptLedgerService(database: db)
+        let now = date(2026, 7, 13)
+        let todo = TodoCard(title: "Preview suppressed todo", dueDate: now)
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [todo], dateCards: [], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+        let duplicateKey = "todo:\(todo.id.uuidString):\(now.timeIntervalSince1970):surface"
+        try recordPingReceipt(
+            ledger: ledger,
+            owner: SecondBrainOwnerRef(ownerType: "todo", ownerID: todo.id.uuidString),
+            action: "record_ping_surface",
+            duplicateKey: duplicateKey
+        )
+
+        let intents = try CiderReminderPingEligibilityService.pendingIntents(from: feed, ledger: ledger)
+        let preview = CiderReminderPingDeliveryPreviewService.preview(from: intents, transport: "discord", surface: "agent-chat")
+
+        #expect(preview.envelopes.isEmpty)
+        #expect(preview.suppressed.count == 1)
+        #expect(preview.suppressed.first?.duplicateKey == duplicateKey)
+        #expect(preview.suppressed.first?.reason == "matching_record_ping_surface_receipt")
+    }
+
     private func recordPingReceipt(
         ledger: SecondBrainActionReceiptLedgerService,
         owner: SecondBrainOwnerRef,

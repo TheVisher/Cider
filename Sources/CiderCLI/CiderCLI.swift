@@ -245,6 +245,7 @@ struct CiderCLI {
       cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
       cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
       cider-cli item reminder-ping-intents [--limit <n>] [--stale-after-days <n>] [--json]
+      cider-cli item reminder-ping-delivery-preview [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]
       cider-cli item why-surfaced <type> <id-or-ref> [--json]
       cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
@@ -352,6 +353,8 @@ struct CiderCLI {
             print("Usage: cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]")
         case "reminder-ping-intents", "pending-reminder-pings", "reminder-pings":
             print("Usage: cider-cli item reminder-ping-intents [--limit <n>] [--stale-after-days <n>] [--json]")
+        case "reminder-ping-delivery-preview", "reminder-ping-preview", "reminder-ping-envelopes":
+            print("Usage: cider-cli item reminder-ping-delivery-preview [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]")
         case "ping-receipt", "ping-receipts":
             print("Usage: cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]")
         case "why-surfaced", "why":
@@ -6174,6 +6177,40 @@ struct CiderCLI {
                     print("Pending reminder ping intents: \(result.intents.count)")
                     for intent in result.intents {
                         print("  [\(intent.kind)] \(intent.title) — \(intent.whyEligible)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "reminder-ping-delivery-preview", "reminder-ping-preview", "reminder-ping-envelopes":
+            do {
+                guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: "item.reminder-ping-delivery-preview", minimum: 1) else { return }
+                guard let parsedStaleAfterDays = parsePositiveIntFlag("--stale-after-days", from: args, command: "item.reminder-ping-delivery-preview", minimum: 0) else { return }
+                let limit = parsedLimit ?? 20
+                let staleAfterDays = parsedStaleAfterDays ?? 3
+                let transport = parseFlag("--transport", from: args) ?? CiderReminderPingDeliveryPreviewService.defaultTransport
+                let surface = parseFlag("--surface", from: args) ?? CiderReminderPingDeliveryPreviewService.defaultSurface
+                let result = try reminderPingDeliveryPreviewPayload(
+                    limit: limit,
+                    staleAfterDays: staleAfterDays,
+                    transport: transport,
+                    surface: surface
+                )
+                if jsonOutput {
+                    var payload = reminderPingDeliveryPreviewResultToDict(result)
+                    payload["filters"] = [
+                        "limit": limit,
+                        "staleAfterDays": staleAfterDays,
+                        "transport": result.transport,
+                        "surface": result.surface,
+                    ]
+                    payload["actionReceipt"] = reminderPingDeliveryPreviewReadOnlyActionReceipt(result: result)
+                    outputJSON(payload)
+                } else {
+                    print("Reminder ping delivery preview envelopes: \(result.envelopes.count)")
+                    for envelope in result.envelopes {
+                        print("  [\(envelope.kind)] \(envelope.title) — \(envelope.transport)/\(envelope.surface)")
                     }
                 }
             } catch {
@@ -15724,6 +15761,29 @@ struct CiderCLI {
         return receipt
     }
 
+    static func reminderPingDeliveryPreviewReadOnlyActionReceipt(result: CiderReminderPingDeliveryPreviewResult) -> [String: Any] {
+        let sourceRefs = result.envelopes.flatMap(\.sourceRefs) + result.suppressed.map { $0.owner.canonicalRef }
+        let safeCommands = result.safeVerificationCommands + result.safeNextCommands
+        var receipt = readOnlyActionReceiptToDict(
+            command: result.command,
+            matchedSourceRefs: sourceRefs,
+            safeCommandRefs: safeCommands,
+            provenanceRefs: sourceRefs,
+            status: "succeeded",
+            generatedAt: result.generatedAt,
+            truthBoundary: "receipt_proves_command_execution_not_delivery_truth"
+        )
+        receipt["action"] = "preview_reminder_ping_delivery_envelopes"
+        receipt["actor"] = "cider-cli"
+        receipt["sourceBoundary"] = result.truthBoundary
+        receipt["transportBoundary"] = "no_transport_send"
+        receipt["transport"] = result.transport
+        receipt["surface"] = result.surface
+        receipt["pendingEnvelopeCount"] = result.envelopes.count
+        receipt["suppressedCount"] = result.suppressed.count
+        return receipt
+    }
+
     static func validateReviewFilterIfPresent(
         command: String,
         name: String,
@@ -18599,6 +18659,20 @@ struct CiderCLI {
         return try CiderReminderPingEligibilityService.pendingIntents(
             from: feed,
             ledger: SecondBrainActionReceiptLedgerService(database: .shared)
+        )
+    }
+
+    static func reminderPingDeliveryPreviewPayload(
+        limit: Int,
+        staleAfterDays: Int = 3,
+        transport: String = CiderReminderPingDeliveryPreviewService.defaultTransport,
+        surface: String = CiderReminderPingDeliveryPreviewService.defaultSurface
+    ) throws -> CiderReminderPingDeliveryPreviewResult {
+        let eligibility = try reminderPingEligibilityPayload(limit: limit, staleAfterDays: staleAfterDays)
+        return CiderReminderPingDeliveryPreviewService.preview(
+            from: eligibility,
+            transport: transport,
+            surface: surface
         )
     }
 
