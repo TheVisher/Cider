@@ -126,20 +126,19 @@ final class CiderSpaceStorageTests: XCTestCase {
     }
 
     @MainActor
-    func testDefaultPinnedPresetsAreCreatedAndShownInSidebar() throws {
+    func testDefaultPinnedPresetsAreDeferredInsteadOfCreatedAndShownInSidebar() throws {
         let tempRoot = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
         let storage = CiderSpaceStorage(vaultRoot: tempRoot, defaultPinnedPresets: [.recipes])
 
-        XCTAssertEqual(storage.spaces.map(\.preset), [.recipes])
-        XCTAssertEqual(storage.pinnedSpaces.map(\.name), ["Recipes"])
-        XCTAssertEqual(storage.spaces.first?.rootRelativePath, "Spaces/Recipes")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("Spaces/Recipes/.cider-space.yaml").path))
+        XCTAssertTrue(storage.spaces.isEmpty)
+        XCTAssertTrue(storage.pinnedSpaces.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("Spaces/Recipes/.cider-space.yaml").path))
 
         let reloaded = CiderSpaceStorage(vaultRoot: tempRoot, defaultPinnedPresets: [.recipes])
-        XCTAssertEqual(reloaded.spaces.count, 1)
-        XCTAssertEqual(reloaded.pinnedSpaces.map(\.name), ["Recipes"])
+        XCTAssertTrue(reloaded.spaces.isEmpty)
+        XCTAssertTrue(reloaded.pinnedSpaces.isEmpty)
     }
 
     @MainActor

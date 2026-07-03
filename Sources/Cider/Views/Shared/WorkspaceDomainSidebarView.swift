@@ -54,14 +54,6 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
 
     private var spacesSection: some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
-            ForEach(pinnedSpaces) { space in
-                spaceButton(space)
-            }
-
-            ForEach(missingStarterPresets, id: \.self) { preset in
-                starterSpaceButton(preset)
-            }
-
             Button {
                 onOpenSpacesManager()
             } label: {
@@ -79,42 +71,6 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
 
     private var pinnedSpaces: [CiderSpace] {
         CiderSpaceSidebarModel.pinnedSpaces(from: spaces)
-    }
-
-    private var missingStarterPresets: [CiderSpacePresetKind] {
-        [.media, .recipes].filter { preset in
-            spaces.contains { $0.preset == preset } == false
-        }
-    }
-
-    private func spaceButton(_ space: CiderSpace) -> some View {
-        Button {
-            onSelectSpace(space)
-        } label: {
-            WorkspaceSidebarNestedRowLabel(
-                title: space.name,
-                systemImage: space.systemImage,
-                isSelected: selectedSpaceID == space.id
-            )
-        }
-        .buttonStyle(.plain)
-        .help(space.purpose)
-    }
-
-    private func starterSpaceButton(_ preset: CiderSpacePresetKind) -> some View {
-        let defaults = CiderSpacePreset.defaults(for: preset)
-
-        return Button {
-            onCreateSpace(preset)
-        } label: {
-            WorkspaceSidebarNestedRowLabel(
-                title: defaults.title,
-                systemImage: defaults.systemImage,
-                isSelected: false
-            )
-        }
-        .buttonStyle(.plain)
-        .help("Create \(defaults.title) Space")
     }
 
     private var contextualDomains: [WorkspaceNavigationDomain] {

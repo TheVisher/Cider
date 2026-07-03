@@ -226,6 +226,25 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         )
     }
 
+    func testSpacesSidebarDoesNotExposeStarterChildButtons() throws {
+        let sourceURL = Self.repositoryRoot
+            .appendingPathComponent("Sources/Cider/Views/Shared/WorkspaceDomainSidebarView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertFalse(
+            source.contains("missingStarterPresets"),
+            "Starter Spaces should stay deferred to the Spaces manager/dashboard instead of appearing as live sidebar child buttons."
+        )
+        XCTAssertFalse(
+            source.contains("starterSpaceButton"),
+            "The Spaces sidebar should not expose one-click starter Space creation rows."
+        )
+        XCTAssertFalse(
+            source.contains("ForEach(pinnedSpaces)"),
+            "Pinned Spaces should stay reachable through All Spaces instead of appearing as sidebar child buttons."
+        )
+    }
+
     func testDomainExpansionStateCanOpenMultipleDomainsWithoutNavigationSelection() {
         var state = WorkspaceDomainSidebarExpansionState()
 
