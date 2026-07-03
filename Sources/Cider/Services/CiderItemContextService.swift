@@ -821,7 +821,11 @@ final class CiderItemContextService {
         _ result: CiderItemSearchResult,
         matches stage: RecallQueryStage
     ) -> Bool {
-        result.stage == stage.name
+        if stage.name == "tag_facet_filter" {
+            return result.stage == stage.name
+                || result.rankFactors.contains("stage:tag_facet_filter")
+        }
+        return result.stage == stage.name
             || result.matchedQuery == stage.query
             || result.rankFactors.contains("matched_query:\(stage.query)")
     }
@@ -840,6 +844,7 @@ final class CiderItemContextService {
     private struct TagFacetFilter: Equatable {
         var itemTypes: [LibraryEntityType] = []
         var tagQueries: [String] = []
+        var constrainsLexicalMatches: Bool = false
 
         var hasFilters: Bool {
             !itemTypes.isEmpty || !tagQueries.isEmpty
@@ -1046,7 +1051,7 @@ final class CiderItemContextService {
             let stageLimit = max(boundedLimit, boundedLimit * 3)
             let itemMatches = try searchItems(stage.query, limit: stageLimit, spaceRefs: spaceRefs)
             for match in itemMatches {
-                if tagFilter.hasFilters {
+                if tagFilter.constrainsLexicalMatches {
                     guard let item = match.item,
                           try self.item(item, matches: tagFilter) != nil else {
                         continue
@@ -1085,7 +1090,7 @@ final class CiderItemContextService {
             let chunkMatches = try secondBrainStore.searchChunks(query: stage.query, limit: stageLimit)
             for match in chunkMatches {
                 let item = try? itemSummary(owner: match.owner)
-                if tagFilter.hasFilters {
+                if tagFilter.constrainsLexicalMatches {
                     guard let item,
                           try self.item(item, matches: tagFilter) != nil else {
                         continue
@@ -1138,7 +1143,7 @@ final class CiderItemContextService {
 
             let enrichmentMatches = try searchEnrichmentOutputs(stage.query, limit: stageLimit, spaceRefs: spaceRefs)
             for match in enrichmentMatches {
-                if tagFilter.hasFilters {
+                if tagFilter.constrainsLexicalMatches {
                     guard let item = match.item,
                           try self.item(item, matches: tagFilter) != nil else {
                         continue
@@ -1722,16 +1727,55 @@ final class CiderItemContextService {
             case "type", "source":
                 if let itemType = itemTypeFacet(value) {
                     filter.itemTypes.append(itemType)
+                    filter.constrainsLexicalMatches = true
                 }
             case "tag", "topic":
                 filter.tagQueries.append(value)
+                filter.constrainsLexicalMatches = true
             default:
                 continue
             }
         }
         filter.itemTypes = orderedUnique(filter.itemTypes.map(\.rawValue)).compactMap(LibraryEntityType.init(rawValue:))
         filter.tagQueries = orderedUnique(filter.tagQueries)
+        filter = addingNaturalFileLookupTagFacetFallback(to: filter, query: query)
         return filter
+    }
+
+    private func addingNaturalFileLookupTagFacetFallback(
+        to filter: TagFacetFilter,
+        query: String
+    ) -> TagFacetFilter {
+        let intent = lifeMemoryTypeIntent(in: query)
+        let hasFileIntent = filter.itemTypes.contains(.vaultFile)
+            || intent?.itemType == .vaultFile
+            || recallProviderSignals(in: query).contains { ["pdf", "docx"].contains($0) }
+        guard hasFileIntent else { return filter }
+
+        let explicitTagQueries = !filter.tagQueries.isEmpty
+        var enriched = filter
+        if !enriched.itemTypes.contains(.vaultFile) {
+            enriched.itemTypes.append(.vaultFile)
+        }
+        guard !explicitTagQueries else {
+            enriched.itemTypes = orderedUnique(enriched.itemTypes.map(\.rawValue)).compactMap(LibraryEntityType.init(rawValue:))
+            return enriched
+        }
+
+        let topicTokens = orderedUnique(
+            recallTokens(query)
+                .map(normalizedRecallToken)
+                .filter(isDistinctiveRecallToken)
+        )
+        guard !topicTokens.isEmpty else {
+            enriched.itemTypes = orderedUnique(enriched.itemTypes.map(\.rawValue)).compactMap(LibraryEntityType.init(rawValue:))
+            return enriched
+        }
+
+        enriched.tagQueries.append(contentsOf: topicTokens)
+        enriched.itemTypes = orderedUnique(enriched.itemTypes.map(\.rawValue)).compactMap(LibraryEntityType.init(rawValue:))
+        enriched.tagQueries = orderedUnique(enriched.tagQueries)
+        return enriched
     }
 
     private func itemTypeFacet(_ raw: String) -> LibraryEntityType? {
@@ -1775,14 +1819,47 @@ final class CiderItemContextService {
         }
 
         for query in filter.tagQueries {
-            guard let matched = tags.first(where: { tagMatches($0, query: query) }) else {
+            if let matched = tags.first(where: { tagMatches($0, query: query) }) {
+                factors.append("tag_filter:\(matched)")
+                factors.append("tag_facet:\(facetName(for: matched) ?? "tag")")
+                continue
+            }
+            guard let sourceBackedFacet = sourceBackedTopicFacetEvidence(item: item, query: query) else {
                 return nil
             }
-            factors.append("tag_filter:\(matched)")
-            factors.append("tag_facet:\(facetName(for: matched) ?? "tag")")
+            factors += sourceBackedFacet
         }
 
         return orderedUnique(factors)
+    }
+
+    private func sourceBackedTopicFacetEvidence(
+        item: CiderItemSummary,
+        query: String
+    ) -> [String]? {
+        let normalizedQuery = normalizedRecallToken(query)
+        guard isDistinctiveRecallToken(normalizedQuery) else { return nil }
+        let sourceText = [
+            item.title,
+            item.relativePath ?? "",
+        ].joined(separator: " ")
+        guard containsRecallToken(normalizedQuery, in: sourceText) else { return nil }
+        let display = displayTopicFacet(query)
+        return [
+            "source_backed_topic_facet:\(display)",
+            "tag_facet:source",
+            "tag_facet:topic",
+        ]
+    }
+
+    private func displayTopicFacet(_ query: String) -> String {
+        let normalized = normalizedRecallToken(query)
+        switch normalized {
+        case "adhd":
+            return "ADHD"
+        default:
+            return query
+        }
     }
 
     private func itemTags(for itemID: UUID) throws -> [String] {

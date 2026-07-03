@@ -1802,6 +1802,144 @@ struct CiderItemContextServiceTests {
         })
     }
 
+    @Test("natural file lookup derives tag facet fallback for ADHD documents")
+    func naturalFileLookupDerivesTagFacetFallbackForAdhdDocuments() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let target = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        let noisyJournal = LibraryEntityRef(type: .note, entityID: UUID())
+        let noisyNote = LibraryEntityRef(type: .note, entityID: UUID())
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+
+        try insertItem(
+            target,
+            title: "Assessment paperwork",
+            relativePath: "Files/Health/Assessment paperwork.pdf",
+            into: db,
+            createdAt: now.addingTimeInterval(-20_000),
+            updatedAt: now.addingTimeInterval(-20_000)
+        )
+        try insertItem(
+            noisyJournal,
+            title: "Daily Journal 2026-07-03",
+            relativePath: "Journal/Daily Journal 2026-07-03.md",
+            into: db,
+            createdAt: now,
+            updatedAt: now
+        )
+        try insertItem(
+            noisyNote,
+            title: "ADHD admin note",
+            relativePath: "Inbox/Notes/ADHD admin note.md",
+            into: db,
+            createdAt: now,
+            updatedAt: now
+        )
+
+        try tagItem(target, tags: ["type/file", "topic/ADHD"], in: db)
+        try tagItem(noisyJournal, tags: ["type/note", "topic/ADHD"], in: db)
+        try tagItem(noisyNote, tags: ["type/note", "topic/ADHD"], in: db)
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: noisyJournal.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: noisyJournal.entityID.uuidString,
+                source: "journal",
+                title: "ADHD document lookup scratchpad",
+                body: "Find my ADHD document came up during a noisy journal reflection, but this is not the file.",
+                chunkIndex: 0
+            )
+        ])
+
+        let service = CiderItemContextService(
+            database: db,
+            secondBrainStore: store,
+            nowProvider: { now }
+        )
+
+        for query in ["find my ADHD document", "ADHD files", "show ADHD PDF"] {
+            let results = try service.search(query, limit: 5)
+            let first = try #require(results.first, "Expected a result for \(query)")
+            #expect(first.item?.id == target.entityID, "Expected tagged ADHD file first for \(query), got \(first.title)")
+            #expect(first.item?.type == .vaultFile)
+            #expect(first.stage == "tag_facet_filter")
+            #expect(first.rankFactors.contains("tag_filter:type/file"))
+            #expect(first.rankFactors.contains("tag_filter:topic/ADHD"))
+            #expect(first.rankFactors.contains("tag_facet:type"))
+            #expect(first.rankFactors.contains("tag_facet:topic"))
+
+            let firstDict = CiderCLI.itemSearchResultToDict(first)
+            let rankFactors = try #require(firstDict["rankFactors"] as? [String])
+            #expect(rankFactors.contains("tag_filter:topic/ADHD"))
+            #expect((firstDict["safeNextCommands"] as? [String])?.contains("cider-cli item context vaultFile \(target.entityID.uuidString) --json") == true)
+        }
+
+        let report = try service.searchDiagnostics("find my ADHD document", limit: 5)
+        #expect(report.exactMatches.first?.item?.id == target.entityID)
+        #expect(report.fallbackStages.contains {
+            $0.name == "tag_facet_filter"
+                && $0.query == "find my ADHD document"
+                && $0.resultCount == 1
+        })
+    }
+
+    @Test("natural file lookup can use source backed projected topic facets")
+    func naturalFileLookupCanUseSourceBackedProjectedTopicFacets() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let target = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        let noisyJournal = LibraryEntityRef(type: .note, entityID: UUID())
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+
+        try insertItem(
+            target,
+            title: "Assessment paperwork",
+            relativePath: "Inbox/Files/adhd-intake-source.pdf",
+            into: db,
+            createdAt: now.addingTimeInterval(-20_000),
+            updatedAt: now.addingTimeInterval(-20_000)
+        )
+        try insertItem(
+            noisyJournal,
+            title: "Daily Journal 2026-07-03",
+            relativePath: "Journal/Daily Journal 2026-07-03.md",
+            into: db,
+            createdAt: now,
+            updatedAt: now
+        )
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: noisyJournal.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: noisyJournal.entityID.uuidString,
+                source: "journal",
+                title: "ADHD document lookup scratchpad",
+                body: "Find my ADHD document came up during a noisy journal reflection, but this is not the file.",
+                chunkIndex: 0
+            )
+        ])
+
+        let service = CiderItemContextService(
+            database: db,
+            secondBrainStore: store,
+            nowProvider: { now }
+        )
+
+        let results = try service.search("find my ADHD document", limit: 5)
+        let first = try #require(results.first)
+        #expect(first.item?.id == target.entityID)
+        #expect(first.rankFactors.contains("source_backed_topic_facet:ADHD"))
+        #expect(first.rankFactors.contains("tag_facet:source"))
+
+        let dict = CiderCLI.itemSearchResultToDict(first)
+        let rankFactors = try #require(dict["rankFactors"] as? [String])
+        #expect(rankFactors.contains("source_backed_topic_facet:ADHD"))
+    }
+
     @Test("journal phrase recall ranks recent daily journal body matches above generic voice titles")
     func journalPhraseRecallRanksRecentDailyJournalBodyMatches() throws {
         let (db, url) = try makeTestDB()
