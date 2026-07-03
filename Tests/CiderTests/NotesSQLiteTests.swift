@@ -1073,10 +1073,10 @@ struct NotesSQLiteTests {
         let reloaded = makeService(db)
         reloaded.loadNotesFromDatabase(db)
         #expect(reloaded.notes.count == 1)
-        #expect(reloaded.notes[0].id == note.id)
-        #expect(reloaded.notes[0].projectID == "cider")
-        #expect(reloaded.notes[0].artifactType == "note")
-        #expect(reloaded.loadContent(for: reloaded.notes[0]) == "# Body\nFile-backed project note.")
+        let loaded = try #require(reloaded.notes.first(where: { $0.id == note.id }))
+        #expect(loaded.projectID == "cider")
+        #expect(loaded.artifactType == "note")
+        #expect(reloaded.loadContent(for: loaded) == "# Body\nFile-backed project note.")
     }
 
     @Test("Project handoff artifacts are file-backed under project handoffs and reload explicit ownership")

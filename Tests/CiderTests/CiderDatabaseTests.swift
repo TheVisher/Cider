@@ -623,6 +623,48 @@ struct CiderDatabaseTests {
         #expect(stmt.int(at: 0) == 0)
     }
 
+    @Test("Nested successful transaction commits with outer transaction")
+    func nestedSuccessfulTransactionCommitsWithOuterTransaction() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+
+        try db.withTransaction {
+            let outer = try db.prepare(
+                "INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);"
+            )
+            outer.bind("outer-label", at: 1)
+                .bind("Outer", at: 2)
+                .bind("#111111", at: 3)
+                .bind("custom", at: 4)
+                .bind(0.0, at: 5)
+                .bind(0.0, at: 6)
+            try outer.step()
+
+            try db.withTransaction {
+                let inner = try db.prepare(
+                    "INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);"
+                )
+                inner.bind("inner-label", at: 1)
+                    .bind("Inner", at: 2)
+                    .bind("#222222", at: 3)
+                    .bind("custom", at: 4)
+                    .bind(0.0, at: 5)
+                    .bind(0.0, at: 6)
+                try inner.step()
+            }
+        }
+
+        let stmt = try db.prepare("SELECT count(*) FROM labels WHERE id IN (?, ?);")
+        stmt.bind("outer-label", at: 1)
+            .bind("inner-label", at: 2)
+        try stmt.step()
+        #expect(stmt.int(at: 0) == 2)
+    }
+
     // MARK: - Foreign Key Enforcement
 
     @Test("Foreign key constraint prevents orphan items")

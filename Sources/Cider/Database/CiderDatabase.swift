@@ -21,6 +21,7 @@ final class CiderDatabase {
     private let logger = Logger(subsystem: "com.cider.app", category: "CiderDatabase")
     private var db: OpaquePointer?
     private(set) var databaseURL: URL?
+    private var transactionDepth = 0
 
     /// Whether the database connection is currently open.
     var isOpen: Bool { db != nil }
@@ -77,6 +78,7 @@ final class CiderDatabase {
         sqlite3_close_v2(db)
         self.db = nil
         self.databaseURL = nil
+        self.transactionDepth = 0
         logger.info("Database closed")
     }
 
@@ -112,13 +114,32 @@ final class CiderDatabase {
     /// Run a block inside a SQLite transaction.
     /// Commits on success, rolls back on throw.
     func withTransaction<T>(_ body: @MainActor () throws -> T) throws -> T {
-        try runSQL("BEGIN TRANSACTION;")
+        let isNested = transactionDepth > 0
+        let savepointName = "cider_transaction_\(transactionDepth + 1)"
+        if isNested {
+            try runSQL("SAVEPOINT \(savepointName);")
+        } else {
+            try runSQL("BEGIN TRANSACTION;")
+        }
+
+        transactionDepth += 1
+        defer { transactionDepth -= 1 }
+
         do {
             let result = try body()
-            try runSQL("COMMIT;")
+            if isNested {
+                try runSQL("RELEASE SAVEPOINT \(savepointName);")
+            } else {
+                try runSQL("COMMIT;")
+            }
             return result
         } catch {
-            try? runSQL("ROLLBACK;")
+            if isNested {
+                try? runSQL("ROLLBACK TO SAVEPOINT \(savepointName);")
+                try? runSQL("RELEASE SAVEPOINT \(savepointName);")
+            } else {
+                try? runSQL("ROLLBACK;")
+            }
             throw error
         }
     }
