@@ -1391,6 +1391,144 @@ struct CiderCLIAgentSafetyTests {
         #expect((afterProofLedger["entries"] as? [[String: Any]])?.count == 1)
     }
 
+    @Test("reminder ping fake sender CLI writes proof transcript without receipts")
+    func reminderPingFakeSenderCLIWritesProofTranscriptWithoutReceipts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-reminder-ping-fake-sender-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let dueDate = Self.relativeDateString(daysFromToday: -1)
+
+        let help = try runCLI(args: ["item", "reminder-ping-fake-send", "--help"], vault: vault)
+        #expect(help.status == 0)
+        #expect(help.stdout.contains("reminder-ping-fake-send"))
+        #expect(help.stdout.contains("--output"))
+        #expect(help.stdout.contains("no real send"))
+
+        let firstCapture = try assertStrictProcessJSON(
+            runCLI(args: [
+                "capture", "add", "--kind", "todo",
+                "--content", "Reminder ping fake sender first todo",
+                "--date", dueDate,
+                "--json",
+            ], vault: vault),
+            command: "capture.add"
+        )
+        let firstItem = try #require(firstCapture["item"] as? [String: Any])
+        let firstID = try #require(firstItem["id"] as? String)
+
+        let secondCapture = try assertStrictProcessJSON(
+            runCLI(args: [
+                "capture", "add", "--kind", "todo",
+                "--content", "Reminder ping fake sender second todo",
+                "--date", dueDate,
+                "--json",
+            ], vault: vault),
+            command: "capture.add"
+        )
+        let secondItem = try #require(secondCapture["item"] as? [String: Any])
+        let secondID = try #require(secondItem["id"] as? String)
+
+        let plannedFile = vault.appendingPathComponent("planned-reminder-pings.jsonl")
+        _ = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-transcript",
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--file", plannedFile.path,
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-transcript"
+        )
+
+        let deliveredFile = vault.appendingPathComponent("fake-delivered-reminder-pings.jsonl")
+        let sent = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-fake-send",
+                "--file", plannedFile.path,
+                "--output", deliveredFile.path,
+                "--limit", "1",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-fake-send"
+        )
+        #expect(sent["readOnly"] as? Bool == true)
+        #expect(sent["changed"] as? Bool == false)
+        #expect(sent["truthBoundary"] as? String == "cider_items_plus_action_receipts_remain_source_of_truth_fake_transport_no_receipts")
+        #expect(sent["transportBoundary"] as? String == "fake_transport_no_real_send_delivery_proof_only")
+        let counts = try #require(sent["counts"] as? [String: Any])
+        #expect(counts["rows"] as? Int == 2)
+        #expect(counts["delivered"] as? Int == 1)
+        #expect(counts["noSend"] as? Int == 1)
+        let fileWrites = try #require(sent["fileWriteCounts"] as? [String: Any])
+        #expect(fileWrites["written"] as? Int == 1)
+        let artifact = try #require(sent["artifact"] as? [String: Any])
+        #expect(artifact["path"] as? String == deliveredFile.path)
+
+        let deliveredLines = try String(contentsOf: deliveredFile, encoding: .utf8)
+            .split(separator: "\n")
+            .map(String.init)
+        #expect(deliveredLines.count == 2)
+        let deliveredRows = try deliveredLines.map { try parseJSONObject($0) }
+        let deliveredRow = try #require(deliveredRows.first { $0["status"] as? String == "delivered" })
+        #expect(deliveredRow["deliveryID"] as? String == "fake-delivery:\(deliveredRow["envelopeID"] as? String ?? "")")
+        #expect(deliveredRow["messageID"] as? String == "fake-message:\(deliveredRow["envelopeID"] as? String ?? "")")
+        #expect(deliveredRow["fakeTransport"] as? Bool == true)
+        #expect(deliveredRow["noRealSend"] as? Bool == true)
+        #expect(deliveredRows.contains { $0["status"] as? String == "not_delivered" && $0["itemID"] as? String == secondID })
+
+        let beforeImportLedger = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "action-ledger", "list",
+                "--action", "record_ping_surface",
+                "--limit", "5",
+                "--json",
+            ], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        #expect((beforeImportLedger["entries"] as? [[String: Any]])?.isEmpty == true)
+
+        let imported = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-import-ack",
+                "--file", deliveredFile.path,
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-import-ack"
+        )
+        let importedCounts = try #require(imported["counts"] as? [String: Any])
+        #expect(importedCounts["changed"] as? Int == 1)
+        #expect(importedCounts["skipped"] as? Int == 1)
+
+        let firstLedger = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "action-ledger", "list",
+                "--owner", "todo:\(firstID)",
+                "--action", "record_ping_surface",
+                "--limit", "5",
+                "--json",
+            ], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        #expect((firstLedger["entries"] as? [[String: Any]])?.count == 1)
+
+        let secondLedger = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "action-ledger", "list",
+                "--owner", "todo:\(secondID)",
+                "--action", "record_ping_surface",
+                "--limit", "5",
+                "--json",
+            ], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        #expect((secondLedger["entries"] as? [[String: Any]])?.isEmpty == true)
+    }
+
     @Test("action ledger CLI filters by command refs and time windows")
     func actionLedgerCLIFiltersByCommandRefsAndTimeWindows() throws {
         let vault = FileManager.default.temporaryDirectory

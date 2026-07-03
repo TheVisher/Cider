@@ -303,6 +303,63 @@ struct CiderReminderPingEligibilityServiceTests {
         #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
     }
 
+    @Test("fake transport sender fills deterministic delivery proof without receipts")
+    func fakeTransportSenderFillsDeterministicDeliveryProofWithoutReceipts() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let ledger = SecondBrainActionReceiptLedgerService(database: db)
+        let now = date(2026, 7, 13)
+        let todo = TodoCard(title: "Fake sender todo", dueDate: now)
+        let dateCard = DateCard(title: "Fake sender date card", startAt: now)
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [todo], dateCards: [dateCard], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+        let intents = try CiderReminderPingEligibilityService.pendingIntents(from: feed, ledger: ledger)
+        let preview = CiderReminderPingDeliveryPreviewService.preview(
+            from: intents,
+            transport: "discord",
+            surface: "agent-chat"
+        )
+        let dryRun = CiderReminderPingDryRunService.run(from: preview)
+        let transcript = CiderReminderPingTranscriptService.produce(from: dryRun)
+
+        let delivered = try CiderReminderPingFakeTransportSenderService.deliver(
+            transcriptJSONL: transcript.jsonl(),
+            limit: 1
+        )
+
+        #expect(delivered.command == "item.reminder-ping-fake-send")
+        #expect(delivered.readOnly == true)
+        #expect(delivered.changed == false)
+        #expect(delivered.truthBoundary == "cider_items_plus_action_receipts_remain_source_of_truth_fake_transport_no_receipts")
+        #expect(delivered.transportBoundary == "fake_transport_no_real_send_delivery_proof_only")
+        #expect(delivered.counts.rows == 2)
+        #expect(delivered.counts.delivered == 1)
+        #expect(delivered.counts.noSend == 1)
+        #expect(delivered.counts.skipped == 1)
+
+        let deliveredRow = try #require(delivered.rows.first { $0.status == "delivered" })
+        let originalRow = try #require(transcript.rows.first { $0.id == deliveredRow.id })
+        #expect(deliveredRow.owner == originalRow.owner)
+        #expect(deliveredRow.runKey == originalRow.runKey)
+        #expect(deliveredRow.envelopeID == originalRow.envelopeID)
+        #expect(deliveredRow.deliveryID == "fake-delivery:\(originalRow.envelopeID)")
+        #expect(deliveredRow.messageID == "fake-message:\(originalRow.envelopeID)")
+        #expect(deliveredRow.senderMetadata["adapter"] == "cider_fake_transport")
+        #expect(deliveredRow.senderMetadata["fakeTransport"] == "true")
+        #expect(deliveredRow.senderMetadata["noRealSend"] == "true")
+        #expect(delivered.jsonl().contains("\"fakeTransport\":true"))
+        #expect(delivered.jsonl().contains("\"noRealSend\":true"))
+        #expect(delivered.safeNextCommands.contains("cider-cli item reminder-ping-import-ack --file <delivered-transcript.jsonl> --json"))
+        #expect(delivered.safeVerificationCommands.contains("cider-cli item action-ledger list --action record_ping_surface --json"))
+        #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
+    }
+
     private func recordPingReceipt(
         ledger: SecondBrainActionReceiptLedgerService,
         owner: SecondBrainOwnerRef,
