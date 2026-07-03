@@ -237,6 +237,7 @@ struct CiderCLI {
         Read-only source-backed natural personal/work memory recall over Cider items.
       cider-cli item search-debug <query> [--limit <n>] [--json]
       cider-cli item get <type> <id-or-ref> [--json]
+      cider-cli item thumbnail-plan bookmark <id-or-ref> [--json]
       cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
         Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
       cider-cli item open <type> <id-or-ref> [--json]
@@ -5953,6 +5954,45 @@ struct CiderCLI {
                 )
             } catch {
                 printCLIError(error.localizedDescription)
+            }
+
+        case "thumbnail-plan", "thumbnail-localization-plan":
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                printCLIError("Usage: cider-cli item thumbnail-plan bookmark <id-or-ref> [--json]")
+                return
+            }
+            guard positional[0].lowercased() == "bookmark" else {
+                printCLIError("Usage: cider-cli item thumbnail-plan bookmark <id-or-ref> [--json]")
+                return
+            }
+            guard let bookmarkID = UUID(uuidString: positional[1]),
+                  let bookmark = bookmarkForCaptureQuality(id: bookmarkID) else {
+                printCLIError(
+                    "Item not found: bookmark \(positional[1])",
+                    details: itemNotFoundErrorDetails(command: "item.thumbnail-plan", type: "bookmark", ref: positional[1])
+                )
+                return
+            }
+            var payload = CiderCaptureResult.bookmarkThumbnailLocalizationPlanDictionary(for: bookmark)
+            payload["sourceRef"] = [
+                "type": positional[0],
+                "ref": positional[1],
+            ]
+            payload["actionReceipt"] = readOnlyActionReceiptToDict(
+                command: "item.thumbnail-plan",
+                matchedSourceRefs: ["bookmark:\(bookmark.id.uuidString)"],
+                safeCommandRefs: payload["safeVerificationCommands"] as? [String] ?? [],
+                provenanceRefs: ["bookmark:\(bookmark.id.uuidString)"],
+                truthBoundary: "read_only_thumbnail_plan_from_stored_bookmark_metadata_no_network_or_mutation"
+            )
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("Bookmark thumbnail plan: \(bookmark.id.uuidString)")
+                print("  Status: \(payload["thumbnailStatus"] ?? "unknown")")
+                print("  Local ready: \(payload["localReady"] ?? false)")
+                print("  Next: \(payload["safeNextAction"] ?? "inspect_visible_card")")
             }
 
         case "open":
@@ -29322,6 +29362,7 @@ struct CiderCLI {
             Valid --sort values: relevance, newest, oldest. Default is relevance; newest/oldest use capture provenance timestamps when present, otherwise item updated/created timestamps.
           cider-cli item search-debug <query> [--limit <n>] [--json]
           cider-cli item get <type> <id-or-ref> [--json]
+          cider-cli item thumbnail-plan bookmark <id-or-ref> [--json]
           cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
             Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
           cider-cli item open <type> <id-or-ref> [--json]

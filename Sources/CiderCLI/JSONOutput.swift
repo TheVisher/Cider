@@ -743,7 +743,62 @@ func bookmarkDriftFindingToDict(_ finding: CiderBookmarkDriftFinding) -> [String
     if !finding.safeNextCommands.isEmpty {
         dict["safeNextCommands"] = finding.safeNextCommands
     }
+    if finding.thumbnailStatus == "remote_only" {
+        dict["thumbnailLocalizationPlan"] = bookmarkThumbnailLocalizationPlanToDict(finding)
+    }
     return dict
+}
+
+private func bookmarkThumbnailLocalizationPlanToDict(_ finding: CiderBookmarkDriftFinding) -> [String: Any] {
+    let provider = knownBookmarkThumbnailProvider(urlString: finding.url) ?? "unknown"
+    let fallbackReason = finding.thumbnailFallbackReason ?? "remote_provider_image_without_local_thumbnail"
+    return [
+        "command": "storage.bookmark-drift.audit.thumbnail-plan",
+        "readOnly": true,
+        "changed": false,
+        "itemType": "bookmark",
+        "itemID": finding.itemID,
+        "url": finding.url,
+        "title": finding.currentTitle,
+        "stableSelectors": [
+            "itemID": finding.itemID,
+            "itemRef": "bookmark:\(finding.itemID)",
+            "auditFindingID": finding.id,
+            "url": finding.url,
+            "relativePath": finding.currentRelativePath,
+        ],
+        "thumbnailState": [
+            "localReady": false,
+            "thumbnailStatus": "remote_only",
+            "provider": provider,
+            "providerUnknown": provider == "unknown",
+            "fallbackReason": fallbackReason,
+            "visibleCardCurrent": false,
+        ],
+        "localReady": false,
+        "thumbnailStatus": "remote_only",
+        "fallbackReason": fallbackReason,
+        "safeNextAction": finding.safeNextAction ?? "verify_or_localize_thumbnail",
+        "safeVerificationCommands": finding.safeVerificationCommands,
+        "safeNextCommands": finding.safeNextCommands,
+        "applyCommands": finding.safeNextCommands.filter { $0.contains(" review enrich ") },
+        "applyCommandCaveat": "The enrich/apply command may perform network/provider work and mutate stored bookmark metadata or thumbnail files; run it only with explicit user approval.",
+        "truthBoundary": "read_only_thumbnail_plan_from_stored_bookmark_metadata_no_network_or_mutation",
+        "readinessBoundary": "localReady requires an existing non-empty local thumbnail asset; remote provider URLs are not downloaded by this command",
+    ]
+}
+
+private func knownBookmarkThumbnailProvider(urlString: String) -> String? {
+    guard let host = URLComponents(string: urlString)?.host?
+        .replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression)
+        .lowercased() else {
+        return nil
+    }
+    if host.contains("tiktok.com") { return "tiktok" }
+    if host.contains("youtube.com") || host.contains("youtu.be") { return "youtube" }
+    if host.contains("instagram.com") { return "instagram" }
+    if host.contains("x.com") || host.contains("twitter.com") { return "x" }
+    return nil
 }
 
 func activeDuplicateInvariantReportToDict(_ report: CiderActiveDuplicateInvariantReport) -> [String: Any] {

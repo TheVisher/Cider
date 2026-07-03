@@ -653,6 +653,77 @@ struct CiderCaptureResult {
         ]
     }
 
+    @MainActor
+    static func bookmarkThumbnailLocalizationPlanDictionary(for bookmark: Bookmark) -> [String: Any] {
+        let thumbnailStatus = bookmarkThumbnailStatus(bookmark)
+        let localReady = thumbnailStatusIsLocalReady(thumbnailStatus)
+        let provider = knownThumbnailProvider(for: bookmark) ?? "unknown"
+        let fallbackReason: String
+        if thumbnailStatus == "remote_only" {
+            fallbackReason = "remote_provider_image_without_local_thumbnail"
+        } else if thumbnailStatus == "missing" {
+            fallbackReason = "no_provider_or_local_thumbnail"
+        } else {
+            fallbackReason = "local_thumbnail_ready"
+        }
+        let safeVerificationCommands = bookmarkThumbnailVerificationCommands(for: bookmark)
+        let safeNextCommands = bookmarkThumbnailNextCommands(for: bookmark, thumbnailStatus: thumbnailStatus)
+        let applyCommands = safeNextCommands.filter { $0.contains(" review enrich ") }
+
+        var thumbnailState: [String: Any] = [
+            "localReady": localReady,
+            "thumbnailStatus": thumbnailStatus,
+            "provider": provider,
+            "providerUnknown": provider == "unknown",
+            "fallbackReason": fallbackReason,
+            "visibleCardCurrent": localReady,
+        ]
+        if let remote = bookmark.thumbnailRemoteURLString?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !remote.isEmpty {
+            thumbnailState["remoteImageURL"] = remote
+        }
+        if let relativePath = bookmark.thumbnailRelativePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !relativePath.isEmpty {
+            thumbnailState["thumbnailRelativePath"] = relativePath
+        }
+        if let originalPath = bookmark.originalImageRelativePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !originalPath.isEmpty {
+            thumbnailState["originalImageRelativePath"] = originalPath
+        }
+
+        var stableSelectors: [String: Any] = [
+            "itemID": bookmark.id.uuidString,
+            "itemRef": "bookmark:\(bookmark.id.uuidString)",
+            "url": bookmark.urlString,
+        ]
+        if let relativePath = bookmark.relativePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !relativePath.isEmpty {
+            stableSelectors["relativePath"] = relativePath
+        }
+
+        return [
+            "command": "item.thumbnail-plan",
+            "readOnly": true,
+            "changed": false,
+            "itemType": "bookmark",
+            "itemID": bookmark.id.uuidString,
+            "url": bookmark.urlString,
+            "title": bookmark.title,
+            "stableSelectors": stableSelectors,
+            "thumbnailState": thumbnailState,
+            "localReady": localReady,
+            "thumbnailStatus": thumbnailStatus,
+            "fallbackReason": fallbackReason,
+            "safeNextAction": localReady ? "inspect_visible_card" : "verify_or_localize_thumbnail",
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": safeNextCommands,
+            "applyCommands": applyCommands,
+            "applyCommandCaveat": "The enrich/apply command may perform network/provider work and mutate stored bookmark metadata or thumbnail files; run it only with explicit user approval.",
+            "truthBoundary": "read_only_thumbnail_plan_from_stored_bookmark_metadata_no_network_or_mutation",
+            "readinessBoundary": "localReady requires an existing non-empty local thumbnail asset; remote provider URLs are not downloaded by this command",
+        ]
+    }
+
     static func bookmarkThumbnailNextCommands(for bookmark: Bookmark, thumbnailStatus: String? = nil) -> [String] {
         let status = thumbnailStatus ?? bookmarkThumbnailStatus(bookmark)
         var commands = bookmarkThumbnailVerificationCommands(for: bookmark)
@@ -683,6 +754,14 @@ struct CiderCaptureResult {
         if host.contains("instagram.com") { return "instagram" }
         if host.contains("x.com") || host.contains("twitter.com") { return "x" }
         return host
+    }
+
+    private static func knownThumbnailProvider(for bookmark: Bookmark) -> String? {
+        guard let provider = bookmarkProvider(for: bookmark).split(separator: ".").first.map(String.init),
+              ["tiktok", "youtube", "instagram", "x"].contains(provider) else {
+            return nil
+        }
+        return provider
     }
 
     private static func bookmarkTitleQuality(_ bookmark: Bookmark) -> String {

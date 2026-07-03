@@ -4869,6 +4869,97 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeCommands.contains("cider-cli review enrich \(bookmarkID) --actor agent --timeout 20 --json"))
     }
 
+    @Test("item thumbnail plan explains remote-only social bookmark without creating local thumbnail")
+    func itemThumbnailPlanExplainsRemoteOnlySocialBookmarkWithoutCreatingLocalThumbnail() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-social-thumbnail-plan-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["db", "integrity", "--json"], vault: vault)
+        let bookmarkID = "D7521D2A-C273-49B4-A019-55FA2948BDC1"
+        try seedRichRemoteOnlyBookmark(
+            bookmarkID: bookmarkID,
+            vault: vault,
+            title: "Sodam Chicken - Korean fried chicken in Everett",
+            urlString: "https://www.tiktok.com/@sodamchicken/video/7521",
+            notes: "Rich chunks mention Sodam Chicken, Korean fried chicken, Everett, and TikTok restaurant context.",
+            aiSummary: "TikTok restaurant capture for Sodam Chicken in Everett.",
+            mediaType: "video",
+            thumbnailRemoteURLString: "https://example.invalid/sodam-remote-only.jpeg"
+        )
+        let thumbnailPath = vault
+            .appendingPathComponent(".cider/bookmarks/.thumbnails/\(bookmarkID).png")
+        #expect(!FileManager.default.fileExists(atPath: thumbnailPath.path))
+
+        let result = try runCLI(
+            args: ["item", "thumbnail-plan", "bookmark", bookmarkID, "--json"],
+            vault: vault,
+            environment: ["CIDER_DISABLE_BOOKMARK_ENRICHMENT": "1"]
+        )
+        let payload = try parseJSONObject(result.stdout)
+        let state = try #require(payload["thumbnailState"] as? [String: Any])
+        let commands = try #require(payload["safeNextCommands"] as? [String])
+        let verificationCommands = try #require(payload["safeVerificationCommands"] as? [String])
+        let selectors = try #require(payload["stableSelectors"] as? [String: Any])
+
+        #expect(payload["command"] as? String == "item.thumbnail-plan")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["safeNextAction"] as? String == "verify_or_localize_thumbnail")
+        #expect(payload["fallbackReason"] as? String == "remote_provider_image_without_local_thumbnail")
+        #expect(payload["truthBoundary"] as? String == "read_only_thumbnail_plan_from_stored_bookmark_metadata_no_network_or_mutation")
+        #expect(payload["readinessBoundary"] as? String == "localReady requires an existing non-empty local thumbnail asset; remote provider URLs are not downloaded by this command")
+        #expect(payload["applyCommandCaveat"] as? String == "The enrich/apply command may perform network/provider work and mutate stored bookmark metadata or thumbnail files; run it only with explicit user approval.")
+        #expect(state["localReady"] as? Bool == false)
+        #expect(state["thumbnailStatus"] as? String == "remote_only")
+        #expect(state["provider"] as? String == "tiktok")
+        #expect(state["remoteImageURL"] as? String == "https://example.invalid/sodam-remote-only.jpeg")
+        #expect(verificationCommands.contains("cider-cli item get bookmark \(bookmarkID) --json"))
+        #expect(commands.contains("cider-cli review enrich \(bookmarkID) --actor agent --timeout 20 --json"))
+        #expect(selectors["itemID"] as? String == bookmarkID)
+        #expect(selectors["itemRef"] as? String == "bookmark:\(bookmarkID)")
+        #expect(!FileManager.default.fileExists(atPath: thumbnailPath.path))
+    }
+
+    @Test("item thumbnail plan explains generic remote-only bookmark with provider unknown")
+    func itemThumbnailPlanExplainsGenericRemoteOnlyBookmarkWithProviderUnknown() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-generic-thumbnail-plan-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["db", "integrity", "--json"], vault: vault)
+        let bookmarkID = "2F29F4C4-2801-4E47-8D82-A182E6E3B350"
+        try seedRichRemoteOnlyBookmark(
+            bookmarkID: bookmarkID,
+            vault: vault,
+            title: "Open Graph image debugging notes",
+            urlString: "https://example.invalid/articles/open-graph-debugging",
+            notes: "Generic remote-only bookmark fixture with stored metadata and a remote Open Graph image.",
+            aiSummary: "Generic article capture with remote-only Open Graph image.",
+            mediaType: "article",
+            thumbnailRemoteURLString: "https://cdn.example.invalid/open-graph-debugging.jpg"
+        )
+
+        let result = try runCLI(
+            args: ["item", "thumbnail-plan", "bookmark", bookmarkID, "--json"],
+            vault: vault,
+            environment: ["CIDER_DISABLE_BOOKMARK_ENRICHMENT": "1"]
+        )
+        let payload = try parseJSONObject(result.stdout)
+        let state = try #require(payload["thumbnailState"] as? [String: Any])
+
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(state["localReady"] as? Bool == false)
+        #expect(state["thumbnailStatus"] as? String == "remote_only")
+        #expect(state["providerUnknown"] as? Bool == true)
+        #expect(state["provider"] as? String == "unknown")
+        #expect(payload["safeNextAction"] as? String == "verify_or_localize_thumbnail")
+        #expect((payload["safeNextCommands"] as? [String])?.contains("cider-cli review enrich \(bookmarkID) --actor agent --timeout 20 --json") == true)
+    }
+
     @Test("note daily append upserts same-day food log and refreshes context")
     func noteDailyAppendUpsertsSameDayFoodLogAndRefreshesContext() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -10443,6 +10534,28 @@ struct CiderCLIAgentSafetyTests {
     }
 
     private func seedRichRemoteOnlySocialBookmark(bookmarkID: String, vault: URL) throws {
+        try seedRichRemoteOnlyBookmark(
+            bookmarkID: bookmarkID,
+            vault: vault,
+            title: "Sodam Chicken - Korean fried chicken in Everett",
+            urlString: "https://www.tiktok.com/@sodamchicken/video/7521",
+            notes: "Rich chunks mention Sodam Chicken, Korean fried chicken, Everett, and TikTok restaurant context.",
+            aiSummary: "TikTok restaurant capture for Sodam Chicken in Everett.",
+            mediaType: "video",
+            thumbnailRemoteURLString: "https://example.invalid/sodam-remote-only.jpeg"
+        )
+    }
+
+    private func seedRichRemoteOnlyBookmark(
+        bookmarkID: String,
+        vault: URL,
+        title: String,
+        urlString: String,
+        notes: String,
+        aiSummary: String,
+        mediaType: String,
+        thumbnailRemoteURLString: String
+    ) throws {
         let bookmarkUUID = try #require(UUID(uuidString: bookmarkID))
         try FileManager.default.createDirectory(
             at: vault.appendingPathComponent("Inbox/Bookmarks"),
@@ -10451,8 +10564,8 @@ struct CiderCLIAgentSafetyTests {
         let relativePath = try BookmarkFileService.shared.write(
             bookmark: Bookmark(
                 id: bookmarkUUID,
-                title: "Sodam Chicken - Korean fried chicken in Everett",
-                urlString: "https://www.tiktok.com/@sodamchicken/video/7521"
+                title: title,
+                urlString: urlString
             ),
             toDirectory: vault.appendingPathComponent("Inbox/Bookmarks"),
             dirRelativePath: "Inbox/Bookmarks"
@@ -10467,7 +10580,7 @@ struct CiderCLIAgentSafetyTests {
             VALUES (?, 'bookmark', ?, ?, ?, NULL, ?);
             """)
         itemStmt.bind(bookmarkID, at: 1)
-            .bind("Sodam Chicken - Korean fried chicken in Everett", at: 2)
+            .bind(title, at: 2)
             .bind(now, at: 3)
             .bind(now, at: 4)
             .bind(relativePath, at: 5)
@@ -10479,14 +10592,15 @@ struct CiderCLIAgentSafetyTests {
                 ai_summary, media_type, thumbnail_relative_path, thumbnail_remote_url,
                 original_image_path, enrichment_status, last_enriched_at
             )
-            VALUES (?, ?, ?, 0, 0, ?, 'video', NULL, ?, NULL, 'metadata_complete', ?);
+            VALUES (?, ?, ?, 0, 0, ?, ?, NULL, ?, NULL, 'metadata_complete', ?);
             """)
         bookmarkStmt.bind(bookmarkID, at: 1)
-            .bind("https://www.tiktok.com/@sodamchicken/video/7521", at: 2)
-            .bind("Rich chunks mention Sodam Chicken, Korean fried chicken, Everett, and TikTok restaurant context.", at: 3)
-            .bind("TikTok restaurant capture for Sodam Chicken in Everett.", at: 4)
-            .bind("https://example.invalid/sodam-remote-only.jpeg", at: 5)
-            .bind(now, at: 6)
+            .bind(urlString, at: 2)
+            .bind(notes, at: 3)
+            .bind(aiSummary, at: 4)
+            .bind(mediaType, at: 5)
+            .bind(thumbnailRemoteURLString, at: 6)
+            .bind(now, at: 7)
         try bookmarkStmt.step()
 
         let metadataURL = vault
@@ -10497,23 +10611,23 @@ struct CiderCLIAgentSafetyTests {
         )
         let bookmarks: [[String: Any]] = [[
             "id": bookmarkID,
-            "title": "Sodam Chicken - Korean fried chicken in Everett",
-            "urlString": "https://www.tiktok.com/@sodamchicken/video/7521",
+            "title": title,
+            "urlString": urlString,
             "createdAt": now,
             "updatedAt": now,
-            "notes": "Rich chunks mention Sodam Chicken, Korean fried chicken, Everett, and TikTok restaurant context.",
+            "notes": notes,
             "tags": [],
             "labelIDs": [],
             "dismissedLabelIDs": [],
             "relativePath": relativePath,
             "titleManuallySet": false,
             "notesManuallySet": false,
-            "aiSummary": "TikTok restaurant capture for Sodam Chicken in Everett.",
+            "aiSummary": aiSummary,
             "enrichmentStatus": "metadata_complete",
             "lastEnrichedAt": now,
             "metadataUpdatedAt": now,
-            "thumbnailRemoteURLString": "https://example.invalid/sodam-remote-only.jpeg",
-            "mediaType": "video",
+            "thumbnailRemoteURLString": thumbnailRemoteURLString,
+            "mediaType": mediaType,
         ]]
         let updated = try JSONSerialization.data(withJSONObject: bookmarks, options: [.prettyPrinted, .sortedKeys])
         try updated.write(to: metadataURL, options: .atomic)

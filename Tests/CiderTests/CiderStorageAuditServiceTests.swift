@@ -1732,6 +1732,17 @@ struct CiderStorageAuditServiceTests {
         let jsonFinding = try #require(findings.first)
         #expect(jsonFinding["thumbnailStatus"] as? String == "remote_only")
         #expect(jsonFinding["safeNextAction"] as? String == "verify_or_localize_thumbnail")
+        let plan = try #require(jsonFinding["thumbnailLocalizationPlan"] as? [String: Any])
+        let state = try #require(plan["thumbnailState"] as? [String: Any])
+        #expect(plan["readOnly"] as? Bool == true)
+        #expect(plan["changed"] as? Bool == false)
+        #expect(state["localReady"] as? Bool == false)
+        #expect(state["thumbnailStatus"] as? String == "remote_only")
+        #expect(state["provider"] as? String == "tiktok")
+        #expect(plan["fallbackReason"] as? String == "remote_provider_image_without_local_thumbnail")
+        #expect(plan["truthBoundary"] as? String == "read_only_thumbnail_plan_from_stored_bookmark_metadata_no_network_or_mutation")
+        #expect((plan["safeVerificationCommands"] as? [String])?.contains("cider-cli item get bookmark \(bookmarkID.uuidString) --json") == true)
+        #expect((plan["safeNextCommands"] as? [String])?.contains("cider-cli review enrich \(bookmarkID.uuidString) --actor agent --timeout 20 --json") == true)
     }
 
     @Test("bookmark drift audit ignores host-only titles that would only add duplicate suffixes")
