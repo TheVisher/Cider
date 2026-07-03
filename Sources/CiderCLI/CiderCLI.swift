@@ -5966,18 +5966,19 @@ struct CiderCLI {
                 printCLIError("Usage: cider-cli item thumbnail-plan bookmark <id-or-ref> [--json]")
                 return
             }
-            guard let bookmarkID = UUID(uuidString: positional[1]),
+            let rawRef = positional[1]
+            guard let bookmarkID = bookmarkIDForThumbnailPlanSelector(rawRef),
                   let bookmark = bookmarkForCaptureQuality(id: bookmarkID) else {
                 printCLIError(
-                    "Item not found: bookmark \(positional[1])",
-                    details: itemNotFoundErrorDetails(command: "item.thumbnail-plan", type: "bookmark", ref: positional[1])
+                    "Item not found: bookmark \(rawRef)",
+                    details: itemNotFoundErrorDetails(command: "item.thumbnail-plan", type: "bookmark", ref: rawRef)
                 )
                 return
             }
             var payload = CiderCaptureResult.bookmarkThumbnailLocalizationPlanDictionary(for: bookmark)
             payload["sourceRef"] = [
                 "type": positional[0],
-                "ref": positional[1],
+                "ref": rawRef,
             ]
             payload["actionReceipt"] = readOnlyActionReceiptToDict(
                 command: "item.thumbnail-plan",
@@ -27342,6 +27343,25 @@ struct CiderCLI {
         } catch {
             return nil
         }
+    }
+
+    private static func bookmarkIDForThumbnailPlanSelector(_ rawRef: String) -> UUID? {
+        let trimmed = rawRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let id = UUID(uuidString: trimmed) {
+            return id
+        }
+
+        let supportedPrefixes = [
+            "bookmark:",
+            "bookmark-thumbnail-readiness:",
+        ]
+        for prefix in supportedPrefixes where trimmed.lowercased().hasPrefix(prefix) {
+            let suffix = String(trimmed.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return UUID(uuidString: suffix)
+        }
+
+        return nil
     }
 
     static func itemAgentContextPacketToDict(_ packet: CiderItemAgentContextPacket) -> [String: Any] {

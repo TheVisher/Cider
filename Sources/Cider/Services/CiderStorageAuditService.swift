@@ -1817,10 +1817,16 @@ final class CiderStorageAuditService {
             reasons.append("bookmark has rich metadata but its visible card image is remote-only; local thumbnail/card readiness is not current")
         }
 
-        let safeVerificationCommands = [
-            "cider-cli item get bookmark \(candidate.itemID) --json",
-            "cider-cli item context bookmark \(candidate.itemID) --json",
-        ]
+        let safeVerificationCommands = thumbnailRemoteOnly
+            ? [
+                "cider-cli item thumbnail-plan bookmark bookmark:\(candidate.itemID) --json",
+                "cider-cli item get bookmark \(candidate.itemID) --json",
+                "cider-cli item context bookmark \(candidate.itemID) --json",
+            ]
+            : [
+                "cider-cli item get bookmark \(candidate.itemID) --json",
+                "cider-cli item context bookmark \(candidate.itemID) --json",
+            ]
         let safeNextCommands = safeVerificationCommands + [
             "cider-cli review enrich \(candidate.itemID) --actor agent --timeout 20 --json",
             "cider-cli storage bookmark-drift-audit --limit 20 --json",

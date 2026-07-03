@@ -4922,6 +4922,79 @@ struct CiderCLIAgentSafetyTests {
         #expect(!FileManager.default.fileExists(atPath: thumbnailPath.path))
     }
 
+    @Test("item thumbnail plan replays bookmark drift audit safe verification command")
+    func itemThumbnailPlanReplaysBookmarkDriftAuditSafeVerificationCommand() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-thumbnail-plan-audit-replay-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["db", "integrity", "--json"], vault: vault)
+        let bookmarkID = "D7521D2A-C273-49B4-A019-55FA2948BDC1"
+        try seedRichRemoteOnlySocialBookmark(bookmarkID: bookmarkID, vault: vault)
+
+        let auditResult = try runCLI(
+            args: ["storage", "bookmark-drift-audit", "--limit", "20", "--json"],
+            vault: vault,
+            environment: ["CIDER_DISABLE_BOOKMARK_ENRICHMENT": "1"]
+        )
+        let auditPayload = try parseJSONObject(auditResult.stdout)
+        let findings = try #require(auditPayload["findings"] as? [[String: Any]])
+        let finding = try #require(findings.first { $0["kind"] as? String == "bookmark_thumbnail_readiness" })
+        let plan = try #require(finding["thumbnailLocalizationPlan"] as? [String: Any])
+        let selectors = try #require(plan["stableSelectors"] as? [String: Any])
+        let commands = try #require(finding["safeVerificationCommands"] as? [String])
+        let replayCommand = try #require(commands.first { $0.contains(" item thumbnail-plan bookmark ") })
+        let replayArgs = replayCommand.split(separator: " ").dropFirst().map(String.init)
+
+        #expect(selectors["itemRef"] as? String == "bookmark:\(bookmarkID)")
+        #expect(replayCommand == "cider-cli item thumbnail-plan bookmark bookmark:\(bookmarkID) --json")
+
+        let replayResult = try runCLI(
+            args: replayArgs,
+            vault: vault,
+            environment: ["CIDER_DISABLE_BOOKMARK_ENRICHMENT": "1"]
+        )
+        let replayPayload = try parseJSONObject(replayResult.stdout)
+        let state = try #require(replayPayload["thumbnailState"] as? [String: Any])
+        let thumbnailPath = vault
+            .appendingPathComponent(".cider/bookmarks/.thumbnails/\(bookmarkID).png")
+
+        #expect(replayPayload["readOnly"] as? Bool == true)
+        #expect(replayPayload["changed"] as? Bool == false)
+        #expect(replayPayload["itemID"] as? String == bookmarkID)
+        #expect(state["thumbnailStatus"] as? String == "remote_only")
+        #expect(!FileManager.default.fileExists(atPath: thumbnailPath.path))
+    }
+
+    @Test("item thumbnail plan fails closed for invalid bookmark selector")
+    func itemThumbnailPlanFailsClosedForInvalidBookmarkSelector() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-thumbnail-plan-invalid-selector-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["db", "integrity", "--json"], vault: vault)
+
+        let result = try runCLI(
+            args: ["item", "thumbnail-plan", "bookmark", "note:not-a-bookmark", "--json"],
+            vault: vault,
+            environment: ["CIDER_DISABLE_BOOKMARK_ENRICHMENT": "1"]
+        )
+        let payload = try parseJSONObject(result.stdout)
+        let sourceRef = try #require(payload["sourceRef"] as? [String: Any])
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+
+        #expect(result.status != 0)
+        #expect(payload["ok"] as? Bool == false)
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["errorCode"] as? String == "item_not_found")
+        #expect(sourceRef["type"] as? String == "bookmark")
+        #expect(sourceRef["ref"] as? String == "note:not-a-bookmark")
+        #expect(safeNextCommands.contains("cider-cli item search <query> --json"))
+    }
+
     @Test("item thumbnail plan explains generic remote-only bookmark with provider unknown")
     func itemThumbnailPlanExplainsGenericRemoteOnlyBookmarkWithProviderUnknown() throws {
         let vault = FileManager.default.temporaryDirectory
