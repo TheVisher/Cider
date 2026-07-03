@@ -247,6 +247,7 @@ struct CiderCLI {
       cider-cli item reminder-ping-intents [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item reminder-ping-delivery-preview [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item reminder-ping-dry-run [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
+      cider-cli item reminder-ping-transcript [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--file <jsonl>] [--json]
       cider-cli item reminder-ping-confirm-delivery <todo|dateCard> <id-or-ref> --transport <name> --surface <name> --delivery-id <id> [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item reminder-ping-import-ack (--file <json-or-jsonl>|--stdin) [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]
@@ -362,6 +363,11 @@ struct CiderCLI {
             print("""
             Usage: cider-cli item reminder-ping-dry-run [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
             Read-only no-send worker pass summary built from item reminder-ping-delivery-preview. Does not send pings or record receipts.
+            """)
+        case "reminder-ping-transcript", "reminder-ping-transcript-preview", "reminder-ping-produce-transcript":
+            print("""
+            Usage: cider-cli item reminder-ping-transcript [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--file <jsonl>] [--json]
+            Produces no-send JSONL transcript rows from item reminder-ping-dry-run. Rows stay not_delivered until a future sender fills deliveryID or messageID.
             """)
         case "reminder-ping-confirm-delivery", "reminder-ping-confirm", "reminder-ping-delivered":
             print("""
@@ -6269,6 +6275,9 @@ struct CiderCLI {
             } catch {
                 printCLIError(error.localizedDescription)
             }
+
+        case "reminder-ping-transcript", "reminder-ping-transcript-preview", "reminder-ping-produce-transcript":
+            handleReminderPingTranscriptCommand(args: args)
 
         case "reminder-ping-confirm-delivery", "reminder-ping-confirm", "reminder-ping-delivered":
             handleReminderPingConfirmDeliveryCommand(args: args)
@@ -15775,6 +15784,68 @@ struct CiderCLI {
         }
     }
 
+    static func handleReminderPingTranscriptCommand(args: [String]) {
+        let command = "item.reminder-ping-transcript"
+        do {
+            guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: command, minimum: 1) else { return }
+            guard let parsedStaleAfterDays = parsePositiveIntFlag("--stale-after-days", from: args, command: command, minimum: 0) else { return }
+            let limit = parsedLimit ?? 20
+            let staleAfterDays = parsedStaleAfterDays ?? 3
+            let transport = parseFlag("--transport", from: args) ?? CiderReminderPingDeliveryPreviewService.defaultTransport
+            let surface = parseFlag("--surface", from: args) ?? CiderReminderPingDeliveryPreviewService.defaultSurface
+            let filePath = parseFlag("--file", from: args)
+            let result = try reminderPingTranscriptPayload(
+                limit: limit,
+                staleAfterDays: staleAfterDays,
+                transport: transport,
+                surface: surface
+            )
+            let jsonl = result.jsonl()
+            var artifact: [String: Any] = [
+                "format": "jsonl",
+                "rowCount": result.rows.count,
+                "changed": false,
+            ]
+            if let filePath {
+                try jsonl.write(toFile: filePath, atomically: true, encoding: .utf8)
+                artifact["path"] = filePath
+                artifact["lastPathComponent"] = URL(fileURLWithPath: filePath).lastPathComponent
+                artifact["changed"] = true
+            }
+
+            if jsonOutput {
+                var payload = reminderPingTranscriptResultToDict(result)
+                payload["filters"] = [
+                    "limit": limit,
+                    "staleAfterDays": staleAfterDays,
+                    "transport": result.transport,
+                    "surface": result.surface,
+                ]
+                payload["artifact"] = artifact
+                payload["actionReceipt"] = reminderPingTranscriptReadOnlyActionReceipt(result: result)
+                outputJSON(payload)
+            } else if filePath != nil {
+                print("Reminder ping no-send transcript rows written: \(result.rows.count)")
+            } else {
+                print(jsonl)
+            }
+        } catch {
+            processExitCode = 1
+            let payload = [
+                "ok": false,
+                "command": command,
+                "readOnly": true,
+                "changed": false,
+                "truthBoundary": "cider_items_plus_action_receipts_remain_source_of_truth_no_send_transcript",
+                "transportBoundary": "no_transport_send_transcript_delivery_proof_required",
+                "error": error.localizedDescription,
+                "safeNextCommands": ["cider-cli item reminder-ping-transcript --file <transport-transcript.jsonl> --json"],
+                "safeVerificationCommands": ["cider-cli item reminder-ping-dry-run --json"],
+            ] as [String: Any]
+            if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
+        }
+    }
+
     static func handleReminderPingImportAckCommand(args: [String]) {
         let command = "item.reminder-ping-import-ack"
         let actor = parseFlag("--actor", from: args) ?? "cider-cli"
@@ -15966,13 +16037,19 @@ struct CiderCLI {
         }
 
         let status = value(["status", "deliveryStatus", "state"]).lowercased()
+        let deliveryID = value(["deliveryID", "deliveryId", "messageID", "messageId"])
         if !status.isEmpty && !["delivered", "confirmed", "sent", "ok", "success"].contains(status) {
-            return [
-                "status": "skipped",
-                "changed": false,
-                "reason": "not_delivered",
-                "inputStatus": status,
-            ]
+            let proofFillableNoSendStatuses = ["not_delivered", "no_send", "no-send", "planned", "pending_delivery"]
+            if !deliveryID.isEmpty && proofFillableNoSendStatuses.contains(status) {
+                // A no-send transcript row becomes importable when a real sender fills delivery proof.
+            } else {
+                return [
+                    "status": "skipped",
+                    "changed": false,
+                    "reason": "not_delivered",
+                    "inputStatus": status,
+                ]
+            }
         }
 
         let rawType = value(["itemType", "type", "kind", "ownerType"])
@@ -15985,7 +16062,6 @@ struct CiderCLI {
         }
         let transport = value(["transport"])
         let surface = value(["surface"])
-        let deliveryID = value(["deliveryID", "deliveryId", "messageID", "messageId"])
         var rowBase: [String: Any] = [
             "changed": false,
             "itemType": rawType,
@@ -16450,6 +16526,33 @@ struct CiderCLI {
         receipt["transport"] = result.transport
         receipt["surface"] = result.surface
         receipt["pendingEnvelopeCount"] = result.counts.planned
+        receipt["suppressedCount"] = result.counts.suppressed
+        receipt["duplicateCount"] = result.counts.duplicates
+        return receipt
+    }
+
+    static func reminderPingTranscriptReadOnlyActionReceipt(result: CiderReminderPingTranscriptResult) -> [String: Any] {
+        let sourceRefs = result.rows.flatMap(\.sourceRefs) + result.suppressed.map { $0.owner.canonicalRef }
+        let safeCommands = result.safeVerificationCommands + result.safeNextCommands + result.rows.map(\.safeRecordPingCommand)
+        var receipt = readOnlyActionReceiptToDict(
+            command: result.command,
+            matchedSourceRefs: sourceRefs,
+            safeCommandRefs: safeCommands,
+            provenanceRefs: sourceRefs,
+            status: "succeeded",
+            generatedAt: result.generatedAt,
+            truthBoundary: "receipt_proves_command_execution_not_delivery_truth"
+        )
+        receipt["action"] = "produce_no_send_reminder_ping_transcript"
+        receipt["actor"] = "cider-cli"
+        receipt["sourceBoundary"] = result.truthBoundary
+        receipt["transportBoundary"] = result.transportBoundary
+        receipt["runKey"] = result.runKey
+        receipt["transport"] = result.transport
+        receipt["surface"] = result.surface
+        receipt["rowCount"] = result.counts.rows
+        receipt["noSendCount"] = result.counts.noSend
+        receipt["deliveredCount"] = result.counts.delivered
         receipt["suppressedCount"] = result.counts.suppressed
         receipt["duplicateCount"] = result.counts.duplicates
         return receipt
@@ -19360,6 +19463,21 @@ struct CiderCLI {
             surface: surface
         )
         return CiderReminderPingDryRunService.run(from: preview)
+    }
+
+    static func reminderPingTranscriptPayload(
+        limit: Int,
+        staleAfterDays: Int = 3,
+        transport: String = CiderReminderPingDeliveryPreviewService.defaultTransport,
+        surface: String = CiderReminderPingDeliveryPreviewService.defaultSurface
+    ) throws -> CiderReminderPingTranscriptResult {
+        let dryRun = try reminderPingDryRunPayload(
+            limit: limit,
+            staleAfterDays: staleAfterDays,
+            transport: transport,
+            surface: surface
+        )
+        return CiderReminderPingTranscriptService.produce(from: dryRun)
     }
 
     static func isCompletedReminderOwner(itemType: String, itemID: UUID) -> Bool {

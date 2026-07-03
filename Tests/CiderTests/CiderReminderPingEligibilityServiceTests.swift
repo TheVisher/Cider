@@ -256,6 +256,53 @@ struct CiderReminderPingEligibilityServiceTests {
         #expect(run.safeVerificationCommands.contains("cider-cli item action-ledger list --owner todo:\(todo.id.uuidString) --action record_ping_surface --json"))
     }
 
+    @Test("transcript producer emits no-send import-compatible rows without receipts")
+    func transcriptProducerEmitsNoSendImportCompatibleRowsWithoutReceipts() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let ledger = SecondBrainActionReceiptLedgerService(database: db)
+        let now = date(2026, 7, 13)
+        let todo = TodoCard(title: "Transcript todo", dueDate: now)
+        let dateCard = DateCard(title: "Transcript date card", startAt: now)
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [todo], dateCards: [dateCard], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+        let intents = try CiderReminderPingEligibilityService.pendingIntents(from: feed, ledger: ledger)
+        let preview = CiderReminderPingDeliveryPreviewService.preview(
+            from: intents,
+            transport: "discord",
+            surface: "agent-chat"
+        )
+        let dryRun = CiderReminderPingDryRunService.run(from: preview)
+
+        let transcript = CiderReminderPingTranscriptService.produce(from: dryRun)
+
+        #expect(transcript.command == "item.reminder-ping-transcript")
+        #expect(transcript.readOnly == true)
+        #expect(transcript.changed == false)
+        #expect(transcript.truthBoundary == "cider_items_plus_action_receipts_remain_source_of_truth_no_send_transcript")
+        #expect(transcript.transportBoundary == "no_transport_send_transcript_delivery_proof_required")
+        #expect(transcript.counts.rows == 2)
+        #expect(transcript.counts.noSend == 2)
+        #expect(transcript.counts.delivered == 0)
+        #expect(transcript.rows.map(\.status) == ["not_delivered", "not_delivered"])
+        #expect(transcript.rows.allSatisfy { $0.deliveryID == nil && $0.messageID == nil })
+        #expect(transcript.rows.contains { $0.itemType == "todo" && $0.itemID == todo.id.uuidString && $0.owner.canonicalRef == "todo:\(todo.id.uuidString)" })
+        #expect(transcript.rows.contains { $0.itemType == "dateCard" && $0.itemID == dateCard.id.uuidString && $0.owner.canonicalRef == "dateCard:\(dateCard.id.uuidString)" })
+        #expect(transcript.rows.allSatisfy { $0.transport == "discord" && $0.surface == "agent-chat" })
+        #expect(transcript.rows.allSatisfy { $0.envelopeID.hasPrefix("ping_delivery_preview:") && $0.runKey == dryRun.runKey })
+        #expect(transcript.rows.allSatisfy { $0.noSendReason == "transcript_preview_only_delivery_proof_required" })
+        #expect(transcript.jsonl().split(separator: "\n").count == 2)
+        #expect(transcript.safeNextCommands.contains("cider-cli item reminder-ping-import-ack --file <transport-transcript.jsonl> --json"))
+        #expect(transcript.safeVerificationCommands.contains("cider-cli item reminder-ping-dry-run --transport discord --surface agent-chat --json"))
+        #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
+    }
+
     private func recordPingReceipt(
         ledger: SecondBrainActionReceiptLedgerService,
         owner: SecondBrainOwnerRef,

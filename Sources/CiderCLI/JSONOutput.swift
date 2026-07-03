@@ -1487,10 +1487,43 @@ func reminderPingDryRunResultToDict(_ result: CiderReminderPingDryRunResult) -> 
     ]
 }
 
+func reminderPingTranscriptResultToDict(_ result: CiderReminderPingTranscriptResult) -> [String: Any] {
+    let formatter = ISO8601DateFormatter()
+    return [
+        "ok": true,
+        "command": result.command,
+        "runKey": result.runKey,
+        "generatedAt": formatter.string(from: result.generatedAt),
+        "readOnly": result.readOnly,
+        "changed": result.changed,
+        "truthBoundary": result.truthBoundary,
+        "transportBoundary": result.transportBoundary,
+        "transport": result.transport,
+        "surface": result.surface,
+        "count": result.counts.rows,
+        "counts": reminderPingTranscriptCountsToDict(result.counts),
+        "rows": result.rows.map { reminderPingTranscriptRowToDict($0) },
+        "suppressed": result.suppressed.map { reminderPingSuppressedIntentToDict($0) },
+        "duplicates": result.duplicates.map { reminderPingDryRunDuplicateToDict($0, formatter: formatter) },
+        "safeNextCommands": result.safeNextCommands,
+        "safeVerificationCommands": result.safeVerificationCommands,
+    ]
+}
+
 func reminderPingDryRunCountsToDict(_ counts: CiderReminderPingDryRunCounts) -> [String: Any] {
     [
         "eligible": counts.eligible,
         "planned": counts.planned,
+        "suppressed": counts.suppressed,
+        "duplicates": counts.duplicates,
+    ]
+}
+
+func reminderPingTranscriptCountsToDict(_ counts: CiderReminderPingTranscriptCounts) -> [String: Any] {
+    [
+        "rows": counts.rows,
+        "noSend": counts.noSend,
+        "delivered": counts.delivered,
         "suppressed": counts.suppressed,
         "duplicates": counts.duplicates,
     ]
@@ -2329,6 +2362,10 @@ func reminderPingDryRunDuplicateToDict(_ duplicate: CiderReminderPingDryRunDupli
         "duplicateKey": duplicate.envelope.duplicateKey,
         "envelope": reminderPingDeliveryEnvelopeToDict(duplicate.envelope, formatter: formatter),
     ]
+}
+
+func reminderPingTranscriptRowToDict(_ row: CiderReminderPingTranscriptRow) -> [String: Any] {
+    CiderReminderPingTranscriptService.rowDictionary(row)
 }
 
 func reminderPingSuppressedIntentToDict(_ suppressed: CiderReminderPingSuppressedIntent) -> [String: Any] {
