@@ -1425,6 +1425,24 @@ func dueToSurfaceFeedToDict(_ feed: CiderDueToSurfaceFeed) -> [String: Any] {
     ]
 }
 
+func reminderPingEligibilityResultToDict(_ result: CiderReminderPingEligibilityResult) -> [String: Any] {
+    let formatter = ISO8601DateFormatter()
+    return [
+        "ok": true,
+        "command": result.command,
+        "generatedAt": formatter.string(from: result.generatedAt),
+        "readOnly": result.readOnly,
+        "changed": result.changed,
+        "truthBoundary": result.truthBoundary,
+        "count": result.intents.count,
+        "suppressedCount": result.suppressed.count,
+        "intents": result.intents.map { reminderPingIntentToDict($0, formatter: formatter) },
+        "suppressed": result.suppressed.map { reminderPingSuppressedIntentToDict($0) },
+        "safeNextCommands": result.safeNextCommands,
+        "safeVerificationCommands": result.safeVerificationCommands,
+    ]
+}
+
 func dailyEpisodePreviewToDict(_ preview: DailyEpisodePreview) -> [String: Any] {
     var dict: [String: Any] = [
         "ok": true,
@@ -2150,6 +2168,52 @@ func dueToSurfaceCandidateToDict(_ candidate: CiderDueToSurfaceCandidate, format
         dict["surfacingRelevance"] = acceptedMemoryDueToSurfaceRelevanceToDict(candidate)
     }
     return dict
+}
+
+func reminderPingIntentToDict(_ intent: CiderReminderPingIntent, formatter: ISO8601DateFormatter) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": intent.id,
+        "itemID": intent.owner.ownerID,
+        "kind": intent.kind,
+        "owner": secondBrainOwnerRefToDict(intent.owner),
+        "title": intent.title,
+        "itemType": intent.itemType,
+        "duplicateKey": intent.duplicateKey,
+        "whyEligible": intent.whyEligible,
+        "sourceCandidateID": intent.sourceCandidateID,
+        "sourceRefs": intent.sourceRefs,
+        "safeRecordPingCommand": intent.safeRecordPingCommand,
+        "safeVerificationCommands": intent.safeVerificationCommands,
+        "window": dueToSurfaceWindowToDict(intent.window, formatter: formatter),
+        "ping": [
+            "sourceOfTruth": "cider_item",
+            "transportBoundary": "transport_records_delivery_only",
+            "duplicateKey": intent.duplicateKey,
+            "recordCommand": intent.safeRecordPingCommand,
+        ],
+    ]
+    if intent.dueAt != nil || intent.dueStatus != nil {
+        var due: [String: Any] = [:]
+        if let dueStatus = intent.dueStatus { due["status"] = dueStatus }
+        if let dueAt = intent.dueAt { due["at"] = formatter.string(from: dueAt) }
+        due["window"] = dueToSurfaceWindowToDict(intent.window, formatter: formatter)
+        dict["due"] = due
+    }
+    return dict
+}
+
+func reminderPingSuppressedIntentToDict(_ suppressed: CiderReminderPingSuppressedIntent) -> [String: Any] {
+    [
+        "id": suppressed.id,
+        "itemID": suppressed.owner.ownerID,
+        "kind": suppressed.owner.ownerType,
+        "owner": secondBrainOwnerRefToDict(suppressed.owner),
+        "duplicateKey": suppressed.duplicateKey,
+        "reason": suppressed.reason,
+        "matchingReceiptID": suppressed.matchingReceiptID,
+        "sourceCandidateID": suppressed.sourceCandidateID,
+        "safeVerificationCommands": suppressed.safeVerificationCommands,
+    ]
 }
 
 func acceptedMemoryDueToSurfaceRelevanceToDict(_ candidate: CiderDueToSurfaceCandidate) -> [String: Any] {

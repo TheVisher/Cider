@@ -683,6 +683,78 @@ struct CiderCLIAgentSafetyTests {
         #expect(entry["changed"] as? Bool == true)
     }
 
+    @Test("reminder ping intents CLI suppresses after matching ping receipt")
+    func reminderPingIntentsCLISuppressesAfterMatchingPingReceipt() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-reminder-ping-intents-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let dueDate = Self.relativeDateString(daysFromToday: -1)
+
+        let capture = try assertStrictProcessJSON(
+            runCLI(args: [
+                "capture", "add", "--kind", "todo",
+                "--content", "Reminder ping intents CLI todo",
+                "--date", dueDate,
+                "--json",
+            ], vault: vault),
+            command: "capture.add"
+        )
+        let item = try #require(capture["item"] as? [String: Any])
+        let id = try #require(item["id"] as? String)
+
+        let before = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-intents",
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-intents"
+        )
+        #expect(before["readOnly"] as? Bool == true)
+        #expect(before["changed"] as? Bool == false)
+        #expect(before["truthBoundary"] as? String == "cider_items_plus_action_receipts")
+        let actionReceipt = try #require(before["actionReceipt"] as? [String: Any])
+        #expect(actionReceipt["readOnly"] as? Bool == true)
+        #expect(actionReceipt["changed"] as? Bool == false)
+        #expect(actionReceipt["transportBoundary"] as? String == "no_transport_send")
+        let intents = try #require(before["intents"] as? [[String: Any]])
+        let intent = try #require(intents.first { $0["itemID"] as? String == id })
+        let duplicateKey = try #require(intent["duplicateKey"] as? String)
+        #expect(intent["safeRecordPingCommand"] as? String == "cider-cli item ping-receipt record todo \(id) --transport <transport> --surface <surface> --json")
+        #expect((intent["safeVerificationCommands"] as? [String])?.contains("cider-cli item action-ledger list --owner todo:\(id) --action record_ping_surface --json") == true)
+
+        let receipt = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "ping-receipt", "record", "todo", id,
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--delivery-id", "discord-message-1",
+                "--json",
+            ], vault: vault),
+            command: "item.ping-receipt.record"
+        )
+        #expect(receipt["duplicateKey"] as? String == duplicateKey)
+        #expect(receipt["deliveryDuplicateKey"] as? String == "todo:\(id):discord:agent-chat:discord-message-1")
+
+        let after = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-intents",
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-intents"
+        )
+        let afterIntents = try #require(after["intents"] as? [[String: Any]])
+        #expect(afterIntents.contains { $0["itemID"] as? String == id } == false)
+        let suppressed = try #require(after["suppressed"] as? [[String: Any]])
+        let suppressedIntent = try #require(suppressed.first { $0["itemID"] as? String == id })
+        #expect(suppressedIntent["duplicateKey"] as? String == duplicateKey)
+        #expect(suppressedIntent["reason"] as? String == "matching_record_ping_surface_receipt")
+    }
+
     @Test("action ledger CLI filters by command refs and time windows")
     func actionLedgerCLIFiltersByCommandRefsAndTimeWindows() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -9148,5 +9220,14 @@ struct CiderCLIAgentSafetyTests {
             return url
         }
         throw CocoaError(.fileNoSuchFile)
+    }
+
+    private static func relativeDateString(daysFromToday: Int) -> String {
+        let date = Calendar(identifier: .gregorian).date(byAdding: .day, value: daysFromToday, to: Date()) ?? Date()
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 }

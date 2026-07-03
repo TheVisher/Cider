@@ -244,6 +244,7 @@ struct CiderCLI {
       cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
       cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
       cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
+      cider-cli item reminder-ping-intents [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]
       cider-cli item why-surfaced <type> <id-or-ref> [--json]
       cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
@@ -349,6 +350,8 @@ struct CiderCLI {
             }
         case "due-to-surface", "resurface", "resurfacing-feed":
             print("Usage: cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]")
+        case "reminder-ping-intents", "pending-reminder-pings", "reminder-pings":
+            print("Usage: cider-cli item reminder-ping-intents [--limit <n>] [--stale-after-days <n>] [--json]")
         case "ping-receipt", "ping-receipts":
             print("Usage: cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]")
         case "why-surfaced", "why":
@@ -6146,6 +6149,31 @@ struct CiderCLI {
                     print("Due-to-surface candidates: \(feed.candidates.count)")
                     for candidate in feed.candidates {
                         print("  [\(candidate.family.rawValue)] \(candidate.title) — \(candidate.whyNow)")
+                    }
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "reminder-ping-intents", "pending-reminder-pings", "reminder-pings":
+            do {
+                guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: "item.reminder-ping-intents", minimum: 1) else { return }
+                guard let parsedStaleAfterDays = parsePositiveIntFlag("--stale-after-days", from: args, command: "item.reminder-ping-intents", minimum: 0) else { return }
+                let limit = parsedLimit ?? 20
+                let staleAfterDays = parsedStaleAfterDays ?? 3
+                let result = try reminderPingEligibilityPayload(limit: limit, staleAfterDays: staleAfterDays)
+                if jsonOutput {
+                    var payload = reminderPingEligibilityResultToDict(result)
+                    payload["filters"] = [
+                        "limit": limit,
+                        "staleAfterDays": staleAfterDays,
+                    ]
+                    payload["actionReceipt"] = reminderPingEligibilityReadOnlyActionReceipt(result: result)
+                    outputJSON(payload)
+                } else {
+                    print("Pending reminder ping intents: \(result.intents.count)")
+                    for intent in result.intents {
+                        print("  [\(intent.kind)] \(intent.title) — \(intent.whyEligible)")
                     }
                 }
             } catch {
@@ -15495,11 +15523,13 @@ struct CiderCLI {
         actor: String = "cider-cli"
     ) -> [String: Any] {
         let owner = SecondBrainOwnerRef(ownerType: type.rawValue, ownerID: id.uuidString)
-        let duplicateKey = "\(owner.canonicalRef):\(transport):\(surface):\(deliveryID ?? "surface")"
+        let duplicateKey = reminderPingDuplicateKey(type: type, id: id)
+        let deliveryDuplicateKey = "\(owner.canonicalRef):\(transport):\(surface):\(deliveryID ?? "surface")"
         let safeVerificationCommands = [
             "cider-cli item action-ledger list --owner \(owner.canonicalRef) --action record_ping_surface --json",
             "cider-cli item context \(type.rawValue) \(id.uuidString) --max-history 10 --json",
             "cider-cli item due-to-surface --json",
+            "cider-cli item reminder-ping-intents --json",
         ]
         let safeNextCommands = [
             "cider-cli reminder complete \(type.rawValue) \(id.uuidString) --json",
@@ -15518,6 +15548,7 @@ struct CiderCLI {
             "transport": transport,
             "surface": surface,
             "duplicateKey": duplicateKey,
+            "deliveryDuplicateKey": deliveryDuplicateKey,
         ]
         if let deliveryID, !deliveryID.isEmpty {
             after["deliveryID"] = deliveryID
@@ -15541,6 +15572,7 @@ struct CiderCLI {
         receipt["transport"] = transport
         receipt["surface"] = surface
         receipt["duplicateKey"] = duplicateKey
+        receipt["deliveryDuplicateKey"] = deliveryDuplicateKey
         if let deliveryID, !deliveryID.isEmpty {
             receipt["deliveryID"] = deliveryID
         }
@@ -15555,6 +15587,7 @@ struct CiderCLI {
             "transport": transport,
             "surface": surface,
             "duplicateKey": duplicateKey,
+            "deliveryDuplicateKey": deliveryDuplicateKey,
             "actionReceipt": receipt,
             "safeVerificationCommands": safeVerificationCommands,
             "safeNextCommands": safeNextCommands,
@@ -15563,6 +15596,21 @@ struct CiderCLI {
             payload["deliveryID"] = deliveryID
         }
         return payload
+    }
+
+    static func reminderPingDuplicateKey(type: LibraryEntityType, id: UUID) -> String {
+        let owner = SecondBrainOwnerRef(ownerType: type.rawValue, ownerID: id.uuidString)
+        let dueAt: Date?
+        switch type {
+        case .todo:
+            dueAt = TodoCardStorage.shared.todoCards.first(where: { $0.id == id })?.dueDate
+        case .dateCard:
+            dueAt = DateCardStorage.shared.dateCards.first(where: { $0.id == id })?.startAt
+        default:
+            dueAt = nil
+        }
+        let duplicateDueComponent = dueAt.map { String($0.timeIntervalSince1970) } ?? "unscheduled"
+        return "\(owner.canonicalRef):\(duplicateDueComponent):surface"
     }
 
     static let supportedAgentItemTypes = ["bookmark", "note", "todo", "dateCard", "contact", "vaultFile"]
@@ -15652,6 +15700,27 @@ struct CiderCLI {
         receipt["sourceBoundary"] = "mixed_due_to_surface_read_model"
         receipt["candidateBoundary"] = "mixed_reviewable_and_accepted_truth_boundaries"
         receipt["countsByFamily"] = feed.countsByFamily
+        return receipt
+    }
+
+    static func reminderPingEligibilityReadOnlyActionReceipt(result: CiderReminderPingEligibilityResult) -> [String: Any] {
+        let sourceRefs = result.intents.flatMap(\.sourceRefs) + result.suppressed.map { $0.owner.canonicalRef }
+        let safeCommands = result.safeVerificationCommands + result.safeNextCommands
+        var receipt = readOnlyActionReceiptToDict(
+            command: result.command,
+            matchedSourceRefs: sourceRefs,
+            safeCommandRefs: safeCommands,
+            provenanceRefs: sourceRefs,
+            status: "succeeded",
+            generatedAt: result.generatedAt,
+            truthBoundary: "receipt_proves_command_execution_not_delivery_truth"
+        )
+        receipt["action"] = "read_pending_reminder_ping_intents"
+        receipt["actor"] = "cider-cli"
+        receipt["sourceBoundary"] = result.truthBoundary
+        receipt["transportBoundary"] = "no_transport_send"
+        receipt["pendingCount"] = result.intents.count
+        receipt["suppressedCount"] = result.suppressed.count
         return receipt
     }
 
@@ -18522,6 +18591,14 @@ struct CiderCLI {
             followUpExecutionPreviews: followUpExecutionPreviews,
             now: now,
             limit: limit
+        )
+    }
+
+    static func reminderPingEligibilityPayload(limit: Int, staleAfterDays: Int = 3) throws -> CiderReminderPingEligibilityResult {
+        let feed = try dueToSurfaceFeedPayload(limit: limit, includeSuppressed: false, staleAfterDays: staleAfterDays)
+        return try CiderReminderPingEligibilityService.pendingIntents(
+            from: feed,
+            ledger: SecondBrainActionReceiptLedgerService(database: .shared)
         )
     }
 
