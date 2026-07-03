@@ -141,4 +141,36 @@ final class CiderDueToSurfaceFeedServiceTests: XCTestCase {
         XCTAssertEqual(feed.candidates.first?.urgency, "overdue")
         XCTAssertEqual(feed.candidates.first?.reviewState, "overdue")
     }
+
+    func testAgendaDueCandidateExposesTransportNeutralPingContract() throws {
+        let now = date(2026, 6, 15)
+        let dueTodo = TodoCard(title: "Ping-ready todo", dueDate: now)
+
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [dueTodo], dateCards: [], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+
+        let candidate = try XCTUnwrap(feed.candidates.first)
+        let dict = dueToSurfaceCandidateToDict(candidate, formatter: ISO8601DateFormatter())
+
+        XCTAssertEqual(dict["itemID"] as? String, dueTodo.id.uuidString)
+        XCTAssertEqual(dict["kind"] as? String, "todo")
+        XCTAssertEqual(dict["completionState"] as? String, "active")
+        XCTAssertEqual(dict["ackState"] as? String, "unacknowledged")
+        let due = try XCTUnwrap(dict["due"] as? [String: Any])
+        XCTAssertEqual(due["status"] as? String, "today")
+        XCTAssertNotNil(due["at"] as? String)
+        let ping = try XCTUnwrap(dict["ping"] as? [String: Any])
+        XCTAssertEqual(ping["sourceOfTruth"] as? String, "cider_item")
+        XCTAssertEqual(ping["transportBoundary"] as? String, "transport_records_delivery_only")
+        XCTAssertEqual(ping["duplicateKey"] as? String, "todo:\(dueTodo.id.uuidString):\(dueTodo.dueDate!.timeIntervalSince1970):surface")
+        XCTAssertEqual(ping["receiptCommand"] as? String, "cider-cli item ping-receipt record todo \(dueTodo.id.uuidString) --transport <transport> --surface <surface> --json")
+        let safeCommands = try XCTUnwrap(dict["safeNextCommands"] as? [String])
+        XCTAssertTrue(safeCommands.contains("cider-cli item ping-receipt record todo \(dueTodo.id.uuidString) --transport <transport> --surface <surface> --json"))
+    }
 }

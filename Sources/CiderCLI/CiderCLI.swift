@@ -244,6 +244,7 @@ struct CiderCLI {
       cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
       cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
       cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
+      cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]
       cider-cli item why-surfaced <type> <id-or-ref> [--json]
       cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
       cider-cli item action-ledger recap [--owner <type:id>|--owner-type <type> --owner-id <id>] [--family <command-family>] [--command <command>|--command-prefix <prefix>] [--action <action>|--action-prefix <prefix>] [--status <status>] [--source-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>|--until <iso|yyyy-mm-dd>] [--limit <n>] [--json]
@@ -348,6 +349,8 @@ struct CiderCLI {
             }
         case "due-to-surface", "resurface", "resurfacing-feed":
             print("Usage: cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]")
+        case "ping-receipt", "ping-receipts":
+            print("Usage: cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]")
         case "why-surfaced", "why":
             print("Usage: cider-cli item why-surfaced <type> <id-or-ref> [--json]")
         case "search":
@@ -6344,6 +6347,9 @@ struct CiderCLI {
 
         case "action-ledger", "actions", "activity":
             handleActionLedgerCommand(args: args)
+
+        case "ping-receipt", "ping-receipts":
+            handlePingReceiptCommand(args: args)
 
         case "why-surfaced", "why":
             let positional = leadingPositionalArgs(from: args)
@@ -15392,6 +15398,171 @@ struct CiderCLI {
         } catch {
             printCLIError(error.localizedDescription)
         }
+    }
+
+    static func handlePingReceiptCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        let action = positional.first ?? "record"
+        guard ["record", "delivered", "surfaced"].contains(action) else {
+            printCLIError("Unknown ping-receipt command: \(action). Commands: record")
+            return
+        }
+        guard positional.count >= 3 else {
+            printCLIError("Usage: cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]")
+            return
+        }
+        let rawType = positional[1]
+        let rawRef = positional[2]
+        guard let transport = parseFlag("--transport", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !transport.isEmpty,
+              let surface = parseFlag("--surface", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !surface.isEmpty else {
+            printCLIError(
+                "--transport and --surface are required.",
+                details: structuredCLIErrorDetails(
+                    command: "item.ping-receipt.record",
+                    readOnly: false,
+                    errorCode: "missing_ping_receipt_target",
+                    safeVerificationCommands: ["cider-cli item due-to-surface --json"],
+                    safeNextCommands: ["cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <transport> --surface <surface> --json"]
+                )
+            )
+            return
+        }
+        do {
+            let type = try ItemLinkService.entityType(from: rawType)
+            guard type == .todo || type == .dateCard else {
+                var payload = structuredActionReceiptFailurePayload(
+                    command: "item.ping-receipt.record",
+                    action: "record_ping_surface",
+                    readOnly: false,
+                    errorCode: "unsupported_item_type",
+                    error: "Unsupported ping receipt item type '\(rawType)'.",
+                    sourceRefs: ["\(rawType):\(rawRef)"],
+                    safeVerificationCommands: ["cider-cli item due-to-surface --json"],
+                    safeNextCommands: ["Use one of: todo, dateCard"]
+                )
+                payload["supportedTypes"] = ["todo", "dateCard"]
+                payload["truthBoundary"] = "ping_receipt_records_delivery_not_item_truth"
+                processExitCode = 1
+                persistActionReceiptIfPresent(payload)
+                if jsonOutput { outputJSON(payload) } else { print("Error: Unsupported ping receipt item type '\(rawType)'.") }
+                return
+            }
+            let ref = try ItemLinkService.shared.resolve(type: type, ref: rawRef)
+            let payload = pingReceiptRecordPayload(
+                type: type,
+                id: ref.entityID,
+                transport: transport,
+                surface: surface,
+                deliveryID: parseFlag("--delivery-id", from: args) ?? parseFlag("--message-id", from: args),
+                actor: parseFlag("--actor", from: args) ?? "cider-cli"
+            )
+            persistActionReceiptIfPresent(payload)
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("Recorded ping receipt for \(type.rawValue):\(ref.entityID.uuidString) via \(transport)/\(surface)")
+            }
+        } catch {
+            var payload = structuredActionReceiptFailurePayload(
+                command: "item.ping-receipt.record",
+                action: "record_ping_surface",
+                owner: nil,
+                readOnly: false,
+                errorCode: "item_not_found",
+                error: error.localizedDescription,
+                sourceRefs: ["\(rawType):\(rawRef)"],
+                safeVerificationCommands: [
+                    "cider-cli item due-to-surface --json",
+                    "cider-cli item search \(rawRef) --json",
+                ],
+                safeNextCommands: ["cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <transport> --surface <surface> --json"]
+            )
+            payload["truthBoundary"] = "ping_receipt_records_delivery_not_item_truth"
+            processExitCode = 1
+            persistActionReceiptIfPresent(payload)
+            if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
+        }
+    }
+
+    static func pingReceiptRecordPayload(
+        type: LibraryEntityType,
+        id: UUID,
+        transport: String,
+        surface: String,
+        deliveryID: String?,
+        actor: String = "cider-cli"
+    ) -> [String: Any] {
+        let owner = SecondBrainOwnerRef(ownerType: type.rawValue, ownerID: id.uuidString)
+        let duplicateKey = "\(owner.canonicalRef):\(transport):\(surface):\(deliveryID ?? "surface")"
+        let safeVerificationCommands = [
+            "cider-cli item action-ledger list --owner \(owner.canonicalRef) --action record_ping_surface --json",
+            "cider-cli item context \(type.rawValue) \(id.uuidString) --max-history 10 --json",
+            "cider-cli item due-to-surface --json",
+        ]
+        let safeNextCommands = [
+            "cider-cli reminder complete \(type.rawValue) \(id.uuidString) --json",
+            "cider-cli reminder snooze \(type.rawValue) \(id.uuidString) --until yyyy-MM-dd --json",
+            "cider-cli item action-ledger list --owner \(owner.canonicalRef) --action record_ping_surface --json",
+        ]
+        let before: [String: Any] = [
+            "sourceOfTruth": "cider_item",
+            "transport": transport,
+            "surface": surface,
+        ]
+        var after: [String: Any] = [
+            "pingState": "surfaced",
+            "sourceOfTruth": "cider_item",
+            "transportBoundary": "transport_records_delivery_only",
+            "transport": transport,
+            "surface": surface,
+            "duplicateKey": duplicateKey,
+        ]
+        if let deliveryID, !deliveryID.isEmpty {
+            after["deliveryID"] = deliveryID
+        }
+        var receipt = agentActionReceiptToDict(
+            command: "item.ping-receipt.record",
+            action: "record_ping_surface",
+            actor: actor,
+            owner: owner,
+            sourceRefs: [owner.canonicalRef],
+            evidenceRefs: [owner.canonicalRef],
+            readOnly: false,
+            changed: true,
+            before: before,
+            after: after,
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: safeNextCommands
+        )
+        receipt["commandFamily"] = "reminder_ping"
+        receipt["truthBoundary"] = "ping_receipt_records_delivery_not_item_truth"
+        receipt["transport"] = transport
+        receipt["surface"] = surface
+        receipt["duplicateKey"] = duplicateKey
+        if let deliveryID, !deliveryID.isEmpty {
+            receipt["deliveryID"] = deliveryID
+        }
+        var payload: [String: Any] = [
+            "ok": true,
+            "command": "item.ping-receipt.record",
+            "readOnly": false,
+            "changed": true,
+            "truthBoundary": "ping_receipt_records_delivery_not_item_truth",
+            "owner": ownerToDict(owner),
+            "ownerRef": owner.canonicalRef,
+            "transport": transport,
+            "surface": surface,
+            "duplicateKey": duplicateKey,
+            "actionReceipt": receipt,
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": safeNextCommands,
+        ]
+        if let deliveryID, !deliveryID.isEmpty {
+            payload["deliveryID"] = deliveryID
+        }
+        return payload
     }
 
     static let supportedAgentItemTypes = ["bookmark", "note", "todo", "dateCard", "contact", "vaultFile"]

@@ -43,6 +43,13 @@ struct CiderDueToSurfaceCandidate: Identifiable, Equatable {
     var reasonCodes: [String]
     var urgency: String
     var window: CiderDueToSurfaceWindow
+    var dueAt: Date? = nil
+    var dueStatus: String? = nil
+    var completionState: String? = nil
+    var snoozeState: String? = nil
+    var ackState: String? = nil
+    var pingDuplicateKey: String? = nil
+    var pingReceiptCommand: String? = nil
     var confidence: Double
     var reviewState: String
     var truthBoundary: String
@@ -246,6 +253,9 @@ enum CiderDueToSurfaceFeedService {
         guard item.surfaceToday else { return nil }
         let ownerType = item.itemType == .todo ? "todo" : "dateCard"
         let urgency = item.surfacingExplanation.urgency
+        let ownerRef = "\(ownerType):\(item.id.uuidString)"
+        let duplicateDueComponent = item.dueAt.map { String($0.timeIntervalSince1970) } ?? "unscheduled"
+        let receiptCommand = "cider-cli item ping-receipt record \(ownerType) \(item.id.uuidString) --transport <transport> --surface <surface> --json"
         return CiderDueToSurfaceCandidate(
             id: "agenda:\(ownerType):\(item.id.uuidString)",
             family: .agenda,
@@ -256,17 +266,24 @@ enum CiderDueToSurfaceFeedService {
             reasonCodes: ["agenda_due", item.status.rawValue, item.bucket.rawValue, item.itemType.rawValue],
             urgency: urgency,
             window: CiderDueToSurfaceWindow(label: item.reason, startsAt: now, endsAt: item.dueAt),
+            dueAt: item.dueAt,
+            dueStatus: item.status.rawValue,
+            completionState: item.status == .completed ? "completed" : "active",
+            snoozeState: item.status == .snoozed ? "snoozed" : "none",
+            ackState: "unacknowledged",
+            pingDuplicateKey: "\(ownerRef):\(duplicateDueComponent):surface",
+            pingReceiptCommand: receiptCommand,
             confidence: 0.95,
             reviewState: item.status.rawValue,
             truthBoundary: "agenda_read_model_not_mutation",
             score: urgencyScore(urgency) + 30,
-            sourceRefs: ["\(ownerType):\(item.id.uuidString)"],
+            sourceRefs: [ownerRef],
             citedEvidence: [
                 CiderDueToSurfaceEvidence(
-                    ref: "\(ownerType):\(item.id.uuidString)",
+                    ref: ownerRef,
                     kind: "agenda_item",
                     summary: item.reminderPolicy,
-                    sourceOwnerRef: "\(ownerType):\(item.id.uuidString)",
+                    sourceOwnerRef: ownerRef,
                     candidateRef: nil,
                     metadata: ["status": item.status.rawValue, "bucket": item.bucket.rawValue]
                 ),
@@ -274,6 +291,7 @@ enum CiderDueToSurfaceFeedService {
             safeNextCommands: [
                 "cider-cli item why-surfaced \(ownerType) \(item.id.uuidString) --json",
                 "cider-cli agenda --json",
+                receiptCommand,
             ]
         )
     }

@@ -626,6 +626,63 @@ struct CiderCLIAgentSafetyTests {
         #expect((inspected["safeVerificationCommands"] as? [String])?.contains("cider-cli item why-surfaced dateCard \(id) --json") == true)
     }
 
+    @Test("ping receipt CLI records transport neutral surfaced receipt")
+    func pingReceiptCLIRecordsTransportNeutralSurfacedReceipt() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-ping-receipt-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let capture = try assertStrictProcessJSON(
+            runCLI(args: [
+                "capture", "add", "--kind", "todo",
+                "--content", "Ping receipt CLI todo",
+                "--date", "2026-07-13",
+                "--json",
+            ], vault: vault),
+            command: "capture.add"
+        )
+        let item = try #require(capture["item"] as? [String: Any])
+        let id = try #require(item["id"] as? String)
+
+        let receipt = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "ping-receipt", "record", "todo", id,
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--delivery-id", "discord-message-1",
+                "--json",
+            ], vault: vault),
+            command: "item.ping-receipt.record"
+        )
+
+        #expect(receipt["readOnly"] as? Bool == false)
+        #expect(receipt["changed"] as? Bool == true)
+        #expect(receipt["truthBoundary"] as? String == "ping_receipt_records_delivery_not_item_truth")
+        let actionReceipt = try #require(receipt["actionReceipt"] as? [String: Any])
+        #expect(actionReceipt["action"] as? String == "record_ping_surface")
+        #expect(actionReceipt["commandFamily"] as? String == "reminder_ping")
+        #expect(actionReceipt["ownerRef"] as? String == "todo:\(id)")
+        let safeCommands = try #require(receipt["safeNextCommands"] as? [String])
+        #expect(safeCommands.contains("cider-cli item action-ledger list --owner todo:\(id) --action record_ping_surface --json"))
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "action-ledger", "list",
+                "--owner", "todo:\(id)",
+                "--action", "record_ping_surface",
+                "--limit", "5",
+                "--json",
+            ], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        let entry = try #require(entries.first)
+        #expect(entry["command"] as? String == "item.ping-receipt.record")
+        #expect(entry["action"] as? String == "record_ping_surface")
+        #expect(entry["changed"] as? Bool == true)
+    }
+
     @Test("action ledger CLI filters by command refs and time windows")
     func actionLedgerCLIFiltersByCommandRefsAndTimeWindows() throws {
         let vault = FileManager.default.temporaryDirectory

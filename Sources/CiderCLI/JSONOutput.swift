@@ -2091,6 +2091,8 @@ func dueToSurfaceCandidateToDict(_ candidate: CiderDueToSurfaceCandidate, format
     var dict: [String: Any] = [
         "id": candidate.id,
         "family": candidate.family.rawValue,
+        "itemID": candidate.owner.ownerID,
+        "kind": candidate.owner.ownerType,
         "owner": [
             "ownerType": candidate.owner.ownerType,
             "ownerID": candidate.owner.ownerID,
@@ -2118,6 +2120,27 @@ func dueToSurfaceCandidateToDict(_ candidate: CiderDueToSurfaceCandidate, format
     if !candidate.relatedRefs.isEmpty { dict["relatedRefs"] = candidate.relatedRefs }
     if !candidate.actionIntentRefs.isEmpty { dict["actionIntentRefs"] = candidate.actionIntentRefs }
     if !candidate.safeVerificationCommands.isEmpty { dict["safeVerificationCommands"] = candidate.safeVerificationCommands }
+    if let completionState = candidate.completionState { dict["completionState"] = completionState }
+    if let snoozeState = candidate.snoozeState { dict["snoozeState"] = snoozeState }
+    if let ackState = candidate.ackState { dict["ackState"] = ackState }
+    if candidate.dueAt != nil || candidate.dueStatus != nil {
+        var due: [String: Any] = [:]
+        if let dueStatus = candidate.dueStatus { due["status"] = dueStatus }
+        if let dueAt = candidate.dueAt { due["at"] = formatter.string(from: dueAt) }
+        due["window"] = dueToSurfaceWindowToDict(candidate.window, formatter: formatter)
+        dict["due"] = due
+    }
+    if let pingReceiptCommand = candidate.pingReceiptCommand {
+        var ping: [String: Any] = [
+            "sourceOfTruth": "cider_item",
+            "transportBoundary": "transport_records_delivery_only",
+            "receiptCommand": pingReceiptCommand,
+        ]
+        if let duplicateKey = candidate.pingDuplicateKey {
+            ping["duplicateKey"] = duplicateKey
+        }
+        dict["ping"] = ping
+    }
     if candidate.truthBoundary == "reviewable_candidate_not_truth" {
         dict["needsReview"] = true
         dict["acceptedTruth"] = false
