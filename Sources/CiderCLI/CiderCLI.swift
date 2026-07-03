@@ -247,6 +247,7 @@ struct CiderCLI {
       cider-cli item reminder-ping-intents [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item reminder-ping-delivery-preview [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item reminder-ping-dry-run [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
+      cider-cli item reminder-ping-confirm-delivery <todo|dateCard> <id-or-ref> --transport <name> --surface <name> --delivery-id <id> [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]
       cider-cli item why-surfaced <type> <id-or-ref> [--json]
       cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
@@ -360,6 +361,11 @@ struct CiderCLI {
             print("""
             Usage: cider-cli item reminder-ping-dry-run [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
             Read-only no-send worker pass summary built from item reminder-ping-delivery-preview. Does not send pings or record receipts.
+            """)
+        case "reminder-ping-confirm-delivery", "reminder-ping-confirm", "reminder-ping-delivered":
+            print("""
+            Usage: cider-cli item reminder-ping-confirm-delivery <todo|dateCard> <id-or-ref> --transport <name> --surface <name> --delivery-id <id> [--limit <n>] [--stale-after-days <n>] [--json]
+            Transport-confirmed adapter over item reminder-ping-delivery-preview. Records item ping-receipt only after an explicit delivery ID is supplied.
             """)
         case "ping-receipt", "ping-receipts":
             print("Usage: cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]")
@@ -6257,6 +6263,9 @@ struct CiderCLI {
             } catch {
                 printCLIError(error.localizedDescription)
             }
+
+        case "reminder-ping-confirm-delivery", "reminder-ping-confirm", "reminder-ping-delivered":
+            handleReminderPingConfirmDeliveryCommand(args: args)
 
         case "context", "agent-context":
             let positional = leadingPositionalArgs(from: args)
@@ -15590,6 +15599,292 @@ struct CiderCLI {
             persistActionReceiptIfPresent(payload)
             if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
         }
+    }
+
+    static func handleReminderPingConfirmDeliveryCommand(args: [String]) {
+        let positional = leadingPositionalArgs(from: args)
+        guard positional.count >= 2 else {
+            printCLIError("Usage: cider-cli item reminder-ping-confirm-delivery <todo|dateCard> <id-or-ref> --transport <name> --surface <name> --delivery-id <id> [--json]")
+            return
+        }
+        let rawType = positional[0]
+        let rawRef = positional[1]
+        let command = "item.reminder-ping-confirm-delivery"
+        let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+        let deliveryID = (parseFlag("--delivery-id", from: args) ?? parseFlag("--message-id", from: args) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let transport = parseFlag("--transport", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !transport.isEmpty,
+              let surface = parseFlag("--surface", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !surface.isEmpty else {
+            let payload = reminderPingConfirmDeliveryFailurePayload(
+                command: command,
+                actor: actor,
+                owner: nil,
+                errorCode: "missing_transport_or_surface",
+                error: "--transport and --surface are required.",
+                sourceRefs: ["\(rawType):\(rawRef)"],
+                safeNextCommands: ["cider-cli item reminder-ping-confirm-delivery <todo|dateCard> <id-or-ref> --transport <transport> --surface <surface> --delivery-id <delivery-id> --json"]
+            )
+            processExitCode = 1
+            if jsonOutput { outputJSON(payload) } else { print("Error: --transport and --surface are required.") }
+            return
+        }
+
+        do {
+            let type = try ItemLinkService.entityType(from: rawType)
+            guard type == .todo || type == .dateCard else {
+                var payload = reminderPingConfirmDeliveryFailurePayload(
+                    command: command,
+                    actor: actor,
+                    owner: nil,
+                    errorCode: "unsupported_item_type",
+                    error: "Unsupported reminder ping confirmation item type '\(rawType)'.",
+                    sourceRefs: ["\(rawType):\(rawRef)"],
+                    safeNextCommands: ["Use one of: todo, dateCard"]
+                )
+                payload["supportedTypes"] = ["todo", "dateCard"]
+                processExitCode = 1
+                if jsonOutput { outputJSON(payload) } else { print("Error: Unsupported reminder ping confirmation item type '\(rawType)'.") }
+                return
+            }
+            let ref = try ItemLinkService.shared.resolve(type: type, ref: rawRef)
+            let owner = SecondBrainOwnerRef(ownerType: type.rawValue, ownerID: ref.entityID.uuidString)
+            guard !deliveryID.isEmpty else {
+                var payload = reminderPingConfirmDeliveryFailurePayload(
+                    command: command,
+                    actor: actor,
+                    owner: owner,
+                    errorCode: "missing_delivery_id",
+                    error: "--delivery-id is required before recording a ping receipt.",
+                    sourceRefs: [owner.canonicalRef],
+                    safeNextCommands: [
+                        "cider-cli item reminder-ping-dry-run --transport \(transport) --surface \(surface) --json",
+                        "cider-cli item reminder-ping-confirm-delivery \(type.rawValue) \(ref.entityID.uuidString) --transport \(transport) --surface \(surface) --delivery-id <delivery-id> --json",
+                    ]
+                )
+                payload["transport"] = transport
+                payload["surface"] = surface
+                processExitCode = 1
+                if jsonOutput { outputJSON(payload) } else { print("Error: --delivery-id is required before recording a ping receipt.") }
+                return
+            }
+
+            guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: command, minimum: 1) else { return }
+            guard let parsedStaleAfterDays = parsePositiveIntFlag("--stale-after-days", from: args, command: command, minimum: 0) else { return }
+            let limit = parsedLimit ?? 20
+            let staleAfterDays = parsedStaleAfterDays ?? 3
+            let preview = try reminderPingDeliveryPreviewPayload(
+                limit: limit,
+                staleAfterDays: staleAfterDays,
+                transport: transport,
+                surface: surface
+            )
+
+            if let envelope = preview.envelopes.first(where: { $0.owner == owner }) {
+                var payload = pingReceiptRecordPayload(
+                    type: type,
+                    id: ref.entityID,
+                    transport: envelope.transport,
+                    surface: envelope.surface,
+                    deliveryID: deliveryID,
+                    actor: actor
+                )
+                payload["command"] = command
+                payload["truthBoundary"] = "transport_confirmation_required_before_ping_receipt"
+                payload["sourceEnvelope"] = reminderPingDeliveryEnvelopeToDict(envelope, formatter: ISO8601DateFormatter())
+                payload["safeNextCommands"] = orderedUniqueStringsForCLI(
+                    (payload["safeNextCommands"] as? [String] ?? [])
+                    + [
+                        "cider-cli item reminder-ping-dry-run --transport \(envelope.transport) --surface \(envelope.surface) --json",
+                        "cider-cli item reminder-ping-delivery-preview --transport \(envelope.transport) --surface \(envelope.surface) --json",
+                    ]
+                )
+                persistActionReceiptIfPresent(payload)
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Confirmed delivery \(deliveryID) and recorded ping receipt for \(owner.canonicalRef)")
+                }
+                return
+            }
+
+            if let suppressed = preview.suppressed.first(where: { $0.owner == owner }) {
+                let payload = reminderPingConfirmDeliveryNoOpPayload(
+                    command: command,
+                    actor: actor,
+                    owner: owner,
+                    transport: preview.transport,
+                    surface: preview.surface,
+                    duplicateKey: suppressed.duplicateKey,
+                    reason: suppressed.reason,
+                    matchingReceiptID: suppressed.matchingReceiptID,
+                    safeVerificationCommands: suppressed.safeVerificationCommands,
+                    safeNextCommands: [
+                        "cider-cli item action-ledger inspect \(suppressed.matchingReceiptID) --json",
+                        "cider-cli item reminder-ping-dry-run --transport \(preview.transport) --surface \(preview.surface) --json",
+                    ]
+                )
+                if jsonOutput { outputJSON(payload) } else { print("Reminder ping receipt already exists for \(owner.canonicalRef)") }
+                return
+            }
+
+            let payload = reminderPingConfirmDeliveryNoOpPayload(
+                command: command,
+                actor: actor,
+                owner: owner,
+                transport: preview.transport,
+                surface: preview.surface,
+                duplicateKey: reminderPingDuplicateKey(type: type, id: ref.entityID),
+                reason: "no_eligible_reminder_ping_envelope",
+                matchingReceiptID: nil,
+                safeVerificationCommands: [
+                    "cider-cli item reminder-ping-dry-run --transport \(preview.transport) --surface \(preview.surface) --json",
+                    "cider-cli item due-to-surface --json",
+                    "cider-cli item context \(owner.ownerType) \(owner.ownerID) --max-history 10 --json",
+                ],
+                safeNextCommands: [
+                    "cider-cli item reminder-ping-dry-run --transport \(preview.transport) --surface \(preview.surface) --json",
+                    "cider-cli item due-to-surface --json",
+                ]
+            )
+            if jsonOutput { outputJSON(payload) } else { print("No eligible reminder ping envelope found for \(owner.canonicalRef)") }
+        } catch {
+            var payload = reminderPingConfirmDeliveryFailurePayload(
+                command: command,
+                actor: actor,
+                owner: nil,
+                errorCode: "item_not_found",
+                error: error.localizedDescription,
+                sourceRefs: ["\(rawType):\(rawRef)"],
+                safeNextCommands: ["cider-cli item search \(rawRef) --json"]
+            )
+            payload["transport"] = transport
+            payload["surface"] = surface
+            processExitCode = 1
+            if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
+        }
+    }
+
+    static func reminderPingConfirmDeliveryFailurePayload(
+        command: String,
+        actor: String,
+        owner: SecondBrainOwnerRef?,
+        errorCode: String,
+        error: String,
+        sourceRefs: [String],
+        safeNextCommands: [String]
+    ) -> [String: Any] {
+        let safeVerificationCommands = orderedUniqueStringsForCLI([
+            "cider-cli item reminder-ping-dry-run --json",
+            "cider-cli item reminder-ping-delivery-preview --json",
+        ] + (owner.map { ["cider-cli item action-ledger list --owner \($0.canonicalRef) --action record_ping_surface --json"] } ?? []))
+        let receipt = agentActionReceiptToDict(
+            command: command,
+            action: "confirm_reminder_ping_delivery",
+            actor: actor,
+            owner: owner,
+            sourceRefs: sourceRefs,
+            evidenceRefs: sourceRefs,
+            readOnly: false,
+            changed: false,
+            status: "failed",
+            errorCode: errorCode,
+            error: error,
+            before: ["transportConfirmation": "missing_or_invalid"],
+            after: ["pingReceiptRecorded": false],
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: safeNextCommands
+        )
+        var payload: [String: Any] = [
+            "ok": false,
+            "command": command,
+            "readOnly": false,
+            "changed": false,
+            "errorCode": errorCode,
+            "error": error,
+            "truthBoundary": "transport_confirmation_required_before_ping_receipt",
+            "actionReceipt": receipt,
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": safeNextCommands,
+        ]
+        if let owner {
+            payload["owner"] = ownerToDict(owner)
+            payload["ownerRef"] = owner.canonicalRef
+        }
+        return payload
+    }
+
+    static func reminderPingConfirmDeliveryNoOpPayload(
+        command: String,
+        actor: String,
+        owner: SecondBrainOwnerRef,
+        transport: String,
+        surface: String,
+        duplicateKey: String,
+        reason: String,
+        matchingReceiptID: String?,
+        safeVerificationCommands: [String],
+        safeNextCommands: [String]
+    ) -> [String: Any] {
+        var after: [String: Any] = [
+            "pingReceiptRecorded": false,
+            "reason": reason,
+            "duplicateKey": duplicateKey,
+        ]
+        if let matchingReceiptID {
+            after["matchingReceiptID"] = matchingReceiptID
+        }
+        var receipt = agentActionReceiptToDict(
+            command: command,
+            action: "confirm_reminder_ping_delivery",
+            actor: actor,
+            owner: owner,
+            sourceRefs: [owner.canonicalRef],
+            evidenceRefs: [owner.canonicalRef],
+            readOnly: false,
+            changed: false,
+            status: "skipped",
+            before: [
+                "transport": transport,
+                "surface": surface,
+                "duplicateKey": duplicateKey,
+            ],
+            after: after,
+            safeVerificationCommands: safeVerificationCommands,
+            safeNextCommands: safeNextCommands
+        )
+        receipt["truthBoundary"] = "transport_confirmation_required_before_ping_receipt"
+        var payload: [String: Any] = [
+            "ok": true,
+            "command": command,
+            "readOnly": false,
+            "changed": false,
+            "truthBoundary": "transport_confirmation_required_before_ping_receipt",
+            "owner": ownerToDict(owner),
+            "ownerRef": owner.canonicalRef,
+            "transport": transport,
+            "surface": surface,
+            "duplicateKey": duplicateKey,
+            "reason": reason,
+            "actionReceipt": receipt,
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": safeNextCommands,
+        ]
+        if let matchingReceiptID {
+            payload["matchingReceiptID"] = matchingReceiptID
+        }
+        return payload
+    }
+
+    static func orderedUniqueStringsForCLI(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values where !value.isEmpty && !seen.contains(value) {
+            seen.insert(value)
+            result.append(value)
+        }
+        return result
     }
 
     static func pingReceiptRecordPayload(

@@ -817,7 +817,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(envelope["transport"] as? String == "discord")
         #expect(envelope["surface"] as? String == "agent-chat")
         #expect(envelope["deliveryKey"] as? String == "\(duplicateKey):discord:agent-chat")
-        #expect(envelope["safeRecordPingCommand"] as? String == "cider-cli item ping-receipt record todo \(id) --transport discord --surface agent-chat --json")
+        #expect(envelope["safeRecordPingCommand"] as? String == "cider-cli item reminder-ping-confirm-delivery todo \(id) --transport discord --surface agent-chat --delivery-id <delivery-id> --json")
         #expect((envelope["message"] as? String)?.contains("Reminder ping delivery preview CLI todo") == true)
 
         let afterPreviewLedger = try assertStrictProcessJSON(
@@ -916,7 +916,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(envelope["itemID"] as? String == id)
         let duplicateKey = try #require(envelope["duplicateKey"] as? String)
         let safeRecordCommands = try #require(before["safeRecordPingCommands"] as? [String])
-        #expect(safeRecordCommands == ["cider-cli item ping-receipt record todo \(id) --transport discord --surface agent-chat --json"])
+        #expect(safeRecordCommands == ["cider-cli item reminder-ping-confirm-delivery todo \(id) --transport discord --surface agent-chat --delivery-id <delivery-id> --json"])
         let actionReceipt = try #require(before["actionReceipt"] as? [String: Any])
         #expect(actionReceipt["readOnly"] as? Bool == true)
         #expect(actionReceipt["changed"] as? Bool == false)
@@ -962,6 +962,163 @@ struct CiderCLIAgentSafetyTests {
         #expect(afterCounts["suppressed"] as? Int == 1)
         let suppressed = try #require(after["suppressed"] as? [[String: Any]])
         #expect(suppressed.contains { $0["itemID"] as? String == id && $0["duplicateKey"] as? String == duplicateKey })
+    }
+
+    @Test("reminder ping confirm delivery CLI requires transport delivery ID before receipt")
+    func reminderPingConfirmDeliveryCLIRequiresTransportDeliveryIDBeforeReceipt() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-reminder-ping-confirm-delivery-missing-id-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let dueDate = Self.relativeDateString(daysFromToday: -1)
+
+        let help = try runCLI(args: ["item", "reminder-ping-confirm-delivery", "--help"], vault: vault)
+        #expect(help.status == 0)
+        #expect(help.stdout.contains("reminder-ping-confirm-delivery"))
+        #expect(help.stdout.contains("--delivery-id"))
+
+        let capture = try assertStrictProcessJSON(
+            runCLI(args: [
+                "capture", "add", "--kind", "todo",
+                "--content", "Reminder ping confirmed delivery missing id todo",
+                "--date", dueDate,
+                "--json",
+            ], vault: vault),
+            command: "capture.add"
+        )
+        let item = try #require(capture["item"] as? [String: Any])
+        let id = try #require(item["id"] as? String)
+
+        let missingID = try parseJSONObject(try runCLI(args: [
+            "item", "reminder-ping-confirm-delivery", "todo", id,
+            "--transport", "discord",
+            "--surface", "agent-chat",
+            "--limit", "10",
+            "--stale-after-days", "999",
+            "--json",
+        ], vault: vault).stdout)
+
+        #expect(missingID["ok"] as? Bool == false)
+        #expect(missingID["command"] as? String == "item.reminder-ping-confirm-delivery")
+        #expect(missingID["readOnly"] as? Bool == false)
+        #expect(missingID["changed"] as? Bool == false)
+        #expect(missingID["errorCode"] as? String == "missing_delivery_id")
+        #expect(missingID["truthBoundary"] as? String == "transport_confirmation_required_before_ping_receipt")
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "action-ledger", "list",
+                "--owner", "todo:\(id)",
+                "--action", "record_ping_surface",
+                "--limit", "5",
+                "--json",
+            ], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        #expect((ledger["entries"] as? [[String: Any]])?.isEmpty == true)
+    }
+
+    @Test("reminder ping confirm delivery CLI records eligible envelope once")
+    func reminderPingConfirmDeliveryCLIRecordsEligibleEnvelopeOnce() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-reminder-ping-confirm-delivery-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let dueDate = Self.relativeDateString(daysFromToday: -1)
+
+        let capture = try assertStrictProcessJSON(
+            runCLI(args: [
+                "capture", "add", "--kind", "todo",
+                "--content", "Reminder ping confirmed delivery todo",
+                "--date", dueDate,
+                "--json",
+            ], vault: vault),
+            command: "capture.add"
+        )
+        let item = try #require(capture["item"] as? [String: Any])
+        let id = try #require(item["id"] as? String)
+
+        let before = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-dry-run",
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-dry-run"
+        )
+        let planned = try #require(before["planned"] as? [[String: Any]])
+        #expect(planned.count == 1)
+        let envelope = try #require(planned.first?["envelope"] as? [String: Any])
+        let duplicateKey = try #require(envelope["duplicateKey"] as? String)
+
+        let receipt = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-confirm-delivery", "todo", id,
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--delivery-id", "discord-message-confirmed-1",
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-confirm-delivery"
+        )
+        #expect(receipt["readOnly"] as? Bool == false)
+        #expect(receipt["changed"] as? Bool == true)
+        #expect(receipt["truthBoundary"] as? String == "transport_confirmation_required_before_ping_receipt")
+        #expect(receipt["duplicateKey"] as? String == duplicateKey)
+        #expect(receipt["deliveryID"] as? String == "discord-message-confirmed-1")
+        let actionReceipt = try #require(receipt["actionReceipt"] as? [String: Any])
+        #expect(actionReceipt["command"] as? String == "item.ping-receipt.record")
+        #expect(actionReceipt["action"] as? String == "record_ping_surface")
+
+        let duplicate = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-confirm-delivery", "todo", id,
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--delivery-id", "discord-message-confirmed-2",
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-confirm-delivery"
+        )
+        #expect(duplicate["readOnly"] as? Bool == false)
+        #expect(duplicate["changed"] as? Bool == false)
+        #expect(duplicate["reason"] as? String == "matching_record_ping_surface_receipt")
+        #expect(duplicate["duplicateKey"] as? String == duplicateKey)
+
+        let after = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-dry-run",
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-dry-run"
+        )
+        let afterCounts = try #require(after["counts"] as? [String: Any])
+        #expect(afterCounts["planned"] as? Int == 0)
+        #expect(afterCounts["suppressed"] as? Int == 1)
+
+        let ledger = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "action-ledger", "list",
+                "--owner", "todo:\(id)",
+                "--action", "record_ping_surface",
+                "--limit", "5",
+                "--json",
+            ], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        let entries = try #require(ledger["entries"] as? [[String: Any]])
+        #expect(entries.count == 1)
     }
 
     @Test("action ledger CLI filters by command refs and time windows")

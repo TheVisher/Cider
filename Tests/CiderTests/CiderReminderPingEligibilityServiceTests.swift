@@ -131,7 +131,7 @@ struct CiderReminderPingEligibilityServiceTests {
         #expect(envelope.deliveryKey == "todo:\(todo.id.uuidString):\(now.timeIntervalSince1970):surface:discord:agent-chat")
         #expect(envelope.humanSafeMessage.contains("Preview delivery todo"))
         #expect(envelope.idempotencyGuidance.contains(envelope.duplicateKey))
-        #expect(envelope.safeRecordPingCommand == "cider-cli item ping-receipt record todo \(todo.id.uuidString) --transport discord --surface agent-chat --json")
+        #expect(envelope.safeRecordPingCommand == "cider-cli item reminder-ping-confirm-delivery todo \(todo.id.uuidString) --transport discord --surface agent-chat --delivery-id <delivery-id> --json")
         #expect(envelope.safeVerificationCommands.contains("cider-cli item action-ledger list --owner todo:\(todo.id.uuidString) --action record_ping_surface --json"))
         #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
     }
@@ -205,7 +205,7 @@ struct CiderReminderPingEligibilityServiceTests {
         #expect(run.counts.duplicates == 0)
         let planned = try #require(run.planned.first)
         #expect(run.eligibleEnvelopeRefs == [planned.envelope.id])
-        #expect(run.safeRecordPingCommands == ["cider-cli item ping-receipt record todo \(todo.id.uuidString) --transport discord --surface agent-chat --json"])
+        #expect(run.safeRecordPingCommands == ["cider-cli item reminder-ping-confirm-delivery todo \(todo.id.uuidString) --transport discord --surface agent-chat --delivery-id <delivery-id> --json"])
         #expect(run.safeVerificationCommands.contains("cider-cli item reminder-ping-delivery-preview --transport discord --surface agent-chat --json"))
         #expect(planned.envelope.owner == SecondBrainOwnerRef(ownerType: "todo", ownerID: todo.id.uuidString))
         #expect(planned.wouldSend == false)

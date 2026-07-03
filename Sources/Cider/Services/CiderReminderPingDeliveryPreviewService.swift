@@ -78,7 +78,7 @@ enum CiderReminderPingDeliveryPreviewService {
         surface: String
     ) -> CiderReminderPingDeliveryEnvelope {
         let deliveryKey = "\(intent.duplicateKey):\(transport):\(surface)"
-        let command = "cider-cli item ping-receipt record \(intent.kind) \(intent.owner.ownerID) --transport \(transport) --surface \(surface) --json"
+        let command = "cider-cli item reminder-ping-confirm-delivery \(intent.kind) \(intent.owner.ownerID) --transport \(transport) --surface \(surface) --delivery-id <delivery-id> --json"
         let verificationCommands = orderedUniqueStrings(
             intent.safeVerificationCommands + [
                 "cider-cli item reminder-ping-delivery-preview --transport \(transport) --surface \(surface) --json",
