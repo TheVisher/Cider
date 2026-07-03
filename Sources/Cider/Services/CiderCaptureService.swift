@@ -479,7 +479,7 @@ struct CiderCaptureResult {
         finalResult.enrichment.titleState = Self.titleState(for: finalBookmark)
         finalResult.enrichment.lastEnrichedAt = finalBookmark.lastEnrichedAt
         finalResult.stagedIntents = CiderCaptureIntentStagingService.stagedIntents(for: finalBookmark)
-        let captureQuality = Self.captureQualityDictionary(for: finalBookmark)
+        let captureQuality = Self.bookmarkCaptureQualityDictionary(for: finalBookmark)
         finalResult.captureQuality = captureQuality
         finalResult.indexing = Self.finalBookmarkIndexingStatus(
             from: finalResult.indexing,
@@ -536,7 +536,7 @@ struct CiderCaptureResult {
     }
 
     @MainActor
-    private static func captureQualityDictionary(for bookmark: Bookmark) -> [String: Any] {
+    static func bookmarkCaptureQualityDictionary(for bookmark: Bookmark) -> [String: Any] {
         let formatter = ISO8601DateFormatter()
         let metadataStatus = enrichmentStatus(for: bookmark)
         let metadataComplete = bookmark.metadataUpdatedAt != nil
@@ -573,14 +573,25 @@ struct CiderCaptureResult {
             && titleQuality == "rich"
             && thumbnailStatusIsLocalReady(thumbnailStatus)
             && pathStatus == "current"
+        let onlyRemoteThumbnailDegraded = degradedReasons == ["card_image_not_local"]
         let semanticStatus: String
         if bookmark.isEnriching || !metadataComplete {
             semanticStatus = "pending"
+        } else if onlyRemoteThumbnailDegraded {
+            semanticStatus = "complete"
         } else if degradedReasons.isEmpty {
             semanticStatus = "complete"
         } else {
             semanticStatus = "degraded"
         }
+        let thumbnailReadiness = bookmarkThumbnailReadiness(
+            bookmark,
+            thumbnailStatus: thumbnailStatus,
+            localReady: thumbnailStatusIsLocalReady(thumbnailStatus)
+        )
+        let safeNextAction = onlyRemoteThumbnailDegraded
+            ? "verify_or_localize_thumbnail"
+            : (degradedReasons.isEmpty ? "inspect_visible_card" : "repair_or_refetch_metadata")
 
         var dict: [String: Any] = [
             "lifecycleStatus": bookmark.isEnriching ? "enriching" : (metadataComplete ? "metadata_committed" : "pending"),
@@ -592,11 +603,14 @@ struct CiderCaptureResult {
             "visibleCardCurrent": cardComplete,
             "titleQuality": titleQuality,
             "thumbnailStatus": thumbnailStatus,
+            "thumbnailReadiness": thumbnailReadiness,
             "pathStatus": pathStatus,
             "degraded": !degradedReasons.isEmpty,
             "degradedReasons": degradedReasons,
-            "fallbackReason": degradedReasons.first ?? NSNull(),
-            "safeNextAction": degradedReasons.isEmpty ? "inspect_visible_card" : "repair_or_refetch_metadata",
+            "fallbackReason": thumbnailReadiness["fallbackReason"] ?? degradedReasons.first ?? NSNull(),
+            "safeNextAction": safeNextAction,
+            "safeVerificationCommands": bookmarkThumbnailVerificationCommands(for: bookmark),
+            "safeNextCommands": bookmarkThumbnailNextCommands(for: bookmark, thumbnailStatus: thumbnailStatus),
         ]
         if let metadataUpdatedAt = bookmark.metadataUpdatedAt {
             dict["metadataUpdatedAt"] = formatter.string(from: metadataUpdatedAt)
@@ -606,6 +620,69 @@ struct CiderCaptureResult {
         }
         dict["canonicalCommitAt"] = formatter.string(from: bookmark.updatedAt)
         return dict
+    }
+
+    private static func bookmarkThumbnailReadiness(
+        _ bookmark: Bookmark,
+        thumbnailStatus: String,
+        localReady: Bool
+    ) -> [String: Any] {
+        var readiness: [String: Any] = [
+            "status": thumbnailStatus,
+            "localReady": localReady,
+            "provider": bookmarkProvider(for: bookmark),
+            "safeVerificationCommands": bookmarkThumbnailVerificationCommands(for: bookmark),
+            "safeNextCommands": bookmarkThumbnailNextCommands(for: bookmark, thumbnailStatus: thumbnailStatus),
+        ]
+        if thumbnailStatus == "remote_only" {
+            readiness["fallbackReason"] = "remote_provider_image_without_local_thumbnail"
+            readiness["remoteImageURL"] = bookmark.thumbnailRemoteURLString ?? NSNull()
+        } else if thumbnailStatus == "missing" {
+            readiness["fallbackReason"] = "no_provider_or_local_thumbnail"
+        }
+        if let relativePath = bookmark.thumbnailRelativePath {
+            readiness["thumbnailRelativePath"] = relativePath
+        }
+        return readiness
+    }
+
+    static func bookmarkThumbnailVerificationCommands(for bookmark: Bookmark) -> [String] {
+        [
+            "cider-cli item get bookmark \(bookmark.id.uuidString) --json",
+            "cider-cli item context bookmark \(bookmark.id.uuidString) --json",
+        ]
+    }
+
+    static func bookmarkThumbnailNextCommands(for bookmark: Bookmark, thumbnailStatus: String? = nil) -> [String] {
+        let status = thumbnailStatus ?? bookmarkThumbnailStatus(bookmark)
+        var commands = bookmarkThumbnailVerificationCommands(for: bookmark)
+        if status == "remote_only" || status == "missing" {
+            commands.append("cider-cli review enrich \(bookmark.id.uuidString) --actor agent --timeout 20 --json")
+            commands.append("cider-cli storage audit --json")
+        }
+        return orderedUniqueStrings(commands)
+    }
+
+    private static func orderedUniqueStrings(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var unique: [String] = []
+        for value in values where seen.insert(value).inserted {
+            unique.append(value)
+        }
+        return unique
+    }
+
+    private static func bookmarkProvider(for bookmark: Bookmark) -> String {
+        guard let host = URLComponents(string: bookmark.urlString)?.host?
+            .replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression)
+            .lowercased() else {
+            return "unknown"
+        }
+        if host.contains("tiktok.com") { return "tiktok" }
+        if host.contains("youtube.com") || host.contains("youtu.be") { return "youtube" }
+        if host.contains("instagram.com") { return "instagram" }
+        if host.contains("x.com") || host.contains("twitter.com") { return "x" }
+        return host
     }
 
     private static func bookmarkTitleQuality(_ bookmark: Bookmark) -> String {

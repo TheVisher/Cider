@@ -1908,6 +1908,9 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     private func scheduleEnrichmentForIncompleteBookmarks() {
+        guard ProcessInfo.processInfo.environment["CIDER_DISABLE_BOOKMARK_ENRICHMENT"] != "1" else {
+            return
+        }
         for bookmark in bookmarks {
             startEnrichmentIfNeeded(for: bookmark.id)
         }

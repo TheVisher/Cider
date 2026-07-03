@@ -764,12 +764,19 @@ struct CiderCaptureServiceTests {
             let remoteOnlyDict = result.toDictionary(finalBookmark: remoteOnlyThumbnailBookmark)
             let remoteOnlyQuality = try #require(remoteOnlyDict["captureQuality"] as? [String: Any])
             let remoteOnlyReasons = try #require(remoteOnlyQuality["degradedReasons"] as? [String])
+            let remoteOnlyReadiness = try #require(remoteOnlyQuality["thumbnailReadiness"] as? [String: Any])
+            let remoteOnlySafeCommands = try #require(remoteOnlyQuality["safeNextCommands"] as? [String])
 
-            #expect(remoteOnlyQuality["semanticStatus"] as? String == "degraded")
+            #expect(remoteOnlyQuality["semanticStatus"] as? String == "complete")
+            #expect(remoteOnlyQuality["cardStatus"] as? String == "degraded")
             #expect(remoteOnlyQuality["thumbnailStatus"] as? String == "remote_only")
             #expect(remoteOnlyQuality["cardComplete"] as? Bool == false)
             #expect(remoteOnlyQuality["visibleCardCurrent"] as? Bool == false)
-            #expect(remoteOnlyReasons.contains("card_image_not_local"))
+            #expect(remoteOnlyReasons == ["card_image_not_local"])
+            #expect(remoteOnlyQuality["safeNextAction"] as? String == "verify_or_localize_thumbnail")
+            #expect(remoteOnlyReadiness["localReady"] as? Bool == false)
+            #expect(remoteOnlyReadiness["fallbackReason"] as? String == "remote_provider_image_without_local_thumbnail")
+            #expect(remoteOnlySafeCommands.contains("cider-cli review enrich \(result.item.id.uuidString) --actor agent --timeout 20 --json"))
 
             let cachedBookmarkThumbnailPath = ".thumbnails/cached-bookmark-swift-markdown-engine.jpg"
             let cachedBookmarkThumbnailURL = StoragePaths.cachedDirectoryURL(for: .bookmarks)

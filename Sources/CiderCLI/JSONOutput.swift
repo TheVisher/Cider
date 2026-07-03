@@ -712,7 +712,7 @@ func bookmarkDriftAuditReportToDict(_ report: CiderBookmarkDriftAuditReport) -> 
 }
 
 func bookmarkDriftFindingToDict(_ finding: CiderBookmarkDriftFinding) -> [String: Any] {
-    [
+    var dict: [String: Any] = [
         "id": finding.id,
         "kind": finding.kind,
         "severity": finding.severity,
@@ -728,6 +728,22 @@ func bookmarkDriftFindingToDict(_ finding: CiderBookmarkDriftFinding) -> [String
         "approvalToken": finding.approvalToken,
         "repairCommand": finding.repairCommand,
     ]
+    if let thumbnailStatus = finding.thumbnailStatus {
+        dict["thumbnailStatus"] = thumbnailStatus
+    }
+    if let fallbackReason = finding.thumbnailFallbackReason {
+        dict["thumbnailFallbackReason"] = fallbackReason
+    }
+    if let safeNextAction = finding.safeNextAction {
+        dict["safeNextAction"] = safeNextAction
+    }
+    if !finding.safeVerificationCommands.isEmpty {
+        dict["safeVerificationCommands"] = finding.safeVerificationCommands
+    }
+    if !finding.safeNextCommands.isEmpty {
+        dict["safeNextCommands"] = finding.safeNextCommands
+    }
+    return dict
 }
 
 func activeDuplicateInvariantReportToDict(_ report: CiderActiveDuplicateInvariantReport) -> [String: Any] {

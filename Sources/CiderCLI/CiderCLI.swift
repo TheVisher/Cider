@@ -27214,6 +27214,15 @@ struct CiderCLI {
            let todo = TodoCardStorage.shared.todoCard(for: bundle.item.id) {
             dict["todo"] = todoToDict(todo)
         }
+        if bundle.item.type == .bookmark,
+           let bookmark = bookmarkForCaptureQuality(id: bundle.item.id) {
+            let captureQuality = CiderCaptureResult.bookmarkCaptureQualityDictionary(for: bookmark)
+            dict["captureQuality"] = captureQuality
+            dict["bookmark"] = bookmarkToDict(bookmark)
+            var safeNextCommands = dict["safeNextCommands"] as? [String] ?? []
+            safeNextCommands.append(contentsOf: captureQuality["safeNextCommands"] as? [String] ?? [])
+            dict["safeNextCommands"] = orderedUniqueStrings(safeNextCommands)
+        }
         dict["actionReceipt"] = readOnlyActionReceiptToDict(
             command: "item.get",
             matchedSourceRefs: [sourceRef],
@@ -27224,6 +27233,75 @@ struct CiderCLI {
             provenanceRefs: [sourceRef]
         )
         return dict
+    }
+
+    private static func bookmarkForCaptureQuality(id: UUID) -> Bookmark? {
+        let database = CiderDatabase()
+        do {
+            try database.open(at: StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(".cider/cider.db"))
+            defer { database.close() }
+            if let bookmark = bookmarkForCaptureQuality(id: id, database: database) {
+                return bookmark
+            }
+        } catch {
+            if CiderDatabase.shared.isOpen,
+               let bookmark = bookmarkForCaptureQuality(id: id, database: .shared) {
+                return bookmark
+            }
+            return VaultBookmarkService.shared.bookmarks.first(where: { $0.id == id })
+        }
+        if CiderDatabase.shared.isOpen,
+           let bookmark = bookmarkForCaptureQuality(id: id, database: .shared) {
+            return bookmark
+        }
+        return VaultBookmarkService.shared.bookmarks.first(where: { $0.id == id })
+    }
+
+    private static func bookmarkForCaptureQuality(id: UUID, database: CiderDatabase) -> Bookmark? {
+        do {
+            let stmt = try database.prepare("""
+                SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
+                       b.url, COALESCE(b.notes, ''), b.notes_manually_set, b.title_manually_set,
+                       b.ai_summary, b.ocr_text, b.dominant_colors, b.media_type,
+                       b.thumbnail_relative_path, b.thumbnail_remote_url, b.original_image_path,
+                       b.carousel_image_paths, b.reader_unavailable, b.preferred_hero_mode,
+                       b.enrichment_status, b.last_enriched_at
+                FROM items i
+                JOIN bookmarks b ON b.item_id = i.id
+                WHERE i.type = 'bookmark'
+                  AND i.id = ?
+                LIMIT 1;
+                """)
+            stmt.bind(id.uuidString, at: 1)
+            guard try stmt.step() else { return nil }
+            let mediaType = stmt.optionalString(at: 13).flatMap(BookmarkMediaType.init(rawValue:))
+            return Bookmark(
+                id: id,
+                title: stmt.string(at: 1),
+                urlString: stmt.string(at: 6),
+                createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 2)),
+                updatedAt: DatabaseHelpers.decodeDate(stmt.double(at: 3)),
+                notes: stmt.string(at: 7),
+                folderID: DatabaseHelpers.decodeUUID(stmt.optionalString(at: 4) ?? ""),
+                thumbnailRemoteURLString: stmt.optionalString(at: 15),
+                thumbnailRelativePath: stmt.optionalString(at: 14),
+                originalImageRelativePath: stmt.optionalString(at: 16),
+                aiSummary: stmt.optionalString(at: 10),
+                ocrText: stmt.optionalString(at: 11),
+                dominantColors: DatabaseHelpers.decodeStringArray(stmt.optionalString(at: 12)),
+                mediaType: mediaType,
+                carouselImagePaths: DatabaseHelpers.decodeStringArray(stmt.optionalString(at: 17)),
+                readerUnavailable: stmt.optionalBool(at: 18),
+                preferredHeroMode: stmt.optionalString(at: 19),
+                relativePath: stmt.optionalString(at: 5),
+                titleManuallySet: stmt.bool(at: 9),
+                notesManuallySet: stmt.bool(at: 8),
+                enrichmentStatus: stmt.optionalString(at: 20),
+                lastEnrichedAt: stmt.optionalDouble(at: 21).map(DatabaseHelpers.decodeDate)
+            )
+        } catch {
+            return nil
+        }
     }
 
     static func itemAgentContextPacketToDict(_ packet: CiderItemAgentContextPacket) -> [String: Any] {

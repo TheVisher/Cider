@@ -1671,6 +1671,69 @@ struct CiderStorageAuditServiceTests {
         #expect(finding.repairCommand.contains(bookmarkID.uuidString))
     }
 
+    @Test("bookmark drift audit exposes remote-only thumbnail readiness for rich social bookmark")
+    func bookmarkDriftAuditExposesRemoteOnlyThumbnailReadinessForRichSocialBookmark() throws {
+        let bookmarkID = UUID(uuidString: "D7521D2A-C273-49B4-A019-55FA2948BDC1")!
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try makeDirectories(["Inbox/Bookmarks"], under: vault)
+        let relativePath = try BookmarkFileService.shared.write(
+            bookmark: Bookmark(
+                id: bookmarkID,
+                title: "Sodam Chicken - Korean fried chicken in Everett",
+                urlString: "https://www.tiktok.com/@sodamchicken/video/7521"
+            ),
+            toDirectory: vault.appendingPathComponent("Inbox/Bookmarks"),
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        try insertBookmarkDriftFixture(
+            db,
+            id: bookmarkID,
+            title: "Sodam Chicken - Korean fried chicken in Everett",
+            url: "https://www.tiktok.com/@sodamchicken/video/7521",
+            relativePath: relativePath,
+            chunkTitle: "Sodam Chicken - Korean fried chicken in Everett",
+            chunkBody: "Title: Sodam Chicken - Korean fried chicken in Everett\nURL: https://www.tiktok.com/@sodamchicken/video/7521\nPath: \(relativePath)"
+        )
+        let stmt = try db.prepare("""
+            UPDATE bookmarks
+            SET thumbnail_remote_url = ?,
+                thumbnail_relative_path = ?,
+                enrichment_status = 'metadata_complete'
+            WHERE item_id = ?;
+            """)
+        stmt.bind("https://example.invalid/sodam-remote-only.jpeg", at: 1)
+            .bind(".thumbnails/\(bookmarkID.uuidString).png", at: 2)
+            .bind(DatabaseHelpers.encode(bookmarkID), at: 3)
+        try stmt.step()
+        let service = CiderStorageAuditService(
+            database: db,
+            vaultRoot: vault,
+            doctorReportProvider: { VaultDoctor.Report(startedAt: Date(), finishedAt: Date(), findings: []) },
+            duplicateFindingsProvider: { [] },
+            nowProvider: { Date(timeIntervalSince1970: 12) }
+        )
+
+        let report = try service.bookmarkDriftAudit(limit: 10)
+
+        let finding = try #require(report.findings.first)
+        #expect(finding.kind == "bookmark_thumbnail_readiness")
+        #expect(finding.pathDrift == false)
+        #expect(finding.chunkDrift == false)
+        #expect(finding.thumbnailStatus == "remote_only")
+        #expect(finding.safeNextAction == "verify_or_localize_thumbnail")
+        #expect(finding.safeVerificationCommands.contains("cider-cli item get bookmark \(bookmarkID.uuidString) --json"))
+        #expect(finding.safeNextCommands.contains("cider-cli review enrich \(bookmarkID.uuidString) --actor agent --timeout 20 --json"))
+
+        let dict = bookmarkDriftAuditReportToDict(report)
+        let findings = try #require(dict["findings"] as? [[String: Any]])
+        let jsonFinding = try #require(findings.first)
+        #expect(jsonFinding["thumbnailStatus"] as? String == "remote_only")
+        #expect(jsonFinding["safeNextAction"] as? String == "verify_or_localize_thumbnail")
+    }
+
     @Test("bookmark drift audit ignores host-only titles that would only add duplicate suffixes")
     func bookmarkDriftAuditIgnoresHostOnlyTitles() throws {
         let bookmarkID = UUID(uuidString: "EDE7C93D-4B82-4820-BB2B-C01D67DCCEB4")!

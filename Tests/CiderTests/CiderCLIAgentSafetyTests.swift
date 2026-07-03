@@ -4831,6 +4831,44 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeNextCommands.contains("cider-cli item rebuild-chunks bookmark \(itemID) --json"))
     }
 
+    @Test("item get explains rich social bookmark with remote-only thumbnail")
+    func itemGetExplainsRichSocialBookmarkWithRemoteOnlyThumbnail() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-social-remote-thumbnail-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["db", "integrity", "--json"], vault: vault)
+        let bookmarkID = "D7521D2A-C273-49B4-A019-55FA2948BDC1"
+        try seedRichRemoteOnlySocialBookmark(bookmarkID: bookmarkID, vault: vault)
+
+        let getResult = try runCLI(
+            args: ["item", "get", "bookmark", bookmarkID, "--json"],
+            vault: vault,
+            environment: ["CIDER_DISABLE_BOOKMARK_ENRICHMENT": "1"]
+        )
+        let payload = try parseJSONObject(getResult.stdout)
+        let quality = try #require(payload["captureQuality"] as? [String: Any])
+        let reasons = try #require(quality["degradedReasons"] as? [String])
+        let readiness = try #require(quality["thumbnailReadiness"] as? [String: Any])
+        let safeCommands = try #require(payload["safeNextCommands"] as? [String])
+
+        #expect(quality["semanticStatus"] as? String == "complete")
+        #expect(quality["cardStatus"] as? String == "degraded")
+        #expect(quality["visibleCardCurrent"] as? Bool == false)
+        #expect(quality["thumbnailStatus"] as? String == "remote_only")
+        #expect(reasons == ["card_image_not_local"])
+        #expect(quality["safeNextAction"] as? String == "verify_or_localize_thumbnail")
+        #expect(readiness["status"] as? String == "remote_only")
+        #expect(readiness["localReady"] as? Bool == false)
+        #expect(readiness["provider"] as? String == "tiktok")
+        #expect(readiness["fallbackReason"] as? String == "remote_provider_image_without_local_thumbnail")
+        #expect((readiness["safeVerificationCommands"] as? [String])?.contains("cider-cli item get bookmark \(bookmarkID) --json") == true)
+        #expect((readiness["safeNextCommands"] as? [String])?.contains("cider-cli review enrich \(bookmarkID) --actor agent --timeout 20 --json") == true)
+        #expect(safeCommands.contains("cider-cli item get bookmark \(bookmarkID) --json"))
+        #expect(safeCommands.contains("cider-cli review enrich \(bookmarkID) --actor agent --timeout 20 --json"))
+    }
+
     @Test("note daily append upserts same-day food log and refreshes context")
     func noteDailyAppendUpsertsSameDayFoodLogAndRefreshesContext() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -10402,6 +10440,87 @@ struct CiderCLIAgentSafetyTests {
         )
         let payload = try parseJSONObject(result.stdout)
         return try #require(payload["id"] as? String)
+    }
+
+    private func seedRichRemoteOnlySocialBookmark(bookmarkID: String, vault: URL) throws {
+        let bookmarkUUID = try #require(UUID(uuidString: bookmarkID))
+        try FileManager.default.createDirectory(
+            at: vault.appendingPathComponent("Inbox/Bookmarks"),
+            withIntermediateDirectories: true
+        )
+        let relativePath = try BookmarkFileService.shared.write(
+            bookmark: Bookmark(
+                id: bookmarkUUID,
+                title: "Sodam Chicken - Korean fried chicken in Everett",
+                urlString: "https://www.tiktok.com/@sodamchicken/video/7521"
+            ),
+            toDirectory: vault.appendingPathComponent("Inbox/Bookmarks"),
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { db.close() }
+
+        let now = Date().timeIntervalSince1970
+        let itemStmt = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'bookmark', ?, ?, ?, NULL, ?);
+            """)
+        itemStmt.bind(bookmarkID, at: 1)
+            .bind("Sodam Chicken - Korean fried chicken in Everett", at: 2)
+            .bind(now, at: 3)
+            .bind(now, at: 4)
+            .bind(relativePath, at: 5)
+        try itemStmt.step()
+
+        let bookmarkStmt = try db.prepare("""
+            INSERT INTO bookmarks (
+                item_id, url, notes, notes_manually_set, title_manually_set,
+                ai_summary, media_type, thumbnail_relative_path, thumbnail_remote_url,
+                original_image_path, enrichment_status, last_enriched_at
+            )
+            VALUES (?, ?, ?, 0, 0, ?, 'video', NULL, ?, NULL, 'metadata_complete', ?);
+            """)
+        bookmarkStmt.bind(bookmarkID, at: 1)
+            .bind("https://www.tiktok.com/@sodamchicken/video/7521", at: 2)
+            .bind("Rich chunks mention Sodam Chicken, Korean fried chicken, Everett, and TikTok restaurant context.", at: 3)
+            .bind("TikTok restaurant capture for Sodam Chicken in Everett.", at: 4)
+            .bind("https://example.invalid/sodam-remote-only.jpeg", at: 5)
+            .bind(now, at: 6)
+        try bookmarkStmt.step()
+
+        let metadataURL = vault
+            .appendingPathComponent(".cider/bookmarks/_cider_bookmarks_index.json")
+        try FileManager.default.createDirectory(
+            at: metadataURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let bookmarks: [[String: Any]] = [[
+            "id": bookmarkID,
+            "title": "Sodam Chicken - Korean fried chicken in Everett",
+            "urlString": "https://www.tiktok.com/@sodamchicken/video/7521",
+            "createdAt": now,
+            "updatedAt": now,
+            "notes": "Rich chunks mention Sodam Chicken, Korean fried chicken, Everett, and TikTok restaurant context.",
+            "tags": [],
+            "labelIDs": [],
+            "dismissedLabelIDs": [],
+            "relativePath": relativePath,
+            "titleManuallySet": false,
+            "notesManuallySet": false,
+            "aiSummary": "TikTok restaurant capture for Sodam Chicken in Everett.",
+            "enrichmentStatus": "metadata_complete",
+            "lastEnrichedAt": now,
+            "metadataUpdatedAt": now,
+            "thumbnailRemoteURLString": "https://example.invalid/sodam-remote-only.jpeg",
+            "mediaType": "video",
+        ]]
+        let updated = try JSONSerialization.data(withJSONObject: bookmarks, options: [.prettyPrinted, .sortedKeys])
+        try updated.write(to: metadataURL, options: .atomic)
+
+        let bookmarkAssets = vault.appendingPathComponent(".cider/bookmarks")
+        try? FileManager.default.removeItem(at: bookmarkAssets.appendingPathComponent(".thumbnails"))
+        try? FileManager.default.removeItem(at: bookmarkAssets.appendingPathComponent(".originals"))
     }
 
     private func insertFolderRow(relativePath: String, vault: URL) throws {

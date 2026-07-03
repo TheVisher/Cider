@@ -191,6 +191,11 @@ struct CiderBookmarkDriftFinding: Equatable {
     var reasons: [String]
     var approvalToken: String
     var repairCommand: String
+    var thumbnailStatus: String? = nil
+    var thumbnailFallbackReason: String? = nil
+    var safeNextAction: String? = nil
+    var safeVerificationCommands: [String] = []
+    var safeNextCommands: [String] = []
 }
 
 struct CiderBookmarkDriftRepairReport: Equatable {
@@ -1722,6 +1727,9 @@ final class CiderStorageAuditService {
         var notes: String
         var ocrText: String?
         var titleManuallySet: Bool
+        var thumbnailRelativePath: String?
+        var thumbnailRemoteURL: String?
+        var enrichmentStatus: String?
     }
 
     private func bookmarkDriftFindings() throws -> [CiderBookmarkDriftFinding] {
@@ -1733,7 +1741,8 @@ final class CiderStorageAuditService {
     private func bookmarkDriftCandidates() throws -> [BookmarkDriftCandidate] {
         let stmt = try database.prepare("""
             SELECT i.id, i.title, b.url, COALESCE(i.relative_path, ''),
-                   COALESCE(b.notes, ''), b.ocr_text, b.title_manually_set
+                   COALESCE(b.notes, ''), b.ocr_text, b.title_manually_set,
+                   b.thumbnail_relative_path, b.thumbnail_remote_url, b.enrichment_status
             FROM items i
             JOIN bookmarks b ON b.item_id = i.id
             WHERE i.type = 'bookmark'
@@ -1751,7 +1760,10 @@ final class CiderStorageAuditService {
                     relativePath: stmt.string(at: 3),
                     notes: stmt.string(at: 4),
                     ocrText: stmt.optionalString(at: 5),
-                    titleManuallySet: stmt.int64(at: 6) != 0
+                    titleManuallySet: stmt.int64(at: 6) != 0,
+                    thumbnailRelativePath: stmt.optionalString(at: 7),
+                    thumbnailRemoteURL: stmt.optionalString(at: 8),
+                    enrichmentStatus: stmt.optionalString(at: 9)
                 )
             )
         }
@@ -1783,7 +1795,8 @@ final class CiderStorageAuditService {
             && likelyStaleBookmarkFilename(currentBase, title: proposedTitle, urlString: candidate.url)
 
         let chunkDrift = try bookmarkChunkDrift(candidate: candidate, proposedTitle: proposedTitle)
-        guard pathDrift || chunkDrift else { return nil }
+        let thumbnailRemoteOnly = bookmarkThumbnailRemoteOnly(candidate)
+        guard pathDrift || chunkDrift || thumbnailRemoteOnly else { return nil }
 
         let approvalToken = Self.bookmarkDriftApprovalToken(
             itemID: candidate.itemID,
@@ -1800,10 +1813,26 @@ final class CiderStorageAuditService {
         if chunkDrift {
             reasons.append("bookmark content chunks still contain stale title/path text")
         }
+        if thumbnailRemoteOnly {
+            reasons.append("bookmark has rich metadata but its visible card image is remote-only; local thumbnail/card readiness is not current")
+        }
+
+        let safeVerificationCommands = [
+            "cider-cli item get bookmark \(candidate.itemID) --json",
+            "cider-cli item context bookmark \(candidate.itemID) --json",
+        ]
+        let safeNextCommands = safeVerificationCommands + [
+            "cider-cli review enrich \(candidate.itemID) --actor agent --timeout 20 --json",
+            "cider-cli storage bookmark-drift-audit --limit 20 --json",
+        ]
 
         return CiderBookmarkDriftFinding(
-            id: "bookmark-title-path-drift:\(candidate.itemID)",
-            kind: "bookmark_title_path_drift",
+            id: thumbnailRemoteOnly && !pathDrift && !chunkDrift
+                ? "bookmark-thumbnail-readiness:\(candidate.itemID)"
+                : "bookmark-title-path-drift:\(candidate.itemID)",
+            kind: thumbnailRemoteOnly && !pathDrift && !chunkDrift
+                ? "bookmark_thumbnail_readiness"
+                : "bookmark_title_path_drift",
             severity: "warning",
             itemID: candidate.itemID,
             currentTitle: candidate.title,
@@ -1815,8 +1844,27 @@ final class CiderStorageAuditService {
             chunkDrift: chunkDrift,
             reasons: reasons,
             approvalToken: approvalToken,
-            repairCommand: "cider-cli storage bookmark-drift-repair --item \(Self.shellQuoted(candidate.itemID)) --approve \(Self.shellQuoted(approvalToken)) --execute --json"
+            repairCommand: "cider-cli storage bookmark-drift-repair --item \(Self.shellQuoted(candidate.itemID)) --approve \(Self.shellQuoted(approvalToken)) --execute --json",
+            thumbnailStatus: thumbnailRemoteOnly ? "remote_only" : nil,
+            thumbnailFallbackReason: thumbnailRemoteOnly ? "remote_provider_image_without_local_thumbnail" : nil,
+            safeNextAction: thumbnailRemoteOnly ? "verify_or_localize_thumbnail" : nil,
+            safeVerificationCommands: thumbnailRemoteOnly ? safeVerificationCommands : [],
+            safeNextCommands: thumbnailRemoteOnly ? safeNextCommands : []
         )
+    }
+
+    private func bookmarkThumbnailRemoteOnly(_ candidate: BookmarkDriftCandidate) -> Bool {
+        guard let remote = candidate.thumbnailRemoteURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !remote.isEmpty else { return false }
+        if let relativePath = candidate.thumbnailRelativePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !relativePath.isEmpty,
+           FileManager.default.fileExists(atPath: vaultRoot.appendingPathComponent(".cider/bookmarks").appendingPathComponent(relativePath).path) {
+            return false
+        }
+        guard candidate.enrichmentStatus == "metadata_complete" || candidate.enrichmentStatus == "complete" else {
+            return false
+        }
+        return true
     }
 
     private func proposedBookmarkRelativePath(title: String, currentRelativePath: String) -> String {
