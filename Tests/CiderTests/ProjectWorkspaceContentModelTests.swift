@@ -10,6 +10,15 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(ProjectWorkspaceSurfaceDisplayMode.grid.systemImage, "square.grid.2x2")
     }
 
+    func testProjectArtifactSurfacesExposeRealListRenderingPolicy() {
+        XCTAssertTrue(ProjectWorkspaceSurface.notes.usesProjectArtifactList)
+        XCTAssertTrue(ProjectWorkspaceSurface.decisions.usesProjectArtifactList)
+        XCTAssertTrue(ProjectWorkspaceSurface.qaAudits.usesProjectArtifactList)
+        XCTAssertTrue(ProjectWorkspaceSurface.plansHandoffs.usesProjectArtifactList)
+        XCTAssertFalse(ProjectWorkspaceSurface.assets.usesProjectArtifactList)
+        XCTAssertFalse(ProjectWorkspaceSurface.milestones.usesProjectArtifactList)
+    }
+
     func testProjectReferencesIncludeProjectAssetFolderItemsOnly() {
         let linkedID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let placedID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!

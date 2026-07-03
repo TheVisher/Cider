@@ -771,7 +771,7 @@ struct ProjectWorkspaceSurfaceView: View {
     }
 
     var body: some View {
-        if currentModel.surface == .notes || currentModel.surface == .plansHandoffs || currentModel.surface == .qaAudits {
+        if currentModel.surface.usesProjectArtifactList {
             artifactListBody
         } else {
             ProjectWorkspaceSurfacePlaceholderView(project: currentModel.workspace, surface: currentModel.surface)
@@ -1033,6 +1033,8 @@ struct ProjectWorkspaceSurfaceView: View {
             return "Markdown-backed notes stored under Projects/\(currentModel.workspace.title)/Notes"
         case .plansHandoffs:
             return "Draft feature plans stored under Projects/\(currentModel.workspace.title)/Plans until they become milestones and cards"
+        case .decisions:
+            return "Durable decisions stored under Projects/\(currentModel.workspace.title)/Decisions"
         case .qaAudits:
             return "Audit results and QA reports stored under Projects/\(currentModel.workspace.title)/QA until they become cleanup milestones and cards"
         default:
@@ -1046,6 +1048,8 @@ struct ProjectWorkspaceSurfaceView: View {
             return "No project notes yet"
         case .plansHandoffs:
             return "No plans yet"
+        case .decisions:
+            return "No decisions yet"
         case .qaAudits:
             return "No QA audits yet"
         default:

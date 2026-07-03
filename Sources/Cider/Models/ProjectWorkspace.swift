@@ -61,6 +61,15 @@ enum ProjectWorkspaceSurface: String, CaseIterable, Codable, Hashable, Identifia
             "Draft feature plans collect here while ideas are shaped before milestone and card extraction."
         }
     }
+
+    var usesProjectArtifactList: Bool {
+        switch self {
+        case .notes, .decisions, .qaAudits, .plansHandoffs:
+            true
+        case .boards, .milestones, .assets:
+            false
+        }
+    }
 }
 
 private extension String {
