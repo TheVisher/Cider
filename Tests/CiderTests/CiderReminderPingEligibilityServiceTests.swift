@@ -360,6 +360,72 @@ struct CiderReminderPingEligibilityServiceTests {
         #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
     }
 
+    @Test("transport worker contract stub validates config and preserves row selectors without receipts")
+    func transportWorkerContractStubValidatesConfigAndPreservesRowSelectorsWithoutReceipts() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let ledger = SecondBrainActionReceiptLedgerService(database: db)
+        let now = date(2026, 7, 14)
+        let todo = TodoCard(title: "Transport worker todo", dueDate: now)
+        let dateCard = DateCard(title: "Transport worker date card", startAt: now)
+        let feed = CiderDueToSurfaceFeedService.build(
+            agenda: AgendaBriefingService.build(todos: [todo], dateCards: [dateCard], now: now, calendar: calendar),
+            reviewItems: [],
+            staleCaptures: [],
+            linkedContext: [],
+            now: now,
+            limit: 10
+        )
+        let intents = try CiderReminderPingEligibilityService.pendingIntents(from: feed, ledger: ledger)
+        let preview = CiderReminderPingDeliveryPreviewService.preview(
+            from: intents,
+            transport: "discord",
+            surface: "agent-chat"
+        )
+        let dryRun = CiderReminderPingDryRunService.run(from: preview)
+        let transcript = CiderReminderPingTranscriptService.produce(from: dryRun)
+
+        let worker = try CiderReminderPingTransportWorkerContractService.deliver(
+            transcriptJSONL: transcript.jsonl(),
+            configuration: .init(
+                workerID: "discord-reminder-worker",
+                senderID: "discord-bot-local-stub",
+                transport: "discord"
+            ),
+            limit: 1
+        )
+
+        #expect(worker.command == "item.reminder-ping-transport-worker")
+        #expect(worker.readOnly == true)
+        #expect(worker.changed == false)
+        #expect(worker.noRealSend == true)
+        #expect(worker.truthBoundary == "cider_items_plus_action_receipts_remain_source_of_truth_transport_worker_no_receipts")
+        #expect(worker.transportBoundary == "transport_worker_contract_stub_no_real_send_delivery_proof_only")
+        #expect(worker.counts.rows == 2)
+        #expect(worker.counts.delivered == 1)
+        #expect(worker.counts.noSend == 1)
+        #expect(worker.counts.skipped == 1)
+
+        let deliveredRow = try #require(worker.rows.first { $0.status == "delivered" })
+        let originalRow = try #require(transcript.rows.first { $0.id == deliveredRow.id })
+        #expect(deliveredRow.owner == originalRow.owner)
+        #expect(deliveredRow.runKey == originalRow.runKey)
+        #expect(deliveredRow.envelopeID == originalRow.envelopeID)
+        #expect(deliveredRow.plannedPingID == originalRow.plannedPingID)
+        #expect(deliveredRow.deliveryKey == originalRow.deliveryKey)
+        #expect(deliveredRow.duplicateKey == originalRow.duplicateKey)
+        #expect(deliveredRow.deliveryID == "transport-worker:discord-reminder-worker:\(originalRow.envelopeID)")
+        #expect(deliveredRow.messageID == "transport-worker-message:discord-reminder-worker:\(originalRow.envelopeID)")
+        #expect(deliveredRow.senderMetadata["adapter"] == "cider_transport_worker_contract_stub")
+        #expect(deliveredRow.senderMetadata["workerID"] == "discord-reminder-worker")
+        #expect(deliveredRow.senderMetadata["senderID"] == "discord-bot-local-stub")
+        #expect(deliveredRow.senderMetadata["noRealSend"] == "true")
+        #expect(worker.jsonl().contains("\"transportWorkerContract\":\"stub\""))
+        #expect(worker.safeNextCommands.contains("cider-cli item reminder-ping-import-ack --file <transport-worker-delivered.jsonl> --json"))
+        #expect(worker.safeVerificationCommands.contains("cider-cli item action-ledger list --action record_ping_surface --json"))
+        #expect(try ledger.list(filter: .init(limit: 10)).isEmpty)
+    }
+
     private func recordPingReceipt(
         ledger: SecondBrainActionReceiptLedgerService,
         owner: SecondBrainOwnerRef,

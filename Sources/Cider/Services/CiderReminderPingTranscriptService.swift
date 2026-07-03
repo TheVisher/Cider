@@ -166,9 +166,74 @@ enum CiderReminderPingTranscriptService {
             dict["noRealSend"] = row.senderMetadata["noRealSend"] == "true"
             dict["senderAdapter"] = row.senderMetadata["adapter"]
             dict["sentBy"] = row.senderMetadata["sentBy"]
-            dict["transportBoundary"] = "fake_transport_no_real_send_delivery_proof_only"
+            if let contract = row.senderMetadata["transportWorkerContract"] {
+                dict["transportWorkerContract"] = contract
+            }
+            if row.senderMetadata["adapter"] == "cider_transport_worker_contract_stub" {
+                dict["transportBoundary"] = "transport_worker_contract_stub_no_real_send_delivery_proof_only"
+            } else {
+                dict["transportBoundary"] = "fake_transport_no_real_send_delivery_proof_only"
+            }
         }
         return dict
+    }
+
+    static func parseRows(_ input: String, errorDomain: String) throws -> [CiderReminderPingTranscriptRow] {
+        let lines = input
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return try lines.map { line in
+            guard let data = line.data(using: .utf8),
+                  let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw NSError(domain: errorDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "Transcript row is not valid JSON."])
+            }
+            return try row(from: object, errorDomain: errorDomain)
+        }
+    }
+
+    static func row(from object: [String: Any], errorDomain: String) throws -> CiderReminderPingTranscriptRow {
+        func string(_ key: String) -> String {
+            (object[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+        func strings(_ key: String) -> [String] {
+            object[key] as? [String] ?? []
+        }
+        let ownerObject = object["owner"] as? [String: Any]
+        let ownerType = (ownerObject?["ownerType"] as? String) ?? string("itemType")
+        let ownerID = (ownerObject?["ownerID"] as? String) ?? string("itemID")
+        guard !ownerType.isEmpty, !ownerID.isEmpty else {
+            throw NSError(domain: errorDomain, code: 2, userInfo: [NSLocalizedDescriptionKey: "Transcript row is missing owner selector fields."])
+        }
+        let owner = SecondBrainOwnerRef(ownerType: ownerType, ownerID: ownerID)
+        var row = CiderReminderPingTranscriptRow(
+            id: string("id"),
+            status: string("status").isEmpty ? "not_delivered" : string("status"),
+            deliveryStatus: string("deliveryStatus").isEmpty ? "not_delivered" : string("deliveryStatus"),
+            noSendReason: string("noSendReason").isEmpty ? "transcript_preview_only_delivery_proof_required" : string("noSendReason"),
+            owner: owner,
+            itemType: string("itemType").isEmpty ? string("kind") : string("itemType"),
+            itemID: string("itemID").isEmpty ? ownerID : string("itemID"),
+            title: string("title"),
+            transport: string("transport"),
+            surface: string("surface"),
+            deliveryKey: string("deliveryKey"),
+            duplicateKey: string("duplicateKey"),
+            envelopeID: string("envelopeID"),
+            runKey: string("runKey"),
+            plannedPingID: string("plannedPingID"),
+            message: string("message").isEmpty ? string("humanSafeMessage") : string("message"),
+            sourceIntentID: string("sourceIntentID"),
+            sourceCandidateID: string("sourceCandidateID"),
+            sourceRefs: strings("sourceRefs"),
+            safeRecordPingCommand: string("safeRecordPingCommand"),
+            deliveryID: string("deliveryID").isEmpty ? nil : string("deliveryID"),
+            messageID: string("messageID").isEmpty ? nil : string("messageID")
+        )
+        if row.id.isEmpty {
+            row.id = "transcript:\(row.plannedPingID)"
+        }
+        return row
     }
 
     private static func orderedUniqueStrings(_ values: [String]) -> [String] {
@@ -219,7 +284,10 @@ enum CiderReminderPingFakeTransportSenderService {
         limit: Int? = nil,
         senderID: String = "cider-fake-transport"
     ) throws -> CiderReminderPingFakeTransportSenderResult {
-        let rows = try parseRows(transcriptJSONL)
+        let rows = try CiderReminderPingTranscriptService.parseRows(
+            transcriptJSONL,
+            errorDomain: "CiderReminderPingFakeTransportSenderService"
+        )
         let maxDeliveries = limit ?? rows.count
         var deliveredCount = 0
         let deliveredRows = rows.map { row -> CiderReminderPingTranscriptRow in
@@ -260,61 +328,132 @@ enum CiderReminderPingFakeTransportSenderService {
         )
     }
 
-    private static func parseRows(_ input: String) throws -> [CiderReminderPingTranscriptRow] {
-        let lines = input
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return try lines.map { line in
-            guard let data = line.data(using: .utf8),
-                  let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw NSError(domain: "CiderReminderPingFakeTransportSenderService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Transcript row is not valid JSON."])
+}
+
+struct CiderReminderPingTransportWorkerConfiguration: Equatable {
+    var workerID: String
+    var senderID: String
+    var transport: String
+}
+
+struct CiderReminderPingTransportWorkerContractResult: Equatable {
+    var command: String = "item.reminder-ping-transport-worker"
+    var generatedAt: Date
+    var readOnly: Bool = true
+    var changed: Bool = false
+    var noRealSend: Bool = true
+    var truthBoundary: String = "cider_items_plus_action_receipts_remain_source_of_truth_transport_worker_no_receipts"
+    var transportBoundary: String = "transport_worker_contract_stub_no_real_send_delivery_proof_only"
+    var counts: CiderReminderPingTranscriptCounts
+    var rows: [CiderReminderPingTranscriptRow]
+    var safeNextCommands: [String] = [
+        "cider-cli item reminder-ping-import-ack --file <transport-worker-delivered.jsonl> --json",
+    ]
+    var safeVerificationCommands: [String] = [
+        "cider-cli item action-ledger list --action record_ping_surface --json",
+        "cider-cli item reminder-ping-dry-run --json",
+    ]
+
+    func jsonl() -> String {
+        rows.map { row in
+            let object = CiderReminderPingTranscriptService.rowDictionary(row)
+            guard JSONSerialization.isValidJSONObject(object),
+                  let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+                  let line = String(data: data, encoding: .utf8) else {
+                return "{}"
             }
-            return try row(from: object)
+            return line
         }
+        .joined(separator: "\n")
+    }
+}
+
+enum CiderReminderPingTransportWorkerContractService {
+    static func deliver(
+        transcriptJSONL: String,
+        configuration: CiderReminderPingTransportWorkerConfiguration,
+        limit: Int? = nil
+    ) throws -> CiderReminderPingTransportWorkerContractResult {
+        let workerID = configuration.workerID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let senderID = configuration.senderID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let transport = configuration.transport.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !workerID.isEmpty else {
+            throw NSError(domain: "CiderReminderPingTransportWorkerContractService", code: 10, userInfo: [NSLocalizedDescriptionKey: "Transport worker configuration is missing workerID."])
+        }
+        guard !senderID.isEmpty else {
+            throw NSError(domain: "CiderReminderPingTransportWorkerContractService", code: 11, userInfo: [NSLocalizedDescriptionKey: "Transport worker configuration is missing senderID."])
+        }
+        guard !transport.isEmpty else {
+            throw NSError(domain: "CiderReminderPingTransportWorkerContractService", code: 12, userInfo: [NSLocalizedDescriptionKey: "Transport worker configuration is missing transport."])
+        }
+
+        let rows = try CiderReminderPingTranscriptService.parseRows(
+            transcriptJSONL,
+            errorDomain: "CiderReminderPingTransportWorkerContractService"
+        )
+        let maxDeliveries = limit ?? rows.count
+        var deliveredCount = 0
+        let deliveredRows = try rows.map { row -> CiderReminderPingTranscriptRow in
+            try validate(row: row, transport: transport)
+            guard deliveredCount < maxDeliveries,
+                  row.deliveryID?.isEmpty ?? true,
+                  row.messageID?.isEmpty ?? true,
+                  row.status != "delivered" else {
+                return row
+            }
+            deliveredCount += 1
+            var next = row
+            next.status = "delivered"
+            next.deliveryStatus = "delivered"
+            next.noSendReason = "transport_worker_contract_stub_no_real_send"
+            next.deliveryID = "transport-worker:\(workerID):\(row.envelopeID)"
+            next.messageID = "transport-worker-message:\(workerID):\(row.envelopeID)"
+            next.senderMetadata = [
+                "adapter": "cider_transport_worker_contract_stub",
+                "noRealSend": "true",
+                "senderID": senderID,
+                "sentBy": "cider-cli",
+                "transport": transport,
+                "transportWorkerContract": "stub",
+                "workerID": workerID,
+            ]
+            return next
+        }
+        let counts = CiderReminderPingTranscriptCounts(
+            rows: deliveredRows.count,
+            noSend: deliveredRows.filter { $0.status != "delivered" }.count,
+            delivered: deliveredRows.filter { $0.status == "delivered" }.count,
+            skipped: max(0, deliveredRows.count - deliveredCount),
+            suppressed: 0,
+            duplicates: 0
+        )
+        return CiderReminderPingTransportWorkerContractResult(
+            generatedAt: Date(),
+            counts: counts,
+            rows: deliveredRows
+        )
     }
 
-    private static func row(from object: [String: Any]) throws -> CiderReminderPingTranscriptRow {
-        func string(_ key: String) -> String {
-            (object[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    private static func validate(row: CiderReminderPingTranscriptRow, transport: String) throws {
+        let required: [(String, String)] = [
+            ("id", row.id),
+            ("ownerRef", row.owner.canonicalRef),
+            ("itemType", row.itemType),
+            ("itemID", row.itemID),
+            ("transport", row.transport),
+            ("surface", row.surface),
+            ("deliveryKey", row.deliveryKey),
+            ("duplicateKey", row.duplicateKey),
+            ("envelopeID", row.envelopeID),
+            ("runKey", row.runKey),
+            ("plannedPingID", row.plannedPingID),
+            ("message", row.message),
+        ]
+        if let missing = required.first(where: { $0.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            throw NSError(domain: "CiderReminderPingTransportWorkerContractService", code: 20, userInfo: [NSLocalizedDescriptionKey: "Transcript row is missing required delivery proof field \(missing.0)."])
         }
-        func strings(_ key: String) -> [String] {
-            object[key] as? [String] ?? []
+        guard row.transport == transport else {
+            throw NSError(domain: "CiderReminderPingTransportWorkerContractService", code: 21, userInfo: [NSLocalizedDescriptionKey: "Transcript row transport \(row.transport) does not match worker transport \(transport)."])
         }
-        let ownerObject = object["owner"] as? [String: Any]
-        let ownerType = (ownerObject?["ownerType"] as? String) ?? string("itemType")
-        let ownerID = (ownerObject?["ownerID"] as? String) ?? string("itemID")
-        guard !ownerType.isEmpty, !ownerID.isEmpty else {
-            throw NSError(domain: "CiderReminderPingFakeTransportSenderService", code: 2, userInfo: [NSLocalizedDescriptionKey: "Transcript row is missing owner selector fields."])
-        }
-        let owner = SecondBrainOwnerRef(ownerType: ownerType, ownerID: ownerID)
-        var row = CiderReminderPingTranscriptRow(
-            id: string("id"),
-            status: string("status").isEmpty ? "not_delivered" : string("status"),
-            deliveryStatus: string("deliveryStatus").isEmpty ? "not_delivered" : string("deliveryStatus"),
-            noSendReason: string("noSendReason").isEmpty ? "transcript_preview_only_delivery_proof_required" : string("noSendReason"),
-            owner: owner,
-            itemType: string("itemType").isEmpty ? string("kind") : string("itemType"),
-            itemID: string("itemID").isEmpty ? ownerID : string("itemID"),
-            title: string("title"),
-            transport: string("transport"),
-            surface: string("surface"),
-            deliveryKey: string("deliveryKey"),
-            duplicateKey: string("duplicateKey"),
-            envelopeID: string("envelopeID"),
-            runKey: string("runKey"),
-            plannedPingID: string("plannedPingID"),
-            message: string("message").isEmpty ? string("humanSafeMessage") : string("message"),
-            sourceIntentID: string("sourceIntentID"),
-            sourceCandidateID: string("sourceCandidateID"),
-            sourceRefs: strings("sourceRefs"),
-            safeRecordPingCommand: string("safeRecordPingCommand"),
-            deliveryID: string("deliveryID").isEmpty ? nil : string("deliveryID"),
-            messageID: string("messageID").isEmpty ? nil : string("messageID")
-        )
-        if row.id.isEmpty {
-            row.id = "transcript:\(row.plannedPingID)"
-        }
-        return row
     }
 }

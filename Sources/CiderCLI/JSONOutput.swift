@@ -1528,6 +1528,25 @@ func reminderPingFakeTransportSenderResultToDict(_ result: CiderReminderPingFake
     ]
 }
 
+func reminderPingTransportWorkerContractResultToDict(_ result: CiderReminderPingTransportWorkerContractResult) -> [String: Any] {
+    let formatter = ISO8601DateFormatter()
+    return [
+        "ok": true,
+        "command": result.command,
+        "generatedAt": formatter.string(from: result.generatedAt),
+        "readOnly": result.readOnly,
+        "changed": result.changed,
+        "noRealSend": result.noRealSend,
+        "truthBoundary": result.truthBoundary,
+        "transportBoundary": result.transportBoundary,
+        "count": result.counts.rows,
+        "counts": reminderPingTranscriptCountsToDict(result.counts),
+        "rows": result.rows.map { reminderPingTranscriptRowToDict($0) },
+        "safeNextCommands": result.safeNextCommands,
+        "safeVerificationCommands": result.safeVerificationCommands,
+    ]
+}
+
 func reminderPingDryRunCountsToDict(_ counts: CiderReminderPingDryRunCounts) -> [String: Any] {
     [
         "eligible": counts.eligible,

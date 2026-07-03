@@ -1529,6 +1529,120 @@ struct CiderCLIAgentSafetyTests {
         #expect((secondLedger["entries"] as? [[String: Any]])?.isEmpty == true)
     }
 
+    @Test("reminder ping transport worker CLI validates contract and writes proof transcript without receipts")
+    func reminderPingTransportWorkerCLIValidatesContractAndWritesProofTranscriptWithoutReceipts() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-reminder-ping-transport-worker-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let dueDate = Self.relativeDateString(daysFromToday: -1)
+
+        let help = try runCLI(args: ["item", "reminder-ping-transport-worker", "--help"], vault: vault)
+        #expect(help.status == 0)
+        #expect(help.stdout.contains("reminder-ping-transport-worker"))
+        #expect(help.stdout.contains("--worker-id"))
+        #expect(help.stdout.contains("no real send"))
+
+        let capture = try assertStrictProcessJSON(
+            runCLI(args: [
+                "capture", "add", "--kind", "todo",
+                "--content", "Reminder ping transport worker contract todo",
+                "--date", dueDate,
+                "--json",
+            ], vault: vault),
+            command: "capture.add"
+        )
+        let item = try #require(capture["item"] as? [String: Any])
+        let itemID = try #require(item["id"] as? String)
+
+        let plannedFile = vault.appendingPathComponent("planned-reminder-pings.jsonl")
+        _ = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-transcript",
+                "--transport", "discord",
+                "--surface", "agent-chat",
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--file", plannedFile.path,
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-transcript"
+        )
+
+        let deliveredFile = vault.appendingPathComponent("worker-delivered-reminder-pings.jsonl")
+        let delivered = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-transport-worker",
+                "--file", plannedFile.path,
+                "--output", deliveredFile.path,
+                "--transport", "discord",
+                "--worker-id", "discord-reminder-worker",
+                "--sender-id", "discord-bot-local-stub",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-transport-worker"
+        )
+        #expect(delivered["readOnly"] as? Bool == true)
+        #expect(delivered["changed"] as? Bool == false)
+        #expect(delivered["noRealSend"] as? Bool == true)
+        #expect(delivered["truthBoundary"] as? String == "cider_items_plus_action_receipts_remain_source_of_truth_transport_worker_no_receipts")
+        #expect(delivered["transportBoundary"] as? String == "transport_worker_contract_stub_no_real_send_delivery_proof_only")
+        let counts = try #require(delivered["counts"] as? [String: Any])
+        #expect(counts["rows"] as? Int == 1)
+        #expect(counts["delivered"] as? Int == 1)
+        let artifact = try #require(delivered["artifact"] as? [String: Any])
+        #expect(artifact["path"] as? String == deliveredFile.path)
+
+        let deliveredLine = try #require(String(contentsOf: deliveredFile, encoding: .utf8)
+            .split(separator: "\n")
+            .map(String.init)
+            .first)
+        let deliveredRow = try parseJSONObject(deliveredLine)
+        #expect(deliveredRow["itemID"] as? String == itemID)
+        #expect(deliveredRow["status"] as? String == "delivered")
+        #expect(deliveredRow["deliveryID"] as? String == "transport-worker:discord-reminder-worker:\(deliveredRow["envelopeID"] as? String ?? "")")
+        #expect(deliveredRow["messageID"] as? String == "transport-worker-message:discord-reminder-worker:\(deliveredRow["envelopeID"] as? String ?? "")")
+        #expect(deliveredRow["transportWorkerContract"] as? String == "stub")
+        #expect(deliveredRow["noRealSend"] as? Bool == true)
+
+        let beforeImportLedger = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "action-ledger", "list",
+                "--owner", "todo:\(itemID)",
+                "--action", "record_ping_surface",
+                "--limit", "5",
+                "--json",
+            ], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        #expect((beforeImportLedger["entries"] as? [[String: Any]])?.isEmpty == true)
+
+        let imported = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "reminder-ping-import-ack",
+                "--file", deliveredFile.path,
+                "--limit", "10",
+                "--stale-after-days", "999",
+                "--json",
+            ], vault: vault),
+            command: "item.reminder-ping-import-ack"
+        )
+        let importedCounts = try #require(imported["counts"] as? [String: Any])
+        #expect(importedCounts["changed"] as? Int == 1)
+
+        let afterImportLedger = try assertStrictProcessJSON(
+            runCLI(args: [
+                "item", "action-ledger", "list",
+                "--owner", "todo:\(itemID)",
+                "--action", "record_ping_surface",
+                "--limit", "5",
+                "--json",
+            ], vault: vault),
+            command: "item.action-ledger.list"
+        )
+        #expect((afterImportLedger["entries"] as? [[String: Any]])?.count == 1)
+    }
+
     @Test("action ledger CLI filters by command refs and time windows")
     func actionLedgerCLIFiltersByCommandRefsAndTimeWindows() throws {
         let vault = FileManager.default.temporaryDirectory

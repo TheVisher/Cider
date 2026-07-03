@@ -249,6 +249,7 @@ struct CiderCLI {
       cider-cli item reminder-ping-dry-run [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item reminder-ping-transcript [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--file <jsonl>] [--json]
       cider-cli item reminder-ping-fake-send --file <planned-jsonl> --output <delivered-jsonl> [--limit <n>] [--json]
+      cider-cli item reminder-ping-transport-worker --file <planned-jsonl> --output <delivered-jsonl> --transport <name> --worker-id <id> --sender-id <id> [--limit <n>] [--json]
       cider-cli item reminder-ping-confirm-delivery <todo|dateCard> <id-or-ref> --transport <name> --surface <name> --delivery-id <id> [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item reminder-ping-import-ack (--file <json-or-jsonl>|--stdin) [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]
@@ -374,6 +375,11 @@ struct CiderCLI {
             print("""
             Usage: cider-cli item reminder-ping-fake-send --file <planned-jsonl> --output <delivered-jsonl> [--limit <n>] [--json]
             Fake transport adapter for reminder ping transcripts. Fills deterministic delivery proof with no real send and records no Cider receipts.
+            """)
+        case "reminder-ping-transport-worker", "reminder-ping-worker-contract", "reminder-ping-transport-worker-stub":
+            print("""
+            Usage: cider-cli item reminder-ping-transport-worker --file <planned-jsonl> --output <delivered-jsonl> --transport <name> --worker-id <id> --sender-id <id> [--limit <n>] [--json]
+            Transport-worker contract stub for reminder ping transcripts. Validates sender config and delivery proof shape with no real send and records no Cider receipts.
             """)
         case "reminder-ping-confirm-delivery", "reminder-ping-confirm", "reminder-ping-delivered":
             print("""
@@ -6287,6 +6293,9 @@ struct CiderCLI {
 
         case "reminder-ping-fake-send", "reminder-ping-fake-sender", "reminder-ping-fake-transport":
             handleReminderPingFakeSendCommand(args: args)
+
+        case "reminder-ping-transport-worker", "reminder-ping-worker-contract", "reminder-ping-transport-worker-stub":
+            handleReminderPingTransportWorkerCommand(args: args)
 
         case "reminder-ping-confirm-delivery", "reminder-ping-confirm", "reminder-ping-delivered":
             handleReminderPingConfirmDeliveryCommand(args: args)
@@ -15911,6 +15920,84 @@ struct CiderCLI {
                 "transportBoundary": "fake_transport_no_real_send_delivery_proof_only",
                 "error": error.localizedDescription,
                 "safeNextCommands": ["cider-cli item reminder-ping-fake-send --file <planned-jsonl> --output <delivered-jsonl> --json"],
+                "safeVerificationCommands": ["cider-cli item action-ledger list --action record_ping_surface --json"],
+            ] as [String: Any]
+            if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
+        }
+    }
+
+    static func handleReminderPingTransportWorkerCommand(args: [String]) {
+        let command = "item.reminder-ping-transport-worker"
+        do {
+            guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: command, minimum: 1) else { return }
+            let inputPath = parseFlag("--file", from: args)
+            let outputPath = parseFlag("--output", from: args)
+            let transport = parseFlag("--transport", from: args)
+            let workerID = parseFlag("--worker-id", from: args)
+            let senderID = parseFlag("--sender-id", from: args)
+            guard let inputPath, let outputPath, let transport, let workerID, let senderID else {
+                throw NSError(domain: "CiderCLI", code: 1, userInfo: [NSLocalizedDescriptionKey: "Usage: cider-cli item reminder-ping-transport-worker --file <planned-jsonl> --output <delivered-jsonl> --transport <name> --worker-id <id> --sender-id <id> [--limit <n>] [--json]"])
+            }
+
+            let input = try String(contentsOfFile: inputPath, encoding: .utf8)
+            let result = try CiderReminderPingTransportWorkerContractService.deliver(
+                transcriptJSONL: input,
+                configuration: .init(
+                    workerID: workerID,
+                    senderID: senderID,
+                    transport: transport
+                ),
+                limit: parsedLimit
+            )
+            let jsonl = result.jsonl()
+            try jsonl.write(toFile: outputPath, atomically: true, encoding: .utf8)
+            let artifact: [String: Any] = [
+                "format": "jsonl",
+                "path": outputPath,
+                "lastPathComponent": URL(fileURLWithPath: outputPath).lastPathComponent,
+                "rowCount": result.rows.count,
+                "changed": true,
+            ]
+            let source: [String: Any] = [
+                "kind": "file",
+                "path": inputPath,
+                "lastPathComponent": URL(fileURLWithPath: inputPath).lastPathComponent,
+                "format": "jsonl",
+            ]
+            let worker: [String: Any] = [
+                "workerID": workerID,
+                "senderID": senderID,
+                "transport": transport,
+                "contract": "stub",
+            ]
+            let fileWriteCounts: [String: Any] = [
+                "read": 1,
+                "written": 1,
+                "rowsWritten": result.rows.count,
+            ]
+
+            if jsonOutput {
+                var payload = reminderPingTransportWorkerContractResultToDict(result)
+                payload["source"] = source
+                payload["artifact"] = artifact
+                payload["worker"] = worker
+                payload["fileWriteCounts"] = fileWriteCounts
+                outputJSON(payload)
+            } else {
+                print("Reminder ping transport-worker contract proof rows written: \(result.rows.count)")
+            }
+        } catch {
+            processExitCode = 1
+            let payload = [
+                "ok": false,
+                "command": command,
+                "readOnly": true,
+                "changed": false,
+                "noRealSend": true,
+                "truthBoundary": "cider_items_plus_action_receipts_remain_source_of_truth_transport_worker_no_receipts",
+                "transportBoundary": "transport_worker_contract_stub_no_real_send_delivery_proof_only",
+                "error": error.localizedDescription,
+                "safeNextCommands": ["cider-cli item reminder-ping-transport-worker --file <planned-jsonl> --output <delivered-jsonl> --transport <name> --worker-id <id> --sender-id <id> --json"],
                 "safeVerificationCommands": ["cider-cli item action-ledger list --action record_ping_surface --json"],
             ] as [String: Any]
             if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
