@@ -248,6 +248,7 @@ struct CiderCLI {
       cider-cli item reminder-ping-delivery-preview [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item reminder-ping-dry-run [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item reminder-ping-confirm-delivery <todo|dateCard> <id-or-ref> --transport <name> --surface <name> --delivery-id <id> [--limit <n>] [--stale-after-days <n>] [--json]
+      cider-cli item reminder-ping-import-ack (--file <json-or-jsonl>|--stdin) [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]
       cider-cli item why-surfaced <type> <id-or-ref> [--json]
       cider-cli item action-ledger list [--owner <type:id>|--owner-type <type> --owner-id <id>] [--command <command>] [--action <action>] [--actor <actor>] [--status <status>] [--source-ref <ref>] [--evidence-ref <ref>] [--since <iso|yyyy-mm-dd>] [--before <iso|yyyy-mm-dd>] [--limit <n>] [--json]
@@ -366,6 +367,11 @@ struct CiderCLI {
             print("""
             Usage: cider-cli item reminder-ping-confirm-delivery <todo|dateCard> <id-or-ref> --transport <name> --surface <name> --delivery-id <id> [--limit <n>] [--stale-after-days <n>] [--json]
             Transport-confirmed adapter over item reminder-ping-delivery-preview. Records item ping-receipt only after an explicit delivery ID is supplied.
+            """)
+        case "reminder-ping-import-ack", "reminder-ping-ack-import", "reminder-ping-import-acks":
+            print("""
+            Usage: cider-cli item reminder-ping-import-ack (--file <json-or-jsonl>|--stdin) [--limit <n>] [--stale-after-days <n>] [--json]
+            Imports a saved no-send transport transcript. Input may be JSONL rows or JSON {rows:[...]} / [...] with delivered reminder ping fields: itemType, itemID, transport, surface, deliveryID or messageID.
             """)
         case "ping-receipt", "ping-receipts":
             print("Usage: cider-cli item ping-receipt record <todo|dateCard> <id-or-ref> --transport <name> --surface <name> [--delivery-id <id>] [--json]")
@@ -6266,6 +6272,9 @@ struct CiderCLI {
 
         case "reminder-ping-confirm-delivery", "reminder-ping-confirm", "reminder-ping-delivered":
             handleReminderPingConfirmDeliveryCommand(args: args)
+
+        case "reminder-ping-import-ack", "reminder-ping-ack-import", "reminder-ping-import-acks":
+            handleReminderPingImportAckCommand(args: args)
 
         case "context", "agent-context":
             let positional = leadingPositionalArgs(from: args)
@@ -15763,6 +15772,307 @@ struct CiderCLI {
             payload["surface"] = surface
             processExitCode = 1
             if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
+        }
+    }
+
+    static func handleReminderPingImportAckCommand(args: [String]) {
+        let command = "item.reminder-ping-import-ack"
+        let actor = parseFlag("--actor", from: args) ?? "cider-cli"
+        guard let parsedLimit = parsePositiveIntFlag("--limit", from: args, command: command, minimum: 1) else { return }
+        guard let parsedStaleAfterDays = parsePositiveIntFlag("--stale-after-days", from: args, command: command, minimum: 0) else { return }
+        let limit = parsedLimit ?? 20
+        let staleAfterDays = parsedStaleAfterDays ?? 3
+
+        let filePath = parseFlag("--file", from: args)
+        let wantsStdin = args.contains("--stdin")
+        guard (filePath != nil) != wantsStdin else {
+            var payload = reminderPingImportAckBasePayload(
+                actor: actor,
+                rows: [],
+                source: ["kind": "missing"],
+                counts: ["changed": 0, "duplicates": 0, "failed": 1, "skipped": 0, "total": 0]
+            )
+            payload["ok"] = false
+            payload["changed"] = false
+            payload["errorCode"] = "missing_input"
+            payload["error"] = "Pass exactly one input source: --file <json-or-jsonl> or --stdin."
+            processExitCode = 1
+            if jsonOutput { outputJSON(payload) } else { print("Error: Pass exactly one input source: --file <json-or-jsonl> or --stdin.") }
+            return
+        }
+
+        do {
+            let input: String
+            let source: [String: Any]
+            if let filePath {
+                input = try String(contentsOfFile: filePath, encoding: .utf8)
+                source = [
+                    "kind": "file",
+                    "path": filePath,
+                    "lastPathComponent": URL(fileURLWithPath: filePath).lastPathComponent,
+                ]
+            } else {
+                guard let stdin = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) else {
+                    throw NSError(domain: "CiderCLI", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unable to read UTF-8 transcript from stdin."])
+                }
+                input = stdin
+                source = ["kind": "stdin"]
+            }
+
+            let parsedRows = reminderPingImportAckParseRows(input)
+            let rowResults = parsedRows.rows.map { row in
+                reminderPingImportAckProcessRow(
+                    row,
+                    command: command,
+                    actor: actor,
+                    limit: limit,
+                    staleAfterDays: staleAfterDays
+                )
+            }
+            let counts = reminderPingImportAckCounts(rowResults)
+            var sourceMetadata = source
+            sourceMetadata["format"] = parsedRows.format
+            sourceMetadata["rowCount"] = rowResults.count
+            sourceMetadata["malformedRowCount"] = rowResults.filter { $0["errorCode"] as? String == "malformed_row" }.count
+            var payload = reminderPingImportAckBasePayload(
+                actor: actor,
+                rows: rowResults,
+                source: sourceMetadata,
+                counts: counts
+            )
+            payload["changed"] = (counts["changed"] ?? 0) > 0
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print("Imported reminder ping delivery acknowledgements: changed=\(counts["changed"] ?? 0), duplicates=\(counts["duplicates"] ?? 0), failed=\(counts["failed"] ?? 0), skipped=\(counts["skipped"] ?? 0)")
+            }
+        } catch {
+            var payload = reminderPingImportAckBasePayload(
+                actor: actor,
+                rows: [],
+                source: ["kind": filePath == nil ? "stdin" : "file", "path": filePath ?? ""],
+                counts: ["changed": 0, "duplicates": 0, "failed": 1, "skipped": 0, "total": 0]
+            )
+            payload["ok"] = false
+            payload["changed"] = false
+            payload["errorCode"] = "input_read_failed"
+            payload["error"] = error.localizedDescription
+            processExitCode = 1
+            if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
+        }
+    }
+
+    static func reminderPingImportAckBasePayload(
+        actor: String,
+        rows: [[String: Any]],
+        source: [String: Any],
+        counts: [String: Int]
+    ) -> [String: Any] {
+        [
+            "ok": true,
+            "command": "item.reminder-ping-import-ack",
+            "readOnly": false,
+            "changed": false,
+            "actor": actor,
+            "truthBoundary": "transport_run_import_confirms_delivery_only",
+            "transportBoundary": "no_send_import_ack_only",
+            "source": source,
+            "counts": counts,
+            "rows": rows,
+            "safeVerificationCommands": [
+                "cider-cli item reminder-ping-dry-run --json",
+                "cider-cli item action-ledger list --action record_ping_surface --json",
+            ],
+            "safeNextCommands": [
+                "cider-cli item reminder-ping-import-ack --file <transport-transcript.jsonl> --json",
+                "cider-cli item reminder-ping-dry-run --json",
+            ],
+        ]
+    }
+
+    static func reminderPingImportAckCounts(_ rows: [[String: Any]]) -> [String: Int] {
+        var counts = ["changed": 0, "duplicates": 0, "failed": 0, "skipped": 0, "total": rows.count]
+        for row in rows {
+            switch row["status"] as? String {
+            case "changed":
+                counts["changed", default: 0] += 1
+            case "duplicate":
+                counts["duplicates", default: 0] += 1
+            case "skipped":
+                counts["skipped", default: 0] += 1
+            case "failed":
+                counts["failed", default: 0] += 1
+            default:
+                counts["failed", default: 0] += 1
+            }
+        }
+        return counts
+    }
+
+    static func reminderPingImportAckParseRows(_ input: String) -> (rows: [[String: Any]?], format: String) {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return ([nil], "empty") }
+        if let data = trimmed.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) {
+            if let rows = json as? [[String: Any]] {
+                return (rows.map { Optional($0) }, "json")
+            }
+            if let object = json as? [String: Any] {
+                for key in ["rows", "delivered", "envelopes", "items"] {
+                    if let rows = object[key] as? [[String: Any]] {
+                        return (rows.map { Optional($0) }, "json")
+                    }
+                }
+                return ([object], "json")
+            }
+        }
+
+        let rows: [[String: Any]?] = input
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { line in
+                guard let data = line.data(using: .utf8),
+                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    return nil
+                }
+                return object
+            }
+        return (rows.isEmpty ? [nil] : rows, "jsonl")
+    }
+
+    static func reminderPingImportAckProcessRow(
+        _ row: [String: Any]?,
+        command: String,
+        actor: String,
+        limit: Int,
+        staleAfterDays: Int
+    ) -> [String: Any] {
+        guard let row else {
+            return [
+                "status": "failed",
+                "changed": false,
+                "errorCode": "malformed_row",
+                "error": "Row is not a valid JSON object.",
+            ]
+        }
+        let envelope = row["envelope"] as? [String: Any]
+        func value(_ keys: [String]) -> String {
+            for key in keys {
+                if let string = row[key] as? String { return string.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if let string = envelope?[key] as? String { return string.trimmingCharacters(in: .whitespacesAndNewlines) }
+            }
+            return ""
+        }
+
+        let status = value(["status", "deliveryStatus", "state"]).lowercased()
+        if !status.isEmpty && !["delivered", "confirmed", "sent", "ok", "success"].contains(status) {
+            return [
+                "status": "skipped",
+                "changed": false,
+                "reason": "not_delivered",
+                "inputStatus": status,
+            ]
+        }
+
+        let rawType = value(["itemType", "type", "kind", "ownerType"])
+        var rawRef = value(["itemID", "itemId", "id", "ref", "ownerID", "ownerId"])
+        if rawRef.isEmpty {
+            let ownerRef = value(["ownerRef"])
+            if let colon = ownerRef.firstIndex(of: ":") {
+                rawRef = String(ownerRef[ownerRef.index(after: colon)...])
+            }
+        }
+        let transport = value(["transport"])
+        let surface = value(["surface"])
+        let deliveryID = value(["deliveryID", "deliveryId", "messageID", "messageId"])
+        var rowBase: [String: Any] = [
+            "changed": false,
+            "itemType": rawType,
+            "itemID": rawRef,
+            "transport": transport,
+            "surface": surface,
+        ]
+        if !deliveryID.isEmpty { rowBase["deliveryID"] = deliveryID }
+
+        guard !rawType.isEmpty, !rawRef.isEmpty else {
+            rowBase["status"] = "failed"
+            rowBase["errorCode"] = "missing_item_selector"
+            rowBase["error"] = "Row must include itemType and itemID or ownerRef."
+            return rowBase
+        }
+        guard !transport.isEmpty, !surface.isEmpty else {
+            rowBase["status"] = "failed"
+            rowBase["errorCode"] = "missing_transport_or_surface"
+            rowBase["error"] = "Row must include transport and surface."
+            return rowBase
+        }
+
+        do {
+            let type = try ItemLinkService.entityType(from: rawType)
+            guard type == .todo || type == .dateCard else {
+                rowBase["status"] = "failed"
+                rowBase["errorCode"] = "unsupported_item_type"
+                rowBase["error"] = "Unsupported reminder ping item type '\(rawType)'."
+                return rowBase
+            }
+            let ref = try ItemLinkService.shared.resolve(type: type, ref: rawRef)
+            let owner = SecondBrainOwnerRef(ownerType: type.rawValue, ownerID: ref.entityID.uuidString)
+            rowBase["owner"] = ownerToDict(owner)
+            rowBase["ownerRef"] = owner.canonicalRef
+            rowBase["itemID"] = ref.entityID.uuidString
+
+            guard !deliveryID.isEmpty else {
+                rowBase["status"] = "failed"
+                rowBase["errorCode"] = "missing_delivery_id"
+                rowBase["error"] = "deliveryID or messageID is required before recording a ping receipt."
+                return rowBase
+            }
+
+            let preview = try reminderPingDeliveryPreviewPayload(
+                limit: limit,
+                staleAfterDays: staleAfterDays,
+                transport: transport,
+                surface: surface
+            )
+            if let envelope = preview.envelopes.first(where: { $0.owner == owner }) {
+                var payload = pingReceiptRecordPayload(
+                    type: type,
+                    id: ref.entityID,
+                    transport: envelope.transport,
+                    surface: envelope.surface,
+                    deliveryID: deliveryID,
+                    actor: actor
+                )
+                payload["command"] = command
+                payload["truthBoundary"] = "transport_run_import_confirms_delivery_only"
+                payload["transportBoundary"] = "no_send_import_ack_only"
+                payload["sourceEnvelope"] = reminderPingDeliveryEnvelopeToDict(envelope, formatter: ISO8601DateFormatter())
+                persistActionReceiptIfPresent(payload)
+                rowBase["status"] = "changed"
+                rowBase["changed"] = true
+                rowBase["duplicateKey"] = payload["duplicateKey"]
+                rowBase["deliveryDuplicateKey"] = payload["deliveryDuplicateKey"]
+                rowBase["actionReceipt"] = payload["actionReceipt"]
+                return rowBase
+            }
+            if let suppressed = preview.suppressed.first(where: { $0.owner == owner }) {
+                rowBase["status"] = "duplicate"
+                rowBase["changed"] = false
+                rowBase["reason"] = suppressed.reason
+                rowBase["duplicateKey"] = suppressed.duplicateKey
+                rowBase["matchingReceiptID"] = suppressed.matchingReceiptID
+                return rowBase
+            }
+            rowBase["status"] = "skipped"
+            rowBase["reason"] = "no_eligible_reminder_ping_envelope"
+            rowBase["duplicateKey"] = reminderPingDuplicateKey(type: type, id: ref.entityID)
+            return rowBase
+        } catch {
+            rowBase["status"] = "failed"
+            rowBase["errorCode"] = "item_not_found"
+            rowBase["error"] = error.localizedDescription
+            return rowBase
         }
     }
 
