@@ -348,6 +348,28 @@ struct CiderCaptureServiceTests {
             #expect(steamIntent["spaceName"] as? String == "Media")
             #expect(steamIntent["area"] as? String == "Games")
 
+            let socialRestaurant = try service.addBookmarkCapture(
+                urlString: "https://www.tiktok.com/t/ZP8GYjxNA/",
+                title: "Tokuni #Food #Lynnwood #Seattle #Asian #Foodie",
+                folderID: nil,
+                sourceContext: CaptureSourceContext(
+                    surface: "discord",
+                    originalText: "Save this TikTok as a Lynnwood restaurant/place to try: Tokuni, Asian food near Seattle."
+                )
+            ).toDictionary()
+            let socialRestaurantIntent = try #require(socialRestaurant["spaceIntent"] as? [String: Any])
+            #expect(socialRestaurantIntent["spaceName"] as? String == "Food")
+            #expect(socialRestaurantIntent["area"] as? String == "Restaurants")
+            #expect(socialRestaurantIntent["source"] as? String == "capture.intent.social_restaurant_signal")
+            #expect(socialRestaurantIntent["storageDestination"] as? String == "Inbox/Bookmarks")
+            #expect(socialRestaurantIntent["wouldRouteWithoutReview"] as? Bool == false)
+            #expect(socialRestaurantIntent["rootRelativePath"] as? String == "Spaces/Food")
+            #expect(socialRestaurantIntent["spaceName"] as? String != "Recipes")
+            let socialRestaurantSource = try #require(socialRestaurant["source"] as? [String: Any])
+            #expect(socialRestaurantSource["url"] as? String == "https://www.tiktok.com/t/ZP8GYjxNA/")
+            let socialRestaurantRouting = try #require(socialRestaurant["routing"] as? [String: Any])
+            #expect((socialRestaurantRouting["candidateTarget"] as? [String: Any])?["relativePath"] as? String == "Inbox/Bookmarks")
+
             let projectReference = try service.addBookmarkCapture(
                 urlString: "https://x.com/openaidevs/status/2062599291479478275?s=12",
                 title: "OpenAI Developers Codex iOS app loop",

@@ -916,12 +916,7 @@ enum CiderCaptureIntentStagingService {
                 source: "capture.intent.url_provider"
             ))
         } else if host.matchesDomain("tiktok.com") {
-            intents.append(.init(
-                kind: .space(spaceName: "Media", area: "Social Video"),
-                confidence: 0.62,
-                reason: "TikTok URLs are social video references; keep the capture in Inbox for review while preserving the likely media intent.",
-                source: "capture.intent.url_provider"
-            ))
+            intents.append(stagedTikTokIntent(in: text))
         } else if host.matchesDomain("allrecipes.com")
                     || host.matchesDomain("seriouseats.com")
                     || host.matchesDomain("smittenkitchen.com") {
@@ -934,6 +929,40 @@ enum CiderCaptureIntentStagingService {
         }
 
         return intents.isEmpty ? stagedTextIntents(in: text) : intents
+    }
+
+    private static func stagedTikTokIntent(in text: String) -> CiderCaptureResult.StagedIntent {
+        if hasRestaurantPlaceSignals(in: text) {
+            return .init(
+                kind: .space(spaceName: "Food", area: "Restaurants"),
+                confidence: 0.74,
+                reason: "TikTok provider provenance is social video, but the capture text identifies a restaurant or place-to-try; keep the bookmark in Inbox for review while staging the likely restaurant intent.",
+                source: "capture.intent.social_restaurant_signal"
+            )
+        }
+        return .init(
+            kind: .space(spaceName: "Media", area: "Social Video"),
+            confidence: 0.62,
+            reason: "TikTok URLs are social video references; keep the capture in Inbox for review while preserving the likely media intent.",
+            source: "capture.intent.url_provider"
+        )
+    }
+
+    private static func hasRestaurantPlaceSignals(in text: String) -> Bool {
+        let restaurantSignals = [
+            "restaurant", "restaurants", "place to try", "places to try", "food court",
+            "menu", "address", "sushi", "bb.q", "wings", "tokuni", "tengu"
+        ]
+        let localSignals = [
+            "seattle", "lynnwood", "northgate", "wa ", "washington", "h-mart", "h mart"
+        ]
+        let foodSignals = [
+            "#food", "foodie", "asian food", "chicken", "deok-bokki", "corn cheese"
+        ]
+        let hasRestaurant = restaurantSignals.contains { text.contains($0) }
+        let hasLocalPlace = localSignals.contains { text.contains($0) }
+        let hasFoodContext = foodSignals.contains { text.contains($0) }
+        return hasLocalPlace && (hasRestaurant || hasFoodContext)
     }
 
     private static func firstURLString(in text: String) -> String? {
