@@ -10304,12 +10304,14 @@ struct CiderCLI {
                 column.cards.contains { $0.id == card.id }
             }
             storage.moveCard(boardID: board.id, cardID: card.id, toColumnID: destCol.id, toIndex: 0)
+            let refreshedBoard = findBoard(board.id, in: storage) ?? board
+            let refreshedCard = refreshedBoard.card(matching: card.id) ?? card
             if jsonOutput {
                 var dict = boardMutationEnvelope(
                     command: "board.move-card",
                     action: "moved",
-                    board: board,
-                    card: card
+                    board: refreshedBoard,
+                    card: refreshedCard
                 )
                 if let sourceCol {
                     dict["fromColumn"] = boardColumnSummaryToDict(sourceCol)
@@ -10317,7 +10319,7 @@ struct CiderCLI {
                 dict["toColumn"] = boardColumnSummaryToDict(destCol)
                 outputJSON(dict)
             } else {
-                print("Moved '\(card.title)' → \(destCol.name)")
+                print("Moved '\(refreshedCard.title)' → \(destCol.name)")
             }
 
         case "delete-card":
@@ -14659,7 +14661,7 @@ struct CiderCLI {
             guard let board = findBoard(boardRef, in: storage) else { return }
             guard let milestone = resolveMilestone(milestoneRef, in: board) else { return }
             let children = board.childCards(of: milestone.id)
-            printMilestoneResult(boardID: board.id, boardName: board.name, milestone: milestone, children: children, action: "inspected")
+            printMilestoneResult(board: board, milestone: milestone, children: children, action: "inspected")
 
         case "attach-card", "attach":
             guard let boardRef = args.first,
@@ -14768,6 +14770,25 @@ struct CiderCLI {
     }
 
     static func printMilestoneResult(
+        board: KanbanBoard,
+        milestone: KanbanCard,
+        children: [KanbanCard],
+        action: String
+    ) {
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "action": action,
+                "board": ["id": board.id, "name": board.name],
+                "milestone": milestoneToDict(board: board, milestone: milestone),
+                "children": children.map(minimalCardToDict),
+            ])
+        } else {
+            print("\(action.capitalized) milestone: \(milestone.title) [\(milestone.id)] — \(children.count) card(s)")
+        }
+    }
+
+    static func printMilestoneResult(
         boardID: String,
         boardName: String,
         milestone: KanbanCard,
@@ -14789,15 +14810,24 @@ struct CiderCLI {
 
     static func milestoneToDict(board: KanbanBoard, milestone: KanbanCard) -> [String: Any] {
         var dict = milestoneToDict(boardID: board.id, milestone: milestone, children: board.childCards(of: milestone.id))
-        let doneCount = board.columns.reduce(0) { count, column in
-            let children = column.cards.filter { $0.parentCardID == milestone.id }
-            return count + (column.isDoneLikeColumn ? children.count : children.filter { $0.completed != nil }.count)
-        }
-        let childCount = board.childCards(of: milestone.id).count
-        dict["childCount"] = childCount
-        dict["completedChildCount"] = doneCount
-        dict["progressFraction"] = childCount == 0 ? 0 : Double(doneCount) / Double(childCount)
+        let summary = milestoneProgressSummary(board: board, milestoneID: milestone.id)
+        dict["childCount"] = summary.totalCount
+        dict["completedChildCount"] = summary.doneCount
+        dict["progressFraction"] = summary.totalCount == 0 ? 0 : Double(summary.doneCount) / Double(summary.totalCount)
         return dict
+    }
+
+    static func milestoneProgressSummary(board: KanbanBoard, milestoneID: String) -> (totalCount: Int, doneCount: Int) {
+        board.columns.reduce((totalCount: 0, doneCount: 0)) { summary, column in
+            let children = column.cards.filter { $0.parentCardID == milestoneID }
+            let doneChildren = column.isDoneLikeColumn
+                ? children.count
+                : children.filter { $0.completed != nil }.count
+            return (
+                totalCount: summary.totalCount + children.count,
+                doneCount: summary.doneCount + doneChildren
+            )
+        }
     }
 
     static func milestoneToDict(boardID: String, milestone: KanbanCard, children: [KanbanCard]) -> [String: Any] {
@@ -15134,6 +15164,16 @@ struct CiderCLI {
                     if let parentCardID = card.parentCardID,
                        !parentCardID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         parentByCardID[card.id] = parentCardID
+                    }
+                    if column.isDoneLikeColumn && card.completed == nil {
+                        warnings.append(boardAuditFinding(
+                            type: "done_card_missing_completed",
+                            severity: "warning",
+                            board: board,
+                            column: column,
+                            card: card,
+                            message: "Card '\(card.title)' is in done-like column '\(column.name)' without completed metadata. Milestone progress treats done-like placement as complete; repair metadata by moving the card to this done-like column through cider-cli board move-card."
+                        ))
                     }
                 }
             }

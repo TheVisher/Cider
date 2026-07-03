@@ -99,6 +99,7 @@ Examples:
 
 Kanban YAML remains canonical for boards and card notes in this bridge phase. SQLite projections are rebuildable agent/read-model data.
 
+- Kanban completion/progress uses done-like column placement as the canonical done truth. A child card in a Done/Completed/archive-like column counts complete even if old YAML lacks a `completed` date. The `completed` field is supporting timestamp metadata; supported moves into done-like columns should set or repair it, and audits may flag done-like cards that are missing it.
 - Card projection is created or refreshed when Cider writes card notes through `board add-card`, `board update-card`, `board section update`, or `board evidence add`.
 - `item backfill-kanban [--board <name-or-id>]` rebuilds projections from canonical board YAML. Use it after branch changes, restores, manual YAML repair, or when an agent needs current search results before the app has naturally refreshed the board.
 - Card or board deletion removes matching `item_sections` and `content_chunks` projections plus owner-scoped graph sidecars so old card text and stale Kanban owner provenance do not remain searchable/queryable.

@@ -10378,6 +10378,85 @@ struct CiderCLIAgentSafetyTests {
         #expect(deleteBoardPayload["changed"] as? Bool == true)
     }
 
+    @Test("board milestone inspect counts done column children missing completed metadata")
+    func boardMilestoneInspectCountsDoneColumnChildrenMissingCompletedMetadata() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-milestone-done-column-progress-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let create = try runCLI(args: ["board", "create", "Milestone Progress Board", "--json"], vault: vault)
+        let createPayload = try parseJSONObject(create.stdout)
+        let board = try #require(createPayload["board"] as? [String: Any])
+        let boardID = try #require(board["id"] as? String)
+
+        let milestone = try runCLI(args: ["board", "milestone", "create", boardID, "--title", "Progress parity", "--json"], vault: vault)
+        let milestonePayload = try parseJSONObject(milestone.stdout)
+        let milestoneDict = try #require(milestonePayload["milestone"] as? [String: Any])
+        let milestoneID = try #require(milestoneDict["id"] as? String)
+
+        _ = try runCLI(args: ["board", "set-column-done", boardID, "--column", "Done", "--done", "--json"], vault: vault)
+        let addDoneChild = try runCLI(
+            args: ["board", "add-card", boardID, "--column", "Done", "--title", "Done child without metadata", "--parent", milestoneID, "--json"],
+            vault: vault
+        )
+        let addDonePayload = try parseJSONObject(addDoneChild.stdout)
+        let doneChild = try #require(addDonePayload["card"] as? [String: Any])
+        #expect(doneChild["completed"] == nil)
+
+        _ = try runCLI(
+            args: ["board", "add-card", boardID, "--column", "Backlog", "--title", "Queued child", "--parent", milestoneID, "--json"],
+            vault: vault
+        )
+
+        let inspect = try runCLI(args: ["board", "milestone", "inspect", boardID, "--milestone", milestoneID, "--json"], vault: vault)
+        let inspectPayload = try parseJSONObject(inspect.stdout)
+        let inspectedMilestone = try #require(inspectPayload["milestone"] as? [String: Any])
+        #expect(inspect.status == 0)
+        #expect(inspectedMilestone["childCount"] as? Int == 2)
+        #expect(inspectedMilestone["completedChildCount"] as? Int == 1)
+        #expect(inspectedMilestone["progressFraction"] as? Double == 0.5)
+
+        let audit = try runCLI(args: ["board", "audit", "--json"], vault: vault)
+        let auditPayload = try parseJSONObject(audit.stdout)
+        let warnings = try #require(auditPayload["warnings"] as? [[String: Any]])
+        #expect(warnings.contains { warning in
+            warning["type"] as? String == "done_card_missing_completed"
+                && warning["cardTitle"] as? String == "Done child without metadata"
+        })
+    }
+
+    @Test("board move card to done sets completed metadata")
+    func boardMoveCardToDoneSetsCompletedMetadata() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-move-card-done-completed-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let create = try runCLI(args: ["board", "create", "Move Done Board", "--json"], vault: vault)
+        let createPayload = try parseJSONObject(create.stdout)
+        let board = try #require(createPayload["board"] as? [String: Any])
+        let boardID = try #require(board["id"] as? String)
+
+        _ = try runCLI(args: ["board", "set-column-done", boardID, "--column", "Done", "--done", "--json"], vault: vault)
+        let addCard = try runCLI(args: ["board", "add-card", boardID, "--column", "Backlog", "--title", "Move me", "--json"], vault: vault)
+        let addPayload = try parseJSONObject(addCard.stdout)
+        let card = try #require(addPayload["card"] as? [String: Any])
+        let cardID = try #require(card["id"] as? String)
+        #expect(card["completed"] == nil)
+
+        let move = try runCLI(args: ["board", "move-card", boardID, "--card", cardID, "--to", "Done", "--json"], vault: vault)
+        let movePayload = try parseJSONObject(move.stdout)
+        let movedCard = try #require(movePayload["card"] as? [String: Any])
+        #expect(move.status == 0)
+        #expect(movedCard["completed"] as? String != nil)
+
+        let inspect = try runCLI(args: ["board", "card", "inspect", boardID, "--card", cardID, "--json"], vault: vault)
+        let inspectPayload = try parseJSONObject(inspect.stdout)
+        let inspectedCard = try #require(inspectPayload["card"] as? [String: Any])
+        #expect(inspectedCard["completed"] as? String != nil)
+    }
+
     @Test("board read commands return normalized strict process json")
     func boardReadCommandsReturnNormalizedStrictProcessJSON() throws {
         let vault = FileManager.default.temporaryDirectory
