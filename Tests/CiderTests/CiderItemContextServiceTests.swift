@@ -1584,6 +1584,61 @@ struct CiderItemContextServiceTests {
         }
     }
 
+    @Test("file lookup phrases rank exact ADHD Evaluation vault file above noisy recent journal chunks")
+    func fileLookupPhrasesRankExactAdhdEvaluationVaultFileFirst() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let oldDate = Date(timeIntervalSince1970: 1_760_000_000)
+        let recentDate = Date(timeIntervalSince1970: 1_790_000_000)
+        let target = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        let noisyJournal = LibraryEntityRef(type: .note, entityID: UUID())
+
+        try insertItem(
+            target,
+            title: "ADHD Evaluation",
+            relativePath: "Files/Health/ADHD Evaluation.pdf",
+            into: db,
+            createdAt: oldDate,
+            updatedAt: oldDate
+        )
+        try insertItem(
+            noisyJournal,
+            title: "Daily Journal 2026-07-03",
+            relativePath: "Journal/Daily Journal 2026-07-03.md",
+            into: db,
+            createdAt: recentDate,
+            updatedAt: recentDate
+        )
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: noisyJournal.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: noisyJournal.entityID.uuidString,
+                source: "journal",
+                title: "Recent recall scratchpad",
+                body: "Dogfood note: find my ADHD evaluation document was a failed lookup phrase, but this journal is not the file.",
+                chunkIndex: 0
+            )
+        ])
+
+        let service = CiderItemContextService(
+            database: db,
+            secondBrainStore: store,
+            nowProvider: { recentDate }
+        )
+
+        for query in ["ADHD evaluation", "ADHD evaluation form", "find my ADHD evaluation document"] {
+            let results = try service.search(query, limit: 5)
+            let first = try #require(results.first, "Expected a result for \(query)")
+            #expect(first.item?.id == target.entityID, "Expected ADHD Evaluation file first for \(query), got \(first.title)")
+            #expect(first.item?.type == .vaultFile)
+            #expect(first.rankFactors.contains("file_lookup_title_or_filename_match"))
+            #expect(results.firstIndex { $0.item?.id == noisyJournal.entityID }.map { $0 > 0 } ?? true)
+        }
+    }
+
     @Test("item search recency sort preserves relevance default and orders by capture provenance then item timestamps")
     func itemSearchRecencySortPreservesRelevanceDefaultAndOrdersByTemporalMetadata() throws {
         let (db, url) = try makeTestDB()

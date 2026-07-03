@@ -1538,6 +1538,10 @@ final class CiderItemContextService {
             if item.type == .vaultFile {
                 contribution += 28
                 factors.append("type_signal:vaultFile")
+                if fileLookupTitleOrFilenameMatches(item: item, query: originalQuery) {
+                    contribution += 360
+                    factors.append("file_lookup_title_or_filename_match")
+                }
             }
             let memberships = try spaceMembershipStore.memberships(for: LibraryEntityRef(type: item.type, entityID: item.id))
             for membership in memberships {
@@ -1565,8 +1569,9 @@ final class CiderItemContextService {
         let generic: Set<String> = [
             "and", "the", "for", "with", "from", "this", "that",
             "capture", "saved", "item", "social", "video", "media",
-            "file", "document", "doc", "pdf", "movie", "game", "games",
+            "file", "files", "document", "documents", "doc", "docs", "form", "forms", "pdf", "movie", "game", "games",
             "last", "time", "what", "when", "where", "did", "was", "were", "you",
+            "find", "my", "open", "show", "search", "lookup", "look",
             "tiktok", "imdb", "steam", "rottentomatoes", "rotten", "tomatoes",
         ]
         return !generic.contains(token)
@@ -1644,6 +1649,21 @@ final class CiderItemContextService {
         default:
             return ["type_intent_match"]
         }
+    }
+
+    private func fileLookupTitleOrFilenameMatches(item: CiderItemSummary, query: String) -> Bool {
+        guard item.type == .vaultFile else { return false }
+        let queryTokens = orderedUnique(recallTokens(query).map(normalizedRecallToken))
+            .filter(isDistinctiveRecallToken)
+        guard !queryTokens.isEmpty else { return false }
+
+        let titleAndFilename = [
+            item.title,
+            item.relativePath.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent } ?? "",
+        ].joined(separator: " ")
+        let titleTokens = Set(recallTokens(titleAndFilename).map(normalizedRecallToken))
+        guard !titleTokens.isEmpty else { return false }
+        return queryTokens.allSatisfy(titleTokens.contains)
     }
 
     private func lifeMemoryTypeIntent(in query: String) -> LifeMemoryTypeIntent? {
