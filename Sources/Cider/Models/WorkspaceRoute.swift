@@ -769,6 +769,9 @@ enum WorkspaceRouteSidebarProjection {
 
 enum WorkspaceRouterCompatibility {
     static func route(from state: WorkspaceRouterCompatibilityState) -> WorkspaceRoute {
+        if isGlobalHomeSelection(state) {
+            return .home
+        }
         if let tagID = state.selectedTagIDs.first {
             return .library(.tag(tagID))
         }
@@ -790,6 +793,13 @@ enum WorkspaceRouterCompatibility {
             routeKind: state.selectedDomainRouteKind,
             selectedProjectWorkspaceID: state.selectedProjectWorkspaceID
         )
+    }
+
+    private static func isGlobalHomeSelection(_ state: WorkspaceRouterCompatibilityState) -> Bool {
+        if case .domainDashboard(.mainDashboard) = state.legacyTab {
+            return true
+        }
+        return state.legacyTab == nil && state.selectedNavigationDomain == nil
     }
 
     private static func route(from tab: CiderTab) -> WorkspaceRoute? {

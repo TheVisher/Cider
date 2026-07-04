@@ -64,6 +64,49 @@ final class WorkspaceRouterCompatibilityTests: XCTestCase {
         }
     }
 
+    func testCompatibilityPrioritizesAllCiderHomeOverStaleDomainState() {
+        let folderID = UUID()
+        let tagID = UUID()
+
+        let staleStates: [WorkspaceRouterCompatibilityState] = [
+            WorkspaceRouterCompatibilityState(
+                legacyTab: .domainDashboard(.mainDashboard),
+                selectedNavigationDomain: .browse,
+                selectedDomainRouteKind: .bookmarks,
+                selectedFolderID: folderID,
+                selectedTagIDs: [tagID],
+                selectedProjectWorkspaceID: "cider"
+            ),
+            WorkspaceRouterCompatibilityState(
+                legacyTab: .domainDashboard(.mainDashboard),
+                selectedNavigationDomain: .projects,
+                selectedDomainRouteKind: .all,
+                selectedProjectWorkspaceID: "browse-all-boards"
+            ),
+            WorkspaceRouterCompatibilityState(
+                legacyTab: .domainDashboard(.mainDashboard),
+                selectedNavigationDomain: .aiAssistant,
+                selectedDomainRouteKind: .chats,
+                selectedProjectWorkspaceID: "cider"
+            ),
+            WorkspaceRouterCompatibilityState(
+                selectedNavigationDomain: nil,
+                selectedDomainRouteKind: .bookmarks,
+                selectedFolderID: folderID,
+                selectedTagIDs: [tagID],
+                selectedProjectWorkspaceID: "browse-all-boards"
+            ),
+        ]
+
+        for state in staleStates {
+            XCTAssertEqual(
+                WorkspaceRouterCompatibility.route(from: state),
+                .home,
+                "All Cider/Home must be a real global route, not stale domain content for \(state)"
+            )
+        }
+    }
+
     func testCompatibilityMapsProjectAndBrowseAllBoardsStateWithoutSelectedTab() {
         XCTAssertEqual(
             WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(

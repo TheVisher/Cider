@@ -163,6 +163,74 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
         XCTAssertTrue(result.projectBoardInspectorVisible)
     }
 
+    func testAllCiderHomeRouteClearsStaleDomainCompanionState() {
+        let folderID = UUID()
+        let tagID = UUID()
+        let selectedItemID = UUID().uuidString
+        let staleState = WorkspaceRouteCompanionState(
+            selectedFolderID: folderID,
+            selectedTagIDs: [tagID],
+            selectedItemIDs: [selectedItemID],
+            focusedItemID: selectedItemID,
+            selectionAnchorID: selectedItemID,
+            sidebarSearchText: "bookmarks",
+            debouncedSearchText: "bookmarks",
+            hasOpenDetail: true,
+            hasAIAssistantContext: true,
+            displayMode: .grid,
+            cardSizeScale: 1.2,
+            projectBoardInspectorVisible: true
+        )
+        let previousRoutes: [WorkspaceRoute] = [
+            .projects(.workspace(projectID: "cider", section: .assets)),
+            .projects(.workspace(projectID: "cider", section: .board(boardID: "2afee0", milestoneCardID: nil))),
+            .library(.search("bookmarks")),
+            .ai,
+            .projects(.browseAllBoards(section: .board(boardID: "2afee0", milestoneCardID: nil))),
+        ]
+
+        for route in previousRoutes {
+            let result = WorkspaceRouteTransitionPolicy.state(
+                afterNavigatingFrom: route,
+                to: .home,
+                current: staleState
+            )
+
+            XCTAssertNil(result.selectedFolderID, "\(route)")
+            XCTAssertTrue(result.selectedTagIDs.isEmpty, "\(route)")
+            XCTAssertTrue(result.selectedItemIDs.isEmpty, "\(route)")
+            XCTAssertNil(result.focusedItemID, "\(route)")
+            XCTAssertNil(result.selectionAnchorID, "\(route)")
+            XCTAssertEqual(result.sidebarSearchText, "", "\(route)")
+            XCTAssertEqual(result.debouncedSearchText, "", "\(route)")
+            XCTAssertFalse(result.hasOpenDetail, "\(route)")
+            XCTAssertFalse(result.hasAIAssistantContext, "\(route)")
+            XCTAssertEqual(result.displayMode, .grid, "\(route)")
+            XCTAssertEqual(result.cardSizeScale, 1.2, "\(route)")
+            XCTAssertTrue(result.projectBoardInspectorVisible, "\(route)")
+        }
+    }
+
+    func testAllCiderHomePresentationKeepsChromeSidebarAndContentCoherent() {
+        let presentation = WorkspaceRoutePresentation.presentation(for: .home)
+        let sidebar = WorkspaceRouteSidebarProjection.state(for: .home)
+        let chrome = WorkspaceRouteChromePolicy.chrome(for: .home)
+
+        XCTAssertNil(presentation.sidebarDomain)
+        XCTAssertEqual(presentation.title, "Home")
+        XCTAssertEqual(presentation.contentKind, .home)
+        XCTAssertEqual(presentation.visibleItemScope, .none)
+        XCTAssertFalse(presentation.showsLibraryViewOptions)
+        XCTAssertNil(presentation.selectedProjectLocalTabKind)
+        XCTAssertNil(sidebar.selectedNavigationDomain)
+        XCTAssertNil(sidebar.selectedFolderID)
+        XCTAssertTrue(sidebar.selectedTagIDs.isEmpty)
+        XCTAssertNil(sidebar.selectedProjectWorkspaceID)
+        XCTAssertEqual(chrome.title, "Home")
+        XCTAssertEqual(chrome.subtitle, "Command center and active work")
+        XCTAssertFalse(chrome.showsLibraryViewOptions)
+    }
+
     func testRoutePresentationOwnsVisibleScopeForLibraryRoutes() {
         XCTAssertEqual(
             WorkspaceRoutePresentation.presentation(for: .library(.files)).visibleItemScope,
