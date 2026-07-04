@@ -20075,6 +20075,9 @@ struct CiderCLI {
             "updatedAt": ISO8601DateFormatter().string(from: item.updatedAt),
             "isProjectArtifact": false,
         ]
+        if let displayTitle = itemSearchDisplayTitle(for: item), displayTitle != item.title {
+            dict["displayTitle"] = displayTitle
+        }
         if let relativePath = item.relativePath { dict["relativePath"] = relativePath }
         if let folderID = item.folderID { dict["folderID"] = folderID.uuidString }
         if let projectRelation = ownerRelations.first(where: {
@@ -27908,7 +27911,11 @@ struct CiderCLI {
             "searchScope": result.searchScope.rawValue,
         ]
         if let item = result.item {
+            let displayTitle = itemSearchDisplayTitle(for: item)
             dict["item"] = itemSummaryToDict(item)
+            if let displayTitle, displayTitle != result.title {
+                dict["displayTitle"] = displayTitle
+            }
             dict["itemType"] = item.type.rawValue
             dict["itemID"] = item.id.uuidString
             dict["sourceSelector"] = "\(item.type.rawValue):\(item.id.uuidString)"
@@ -28271,6 +28278,73 @@ struct CiderCLI {
         return ["cider-cli item get \(item.type.rawValue) \(item.id.uuidString) --json"]
     }
 
+    private static func itemSearchDisplayTitle(for item: CiderItemSummary) -> String? {
+        guard item.type == .vaultFile else {
+            return nil
+        }
+        if let file = VaultFileService.shared.file(for: item.id),
+           file.displayTitle != item.title {
+            return file.displayTitle
+        }
+        return humanizedMachineVaultFileTitle(item.title)
+            ?? item.relativePath.flatMap { relativePath in
+                let stem = (URL(fileURLWithPath: relativePath).lastPathComponent as NSString).deletingPathExtension
+                return humanizedMachineVaultFileTitle(stem)
+            }
+    }
+
+    private static func humanizedMachineVaultFileTitle(_ rawTitle: String) -> String? {
+        let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let separators = CharacterSet(charactersIn: "_- .")
+        let rawTokens = trimmed
+            .components(separatedBy: separators)
+            .map { $0.trimmingCharacters(in: CharacterSet.alphanumerics.inverted).lowercased() }
+            .filter { !$0.isEmpty }
+        guard rawTokens.count >= 3 else { return nil }
+
+        let genericPrefixes: Set<String> = ["doc", "document", "file", "scan", "pdf", "img", "image"]
+        var tokens = rawTokens
+        var removedMachineToken = false
+        if let first = tokens.first, genericPrefixes.contains(first) {
+            tokens.removeFirst()
+            removedMachineToken = true
+        }
+        while let first = tokens.first, isMachineIdentifierToken(first) {
+            tokens.removeFirst()
+            removedMachineToken = true
+        }
+        guard removedMachineToken, !tokens.isEmpty else { return nil }
+
+        let words = tokens.map(humanizedVaultFileWord)
+        let title = words.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title != trimmed else { return nil }
+        return title
+    }
+
+    private static func isMachineIdentifierToken(_ token: String) -> Bool {
+        guard token.count >= 6 else { return false }
+        return token.unicodeScalars.allSatisfy { scalar in
+            CharacterSet(charactersIn: "0123456789abcdef").contains(scalar)
+        }
+    }
+
+    private static func humanizedVaultFileWord(_ token: String) -> String {
+        let acronyms: [String: String] = [
+            "adhd": "ADHD",
+            "ai": "AI",
+            "api": "API",
+            "cli": "CLI",
+            "docx": "DOCX",
+            "ocr": "OCR",
+            "pdf": "PDF",
+            "qa": "QA",
+            "ui": "UI",
+        ]
+        if let acronym = acronyms[token] { return acronym }
+        return token.prefix(1).uppercased() + token.dropFirst()
+    }
+
     private static func itemSearchTemporalMetadata(_ result: CiderItemSearchResult) -> [String: Any] {
         let formatter = ISO8601DateFormatter()
         if let capturedAt = result.captureProvenance.map(\.createdAt).max() {
@@ -28316,10 +28390,14 @@ struct CiderCLI {
             "evidenceSummary": boundedItemSearchEvidenceExcerpt(result.snippet),
         ]
         if let item = result.item {
+            let displayTitle = itemSearchDisplayTitle(for: item)
             dict["sourceRef"] = "\(item.type.rawValue):\(item.id.uuidString)"
             dict["sourceType"] = item.type.rawValue
             dict["sourceID"] = item.id.uuidString
-            dict["sourceTitle"] = item.title
+            dict["sourceTitle"] = displayTitle ?? item.title
+            if let displayTitle, displayTitle != item.title {
+                dict["displayTitle"] = displayTitle
+            }
             if let relativePath = item.relativePath {
                 dict["sourceLocation"] = relativePath
                 dict["vaultRelativePath"] = relativePath

@@ -1359,6 +1359,71 @@ struct CiderItemContextServiceTests {
         #expect((dict["safeNextCommands"] as? [String])?.contains("cider-cli item context note \(noteID.uuidString) --json") == true)
     }
 
+    @Test("vault file search JSON exposes human display title when shared item title is raw filename")
+    func vaultFileSearchJSONExposesHumanDisplayTitleForRawFilenameRows() throws {
+        let fileID = UUID()
+        let created = Date(timeIntervalSince1970: 1_788_000_000)
+        let updated = Date(timeIntervalSince1970: 1_788_003_600)
+        let rawTitle = "doc_ebb7e75ccbf0_adhd_evaluation"
+        let relativePath = "Inbox/Files/doc_ebb7e75ccbf0_adhd_evaluation.docx"
+        let previousFiles = VaultFileService.shared.files
+        defer {
+            VaultFileService.shared._setFilesForTesting(previousFiles)
+        }
+
+        VaultFileService.shared._setFilesForTesting([
+            VaultFile(
+                id: fileID,
+                filename: "doc_ebb7e75ccbf0_adhd_evaluation.docx",
+                relativePath: relativePath,
+                fileType: .document,
+                fileSize: 42,
+                createdAt: created,
+                modifiedAt: updated,
+                folderID: nil
+            )
+        ])
+
+        let result = CiderItemSearchResult(
+            id: "item-\(fileID.uuidString)",
+            kind: .item,
+            owner: SecondBrainOwnerRef(ownerType: "vaultFile", ownerID: fileID.uuidString),
+            item: CiderItemSummary(
+                id: fileID,
+                type: .vaultFile,
+                title: rawTitle,
+                relativePath: relativePath,
+                folderID: nil,
+                createdAt: created,
+                updatedAt: updated
+            ),
+            title: rawTitle,
+            snippet: relativePath,
+            rank: 1_500,
+            rankFactors: [
+                "type_signal:vaultFile",
+                "file_lookup_title_or_filename_match",
+            ]
+        )
+
+        let dict = CiderCLI.itemSearchResultToDict(result)
+
+        #expect(dict["title"] as? String == rawTitle)
+        #expect(dict["displayTitle"] as? String == "ADHD Evaluation")
+        #expect((dict["item"] as? [String: Any])?["title"] as? String == rawTitle)
+        #expect((dict["item"] as? [String: Any])?["displayTitle"] as? String == "ADHD Evaluation")
+        #expect(dict["sourceSelector"] as? String == "vaultFile:\(fileID.uuidString)")
+        #expect(dict["itemType"] as? String == "vaultFile")
+        #expect(dict["itemID"] as? String == fileID.uuidString)
+        #expect(dict["safeContextCommand"] as? String == "cider-cli item context vaultFile \(fileID.uuidString) --json")
+        #expect(dict["safeVerificationCommands"] as? [String] == [
+            "cider-cli item get vaultFile \(fileID.uuidString) --json",
+        ])
+        let provenance = try #require(dict["provenance"] as? [String: Any])
+        #expect(provenance["sourceTitle"] as? String == "ADHD Evaluation")
+        #expect(provenance["sourceLocation"] as? String == relativePath)
+    }
+
     @Test("scoped item search JSON wrapper includes read only action receipt")
     func scopedItemSearchJSONWrapperIncludesReadOnlyActionReceipt() throws {
         let noteID = UUID()
@@ -1736,6 +1801,81 @@ struct CiderItemContextServiceTests {
             #expect(first.rankFactors.contains("file_lookup_title_or_filename_match"))
             #expect(results.firstIndex { $0.item?.id == noisyJournal.entityID }.map { $0 > 0 } ?? true)
         }
+    }
+
+    @Test("file lookup phrase exposes friendly title for raw filename vault file winner")
+    func fileLookupPhraseExposesFriendlyTitleForRawFilenameVaultFileWinner() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let oldDate = Date(timeIntervalSince1970: 1_760_000_000)
+        let recentDate = Date(timeIntervalSince1970: 1_790_000_000)
+        let rawFilenameTarget = LibraryEntityRef(type: .vaultFile, entityID: UUID())
+        let noisyJournal = LibraryEntityRef(type: .note, entityID: UUID())
+        let previousFiles = VaultFileService.shared.files
+        defer {
+            VaultFileService.shared._setFilesForTesting(previousFiles)
+        }
+
+        try insertItem(
+            rawFilenameTarget,
+            title: "doc_ebb7e75ccbf0_adhd_evaluation",
+            relativePath: "Inbox/Files/doc_ebb7e75ccbf0_adhd_evaluation.docx",
+            into: db,
+            createdAt: oldDate,
+            updatedAt: oldDate
+        )
+        try insertItem(
+            noisyJournal,
+            title: "Daily Journal 2026-07-03",
+            relativePath: "Journal/Daily Journal 2026-07-03.md",
+            into: db,
+            createdAt: recentDate,
+            updatedAt: recentDate
+        )
+        VaultFileService.shared._setFilesForTesting([
+            VaultFile(
+                id: rawFilenameTarget.entityID,
+                filename: "doc_ebb7e75ccbf0_adhd_evaluation.docx",
+                relativePath: "Inbox/Files/doc_ebb7e75ccbf0_adhd_evaluation.docx",
+                fileType: .document,
+                fileSize: 42,
+                createdAt: oldDate,
+                modifiedAt: oldDate,
+                folderID: nil
+            )
+        ])
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: noisyJournal.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: noisyJournal.entityID.uuidString,
+                source: "journal",
+                title: "Recent recall scratchpad",
+                body: "Dogfood note: where is my ADHD evaluation form was a failed lookup phrase, but this journal is not the file.",
+                chunkIndex: 0
+            )
+        ])
+
+        let service = CiderItemContextService(
+            database: db,
+            secondBrainStore: store,
+            nowProvider: { recentDate }
+        )
+
+        let dogfoodResults = try service.search("where is my ADHD evaluation form", limit: 5)
+        let dogfoodFirst = try #require(dogfoodResults.first)
+        #expect(dogfoodFirst.item?.id == rawFilenameTarget.entityID)
+        #expect(dogfoodFirst.rankFactors.contains("file_lookup_title_or_filename_match"))
+        let dogfoodDict = CiderCLI.itemSearchResultToDict(dogfoodFirst)
+        #expect(dogfoodDict["title"] as? String == "doc_ebb7e75ccbf0_adhd_evaluation")
+        #expect(dogfoodDict["displayTitle"] as? String == "ADHD Evaluation")
+        #expect(dogfoodDict["sourceSelector"] as? String == "vaultFile:\(rawFilenameTarget.entityID.uuidString)")
+        #expect(dogfoodDict["safeContextCommand"] as? String == "cider-cli item context vaultFile \(rawFilenameTarget.entityID.uuidString) --json")
+        #expect(dogfoodDict["safeVerificationCommands"] as? [String] == [
+            "cider-cli item get vaultFile \(rawFilenameTarget.entityID.uuidString) --json",
+        ])
     }
 
     @Test("item search recency sort preserves relevance default and orders by capture provenance then item timestamps")
