@@ -9924,6 +9924,54 @@ struct CiderCLIAgentSafetyTests {
         let routing = try #require(payload["routing"] as? [String: Any])
         #expect(routing["status"] as? String == "recorded")
         #expect(routing["statusReason"] == nil)
+        #expect(routing["reviewNeeded"] as? Bool == false)
+        #expect(routing["reviewState"] as? String == "accepted")
+        let routingReadiness = try #require(payload["routingReadiness"] as? [String: Any])
+        #expect(routingReadiness["status"] as? String == "ready")
+        #expect(routingReadiness["routeReviewNeeded"] as? Bool == false)
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        let itemID = try #require(item["id"] as? String)
+        #expect(safeNextCommands.first == "cider-cli item get note \(itemID) --json")
+        #expect(!safeNextCommands.contains("cider-cli routing explain \(itemID) --json"))
+        #expect(!safeNextCommands.contains("cider-cli review list --item-type note --state needs_review --limit 10 --json"))
+        #expect(payload["readOnly"] as? Bool == false)
+        #expect(payload["changed"] as? Bool == true)
+    }
+
+    @Test("plain note capture without folder is quiet when filed in Inbox Notes")
+    func plainNoteCaptureWithoutFolderIsQuietWhenFiledInInboxNotes() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-capture-plain-note-quiet-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "note",
+                "Plain note safe-command contract",
+                "--json",
+            ],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        let item = try #require(payload["item"] as? [String: Any])
+        let itemID = try #require(item["id"] as? String)
+        #expect(item["type"] as? String == "note")
+        #expect((item["relativePath"] as? String)?.hasPrefix("Inbox/Notes/") == true)
+        let routing = try #require(payload["routing"] as? [String: Any])
+        #expect(routing["status"] as? String == "recorded")
+        #expect(routing["reviewNeeded"] as? Bool == false)
+        #expect(routing["reviewState"] as? String == "accepted")
+        let routingReadiness = try #require(payload["routingReadiness"] as? [String: Any])
+        #expect(routingReadiness["status"] as? String == "ready")
+        #expect(routingReadiness["routeReviewNeeded"] as? Bool == false)
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands == ["cider-cli item get note \(itemID) --json"])
+        #expect(payload["readOnly"] as? Bool == false)
+        #expect(payload["changed"] as? Bool == true)
     }
 
     @Test("item move path rejects filename shaped target folders")

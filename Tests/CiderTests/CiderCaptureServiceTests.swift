@@ -1261,9 +1261,19 @@ struct CiderCaptureServiceTests {
             #expect(result.item.relativePath?.hasPrefix("Inbox/Notes/") == true)
             #expect(result.enrichment.status == "not_applicable")
             #expect(result.duplicate.status == "not_checked")
-            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.reviewNeeded == false)
+            #expect(result.routing.reviewState == "accepted")
+            #expect(result.routing.status == "recorded")
             #expect(result.routing.candidateTarget?.relativePath == "Inbox/Notes")
             #expect(result.nextSafeAction == "inspect_item")
+            let dict = result.toDictionary()
+            let routingReadiness = try #require(dict["routingReadiness"] as? [String: Any])
+            let blockingIssues = try #require(dict["blockingIssues"] as? [String])
+            #expect(dict["readOnly"] as? Bool == false)
+            #expect(dict["changed"] as? Bool == true)
+            #expect(routingReadiness["status"] as? String == "ready")
+            #expect(routingReadiness["routeReviewNeeded"] as? Bool == false)
+            #expect(blockingIssues.contains("routing_needs_review") == false)
             try expectQuietCaptureSafeCommands(for: result)
 
             let storedNote = notes.notes.first(where: { $0.id == result.item.id })
@@ -1272,7 +1282,7 @@ struct CiderCaptureServiceTests {
 
             let explanation = try routing.explain(itemID: result.item.id)
             #expect(explanation.item.type == "note")
-            #expect(explanation.latestDecision?.reviewState == "needs_review")
+            #expect(explanation.latestDecision?.reviewState == "accepted")
             #expect(explanation.latestDecision?.target.relativePath == "Inbox/Notes")
         }
     }

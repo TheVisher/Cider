@@ -293,6 +293,8 @@ struct CiderCaptureResult {
 
         var dict: [String: Any] = [
             "command": command,
+            "readOnly": false,
+            "changed": true,
             "source": sourceDict,
             "item": itemDict,
             "enrichment": enrichmentDict,
@@ -1475,9 +1477,11 @@ final class CiderCaptureService {
             itemID: stored.id,
             itemType: "note",
             target: target,
-            reviewNeeded: stored.folderID == nil,
-            acceptedReason: "Capture used the supplied deterministic target.",
-            reviewReason: "Cider captured text as a note and kept it in Inbox/Notes for review."
+            reviewNeeded: folderID != nil && stored.folderID == nil,
+            acceptedReason: folderID == nil
+                ? "No deterministic destination was supplied; Cider stored the note in Inbox/Notes as neutral staging."
+                : "Capture used the supplied deterministic target.",
+            reviewReason: "The requested deterministic note destination could not be applied, so Cider kept the capture in Inbox/Notes for review."
         )
 
         return sharedResult(
