@@ -4999,6 +4999,59 @@ struct CiderCLIAgentSafetyTests {
         #expect(!safeCommands.contains("cider-cli review enrich \(bookmarkID) --actor agent --timeout 20 --json"))
     }
 
+    @Test("item get explains route review when bookmark card quality is current")
+    func itemGetExplainsRouteReviewWhenBookmarkCardQualityIsCurrent() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-social-route-review-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["db", "integrity", "--json"], vault: vault)
+        let bookmarkID = "9E4893B3-B845-4FE9-816C-A9F39990D04B"
+        try seedRichRemoteOnlyBookmark(
+            bookmarkID: bookmarkID,
+            vault: vault,
+            title: "Codex skill update",
+            urlString: "https://x.com/codex/status/123",
+            notes: "Rich X capture with Codex skill context.",
+            aiSummary: "Codex skill social bookmark.",
+            mediaType: "post",
+            thumbnailRemoteURLString: "https://example.invalid/codex-skill.png"
+        )
+        let thumbnailURL = vault
+            .appendingPathComponent(".cider/bookmarks/.thumbnails/\(bookmarkID).png")
+        try FileManager.default.createDirectory(
+            at: thumbnailURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("localized codex thumbnail".utf8).write(to: thumbnailURL)
+        try recordNeedsReviewRoute(bookmarkID: bookmarkID, vault: vault)
+
+        let getResult = try runCLI(
+            args: ["item", "get", "bookmark", bookmarkID, "--json"],
+            vault: vault,
+            environment: ["CIDER_DISABLE_BOOKMARK_ENRICHMENT": "1"]
+        )
+        let payload = try parseJSONObject(getResult.stdout)
+        let quality = try #require(payload["captureQuality"] as? [String: Any])
+        let routingReadiness = try #require(quality["routingReadiness"] as? [String: Any])
+        let topRoutingReadiness = try #require(payload["routingReadiness"] as? [String: Any])
+        let blockingIssues = try #require(payload["blockingIssues"] as? [String])
+        let safeCommands = try #require(payload["safeNextCommands"] as? [String])
+
+        #expect(quality["thumbnailStatus"] as? String == "local")
+        #expect(quality["visibleCardCurrent"] as? Bool == true)
+        #expect(routingReadiness["status"] as? String == "needs_review")
+        #expect(routingReadiness["routeReviewNeeded"] as? Bool == true)
+        #expect(routingReadiness["agentMayRoute"] as? Bool == false)
+        #expect(topRoutingReadiness["status"] as? String == "needs_review")
+        #expect(payload["useful"] as? Bool == false)
+        #expect(payload["recommendedNextAction"] as? String == "review_route")
+        #expect(blockingIssues == ["routing_needs_review"])
+        #expect(safeCommands.contains("cider-cli routing explain \(bookmarkID) --json"))
+        #expect(safeCommands.contains("cider-cli review list --item-type bookmark --state needs_review --limit 10 --json"))
+    }
+
     @Test("item thumbnail plan explains remote-only social bookmark without creating local thumbnail")
     func itemThumbnailPlanExplainsRemoteOnlySocialBookmarkWithoutCreatingLocalThumbnail() throws {
         let vault = FileManager.default.temporaryDirectory
@@ -10994,6 +11047,28 @@ struct CiderCLIAgentSafetyTests {
         let bookmarkAssets = vault.appendingPathComponent(".cider/bookmarks")
         try? FileManager.default.removeItem(at: bookmarkAssets.appendingPathComponent(".thumbnails"))
         try? FileManager.default.removeItem(at: bookmarkAssets.appendingPathComponent(".originals"))
+    }
+
+    private func recordNeedsReviewRoute(bookmarkID: String, vault: URL) throws {
+        let db = CiderDatabase()
+        try db.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { db.close() }
+
+        try SecondBrainStore(database: db).recordRoutingDecision(
+            SecondBrainRoutingDecision(
+                owner: SecondBrainOwnerRef(ownerType: "bookmark", ownerID: bookmarkID),
+                itemID: bookmarkID,
+                targetType: "folder",
+                targetID: nil,
+                targetPath: "Inbox/Bookmarks",
+                confidence: 0.0,
+                reason: "Route review remains required after visible card quality is current.",
+                status: "needs_review",
+                actor: "agent",
+                source: "test.fixture",
+                candidatesJSON: nil
+            )
+        )
     }
 
     private func insertFolderRow(relativePath: String, vault: URL) throws {

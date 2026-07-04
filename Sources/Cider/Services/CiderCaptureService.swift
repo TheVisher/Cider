@@ -303,7 +303,10 @@ struct CiderCaptureResult {
             "nextSafeAction": nextSafeAction,
             "safeNextCommands": safeNextCommands(),
         ]
-        if let captureQuality {
+        let routingReadiness = routingReadinessDictionary()
+        dict["routingReadiness"] = routingReadiness
+        if var captureQuality {
+            captureQuality["routingReadiness"] = routingReadiness
             dict["captureQuality"] = captureQuality
         }
         addStagedIntentDictionaries(to: &dict)
@@ -360,6 +363,44 @@ struct CiderCaptureResult {
         }
     }
 
+    private func routingReadinessDictionary() -> [String: Any] {
+        let routeReviewNeeded = routing.reviewNeeded || routing.reviewState == "needs_review"
+        var dict: [String: Any] = [
+            "status": routeReviewNeeded ? "needs_review" : "ready",
+            "routeReviewNeeded": routeReviewNeeded,
+            "agentMayRoute": false,
+            "safeNextAction": routeReviewNeeded ? "review_route" : "inspect_item",
+            "truthBoundary": "read_only_routing_readiness_no_route_mutation_or_auto_acceptance",
+            "safeVerificationCommands": [
+                "cider-cli item get \(item.type) \(item.id.uuidString) --json",
+                "cider-cli routing explain \(item.id.uuidString) --json",
+            ],
+            "safeNextCommands": routeReviewNeeded
+                ? [
+                    "cider-cli routing explain \(item.id.uuidString) --json",
+                    "cider-cli review list --item-type \(item.type) --state needs_review --limit 10 --json",
+                ]
+                : [
+                    "cider-cli item get \(item.type) \(item.id.uuidString) --json",
+                ],
+        ]
+        if let target = routing.candidateTarget {
+            var targetDict: [String: Any] = [
+                "kind": target.kind,
+                "name": target.name,
+                "relativePath": target.relativePath,
+            ]
+            if let folderID = target.folderID {
+                targetDict["folderID"] = folderID.uuidString
+            }
+            dict["candidateTarget"] = targetDict
+        }
+        dict["reviewState"] = routing.reviewState
+        dict["confidence"] = routing.confidence
+        dict["reason"] = routing.reason
+        return dict
+    }
+
     private func agentDecisionDictionary() -> [String: Any] {
         let safeCommands = safeNextCommands()
         let qualityNeedsEnrichment = captureQuality?["needsEnrichment"] as? Bool ?? false
@@ -395,9 +436,16 @@ struct CiderCaptureResult {
             blockingIssues.append("canonical_side_effects_incomplete")
         }
         blockingIssues.append(contentsOf: qualityBlockingIssues)
-        let recommendedNextAction = needsIntentApproval
-            ? "review_intent"
-            : (qualityRecommendedAction ?? (routingNeedsReview ? "review_route" : nextSafeAction))
+        let recommendedNextAction: String
+        if needsIntentApproval {
+            recommendedNextAction = "review_intent"
+        } else if qualityNeedsReview {
+            recommendedNextAction = qualityRecommendedAction ?? nextSafeAction
+        } else if routingNeedsReview {
+            recommendedNextAction = "review_route"
+        } else {
+            recommendedNextAction = qualityRecommendedAction ?? nextSafeAction
+        }
         var dict = CiderAgentDecisionContract.dictionary(
             saved: true,
             needsReview: needsReview,
@@ -428,7 +476,7 @@ struct CiderCaptureResult {
         if stagedIntents.contains(where: { $0.isProjectIntent }) {
             commands.append("cider-cli item apply-intent \(item.type) \(item.id.uuidString) --intent project --json")
         }
-        if routing.needsAgentRouteReview {
+        if routing.reviewNeeded || routing.needsAgentRouteReview {
             commands.append("cider-cli routing explain \(item.id.uuidString) --json")
             commands.append("cider-cli review list --item-type \(item.type) --state needs_review --limit 10 --json")
         }
@@ -487,7 +535,6 @@ struct CiderCaptureResult {
         )
 
         var dict = finalResult.toDictionary()
-        dict["captureQuality"] = captureQuality
         if captureQuality["degraded"] as? Bool == true {
             let repairCommands = Self.bookmarkCaptureRepairCommands(for: finalBookmark)
             var commands = (dict["safeNextCommands"] as? [String]) ?? []

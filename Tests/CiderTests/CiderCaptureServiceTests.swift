@@ -878,6 +878,70 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("capture result explains routing readiness when visible bookmark quality is current")
+    func captureResultExplainsRoutingReadinessWhenVisibleBookmarkQualityIsCurrent() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
+            )
+
+            let result = try service.addBookmarkCapture(
+                urlString: "https://x.com/codex/status/123",
+                title: "Codex skill update",
+                folderID: UUID()
+            )
+            let canonicalThumbnailURL = StoragePaths.cachedDirectoryURL(for: .bookmarks)
+                .appendingPathComponent(".thumbnails/\(result.item.id.uuidString).png")
+            try FileManager.default.createDirectory(
+                at: canonicalThumbnailURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data("canonical x thumbnail".utf8).write(to: canonicalThumbnailURL)
+
+            let enrichedAt = Date(timeIntervalSince1970: 1_775_000_000)
+            let finalBookmark = Bookmark(
+                id: result.item.id,
+                title: "Codex skill update",
+                urlString: "https://x.com/codex/status/123",
+                createdAt: Date(timeIntervalSince1970: 1_774_999_000),
+                updatedAt: Date(timeIntervalSince1970: 1_774_999_500),
+                thumbnailRemoteURLString: "https://example.com/codex-skill.png",
+                metadataUpdatedAt: enrichedAt,
+                relativePath: "Inbox/Bookmarks/Codex skill update.webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: enrichedAt
+            )
+            var reviewResult = result
+            reviewResult.routing.reviewNeeded = true
+            reviewResult.routing.reviewState = "needs_review"
+            reviewResult.routing.confidence = 0.0
+            reviewResult.routing.reason = "Route review remains required after visible card quality is current."
+            let dict = reviewResult.toDictionary(finalBookmark: finalBookmark)
+            let quality = try #require(dict["captureQuality"] as? [String: Any])
+            let routingReadiness = try #require(quality["routingReadiness"] as? [String: Any])
+            let safeNextCommands = try #require(dict["safeNextCommands"] as? [String])
+            let blockingIssues = try #require(dict["blockingIssues"] as? [String])
+
+            #expect(quality["thumbnailStatus"] as? String == "local")
+            #expect(quality["visibleCardCurrent"] as? Bool == true)
+            #expect(quality["degraded"] as? Bool == false)
+            #expect(routingReadiness["status"] as? String == "needs_review")
+            #expect(routingReadiness["routeReviewNeeded"] as? Bool == true)
+            #expect(routingReadiness["agentMayRoute"] as? Bool == false)
+            #expect(routingReadiness["safeNextAction"] as? String == "review_route")
+            #expect(dict["useful"] as? Bool == false)
+            #expect(dict["recommendedNextAction"] as? String == "review_route")
+            #expect(blockingIssues == ["routing_needs_review"])
+            #expect(safeNextCommands.contains("cider-cli routing explain \(result.item.id.uuidString) --json"))
+            #expect(safeNextCommands.contains("cider-cli review list --item-type bookmark --state needs_review --limit 10 --json"))
+        }
+    }
+
     @Test("capture quality dogfood fixtures cover stale external bookmark receipts")
     func captureQualityDogfoodFixturesCoverStaleExternalBookmarkReceipts() throws {
         struct Fixture {

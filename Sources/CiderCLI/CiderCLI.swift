@@ -27512,11 +27512,15 @@ struct CiderCLI {
         }
         if bundle.item.type == .bookmark,
            let bookmark = bookmarkForCaptureQuality(id: bundle.item.id) {
-            let captureQuality = CiderCaptureResult.bookmarkCaptureQualityDictionary(for: bookmark)
+            var captureQuality = CiderCaptureResult.bookmarkCaptureQualityDictionary(for: bookmark)
+            let routingReadiness = itemRoutingReadinessDictionary(for: bundle)
+            captureQuality["routingReadiness"] = routingReadiness
+            dict["routingReadiness"] = routingReadiness
             dict["captureQuality"] = captureQuality
             dict["bookmark"] = bookmarkToDict(bookmark)
             var safeNextCommands = dict["safeNextCommands"] as? [String] ?? []
             safeNextCommands.append(contentsOf: captureQuality["safeNextCommands"] as? [String] ?? [])
+            safeNextCommands.append(contentsOf: routingReadiness["safeNextCommands"] as? [String] ?? [])
             dict["safeNextCommands"] = orderedUniqueStrings(safeNextCommands)
         }
         dict["actionReceipt"] = readOnlyActionReceiptToDict(
@@ -27528,6 +27532,50 @@ struct CiderCLI {
             ],
             provenanceRefs: [sourceRef]
         )
+        return dict
+    }
+
+    private static func itemRoutingReadinessDictionary(for bundle: CiderItemContextBundle) -> [String: Any] {
+        let latestDecision = bundle.routingDecisions.sorted { lhs, rhs in
+            lhs.createdAt > rhs.createdAt
+        }.first
+        let routeReviewNeeded = latestDecision?.status == "needs_review"
+        let itemType = bundle.item.type.rawValue
+        let itemID = bundle.item.id.uuidString
+        var dict: [String: Any] = [
+            "status": routeReviewNeeded ? "needs_review" : "ready",
+            "routeReviewNeeded": routeReviewNeeded,
+            "agentMayRoute": false,
+            "safeNextAction": routeReviewNeeded ? "review_route" : "inspect_item",
+            "truthBoundary": "read_only_routing_readiness_no_route_mutation_or_auto_acceptance",
+            "safeVerificationCommands": [
+                "cider-cli item get \(itemType) \(itemID) --json",
+                "cider-cli routing explain \(itemID) --json",
+            ],
+            "safeNextCommands": routeReviewNeeded
+                ? [
+                    "cider-cli routing explain \(itemID) --json",
+                    "cider-cli review list --item-type \(itemType) --state needs_review --limit 10 --json",
+                ]
+                : [
+                    "cider-cli item get \(itemType) \(itemID) --json",
+                ],
+        ]
+        if let latestDecision {
+            dict["reviewState"] = latestDecision.status
+            dict["confidence"] = latestDecision.confidence
+            dict["reason"] = latestDecision.reason
+            var target: [String: Any] = [
+                "kind": latestDecision.targetType,
+            ]
+            if let targetID = latestDecision.targetID {
+                target["id"] = targetID
+            }
+            if let targetPath = latestDecision.targetPath {
+                target["relativePath"] = targetPath
+            }
+            dict["candidateTarget"] = target
+        }
         return dict
     }
 
