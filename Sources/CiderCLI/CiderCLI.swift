@@ -7336,7 +7336,24 @@ struct CiderCLI {
                     printCLIError("Folder routes require --target-id <folder-id> or --target-path <folder-path>.")
                     return
                 }
-                switch resolveFolderOwner(ref: folderRef) {
+                if looksLikeVaultArtifactPath(folderRef) {
+                    let parentPath = parentFolderPath(forArtifactPath: folderRef) ?? "<folder-path>"
+                    processExitCode = 1
+                    let payload = folderRouteResolutionFailurePayload(
+                        sourceRef: folderRef,
+                        targetType: normalizedTargetType,
+                        targetPath: targetPath ?? targetID,
+                        error: "`--target-path \(folderRef)` looks like a file path, but this command expects a target folder path. Use `--target-path \(parentPath)` to route to the containing folder.",
+                        matches: []
+                    )
+                    if jsonOutput {
+                        outputJSON(payload)
+                    } else {
+                        print("Error: `--target-path \(folderRef)` looks like a file path.")
+                    }
+                    return
+                }
+                switch resolveObviousFolderDestination(ref: folderRef, createIfKnownAlias: true) {
                 case .folder(let folder):
                     resolvedTargetID = folder.id.uuidString
                     resolvedTargetPath = folder.relativePath
@@ -7353,7 +7370,7 @@ struct CiderCLI {
                         sourceRef: folderRef,
                         targetType: normalizedTargetType,
                         targetPath: targetPath ?? targetID,
-                        error: "No folder found matching '\(folderRef)'.",
+                        error: "No folder found matching '\(folderRef)'. Use an existing folder id/relativePath or one of the supported aliases: Games, Movies, Shows, Recipes.",
                         matches: []
                     )
                     if jsonOutput {
@@ -8044,7 +8061,7 @@ struct CiderCLI {
             if operation["folder"] as? String != nil,
                operation["path"] == nil,
                operation["targetPath"] == nil {
-                switch resolveFolderOwner(ref: path) {
+                switch resolveObviousFolderDestination(ref: path, createIfKnownAlias: true) {
                 case .folder(let resolvedFolder):
                     folder = resolvedFolder
                 case .inbox:
@@ -8093,7 +8110,10 @@ struct CiderCLI {
             var resolvedTargetFolder: VaultFolder?
             if targetType == "folder" {
                 let folderRef = (targetID ?? targetPath ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                switch resolveFolderOwner(ref: folderRef) {
+                if looksLikeVaultArtifactPath(folderRef) {
+                    return ItemBatchOperationPlan(index: index, operationID: operationID, action: action, type: entityType.rawValue, ref: ref, status: "invalid", error: "target_path_must_be_folder_path", itemRef: itemRef, targetType: targetType, targetID: targetID, targetFolder: nil, targetRelativePath: targetPath, reason: reason, routeStatus: routeStatus, applySupported: false)
+                }
+                switch resolveObviousFolderDestination(ref: folderRef, createIfKnownAlias: true) {
                 case .folder(let folder):
                     resolvedTargetID = folder.id.uuidString
                     resolvedTargetPath = folder.relativePath
@@ -17798,6 +17818,17 @@ struct CiderCLI {
         case missing
     }
 
+    static let obviousFolderDestinationAliases: [String: String] = [
+        "games": "Media/Games",
+        "media/games": "Media/Games",
+        "movies": "Media/Movies",
+        "media/movies": "Media/Movies",
+        "shows": "Media/Shows",
+        "media/shows": "Media/Shows",
+        "recipes": "Spaces/Recipes",
+        "spaces/recipes": "Spaces/Recipes",
+    ]
+
     static func itemOpenPayload(
         type rawType: String,
         ref rawRef: String,
@@ -18064,6 +18095,53 @@ struct CiderCLI {
         return .missing
     }
 
+    static func canonicalFolderDestinationAlias(for ref: String) -> String? {
+        let normalized = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !normalized.isEmpty else { return nil }
+        return obviousFolderDestinationAliases[normalized.lowercased()]
+    }
+
+    static func obviousFolderDestinationCandidateDicts() -> [[String: Any]] {
+        let aliasesByPath = obviousFolderDestinationAliases.reduce(into: [String: [String]]()) { partial, pair in
+            partial[pair.value, default: []].append(pair.key)
+        }
+        return aliasesByPath.keys
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            .map { path in
+                [
+                    "relativePath": path,
+                    "aliases": (aliasesByPath[path] ?? []).sorted(),
+                ]
+            }
+    }
+
+    static func resolveObviousFolderDestination(ref: String, createIfKnownAlias: Bool) -> FolderOwnerResolution {
+        let trimmed = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .missing }
+        if looksLikeVaultArtifactPath(trimmed) {
+            return .missing
+        }
+
+        let direct = resolveFolderOwner(ref: trimmed)
+        if case .missing = direct {
+            if let canonical = canonicalFolderDestinationAlias(for: trimmed) {
+                let aliased = resolveFolderOwner(ref: canonical)
+                switch aliased {
+                case .folder, .inbox, .ambiguous:
+                    return aliased
+                case .missing:
+                    guard createIfKnownAlias, let folder = findOrCreateFolderByPath(canonical) else {
+                        return .missing
+                    }
+                    return .folder(folder)
+                }
+            }
+            return .missing
+        }
+        return direct
+    }
+
     static func folderRouteResolutionFailurePayload(
         sourceRef: String,
         targetType: String,
@@ -18085,6 +18163,7 @@ struct CiderCLI {
             "matches": matches
                 .sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
                 .map(folderOwnerMatchDict),
+            "candidateDestinations": obviousFolderDestinationCandidateDicts(),
             "safeNextCommands": [
                 "cider-cli item owner-get folder \"\(sourceRef)\" --json",
                 "cider-cli capture review-queue --json",
@@ -29035,6 +29114,7 @@ struct CiderCLI {
             "matches": matches
                 .sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
                 .map(folderOwnerMatchDict),
+            "candidateDestinations": obviousFolderDestinationCandidateDicts(),
             "safeNextCommands": safeNextCommands,
         ]
         CiderAgentDecisionContract.merge(
@@ -29093,7 +29173,14 @@ struct CiderCLI {
             return .failed
         }
         if let name = parseFlag("--folder", from: args) {
-            switch resolveFolderOwner(ref: name) {
+            if looksLikeVaultArtifactPath(name) {
+                let parentPath = parentFolderPath(forArtifactPath: name) ?? "<folder-path>"
+                printCLIError(
+                    "`--folder \(name)` looks like a file path, but this command expects a target folder path. Use `--folder \(parentPath)` to move into the containing folder."
+                )
+                return .failed
+            }
+            switch resolveObviousFolderDestination(ref: name, createIfKnownAlias: true) {
             case .folder(let folder):
                 return .resolved(folder)
             case .inbox:
@@ -29114,7 +29201,7 @@ struct CiderCLI {
             case .missing:
                 printFolderArgResolutionFailure(
                     ref: name,
-                    error: "No folder found matching '\(name)'. Use --path to create a folder path, or pass an existing folder id/relativePath.",
+                    error: "No folder found matching '\(name)'. Use --path to create a folder path, pass an existing folder id/relativePath, or use one of the supported aliases: Games, Movies, Shows, Recipes.",
                     blockingIssue: "folder_ref_missing"
                 )
                 return .failed

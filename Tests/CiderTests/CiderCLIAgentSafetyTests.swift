@@ -4698,8 +4698,8 @@ struct CiderCLIAgentSafetyTests {
             args: [
                 "item", "route", "note", noteID,
                 "--target-type", "folder",
-                "--target-path", "Media/Movies",
-                "--reason", "Movies should route to Media/Movies.",
+                "--target-path", "Media/Documentaries",
+                "--reason", "Documentaries should route to Media/Documentaries.",
                 "--json",
             ],
             vault: vault
@@ -4710,9 +4710,12 @@ struct CiderCLIAgentSafetyTests {
         #expect(payload["ok"] as? Bool == false)
         #expect(payload["changed"] as? Bool == false)
         #expect(payload["targetType"] as? String == "folder")
-        #expect(payload["targetPath"] as? String == "Media/Movies")
+        #expect(payload["targetPath"] as? String == "Media/Documentaries")
         #expect(payload["recommendedNextAction"] as? String == "review_route")
         #expect((payload["error"] as? String)?.contains("No folder found") == true)
+        let candidateDestinations = try #require(payload["candidateDestinations"] as? [[String: Any]])
+        #expect(candidateDestinations.contains { $0["relativePath"] as? String == "Media/Movies" })
+        #expect(candidateDestinations.contains { $0["relativePath"] as? String == "Media/Games" })
     }
 
     @Test("item route folder name fails closed when folder name is ambiguous")
@@ -9947,6 +9950,117 @@ struct CiderCLIAgentSafetyTests {
         #expect(move["ok"] as? Bool == false)
         #expect((move["error"] as? String)?.contains("looks like a file path") == true)
         #expect((move["error"] as? String)?.contains("--folder Inbox/Bookmarks") == true)
+    }
+
+    @Test("item move resolves obvious media and recipe folder aliases")
+    func itemMoveResolvesObviousMediaAndRecipeFolderAliases() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-folder-alias-move-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let movieID = try createNote(title: "Movie Alias Source", content: "movie", vault: vault)
+        let movieMove = try parseJSONObject(try runCLI(
+            args: ["item", "move", "note", movieID, "--folder", "Media/Movies", "--json"],
+            vault: vault
+        ).stdout)
+        #expect(movieMove["ok"] as? Bool == true)
+        let movieAfter = try #require(movieMove["after"] as? [String: Any])
+        #expect(movieAfter["relativePath"] as? String == "Media/Movies/Movie Alias Source.md")
+
+        let gameID = try createNote(title: "Game Alias Source", content: "game", vault: vault)
+        let gameMove = try parseJSONObject(try runCLI(
+            args: ["item", "move", "note", gameID, "--folder", "Games", "--json"],
+            vault: vault
+        ).stdout)
+        #expect(gameMove["ok"] as? Bool == true)
+        let gameAfter = try #require(gameMove["after"] as? [String: Any])
+        #expect(gameAfter["relativePath"] as? String == "Media/Games/Game Alias Source.md")
+
+        let recipeID = try createNote(title: "Recipe Alias Source", content: "recipe", vault: vault)
+        let recipeMove = try parseJSONObject(try runCLI(
+            args: ["item", "move", "note", recipeID, "--folder", "Recipes", "--json"],
+            vault: vault
+        ).stdout)
+        #expect(recipeMove["ok"] as? Bool == true)
+        let recipeAfter = try #require(recipeMove["after"] as? [String: Any])
+        #expect(recipeAfter["relativePath"] as? String == "Spaces/Recipes/Recipe Alias Source.md")
+    }
+
+    @Test("item route and review correct resolve destination aliases without accepting truth")
+    func itemRouteAndReviewCorrectResolveDestinationAliasesWithoutAcceptingTruth() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-folder-alias-route-review-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let bookmarkCapture = try parseJSONObject(try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "bookmark",
+                "--url", "https://www.imdb.com/title/tt0111161/",
+                "--title", "Movie Alias Bookmark",
+                "--json",
+            ],
+            vault: vault
+        ).stdout)
+        let bookmark = try #require(bookmarkCapture["item"] as? [String: Any])
+        let bookmarkID = try #require(bookmark["id"] as? String)
+
+        let routePayload = try parseJSONObject(try runCLI(
+            args: [
+                "item", "route", "bookmark", bookmarkID,
+                "--target-type", "folder",
+                "--target-path", "Movies",
+                "--reason", "Movie bookmarks belong in Movies.",
+                "--status", "needs_review",
+                "--json",
+            ],
+            vault: vault
+        ).stdout)
+        #expect(routePayload["id"] as? String != nil)
+        #expect(routePayload["targetPath"] as? String == "Media/Movies")
+        #expect(routePayload["status"] as? String == "needs_review")
+
+        let reviewPayload = try parseJSONObject(try runCLI(
+            args: [
+                "review", "correct", bookmarkID,
+                "--folder", "Media/Games",
+                "--reason", "Corrected to game media folder.",
+                "--actor", "agent",
+                "--json",
+            ],
+            vault: vault
+        ).stdout)
+        #expect(reviewPayload["changed"] as? Bool == true)
+        let target = try #require(reviewPayload["target"] as? [String: Any])
+        #expect(target["relativePath"] as? String == "Media/Games")
+
+        let inspected = try parseJSONObject(try runCLI(args: ["item", "get", "bookmark", bookmarkID, "--json"], vault: vault).stdout)
+        let item = try #require(inspected["item"] as? [String: Any])
+        #expect((item["relativePath"] as? String)?.contains(".webloc") == true)
+        #expect((item["relativePath"] as? String)?.hasPrefix("Media/Games/") == true)
+    }
+
+    @Test("item move folder alias rejects webloc shaped destinations without folder creation")
+    func itemMoveFolderAliasRejectsWeblocShapedDestinationsWithoutFolderCreation() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-folder-alias-webloc-guard-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(title: "Webloc Guard Source", content: "body", vault: vault)
+        let result = try runCLI(
+            args: ["item", "move", "note", noteID, "--folder", "Media/Movies/Example.webloc", "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status != 0)
+        #expect(payload["ok"] as? Bool == false)
+        #expect((payload["error"] as? String)?.contains("looks like a file path") == true)
+        #expect((payload["error"] as? String)?.contains("--folder Media/Movies") == true)
+        #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent("Media/Movies/Example.webloc").path) == false)
     }
 
     @Test("item move note into project notes records project ownership and unfile clears it")
