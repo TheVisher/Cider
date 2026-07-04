@@ -4960,6 +4960,45 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeCommands.contains("cider-cli review enrich \(bookmarkID) --actor agent --timeout 20 --json"))
     }
 
+    @Test("item get treats canonical local thumbnail artifact as local ready")
+    func itemGetTreatsCanonicalLocalThumbnailArtifactAsLocalReady() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-social-local-thumbnail-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["db", "integrity", "--json"], vault: vault)
+        let bookmarkID = "D7521D2A-C273-49B4-A019-55FA2948BDC1"
+        try seedRichRemoteOnlySocialBookmark(bookmarkID: bookmarkID, vault: vault)
+        let thumbnailURL = vault
+            .appendingPathComponent(".cider/bookmarks/.thumbnails/\(bookmarkID).png")
+        try FileManager.default.createDirectory(
+            at: thumbnailURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("localized thumbnail".utf8).write(to: thumbnailURL)
+
+        let getResult = try runCLI(
+            args: ["item", "get", "bookmark", bookmarkID, "--json"],
+            vault: vault,
+            environment: ["CIDER_DISABLE_BOOKMARK_ENRICHMENT": "1"]
+        )
+        let payload = try parseJSONObject(getResult.stdout)
+        let quality = try #require(payload["captureQuality"] as? [String: Any])
+        let reasons = try #require(quality["degradedReasons"] as? [String])
+        let readiness = try #require(quality["thumbnailReadiness"] as? [String: Any])
+        let safeCommands = try #require(payload["safeNextCommands"] as? [String])
+
+        #expect(quality["thumbnailStatus"] as? String == "local")
+        #expect(quality["cardStatus"] as? String == "complete")
+        #expect(quality["cardComplete"] as? Bool == true)
+        #expect(quality["visibleCardCurrent"] as? Bool == true)
+        #expect(!reasons.contains("card_image_not_local"))
+        #expect(readiness["status"] as? String == "local")
+        #expect(readiness["localReady"] as? Bool == true)
+        #expect(!safeCommands.contains("cider-cli review enrich \(bookmarkID) --actor agent --timeout 20 --json"))
+    }
+
     @Test("item thumbnail plan explains remote-only social bookmark without creating local thumbnail")
     func itemThumbnailPlanExplainsRemoteOnlySocialBookmarkWithoutCreatingLocalThumbnail() throws {
         let vault = FileManager.default.temporaryDirectory

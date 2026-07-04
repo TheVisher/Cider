@@ -802,6 +802,9 @@ struct CiderCaptureResult {
            localCaptureAssetExists(relativePath: originalImageRelativePath) {
             return "local_original"
         }
+        if localCanonicalThumbnailAssetExists(for: bookmark.id) {
+            return "local"
+        }
         if let thumbnailRemoteURLString = bookmark.thumbnailRemoteURLString,
            !thumbnailRemoteURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "remote_only"
@@ -815,6 +818,28 @@ struct CiderCaptureResult {
             return true
         default:
             return false
+        }
+    }
+
+    private static func localCanonicalThumbnailAssetExists(for bookmarkID: UUID) -> Bool {
+        let thumbnailsDirectory = StoragePaths.cachedDirectoryURL(for: .bookmarks)
+            .appendingPathComponent(".thumbnails", isDirectory: true)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: thumbnailsDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+        let prefix = bookmarkID.uuidString + "."
+        return files.contains { url in
+            guard url.lastPathComponent.hasPrefix(prefix),
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true,
+                  let fileSize = values.fileSize else {
+                return false
+            }
+            return fileSize > 0
         }
     }
 

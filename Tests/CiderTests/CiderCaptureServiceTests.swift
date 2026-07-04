@@ -806,6 +806,32 @@ struct CiderCaptureServiceTests {
             #expect(cachedThumbnailQuality["thumbnailStatus"] as? String == "local")
             #expect(!cachedThumbnailReasons.contains("card_image_not_local"))
 
+            let canonicalThumbnailURL = StoragePaths.cachedDirectoryURL(for: .bookmarks)
+                .appendingPathComponent(".thumbnails/\(result.item.id.uuidString).png")
+            try Data("canonical bookmark thumbnail".utf8).write(to: canonicalThumbnailURL)
+            let canonicalLocalThumbnailBookmark = Bookmark(
+                id: result.item.id,
+                title: "GitHub - nodes-app/swift-markdown-engine",
+                urlString: "https://github.com/nodes-app/swift-markdown-engine",
+                createdAt: Date(timeIntervalSince1970: 1_774_999_000),
+                updatedAt: Date(timeIntervalSince1970: 1_774_999_500),
+                thumbnailRemoteURLString: "https://example.com/remote-thumbnail.jpg",
+                metadataUpdatedAt: enrichedAt,
+                relativePath: "Inbox/Bookmarks/GitHub - nodes-app-swift-markdown-engine.webloc",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: enrichedAt
+            )
+            let canonicalLocalDict = result.toDictionary(finalBookmark: canonicalLocalThumbnailBookmark)
+            let canonicalLocalQuality = try #require(canonicalLocalDict["captureQuality"] as? [String: Any])
+            let canonicalLocalReasons = try #require(canonicalLocalQuality["degradedReasons"] as? [String])
+            let canonicalLocalReadiness = try #require(canonicalLocalQuality["thumbnailReadiness"] as? [String: Any])
+
+            #expect(canonicalLocalQuality["thumbnailStatus"] as? String == "local")
+            #expect(canonicalLocalQuality["cardComplete"] as? Bool == true)
+            #expect(canonicalLocalQuality["visibleCardCurrent"] as? Bool == true)
+            #expect(!canonicalLocalReasons.contains("card_image_not_local"))
+            #expect(canonicalLocalReadiness["localReady"] as? Bool == true)
+
             let thumbnailURL = StoragePaths.cachedVaultDirectoryURL
                 .appendingPathComponent(".thumbnails/swift-markdown-engine.jpg")
             try FileManager.default.createDirectory(
