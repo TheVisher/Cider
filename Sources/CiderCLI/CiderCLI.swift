@@ -4096,30 +4096,43 @@ struct CiderCLI {
                 try service.record(output)
             }
             let candidates = extraction.outputs.map { output -> [String: Any] in
-                [
+                let refPrefix = output.kind == "memory_candidate" ? "memory_candidate" : "graph_candidate"
+                return [
                     "id": output.id,
-                    "ref": "graph_candidate:\(output.id)",
+                    "ref": "\(refPrefix):\(output.id)",
+                    "kind": output.kind,
                     "mentionText": output.value,
                     "reviewState": output.reviewState,
                     "sourceQuote": output.evidence,
                     "confidence": output.confidence as Any,
                     "safeNextCommands": [
-                        "cider-cli item graph-candidate \(output.id) --json",
+                        output.kind == "memory_candidate"
+                            ? "cider-cli item memory-facts inspect \(output.id) --json"
+                            : "cider-cli item graph-candidate \(output.id) --json",
                         "cider-cli item context note \(result.note.id.uuidString) --json",
                     ],
                 ] as [String: Any]
             }
+            let candidateRefs = extraction.outputs.map { output in
+                "\(output.kind == "memory_candidate" ? "memory_candidate" : "graph_candidate"):\(output.id)"
+            }
+            let reviewQueueCommands = orderedUniqueStrings(
+                ["graph_candidate", "memory_candidate"].compactMap { kind in
+                    extraction.outputs.contains { $0.kind == kind }
+                        ? "cider-cli capture review-queue --kind \(kind) --json"
+                        : nil
+                }
+            )
             return [
                 "status": "suggested",
                 "count": extraction.outputs.count,
                 "candidateIDs": extraction.ids,
-                "candidateRefs": extraction.ids.map { "graph_candidate:\($0)" },
+                "candidateRefs": candidateRefs,
                 "reviewState": "suggested",
                 "candidates": candidates,
                 "safeNextCommands": [
                     "cider-cli item graph-candidates note \(result.note.id.uuidString) --json",
-                    "cider-cli capture review-queue --kind graph_candidate --json",
-                ],
+                ] + reviewQueueCommands,
             ] as [String: Any]
         } catch {
             return [
@@ -26039,6 +26052,14 @@ struct CiderCLI {
             ]
             if let owner {
                 payload["owner"] = ownerToDict(owner)
+                if let diagnostic = journalExtractionDiagnosticForGraphCandidateList(
+                    owner: owner,
+                    includeReviewed: includeReviewed,
+                    limit: limit
+                ) {
+                    payload["journalExtractionDiagnostic"] = diagnostic
+                    payload["relatedMemoryCandidateCount"] = diagnostic["storedMemoryCandidateCount"] as? Int ?? 0
+                }
             }
             outputJSON(payload)
             return
@@ -26057,6 +26078,132 @@ struct CiderCLI {
             let candidate = try? SecondBrainGraphCandidateContract.validate(output)
             print("  [\(output.id)] \(output.reviewState) \(candidate?.mentionText ?? output.value) - \(output.owner.canonicalRef)")
         }
+    }
+
+    static func journalExtractionDiagnosticForGraphCandidateList(
+        owner: SecondBrainOwnerRef,
+        includeReviewed: Bool,
+        limit: Int
+    ) -> [String: Any]? {
+        guard owner.ownerType == "note", CiderDatabase.shared.isOpen else { return nil }
+        do {
+            let rawContent = try journalCandidateReconciliationRawContent(owner: owner, args: [])
+            let noteTitle = try journalNoteTitle(owner: owner)
+            let journalDate = dailyJournalDate(fromTitle: noteTitle)
+            let extraction = SecondBrainJournalGraphCandidateExtractor().extract(
+                sourceOwner: owner,
+                rawContent: rawContent,
+                date: journalDate,
+                time: nil
+            )
+            let states: Set<String>? = includeReviewed ? nil : ["suggested", "needs_review", "deferred"]
+            let service = SecondBrainEnrichmentOutputService(database: .shared)
+            let storedMemoryCandidates = try service.outputs(
+                kind: "memory_candidate",
+                reviewStates: states,
+                limit: nil
+            ).filter { $0.owner == owner }
+            let graphPreviews = extraction.outputs.filter { $0.kind == SecondBrainGraphCandidateContract.outputKind }
+            let memoryPreviews = extraction.outputs.filter { $0.kind == "memory_candidate" }
+            guard !graphPreviews.isEmpty || !memoryPreviews.isEmpty || !storedMemoryCandidates.isEmpty else {
+                return [
+                    "status": "no_current_extractor_candidates",
+                    "truthBoundary": "read_only_extraction_preview_not_persisted_truth",
+                    "storedMemoryCandidateCount": 0,
+                    "currentExtractorGraphCandidateCount": 0,
+                    "currentExtractorMemoryCandidateCount": 0,
+                    "explanation": "No stored graph candidates were listed, and the current journal extractor did not find graph or memory candidate signals in this note content.",
+                    "safeNextCommands": [
+                        "cider-cli item get note \(owner.ownerID) --json",
+                        "cider-cli item journal-candidate-reconcile note \(owner.ownerID) --dry-run --json",
+                    ],
+                ] as [String: Any]
+            }
+
+            let storedEmpty = storedMemoryCandidates.isEmpty
+            let dateBackfillCommand = journalDate.map { "cider-cli item backfill-journals --date \($0) --limit 1 --json" }
+            let safeCommands = orderedUniqueStrings([
+                "cider-cli item get note \(owner.ownerID) --json",
+                "cider-cli item journal-candidate-reconcile note \(owner.ownerID) --dry-run --json",
+                dateBackfillCommand ?? "cider-cli item backfill-journals --limit 1 --json",
+                "cider-cli capture review-queue --kind memory_candidate --json",
+            ])
+            var diagnostic: [String: Any] = [
+                "status": storedEmpty ? "current_extractor_preview_available" : "stored_memory_candidates_available",
+                "truthBoundary": "read_only_extraction_preview_not_persisted_truth",
+                "acceptedAsTruth": false,
+                "reviewRequired": true,
+                "storedMemoryCandidateCount": storedMemoryCandidates.count,
+                "currentExtractorGraphCandidateCount": graphPreviews.count,
+                "currentExtractorMemoryCandidateCount": memoryPreviews.count,
+                "memoryCandidatePreviews": memoryPreviews.prefix(limit).map(journalExtractionMemoryPreviewToDict),
+                "graphCandidatePreviews": graphPreviews.prefix(limit).map(graphCandidateToDict),
+                "safeNextCommands": safeCommands,
+                "explanation": "This is a read-only current-extractor preview for a journal note. Preview rows are not accepted truth and are not persisted review candidates until journal backfill or an explicit reconciliation path records them.",
+            ]
+            if storedEmpty {
+                diagnostic["whyStoredCandidatesEmpty"] = "journal_capture_happened_before_current_extractor_or_backfill_has_not_run"
+            }
+            if let noteTitle { diagnostic["noteTitle"] = noteTitle }
+            if let journalDate { diagnostic["journalDate"] = journalDate }
+            return diagnostic
+        } catch {
+            return [
+                "status": "diagnostic_unavailable",
+                "truthBoundary": "read_only_extraction_preview_not_persisted_truth",
+                "error": error.localizedDescription,
+                "safeNextCommands": [
+                    "cider-cli item get note \(owner.ownerID) --json",
+                    "cider-cli item journal-candidate-reconcile note \(owner.ownerID) --dry-run --json",
+                ],
+            ] as [String: Any]
+        }
+    }
+
+    static func journalExtractionMemoryPreviewToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {
+        var dict = memoryCandidateToDict(output)
+        dict["previewOnly"] = true
+        dict["persisted"] = false
+        dict["reviewActionCommands"] = []
+        dict["acceptEffect"] = "This is a read-only preview. Run journal backfill or reconciliation to persist a reviewable memory_candidate before accepting."
+        dict["safeNextCommands"] = [
+            "cider-cli item backfill-journals --date \(output.metadata["journal_date"] ?? "<YYYY-MM-DD>") --limit 1 --json",
+            "cider-cli item journal-candidate-reconcile \(output.owner.ownerType) \(output.owner.ownerID) --dry-run --json",
+        ]
+        dict["storage"] = [
+            "table": "enrichment_outputs",
+            "kind": "memory_candidate",
+            "state": "preview_only_not_persisted",
+        ]
+        return dict
+    }
+
+    static func journalNoteTitle(owner: SecondBrainOwnerRef) throws -> String? {
+        guard owner.ownerType == "note" else { return nil }
+        let stmt = try CiderDatabase.shared.prepare("""
+            SELECT title
+            FROM items
+            WHERE id = ? AND type = 'note'
+            LIMIT 1;
+            """)
+        stmt.bind(owner.ownerID, at: 1)
+        guard try stmt.step() else { return nil }
+        return stmt.string(at: 0)
+    }
+
+    static func dailyJournalDate(fromTitle title: String?) -> String? {
+        guard let title else { return nil }
+        return firstRegexCapture(pattern: #"(?i)\bDaily\s+Journal\s+(\d{4}-\d{2}-\d{2})\b"#, in: title)
+    }
+
+    static func firstRegexCapture(pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..<text.endIndex, in: text)),
+              match.numberOfRanges > 1,
+              let range = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        return String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func graphCandidateToDict(_ output: SecondBrainEnrichmentOutput) -> [String: Any] {

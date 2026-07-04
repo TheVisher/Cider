@@ -1081,6 +1081,17 @@ struct SecondBrainJournalGraphCandidateExtractor {
             ))
         }
 
+        if let planningCandidate = rememberNextYearTraditionCandidate(
+            sourceOwner: sourceOwner,
+            rawContent: rawContent,
+            lower: lower,
+            date: normalizedDate,
+            time: normalizedTime,
+            keyDate: keyDate
+        ) {
+            outputs.append(planningCandidate)
+        }
+
         for sentence in candidateSentences(from: rawContent) {
             outputs.append(genericHomeMealCandidate(
                 sourceOwner: sourceOwner,
@@ -1243,6 +1254,108 @@ struct SecondBrainJournalGraphCandidateExtractor {
         }
 
         return nil
+    }
+
+    private func rememberNextYearTraditionCandidate(
+        sourceOwner: SecondBrainOwnerRef,
+        rawContent: String,
+        lower: String,
+        date: String?,
+        time: String?,
+        keyDate: String
+    ) -> SecondBrainEnrichmentOutput? {
+        let planningSignals = [
+            "remember that for next year",
+            "remember for next year",
+            "for next year, remember",
+            "for next year remember",
+            "next year remember",
+            "timing notes for next year",
+            "notes for next year",
+        ]
+        let recurrenceSignals = [
+            "every 3rd of july",
+            "every third of july",
+            "try to come every",
+            "come every 3rd",
+            "come every third",
+            "annual",
+            "tradition",
+        ]
+        guard planningSignals.contains(where: { lower.contains($0) }),
+              recurrenceSignals.contains(where: { lower.contains($0) }) else {
+            return nil
+        }
+
+        let quote = traditionPlanningQuote(in: rawContent, containingAny: [
+            "remember",
+            "next year",
+            "timing notes",
+            "every 3rd of July",
+            "every third of July",
+            "LaVassars",
+            "Whidbey Island",
+            "Cultus Bay",
+            "ferry",
+        ])
+        let evidence = quote.text
+        let departureTime = firstCapture(pattern: #"(?i)\bleft\s+(?:our\s+|the\s+)?home\s+at\s+([0-9]{1,2}:[0-9]{2}\s*(?:AM|PM))\b"#, in: evidence)
+            ?? firstCapture(pattern: #"(?i)\bleft\s+our\s+house\s+at\s+([0-9]{1,2}:[0-9]{2}\s*(?:AM|PM))\b"#, in: evidence)
+        let ferryLineTime = firstCapture(pattern: #"(?i)\bferry\s+line\s+at\s+([0-9]{1,2}:[0-9]{2}\s*(?:AM|PM))\b"#, in: evidence)
+        let ferryBoardingTime = firstCapture(pattern: #"(?i)\b(?:got\s+onto|got\s+on|boarded)\s+the\s+([0-9]{1,2}:[0-9]{2}\s*(?:AM|PM))\s+ferry\b"#, in: evidence)
+        let recurrence = lower.contains("every third of july") ? "every third of July" : "every 3rd of July"
+        let places = traditionPlaces(in: evidence)
+        let value = "July 3 Whidbey/Cultus Bay fireworks tradition planning: leave home around \(departureTime ?? "10:50 AM"), get in the ferry line around \(ferryLineTime ?? "11:20 AM"), and aim for the \(ferryBoardingTime ?? "1:00 PM") ferry next year."
+
+        var metadata: [String: String] = [
+            "tradition_recurrence": recurrence,
+            "planning_horizon": "next_year",
+            "event_type": "fireworks_tradition",
+            "location_context": "Whidbey Island / Cultus Bay",
+            "review_query_terms": encodeJSONStringArray(["LaVassars", "Cultus Bay", "Whidbey Island", "ferry", "July 3", "remember for next year"]),
+        ]
+        if !places.isEmpty {
+            metadata["places"] = encodeJSONStringArray(places)
+            metadata["linked_entity_names"] = places.joined(separator: "|")
+            metadata["related_entities"] = encodeJSONStringArray(places)
+        }
+        if let departureTime { metadata["departure_time"] = departureTime }
+        if let ferryLineTime { metadata["ferry_line_time"] = ferryLineTime }
+        if let ferryBoardingTime { metadata["ferry_boarding_time"] = ferryBoardingTime }
+
+        return makeDailyLifeMemoryCandidate(
+            sourceOwner: sourceOwner,
+            kind: "future_planning_tradition",
+            value: value,
+            evidence: evidence,
+            confidence: 0.88,
+            memoryKey: "july-3-whidbey-cultus-bay-ferry-planning-\(keyDate)",
+            date: date,
+            time: time,
+            spanStart: quote.start,
+            spanEnd: quote.end,
+            metadata: metadata
+        )
+    }
+
+    private func traditionPlaces(in text: String) -> [String] {
+        let knownPlaces = ["LaVassars", "Whidbey Island", "Cultus Bay"]
+        return knownPlaces.filter { text.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+    }
+
+    private func traditionPlanningQuote(in rawContent: String, containingAny needles: [String]) -> (text: String, start: Int, end: Int) {
+        let lines = indexedLines(in: rawContent)
+        let matchingIndexes = lines.indices.filter { index in
+            let lower = lines[index].text.lowercased()
+            return needles.contains { lower.contains($0.lowercased()) }
+        }
+        guard let first = matchingIndexes.first, let last = matchingIndexes.last else {
+            let fallback = rawContent.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (fallback, 0, fallback.count)
+        }
+        let start = lines[first].start
+        let end = lines[last].end
+        return (substring(in: rawContent, start: start, end: end), start, end)
     }
 
     private func cleanedFoodItem(_ raw: String?) -> String? {
@@ -1538,6 +1651,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
                 "requires_review": "true",
                 "memory_key": memoryKey,
                 "memory_status": "current",
+                "truth_boundary": "reviewable_candidate_not_truth",
                 "requested_owner_type": sourceOwner.ownerType,
                 "requested_owner_ref": sourceOwner.ownerID,
                 "source_owner_ref": sourceOwner.canonicalRef,

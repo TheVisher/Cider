@@ -404,6 +404,119 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(!result.outputs.contains { $0.value == "to get it more often" })
     }
 
+    @Test("journal extractor creates remember-next-year tradition planning memory candidate")
+    func journalExtractorCreatesRememberNextYearTraditionPlanningMemoryCandidate() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: "435BD66C-351F-4B0C-8FCD-E777E05EF0CC")
+        let rawContent = """
+        We are at the LaVassars house on Whidbey Island, Cultus Bay, about to watch fireworks. We try to come every 3rd of July and it is a good time. For next year, remember that we left home at 10:50 AM, got in the ferry line at 11:20 AM, and got onto the 1:00 PM ferry.
+        """
+
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: rawContent,
+            date: "2026-07-03",
+            time: "20:18"
+        )
+
+        let memoryOutputs = result.outputs.filter { $0.kind == "memory_candidate" }
+        let planning = try #require(memoryOutputs.first { $0.metadata["memory_key"] == "july-3-whidbey-cultus-bay-ferry-planning-2026-07-03" })
+        #expect(planning.reviewState == "suggested")
+        #expect(planning.metadata["truth_boundary"] == "reviewable_candidate_not_truth")
+        #expect(planning.metadata["requires_review"] == "true")
+        #expect(planning.metadata["memory_kind"] == "future_planning_tradition")
+        #expect(planning.metadata["tradition_recurrence"] == "every 3rd of July")
+        #expect(planning.metadata["planning_horizon"] == "next_year")
+        #expect(planning.metadata["journal_date"] == "2026-07-03")
+        #expect(planning.metadata["journal_time"] == "20:18")
+        #expect(planning.metadata["source_owner_ref"] == owner.canonicalRef)
+        #expect(planning.metadata["places"]?.contains("LaVassars") == true)
+        #expect(planning.metadata["places"]?.contains("Whidbey Island") == true)
+        #expect(planning.metadata["places"]?.contains("Cultus Bay") == true)
+        #expect(planning.metadata["departure_time"] == "10:50 AM")
+        #expect(planning.metadata["ferry_line_time"] == "11:20 AM")
+        #expect(planning.metadata["ferry_boarding_time"] == "1:00 PM")
+        #expect(planning.evidence.contains("LaVassars house"))
+        #expect(planning.evidence.contains("Cultus Bay"))
+        #expect(planning.evidence.contains("remember that"))
+        #expect(planning.evidence.contains("1:00 PM ferry"))
+        #expect(planning.value.contains("July 3 Whidbey/Cultus Bay"))
+        #expect(planning.value.contains("10:50 AM"))
+        #expect(planning.value.contains("11:20 AM"))
+        #expect(planning.value.contains("1:00 PM ferry"))
+        #expect(planning.metadata["source_span_start"].flatMap(Int.init) != nil)
+        #expect(planning.metadata["source_span_end"].flatMap(Int.init) != nil)
+    }
+
+    @Test("journal extractor handles live timing-notes-for-next-year tradition wording")
+    func journalExtractorHandlesLiveTimingNotesForNextYearTraditionWording() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: "435BD66C-351F-4B0C-8FCD-E777E05EF0CC")
+        let rawContent = """
+        At the LaVassars house on Whidbey Island, Cultus Bay. About to watch the fireworks in a bit. We try to come here every 3rd of July. It's a good time.
+
+        Timing notes for next year: left our house at 10:50 AM, got in the ferry line at 11:20 AM, and got onto the 1:00 PM ferry.
+        """
+
+        let result = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: rawContent,
+            date: "2026-07-03"
+        )
+
+        let planning = try #require(result.outputs.first { $0.metadata["memory_key"] == "july-3-whidbey-cultus-bay-ferry-planning-2026-07-03" })
+        #expect(planning.kind == "memory_candidate")
+        #expect(planning.reviewState == "suggested")
+        #expect(planning.metadata["memory_kind"] == "future_planning_tradition")
+        #expect(planning.metadata["departure_time"] == "10:50 AM")
+        #expect(planning.metadata["ferry_line_time"] == "11:20 AM")
+        #expect(planning.metadata["ferry_boarding_time"] == "1:00 PM")
+        #expect(planning.evidence.contains("LaVassars house"))
+        #expect(planning.evidence.contains("Timing notes for next year"))
+        #expect(planning.evidence.contains("1:00 PM ferry"))
+        #expect(planning.metadata["source_span_start"].flatMap(Int.init) == 0)
+        #expect(planning.metadata["source_span_end"].flatMap(Int.init) == rawContent.count)
+    }
+
+    @Test("graph candidate read diagnostic previews journal memory candidates when none are stored")
+    func graphCandidateReadDiagnosticPreviewsJournalMemoryCandidatesWhenNoneAreStored() throws {
+        CiderDatabase.shared.close()
+        let url = makeTempDBURL()
+        try CiderDatabase.shared.open(at: url)
+        defer {
+            CiderDatabase.shared.close()
+            cleanup(url)
+        }
+
+        let noteID = UUID(uuidString: "435BD66C-351F-4B0C-8FCD-E777E05EF0CC")!
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let rawContent = """
+        We are at the LaVassars house on Whidbey Island, Cultus Bay, about to watch fireworks. We try to come every 3rd of July and it is a good time. For next year, remember that we left home at 10:50 AM, got in the ferry line at 11:20 AM, and got onto the 1:00 PM ferry.
+        """
+        try insertNote(id: noteID, title: "Daily Journal 2026-07-03", content: rawContent, into: CiderDatabase.shared)
+
+        let diagnostic = try #require(CiderCLI.journalExtractionDiagnosticForGraphCandidateList(
+            owner: owner,
+            includeReviewed: false,
+            limit: 10
+        ))
+
+        #expect(diagnostic["truthBoundary"] as? String == "read_only_extraction_preview_not_persisted_truth")
+        #expect(diagnostic["whyStoredCandidatesEmpty"] as? String == "journal_capture_happened_before_current_extractor_or_backfill_has_not_run")
+        #expect(diagnostic["currentExtractorMemoryCandidateCount"] as? Int == 1)
+        #expect(diagnostic["currentExtractorGraphCandidateCount"] as? Int == 0)
+        let previews = try #require(diagnostic["memoryCandidatePreviews"] as? [[String: Any]])
+        let preview = try #require(previews.first)
+        #expect(preview["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect(preview["memoryKind"] as? String == "future_planning_tradition")
+        #expect(preview["previewOnly"] as? Bool == true)
+        #expect(preview["persisted"] as? Bool == false)
+        #expect((preview["reviewActionCommands"] as? [[String: Any]])?.isEmpty == true)
+        #expect((preview["sourceQuote"] as? String)?.contains("LaVassars house") == true)
+        #expect((preview["sourceQuote"] as? String)?.contains("1:00 PM ferry") == true)
+        let safeCommands = try #require(diagnostic["safeNextCommands"] as? [String])
+        #expect(safeCommands.contains("cider-cli item backfill-journals --date 2026-07-03 --limit 1 --json"))
+        #expect(safeCommands.contains("cider-cli item journal-candidate-reconcile note \(noteID.uuidString) --dry-run --json"))
+    }
+
     @Test("journal extractor suppresses schooling background as place visits")
     func journalExtractorSuppressesSchoolingBackgroundAsPlaceVisits() throws {
         let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
@@ -777,5 +890,24 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(throws: SecondBrainGraphCandidateContract.ValidationError.self) {
             _ = try SecondBrainGraphCandidateContract.validate(invalidState)
         }
+    }
+
+    private func insertNote(id: UUID, title: String, content: String, into db: CiderDatabase) throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000).timeIntervalSince1970
+        let item = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'note', ?, ?, ?, NULL, ?);
+            """)
+        item.bind(id.uuidString, at: 1)
+            .bind(title, at: 2)
+            .bind(now, at: 3)
+            .bind(now, at: 4)
+            .bind("Inbox/Notes/\(title).md", at: 5)
+        try item.step()
+
+        let note = try db.prepare("INSERT INTO notes (item_id, content, summary, is_pinned) VALUES (?, ?, NULL, 0);")
+        note.bind(id.uuidString, at: 1)
+            .bind(content, at: 2)
+        try note.step()
     }
 }
