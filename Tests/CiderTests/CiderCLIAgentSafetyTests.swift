@@ -6009,6 +6009,83 @@ struct CiderCLIAgentSafetyTests {
         })
     }
 
+    @Test("item backfill journals persists July 3 preview as one reviewable memory candidate")
+    func itemBackfillJournalsPersistsJuly3PreviewAsOneReviewableMemoryCandidate() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-backfill-july3-memory-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let journalID = try createNote(
+            title: "Daily Journal 2026-07-03",
+            content: """
+            At the LaVassars house on Whidbey Island, Cultus Bay. About to watch the fireworks in a bit. We try to come here every 3rd of July. It's a good time.
+
+            Timing notes for next year: left our house at 10:50 AM, got in the ferry line at 11:20 AM, and got onto the 1:00 PM ferry.
+            """,
+            vault: vault
+        )
+
+        let before = try assertStrictProcessJSON(
+            runCLI(args: ["item", "graph-candidates", "note", journalID, "--json"], vault: vault),
+            command: "item.graph-candidates"
+        )
+        let beforeDiagnostic = try #require(before["journalExtractionDiagnostic"] as? [String: Any])
+        #expect(beforeDiagnostic["status"] as? String == "current_extractor_preview_available")
+        #expect(beforeDiagnostic["storedMemoryCandidateCount"] as? Int == 0)
+        #expect((beforeDiagnostic["persistedMemoryCandidates"] as? [[String: Any]])?.isEmpty == true)
+        let beforePreview = try #require((beforeDiagnostic["memoryCandidatePreviews"] as? [[String: Any]])?.first)
+        #expect(beforePreview["previewOnly"] as? Bool == true)
+        #expect(beforePreview["persisted"] as? Bool == false)
+        #expect(beforePreview["truthState"] as? String == "reviewable_candidate_not_truth")
+
+        let firstBackfill = try assertStrictProcessJSON(
+            runCLI(args: ["item", "backfill-journals", "--date", "2026-07-03", "--limit", "1", "--json"], vault: vault),
+            command: "item.backfill-journals"
+        )
+        #expect(firstBackfill["selectedCount"] as? Int == 1)
+        #expect(firstBackfill["memoryCandidateCount"] as? Int == 1)
+        let owners = try #require(firstBackfill["owners"] as? [[String: Any]])
+        let owner = try #require(owners.first)
+        let memoryCandidates = try #require(owner["memoryCandidates"] as? [[String: Any]])
+        let memory = try #require(memoryCandidates.first)
+        #expect(memory["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect(memory["memoryKind"] as? String == "future_planning_tradition")
+        #expect(memory["previewOnly"] as? Bool == false)
+        #expect(memory["persisted"] as? Bool == true)
+        #expect((memory["sourceQuote"] as? String)?.contains("Timing notes for next year") == true)
+        #expect((memory["sourceQuote"] as? String)?.contains("1:00 PM ferry") == true)
+
+        let after = try assertStrictProcessJSON(
+            runCLI(args: ["item", "graph-candidates", "note", journalID, "--json"], vault: vault),
+            command: "item.graph-candidates"
+        )
+        let afterDiagnostic = try #require(after["journalExtractionDiagnostic"] as? [String: Any])
+        #expect(afterDiagnostic["status"] as? String == "stored_memory_candidates_available")
+        #expect(afterDiagnostic["storedMemoryCandidateCount"] as? Int == 1)
+        let persisted = try #require((afterDiagnostic["persistedMemoryCandidates"] as? [[String: Any]])?.first)
+        #expect(persisted["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect(persisted["previewOnly"] as? Bool == false)
+        #expect(persisted["persisted"] as? Bool == true)
+
+        let secondBackfill = try assertStrictProcessJSON(
+            runCLI(args: ["item", "backfill-journals", "--date", "2026-07-03", "--limit", "1", "--json"], vault: vault),
+            command: "item.backfill-journals"
+        )
+        #expect(secondBackfill["memoryCandidateCount"] as? Int == 1)
+        let secondOwners = try #require(secondBackfill["owners"] as? [[String: Any]])
+        let secondOwner = try #require(secondOwners.first)
+        #expect(secondOwner["memoryCandidateCount"] as? Int == 1)
+
+        let review = try assertStrictProcessJSON(
+            runCLI(args: ["capture", "review-queue", "--kind", "memory_candidate", "--limit", "20", "--json"], vault: vault),
+            command: "capture.review-queue"
+        )
+        let reviewItems = try #require(review["items"] as? [[String: Any]])
+        #expect(reviewItems.count == 1)
+        #expect(reviewItems.first?["truthState"] as? String == "reviewable_candidate_not_truth")
+    }
+
     @Test("item backfill journals help is side effect free")
     func itemBackfillJournalsHelpIsSideEffectFree() throws {
         let vault = FileManager.default.temporaryDirectory

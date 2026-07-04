@@ -21730,6 +21730,8 @@ struct CiderCLI {
         let memoryKind = output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? "memory"
         dict["reviewFamily"] = "memory_candidate"
         dict["truthState"] = output.reviewState == "accepted" ? "accepted_memory_candidate" : "reviewable_candidate_not_truth"
+        dict["previewOnly"] = false
+        dict["persisted"] = true
         dict["extractionReason"] = "Cider extracted a source-backed memory candidate from the exact source quote; it is not user-owned memory truth until accepted."
         dict["proposedChange"] = [
             "changeType": "memory_candidate",
@@ -26136,6 +26138,7 @@ struct CiderCLI {
                 "storedMemoryCandidateCount": storedMemoryCandidates.count,
                 "currentExtractorGraphCandidateCount": graphPreviews.count,
                 "currentExtractorMemoryCandidateCount": memoryPreviews.count,
+                "persistedMemoryCandidates": storedMemoryCandidates.prefix(limit).map(memoryCandidateToDict),
                 "memoryCandidatePreviews": memoryPreviews.prefix(limit).map(journalExtractionMemoryPreviewToDict),
                 "graphCandidatePreviews": graphPreviews.prefix(limit).map(graphCandidateToDict),
                 "safeNextCommands": safeCommands,

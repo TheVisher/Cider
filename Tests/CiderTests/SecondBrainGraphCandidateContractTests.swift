@@ -517,6 +517,63 @@ struct SecondBrainGraphCandidateContractTests {
         #expect(safeCommands.contains("cider-cli item journal-candidate-reconcile note \(noteID.uuidString) --dry-run --json"))
     }
 
+    @Test("graph candidate read diagnostic distinguishes preview and persisted journal memory candidates")
+    func graphCandidateReadDiagnosticDistinguishesPreviewAndPersistedJournalMemoryCandidates() throws {
+        CiderDatabase.shared.close()
+        let url = makeTempDBURL()
+        try CiderDatabase.shared.open(at: url)
+        defer {
+            CiderDatabase.shared.close()
+            cleanup(url)
+        }
+
+        let noteID = UUID(uuidString: "435BD66C-351F-4B0C-8FCD-E777E05EF0CC")!
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)
+        let rawContent = """
+        At the LaVassars house on Whidbey Island, Cultus Bay. About to watch the fireworks in a bit. We try to come here every 3rd of July. It's a good time.
+
+        Timing notes for next year: left our house at 10:50 AM, got in the ferry line at 11:20 AM, and got onto the 1:00 PM ferry.
+        """
+        try insertNote(id: noteID, title: "Daily Journal 2026-07-03", content: rawContent, into: CiderDatabase.shared)
+
+        let before = try #require(CiderCLI.journalExtractionDiagnosticForGraphCandidateList(
+            owner: owner,
+            includeReviewed: false,
+            limit: 10
+        ))
+        #expect(before["status"] as? String == "current_extractor_preview_available")
+        #expect(before["storedMemoryCandidateCount"] as? Int == 0)
+        #expect(before["currentExtractorMemoryCandidateCount"] as? Int == 1)
+        #expect((before["persistedMemoryCandidates"] as? [[String: Any]])?.isEmpty == true)
+        let preview = try #require((before["memoryCandidatePreviews"] as? [[String: Any]])?.first)
+        #expect(preview["previewOnly"] as? Bool == true)
+        #expect(preview["persisted"] as? Bool == false)
+
+        let extraction = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: rawContent,
+            date: "2026-07-03"
+        )
+        let memoryCandidate = try #require(extraction.outputs.first { $0.kind == "memory_candidate" })
+        try SecondBrainEnrichmentOutputService(database: .shared).record(memoryCandidate)
+
+        let after = try #require(CiderCLI.journalExtractionDiagnosticForGraphCandidateList(
+            owner: owner,
+            includeReviewed: false,
+            limit: 10
+        ))
+        #expect(after["status"] as? String == "stored_memory_candidates_available")
+        #expect(after["storedMemoryCandidateCount"] as? Int == 1)
+        #expect(after["currentExtractorMemoryCandidateCount"] as? Int == 1)
+        let persisted = try #require((after["persistedMemoryCandidates"] as? [[String: Any]])?.first)
+        #expect(persisted["truthState"] as? String == "reviewable_candidate_not_truth")
+        #expect(persisted["memoryKind"] as? String == "future_planning_tradition")
+        #expect(persisted["previewOnly"] as? Bool == false)
+        #expect(persisted["persisted"] as? Bool == true)
+        #expect((persisted["sourceQuote"] as? String)?.contains("Timing notes for next year") == true)
+        #expect((persisted["sourceQuote"] as? String)?.contains("1:00 PM ferry") == true)
+    }
+
     @Test("journal extractor suppresses schooling background as place visits")
     func journalExtractorSuppressesSchoolingBackgroundAsPlaceVisits() throws {
         let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
