@@ -1323,8 +1323,12 @@ final class CiderItemContextService {
             if queryTokens(tokens, match: chunk.title) {
                 currentFields.append("chunk_title")
             }
-            let currentBody = currentContentText(fromChunkBody: chunk.body)
-            if queryTokensMatchAnyLine(tokens, in: currentBody) {
+            let treatsCaptureLinesAsCurrent = result.item.map(isDailyJournal) ?? isDailyJournalTitle(result.title)
+            let currentBody = treatsCaptureLinesAsCurrent ? chunk.body : currentContentText(fromChunkBody: chunk.body)
+            let bodyMatches = treatsCaptureLinesAsCurrent
+                ? queryTokens(tokens, match: currentBody)
+                : queryTokensMatchAnyLine(tokens, in: currentBody)
+            if bodyMatches {
                 currentFields.append("chunk_body")
             }
         }
@@ -1726,6 +1730,15 @@ final class CiderItemContextService {
             contribution += Double(matched.count) * field.weight
             matchedDistinctive += matched
         }
+        if let item = result.item,
+           isDailyJournal(item),
+           chunkBody
+               .split(separator: "\n", omittingEmptySubsequences: false)
+               .contains(where: { isHistoricalProvenanceLine(String($0)) }),
+           !distinctiveTokens.isEmpty,
+           distinctiveTokens.allSatisfy({ containsRecallToken($0, in: chunkBody) }) {
+            factors.append("journal_current_capture_chunk_match")
+        }
 
         let uniqueDistinctive = orderedUnique(matchedDistinctive)
         if !uniqueDistinctive.isEmpty {
@@ -1914,8 +1927,12 @@ final class CiderItemContextService {
     }
 
     private func isDailyJournal(_ item: CiderItemSummary) -> Bool {
-        item.title.localizedCaseInsensitiveContains("Daily Journal")
-            || item.relativePath?.localizedCaseInsensitiveContains("Daily Journal") == true
+        isDailyJournalTitle(item.title)
+            || item.relativePath.map(isDailyJournalTitle) == true
+    }
+
+    private func isDailyJournalTitle(_ value: String) -> Bool {
+        value.localizedCaseInsensitiveContains("Daily Journal")
     }
 
     private func parseTagFacetFilter(from query: String) -> TagFacetFilter {

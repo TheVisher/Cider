@@ -2132,6 +2132,74 @@ struct CiderItemContextServiceTests {
         #expect(first.rankFactors.contains("matched_field:chunk_body"))
     }
 
+    @Test("journal exact multi-term recall ranks current source-date daily journal above older noisy fallback hits")
+    func journalExactMultiTermRecallRanksSourceDateDailyJournalFirst() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let olderDate = Date(timeIntervalSince1970: 1_782_700_000)
+        let sourceDate = Date(timeIntervalSince1970: 1_783_100_000)
+        let target = LibraryEntityRef(type: .note, entityID: UUID(uuidString: "435BD66C-351F-4B0C-8FCD-E777E05EF0CC")!)
+        let olderNoise = LibraryEntityRef(type: .note, entityID: UUID())
+
+        try insertItem(
+            target,
+            title: "Daily Journal 2026-07-03",
+            relativePath: "Inbox/Notes/Daily Journal 2026-07-03.md",
+            into: db,
+            createdAt: sourceDate,
+            updatedAt: sourceDate
+        )
+        try insertItem(
+            olderNoise,
+            title: "Daily Journal 2026-06-29",
+            relativePath: "Inbox/Notes/Daily Journal 2026-06-29.md",
+            into: db,
+            createdAt: olderDate,
+            updatedAt: olderDate
+        )
+
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: target.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: target.entityID.uuidString,
+                source: "item_index.note",
+                title: "Daily Journal 2026-07-03",
+                body: "Capture source text: At the LaVassars house on Whidbey Island, Cultus Bay. Timing notes for next year: left our house at 10:50 AM, got in the ferry line at 11:20 AM, and got onto the 1:00 PM ferry.",
+                chunkIndex: 0
+            )
+        ])
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: olderNoise.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: olderNoise.entityID.uuidString,
+                source: "item_index.note",
+                title: "Daily Journal 2026-06-29",
+                body: "They are planning a Whidbey trip near Cultus Bay and expect the ferry line could be long.",
+                chunkIndex: 0
+            )
+        ])
+
+        let service = CiderItemContextService(
+            database: db,
+            secondBrainStore: store,
+            nowProvider: { sourceDate }
+        )
+
+        let results = try service.search("LaVassars Cultus Bay ferry", limit: 5)
+        let first = try #require(results.first)
+        #expect(first.item?.id == target.entityID)
+        #expect(first.rankFactors.contains("journal_current_capture_chunk_match"))
+        #expect(first.matchProvenance.currentContentMatched)
+        #expect(!first.matchProvenance.isHistoricalOnly)
+
+        let report = try service.searchDiagnostics("LaVassars Cultus Bay ferry", limit: 5)
+        let diagnosticFirst = try #require(report.exactMatches.first)
+        #expect(diagnosticFirst.item?.id == target.entityID)
+        #expect(diagnosticFirst.rankFactors.contains("journal_current_capture_chunk_match"))
+    }
+
     @Test("broad new contact recall boosts recent contacts above unrelated new items")
     func broadNewContactRecallBoostsRecentContacts() throws {
         let (db, url) = try makeTestDB()
